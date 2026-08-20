@@ -28,7 +28,8 @@ class TaskStore:
             CREATE TABLE IF NOT EXISTS tasks (
               id TEXT PRIMARY KEY, account_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
               title TEXT NOT NULL, objective TEXT NOT NULL, status TEXT NOT NULL,
-              requires_approval INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+              requires_approval INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+              cancel_requested INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS task_events (
               id TEXT PRIMARY KEY, task_id TEXT NOT NULL, type TEXT NOT NULL,
               payload TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -55,12 +56,15 @@ class TaskStore:
             for name, definition in (("attempts", "INTEGER NOT NULL DEFAULT 0"), ("max_attempts", "INTEGER NOT NULL DEFAULT 3"), ("retry_at", "TEXT"), ("last_error", "TEXT")):
                 if name not in columns:
                     c.execute(f"ALTER TABLE task_steps ADD COLUMN {name} {definition}")
+            task_columns = {row[1] for row in c.execute("PRAGMA table_info(tasks)")}
+            if "cancel_requested" not in task_columns:
+                c.execute("ALTER TABLE tasks ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
 
     def create(self, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None) -> dict:
         task_id, now = f"task_{uuid.uuid4().hex}", _now()
         steps = steps or [{"name": "execute_task", "depends_on": []}]
         with self._connect() as c:
-            c.execute("INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?)", (task_id, account_id, workspace_id, title, objective, "queued", int(requires_approval), now, now))
+            c.execute("INSERT INTO tasks(id,account_id,workspace_id,title,objective,status,requires_approval,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", (task_id, account_id, workspace_id, title, objective, "queued", int(requires_approval), now, now))
             run_id = f"run_{uuid.uuid4().hex}"
             c.execute("INSERT INTO task_runs VALUES(?,?,?,?,?)", (run_id, task_id, 1, "queued", now))
             step_ids: list[str] = []
@@ -101,6 +105,21 @@ class TaskStore:
             next_status = "queued" if approved else "cancelled"
             c.execute("UPDATE tasks SET status=?,requires_approval=?,updated_at=? WHERE id=?", (next_status, 0 if approved else 1, now, task_id))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, f"approval.{status}", '{"source":"user"}', now))
+        return self.get(task_id, account_id)
+
+    def cancel(self, task_id: str, account_id: str) -> dict:
+        task = self.get(task_id, account_id)
+        if task["status"] in {"completed", "failed", "cancelled"}:
+            return task
+        now = _now()
+        with self._connect() as c:
+            c.execute("UPDATE tasks SET status='cancelling',cancel_requested=1,updated_at=? WHERE id=?", (now, task_id))
+            c.execute("UPDATE task_steps SET status='cancelled' WHERE task_id=? AND status='queued'", (task_id,))
+            running = c.execute("SELECT COUNT(*) FROM task_steps WHERE task_id=? AND status='running'", (task_id,)).fetchone()[0]
+            if running == 0:
+                c.execute("UPDATE tasks SET status='cancelled',updated_at=? WHERE id=?", (now, task_id))
+                c.execute("UPDATE task_runs SET status='cancelled' WHERE task_id=? AND status!='completed'", (task_id,))
+            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.cancel_requested", '{"source":"user"}', now))
         return self.get(task_id, account_id)
 
     def claim_one(self, worker_id: str = "worker", lease_seconds: int = 60) -> dict | None:
@@ -146,6 +165,12 @@ class TaskStore:
             task_id, run_id = row["task_id"], row["task_run_id"]
             c.execute("UPDATE task_steps SET status='completed',lease_owner=NULL,lease_expires_at=NULL WHERE id=? AND status='running'", (step_id,))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "step.completed", '{"result":"recorded"}', now))
+            cancelled = c.execute("SELECT cancel_requested FROM tasks WHERE id=?", (task_id,)).fetchone()[0]
+            if cancelled:
+                c.execute("UPDATE task_runs SET status='cancelled' WHERE id=?", (run_id,))
+                c.execute("UPDATE tasks SET status='cancelled',updated_at=? WHERE id=?", (now, task_id))
+                c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.cancelled", '{"source":"worker"}', now))
+                return
             pending = c.execute("SELECT COUNT(*) FROM task_steps WHERE task_run_id=? AND status!='completed'", (run_id,)).fetchone()[0]
             if pending == 0:
                 c.execute("UPDATE task_runs SET status='completed' WHERE id=?", (run_id,))

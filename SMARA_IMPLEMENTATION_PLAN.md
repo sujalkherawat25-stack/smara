@@ -446,3 +446,14 @@ step, run, and task failed rather than looping forever.
 Verified: the retry test exercises three consecutive failures and proves the
 third failure is terminal. The next reliability slice is cancellation semantics
 and implementing the same worker graph contract against Postgres at runtime.
+
+### 2026-08-20 — Phase 1 safe cancellation
+
+Implemented cancellation as `stop before the next step`. Cancelling immediately
+prevents queued/dependent steps from running. A currently leased step is allowed
+to finish at its safe boundary; after it reports completion, Smara records the
+task as cancelled and does not unlock later work. This never claims to undo an
+external action already in progress.
+
+Verified: a two-step task cancellation test proves the second dependent step is
+never claimed after cancellation.

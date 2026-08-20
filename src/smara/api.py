@@ -79,3 +79,8 @@ async def task_steps(task_id: str, user: str = Depends(account_id)):
 async def approve(task_id: str, body: ApprovalDecision, user: str = Depends(account_id)):
     try: return view(store.decide(task_id, user, body.approved, body.note))
     except KeyError: raise HTTPException(404, "Task not found")
+
+@app.post("/v1/tasks/{task_id}/cancel", response_model=TaskView)
+async def cancel_task(task_id: str, user: str = Depends(account_id)):
+    try: return view(store.cancel(task_id, user))
+    except KeyError: raise HTTPException(404, "Task not found")

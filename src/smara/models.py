@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
-TaskStatus = Literal["queued", "running", "waiting_approval", "completed", "failed", "cancelled"]
+TaskStatus = Literal["queued", "running", "waiting_approval", "cancelling", "completed", "failed", "cancelled"]
 
 
 class TaskStepInput(BaseModel):

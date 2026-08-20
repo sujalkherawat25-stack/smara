@@ -66,3 +66,16 @@ def test_failed_step_retries_with_a_bounded_budget(tmp_path: Path):
         outcome = store.fail_step(claimed["step_id"], "acct_1", "temporary upstream failure", retry_delay_seconds=0)
         assert outcome == ("failed" if attempt == 3 else "retrying")
     assert store.get(task["id"], "acct_1")["status"] == "failed"
+
+
+def test_cancellation_stops_future_steps_but_not_running_step(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Cancel", "Stop safely", False, [
+        {"name": "first", "depends_on": []}, {"name": "second", "depends_on": [0]},
+    ])
+    first = store.claim_one("worker")
+    assert store.cancel(task["id"], "acct_1")["status"] == "cancelling"
+    # The already-claimed operation can finish, but its dependent step is never run.
+    store.complete_step(first["step_id"], "acct_1", "finished at safe boundary")
+    assert store.get(task["id"], "acct_1")["status"] == "cancelled"
+    assert store.claim_one("other-worker") is None
