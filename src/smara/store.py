@@ -95,6 +95,10 @@ class TaskStore:
             CREATE TABLE IF NOT EXISTS push_subscriptions (
               endpoint TEXT PRIMARY KEY, account_id TEXT NOT NULL, p256dh TEXT NOT NULL,
               auth TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS task_dead_letters (
+              id TEXT PRIMARY KEY, task_id TEXT NOT NULL, step_id TEXT NOT NULL,
+              account_id TEXT NOT NULL, error TEXT NOT NULL, attempts INTEGER NOT NULL,
+              created_at TEXT NOT NULL, resolved_at TEXT);
             """)
             # Backward-compatible local development upgrades for databases
             # created before retry state existed.
@@ -246,9 +250,16 @@ class TaskStore:
                 c.execute("UPDATE task_steps SET status='failed',lease_owner=NULL,lease_expires_at=NULL,last_error=? WHERE id=?", (error[:2000], step_id))
                 c.execute("UPDATE task_runs SET status='failed' WHERE id=?", (row["task_run_id"],))
                 c.execute("UPDATE tasks SET status='failed',updated_at=? WHERE id=?", (now, row["task_id"]))
+                c.execute("INSERT INTO task_dead_letters(id,task_id,step_id,account_id,error,attempts,created_at,resolved_at) VALUES(?,?,?,?,?,?,?,NULL)", (f"dlq_{uuid.uuid4().hex}", row["task_id"], step_id, account_id, error[:2000], row["attempts"], now))
                 event_type, outcome = "step.failed", "failed"
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", row["task_id"], event_type, '{"source":"worker"}', now))
             return outcome
+
+    def dead_letters(self, account_id: str) -> list[dict]:
+        with self._connect() as c:
+            return [dict(row) for row in c.execute(
+                "SELECT * FROM task_dead_letters WHERE account_id=? ORDER BY created_at DESC", (account_id,)
+            )]
 
     def create_research(self, account_id: str, workspace_id: str, title: str, question: str, sources: list[str]) -> dict:
         task_id, run_id, now = f"task_{uuid.uuid4().hex}", f"run_{uuid.uuid4().hex}", _now()

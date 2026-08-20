@@ -1,0 +1,39 @@
+from pathlib import Path
+
+import pytest
+from cryptography.fernet import Fernet
+
+from smara.sandbox import SandboxLimits, docker_command
+from smara.store import TaskStore
+from smara.vault import SecretVault
+
+
+def test_terminal_task_failure_is_recorded_in_dead_letter_queue(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Unstable", "Retry safely", False)
+    for _ in range(3):
+        step = store.claim_one("worker")
+        assert step is not None
+        store.fail_step(step["step_id"], "acct_1", "upstream failure", retry_delay_seconds=0)
+    letters = store.dead_letters("acct_1")
+    assert len(letters) == 1
+    assert letters[0]["task_id"] == task["id"]
+    assert letters[0]["attempts"] == 3
+    assert store.dead_letters("acct_2") == []
+
+
+def test_key_ring_reads_old_ciphertext_and_writes_with_new_key():
+    old_key, new_key = Fernet.generate_key().decode(), Fernet.generate_key().decode()
+    old_ciphertext = SecretVault(old_key).encrypt("secret")
+    rotating = SecretVault(f"{new_key},{old_key}")
+    assert rotating.decrypt(old_ciphertext) == "secret"
+    assert SecretVault(new_key).decrypt(rotating.encrypt("fresh")) == "fresh"
+
+
+def test_sandbox_recipe_is_networkless_and_has_no_host_mounts():
+    command = docker_command("python -c 'print(1)'", SandboxLimits(timeout_seconds=30))
+    assert ["--network", "none"] == command[command.index("--network"):command.index("--network") + 2]
+    assert "--read-only" in command and "--cap-drop" in command
+    assert "-v" not in command and "--volume" not in command
+    with pytest.raises(ValueError):
+        docker_command("", SandboxLimits())

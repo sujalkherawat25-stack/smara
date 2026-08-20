@@ -64,8 +64,9 @@ added, even `trusted` external actions require approval. An approver can edit
 the preview and action payload before authorizing it.
 
 The credential endpoint stores only Fernet-encrypted ciphertext in Postgres.
-Set `SMARA_INTEGRATION_MASTER_KEY` from a production secret manager before
-connecting anything. Google (Gmail, Calendar, Drive) and GitHub support OAuth
+Set `SMARA_INTEGRATION_MASTER_KEYS` from a production secret manager before
+connecting anything. It is an ordered key ring: the first key encrypts and all
+keys decrypt, enabling a no-downtime key rotation. Google (Gmail, Calendar, Drive) and GitHub support OAuth
 authorization-code/PKCE flows once their client IDs, client secrets, and the
 public callback URL are configured. Telegram uses an explicitly stored bot
 token. Supported initial actions are Gmail send/search, Calendar create/list,
@@ -74,3 +75,21 @@ Telegram send, GitHub repository list/content commit, and Drive search.
 No provider credential or OAuth application secret is included in this
 repository. That is intentional: configure them in the deployment environment
 before using a live connection.
+
+## Operations and isolated execution
+
+`GET /readyz` checks the task database; `/health` only confirms the process is
+alive. Terminal task failures are retained in `GET /v1/dead-letters` for human
+review rather than disappearing after retries. The API has an abuse limit and
+safe browser headers; deploy a gateway/WAF in front of it for distributed rate
+limits.
+
+Use `scripts/backup-postgres.sh` for a nightly encrypted-storage database
+backup and `scripts/verify-backup.sh backup.dump` to validate an archive. A
+release is not complete until a documented restore is exercised into a fresh,
+disposable Postgres database.
+
+`smara.sandbox` is an internal-only recipe for future approved code/repository
+steps. It uses a fresh Docker container with no network, no mounts, no inherited
+environment, a read-only root filesystem, dropped capabilities and bounded CPU,
+memory, process count and lifetime. It is not available through a public API.

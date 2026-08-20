@@ -20,7 +20,9 @@ from .vault import SecretVault
 from . import integration_oauth
 from . import push
 from .hardening import FixedWindowLimiter
+from .observability import configure_sentry
 
+configure_sentry(settings.sentry_dsn)
 app = FastAPI(title="Smara Control Plane", version="0.1.0")
 store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
 limiter = FixedWindowLimiter(settings.rate_limit_per_minute)
@@ -166,7 +168,7 @@ async def store_integration_credential(provider: str, body: IntegrationCredentia
     if provider not in {"gmail", "calendar", "telegram", "github", "drive"}:
         raise HTTPException(404, "Unknown integration provider.")
     try:
-        encrypted = SecretVault(settings.integration_master_key).encrypt(body.secret)
+        encrypted = SecretVault(settings.integration_master_keys).encrypt(body.secret)
         store.store_integration_credential(user, provider, body.kind, encrypted)
     except (KeyError, RuntimeError) as exc:
         raise HTTPException(409, str(exc))
@@ -186,7 +188,7 @@ async def finish_integration_oauth(provider: str, code: str, state: str):
     try:
         oauth = store.consume_oauth_state(state, provider)
         token = await integration_oauth.exchange(provider, code, oauth["code_verifier"])
-        encrypted = SecretVault(settings.integration_master_key).encrypt(json.dumps(token))
+        encrypted = SecretVault(settings.integration_master_keys).encrypt(json.dumps(token))
         try:
             store.integration(oauth["account_id"], provider)
         except KeyError:
@@ -260,6 +262,11 @@ async def create_research_task(body: ResearchTaskCreate, user: str = Depends(acc
 @app.get("/v1/tasks", response_model=list[TaskView])
 async def list_tasks(user: str = Depends(account_id)):
     return [view(row) for row in store.list(user)]
+
+@app.get("/v1/dead-letters")
+async def list_dead_letters(user: str = Depends(account_id)):
+    """Failure queue for operator/user review; retries never happen silently."""
+    return {"dead_letters": store.dead_letters(user)}
 
 @app.get("/v1/tasks/{task_id}", response_model=TaskView)
 async def get_task(task_id: str, user: str = Depends(account_id)):

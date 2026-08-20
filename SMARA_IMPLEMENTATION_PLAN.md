@@ -671,3 +671,36 @@ platform release.
 
 Verified: eight Smara focused tests and ten Syntarus SDK tests pass, plus
 Python/JavaScript compilation and diff checks.
+
+### 2026-08-20 — Phase 7 production hardening completed for the control plane
+
+Completed the remaining repository-owned Phase 7 controls:
+
+- terminal step failures now enter an account-scoped durable dead-letter queue
+  after their bounded retry budget; operators can review them through
+  `/v1/dead-letters` rather than silently re-running side effects;
+- integration encryption now accepts an ordered Fernet key ring. The first key
+  encrypts and all configured keys decrypt, allowing an overlap period during
+  credential rotation without making existing connections unreadable;
+- Sentry is a real optional production dependency, initialized only when a DSN
+  is supplied, with PII collection disabled by default;
+- backup and integrity-check scripts document a portable Postgres archive and
+  require a disposable restore drill before release; and
+- the internal sandbox recipe has a no-network, no-mount, no-secret,
+  read-only-root, capability-dropped Docker boundary with strict CPU, memory,
+  process and time limits. It is intentionally not exposed as a public API.
+
+Verified: 19 focused Smara tests pass (including dead-letter isolation, key
+rotation compatibility, and the sandbox command contract). A clean Compose
+rebuild installed the production dependency set, applied migration 011, and
+ran API, worker, scheduler, integration worker and Postgres healthily;
+`/health` and `/readyz` both returned success.
+
+Production deployment work still required outside source code: configure a
+real authenticated gateway/WAF for distributed rate limits, provide a secret
+manager and rotation runbook, schedule backups to encrypted off-host storage,
+perform the disposable restore drill, configure Sentry/alerts, and only then
+wire approved code/browser steps to the sandbox. Syntarus server-side metadata
+filter enforcement and memory-control endpoints are a separate MemoryOS
+platform release; the SDK client contract is ready but must not be treated as
+enforced until that release is deployed.

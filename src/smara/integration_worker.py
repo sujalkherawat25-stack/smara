@@ -11,6 +11,7 @@ from .integrations import IntegrationExecutor
 from .integration_oauth import refresh_google
 from .store import TaskStore, open_task_store
 from .vault import SecretVault
+from .observability import configure_sentry
 
 
 async def run_once(store: TaskStore, vault: SecretVault, worker_id: str = "integration-worker") -> bool:
@@ -37,13 +38,14 @@ async def run_once(store: TaskStore, vault: SecretVault, worker_id: str = "integ
 
 
 async def main() -> None:
+    configure_sentry(settings.sentry_dsn)
     store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
     # A deployment can run safely before any integration is configured. It
     # never attempts to process approved external work without a vault key.
-    if not settings.integration_master_key:
+    if not settings.integration_master_keys:
         while True:
             await asyncio.sleep(60)
-    vault = SecretVault(settings.integration_master_key)
+    vault = SecretVault(settings.integration_master_keys)
     while True:
         worked = await run_once(store, vault)
         await asyncio.sleep(0.2 if worked else 2)
