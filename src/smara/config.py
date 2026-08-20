@@ -21,6 +21,8 @@ class Settings:
     vapid_public_key: str = os.getenv("SMARA_VAPID_PUBLIC_KEY", "")
     vapid_private_key: str = os.getenv("SMARA_VAPID_PRIVATE_KEY", "")
     vapid_subject: str = os.getenv("SMARA_VAPID_SUBJECT", "mailto:admin@example.com")
+    rate_limit_per_minute: int = int(os.getenv("SMARA_RATE_LIMIT_PER_MINUTE", "120"))
+    sentry_dsn: str = os.getenv("SMARA_SENTRY_DSN", "")
 
 
 settings = Settings()

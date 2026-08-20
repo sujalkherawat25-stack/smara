@@ -6,7 +6,7 @@ from typing import Protocol
 
 
 class MemoryPort(Protocol):
-    async def search(self, query: str, *, user_id: str, top_k: int = 10, agent_id: str | None = None) -> dict: ...
+    async def search(self, query: str, *, user_id: str, top_k: int = 10, agent_id: str | None = None, filters: dict | None = None) -> dict: ...
     async def add(self, *, user_id: str, messages: list[dict[str, str]], agent_id: str | None = None, run_id: str | None = None, metadata: dict | None = None, idempotency_key: str | None = None) -> dict: ...
 
 
@@ -46,7 +46,7 @@ class SyntarusMemory:
         pretend an unimplemented provider filter is enforced.
         """
         scope = MemoryScope(task["account_id"], task["workspace_id"], task["id"], task["task_run_id"])
-        result = await self._client.search(task["objective"], user_id=scope.user_id, top_k=8)
+        result = await self._client.search(task["objective"], user_id=scope.user_id, top_k=8, filters={"workspace_id": scope.workspace_id, "status": "verified"})
         return str(result.get("context", result.get("context_string", "")))[:12_000]
 
     async def remember_completion(self, task: dict, result: str) -> dict:

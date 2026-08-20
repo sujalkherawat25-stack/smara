@@ -653,3 +653,21 @@ the rebuilt Compose/Postgres stack applied migration 010, accepted a real text
 capture, and created its inbox task/artifact. With no VAPID credentials in the
 local environment, the push public-key endpoint returns no key (safe inactive
 state), confirming no accidental delivery configuration.
+
+### 2026-08-20 — Phase 7 hardening started; Syntarus scope contract advanced
+
+Implemented the first production-safe hardening slice: `/readyz` database
+readiness, conservative API rate limiting, browser security headers, and
+explicit Sentry/rate-limit deployment configuration. These defaults fail safely
+and do not require hidden cloud services.
+
+The public Syntarus SDK now accepts and transmits explicit search provenance
+filters. Smara requests its workspace and verified-status scope through that
+contract. The currently deployed Syntarus API still ignores those fields, so
+this is deliberately recorded as a client contract advance—not a claim that
+provider-side filtering is complete. The matching Memory API filter enforcement
+and individual memory correction/pin/delete endpoints remain the next Syntarus
+platform release.
+
+Verified: eight Smara focused tests and ten Syntarus SDK tests pass, plus
+Python/JavaScript compilation and diff checks.

@@ -7,7 +7,8 @@ import time
 import base64
 from datetime import datetime
 from pathlib import Path
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import httpx
@@ -18,9 +19,11 @@ from .store import open_task_store
 from .vault import SecretVault
 from . import integration_oauth
 from . import push
+from .hardening import FixedWindowLimiter
 
 app = FastAPI(title="Smara Control Plane", version="0.1.0")
 store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
+limiter = FixedWindowLimiter(settings.rate_limit_per_minute)
 source_web_dir = Path(__file__).resolve().parents[2] / "web"
 web_dir = source_web_dir if source_web_dir.is_dir() else Path("/app/web")
 if web_dir.is_dir():
@@ -31,6 +34,16 @@ async def web_root():
     if web_dir.is_dir():
         return FileResponse(web_dir / "index.html")
     return {"ok": True}
+
+@app.middleware("http")
+async def harden_http(request: Request, call_next):
+    if request.url.path.startswith("/v1/"):
+        client = request.client.host if request.client else "unknown"
+        if not limiter.allow(client):
+            return JSONResponse({"detail": "Rate limit exceeded. Try again shortly."}, status_code=429, headers={"Retry-After": "60"})
+    response = await call_next(request)
+    response.headers.update({"X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "strict-origin-when-cross-origin", "Permissions-Policy": "camera=(self), microphone=(self), geolocation=()"})
+    return response
 
 def account_id(
     x_smara_account_id: str | None = Header(default=None),
@@ -86,6 +99,15 @@ def artifact_view(row: dict) -> ArtifactView:
 
 @app.get("/health")
 async def health(): return {"ok": True, "memory_boundary": "syntarus-sdk-only", "auth_mode": "development" if settings.dev_mode else "signed-gateway"}
+
+@app.get("/readyz")
+async def readyz():
+    try:
+        with store._connect() as connection:
+            connection.execute("SELECT 1")
+        return {"ok": True}
+    except Exception:
+        raise HTTPException(503, "Smara database is not ready.")
 
 @app.post("/v1/tasks", response_model=TaskView, status_code=201)
 async def create_task(body: TaskCreate, user: str = Depends(account_id)):
