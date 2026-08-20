@@ -7,7 +7,7 @@ from datetime import datetime
 from fastapi import Depends, FastAPI, Header, HTTPException
 
 from .config import settings
-from .models import ApprovalDecision, ArtifactView, EvidenceView, ResearchTaskCreate, TaskCreate, TaskView
+from .models import ApprovalDecision, ArtifactView, EvidenceView, ExecutorComplete, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, ResearchTaskCreate, TaskCreate, TaskView
 from .store import open_task_store
 
 app = FastAPI(title="Smara Control Plane", version="0.1.0")
@@ -70,8 +70,39 @@ async def health(): return {"ok": True, "memory_boundary": "syntarus-sdk-only", 
 
 @app.post("/v1/tasks", response_model=TaskView, status_code=201)
 async def create_task(body: TaskCreate, user: str = Depends(account_id)):
-    steps = [{"name": step.name, "depends_on": step.depends_on} for step in body.steps]
+    steps = [{"name": step.name, "depends_on": step.depends_on, "executor_kind": step.executor_kind, "required_capability": step.required_capability} for step in body.steps]
     return view(store.create(user, body.workspace_id, body.title, body.objective, body.requires_approval, steps))
+
+def executor_identity(authorization: str | None = Header(default=None), x_smara_executor_id: str | None = Header(default=None)) -> tuple[str, str]:
+    if not x_smara_executor_id or not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Executor id and bearer token are required.")
+    return x_smara_executor_id, authorization.removeprefix("Bearer ")
+
+@app.post("/v1/executors/pairings")
+async def create_executor_pairing(body: ExecutorPairingCreate, user: str = Depends(account_id)):
+    return store.create_executor_pairing(user, body.name, body.capabilities)
+
+@app.post("/v1/executors/pair")
+async def pair_executor(body: ExecutorPairRequest):
+    try: return store.pair_executor(body.code)
+    except KeyError: raise HTTPException(400, "Pairing code is invalid, expired, or already used.")
+
+@app.post("/v1/executors/heartbeat")
+async def heartbeat_executor(body: ExecutorHeartbeat, identity: tuple[str, str] = Depends(executor_identity)):
+    try: return store.heartbeat_executor(*identity, body.capabilities)
+    except KeyError: raise HTTPException(401, "Executor credentials are invalid or revoked.")
+
+@app.post("/v1/executors/claim")
+async def claim_executor(identity: tuple[str, str] = Depends(executor_identity)):
+    try: return {"step": store.claim_for_executor(*identity)}
+    except KeyError: raise HTTPException(401, "Executor credentials are invalid or revoked.")
+
+@app.post("/v1/executors/steps/{step_id}/complete")
+async def complete_executor_step(step_id: str, body: ExecutorComplete, identity: tuple[str, str] = Depends(executor_identity)):
+    try:
+        store.complete_executor_step(*identity, step_id, body.result)
+        return {"ok": True}
+    except KeyError: raise HTTPException(409, "Step is not leased to this executor.")
 
 @app.post("/v1/research", response_model=TaskView, status_code=201)
 async def create_research_task(body: ResearchTaskCreate, user: str = Depends(account_id)):

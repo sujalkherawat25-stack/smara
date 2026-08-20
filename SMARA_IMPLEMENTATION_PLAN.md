@@ -524,3 +524,24 @@ not yet expose strict metadata-filtered search or per-memory correction/pin
 operations. Smara preserves the fields and deliberately does not claim that
 those provider-side controls are already enforced; their SDK/platform extension
 is required before this phase can be called fully scope-filtered.
+
+### 2026-08-20 — Phase 4 desktop executor foundation
+
+Implemented the hosted pairing and lease protocol for the existing Memento
+desktop runtime:
+
+- a logged-in Smara user creates a one-time, ten-minute pairing code with an
+  explicit capability list;
+- the desktop exchanges it once for a revocable executor ID and bearer token;
+- desktop steps declare `executor_kind="desktop"` plus one required
+  capability, so hosted workers cannot claim them;
+- executor work is claimed with a lease (Postgres uses `FOR UPDATE SKIP LOCKED`)
+  and only the owning desktop token can complete it; and
+- the existing local agent now contains an outbound-only `smara_executor.py`
+  bridge. Its first capability is intentionally read-only and it opens no
+  inbound PC port.
+
+Verified: 15 Smara unit tests pass. Real Compose/Postgres pairing created a
+desktop executor, leased a `local_file_read` step to it, accepted its completion
+with the device token, and moved the task to completed. Desktop bridge files
+remain local in `agent_BOT` and are not pushed with Smara.

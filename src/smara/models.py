@@ -10,6 +10,8 @@ TaskStatus = Literal["queued", "running", "waiting_approval", "cancelling", "com
 class TaskStepInput(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     depends_on: list[int] = Field(default_factory=list, max_length=30)
+    executor_kind: Literal["hosted", "desktop"] = "hosted"
+    required_capability: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class TaskCreate(BaseModel):
@@ -77,3 +79,20 @@ class ArtifactView(BaseModel):
     sha256: str | None = None
     content: str | None = None
     created_at: datetime
+
+
+class ExecutorPairingCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    capabilities: list[str] = Field(min_length=1, max_length=20)
+
+
+class ExecutorPairRequest(BaseModel):
+    code: str = Field(pattern=r"^[A-Z0-9]{8}$")
+
+
+class ExecutorHeartbeat(BaseModel):
+    capabilities: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ExecutorComplete(BaseModel):
+    result: str = Field(min_length=1, max_length=20_000)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import secrets
 import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -46,6 +48,7 @@ class TaskStore:
               idempotency_key TEXT NOT NULL UNIQUE, lease_owner TEXT, lease_expires_at TEXT,
               created_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
               max_attempts INTEGER NOT NULL DEFAULT 3, retry_at TEXT, last_error TEXT,
+              required_capability TEXT, executor_kind TEXT NOT NULL DEFAULT 'hosted',
               UNIQUE(task_run_id,ordinal));
             CREATE TABLE IF NOT EXISTS task_step_dependencies (
               step_id TEXT NOT NULL, depends_on_step_id TEXT NOT NULL,
@@ -60,11 +63,24 @@ class TaskStore:
               id TEXT PRIMARY KEY, task_id TEXT NOT NULL, kind TEXT NOT NULL,
               name TEXT NOT NULL, uri TEXT NOT NULL, sha256 TEXT, content TEXT,
               created_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS desktop_executors (
+              id TEXT PRIMARY KEY, account_id TEXT NOT NULL, name TEXT NOT NULL,
+              capabilities TEXT NOT NULL, token_hash TEXT NOT NULL, status TEXT NOT NULL,
+              last_seen_at TEXT, created_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS executor_pairings (
+              code_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, name TEXT NOT NULL,
+              capabilities TEXT NOT NULL, expires_at TEXT NOT NULL, consumed_at TEXT);
+            CREATE TABLE IF NOT EXISTS executor_leases (
+              id TEXT PRIMARY KEY, step_id TEXT NOT NULL UNIQUE, executor_id TEXT NOT NULL,
+              expires_at TEXT NOT NULL, completed_at TEXT, created_at TEXT NOT NULL);
             """)
             # Backward-compatible local development upgrades for databases
             # created before retry state existed.
             columns = {row[1] for row in c.execute("PRAGMA table_info(task_steps)")}
             for name, definition in (("attempts", "INTEGER NOT NULL DEFAULT 0"), ("max_attempts", "INTEGER NOT NULL DEFAULT 3"), ("retry_at", "TEXT"), ("last_error", "TEXT")):
+                if name not in columns:
+                    c.execute(f"ALTER TABLE task_steps ADD COLUMN {name} {definition}")
+            for name, definition in (("required_capability", "TEXT"), ("executor_kind", "TEXT NOT NULL DEFAULT 'hosted'")):
                 if name not in columns:
                     c.execute(f"ALTER TABLE task_steps ADD COLUMN {name} {definition}")
             task_columns = {row[1] for row in c.execute("PRAGMA table_info(tasks)")}
@@ -81,8 +97,8 @@ class TaskStore:
             step_ids: list[str] = []
             for ordinal, step in enumerate(steps, start=1):
                 step_id = f"step_{uuid.uuid4().hex}"; step_ids.append(step_id)
-                c.execute("""INSERT INTO task_steps(id,task_id,task_run_id,ordinal,name,status,idempotency_key,lease_owner,lease_expires_at,created_at)
-                    VALUES(?,?,?,?,?,?,?,?,?,?)""", (step_id, task_id, run_id, ordinal, step["name"], "queued", f"task:{task_id}:step:{ordinal}", None, None, now))
+                c.execute("""INSERT INTO task_steps(id,task_id,task_run_id,ordinal,name,status,idempotency_key,lease_owner,lease_expires_at,created_at,required_capability,executor_kind)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (step_id, task_id, run_id, ordinal, step["name"], "queued", f"task:{task_id}:step:{ordinal}", None, None, now, step.get("required_capability"), step.get("executor_kind", "hosted")))
             for ordinal, step in enumerate(steps):
                 for parent in step.get("depends_on", []):
                     c.execute("INSERT INTO task_step_dependencies VALUES(?,?)", (step_ids[ordinal], step_ids[parent]))
@@ -146,7 +162,7 @@ class TaskStore:
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", item["task_id"], "step.lease_expired", '{"recovered":true}', now))
             row = c.execute("""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
-              WHERE t.status IN ('queued','running') AND s.status='queued' AND (s.retry_at IS NULL OR s.retry_at <= ?) AND NOT EXISTS (
+              WHERE t.status IN ('queued','running') AND s.status='queued' AND s.executor_kind='hosted' AND (s.retry_at IS NULL OR s.retry_at <= ?) AND NOT EXISTS (
                 SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id
                 WHERE d.step_id=s.id AND parent.status!='completed')
               ORDER BY t.created_at,s.ordinal LIMIT 1""", (now,)).fetchone()
@@ -260,6 +276,68 @@ class TaskStore:
         with self._connect() as c:
             return [dict(row) for row in c.execute("SELECT * FROM artifacts WHERE task_id=? ORDER BY created_at,id", (task_id,))]
 
+    def create_executor_pairing(self, account_id: str, name: str, capabilities: list[str]) -> dict:
+        code = secrets.token_hex(4).upper()
+        now = _now(); expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+        with self._connect() as c:
+            c.execute("INSERT INTO executor_pairings(code_hash,account_id,name,capabilities,expires_at,consumed_at) VALUES(?,?,?,?,?,?)", (hashlib.sha256(code.encode()).hexdigest(), account_id, name, json.dumps(sorted(set(capabilities))), expires_at, None))
+        return {"code": code, "expires_at": expires_at}
+
+    def pair_executor(self, code: str) -> dict:
+        now = _now(); code_hash = hashlib.sha256(code.encode()).hexdigest()
+        with self._connect() as c:
+            pairing = c.execute("SELECT * FROM executor_pairings WHERE code_hash=? AND consumed_at IS NULL AND expires_at>?", (code_hash, now)).fetchone()
+            if not pairing: raise KeyError("pairing")
+            pairing = dict(pairing); executor_id, token = f"desktop_{uuid.uuid4().hex}", secrets.token_urlsafe(32)
+            capabilities = pairing["capabilities"] if isinstance(pairing["capabilities"], str) else json.dumps(pairing["capabilities"])
+            c.execute("INSERT INTO desktop_executors(id,account_id,name,capabilities,token_hash,status,last_seen_at,created_at) VALUES(?,?,?,?,?,?,?,?)", (executor_id, pairing["account_id"], pairing["name"], capabilities, hashlib.sha256(token.encode()).hexdigest(), "active", now, now))
+            c.execute("UPDATE executor_pairings SET consumed_at=? WHERE code_hash=?", (now, code_hash))
+        return {"executor_id": executor_id, "token": token, "account_id": pairing["account_id"], "capabilities": json.loads(pairing["capabilities"]) if isinstance(pairing["capabilities"], str) else pairing["capabilities"]}
+
+    def executor(self, executor_id: str, token: str) -> dict:
+        with self._connect() as c:
+            row = c.execute("SELECT * FROM desktop_executors WHERE id=? AND token_hash=? AND status='active'", (executor_id, hashlib.sha256(token.encode()).hexdigest())).fetchone()
+        if not row: raise KeyError("executor")
+        result = dict(row); result["capabilities"] = json.loads(result["capabilities"]) if isinstance(result["capabilities"], str) else result["capabilities"]
+        return result
+
+    def heartbeat_executor(self, executor_id: str, token: str, capabilities: list[str]) -> dict:
+        executor = self.executor(executor_id, token); now = _now()
+        with self._connect() as c:
+            c.execute("UPDATE desktop_executors SET last_seen_at=?,capabilities=? WHERE id=?", (now, json.dumps(sorted(set(capabilities))), executor_id))
+        executor.update({"last_seen_at": now, "capabilities": sorted(set(capabilities))})
+        return executor
+
+    def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 60) -> dict | None:
+        executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
+        with self._connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            rows = c.execute("""SELECT t.*,s.id AS step_id,s.task_run_id,s.idempotency_key,s.name,s.required_capability
+              FROM tasks t JOIN task_steps s ON s.task_id=t.id
+              WHERE t.account_id=? AND t.status IN ('queued','running') AND s.status='queued' AND s.executor_kind='desktop' AND (s.retry_at IS NULL OR s.retry_at<=?) AND NOT EXISTS (
+                SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id WHERE d.step_id=s.id AND parent.status!='completed')
+              ORDER BY t.created_at,s.ordinal""", (executor["account_id"], now)).fetchall()
+            row = next((dict(item) for item in rows if item["required_capability"] in capabilities), None)
+            if not row: return None
+            until = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
+            c.execute("UPDATE tasks SET status='running',updated_at=? WHERE id=?", (now, row["id"]))
+            c.execute("UPDATE task_runs SET status='running' WHERE id=?", (row["task_run_id"],))
+            c.execute("UPDATE task_steps SET status='running',lease_owner=?,lease_expires_at=?,attempts=attempts+1,retry_at=NULL WHERE id=?", (executor_id, until, row["step_id"]))
+            c.execute("INSERT INTO executor_leases(id,step_id,executor_id,expires_at,created_at) VALUES(?,?,?,?,?)", (f"lease_{uuid.uuid4().hex}", row["step_id"], executor_id, until, now))
+            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", row["id"], "executor.step_claimed", f'{{"executor_id":"{executor_id}"}}', now))
+            row["lease_owner"] = executor_id; row["lease_expires_at"] = until; row["status"] = "running"
+            return row
+
+    def complete_executor_step(self, executor_id: str, token: str, step_id: str, result: str) -> None:
+        self.executor(executor_id, token)
+        with self._connect() as c:
+            row = c.execute("SELECT task_id FROM task_steps WHERE id=? AND lease_owner=? AND status='running'", (step_id, executor_id)).fetchone()
+            if not row: raise KeyError("lease")
+            task_id = row["task_id"]
+            c.execute("UPDATE executor_leases SET completed_at=? WHERE step_id=? AND executor_id=?", (_now(), step_id, executor_id))
+        task = self.get(task_id, self.executor(executor_id, token)["account_id"])
+        self.complete_step(step_id, task["account_id"], result)
+
 
 class PostgresTaskStore(TaskStore):
     """Production implementation of the same task-store contract.
@@ -326,6 +404,26 @@ class PostgresTaskStore(TaskStore):
             c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", task["id"], event_type, '{"source":"worker"}', now))
             task["updated_at"] = now
             return task
+
+    def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 60) -> dict | None:
+        """Postgres desktop claim with the same SKIP LOCKED lease guarantee."""
+        executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
+        with self._connect() as c:
+            rows = c.execute("""SELECT t.*,s.id AS step_id,s.task_run_id,s.idempotency_key,s.name,s.required_capability
+              FROM tasks t JOIN task_steps s ON s.task_id=t.id
+              WHERE t.account_id=%s AND t.status IN ('queued','running') AND s.status='queued' AND s.executor_kind='desktop' AND (s.retry_at IS NULL OR s.retry_at<=%s) AND NOT EXISTS (
+                SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id WHERE d.step_id=s.id AND parent.status!='completed')
+              ORDER BY t.created_at,s.ordinal FOR UPDATE OF s SKIP LOCKED""", (executor["account_id"], now)).fetchall()
+            row = next((dict(item) for item in rows if item["required_capability"] in capabilities), None)
+            if not row: return None
+            until = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
+            c.execute("UPDATE tasks SET status='running',updated_at=%s WHERE id=%s", (now, row["id"]))
+            c.execute("UPDATE task_runs SET status='running' WHERE id=%s", (row["task_run_id"],))
+            c.execute("UPDATE task_steps SET status='running',lease_owner=%s,lease_expires_at=%s,attempts=attempts+1,retry_at=NULL WHERE id=%s", (executor_id, until, row["step_id"]))
+            c.execute("INSERT INTO executor_leases(id,step_id,executor_id,expires_at,created_at) VALUES(%s,%s,%s,%s,%s)", (f"lease_{uuid.uuid4().hex}", row["step_id"], executor_id, until, now))
+            c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", row["id"], "executor.step_claimed", f'{{"executor_id":"{executor_id}"}}', now))
+            row.update({"lease_owner": executor_id, "lease_expires_at": until, "status": "running"})
+            return row
 
 
 def open_task_store(*, database_url: str, database_path: str):
