@@ -1,4 +1,4 @@
-const state = { tasks: [], actions: [], selected: null, mode: 'development' };
+const state = { tasks: [], actions: [], selected: null, mode: 'development', bridgeToken: null };
 const $ = (selector) => document.querySelector(selector);
 const account = $('#account');
 account.value = localStorage.getItem('smara-account') || account.value;
@@ -6,6 +6,10 @@ account.addEventListener('change', () => { localStorage.setItem('smara-account',
 
 function headers() {
   const result = {};
+  if (state.bridgeToken) {
+    result.Authorization = `Bearer ${state.bridgeToken}`;
+    return result;
+  }
   if (state.mode === 'development') result['X-Smara-Account-Id'] = account.value.trim() || 'local-user';
   return result;
 }
@@ -23,7 +27,12 @@ async function refresh() {
   try {
     const health = await fetch('/health').then(r => r.json());
     state.mode = health.auth_mode;
-    $('#auth-mode').textContent = state.mode === 'development' ? 'Development account' : 'Signed-in gateway';
+    if (state.mode !== 'development' && !state.bridgeToken) {
+      $('#auth-mode').textContent = 'Waiting for Smara sign-in…';
+      return;
+    }
+    account.disabled = Boolean(state.bridgeToken);
+    $('#auth-mode').textContent = state.bridgeToken ? 'Connected to your Smara account' : state.mode === 'development' ? 'Development account' : 'Signed-in gateway';
     [state.tasks, state.actions, state.integrations, state.devices] = await Promise.all([
       api('/v1/tasks'), api('/v1/integration-actions').then(x => x.actions), api('/v1/integrations').then(x => x.integrations), api('/v1/executors').then(x => x.executors),
     ]);
@@ -31,6 +40,17 @@ async function refresh() {
     notice(`Updated ${new Date().toLocaleTimeString()}`);
   } catch (error) { notice(error.message, true); }
 }
+
+// The parent Smara app proves its httpOnly session to ai.syntarus.com, then
+// sends a 60-second Control-only token here. The token is kept in memory only;
+// no signing key, session cookie, or account identifier is exposed to this app.
+window.addEventListener('message', (event) => {
+  if (event.origin !== 'https://ai.syntarus.com') return;
+  const data = event.data;
+  if (!data || data.type !== 'smara-control-token' || typeof data.token !== 'string') return;
+  state.bridgeToken = data.token;
+  refresh();
+});
 function render() {
   $('#task-total').textContent = state.tasks.length;
   const active = state.tasks.filter(t => !['completed', 'failed', 'cancelled'].includes(t.status));
