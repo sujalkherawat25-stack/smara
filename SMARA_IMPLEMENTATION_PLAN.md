@@ -581,3 +581,30 @@ desktop read of this repository's README completed a task and returned only a
 SHA-256 proof; a GitHub `trusted` push intent remained
 `awaiting_approval` (no external action was run). Desktop bridge files remain
 local in `agent_BOT` and are not pushed with Smara.
+
+### 2026-08-20 — Phase 5 integrations and approval policies completed
+
+Implemented the production integration boundary without embedding any personal
+provider token in the repository:
+
+- credentials are Fernet-encrypted before entering Postgres; the vault key is a
+  deployment secret, and the worker refuses to execute actions when it is not
+  configured;
+- Google (Gmail, Calendar, Drive) and GitHub have OAuth authorization-code +
+  PKCE handoffs, encrypted token storage, and Google refresh-token renewal;
+  Telegram uses a deliberately stored bot token;
+- a separate integration worker leases only approved actions, preserves the
+  idempotency key/audit record, and records a result or a bounded failure;
+- initial narrowly defined adapters support Gmail send/search, Calendar
+  create/list, Telegram send, GitHub repository list/content commit, and Drive
+  search. Every other requested action fails closed; and
+- assisted/trusted external intents show a preview and payload that an approver
+  can edit, approve, or deny. The worker never receives an awaiting-approval
+  action. Even `trusted` remains approval-gated until a bounded workflow
+  template is introduced.
+
+Verified: six focused state-machine/vault tests pass, Python compilation and
+diff validation pass, and live Compose/Postgres applied migration 009 with the
+new integration worker healthy. The live API test configured an assisted Gmail
+connection, created an external send intent, edited it during approval, and
+left it in `approved` state without credentials—so no email could be sent.

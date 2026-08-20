@@ -82,8 +82,16 @@ class TaskStore:
             CREATE TABLE IF NOT EXISTS integration_action_log (
               id TEXT PRIMARY KEY, account_id TEXT NOT NULL, connection_id TEXT NOT NULL,
               action TEXT NOT NULL, preview TEXT NOT NULL, idempotency_key TEXT NOT NULL,
-              risk TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
+              risk TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}',
+              approval_note TEXT NOT NULL DEFAULT '', lease_owner TEXT, lease_expires_at TEXT,
+              attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, result_summary TEXT, created_at TEXT NOT NULL,
               UNIQUE(account_id,idempotency_key));
+            CREATE TABLE IF NOT EXISTS integration_credentials (
+              connection_id TEXT PRIMARY KEY, kind TEXT NOT NULL, encrypted_secret TEXT NOT NULL,
+              updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS integration_oauth_states (
+              state_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, provider TEXT NOT NULL,
+              code_verifier TEXT NOT NULL, expires_at TEXT NOT NULL, consumed_at TEXT);
             """)
             # Backward-compatible local development upgrades for databases
             # created before retry state existed.
@@ -97,6 +105,10 @@ class TaskStore:
             task_columns = {row[1] for row in c.execute("PRAGMA table_info(tasks)")}
             if "cancel_requested" not in task_columns:
                 c.execute("ALTER TABLE tasks ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
+            action_columns = {row[1] for row in c.execute("PRAGMA table_info(integration_action_log)")}
+            for name, definition in (("payload", "TEXT NOT NULL DEFAULT '{}'"), ("approval_note", "TEXT NOT NULL DEFAULT ''"), ("lease_owner", "TEXT"), ("lease_expires_at", "TEXT"), ("attempts", "INTEGER NOT NULL DEFAULT 0"), ("last_error", "TEXT"), ("result_summary", "TEXT")):
+                if name not in action_columns:
+                    c.execute(f"ALTER TABLE integration_action_log ADD COLUMN {name} {definition}")
 
     def create(self, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None) -> dict:
         task_id, now = f"task_{uuid.uuid4().hex}", _now()
@@ -385,7 +397,7 @@ class TaskStore:
             rows = c.execute("SELECT * FROM integration_connections WHERE account_id=? ORDER BY provider", (account_id,)).fetchall()
         return [dict(row) | {"granted_scopes": json.loads(row["granted_scopes"]) if isinstance(row["granted_scopes"], str) else row["granted_scopes"]} for row in rows]
 
-    def request_integration_action(self, account_id: str, provider: str, action: str, preview: str, idempotency_key: str) -> dict:
+    def request_integration_action(self, account_id: str, provider: str, action: str, preview: str, idempotency_key: str, payload: dict | None = None) -> dict:
         connection = self.integration(account_id, provider)
         # The registry, not the caller, classifies a small fixed action set.
         read_actions = {"gmail.search", "calendar.list", "telegram.search", "github.list", "drive.search"}
@@ -403,12 +415,85 @@ class TaskStore:
             prior = c.execute("SELECT * FROM integration_action_log WHERE account_id=? AND idempotency_key=?", (account_id, idempotency_key)).fetchone()
             if prior:
                 return dict(prior)
-            c.execute("INSERT INTO integration_action_log(id,account_id,connection_id,action,preview,idempotency_key,risk,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (action_id, account_id, connection["id"], action, preview, idempotency_key, risk, status, now))
-        return {"id": action_id, "account_id": account_id, "connection_id": connection["id"], "action": action, "preview": preview, "idempotency_key": idempotency_key, "risk": risk, "status": status, "created_at": now}
+            c.execute("INSERT INTO integration_action_log(id,account_id,connection_id,action,preview,idempotency_key,risk,status,payload,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)", (action_id, account_id, connection["id"], action, preview, idempotency_key, risk, status, json.dumps(payload or {}), now))
+        return {"id": action_id, "account_id": account_id, "connection_id": connection["id"], "action": action, "preview": preview, "idempotency_key": idempotency_key, "risk": risk, "status": status, "payload": payload or {}, "created_at": now}
 
     def integration_actions(self, account_id: str) -> list[dict]:
         with self._connect() as c:
             return [dict(row) for row in c.execute("SELECT * FROM integration_action_log WHERE account_id=? ORDER BY created_at DESC", (account_id,))]
+
+    def store_integration_credential(self, account_id: str, provider: str, kind: str, encrypted_secret: str) -> None:
+        connection = self.integration(account_id, provider); now = _now()
+        with self._connect() as c:
+            c.execute("INSERT INTO integration_credentials(connection_id,kind,encrypted_secret,updated_at) VALUES(?,?,?,?) ON CONFLICT(connection_id) DO UPDATE SET kind=excluded.kind,encrypted_secret=excluded.encrypted_secret,updated_at=excluded.updated_at", (connection["id"], kind, encrypted_secret, now))
+            c.execute("UPDATE integration_connections SET health='healthy',updated_at=? WHERE id=?", (now, connection["id"]))
+
+    def encrypted_integration_credential(self, connection_id: str) -> dict:
+        with self._connect() as c:
+            row = c.execute("SELECT * FROM integration_credentials WHERE connection_id=?", (connection_id,)).fetchone()
+        if not row:
+            raise KeyError("credential")
+        return dict(row)
+
+    def integration_by_id(self, connection_id: str) -> dict:
+        with self._connect() as c:
+            row = c.execute("SELECT * FROM integration_connections WHERE id=?", (connection_id,)).fetchone()
+        if not row:
+            raise KeyError("integration")
+        return dict(row)
+
+    def create_oauth_state(self, account_id: str, provider: str, state: str, code_verifier: str) -> None:
+        now = _now(); expires = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+        with self._connect() as c:
+            c.execute("INSERT INTO integration_oauth_states(state_hash,account_id,provider,code_verifier,expires_at,consumed_at) VALUES(?,?,?,?,?,?)", (hashlib.sha256(state.encode()).hexdigest(), account_id, provider, code_verifier, expires, None))
+
+    def consume_oauth_state(self, state: str, provider: str) -> dict:
+        now = _now(); state_hash = hashlib.sha256(state.encode()).hexdigest()
+        with self._connect() as c:
+            row = c.execute("SELECT * FROM integration_oauth_states WHERE state_hash=? AND provider=? AND consumed_at IS NULL AND expires_at>?", (state_hash, provider, now)).fetchone()
+            if not row:
+                raise KeyError("oauth state")
+            c.execute("UPDATE integration_oauth_states SET consumed_at=? WHERE state_hash=?", (now, state_hash))
+        return dict(row)
+
+    def decide_integration_action(self, account_id: str, action_id: str, approved: bool, note: str, edited_preview: str | None = None, edited_payload: dict | None = None) -> dict:
+        with self._connect() as c:
+            row = c.execute("SELECT * FROM integration_action_log WHERE id=? AND account_id=?", (action_id, account_id)).fetchone()
+            if not row:
+                raise KeyError(action_id)
+            result = dict(row)
+            if result["status"] != "awaiting_approval":
+                raise ValueError("action is not awaiting approval")
+            status = "approved" if approved else "denied"
+            preview = edited_preview if edited_preview is not None else result["preview"]
+            payload = edited_payload if edited_payload is not None else (json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"])
+            c.execute("UPDATE integration_action_log SET status=?,approval_note=?,preview=?,payload=? WHERE id=?", (status, note, preview, json.dumps(payload), action_id))
+            result.update({"status": status, "approval_note": note, "preview": preview, "payload": payload})
+            return result
+
+    def claim_integration_action(self, worker_id: str = "integration-worker", lease_seconds: int = 60) -> dict | None:
+        now = _now()
+        with self._connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            c.execute("UPDATE integration_action_log SET status='approved',lease_owner=NULL,lease_expires_at=NULL WHERE status='running' AND lease_expires_at<?", (now,))
+            row = c.execute("SELECT * FROM integration_action_log WHERE status='approved' ORDER BY created_at LIMIT 1").fetchone()
+            if not row:
+                return None
+            result = dict(row); until = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
+            c.execute("UPDATE integration_action_log SET status='running',lease_owner=?,lease_expires_at=?,attempts=attempts+1 WHERE id=?", (worker_id, until, result["id"]))
+            result.update({"status": "running", "lease_owner": worker_id, "lease_expires_at": until, "attempts": result["attempts"] + 1})
+            result["payload"] = json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+            return result
+
+    def complete_integration_action(self, action_id: str, worker_id: str, *, result: str | None = None, error: str | None = None) -> None:
+        with self._connect() as c:
+            row = c.execute("SELECT id FROM integration_action_log WHERE id=? AND status='running' AND lease_owner=?", (action_id, worker_id)).fetchone()
+            if not row:
+                raise KeyError("integration lease")
+            if error:
+                c.execute("UPDATE integration_action_log SET status='failed',lease_owner=NULL,lease_expires_at=NULL,last_error=? WHERE id=?", (error[:2000], action_id))
+            else:
+                c.execute("UPDATE integration_action_log SET status='completed',lease_owner=NULL,lease_expires_at=NULL,result_summary=? WHERE id=?", ((result or "completed")[:2000], action_id))
 
 
 class PostgresTaskStore(TaskStore):
@@ -497,6 +582,19 @@ class PostgresTaskStore(TaskStore):
             row["executor_payload"] = json.loads(row["executor_payload"]) if isinstance(row["executor_payload"], str) else row["executor_payload"]
             row.update({"lease_owner": executor_id, "lease_expires_at": until, "status": "running"})
             return row
+
+    def claim_integration_action(self, worker_id: str = "integration-worker", lease_seconds: int = 60) -> dict | None:
+        now = _now()
+        with self._connect() as c:
+            c.execute("UPDATE integration_action_log SET status='approved',lease_owner=NULL,lease_expires_at=NULL WHERE status='running' AND lease_expires_at<%s", (now,))
+            row = c.execute("SELECT * FROM integration_action_log WHERE status='approved' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED").fetchone()
+            if not row:
+                return None
+            result = dict(row); until = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
+            c.execute("UPDATE integration_action_log SET status='running',lease_owner=%s,lease_expires_at=%s,attempts=attempts+1 WHERE id=%s", (worker_id, until, result["id"]))
+            result.update({"status": "running", "lease_owner": worker_id, "lease_expires_at": until, "attempts": result["attempts"] + 1})
+            result["payload"] = json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+            return result
 
 
 def open_task_store(*, database_url: str, database_path: str):

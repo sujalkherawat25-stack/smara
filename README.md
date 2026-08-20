@@ -11,6 +11,8 @@ or connect to Qdrant/Neo4j directly.
 - `worker`: claims durable task steps and invokes an executor.
 - `scheduler`: creates due task runs (the initial implementation is deliberately
   small; recurring schedules are added through the same task API).
+- `integration-worker`: executes only approved, idempotent provider actions;
+  it cannot run until the credential vault key is configured.
 
 For local development, leave `SMARA_DATABASE_URL` empty and set
 `SMARA_DATABASE_PATH=./data/smara.db`.
@@ -37,3 +39,23 @@ source, verifies the usable evidence, and writes a cited Markdown artifact.
 This first slice does not discover sources automatically, use an LLM to infer
 claims, or deliver reports externally. Those are separate, approval-gated
 capabilities.
+
+## Integrations and approvals
+
+Connections are account-scoped and have one policy: `observe`, `draft`,
+`assisted`, `trusted`, or `blocked`. External actions always create a durable
+intent and visible preview first. Until a bounded trusted-workflow template is
+added, even `trusted` external actions require approval. An approver can edit
+the preview and action payload before authorizing it.
+
+The credential endpoint stores only Fernet-encrypted ciphertext in Postgres.
+Set `SMARA_INTEGRATION_MASTER_KEY` from a production secret manager before
+connecting anything. Google (Gmail, Calendar, Drive) and GitHub support OAuth
+authorization-code/PKCE flows once their client IDs, client secrets, and the
+public callback URL are configured. Telegram uses an explicitly stored bot
+token. Supported initial actions are Gmail send/search, Calendar create/list,
+Telegram send, GitHub repository list/content commit, and Drive search.
+
+No provider credential or OAuth application secret is included in this
+repository. That is intentional: configure them in the deployment environment
+before using a live connection.

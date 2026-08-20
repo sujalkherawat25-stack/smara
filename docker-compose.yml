@@ -36,6 +36,14 @@ services:
       postgres:
         condition: service_healthy
     volumes: ["smara-data:/app/data"]
+  integration-worker:
+    build: .
+    command: ["python", "-m", "smara.integration_worker"]
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes: ["smara-data:/app/data"]
 volumes:
   smara-data:
   smara-postgres:

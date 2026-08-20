@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import time
 from datetime import datetime
 from fastapi import Depends, FastAPI, Header, HTTPException
 
 from .config import settings
-from .models import ApprovalDecision, ArtifactView, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationConfigure, ResearchTaskCreate, TaskCreate, TaskView
+from .models import ApprovalDecision, ArtifactView, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, ResearchTaskCreate, TaskCreate, TaskView
 from .store import open_task_store
+from .vault import SecretVault
+from . import integration_oauth
 
 app = FastAPI(title="Smara Control Plane", version="0.1.0")
 store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
@@ -116,6 +119,41 @@ async def configure_integration(provider: str, body: IntegrationConfigure, user:
         raise HTTPException(404, "Unknown integration provider.")
     return store.configure_integration(user, provider, **body.model_dump())
 
+@app.put("/v1/integrations/{provider}/credential")
+async def store_integration_credential(provider: str, body: IntegrationCredentialInput, user: str = Depends(account_id)):
+    if provider not in {"gmail", "calendar", "telegram", "github", "drive"}:
+        raise HTTPException(404, "Unknown integration provider.")
+    try:
+        encrypted = SecretVault(settings.integration_master_key).encrypt(body.secret)
+        store.store_integration_credential(user, provider, body.kind, encrypted)
+    except (KeyError, RuntimeError) as exc:
+        raise HTTPException(409, str(exc))
+    return {"ok": True, "provider": provider, "credential_stored": True}
+
+@app.get("/v1/integrations/{provider}/oauth/start")
+async def begin_integration_oauth(provider: str, user: str = Depends(account_id)):
+    try:
+        url, state, verifier = integration_oauth.begin(provider)
+        store.create_oauth_state(user, provider, state, verifier)
+        return {"authorization_url": url}
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(503, str(exc))
+
+@app.get("/v1/integrations/{provider}/oauth/callback")
+async def finish_integration_oauth(provider: str, code: str, state: str):
+    try:
+        oauth = store.consume_oauth_state(state, provider)
+        token = await integration_oauth.exchange(provider, code, oauth["code_verifier"])
+        encrypted = SecretVault(settings.integration_master_key).encrypt(json.dumps(token))
+        try:
+            store.integration(oauth["account_id"], provider)
+        except KeyError:
+            store.configure_integration(oauth["account_id"], provider, display_name=provider.title(), policy="assisted", granted_scopes=[], health="not_connected")
+        store.store_integration_credential(oauth["account_id"], provider, "oauth_token", encrypted)
+        return {"ok": True, "provider": provider, "connected": True}
+    except (KeyError, ValueError, RuntimeError, httpx.HTTPError) as exc:
+        raise HTTPException(400, str(exc))
+
 @app.get("/v1/integrations")
 async def list_integrations(user: str = Depends(account_id)):
     return {"integrations": store.integrations(user)}
@@ -123,13 +161,22 @@ async def list_integrations(user: str = Depends(account_id)):
 @app.post("/v1/integration-actions", status_code=201)
 async def request_integration_action(body: IntegrationActionCreate, user: str = Depends(account_id)):
     try:
-        return store.request_integration_action(user, body.provider, body.action, body.preview, body.idempotency_key)
+        return store.request_integration_action(user, body.provider, body.action, body.preview, body.idempotency_key, body.payload)
     except KeyError:
         raise HTTPException(409, "Configure this integration before requesting an action.")
 
 @app.get("/v1/integration-actions")
 async def list_integration_actions(user: str = Depends(account_id)):
     return {"actions": store.integration_actions(user)}
+
+@app.post("/v1/integration-actions/{action_id}/approval")
+async def decide_integration_action(action_id: str, body: IntegrationActionDecision, user: str = Depends(account_id)):
+    try:
+        return store.decide_integration_action(user, action_id, body.approved, body.note, body.edited_preview, body.edited_payload)
+    except KeyError:
+        raise HTTPException(404, "Integration action not found.")
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
 
 @app.post("/v1/research", response_model=TaskView, status_code=201)
 async def create_research_task(body: ResearchTaskCreate, user: str = Depends(account_id)):

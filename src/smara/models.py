@@ -118,3 +118,17 @@ class IntegrationActionCreate(BaseModel):
     action: str = Field(min_length=1, max_length=120)
     preview: str = Field(min_length=1, max_length=2_000)
     idempotency_key: str = Field(min_length=8, max_length=200)
+    payload: dict[str, Any] = Field(default_factory=dict, max_length=30)
+
+
+class IntegrationCredentialInput(BaseModel):
+    """A provider token/secret submitted only over authenticated TLS."""
+    secret: str = Field(min_length=1, max_length=20_000)
+    kind: Literal["oauth_token", "bot_token", "api_token"]
+
+
+class IntegrationActionDecision(BaseModel):
+    approved: bool
+    note: str = Field(default="", max_length=2_000)
+    edited_preview: str | None = Field(default=None, min_length=1, max_length=2_000)
+    edited_payload: dict[str, Any] | None = Field(default=None, max_length=30)
