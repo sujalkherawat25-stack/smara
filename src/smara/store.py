@@ -64,7 +64,7 @@ class TaskStore:
         task_id, now = f"task_{uuid.uuid4().hex}", _now()
         steps = steps or [{"name": "execute_task", "depends_on": []}]
         with self._connect() as c:
-            c.execute("INSERT INTO tasks(id,account_id,workspace_id,title,objective,status,requires_approval,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", (task_id, account_id, workspace_id, title, objective, "queued", int(requires_approval), now, now))
+            c.execute("INSERT INTO tasks(id,account_id,workspace_id,title,objective,status,requires_approval,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", (task_id, account_id, workspace_id, title, objective, "queued", requires_approval, now, now))
             run_id = f"run_{uuid.uuid4().hex}"
             c.execute("INSERT INTO task_runs(id,task_id,attempt,status,created_at) VALUES(?,?,?,?,?)", (run_id, task_id, 1, "queued", now))
             step_ids: list[str] = []
@@ -103,7 +103,7 @@ class TaskStore:
         with self._connect() as c:
             c.execute("INSERT INTO approvals(task_id,status,note,decided_at) VALUES(?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET status=excluded.status,note=excluded.note,decided_at=excluded.decided_at", (task_id, status, note, now))
             next_status = "queued" if approved else "cancelled"
-            c.execute("UPDATE tasks SET status=?,requires_approval=?,updated_at=? WHERE id=?", (next_status, 0 if approved else 1, now, task_id))
+            c.execute("UPDATE tasks SET status=?,requires_approval=?,updated_at=? WHERE id=?", (next_status, not approved, now, task_id))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, f"approval.{status}", '{"source":"user"}', now))
         return self.get(task_id, account_id)
 
@@ -113,7 +113,7 @@ class TaskStore:
             return task
         now = _now()
         with self._connect() as c:
-            c.execute("UPDATE tasks SET status='cancelling',cancel_requested=1,updated_at=? WHERE id=?", (now, task_id))
+            c.execute("UPDATE tasks SET status='cancelling',cancel_requested=?,updated_at=? WHERE id=?", (True, now, task_id))
             c.execute("UPDATE task_steps SET status='cancelled' WHERE task_id=? AND status='queued'", (task_id,))
             running = c.execute("SELECT COUNT(*) AS count FROM task_steps WHERE task_id=? AND status='running'", (task_id,)).fetchone()["count"]
             if running == 0:
@@ -165,7 +165,7 @@ class TaskStore:
             task_id, run_id = row["task_id"], row["task_run_id"]
             c.execute("UPDATE task_steps SET status='completed',lease_owner=NULL,lease_expires_at=NULL WHERE id=? AND status='running'", (step_id,))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "step.completed", '{"result":"recorded"}', now))
-            cancelled = c.execute("SELECT cancel_requested FROM tasks WHERE id=?", (task_id,)).fetchone()[0]
+            cancelled = c.execute("SELECT cancel_requested FROM tasks WHERE id=?", (task_id,)).fetchone()["cancel_requested"]
             if cancelled:
                 c.execute("UPDATE task_runs SET status='cancelled' WHERE id=?", (run_id,))
                 c.execute("UPDATE tasks SET status='cancelled',updated_at=? WHERE id=?", (now, task_id))
@@ -228,7 +228,6 @@ class PostgresTaskStore(TaskStore):
         simply keeps looking rather than observing the same ready step.
         """
         with self._connect() as c:
-            c.execute("BEGIN")
             now = _now()
             expired = c.execute(
                 "SELECT id,task_id FROM task_steps WHERE status='running' AND lease_expires_at < %s FOR UPDATE SKIP LOCKED",

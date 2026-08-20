@@ -477,3 +477,19 @@ Python compilation plus diff validation pass. Live Compose/Postgres execution
 could not be started on this machine because Docker Desktop's Linux engine is
 not running; that final integration check must be rerun after Docker Desktop is
 started with a real local `.env` file.
+
+### 2026-08-20 — Phase 1 live Compose/Postgres verification
+
+Ran the real Docker Compose stack after Docker Desktop became available. The
+test uncovered and fixed three production-only compatibility issues:
+
+- migration SQL was not copied into the installed service image;
+- SQLite's integer Boolean values were invalid for Postgres Boolean columns;
+- Postgres returns timestamp objects while the local SQLite store returns ISO
+  strings.
+
+Verified live against the Compose Postgres database: all four migrations
+applied; API, worker, scheduler, and Postgres stayed running; an approval-gated
+two-step graph moved from queued to waiting approval to completed with both
+steps completed and all expected events; and a second two-step graph cancelled
+before approval left both steps cancelled. Local tests now pass with 11 tests.

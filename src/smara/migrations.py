@@ -11,7 +11,13 @@ def apply_postgres_migrations(database_url: str | None = None) -> None:
     if not url.startswith(("postgres://", "postgresql://")):
         raise ValueError("SMARA_DATABASE_URL must be a PostgreSQL URL")
     import psycopg
-    migration_dir = Path(__file__).resolve().parents[2] / "migrations"
+    # Source checkouts keep migrations at the project root; the production
+    # image copies that directory to /app because installed wheels contain only
+    # Python packages.
+    source_dir = Path(__file__).resolve().parents[2] / "migrations"
+    migration_dir = source_dir if source_dir.is_dir() else Path("/app/migrations")
+    if not migration_dir.is_dir():
+        raise RuntimeError(f"Smara migration directory is missing: {migration_dir}")
     with psycopg.connect(url, autocommit=True) as con:
         with con.cursor() as cur:
             cur.execute("CREATE TABLE IF NOT EXISTS smara_schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())")

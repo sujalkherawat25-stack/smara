@@ -45,8 +45,17 @@ def account_id(
         raise HTTPException(401, "Invalid gateway assertion.")
     return x_smara_account_id
 
+def _as_datetime(value: datetime | str) -> datetime:
+    return value if isinstance(value, datetime) else datetime.fromisoformat(value)
+
+
 def view(row: dict) -> TaskView:
-    return TaskView(**{**row, "requires_approval": bool(row["requires_approval"]), "created_at": datetime.fromisoformat(row["created_at"]), "updated_at": datetime.fromisoformat(row["updated_at"])})
+    return TaskView(**{
+        **row,
+        "requires_approval": bool(row["requires_approval"]),
+        "created_at": _as_datetime(row["created_at"]),
+        "updated_at": _as_datetime(row["updated_at"]),
+    })
 
 @app.get("/health")
 async def health(): return {"ok": True, "memory_boundary": "syntarus-sdk-only", "auth_mode": "development" if settings.dev_mode else "signed-gateway"}
