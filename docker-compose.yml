@@ -1,4 +1,13 @@
 services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["smara-redis:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
   postgres:
     image: postgres:16-alpine
     environment:
@@ -15,8 +24,12 @@ services:
     build: .
     command: ["uvicorn", "smara.api:app", "--host", "0.0.0.0", "--port", "8080"]
     env_file: .env
+    environment:
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://redis:6379/0}
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports: ["127.0.0.1:8080:8080"]
     volumes: ["smara-data:/app/data"]
@@ -24,26 +37,39 @@ services:
     build: .
     command: ["python", "-m", "smara.worker"]
     env_file: .env
+    environment:
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://redis:6379/0}
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes: ["smara-data:/app/data"]
   scheduler:
     build: .
     command: ["python", "-m", "smara.scheduler"]
     env_file: .env
+    environment:
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://redis:6379/0}
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes: ["smara-data:/app/data"]
   integration-worker:
     build: .
     command: ["python", "-m", "smara.integration_worker"]
     env_file: .env
+    environment:
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://redis:6379/0}
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes: ["smara-data:/app/data"]
 volumes:
   smara-data:
   smara-postgres:
+  smara-redis:

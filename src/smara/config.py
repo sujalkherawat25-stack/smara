@@ -24,6 +24,7 @@ class Settings:
     vapid_subject: str = os.getenv("SMARA_VAPID_SUBJECT", "mailto:admin@example.com")
     rate_limit_per_minute: int = int(os.getenv("SMARA_RATE_LIMIT_PER_MINUTE", "120"))
     sentry_dsn: str = os.getenv("SMARA_SENTRY_DSN", "")
+    redis_url: str = os.getenv("SMARA_REDIS_URL", "")
 
 
 settings = Settings()

@@ -10,7 +10,7 @@ TaskStatus = Literal["queued", "running", "waiting_approval", "cancelling", "com
 class TaskStepInput(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     depends_on: list[int] = Field(default_factory=list, max_length=30)
-    executor_kind: Literal["hosted", "desktop"] = "hosted"
+    executor_kind: Literal["hosted", "desktop", "sandbox"] = "hosted"
     required_capability: str | None = Field(default=None, min_length=1, max_length=80)
     executor_payload: dict[str, Any] = Field(default_factory=dict, max_length=30)
 
@@ -47,6 +47,11 @@ class TaskView(BaseModel):
 class ApprovalDecision(BaseModel):
     approved: bool
     note: str = Field(default="", max_length=2_000)
+
+
+class AccountDeletionRequest(BaseModel):
+    """Deliberate confirmation; no account data is deleted by accident."""
+    confirm_account_id: str = Field(min_length=1, max_length=128)
 
 
 class ResearchTaskCreate(BaseModel):

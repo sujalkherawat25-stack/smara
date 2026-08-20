@@ -155,6 +155,12 @@ class TaskStore:
         with self._connect() as c:
             return [dict(r) for r in c.execute("SELECT * FROM task_steps WHERE task_id=? ORDER BY ordinal", (task_id,))]
 
+    def task_is_approved(self, task_id: str, account_id: str) -> bool:
+        self.get(task_id, account_id)
+        with self._connect() as c:
+            row = c.execute("SELECT status FROM approvals WHERE task_id=?", (task_id,)).fetchone()
+        return bool(row and row["status"] == "approved")
+
     def decide(self, task_id: str, account_id: str, approved: bool, note: str) -> dict:
         self.get(task_id, account_id); now = _now(); status = "approved" if approved else "denied"
         with self._connect() as c:
@@ -190,9 +196,9 @@ class TaskStore:
                 c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL WHERE id=?", (item["id"],))
                 c.execute("UPDATE tasks SET status='queued',updated_at=? WHERE id=? AND status='running'", (now, item["task_id"]))
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", item["task_id"], "step.lease_expired", '{"recovered":true}', now))
-            row = c.execute("""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name
+            row = c.execute("""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name, s.executor_kind, s.executor_payload
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
-              WHERE t.status IN ('queued','running') AND s.status='queued' AND s.executor_kind='hosted' AND (s.retry_at IS NULL OR s.retry_at <= ?) AND NOT EXISTS (
+              WHERE t.status IN ('queued','running') AND s.status='queued' AND s.executor_kind IN ('hosted','sandbox') AND (s.retry_at IS NULL OR s.retry_at <= ?) AND NOT EXISTS (
                 SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id
                 WHERE d.step_id=s.id AND parent.status!='completed')
               ORDER BY t.created_at,s.ordinal LIMIT 1""", (now,)).fetchone()
@@ -260,6 +266,35 @@ class TaskStore:
             return [dict(row) for row in c.execute(
                 "SELECT * FROM task_dead_letters WHERE account_id=? ORDER BY created_at DESC", (account_id,)
             )]
+
+    def audit_export(self, account_id: str) -> dict:
+        """Portable account data export; deliberately excludes encrypted secrets."""
+        with self._connect() as c:
+            tasks = [dict(row) for row in c.execute("SELECT * FROM tasks WHERE account_id=? ORDER BY created_at", (account_id,))]
+            task_ids = [task["id"] for task in tasks]
+            placeholders = ",".join("?" for _ in task_ids) or "NULL"
+            return {
+                "schema_version": 1, "account_id": account_id, "tasks": tasks,
+                "events": [dict(row) for row in c.execute(f"SELECT * FROM task_events WHERE task_id IN ({placeholders}) ORDER BY created_at", task_ids)],
+                "steps": [dict(row) for row in c.execute(f"SELECT * FROM task_steps WHERE task_id IN ({placeholders}) ORDER BY ordinal", task_ids)],
+                "artifacts": [dict(row) for row in c.execute(f"SELECT * FROM artifacts WHERE task_id IN ({placeholders}) ORDER BY created_at", task_ids)],
+                "dead_letters": self.dead_letters(account_id),
+                "integrations": [dict(row) for row in c.execute("SELECT id,account_id,provider,display_name,policy,granted_scopes,health,created_at,updated_at FROM integration_connections WHERE account_id=?", (account_id,))],
+                "integration_actions": [dict(row) for row in c.execute("SELECT * FROM integration_action_log WHERE account_id=? ORDER BY created_at", (account_id,))],
+            }
+
+    def delete_account(self, account_id: str) -> None:
+        """Delete Smara-owned account data and credentials; never touch Syntarus."""
+        with self._connect() as c:
+            c.execute("DELETE FROM integration_credentials WHERE connection_id IN (SELECT id FROM integration_connections WHERE account_id=?)", (account_id,))
+            c.execute("DELETE FROM integration_action_log WHERE account_id=?", (account_id,))
+            c.execute("DELETE FROM integration_oauth_states WHERE account_id=?", (account_id,))
+            c.execute("DELETE FROM integration_connections WHERE account_id=?", (account_id,))
+            c.execute("DELETE FROM push_subscriptions WHERE account_id=?", (account_id,))
+            c.execute("DELETE FROM desktop_executors WHERE account_id=?", (account_id,))
+            c.execute("DELETE FROM executor_pairings WHERE account_id=?", (account_id,))
+            c.execute("DELETE FROM task_dead_letters WHERE account_id=?", (account_id,))
+            c.execute("DELETE FROM tasks WHERE account_id=?", (account_id,))
 
     def create_research(self, account_id: str, workspace_id: str, title: str, question: str, sources: list[str]) -> dict:
         task_id, run_id, now = f"task_{uuid.uuid4().hex}", f"run_{uuid.uuid4().hex}", _now()
@@ -578,7 +613,7 @@ class PostgresTaskStore(TaskStore):
                 c.execute("UPDATE tasks SET status='queued',updated_at=%s WHERE id=%s AND status='running'", (now, item["task_id"]))
                 c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", item["task_id"], "step.lease_expired", '{"recovered":true}', now))
 
-            row = c.execute("""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name
+            row = c.execute("""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name, s.executor_kind, s.executor_payload
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
               WHERE t.status IN ('queued','running') AND s.status='queued' AND s.executor_kind='hosted' AND (s.retry_at IS NULL OR s.retry_at <= %s) AND NOT EXISTS (
                 SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id

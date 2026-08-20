@@ -14,18 +14,18 @@ from fastapi.staticfiles import StaticFiles
 import httpx
 
 from .config import settings
-from .models import ApprovalDecision, ArtifactView, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, TaskCreate, TaskView
+from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, TaskCreate, TaskView
 from .store import open_task_store
 from .vault import SecretVault
 from . import integration_oauth
 from . import push
-from .hardening import FixedWindowLimiter
+from .hardening import RedisFixedWindowLimiter
 from .observability import configure_sentry
 
 configure_sentry(settings.sentry_dsn)
 app = FastAPI(title="Smara Control Plane", version="0.1.0")
 store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
-limiter = FixedWindowLimiter(settings.rate_limit_per_minute)
+limiter = RedisFixedWindowLimiter(settings.redis_url, settings.rate_limit_per_minute, allow_local_fallback=settings.dev_mode)
 source_web_dir = Path(__file__).resolve().parents[2] / "web"
 web_dir = source_web_dir if source_web_dir.is_dir() else Path("/app/web")
 if web_dir.is_dir():
@@ -41,7 +41,11 @@ async def web_root():
 async def harden_http(request: Request, call_next):
     if request.url.path.startswith("/v1/"):
         client = request.client.host if request.client else "unknown"
-        if not limiter.allow(client):
+        try:
+            allowed = await limiter.allow(client)
+        except RuntimeError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=503)
+        if not allowed:
             return JSONResponse({"detail": "Rate limit exceeded. Try again shortly."}, status_code=429, headers={"Retry-After": "60"})
     response = await call_next(request)
     response.headers.update({"X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "strict-origin-when-cross-origin", "Permissions-Policy": "camera=(self), microphone=(self), geolocation=()"})
@@ -267,6 +271,16 @@ async def list_tasks(user: str = Depends(account_id)):
 async def list_dead_letters(user: str = Depends(account_id)):
     """Failure queue for operator/user review; retries never happen silently."""
     return {"dead_letters": store.dead_letters(user)}
+
+@app.get("/v1/account/export")
+async def export_account(user: str = Depends(account_id)):
+    return store.audit_export(user)
+
+@app.delete("/v1/account", status_code=204)
+async def delete_account(body: AccountDeletionRequest, user: str = Depends(account_id)):
+    if not hmac.compare_digest(body.confirm_account_id, user):
+        raise HTTPException(400, "confirm_account_id must match the authenticated account.")
+    store.delete_account(user)
 
 @app.get("/v1/tasks/{task_id}", response_model=TaskView)
 async def get_task(task_id: str, user: str = Depends(account_id)):

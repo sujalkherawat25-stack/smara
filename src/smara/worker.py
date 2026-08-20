@@ -8,6 +8,7 @@ from .config import settings
 from .store import TaskStore, open_task_store
 from .syntarus_adapter import SyntarusMemory
 from .research import ResearchExecutor
+from .sandbox import run as run_sandbox
 
 
 async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
@@ -25,6 +26,21 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
             if outcome.report and memory is not None:
                 await memory.remember_verified_research(task, outcome.report, outcome.verified_evidence_count)
             store.complete_step(task["step_id"], task["account_id"], outcome.text)
+            return True
+        if task.get("executor_kind") == "sandbox":
+            # Sandbox tasks must begin at a visible approval gate. The task
+            # engine never accepts a pre-approved arbitrary command.
+            if not store.task_is_approved(task["id"], task["account_id"]):
+                raise RuntimeError("Sandbox execution requires an approval-gated task.")
+            payload = task.get("executor_payload") or {}
+            if isinstance(payload, str):
+                import json
+                payload = json.loads(payload)
+            command = payload.get("command")
+            if not isinstance(command, str):
+                raise RuntimeError("Sandbox step requires a command payload.")
+            result = run_sandbox(command)
+            store.complete_step(task["step_id"], task["account_id"], result)
             return True
     # Executor integration is intentionally explicit. This worker has no
     # implicit shell/browser privileges; a registered executor will replace

@@ -704,3 +704,19 @@ wire approved code/browser steps to the sandbox. Syntarus server-side metadata
 filter enforcement and memory-control endpoints are a separate MemoryOS
 platform release; the SDK client contract is ready but must not be treated as
 enforced until that release is deployed.
+
+### 2026-08-20 — Production deployment controls extended
+
+Added a Redis-backed API limiter for production multi-replica deployments;
+development alone may use the explicitly configured in-process fallback. The
+Compose stack now includes persistent Redis and production fails closed when
+its shared limiter URL is absent. Added an account-scoped audit export endpoint
+that excludes encrypted credentials, deliberate confirmed Smara account
+deletion, and an approval-only sandbox task executor. A sandbox step cannot be
+claimed until the task's approval record says approved.
+
+Verified locally: 21 focused tests pass, including scope isolation for export
+and deletion, and proof that sandbox execution cannot begin before approval.
+The existing live Compose deployment was verified before the Redis image
+rebuild; its final Redis runtime check must be repeated once the production
+image rebuild finishes on the target host.

@@ -6,6 +6,7 @@ from cryptography.fernet import Fernet
 from smara.sandbox import SandboxLimits, docker_command
 from smara.store import TaskStore
 from smara.vault import SecretVault
+from smara.worker import run_once
 
 
 def test_terminal_task_failure_is_recorded_in_dead_letter_queue(tmp_path: Path):
@@ -37,3 +38,17 @@ def test_sandbox_recipe_is_networkless_and_has_no_host_mounts():
     assert "-v" not in command and "--volume" not in command
     with pytest.raises(ValueError):
         docker_command("", SandboxLimits())
+
+
+def test_sandbox_step_runs_only_after_durable_approval(tmp_path: Path, monkeypatch):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Check code", "Run a test", True, [{
+        "name": "sandbox.test", "executor_kind": "sandbox", "executor_payload": {"command": "pytest -q"},
+    }])
+    called: list[str] = []
+    monkeypatch.setattr("smara.worker.run_sandbox", lambda command: called.append(command) or "passed")
+    assert __import__("asyncio").run(run_once(store, None))
+    assert called == [] and store.get(task["id"], "acct_1")["status"] == "waiting_approval"
+    store.decide(task["id"], "acct_1", True, "run it")
+    assert __import__("asyncio").run(run_once(store, None))
+    assert called == ["pytest -q"] and store.get(task["id"], "acct_1")["status"] == "completed"
