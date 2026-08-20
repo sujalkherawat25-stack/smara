@@ -402,3 +402,21 @@ A phase cannot ship until its tests demonstrate:
 - explicit approval before risky action;
 - memory retrieval has traceable provenance;
 - UI shows the same task state on every connected client.
+
+## Implementation log
+
+### 2026-08-20 — Phase 0 started
+
+Implemented in the independent Smara repository:
+
+- a production gateway-assertion boundary: development may use the test header,
+  while production requires a recent HMAC-signed account assertion supplied by
+  an authenticated Smara gateway;
+- a versioned Postgres schema migration for workspaces, tasks, task runs,
+  task steps/dependencies, events, approvals, and artifacts;
+- a migration runner; and
+- Docker Compose Postgres service wiring.
+
+Verified: Smara unit/API tests and the Syntarus SDK suite pass. A live Postgres
+deployment migration remains a deployment-environment verification step because
+no production database URL or secrets are stored in this repository.
