@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -35,12 +35,26 @@ class TaskStore:
             CREATE TABLE IF NOT EXISTS approvals (
               task_id TEXT PRIMARY KEY, status TEXT NOT NULL, note TEXT NOT NULL,
               decided_at TEXT, FOREIGN KEY(task_id) REFERENCES tasks(id));
+            CREATE TABLE IF NOT EXISTS task_runs (
+              id TEXT PRIMARY KEY, task_id TEXT NOT NULL, attempt INTEGER NOT NULL,
+              status TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(task_id,attempt));
+            CREATE TABLE IF NOT EXISTS task_steps (
+              id TEXT PRIMARY KEY, task_id TEXT NOT NULL, task_run_id TEXT NOT NULL,
+              ordinal INTEGER NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL,
+              idempotency_key TEXT NOT NULL UNIQUE, lease_owner TEXT, lease_expires_at TEXT,
+              created_at TEXT NOT NULL, UNIQUE(task_run_id,ordinal));
+            CREATE TABLE IF NOT EXISTS task_step_dependencies (
+              step_id TEXT NOT NULL, depends_on_step_id TEXT NOT NULL,
+              PRIMARY KEY(step_id,depends_on_step_id), CHECK(step_id <> depends_on_step_id));
             """)
 
     def create(self, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool) -> dict:
         task_id, now = f"task_{uuid.uuid4().hex}", _now()
         with self._connect() as c:
             c.execute("INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?)", (task_id, account_id, workspace_id, title, objective, "queued", int(requires_approval), now, now))
+            run_id, step_id = f"run_{uuid.uuid4().hex}", f"step_{uuid.uuid4().hex}"
+            c.execute("INSERT INTO task_runs VALUES(?,?,?,?,?)", (run_id, task_id, 1, "queued", now))
+            c.execute("INSERT INTO task_steps VALUES(?,?,?,?,?,?,?,?,?,?)", (step_id, task_id, run_id, 1, "execute_task", "queued", f"task:{task_id}:step:1", None, None, now))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.created", '{"source":"api"}', now))
         return self.get(task_id, account_id)
 
@@ -64,30 +78,49 @@ class TaskStore:
         with self._connect() as c:
             c.execute("INSERT INTO approvals(task_id,status,note,decided_at) VALUES(?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET status=excluded.status,note=excluded.note,decided_at=excluded.decided_at", (task_id, status, note, now))
             next_status = "queued" if approved else "cancelled"
-            c.execute("UPDATE tasks SET status=?,updated_at=? WHERE id=?", (next_status, now, task_id))
+            c.execute("UPDATE tasks SET status=?,requires_approval=?,updated_at=? WHERE id=?", (next_status, 0 if approved else 1, now, task_id))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, f"approval.{status}", '{"source":"user"}', now))
         return self.get(task_id, account_id)
 
-    def claim_one(self) -> dict | None:
+    def claim_one(self, worker_id: str = "worker", lease_seconds: int = 60) -> dict | None:
         with self._connect() as c:
             c.execute("BEGIN IMMEDIATE")
-            row = c.execute("SELECT * FROM tasks WHERE status='queued' ORDER BY created_at LIMIT 1").fetchone()
+            now = _now()
+            # A dead worker never owns work forever. Recovery requeues only the
+            # step; idempotency remains attached to the external action.
+            expired = c.execute("SELECT id,task_id FROM task_steps WHERE status='running' AND lease_expires_at < ?", (now,)).fetchall()
+            for item in expired:
+                c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL WHERE id=?", (item["id"],))
+                c.execute("UPDATE tasks SET status='queued',updated_at=? WHERE id=? AND status='running'", (now, item["task_id"]))
+                c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", item["task_id"], "step.lease_expired", '{"recovered":true}', now))
+            row = c.execute("""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key
+              FROM tasks t JOIN task_steps s ON s.task_id=t.id
+              WHERE t.status='queued' AND s.status='queued' AND NOT EXISTS (
+                SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id
+                WHERE d.step_id=s.id AND parent.status!='completed')
+              ORDER BY t.created_at,s.ordinal LIMIT 1""").fetchone()
             if not row: return None
             task = dict(row)
             if task["requires_approval"]:
-                c.execute("UPDATE tasks SET status='waiting_approval',updated_at=? WHERE id=?", (_now(), task["id"]))
+                c.execute("UPDATE tasks SET status='waiting_approval',updated_at=? WHERE id=?", (now, task["id"]))
                 typ = "approval.requested"
                 task["status"] = "waiting_approval"
             else:
-                c.execute("UPDATE tasks SET status='running',updated_at=? WHERE id=?", (_now(), task["id"]))
+                until = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
+                c.execute("UPDATE tasks SET status='running',updated_at=? WHERE id=?", (now, task["id"]))
+                c.execute("UPDATE task_runs SET status='running' WHERE id=?", (task["task_run_id"],))
+                c.execute("UPDATE task_steps SET status='running',lease_owner=?,lease_expires_at=? WHERE id=?", (worker_id, until, task["step_id"]))
                 typ = "task.started"
                 task["status"] = "running"
-            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task["id"], typ, '{"source":"worker"}', _now()))
-            task["updated_at"] = _now()
+                task["lease_owner"] = worker_id
+            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task["id"], typ, '{"source":"worker"}', now))
+            task["updated_at"] = now
             return task
 
     def complete(self, task_id: str, account_id: str, result: str) -> None:
         now = _now()
         with self._connect() as c:
+            c.execute("UPDATE task_steps SET status='completed',lease_owner=NULL,lease_expires_at=NULL WHERE task_id=? AND status='running'", (task_id,))
+            c.execute("UPDATE task_runs SET status='completed' WHERE task_id=? AND status='running'", (task_id,))
             c.execute("UPDATE tasks SET status='completed',updated_at=? WHERE id=? AND account_id=?", (now, task_id, account_id))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.completed", '{"result":"recorded"}', now))

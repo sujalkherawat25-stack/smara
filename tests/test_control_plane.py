@@ -26,3 +26,16 @@ def test_worker_uses_only_memory_adapter(tmp_path: Path):
     assert store.get(task["id"], "acct_1")["status"] == "completed"
     assert fake.writes[0]["user_id"] == "acct_1"
     assert fake.writes[0]["run_id"] == task["id"]
+
+
+def test_step_lease_prevents_double_claim_and_recovers(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Run", "Perform one safe step", False)
+    first = store.claim_one("worker-a", lease_seconds=1)
+    assert first and first["step_id"]
+    assert store.claim_one("worker-b") is None
+    with store._connect() as con:
+        con.execute("UPDATE task_steps SET lease_expires_at=? WHERE id=?", ("2000-01-01T00:00:00+00:00", first["step_id"]))
+    recovered = store.claim_one("worker-b")
+    assert recovered and recovered["step_id"] == first["step_id"]
+    assert recovered["lease_owner"] == "worker-b"
