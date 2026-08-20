@@ -31,7 +31,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    ports: ["127.0.0.1:8080:8080"]
+    # A host-local port keeps the API private; Caddy is the only public entry.
+    # Staging uses SMARA_HOST_PORT=8090 so it cannot collide with live Smara.
+    ports: ["${SMARA_BIND_ADDRESS:-127.0.0.1}:${SMARA_HOST_PORT:-8080}:8080"]
     volumes: ["smara-data:/app/data"]
   worker:
     build: .
