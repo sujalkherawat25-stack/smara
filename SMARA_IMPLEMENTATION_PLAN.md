@@ -545,3 +545,39 @@ Verified: 15 Smara unit tests pass. Real Compose/Postgres pairing created a
 desktop executor, leased a `local_file_read` step to it, accepted its completion
 with the device token, and moved the task to completed. Desktop bridge files
 remain local in `agent_BOT` and are not pushed with Smara.
+
+### 2026-08-20 — Phase 4 completed safe local-read slice; Phase 5 registry started
+
+Completed the first real desktop execution path rather than treating a lease as
+work completed:
+
+- task steps now carry a small executor-only payload, and the paired Memento
+  bridge can execute `local_file_read`;
+- the desktop owner must explicitly configure approved local roots; path
+  resolution rejects traversal/symlink escapes, directories, unapproved roots,
+  and files over 256 KiB;
+- no file content leaves the device. Smara receives only a filename, byte count,
+  SHA-256 proof, and `content_shared=false`; and
+- executor errors enter the same bounded retry contract as hosted steps.
+
+Also fixed the live Postgres claim query to exclude desktop-only steps from
+hosted workers.
+
+Started Phase 5 with a durable integration registry and action-intent ledger:
+
+- account-scoped Gmail, Calendar, Telegram, GitHub, and Drive connection
+  records carry declared scopes, connection health, and one of the explicit
+  `observe`, `draft`, `assisted`, `trusted`, or `blocked` policies;
+- action intent is idempotent and recorded before any connector exists; policy
+  derives `blocked`, `draft`, or `awaiting_approval` rather than trusting a
+  caller to self-classify risk; and
+- credentials and connector execution are deliberately not implemented in this
+  slice. They need a reviewed encrypted secret store plus per-provider OAuth
+  flows and bounded action executors.
+
+Verified: five focused SQLite state-machine tests pass, Python compilation
+passes, and live Compose/Postgres applied migrations 007/008. A live paired
+desktop read of this repository's README completed a task and returned only a
+SHA-256 proof; a GitHub `trusted` push intent remained
+`awaiting_approval` (no external action was run). Desktop bridge files remain
+local in `agent_BOT` and are not pushed with Smara.

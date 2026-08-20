@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from pydantic import AnyHttpUrl, BaseModel, Field, model_validator
 
 TaskStatus = Literal["queued", "running", "waiting_approval", "cancelling", "completed", "failed", "cancelled"]
@@ -12,6 +12,7 @@ class TaskStepInput(BaseModel):
     depends_on: list[int] = Field(default_factory=list, max_length=30)
     executor_kind: Literal["hosted", "desktop"] = "hosted"
     required_capability: str | None = Field(default=None, min_length=1, max_length=80)
+    executor_payload: dict[str, Any] = Field(default_factory=dict, max_length=30)
 
 
 class TaskCreate(BaseModel):
@@ -96,3 +97,24 @@ class ExecutorHeartbeat(BaseModel):
 
 class ExecutorComplete(BaseModel):
     result: str = Field(min_length=1, max_length=20_000)
+
+
+class ExecutorFailure(BaseModel):
+    error: str = Field(min_length=1, max_length=2_000)
+
+
+IntegrationPolicy = Literal["observe", "draft", "assisted", "trusted", "blocked"]
+
+
+class IntegrationConfigure(BaseModel):
+    display_name: str = Field(default="", max_length=120)
+    policy: IntegrationPolicy = "observe"
+    granted_scopes: list[str] = Field(default_factory=list, max_length=50)
+    health: Literal["not_connected", "healthy", "needs_reauth", "error"] = "not_connected"
+
+
+class IntegrationActionCreate(BaseModel):
+    provider: Literal["gmail", "calendar", "telegram", "github", "drive"]
+    action: str = Field(min_length=1, max_length=120)
+    preview: str = Field(min_length=1, max_length=2_000)
+    idempotency_key: str = Field(min_length=8, max_length=200)

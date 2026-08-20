@@ -7,7 +7,7 @@ from datetime import datetime
 from fastapi import Depends, FastAPI, Header, HTTPException
 
 from .config import settings
-from .models import ApprovalDecision, ArtifactView, EvidenceView, ExecutorComplete, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, ResearchTaskCreate, TaskCreate, TaskView
+from .models import ApprovalDecision, ArtifactView, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationConfigure, ResearchTaskCreate, TaskCreate, TaskView
 from .store import open_task_store
 
 app = FastAPI(title="Smara Control Plane", version="0.1.0")
@@ -70,7 +70,7 @@ async def health(): return {"ok": True, "memory_boundary": "syntarus-sdk-only", 
 
 @app.post("/v1/tasks", response_model=TaskView, status_code=201)
 async def create_task(body: TaskCreate, user: str = Depends(account_id)):
-    steps = [{"name": step.name, "depends_on": step.depends_on, "executor_kind": step.executor_kind, "required_capability": step.required_capability} for step in body.steps]
+    steps = [{"name": step.name, "depends_on": step.depends_on, "executor_kind": step.executor_kind, "required_capability": step.required_capability, "executor_payload": step.executor_payload} for step in body.steps]
     return view(store.create(user, body.workspace_id, body.title, body.objective, body.requires_approval, steps))
 
 def executor_identity(authorization: str | None = Header(default=None), x_smara_executor_id: str | None = Header(default=None)) -> tuple[str, str]:
@@ -103,6 +103,33 @@ async def complete_executor_step(step_id: str, body: ExecutorComplete, identity:
         store.complete_executor_step(*identity, step_id, body.result)
         return {"ok": True}
     except KeyError: raise HTTPException(409, "Step is not leased to this executor.")
+
+@app.post("/v1/executors/steps/{step_id}/fail")
+async def fail_executor_step(step_id: str, body: ExecutorFailure, identity: tuple[str, str] = Depends(executor_identity)):
+    try:
+        return {"outcome": store.fail_executor_step(*identity, step_id, body.error)}
+    except KeyError: raise HTTPException(409, "Step is not leased to this executor.")
+
+@app.put("/v1/integrations/{provider}")
+async def configure_integration(provider: str, body: IntegrationConfigure, user: str = Depends(account_id)):
+    if provider not in {"gmail", "calendar", "telegram", "github", "drive"}:
+        raise HTTPException(404, "Unknown integration provider.")
+    return store.configure_integration(user, provider, **body.model_dump())
+
+@app.get("/v1/integrations")
+async def list_integrations(user: str = Depends(account_id)):
+    return {"integrations": store.integrations(user)}
+
+@app.post("/v1/integration-actions", status_code=201)
+async def request_integration_action(body: IntegrationActionCreate, user: str = Depends(account_id)):
+    try:
+        return store.request_integration_action(user, body.provider, body.action, body.preview, body.idempotency_key)
+    except KeyError:
+        raise HTTPException(409, "Configure this integration before requesting an action.")
+
+@app.get("/v1/integration-actions")
+async def list_integration_actions(user: str = Depends(account_id)):
+    return {"actions": store.integration_actions(user)}
 
 @app.post("/v1/research", response_model=TaskView, status_code=201)
 async def create_research_task(body: ResearchTaskCreate, user: str = Depends(account_id)):
