@@ -13,8 +13,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     workspace_id TEXT NOT NULL,
     title TEXT NOT NULL,
     objective TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('queued','running','waiting_approval','completed','failed','cancelled')),
+    status TEXT NOT NULL CHECK (status IN ('queued','running','waiting_approval','cancelling','completed','failed','cancelled')),
     requires_approval BOOLEAN NOT NULL DEFAULT TRUE,
+    cancel_requested BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -26,13 +27,13 @@ CREATE TABLE IF NOT EXISTS task_runs (
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     attempt INTEGER NOT NULL,
     status TEXT NOT NULL,
-    started_at TIMESTAMPTZ,
-    finished_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(task_id, attempt)
 );
 
 CREATE TABLE IF NOT EXISTS task_steps (
     id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     task_run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE CASCADE,
     ordinal INTEGER NOT NULL,
     name TEXT NOT NULL,
@@ -42,6 +43,11 @@ CREATE TABLE IF NOT EXISTS task_steps (
     idempotency_key TEXT NOT NULL,
     lease_owner TEXT,
     lease_expires_at TIMESTAMPTZ,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    retry_at TIMESTAMPTZ,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(task_run_id, ordinal),
     UNIQUE(idempotency_key)
 );
@@ -69,6 +75,16 @@ CREATE TABLE IF NOT EXISTS approval_requests (
     preview TEXT NOT NULL,
     decision_note TEXT,
     expires_at TIMESTAMPTZ NOT NULL,
+    decided_at TIMESTAMPTZ
+);
+
+-- The first worker contract has task-level approvals. Later executor work can
+-- add richer per-step requests through approval_requests without changing the
+-- durable decision API used by current clients.
+CREATE TABLE IF NOT EXISTS approvals (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK (status IN ('approved','denied')),
+    note TEXT NOT NULL,
     decided_at TIMESTAMPTZ
 );
 

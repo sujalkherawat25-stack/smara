@@ -66,7 +66,7 @@ class TaskStore:
         with self._connect() as c:
             c.execute("INSERT INTO tasks(id,account_id,workspace_id,title,objective,status,requires_approval,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", (task_id, account_id, workspace_id, title, objective, "queued", int(requires_approval), now, now))
             run_id = f"run_{uuid.uuid4().hex}"
-            c.execute("INSERT INTO task_runs VALUES(?,?,?,?,?)", (run_id, task_id, 1, "queued", now))
+            c.execute("INSERT INTO task_runs(id,task_id,attempt,status,created_at) VALUES(?,?,?,?,?)", (run_id, task_id, 1, "queued", now))
             step_ids: list[str] = []
             for ordinal, step in enumerate(steps, start=1):
                 step_id = f"step_{uuid.uuid4().hex}"; step_ids.append(step_id)
@@ -115,7 +115,7 @@ class TaskStore:
         with self._connect() as c:
             c.execute("UPDATE tasks SET status='cancelling',cancel_requested=1,updated_at=? WHERE id=?", (now, task_id))
             c.execute("UPDATE task_steps SET status='cancelled' WHERE task_id=? AND status='queued'", (task_id,))
-            running = c.execute("SELECT COUNT(*) FROM task_steps WHERE task_id=? AND status='running'", (task_id,)).fetchone()[0]
+            running = c.execute("SELECT COUNT(*) AS count FROM task_steps WHERE task_id=? AND status='running'", (task_id,)).fetchone()["count"]
             if running == 0:
                 c.execute("UPDATE tasks SET status='cancelled',updated_at=? WHERE id=?", (now, task_id))
                 c.execute("UPDATE task_runs SET status='cancelled' WHERE task_id=? AND status!='completed'", (task_id,))
@@ -171,7 +171,7 @@ class TaskStore:
                 c.execute("UPDATE tasks SET status='cancelled',updated_at=? WHERE id=?", (now, task_id))
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.cancelled", '{"source":"worker"}', now))
                 return
-            pending = c.execute("SELECT COUNT(*) FROM task_steps WHERE task_run_id=? AND status!='completed'", (run_id,)).fetchone()[0]
+            pending = c.execute("SELECT COUNT(*) AS count FROM task_steps WHERE task_run_id=? AND status!='completed'", (run_id,)).fetchone()["count"]
             if pending == 0:
                 c.execute("UPDATE task_runs SET status='completed' WHERE id=?", (run_id,))
                 c.execute("UPDATE tasks SET status='completed',updated_at=? WHERE id=?", (now, task_id))
@@ -196,3 +196,86 @@ class TaskStore:
                 event_type, outcome = "step.failed", "failed"
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", row["task_id"], event_type, '{"source":"worker"}', now))
             return outcome
+
+
+class PostgresTaskStore(TaskStore):
+    """Production implementation of the same task-store contract.
+
+    Migrations own schema evolution; this class deliberately inherits the task
+    graph state-machine methods so SQLite tests and the live worker cannot drift.
+    """
+    def __init__(self, database_url: str):
+        self.database_url = database_url
+        self._init()
+
+    def _init(self):
+        from .migrations import apply_postgres_migrations
+        apply_postgres_migrations(self.database_url)
+
+    def _connect(self):
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError as exc:
+            raise RuntimeError("Postgres runtime requires `psycopg[binary]`; install Smara dependencies.") from exc
+        return _PostgresConnection(psycopg.connect(self.database_url, row_factory=dict_row))
+
+    def claim_one(self, worker_id: str = "worker", lease_seconds: int = 60) -> dict | None:
+        """Atomically lease one ready step without competing workers colliding.
+
+        The SQLite implementation uses ``BEGIN IMMEDIATE``. In Postgres the
+        equivalent contract is a row lock with ``SKIP LOCKED``: a second worker
+        simply keeps looking rather than observing the same ready step.
+        """
+        with self._connect() as c:
+            c.execute("BEGIN")
+            now = _now()
+            expired = c.execute(
+                "SELECT id,task_id FROM task_steps WHERE status='running' AND lease_expires_at < %s FOR UPDATE SKIP LOCKED",
+                (now,),
+            ).fetchall()
+            for item in expired:
+                c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL WHERE id=%s", (item["id"],))
+                c.execute("UPDATE tasks SET status='queued',updated_at=%s WHERE id=%s AND status='running'", (now, item["task_id"]))
+                c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", item["task_id"], "step.lease_expired", '{"recovered":true}', now))
+
+            row = c.execute("""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name
+              FROM tasks t JOIN task_steps s ON s.task_id=t.id
+              WHERE t.status IN ('queued','running') AND s.status='queued' AND (s.retry_at IS NULL OR s.retry_at <= %s) AND NOT EXISTS (
+                SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id
+                WHERE d.step_id=s.id AND parent.status!='completed')
+              ORDER BY t.created_at,s.ordinal
+              LIMIT 1 FOR UPDATE OF s SKIP LOCKED""", (now,)).fetchone()
+            if not row:
+                return None
+            task = dict(row)
+            if task["requires_approval"] and task["status"] == "queued":
+                c.execute("UPDATE tasks SET status='waiting_approval',updated_at=%s WHERE id=%s", (now, task["id"]))
+                event_type = "approval.requested"
+                task["status"] = "waiting_approval"
+            else:
+                until = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
+                c.execute("UPDATE tasks SET status='running',updated_at=%s WHERE id=%s", (now, task["id"]))
+                c.execute("UPDATE task_runs SET status='running' WHERE id=%s", (task["task_run_id"],))
+                c.execute("UPDATE task_steps SET status='running',lease_owner=%s,lease_expires_at=%s,attempts=attempts+1,retry_at=NULL WHERE id=%s", (worker_id, until, task["step_id"]))
+                event_type = "task.started"
+                task["status"] = "running"
+                task["lease_owner"] = worker_id
+            c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", task["id"], event_type, '{"source":"worker"}', now))
+            task["updated_at"] = now
+            return task
+
+
+def open_task_store(*, database_url: str, database_path: str):
+    """Select Postgres in every configured live deployment; SQLite is dev/test only."""
+    return PostgresTaskStore(database_url) if database_url else TaskStore(database_path)
+
+
+class _PostgresConnection:
+    """Translate the small common SQL subset used by the shared state machine."""
+    def __init__(self, connection): self._connection = connection
+    def __enter__(self): self._connection.__enter__(); return self
+    def __exit__(self, *args): return self._connection.__exit__(*args)
+    def execute(self, sql: str, params=None):
+        normalized = "BEGIN" if sql == "BEGIN IMMEDIATE" else sql.replace("?", "%s")
+        return self._connection.execute(normalized, params)

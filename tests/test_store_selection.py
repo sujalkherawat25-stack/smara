@@ -1,0 +1,24 @@
+import inspect
+
+from smara import store
+
+
+def test_live_database_url_selects_postgres_store(monkeypatch, tmp_path):
+    chosen = object()
+    monkeypatch.setattr(store, "PostgresTaskStore", lambda url: chosen)
+
+    actual = store.open_task_store(
+        database_url="postgresql://smara:secret@postgres/smara",
+        database_path=str(tmp_path / "local.db"),
+    )
+
+    assert actual is chosen
+
+
+def test_no_database_url_keeps_sqlite_for_local_development(tmp_path):
+    actual = store.open_task_store(database_url="", database_path=str(tmp_path / "local.db"))
+    assert isinstance(actual, store.TaskStore)
+
+
+def test_postgres_claim_uses_a_skip_locked_row_lease():
+    assert "FOR UPDATE OF s SKIP LOCKED" in inspect.getsource(store.PostgresTaskStore.claim_one)

@@ -5,7 +5,7 @@ import os
 
 from syntarus import AsyncMemoryClient
 from .config import settings
-from .store import TaskStore
+from .store import TaskStore, open_task_store
 from .syntarus_adapter import SyntarusMemory
 
 
@@ -34,7 +34,7 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
 
 
 async def main() -> None:
-    store = TaskStore(settings.database_path)
+    store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
     memory = None
     if settings.syntarus_api_key:
         memory = SyntarusMemory(AsyncMemoryClient(settings.syntarus_api_key, base_url=settings.syntarus_base_url))

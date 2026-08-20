@@ -457,3 +457,23 @@ external action already in progress.
 
 Verified: a two-step task cancellation test proves the second dependent step is
 never claimed after cancellation.
+
+### 2026-08-20 — Phase 1 live Postgres task runtime
+
+Implemented the production task-store path shared by the API and worker:
+
+- `SMARA_DATABASE_URL` now selects `PostgresTaskStore`; SQLite is retained only
+  when no database URL is configured for local development and isolated tests;
+- Postgres migrations now include all graph-contract state used by the worker:
+  task ownership on steps, retry metadata, cancellation state, task-run creation
+  time, and task-level approval decisions;
+- the production claim path uses transactional `FOR UPDATE SKIP LOCKED` row
+  leases, so competing workers cannot claim the same ready step; and
+- the Postgres store inherits the existing graph/retry/cancellation methods so
+  local and deployed behavior remain one contract rather than two implementations.
+
+Verified: Smara's task/API tests (10) and Syntarus SDK tests (10) pass, and
+Python compilation plus diff validation pass. Live Compose/Postgres execution
+could not be started on this machine because Docker Desktop's Linux engine is
+not running; that final integration check must be rerun after Docker Desktop is
+started with a real local `.env` file.

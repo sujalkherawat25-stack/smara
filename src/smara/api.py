@@ -8,10 +8,10 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 
 from .config import settings
 from .models import ApprovalDecision, TaskCreate, TaskView
-from .store import TaskStore
+from .store import open_task_store
 
 app = FastAPI(title="Smara Control Plane", version="0.1.0")
-store = TaskStore(settings.database_path)
+store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
 
 def account_id(
     x_smara_account_id: str | None = Header(default=None),
