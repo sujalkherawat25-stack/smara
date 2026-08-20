@@ -57,7 +57,12 @@ async def harden_http(request: Request, call_next):
         if not allowed:
             return JSONResponse({"detail": "Rate limit exceeded. Try again shortly."}, status_code=429, headers={"Retry-After": "60"})
     response = await call_next(request)
-    response.headers.update({"X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "strict-origin-when-cross-origin", "Permissions-Policy": "camera=(self), microphone=(self), geolocation=()"})
+    response.headers.update({"X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin", "Permissions-Policy": "camera=(self), microphone=(self), geolocation=()"})
+    # The Control UI is embedded only by ai.syntarus.com. Caddy applies the
+    # strict frame-ancestors policy; every API route and non-embedded page
+    # remains protected from framing with X-Frame-Options.
+    if not request.url.path.startswith("/app/"):
+        response.headers["X-Frame-Options"] = "DENY"
     return response
 
 def account_id(
