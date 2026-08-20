@@ -25,7 +25,7 @@
         <header><div><p class="eyebrow">CONTROL PLANE</p><h1 id="title">Your tasks</h1></div><button id="refresh" class="secondary">Refresh</button></header>
         <div id="notice" role="status"></div>
         <section id="tasks" class="view active">
-          <div class="hero"><div><p>Make work visible, reversible, and approval-first.</p><button id="new-task">New task</button></div><div class="stat"><b id="task-total">0</b><span>tasks</span></div></div>
+          <div class="hero"><div><p>Make work visible, reversible, and approval-first.</p><div class="actions left"><button id="new-task">New task</button><button id="capture" class="secondary">Quick capture</button><button id="enable-push" class="secondary">Enable phone alerts</button></div></div><div class="stat"><b id="task-total">0</b><span>tasks</span></div></div>
           <div id="task-list" class="task-list"></div>
           <aside id="task-detail" class="detail empty">Select a task to see its plan, evidence, artifacts, and activity.</aside>
         </section>
@@ -37,6 +37,7 @@
     </div>
     <dialog id="task-dialog"><form method="dialog" id="task-form"><header><h2>Create task</h2><button value="cancel" class="icon">×</button></header><label>Title<input name="title" required maxlength="200" placeholder="Prepare a project update" /></label><label>Objective<textarea name="objective" required maxlength="20000" placeholder="What outcome should Smara produce?"></textarea></label><label>Workspace<input name="workspace" value="default" required /></label><label class="toggle"><input name="approval" type="checkbox" checked /> Require approval before work begins</label><div class="actions"><button value="cancel" class="secondary">Cancel</button><button value="submit">Create task</button></div></form></dialog>
     <dialog id="approval-dialog"><form method="dialog" id="approval-form"><header><h2>Review external action</h2><button value="cancel" class="icon">×</button></header><label>Preview<textarea name="preview" required></textarea></label><label>Action payload (JSON)<textarea name="payload" required></textarea></label><label>Note<textarea name="note" placeholder="Optional decision note"></textarea></label><div class="actions"><button value="deny" class="danger">Deny</button><button value="approve">Approve</button></div></form></dialog>
+    <dialog id="capture-dialog"><form method="dialog" id="capture-form"><header><h2>Quick capture</h2><button value="cancel" class="icon">×</button></header><label>Title<input name="title" required maxlength="200" value="Phone capture" /></label><label>Text note<textarea name="text" placeholder="Type a thought, task, or context…"></textarea></label><label>Photo or voice note<input name="media" type="file" accept="image/jpeg,image/png,image/webp,audio/webm,audio/mpeg,audio/mp4,audio/wav" capture="environment" /></label><p class="muted">Capture is stored as an inbox task. Media stays in Smara and is not sent to an LLM automatically.</p><div class="actions"><button value="cancel" class="secondary">Cancel</button><button value="submit">Save capture</button></div></form></dialog>
     <script src="/app/app.js" type="module"></script>
   </body>
 </html>

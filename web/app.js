@@ -5,12 +5,13 @@ account.value = localStorage.getItem('smara-account') || account.value;
 account.addEventListener('change', () => { localStorage.setItem('smara-account', account.value.trim()); refresh(); });
 
 function headers() {
-  const result = { 'Content-Type': 'application/json' };
+  const result = {};
   if (state.mode === 'development') result['X-Smara-Account-Id'] = account.value.trim() || 'local-user';
   return result;
 }
 async function api(path, options = {}) {
-  const response = await fetch(path, { ...options, headers: { ...headers(), ...(options.headers || {}) } });
+  const type = options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' };
+  const response = await fetch(path, { ...options, headers: { ...type, ...headers(), ...(options.headers || {}) } });
   if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || `Request failed (${response.status})`);
   return response.status === 204 ? null : response.json();
 }
@@ -70,11 +71,33 @@ $('#approval-form').addEventListener('submit', async event => {
   } catch (error) { notice(error.message, true); }
 });
 $('#new-task').onclick = () => $('#task-dialog').showModal();
+$('#capture').onclick = () => $('#capture-dialog').showModal();
 $('#task-form').addEventListener('submit', async event => {
   event.preventDefault(); if (event.submitter.value !== 'submit') return $('#task-dialog').close(); const form = event.currentTarget;
   try { await api('/v1/tasks', { method: 'POST', body: JSON.stringify({ title: form.title.value, objective: form.objective.value, workspace_id: form.workspace.value, requires_approval: form.approval.checked, steps: [{ name: 'execute_task' }] }) }); $('#task-dialog').close(); form.reset(); await refresh(); notice('Task created.'); } catch (error) { notice(error.message, true); }
 });
 $('#pair-desktop').onclick = async () => { try { const pairing = await api('/v1/executors/pairings', { method: 'POST', body: JSON.stringify({ name: 'My desktop', capabilities: ['local_file_read'] }) }); $('#device-list').innerHTML = `<article class="card"><h3>Pair this desktop</h3><p>Run the Memento bridge command with this one-time code. It expires at ${new Date(pairing.expires_at).toLocaleTimeString()}.</p><p class="pair-code">${pairing.code}</p></article>`; } catch (error) { notice(error.message, true); } };
+$('#capture-form').addEventListener('submit', async event => {
+  event.preventDefault(); const form = event.currentTarget; if (event.submitter.value !== 'submit') return $('#capture-dialog').close();
+  try {
+    const media = form.media.files[0]; const data = new FormData(); data.append('title', form.title.value);
+    if (media) { data.append('file', media); await api('/v1/captures/media', { method: 'POST', body: data }); }
+    else { data.append('text', form.text.value); await api('/v1/captures/text', { method: 'POST', body: data }); }
+    $('#capture-dialog').close(); form.reset(); await refresh(); notice('Capture saved to your inbox.');
+  } catch (error) { notice(error.message, true); }
+});
+function urlBase64ToUint8Array(value) { const raw = atob(value.replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(raw, char => char.charCodeAt(0)); }
+$('#enable-push').onclick = async () => {
+  try {
+    const key = (await api('/v1/push/public-key')).public_key;
+    if (!key) throw new Error('Phone alerts are not configured on this server yet.');
+    const registration = await navigator.serviceWorker.ready;
+    const permission = await Notification.requestPermission(); if (permission !== 'granted') throw new Error('Notification permission was not granted.');
+    const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) });
+    const json = subscription.toJSON(); await api('/v1/push/subscriptions', { method: 'POST', body: JSON.stringify({ endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth }) });
+    const result = await api('/v1/push/test', { method: 'POST', body: '{}' }); notice(result.delivered ? 'Phone alert sent.' : 'Phone subscription saved; server VAPID delivery is not active yet.');
+  } catch (error) { notice(error.message, true); }
+};
 $('#refresh').onclick = refresh;
 document.querySelectorAll('.nav').forEach(button => button.onclick = () => { document.querySelectorAll('.nav,.view').forEach(el => el.classList.remove('active')); button.classList.add('active'); $(`#${button.dataset.view}`).classList.add('active'); $('#title').textContent = button.textContent.trim().replace(/\d+$/, '').trim(); });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/app/sw.js').catch(() => {});

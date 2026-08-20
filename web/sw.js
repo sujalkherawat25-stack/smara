@@ -1,2 +1,4 @@
 self.addEventListener('install', event => event.waitUntil(caches.open('smara-v1').then(cache => cache.addAll(['/app/','/app/styles.css','/app/app.js','/app/manifest.webmanifest']))));
 self.addEventListener('fetch', event => { if (event.request.method === 'GET' && new URL(event.request.url).origin === location.origin) event.respondWith(caches.match(event.request).then(hit => hit || fetch(event.request))); });
+self.addEventListener('push', event => { const data = event.data ? event.data.json() : {}; event.waitUntil(self.registration.showNotification(data.title || 'Smara', { body: data.body || 'An update needs your attention.', data: { url: data.url || '/app/' } })); });
+self.addEventListener('notificationclick', event => { event.notification.close(); event.waitUntil(clients.openWindow(event.notification.data.url)); });

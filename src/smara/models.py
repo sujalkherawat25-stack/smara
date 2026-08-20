@@ -132,3 +132,9 @@ class IntegrationActionDecision(BaseModel):
     note: str = Field(default="", max_length=2_000)
     edited_preview: str | None = Field(default=None, min_length=1, max_length=2_000)
     edited_payload: dict[str, Any] | None = Field(default=None, max_length=30)
+
+
+class PushSubscriptionInput(BaseModel):
+    endpoint: str = Field(min_length=10, max_length=2_000)
+    p256dh: str = Field(min_length=10, max_length=500)
+    auth: str = Field(min_length=5, max_length=500)

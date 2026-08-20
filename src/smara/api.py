@@ -4,18 +4,20 @@ import hashlib
 import hmac
 import json
 import time
+import base64
 from datetime import datetime
 from pathlib import Path
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import httpx
 
 from .config import settings
-from .models import ApprovalDecision, ArtifactView, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, ResearchTaskCreate, TaskCreate, TaskView
+from .models import ApprovalDecision, ArtifactView, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, TaskCreate, TaskView
 from .store import open_task_store
 from .vault import SecretVault
 from . import integration_oauth
+from . import push
 
 app = FastAPI(title="Smara Control Plane", version="0.1.0")
 store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
@@ -177,15 +179,48 @@ async def list_integrations(user: str = Depends(account_id)):
     return {"integrations": store.integrations(user)}
 
 @app.post("/v1/integration-actions", status_code=201)
-async def request_integration_action(body: IntegrationActionCreate, user: str = Depends(account_id)):
+async def request_integration_action(body: IntegrationActionCreate, background: BackgroundTasks, user: str = Depends(account_id)):
     try:
-        return store.request_integration_action(user, body.provider, body.action, body.preview, body.idempotency_key, body.payload)
+        action = store.request_integration_action(user, body.provider, body.action, body.preview, body.idempotency_key, body.payload)
+        if action["status"] == "awaiting_approval":
+            background.add_task(push.send, store, user, "Smara approval needed", action["preview"], "/app/")
+        return action
     except KeyError:
         raise HTTPException(409, "Configure this integration before requesting an action.")
 
 @app.get("/v1/integration-actions")
 async def list_integration_actions(user: str = Depends(account_id)):
     return {"actions": store.integration_actions(user)}
+
+@app.get("/v1/push/public-key")
+async def push_public_key():
+    return {"public_key": settings.vapid_public_key or None}
+
+@app.post("/v1/push/subscriptions", status_code=201)
+async def subscribe_push(body: PushSubscriptionInput, user: str = Depends(account_id)):
+    store.save_push_subscription(user, body.endpoint, body.p256dh, body.auth)
+    return {"ok": True}
+
+@app.post("/v1/push/test")
+async def test_push(user: str = Depends(account_id)):
+    return {"delivered": push.send(store, user, "Smara phone companion", "Push notifications are connected.")}
+
+@app.post("/v1/captures/text", status_code=201)
+async def capture_text(title: str = Form(..., max_length=200), text: str = Form(..., max_length=20_000), user: str = Depends(account_id)):
+    return store.create_capture(user, "text", title, text)
+
+@app.post("/v1/captures/media", status_code=201)
+async def capture_media(title: str = Form(..., max_length=200), file: UploadFile = File(...), user: str = Depends(account_id)):
+    allowed = {"image/jpeg", "image/png", "image/webp", "audio/webm", "audio/mpeg", "audio/mp4", "audio/wav"}
+    if file.content_type not in allowed:
+        raise HTTPException(415, "Only JPG, PNG, WebP, WebM, MP3, M4A, and WAV captures are accepted.")
+    limit = 4 * 1024 * 1024 if file.content_type.startswith("image/") else 10 * 1024 * 1024
+    content = await file.read(limit + 1)
+    if len(content) > limit:
+        raise HTTPException(413, "Capture exceeds its size limit.")
+    kind = "photo" if file.content_type.startswith("image/") else "voice"
+    payload = base64.b64encode(content).decode()
+    return store.create_capture(user, kind, title, payload, file.content_type)
 
 @app.post("/v1/integration-actions/{action_id}/approval")
 async def decide_integration_action(action_id: str, body: IntegrationActionDecision, user: str = Depends(account_id)):

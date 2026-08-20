@@ -29,6 +29,12 @@ enter a local account identifier in the sidebar; production requests rely on
 the signed identity gateway and do not expose an account identifier in browser
 storage.
 
+Phone alerts need HTTPS plus the VAPID keys in `.env.example`. Once enabled,
+the installed app can register its own browser-push subscription and Smara
+sends an approval alert when an external action enters review. Quick text,
+voice, and photo captures create inbox tasks; media is retained in Smara and
+never sent to an LLM automatically.
+
 ## Memory boundary
 
 `src/smara/syntarus_adapter.py` is the only memory integration point. Give the

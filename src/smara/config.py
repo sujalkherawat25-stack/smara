@@ -18,6 +18,9 @@ class Settings:
     google_client_secret: str = os.getenv("SMARA_GOOGLE_CLIENT_SECRET", "")
     github_client_id: str = os.getenv("SMARA_GITHUB_CLIENT_ID", "")
     github_client_secret: str = os.getenv("SMARA_GITHUB_CLIENT_SECRET", "")
+    vapid_public_key: str = os.getenv("SMARA_VAPID_PUBLIC_KEY", "")
+    vapid_private_key: str = os.getenv("SMARA_VAPID_PRIVATE_KEY", "")
+    vapid_subject: str = os.getenv("SMARA_VAPID_SUBJECT", "mailto:admin@example.com")
 
 
 settings = Settings()

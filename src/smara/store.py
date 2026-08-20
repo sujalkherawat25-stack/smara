@@ -92,6 +92,9 @@ class TaskStore:
             CREATE TABLE IF NOT EXISTS integration_oauth_states (
               state_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, provider TEXT NOT NULL,
               code_verifier TEXT NOT NULL, expires_at TEXT NOT NULL, consumed_at TEXT);
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+              endpoint TEXT PRIMARY KEY, account_id TEXT NOT NULL, p256dh TEXT NOT NULL,
+              auth TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
             """)
             # Backward-compatible local development upgrades for databases
             # created before retry state existed.
@@ -504,6 +507,24 @@ class TaskStore:
                 c.execute("UPDATE integration_action_log SET status='failed',lease_owner=NULL,lease_expires_at=NULL,last_error=? WHERE id=?", (error[:2000], action_id))
             else:
                 c.execute("UPDATE integration_action_log SET status='completed',lease_owner=NULL,lease_expires_at=NULL,result_summary=? WHERE id=?", ((result or "completed")[:2000], action_id))
+
+    def create_capture(self, account_id: str, kind: str, title: str, content: str, mime_type: str = "text/plain") -> dict:
+        task = self.create(account_id, "inbox", title, content[:20_000] or f"{kind} capture", False, [{"name": "capture.received"}])
+        artifact = self.create_artifact(task["id"], account_id, kind=f"capture:{kind}:{mime_type}", name=title, content=content)
+        return {"task": task, "artifact": artifact}
+
+    def save_push_subscription(self, account_id: str, endpoint: str, p256dh: str, auth: str) -> None:
+        now = _now()
+        with self._connect() as c:
+            c.execute("INSERT INTO push_subscriptions(endpoint,account_id,p256dh,auth,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(endpoint) DO UPDATE SET account_id=excluded.account_id,p256dh=excluded.p256dh,auth=excluded.auth,updated_at=excluded.updated_at", (endpoint, account_id, p256dh, auth, now, now))
+
+    def push_subscriptions(self, account_id: str) -> list[dict]:
+        with self._connect() as c:
+            return [dict(row) for row in c.execute("SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE account_id=?", (account_id,))]
+
+    def delete_push_subscription(self, endpoint: str) -> None:
+        with self._connect() as c:
+            c.execute("DELETE FROM push_subscriptions WHERE endpoint=?", (endpoint,))
 
 
 class PostgresTaskStore(TaskStore):

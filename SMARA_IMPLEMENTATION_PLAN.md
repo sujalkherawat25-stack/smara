@@ -633,3 +633,23 @@ visible through the task-board API along with the desktop-status endpoint.
 Native push delivery and capture (voice/photo) remain the next small phone
 companion slice, because they require VAPID credentials, TLS, and an explicit
 device-permission workflow.
+
+### 2026-08-20 — Phase 6 phone companion completed
+
+Completed the phone companion as part of the installed Smara PWA:
+
+- browser push subscriptions are account-scoped and delivered through VAPID;
+  stale provider subscriptions are removed after a terminal push response;
+- external integration actions entering `awaiting_approval` request an
+  approval notification without exposing a device as an executor;
+- the phone UI can create quick text, photo, and voice captures. Captures are
+  bounded by media type/size, become inbox tasks with artifacts, and never
+  enter a model or Syntarus automatically; and
+- VAPID is deliberately configuration-gated. Without HTTPS, browser consent,
+  and server VAPID keys, the UI can never pretend an alert was delivered.
+
+Verified: eight focused state-machine tests and JavaScript syntax checks pass;
+the rebuilt Compose/Postgres stack applied migration 010, accepted a real text
+capture, and created its inbox task/artifact. With no VAPID credentials in the
+local environment, the push public-key endpoint returns no key (safe inactive
+state), confirming no accidental delivery configuration.
