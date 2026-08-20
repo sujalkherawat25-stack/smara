@@ -435,3 +435,14 @@ Implemented a first durable task graph in the local development store:
 Verified: approval, memory adapter, worker, lease recovery, and dependency
 unlock/completion tests pass. The next Phase 1 slice is Postgres-backed runtime
 use of the same graph contract plus explicit retry/cancellation policies.
+
+### 2026-08-20 — Phase 1 bounded retries
+
+Implemented bounded retry state for task steps. A failed worker operation now
+records an event and error, releases its lease, waits until its retry time, and
+requeues only while its configured attempt budget remains. Exhaustion marks the
+step, run, and task failed rather than looping forever.
+
+Verified: the retry test exercises three consecutive failures and proves the
+third failure is terminal. The next reliability slice is cancellation semantics
+and implementing the same worker graph contract against Postgres at runtime.

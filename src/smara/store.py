@@ -42,11 +42,19 @@ class TaskStore:
               id TEXT PRIMARY KEY, task_id TEXT NOT NULL, task_run_id TEXT NOT NULL,
               ordinal INTEGER NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL,
               idempotency_key TEXT NOT NULL UNIQUE, lease_owner TEXT, lease_expires_at TEXT,
-              created_at TEXT NOT NULL, UNIQUE(task_run_id,ordinal));
+              created_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+              max_attempts INTEGER NOT NULL DEFAULT 3, retry_at TEXT, last_error TEXT,
+              UNIQUE(task_run_id,ordinal));
             CREATE TABLE IF NOT EXISTS task_step_dependencies (
               step_id TEXT NOT NULL, depends_on_step_id TEXT NOT NULL,
               PRIMARY KEY(step_id,depends_on_step_id), CHECK(step_id <> depends_on_step_id));
             """)
+            # Backward-compatible local development upgrades for databases
+            # created before retry state existed.
+            columns = {row[1] for row in c.execute("PRAGMA table_info(task_steps)")}
+            for name, definition in (("attempts", "INTEGER NOT NULL DEFAULT 0"), ("max_attempts", "INTEGER NOT NULL DEFAULT 3"), ("retry_at", "TEXT"), ("last_error", "TEXT")):
+                if name not in columns:
+                    c.execute(f"ALTER TABLE task_steps ADD COLUMN {name} {definition}")
 
     def create(self, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None) -> dict:
         task_id, now = f"task_{uuid.uuid4().hex}", _now()
@@ -58,7 +66,8 @@ class TaskStore:
             step_ids: list[str] = []
             for ordinal, step in enumerate(steps, start=1):
                 step_id = f"step_{uuid.uuid4().hex}"; step_ids.append(step_id)
-                c.execute("INSERT INTO task_steps VALUES(?,?,?,?,?,?,?,?,?,?)", (step_id, task_id, run_id, ordinal, step["name"], "queued", f"task:{task_id}:step:{ordinal}", None, None, now))
+                c.execute("""INSERT INTO task_steps(id,task_id,task_run_id,ordinal,name,status,idempotency_key,lease_owner,lease_expires_at,created_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?)""", (step_id, task_id, run_id, ordinal, step["name"], "queued", f"task:{task_id}:step:{ordinal}", None, None, now))
             for ordinal, step in enumerate(steps):
                 for parent in step.get("depends_on", []):
                     c.execute("INSERT INTO task_step_dependencies VALUES(?,?)", (step_ids[ordinal], step_ids[parent]))
@@ -107,10 +116,10 @@ class TaskStore:
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", item["task_id"], "step.lease_expired", '{"recovered":true}', now))
             row = c.execute("""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
-              WHERE t.status IN ('queued','running') AND s.status='queued' AND NOT EXISTS (
+              WHERE t.status IN ('queued','running') AND s.status='queued' AND (s.retry_at IS NULL OR s.retry_at <= ?) AND NOT EXISTS (
                 SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id
                 WHERE d.step_id=s.id AND parent.status!='completed')
-              ORDER BY t.created_at,s.ordinal LIMIT 1""").fetchone()
+              ORDER BY t.created_at,s.ordinal LIMIT 1""", (now,)).fetchone()
             if not row: return None
             task = dict(row)
             if task["requires_approval"] and task["status"] == "queued":
@@ -121,7 +130,7 @@ class TaskStore:
                 until = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
                 c.execute("UPDATE tasks SET status='running',updated_at=? WHERE id=?", (now, task["id"]))
                 c.execute("UPDATE task_runs SET status='running' WHERE id=?", (task["task_run_id"],))
-                c.execute("UPDATE task_steps SET status='running',lease_owner=?,lease_expires_at=? WHERE id=?", (worker_id, until, task["step_id"]))
+                c.execute("UPDATE task_steps SET status='running',lease_owner=?,lease_expires_at=?,attempts=attempts+1,retry_at=NULL WHERE id=?", (worker_id, until, task["step_id"]))
                 typ = "task.started"
                 task["status"] = "running"
                 task["lease_owner"] = worker_id
@@ -142,3 +151,23 @@ class TaskStore:
                 c.execute("UPDATE task_runs SET status='completed' WHERE id=?", (run_id,))
                 c.execute("UPDATE tasks SET status='completed',updated_at=? WHERE id=?", (now, task_id))
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.completed", '{"result":"recorded"}', now))
+
+    def fail_step(self, step_id: str, account_id: str, error: str, retry_delay_seconds: int = 5) -> str:
+        """Record a bounded failure. Returns `retrying` or terminal `failed`."""
+        now = _now()
+        with self._connect() as c:
+            row = c.execute("SELECT task_id,task_run_id,attempts,max_attempts FROM task_steps WHERE id=? AND task_id IN (SELECT id FROM tasks WHERE account_id=?)", (step_id, account_id)).fetchone()
+            if not row: raise KeyError(step_id)
+            retry = row["attempts"] < row["max_attempts"]
+            if retry:
+                retry_at = (datetime.now(timezone.utc) + timedelta(seconds=retry_delay_seconds)).isoformat()
+                c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL,retry_at=?,last_error=? WHERE id=?", (retry_at, error[:2000], step_id))
+                c.execute("UPDATE tasks SET status='queued',updated_at=? WHERE id=?", (now, row["task_id"]))
+                event_type, outcome = "step.retry_scheduled", "retrying"
+            else:
+                c.execute("UPDATE task_steps SET status='failed',lease_owner=NULL,lease_expires_at=NULL,last_error=? WHERE id=?", (error[:2000], step_id))
+                c.execute("UPDATE task_runs SET status='failed' WHERE id=?", (row["task_run_id"],))
+                c.execute("UPDATE tasks SET status='failed',updated_at=? WHERE id=?", (now, row["task_id"]))
+                event_type, outcome = "step.failed", "failed"
+            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", row["task_id"], event_type, '{"source":"worker"}', now))
+            return outcome

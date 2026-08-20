@@ -55,3 +55,14 @@ def test_dependency_graph_unlocks_next_step(tmp_path: Path):
     assert second and second["name"] == "write"
     store.complete_step(second["step_id"], "acct_1", "report complete")
     assert store.get(task["id"], "acct_1")["status"] == "completed"
+
+
+def test_failed_step_retries_with_a_bounded_budget(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Unstable", "Retry safely", False)
+    for attempt in range(1, 4):
+        claimed = store.claim_one("worker", lease_seconds=10)
+        assert claimed is not None
+        outcome = store.fail_step(claimed["step_id"], "acct_1", "temporary upstream failure", retry_delay_seconds=0)
+        assert outcome == ("failed" if attempt == 3 else "retrying")
+    assert store.get(task["id"], "acct_1")["status"] == "failed"

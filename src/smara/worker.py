@@ -15,18 +15,21 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
         return False
     if task["status"] == "waiting_approval":
         return True
-    context = ""
-    if memory is not None:
-        context = await memory.context_for_task(task["account_id"], task["objective"])
+    try:
+        context = ""
+        if memory is not None:
+            context = await memory.context_for_task(task["account_id"], task["objective"])
     # Executor integration is intentionally explicit. This worker has no
     # implicit shell/browser privileges; a registered executor will replace
     # this deterministic safe completion step.
-    result = "Task accepted by Smara. Executor integration is required to perform external actions."
-    if context:
-        result += " Relevant shared memory was retrieved."
-    if memory is not None:
-        await memory.remember_completion(task, result)
-    store.complete_step(task["step_id"], task["account_id"], result)
+        result = "Task accepted by Smara. Executor integration is required to perform external actions."
+        if context:
+            result += " Relevant shared memory was retrieved."
+        if memory is not None:
+            await memory.remember_completion(task, result)
+        store.complete_step(task["step_id"], task["account_id"], result)
+    except Exception as exc:
+        store.fail_step(task["step_id"], task["account_id"], str(exc))
     return True
 
 
