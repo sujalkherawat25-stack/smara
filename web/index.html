@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111827" />
+    <link rel="manifest" href="/app/manifest.webmanifest" />
+    <link rel="stylesheet" href="/app/styles.css" />
+    <title>Smara Control</title>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand"><span>✦</span> Smara</div>
+        <nav aria-label="Main navigation">
+          <button class="nav active" data-view="tasks">Tasks</button>
+          <button class="nav" data-view="approvals">Approvals <span id="approval-count"></span></button>
+          <button class="nav" data-view="integrations">Integrations</button>
+          <button class="nav" data-view="devices">Desktop</button>
+          <button class="nav" data-view="memory">Memory</button>
+        </nav>
+        <div class="account"><label for="account">Account</label><input id="account" value="local-user" autocomplete="off" /><small id="auth-mode">Checking connection…</small></div>
+      </aside>
+      <main>
+        <header><div><p class="eyebrow">CONTROL PLANE</p><h1 id="title">Your tasks</h1></div><button id="refresh" class="secondary">Refresh</button></header>
+        <div id="notice" role="status"></div>
+        <section id="tasks" class="view active">
+          <div class="hero"><div><p>Make work visible, reversible, and approval-first.</p><button id="new-task">New task</button></div><div class="stat"><b id="task-total">0</b><span>tasks</span></div></div>
+          <div id="task-list" class="task-list"></div>
+          <aside id="task-detail" class="detail empty">Select a task to see its plan, evidence, artifacts, and activity.</aside>
+        </section>
+        <section id="approvals" class="view"><div id="approval-list" class="cards"></div></section>
+        <section id="integrations" class="view"><p class="muted">Connections are scoped to this account. Credentials are encrypted server-side.</p><div id="integration-list" class="cards"></div></section>
+        <section id="devices" class="view"><p class="muted">Your desktop only receives work for capabilities it has explicitly paired and declared.</p><button id="pair-desktop">Pair desktop</button><div id="device-list" class="cards"></div></section>
+        <section id="memory" class="view"><div class="empty"><h2>Shared Syntarus memory</h2><p>Task outcomes and verified research retain provenance in Syntarus. Fine-grained browsing, correction, pinning, and deletion controls will appear here when the Syntarus scoped-memory SDK extension is available.</p></div></section>
+      </main>
+    </div>
+    <dialog id="task-dialog"><form method="dialog" id="task-form"><header><h2>Create task</h2><button value="cancel" class="icon">×</button></header><label>Title<input name="title" required maxlength="200" placeholder="Prepare a project update" /></label><label>Objective<textarea name="objective" required maxlength="20000" placeholder="What outcome should Smara produce?"></textarea></label><label>Workspace<input name="workspace" value="default" required /></label><label class="toggle"><input name="approval" type="checkbox" checked /> Require approval before work begins</label><div class="actions"><button value="cancel" class="secondary">Cancel</button><button value="submit">Create task</button></div></form></dialog>
+    <dialog id="approval-dialog"><form method="dialog" id="approval-form"><header><h2>Review external action</h2><button value="cancel" class="icon">×</button></header><label>Preview<textarea name="preview" required></textarea></label><label>Action payload (JSON)<textarea name="payload" required></textarea></label><label>Note<textarea name="note" placeholder="Optional decision note"></textarea></label><div class="actions"><button value="deny" class="danger">Deny</button><button value="approve">Approve</button></div></form></dialog>
+    <script src="/app/app.js" type="module"></script>
+  </body>
+</html>

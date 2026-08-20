@@ -608,3 +608,28 @@ diff validation pass, and live Compose/Postgres applied migration 009 with the
 new integration worker healthy. The live API test configured an assisted Gmail
 connection, created an external send intent, edited it during approval, and
 left it in `approved` state without credentials—so no email could be sent.
+
+### 2026-08-20 — Phase 6 task-control web and phone companion slice
+
+Implemented a dependency-free task-first control app served directly by Smara:
+
+- responsive task board with task creation, polling refresh, task-step plan,
+  activity timeline, evidence ledger, and artifact previews;
+- integration and approval inbox views. An approver can review and edit an
+  external action's preview/payload before approving or denying it;
+- paired desktop status plus one-time desktop-pairing flow; and
+- installable PWA metadata and offline shell caching. The compact layout is
+  the first phone companion: it supports reviewing state and approvals but is
+  never a phone executor.
+
+The UI uses a browser-supplied account identifier only in explicitly enabled
+development mode. Production calls rely on the authenticated Smara gateway.
+Memory controls visibly state the current Syntarus SDK limitation rather than
+pretending workspace-level correction/pinning already exists.
+
+Verified: the rebuilt Compose stack keeps all services healthy; `/app/` and
+its PWA manifest return 200; JavaScript syntax checks pass; and a live task is
+visible through the task-board API along with the desktop-status endpoint.
+Native push delivery and capture (voice/photo) remain the next small phone
+companion slice, because they require VAPID credentials, TLS, and an explicit
+device-permission workflow.

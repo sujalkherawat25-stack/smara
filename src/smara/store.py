@@ -331,6 +331,16 @@ class TaskStore:
         executor.update({"last_seen_at": now, "capabilities": sorted(set(capabilities))})
         return executor
 
+    def executors(self, account_id: str) -> list[dict]:
+        with self._connect() as c:
+            rows = c.execute("SELECT id,name,capabilities,status,last_seen_at,created_at FROM desktop_executors WHERE account_id=? ORDER BY created_at DESC", (account_id,)).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["capabilities"] = json.loads(item["capabilities"]) if isinstance(item["capabilities"], str) else item["capabilities"]
+            result.append(item)
+        return result
+
     def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 60) -> dict | None:
         executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
         with self._connect() as c:

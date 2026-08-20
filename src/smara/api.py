@@ -5,7 +5,11 @@ import hmac
 import json
 import time
 from datetime import datetime
+from pathlib import Path
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+import httpx
 
 from .config import settings
 from .models import ApprovalDecision, ArtifactView, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, ResearchTaskCreate, TaskCreate, TaskView
@@ -15,6 +19,16 @@ from . import integration_oauth
 
 app = FastAPI(title="Smara Control Plane", version="0.1.0")
 store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
+source_web_dir = Path(__file__).resolve().parents[2] / "web"
+web_dir = source_web_dir if source_web_dir.is_dir() else Path("/app/web")
+if web_dir.is_dir():
+    app.mount("/app", StaticFiles(directory=web_dir, html=True), name="smara-web")
+
+@app.get("/", include_in_schema=False)
+async def web_root():
+    if web_dir.is_dir():
+        return FileResponse(web_dir / "index.html")
+    return {"ok": True}
 
 def account_id(
     x_smara_account_id: str | None = Header(default=None),
@@ -94,6 +108,10 @@ async def pair_executor(body: ExecutorPairRequest):
 async def heartbeat_executor(body: ExecutorHeartbeat, identity: tuple[str, str] = Depends(executor_identity)):
     try: return store.heartbeat_executor(*identity, body.capabilities)
     except KeyError: raise HTTPException(401, "Executor credentials are invalid or revoked.")
+
+@app.get("/v1/executors")
+async def list_executors(user: str = Depends(account_id)):
+    return {"executors": store.executors(user)}
 
 @app.post("/v1/executors/claim")
 async def claim_executor(identity: tuple[str, str] = Depends(executor_identity)):

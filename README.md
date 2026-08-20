@@ -20,6 +20,15 @@ Production must use a Postgres-backed store before multiple API/worker replicas
 are deployed. Redis is for event fan-out only, never the sole task source of
 truth.
 
+## Control app and phone companion
+
+The task-first Smara control app is served by the API at `/app/` (or `/`). It
+works responsively on a phone and is installable as a small PWA companion for
+task status and approvals. It does not run a phone executor. In development,
+enter a local account identifier in the sidebar; production requests rely on
+the signed identity gateway and do not expose an account identifier in browser
+storage.
+
 ## Memory boundary
 
 `src/smara/syntarus_adapter.py` is the only memory integration point. Give the
