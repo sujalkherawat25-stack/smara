@@ -25,7 +25,9 @@ def test_worker_uses_only_memory_adapter(tmp_path: Path):
     assert asyncio.run(run_once(store, SyntarusMemory(fake)))
     assert store.get(task["id"], "acct_1")["status"] == "completed"
     assert fake.writes[0]["user_id"] == "acct_1"
-    assert fake.writes[0]["run_id"] == task["id"]
+    assert fake.writes[0]["run_id"].startswith("run_")
+    assert fake.writes[0]["metadata"]["workspace_id"] == "work"
+    assert fake.writes[0]["metadata"]["memory_kind"] == "verified_outcome"
 
 
 def test_step_lease_prevents_double_claim_and_recovers(tmp_path: Path):

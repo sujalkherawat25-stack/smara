@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -49,6 +50,16 @@ class TaskStore:
             CREATE TABLE IF NOT EXISTS task_step_dependencies (
               step_id TEXT NOT NULL, depends_on_step_id TEXT NOT NULL,
               PRIMARY KEY(step_id,depends_on_step_id), CHECK(step_id <> depends_on_step_id));
+            CREATE TABLE IF NOT EXISTS research_evidence (
+              id TEXT PRIMARY KEY, task_id TEXT NOT NULL, url TEXT NOT NULL,
+              title TEXT, status TEXT NOT NULL, retrieved_at TEXT,
+              content_sha256 TEXT, excerpt TEXT, claim TEXT, confidence REAL,
+              citation_label TEXT, error TEXT, created_at TEXT NOT NULL,
+              UNIQUE(task_id,url));
+            CREATE TABLE IF NOT EXISTS artifacts (
+              id TEXT PRIMARY KEY, task_id TEXT NOT NULL, kind TEXT NOT NULL,
+              name TEXT NOT NULL, uri TEXT NOT NULL, sha256 TEXT, content TEXT,
+              created_at TEXT NOT NULL);
             """)
             # Backward-compatible local development upgrades for databases
             # created before retry state existed.
@@ -196,6 +207,58 @@ class TaskStore:
                 event_type, outcome = "step.failed", "failed"
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", row["task_id"], event_type, '{"source":"worker"}', now))
             return outcome
+
+    def create_research(self, account_id: str, workspace_id: str, title: str, question: str, sources: list[str]) -> dict:
+        task_id, run_id, now = f"task_{uuid.uuid4().hex}", f"run_{uuid.uuid4().hex}", _now()
+        step_ids = [f"step_{uuid.uuid4().hex}" for _ in range(3)]
+        steps = ("research.fetch_sources", "research.verify_evidence", "research.write_report")
+        with self._connect() as c:
+            c.execute("INSERT INTO tasks(id,account_id,workspace_id,title,objective,status,requires_approval,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", (task_id, account_id, workspace_id, title, question, "queued", False, now, now))
+            c.execute("INSERT INTO task_runs(id,task_id,attempt,status,created_at) VALUES(?,?,?,?,?)", (run_id, task_id, 1, "queued", now))
+            for ordinal, (step_id, name) in enumerate(zip(step_ids, steps), start=1):
+                c.execute("INSERT INTO task_steps(id,task_id,task_run_id,ordinal,name,status,idempotency_key,lease_owner,lease_expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)", (step_id, task_id, run_id, ordinal, name, "queued", f"task:{task_id}:step:{ordinal}", None, None, now))
+            c.execute("INSERT INTO task_step_dependencies VALUES(?,?)", (step_ids[1], step_ids[0]))
+            c.execute("INSERT INTO task_step_dependencies VALUES(?,?)", (step_ids[2], step_ids[1]))
+            for source in sources:
+                c.execute(
+                    "INSERT INTO research_evidence(id,task_id,url,status,created_at) VALUES(?,?,?,?,?)",
+                    (f"evidence_{uuid.uuid4().hex}", task_id, source, "pending", now),
+                )
+            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.created", '{"source":"research_api"}', now))
+            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "research.planned", f'{{"source_count":{len(sources)}}}', now))
+        return self.get(task_id, account_id)
+
+    def evidence(self, task_id: str, account_id: str) -> list[dict]:
+        self.get(task_id, account_id)
+        with self._connect() as c:
+            return [dict(row) for row in c.execute("SELECT * FROM research_evidence WHERE task_id=? ORDER BY created_at,id", (task_id,))]
+
+    def update_evidence(self, evidence_id: str, task_id: str, *, status: str, title: str | None = None, retrieved_at: str | None = None, content_sha256: str | None = None, excerpt: str | None = None, claim: str | None = None, confidence: float | None = None, citation_label: str | None = None, error: str | None = None) -> None:
+        with self._connect() as c:
+            c.execute("""UPDATE research_evidence SET status=?,title=?,retrieved_at=?,content_sha256=?,excerpt=?,claim=?,confidence=?,citation_label=?,error=?
+              WHERE id=? AND task_id=?""", (status, title, retrieved_at, content_sha256, excerpt, claim, confidence, citation_label, error, evidence_id, task_id))
+
+    def append_event(self, task_id: str, event_type: str, payload: str = "{}") -> None:
+        with self._connect() as c:
+            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, event_type, payload, _now()))
+
+    def create_artifact(self, task_id: str, account_id: str, *, kind: str, name: str, content: str) -> dict:
+        self.get(task_id, account_id)
+        artifact = {
+            "id": f"artifact_{uuid.uuid4().hex}", "task_id": task_id, "kind": kind,
+            "name": name, "uri": "", "sha256": hashlib.sha256(content.encode()).hexdigest(),
+            "content": content, "created_at": _now(),
+        }
+        artifact["uri"] = f"inline://artifacts/{artifact['id']}"
+        with self._connect() as c:
+            c.execute("INSERT INTO artifacts(id,task_id,kind,name,uri,sha256,content,created_at) VALUES(?,?,?,?,?,?,?,?)", tuple(artifact[key] for key in ("id", "task_id", "kind", "name", "uri", "sha256", "content", "created_at")))
+        self.append_event(task_id, "artifact.created", '{"kind":"research_report"}')
+        return artifact
+
+    def artifacts(self, task_id: str, account_id: str) -> list[dict]:
+        self.get(task_id, account_id)
+        with self._connect() as c:
+            return [dict(row) for row in c.execute("SELECT * FROM artifacts WHERE task_id=? ORDER BY created_at,id", (task_id,))]
 
 
 class PostgresTaskStore(TaskStore):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AnyHttpUrl, BaseModel, Field, model_validator
 
 TaskStatus = Literal["queued", "running", "waiting_approval", "cancelling", "completed", "failed", "cancelled"]
 
@@ -44,3 +44,36 @@ class TaskView(BaseModel):
 class ApprovalDecision(BaseModel):
     approved: bool
     note: str = Field(default="", max_length=2_000)
+
+
+class ResearchTaskCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    question: str = Field(min_length=5, max_length=20_000)
+    workspace_id: str = Field(default="default", min_length=1, max_length=128)
+    sources: list[AnyHttpUrl] = Field(min_length=1, max_length=12)
+
+
+class EvidenceView(BaseModel):
+    id: str
+    task_id: str
+    url: str
+    title: str | None = None
+    status: Literal["pending", "fetched", "verified", "failed", "blocked"]
+    retrieved_at: datetime | None = None
+    content_sha256: str | None = None
+    excerpt: str | None = None
+    claim: str | None = None
+    confidence: float | None = None
+    citation_label: str | None = None
+    error: str | None = None
+
+
+class ArtifactView(BaseModel):
+    id: str
+    task_id: str
+    kind: str
+    name: str
+    uri: str
+    sha256: str | None = None
+    content: str | None = None
+    created_at: datetime

@@ -493,3 +493,34 @@ applied; API, worker, scheduler, and Postgres stayed running; an approval-gated
 two-step graph moved from queued to waiting approval to completed with both
 steps completed and all expected events; and a second two-step graph cancelled
 before approval left both steps cancelled. Local tests now pass with 11 tests.
+
+### 2026-08-20 — Phase 2 memory scope contract and Phase 3 research slice
+
+Implemented Smara's canonical Syntarus provenance contract:
+
+- `account_id` maps to the shared Syntarus `user_id`; no device/client gets an
+  isolated agent namespace;
+- every memory read is bounded, and every verified write carries workspace,
+  task, run, memory-kind, source-type, and verification-status provenance; and
+- only the final cited research report is eligible for research write-back;
+  raw source pages, tool logs, and active graph state remain in Smara.
+
+Implemented the first verified research vertical slice:
+
+- `POST /v1/research` creates an atomic three-step task graph (retrieve,
+  verify, report) and its source ledger;
+- retrieval allows only explicitly supplied public HTTP(S) URLs, checks every
+  redirect target, bounds size/type, hashes content, and visibly records failed
+  or blocked sources;
+- verification assigns a confidence and citation label without inventing a
+  claim; and
+- report generation creates a cited Markdown artifact linked to the task.
+
+Verified: 13 Smara tests pass. A real Compose/Postgres task retrieved
+`https://example.com/`, recorded a 64-character source hash, became verified
+as citation `[1]`, and completed with a cited artifact. The current public
+Syntarus SDK/API exposes account isolation and provenance metadata but does
+not yet expose strict metadata-filtered search or per-memory correction/pin
+operations. Smara preserves the fields and deliberately does not claim that
+those provider-side controls are already enforced; their SDK/platform extension
+is required before this phase can be called fully scope-filtered.
