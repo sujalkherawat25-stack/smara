@@ -12,6 +12,11 @@ class Settings:
     syntarus_base_url: str = os.getenv("SYNTARUS_BASE_URL", "https://ai.syntarus.com/v1")
     dev_mode: bool = os.getenv("SMARA_DEV_MODE", "false").lower() == "true"
     gateway_signing_secret: str = os.getenv("SMARA_GATEWAY_SIGNING_SECRET", "")
+    control_bridge_secret: str = os.getenv("SMARA_CONTROL_BRIDGE_SECRET", "")
+    allowed_origins: str = os.getenv(
+        "SMARA_ALLOWED_ORIGINS",
+        "https://ai.syntarus.com,https://control-staging.syntarus.com",
+    )
     integration_master_key: str = os.getenv("SMARA_INTEGRATION_MASTER_KEY", "")
     integration_master_keys: str = os.getenv("SMARA_INTEGRATION_MASTER_KEYS", os.getenv("SMARA_INTEGRATION_MASTER_KEY", ""))
     public_base_url: str = os.getenv("SMARA_PUBLIC_BASE_URL", "http://127.0.0.1:8080")

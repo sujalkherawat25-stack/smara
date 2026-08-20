@@ -18,6 +18,7 @@ dependencies = [
   "pywebpush>=2.0,<3",
   "sentry-sdk>=2.0,<3",
   "redis>=5.0,<6",
+  "PyJWT>=2.8,<3",
   "syntarus>=0.2.0",
 ]
 

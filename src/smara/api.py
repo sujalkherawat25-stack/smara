@@ -10,8 +10,10 @@ from pathlib import Path
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import httpx
+import jwt
 
 from .config import settings
 from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, TaskCreate, TaskView
@@ -24,6 +26,13 @@ from .observability import configure_sentry
 
 configure_sentry(settings.sentry_dsn)
 app = FastAPI(title="Smara Control Plane", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
 limiter = RedisFixedWindowLimiter(settings.redis_url, settings.rate_limit_per_minute, allow_local_fallback=settings.dev_mode)
 source_web_dir = Path(__file__).resolve().parents[2] / "web"
@@ -55,16 +64,41 @@ def account_id(
     x_smara_account_id: str | None = Header(default=None),
     x_smara_gateway_timestamp: str | None = Header(default=None),
     x_smara_gateway_signature: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> str:
-    """Accept a raw identity only in dev; production accepts a gateway assertion.
+    """Resolve an account from a development header or trusted production bridge.
 
-    The gateway is responsible for session/JWT verification. This API verifies
-    that the identity assertion came from that gateway and has not been replayed.
+    Production supports either a short-lived JWT minted after an existing Smara
+    web-session check, or a signed server-to-server gateway assertion.  Neither
+    signing secret is ever exposed to a browser.
     """
     if settings.dev_mode:
         if not x_smara_account_id:
             raise HTTPException(401, "X-Smara-Account-Id is required in development.")
         return x_smara_account_id
+    # Direct unit calls see FastAPI's Header sentinel for omitted arguments;
+    # requests resolved by FastAPI always provide a string or None.
+    if isinstance(authorization, str) and authorization:
+        if not authorization.startswith("Bearer "):
+            raise HTTPException(401, "Invalid authorization scheme.")
+        if not settings.control_bridge_secret:
+            raise HTTPException(503, "Smara Control session bridge is not configured.")
+        try:
+            claims = jwt.decode(
+                authorization.removeprefix("Bearer "),
+                settings.control_bridge_secret,
+                algorithms=["HS256"],
+                audience="smara-control",
+                issuer="ai.syntarus.com",
+                options={"require": ["sub", "exp", "iat", "aud", "iss"]},
+            )
+        except jwt.InvalidTokenError:
+            raise HTTPException(401, "Invalid or expired Smara Control session.")
+        subject = claims.get("sub")
+        if not isinstance(subject, str) or not subject.startswith("acct_"):
+            raise HTTPException(401, "Invalid Smara Control account.")
+        return subject
+
     if not settings.gateway_signing_secret:
         raise HTTPException(503, "Production identity gateway is not configured.")
     if not x_smara_account_id:
