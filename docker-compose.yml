@@ -1,0 +1,19 @@
+services:
+  api:
+    build: .
+    command: ["uvicorn", "smara.api:app", "--host", "0.0.0.0", "--port", "8080"]
+    env_file: .env
+    ports: ["127.0.0.1:8080:8080"]
+    volumes: ["smara-data:/app/data"]
+  worker:
+    build: .
+    command: ["python", "-m", "smara.worker"]
+    env_file: .env
+    volumes: ["smara-data:/app/data"]
+  scheduler:
+    build: .
+    command: ["python", "-m", "smara.scheduler"]
+    env_file: .env
+    volumes: ["smara-data:/app/data"]
+volumes:
+  smara-data:
