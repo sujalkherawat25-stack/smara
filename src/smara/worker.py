@@ -26,7 +26,7 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
         result += " Relevant shared memory was retrieved."
     if memory is not None:
         await memory.remember_completion(task, result)
-    store.complete(task["id"], task["account_id"], result)
+    store.complete_step(task["step_id"], task["account_id"], result)
     return True
 
 

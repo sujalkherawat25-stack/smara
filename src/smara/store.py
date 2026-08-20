@@ -48,13 +48,20 @@ class TaskStore:
               PRIMARY KEY(step_id,depends_on_step_id), CHECK(step_id <> depends_on_step_id));
             """)
 
-    def create(self, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool) -> dict:
+    def create(self, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None) -> dict:
         task_id, now = f"task_{uuid.uuid4().hex}", _now()
+        steps = steps or [{"name": "execute_task", "depends_on": []}]
         with self._connect() as c:
             c.execute("INSERT INTO tasks VALUES(?,?,?,?,?,?,?,?,?)", (task_id, account_id, workspace_id, title, objective, "queued", int(requires_approval), now, now))
-            run_id, step_id = f"run_{uuid.uuid4().hex}", f"step_{uuid.uuid4().hex}"
+            run_id = f"run_{uuid.uuid4().hex}"
             c.execute("INSERT INTO task_runs VALUES(?,?,?,?,?)", (run_id, task_id, 1, "queued", now))
-            c.execute("INSERT INTO task_steps VALUES(?,?,?,?,?,?,?,?,?,?)", (step_id, task_id, run_id, 1, "execute_task", "queued", f"task:{task_id}:step:1", None, None, now))
+            step_ids: list[str] = []
+            for ordinal, step in enumerate(steps, start=1):
+                step_id = f"step_{uuid.uuid4().hex}"; step_ids.append(step_id)
+                c.execute("INSERT INTO task_steps VALUES(?,?,?,?,?,?,?,?,?,?)", (step_id, task_id, run_id, ordinal, step["name"], "queued", f"task:{task_id}:step:{ordinal}", None, None, now))
+            for ordinal, step in enumerate(steps):
+                for parent in step.get("depends_on", []):
+                    c.execute("INSERT INTO task_step_dependencies VALUES(?,?)", (step_ids[ordinal], step_ids[parent]))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.created", '{"source":"api"}', now))
         return self.get(task_id, account_id)
 
@@ -72,6 +79,11 @@ class TaskStore:
         self.get(task_id, account_id)
         with self._connect() as c:
             return [dict(r) for r in c.execute("SELECT * FROM task_events WHERE task_id=? ORDER BY created_at", (task_id,))]
+
+    def steps(self, task_id: str, account_id: str) -> list[dict]:
+        self.get(task_id, account_id)
+        with self._connect() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM task_steps WHERE task_id=? ORDER BY ordinal", (task_id,))]
 
     def decide(self, task_id: str, account_id: str, approved: bool, note: str) -> dict:
         self.get(task_id, account_id); now = _now(); status = "approved" if approved else "denied"
@@ -93,15 +105,15 @@ class TaskStore:
                 c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL WHERE id=?", (item["id"],))
                 c.execute("UPDATE tasks SET status='queued',updated_at=? WHERE id=? AND status='running'", (now, item["task_id"]))
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", item["task_id"], "step.lease_expired", '{"recovered":true}', now))
-            row = c.execute("""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key
+            row = c.execute("""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
-              WHERE t.status='queued' AND s.status='queued' AND NOT EXISTS (
+              WHERE t.status IN ('queued','running') AND s.status='queued' AND NOT EXISTS (
                 SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id
                 WHERE d.step_id=s.id AND parent.status!='completed')
               ORDER BY t.created_at,s.ordinal LIMIT 1""").fetchone()
             if not row: return None
             task = dict(row)
-            if task["requires_approval"]:
+            if task["requires_approval"] and task["status"] == "queued":
                 c.execute("UPDATE tasks SET status='waiting_approval',updated_at=? WHERE id=?", (now, task["id"]))
                 typ = "approval.requested"
                 task["status"] = "waiting_approval"
@@ -117,10 +129,16 @@ class TaskStore:
             task["updated_at"] = now
             return task
 
-    def complete(self, task_id: str, account_id: str, result: str) -> None:
+    def complete_step(self, step_id: str, account_id: str, result: str) -> None:
         now = _now()
         with self._connect() as c:
-            c.execute("UPDATE task_steps SET status='completed',lease_owner=NULL,lease_expires_at=NULL WHERE task_id=? AND status='running'", (task_id,))
-            c.execute("UPDATE task_runs SET status='completed' WHERE task_id=? AND status='running'", (task_id,))
-            c.execute("UPDATE tasks SET status='completed',updated_at=? WHERE id=? AND account_id=?", (now, task_id, account_id))
-            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.completed", '{"result":"recorded"}', now))
+            row = c.execute("SELECT task_id,task_run_id FROM task_steps WHERE id=? AND task_id IN (SELECT id FROM tasks WHERE account_id=?)", (step_id, account_id)).fetchone()
+            if not row: raise KeyError(step_id)
+            task_id, run_id = row["task_id"], row["task_run_id"]
+            c.execute("UPDATE task_steps SET status='completed',lease_owner=NULL,lease_expires_at=NULL WHERE id=? AND status='running'", (step_id,))
+            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "step.completed", '{"result":"recorded"}', now))
+            pending = c.execute("SELECT COUNT(*) FROM task_steps WHERE task_run_id=? AND status!='completed'", (run_id,)).fetchone()[0]
+            if pending == 0:
+                c.execute("UPDATE task_runs SET status='completed' WHERE id=?", (run_id,))
+                c.execute("UPDATE tasks SET status='completed',updated_at=? WHERE id=?", (now, task_id))
+                c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.completed", '{"result":"recorded"}', now))

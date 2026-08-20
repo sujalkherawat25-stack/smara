@@ -53,7 +53,8 @@ async def health(): return {"ok": True, "memory_boundary": "syntarus-sdk-only", 
 
 @app.post("/v1/tasks", response_model=TaskView, status_code=201)
 async def create_task(body: TaskCreate, user: str = Depends(account_id)):
-    return view(store.create(user, body.workspace_id, body.title, body.objective, body.requires_approval))
+    steps = [{"name": step.name, "depends_on": step.depends_on} for step in body.steps]
+    return view(store.create(user, body.workspace_id, body.title, body.objective, body.requires_approval, steps))
 
 @app.get("/v1/tasks", response_model=list[TaskView])
 async def list_tasks(user: str = Depends(account_id)):
@@ -67,6 +68,11 @@ async def get_task(task_id: str, user: str = Depends(account_id)):
 @app.get("/v1/tasks/{task_id}/events")
 async def task_events(task_id: str, user: str = Depends(account_id)):
     try: return {"events": store.events(task_id, user)}
+    except KeyError: raise HTTPException(404, "Task not found")
+
+@app.get("/v1/tasks/{task_id}/steps")
+async def task_steps(task_id: str, user: str = Depends(account_id)):
+    try: return {"steps": store.steps(task_id, user)}
     except KeyError: raise HTTPException(404, "Task not found")
 
 @app.post("/v1/tasks/{task_id}/approval", response_model=TaskView)

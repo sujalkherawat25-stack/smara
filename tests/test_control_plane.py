@@ -39,3 +39,19 @@ def test_step_lease_prevents_double_claim_and_recovers(tmp_path: Path):
     recovered = store.claim_one("worker-b")
     assert recovered and recovered["step_id"] == first["step_id"]
     assert recovered["lease_owner"] == "worker-b"
+
+
+def test_dependency_graph_unlocks_next_step(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Report", "Create a report", False, [
+        {"name": "research", "depends_on": []},
+        {"name": "write", "depends_on": [0]},
+    ])
+    first = store.claim_one("worker-a")
+    assert first and first["name"] == "research"
+    assert store.claim_one("worker-b") is None
+    store.complete_step(first["step_id"], "acct_1", "research complete")
+    second = store.claim_one("worker-b")
+    assert second and second["name"] == "write"
+    store.complete_step(second["step_id"], "acct_1", "report complete")
+    assert store.get(task["id"], "acct_1")["status"] == "completed"

@@ -420,3 +420,18 @@ Implemented in the independent Smara repository:
 Verified: Smara unit/API tests and the Syntarus SDK suite pass. A live Postgres
 deployment migration remains a deployment-environment verification step because
 no production database URL or secrets are stored in this repository.
+
+### 2026-08-20 — Phase 1 task graph started
+
+Implemented a first durable task graph in the local development store:
+
+- every task creates a task run and one or more ordered task steps;
+- steps can depend on earlier steps;
+- only dependency-ready steps can be claimed;
+- worker leases prevent concurrent execution; and
+- an expired lease requeues the step and records recovery before another worker
+  may claim it.
+
+Verified: approval, memory adapter, worker, lease recovery, and dependency
+unlock/completion tests pass. The next Phase 1 slice is Postgres-backed runtime
+use of the same graph contract plus explicit retry/cancellation policies.
