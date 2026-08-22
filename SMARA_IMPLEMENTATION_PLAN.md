@@ -1521,3 +1521,17 @@ POST, while the VM-local API accepts the same signed request. This is a WAF/
 edge policy issue to resolve before public CLI pairing is called production
 ready; no application authentication bypass was added. The temporary smoke
 account/task are disposable staging data.
+
+### 2026-08-22 — Cloudflare CLI edge rule verified
+
+The narrowly scoped Cloudflare Skip rule for
+`control-staging.syntarus.com` POST requests to
+`/v1/cli/device/start` and `/v1/cli/device/exchange` was deployed as an
+active rule. It skips managed WAF and Super Bot Fight Mode checks while
+leaving rate limiting and Smara's signed gateway/token checks enabled.
+
+The public path now passes: pairing exchange returned HTTP 200, the CLI listed
+tasks and created a disposable calculator task, and `task watch` received the
+durable SSE stream through `task.completed`. Cloudflare 403/1010 is resolved
+for this exact API surface. The smoke task used account `acct_cli_edge_smoke`
+and remains disposable staging data.
