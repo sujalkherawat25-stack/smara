@@ -1435,3 +1435,26 @@ The production `ai.syntarus.com` MemoryOS/Memento stack was not changed. The
 next cutover gate is capability shadow-testing against that domain, followed by
 a reversible proxy switch only after authentication, chat, tasks, research,
 approvals, schedules, memory, and rollback checks pass.
+
+### 2026-08-22 — Production gate verification
+
+Completed the safe staging-side production gates without touching the live
+`ai.syntarus.com` application:
+
+- confirmed the migration-lock release is clean across API, worker, scheduler,
+  and integration-worker logs;
+- verified staging health/readiness and signed gateway authentication;
+- created a custom-format Postgres backup, verified its checksum and archive
+  readability, and restored it into a disposable Postgres 16 container with all
+  14 Smara schema versions present; and
+- verified the public staging Cloudflare/Caddy/TLS/security-header path and
+  Redis-backed distributed limiter configuration.
+
+Added `scripts/check-production-config.sh` and `PRODUCTION_GATE_STATUS.md` so
+production cannot be marked ready while secrets or recovery operations are
+missing. The full gate currently remains blocked by deployment-owned values:
+CLI signing secret, integration key ring, Sentry DSN, VAPID keys, a real secret
+manager, an encrypted off-host backup target, and an authenticated Cloudflare
+WAF/rate-limit review. Syntarus server-side metadata-filter enforcement also
+remains advisory and is not claimed as secure. No MemoryOS source/schema/data
+was changed.
