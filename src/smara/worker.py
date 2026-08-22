@@ -18,6 +18,7 @@ from .tool_registry import ToolContext, default_tool_registry
 from .integrations import IntegrationExecutor
 from .vault import SecretVault
 from .integration_oauth import refresh_google
+from .capture_processing import process_capture
 
 
 async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
@@ -42,6 +43,21 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
             if outcome.report and memory is not None:
                 await memory.remember_verified_research(task, outcome.report, outcome.verified_evidence_count)
             store.complete_step(task["step_id"], task["account_id"], outcome.text)
+            return True
+        if task["name"] == "capture.process":
+            async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=False) as client:
+                result = await process_capture(
+                    store,
+                    task,
+                    client,
+                    transcription_base_url=settings.capture_transcription_base_url,
+                    transcription_api_key=settings.capture_transcription_api_key,
+                    transcription_model=settings.capture_transcription_model,
+                    vision_base_url=settings.capture_vision_base_url,
+                    vision_api_key=settings.capture_vision_api_key,
+                    vision_model=settings.capture_vision_model,
+                )
+            store.complete_step(task["step_id"], task["account_id"], result)
             return True
         if task["name"] == "agent.execute":
             provider = OpenAICompatibleProvider(base_url=settings.llm_base_url, api_key=settings.llm_api_key, model=settings.llm_model)

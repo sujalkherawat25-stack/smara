@@ -1359,3 +1359,28 @@ the scheduler's database transaction and never bypasses task approval.
 The clean suite remains **60 tests passed** and the rebuilt scheduler starts
 without errors. Telegram delivery and production VAPID configuration remain
 deployment/provider work.
+
+### 2026-08-22 — Safe capture processing boundary
+
+Completed the next repository-owned Memento migration slice:
+
+- changed phone/web captures to keep media only in the account-scoped artifact;
+  task objectives no longer contain base64 media and the worker runs a normal
+  `capture.process` task-graph step;
+- added optional, independently configured OpenAI-compatible transcription and
+  vision adapters with strict 10 MB voice / 4 MB image bounds, bounded output,
+  and no provider-key reuse;
+- added transcript/description artifacts when a provider is configured, while
+  unconfigured deployments complete locally with an explicit safe status rather
+  than failing or silently sending media anywhere;
+- recorded bounded step results in the durable event stream and corrected
+  artifact-created events to report the actual artifact kind; and
+- verified the full Docker repository suite (**63 passed, 3 warnings**), rebuilt
+  and restarted API/worker/scheduler, then created a live voice capture through
+  the API and confirmed the Postgres-backed worker completed it without errors.
+
+Remaining work is deployment/provider configuration (if transcription or vision
+is desired), real Windows desktop smoke, Telegram delivery, recurrence policy,
+production gateway/secrets/backups/Sentry, reversible `ai.syntarus.com` cutover,
+and Syntarus server-side metadata enforcement. MemoryOS source and schema were
+not modified.

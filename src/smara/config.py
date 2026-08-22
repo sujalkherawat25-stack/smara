@@ -43,6 +43,12 @@ class Settings:
     search_timeout_seconds: float = float(os.getenv("SMARA_SEARCH_TIMEOUT_SECONDS", "12"))
     research_allowed_domains: str = os.getenv("SMARA_RESEARCH_ALLOWED_DOMAINS", "")
     research_blocked_domains: str = os.getenv("SMARA_RESEARCH_BLOCKED_DOMAINS", "")
+    capture_transcription_base_url: str = os.getenv("SMARA_CAPTURE_TRANSCRIPTION_BASE_URL", "")
+    capture_transcription_api_key: str = os.getenv("SMARA_CAPTURE_TRANSCRIPTION_API_KEY", "")
+    capture_transcription_model: str = os.getenv("SMARA_CAPTURE_TRANSCRIPTION_MODEL", "")
+    capture_vision_base_url: str = os.getenv("SMARA_CAPTURE_VISION_BASE_URL", "")
+    capture_vision_api_key: str = os.getenv("SMARA_CAPTURE_VISION_API_KEY", "")
+    capture_vision_model: str = os.getenv("SMARA_CAPTURE_VISION_MODEL", "")
 
 
 settings = Settings()

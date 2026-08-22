@@ -32,8 +32,14 @@ storage.
 Phone alerts need HTTPS plus the VAPID keys in `.env.example`. Once enabled,
 the installed app can register its own browser-push subscription and Smara
 sends an approval alert when an external action enters review. Quick text,
-voice, and photo captures create inbox tasks; media is retained in Smara and
-never sent to an LLM automatically.
+voice, and photo captures create inbox tasks. Media is retained in Smara and is
+never sent to a provider unless the deployment explicitly configures the
+matching capture provider. With `SMARA_CAPTURE_TRANSCRIPTION_*` configured,
+voice creates a bounded transcript artifact; with
+`SMARA_CAPTURE_VISION_*` configured, photos create a bounded description
+artifact. Without those settings the task completes locally with a clear
+"not configured" result, so a missing optional provider cannot block the phone
+companion.
 
 ## Memory boundary
 
@@ -158,6 +164,16 @@ Those remain separate, approval-gated capabilities. An optional
 the configured OpenAI-compatible model, but only after evidence is verified.
 Every model citation must match the ledger; invalid, unavailable, or
 unconfigured synthesis safely falls back to the deterministic cited report.
+
+Capture providers use independent credentials and endpoints so a speech or
+vision key is never reused for ordinary agent calls. Set all three variables in
+each group to enable a provider (for example, an OpenAI-compatible endpoint):
+`SMARA_CAPTURE_TRANSCRIPTION_BASE_URL`,
+`SMARA_CAPTURE_TRANSCRIPTION_API_KEY`,
+`SMARA_CAPTURE_TRANSCRIPTION_MODEL`; or
+`SMARA_CAPTURE_VISION_BASE_URL`, `SMARA_CAPTURE_VISION_API_KEY`,
+`SMARA_CAPTURE_VISION_MODEL`. Upload limits remain 10 MB for voice and 4 MB for
+images, and provider errors are recorded through the normal bounded retry path.
 
 ## Integrations and approvals
 

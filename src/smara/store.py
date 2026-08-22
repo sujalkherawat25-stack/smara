@@ -321,7 +321,8 @@ class TaskStore:
             if not row: raise KeyError(step_id)
             task_id, run_id = row["task_id"], row["task_run_id"]
             c.execute("UPDATE task_steps SET status='completed',lease_owner=NULL,lease_expires_at=NULL,last_error=NULL,retry_at=NULL WHERE id=? AND status='running'", (step_id,))
-            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "step.completed", '{"result":"recorded"}', now))
+            completion_payload = json.dumps({"result": str(result)[:2_000]}, ensure_ascii=False)
+            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "step.completed", completion_payload, now))
             cancelled = c.execute("SELECT cancel_requested FROM tasks WHERE id=?", (task_id,)).fetchone()["cancel_requested"]
             if cancelled:
                 c.execute("UPDATE task_runs SET status='cancelled' WHERE id=?", (run_id,))
@@ -445,7 +446,7 @@ class TaskStore:
         artifact["uri"] = f"inline://artifacts/{artifact['id']}"
         with self._connect() as c:
             c.execute("INSERT INTO artifacts(id,task_id,kind,name,uri,sha256,content,created_at) VALUES(?,?,?,?,?,?,?,?)", tuple(artifact[key] for key in ("id", "task_id", "kind", "name", "uri", "sha256", "content", "created_at")))
-        self.append_event(task_id, "artifact.created", '{"kind":"research_report"}')
+        self.append_event(task_id, "artifact.created", json.dumps({"kind": kind}, ensure_ascii=False))
         return artifact
 
     def artifacts(self, task_id: str, account_id: str) -> list[dict]:
@@ -660,7 +661,9 @@ class TaskStore:
                 c.execute("UPDATE integration_action_log SET status='completed',lease_owner=NULL,lease_expires_at=NULL,result_summary=? WHERE id=?", ((result or "completed")[:2000], action_id))
 
     def create_capture(self, account_id: str, kind: str, title: str, content: str, mime_type: str = "text/plain") -> dict:
-        task = self.create(account_id, "inbox", title, content[:20_000] or f"{kind} capture", False, [{"name": "capture.received"}])
+        # Media bytes stay in the account-scoped artifact.  They must never be
+        # copied into the task objective (which is shown in list/search views).
+        task = self.create(account_id, "inbox", title, f"{kind} capture awaiting processing", False, [{"name": "capture.process"}])
         artifact = self.create_artifact(task["id"], account_id, kind=f"capture:{kind}:{mime_type}", name=title, content=content)
         return {"task": task, "artifact": artifact}
 
