@@ -1553,3 +1553,26 @@ public disposable device flow passed through Cloudflare: request creation,
 signed browser approval, and terminal polling returned `approved` without
 printing the bearer. The full deployed test suite passes **67 tests**. The
 legacy pairing flow and existing task/SSE behavior remain intact.
+
+### 2026-08-22 — Hermes architecture audit
+
+Hermes has a richer interactive terminal/TUI, session picker, broad toolset,
+pluggable memory providers, and selectable local/Docker/SSH/cloud execution
+backends. Its public dashboard forces an auth provider; local loopback use is
+deliberately simpler. Smara is stronger at durable Postgres task graphs,
+approval/audit records, Syntarus shared memory, evidence ledgers, schedules,
+and a single hosted task contract shared by Web, CLI, phone, and desktop.
+
+The audit found and fixed one production-only mismatch: the Postgres worker
+claimed only `hosted` steps while SQLite already claimed `sandbox` steps, so
+approved sandbox work could stall in live deployments. Postgres now uses the
+same `hosted|sandbox` claim contract and the regression suite covers it.
+
+Remaining product gaps versus Hermes are intentional next phases rather than
+MemoryOS changes: interactive streaming CLI sessions and session resume;
+agent-selected desktop/file/terminal/browser execution through explicit
+capability steps; richer tool/plugin registration; production browser-shell
+handoff for the new device login; and a real isolated hosted sandbox backend.
+Operational gates still block cutover: integration key ring, Sentry, VAPID,
+off-host encrypted backups, distributed rate limits, and server-enforced
+Syntarus metadata isolation.
