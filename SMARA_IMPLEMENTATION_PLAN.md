@@ -1486,3 +1486,23 @@ task then completed with `grok-3-mini`, including `agent.tool_requested`,
 memory project key still reports an unavailable-memory event; the worker now
 continues the task and records that condition instead of retrying/failing the
 agent. MemoryOS remains untouched and metadata filtering remains advisory.
+
+### 2026-08-22 — Hosted agent plus Syntarus memory verification
+
+The staging VM was updated with the replacement xAI credential and a
+Syntarus project key in its protected `.env` file; no secret was added to Git.
+The xAI `/v1/models` and chat-completions probes returned successfully.
+
+A read-only disposable Syntarus SDK search passed inside the deployed API
+container. A second disposable Smara task completed end-to-end using the
+shared task graph and calculator tool. Its durable event sequence was:
+`task.created`, `task.started`, `agent.tool_requested`,
+`agent.tool_completed`, `step.completed`, and `task.completed`. The task had
+no `memory.unavailable` event, confirming hosted memory retrieval/write-back
+and agent execution are working together on staging.
+
+This verifies the current hosted milestone without changing MemoryOS source,
+schemas, or production data. Metadata filters remain advisory until the
+Syntarus server enforces them. The next live check is CLI pairing/login and
+watching a task against this same hosted API; research-provider credentials and
+the remaining production hardening gates are still separate work.
