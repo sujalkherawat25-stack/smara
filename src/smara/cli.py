@@ -71,6 +71,116 @@ def _clear_token() -> None:
         pass
 
 
+def _sessions_path() -> Path:
+    configured = os.getenv("SMARA_SESSION_FILE")
+    if configured:
+        return Path(configured)
+    root = Path(os.getenv("APPDATA", Path.home() / ".config")) / "Smara"
+    return root / "sessions.json"
+
+
+def _load_sessions() -> dict[str, dict[str, str]]:
+    try:
+        value = json.loads(_sessions_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _save_sessions(sessions: dict[str, dict[str, str]]) -> None:
+    path = _sessions_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(sessions, indent=2, ensure_ascii=False), encoding="utf-8")
+    if os.name != "nt":
+        path.chmod(0o600)
+
+
+def _session_id(name: str, sessions: dict[str, dict[str, str]]) -> str:
+    import hashlib
+    digest = hashlib.sha256(name.strip().encode("utf-8")).hexdigest()[:20]
+    sessions.setdefault(name, {"conversation_id": f"cli_{digest}"})
+    _save_sessions(sessions)
+    return str(sessions[name]["conversation_id"])
+
+
+def _stream_chat(client: httpx.Client, *, message: str, workspace: str, conversation_id: str, model_profile: str | None = None) -> str:
+    """Print a safe streaming turn and return the conversation id.
+
+    The API emits bounded status/tool/token events. We intentionally render
+    tool previews and final text, never model chain-of-thought or credentials.
+    """
+    payload = {"message": message, "workspace_id": workspace, "conversation_id": conversation_id}
+    if model_profile:
+        payload["model_profile"] = model_profile
+    final_text = ""
+    event_name = "message"
+    try:
+        with client.stream("POST", "/v1/chat/stream", json=payload, headers={"Accept": "text/event-stream"}) as response:
+            if response.status_code >= 400:
+                raise RuntimeError(f"{response.status_code}: chat stream unavailable")
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                if line.startswith("event: "):
+                    event_name = line.removeprefix("event: ")
+                    continue
+                if not line.startswith("data: "):
+                    continue
+                try:
+                    data = json.loads(line.removeprefix("data: "))
+                except json.JSONDecodeError:
+                    continue
+                if event_name == "token":
+                    text = str(data.get("text", ""))
+                    print(text, end="", flush=True)
+                    final_text += text
+                elif event_name == "tool_call":
+                    print(f"\n[tool] {data.get('name', 'unknown')}", file=sys.stderr)
+                elif event_name == "tool_result":
+                    state = "ok" if data.get("ok") else "failed"
+                    print(f"[tool {state}] {data.get('name', 'unknown')}", file=sys.stderr)
+                elif event_name == "phase":
+                    print(f"[{data.get('phase', 'working')}]", file=sys.stderr)
+                elif event_name == "status":
+                    print(f"[{data.get('message', 'working')}]", file=sys.stderr)
+                elif event_name == "error":
+                    raise RuntimeError(str(data.get("message", "Smara chat failed.")))
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Smara chat stream disconnected; retry the turn.") from exc
+    print()
+    return final_text
+
+
+def _interactive_chat(client: httpx.Client, args: argparse.Namespace) -> None:
+    sessions = _load_sessions()
+    conversation_id = _session_id(args.session, sessions)
+    print(f"Smara chat · session {args.session} (type /help or /exit)")
+    while True:
+        try:
+            message = input("you> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if not message:
+            continue
+        if message in {"/exit", "/quit"}:
+            return
+        if message == "/help":
+            print("/sessions  list saved sessions\n/new NAME   switch to a new session\n/exit       leave chat")
+            continue
+        if message == "/sessions":
+            print("\n".join(sorted(sessions)) or "(no saved sessions)")
+            continue
+        if message.startswith("/new"):
+            name = message[4:].strip() or "default"
+            args.session = name
+            conversation_id = _session_id(name, sessions)
+            print(f"Switched to session {name}.")
+            continue
+        print("smara> ", end="", flush=True)
+        _stream_chat(client, message=message, workspace=args.workspace, conversation_id=conversation_id, model_profile=args.model_profile)
+
+
 def _browser_login(client: httpx.Client, args: argparse.Namespace) -> None:
     """Run a short-lived browser device flow; no bearer is shown in output."""
     request = _request(client, "GET", "/v1/cli/device/request", params={"name": "Smara CLI"})
@@ -141,6 +251,12 @@ def build_parser() -> argparse.ArgumentParser:
     ask = commands.add_parser("ask", help="short direct conversation")
     ask.add_argument("message")
     ask.add_argument("--workspace", default="default")
+    chat = commands.add_parser("chat", help="interactive streaming chat with resumable local session names")
+    chat.add_argument("message", nargs="?")
+    chat.add_argument("-q", "--query", dest="query")
+    chat.add_argument("--session", default="default")
+    chat.add_argument("--workspace", default="default")
+    chat.add_argument("--model-profile", default=None, help="operator-configured model profile")
     login = commands.add_parser("login", help="approve this CLI in Smara Web (or exchange a legacy code)")
     login.add_argument("code", nargs="?", help="legacy one-time pairing code")
     login.add_argument("--auth-url", help="browser authorization URL template containing {device_code}")
@@ -193,6 +309,13 @@ def main(argv: list[str] | None = None) -> int:
         with _client(args) as client:
             if args.command == "ask":
                 _print(_request(client, "POST", "/v1/chat", json={"message": args.message, "workspace_id": args.workspace}))
+            elif args.command == "chat":
+                message = args.query or args.message
+                if message:
+                    sessions = _load_sessions()
+                    _stream_chat(client, message=message, workspace=args.workspace, conversation_id=_session_id(args.session, sessions), model_profile=args.model_profile)
+                else:
+                    _interactive_chat(client, args)
             elif args.command == "login":
                 if args.code:
                     result = _request(client, "POST", "/v1/cli/device/exchange", json={"code": args.code})

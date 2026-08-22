@@ -29,6 +29,7 @@ from . import push
 from .hardening import RedisFixedWindowLimiter
 from .observability import configure_sentry
 from .tool_registry import ToolContext, ToolError, default_tool_registry
+from .provider_routing import resolve_profile
 
 configure_sentry(settings.sentry_dsn)
 app = FastAPI(title="Smara Control Plane", version="0.1.0")
@@ -47,18 +48,22 @@ if web_dir.is_dir():
     app.mount("/app", StaticFiles(directory=web_dir, html=True), name="smara-web")
 
 
-def _agent_runtime() -> SmaraAgentRuntime:
+def _agent_runtime(model_profile: str | None = None) -> SmaraAgentRuntime:
     """Construct the runtime without importing any MemoryOS implementation."""
     memory = None
     if settings.syntarus_api_key:
         from syntarus import AsyncMemoryClient
         memory = SyntarusMemory(AsyncMemoryClient(settings.syntarus_api_key, base_url=settings.syntarus_base_url))
+    profile = resolve_profile(
+        raw=settings.llm_profiles,
+        requested=model_profile or settings.llm_default_profile or None,
+        fallback_base_url=settings.llm_base_url,
+        fallback_key=settings.llm_api_key,
+        fallback_model=settings.llm_model,
+        fallback_provider=settings.llm_provider,
+    )
     return SmaraAgentRuntime(
-        OpenAICompatibleProvider(
-            base_url=settings.llm_base_url,
-            api_key=settings.llm_api_key,
-            model=settings.llm_model,
-        ),
+        OpenAICompatibleProvider(base_url=profile.base_url, api_key=profile.api_key, model=profile.model),
         memory=memory,
     )
 
@@ -271,7 +276,7 @@ async def exchange_cli_pairing(body: CliPairingExchange):
 @app.post("/v1/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, user: str = Depends(account_id)):
     """Direct chat with bounded read-only tools; writes remain durable tasks."""
-    runtime = _agent_runtime()
+    runtime = _agent_runtime(body.model_profile)
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=False) as client:
             turn = await runtime.chat_with_tools(
@@ -297,7 +302,7 @@ async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
     """SSE view of direct chat and bounded read-only tool progress."""
     async def emit():
         started_at = time.perf_counter()
-        runtime = _agent_runtime()
+        runtime = _agent_runtime(body.model_profile)
         queue: asyncio.Queue[str] = asyncio.Queue()
 
         def event_hook(event_type: str, payload: dict) -> None:

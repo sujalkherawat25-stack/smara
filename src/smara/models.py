@@ -84,6 +84,7 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=20_000)
     workspace_id: str = Field(default="default", min_length=1, max_length=128)
     conversation_id: str | None = Field(default=None, max_length=160)
+    model_profile: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class ChatResponse(BaseModel):

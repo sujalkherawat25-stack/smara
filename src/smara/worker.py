@@ -19,6 +19,7 @@ from .integrations import IntegrationExecutor
 from .vault import SecretVault
 from .integration_oauth import refresh_google
 from .capture_processing import process_capture
+from .provider_routing import resolve_profile
 
 
 async def _memory_context(memory: SyntarusMemory | None, task: dict, store: TaskStore) -> str:
@@ -86,7 +87,24 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
             store.complete_step(task["step_id"], task["account_id"], result)
             return True
         if task["name"] == "agent.execute":
-            provider = OpenAICompatibleProvider(base_url=settings.llm_base_url, api_key=settings.llm_api_key, model=settings.llm_model)
+            requested_profile = None
+            raw_payload = task.get("executor_payload")
+            if isinstance(raw_payload, str):
+                try:
+                    raw_payload = json.loads(raw_payload)
+                except json.JSONDecodeError:
+                    raw_payload = None
+            if isinstance(raw_payload, dict) and isinstance(raw_payload.get("model_profile"), str):
+                requested_profile = raw_payload["model_profile"]
+            profile = resolve_profile(
+                raw=settings.llm_profiles,
+                requested=requested_profile or settings.llm_default_profile or None,
+                fallback_base_url=settings.llm_base_url,
+                fallback_key=settings.llm_api_key,
+                fallback_model=settings.llm_model,
+                fallback_provider=settings.llm_provider,
+            )
+            provider = OpenAICompatibleProvider(base_url=profile.base_url, api_key=profile.api_key, model=profile.model)
             with_client = httpx.AsyncClient(timeout=httpx.Timeout(12.0), follow_redirects=False)
             async with with_client as client:
                 async def integration_runner(provider_name: str, action: str, payload: dict) -> str:
