@@ -4,5 +4,6 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 COPY web ./web
 COPY migrations ./migrations
+COPY scripts ./scripts
 RUN pip install --no-cache-dir .
 RUN mkdir -p /app/data

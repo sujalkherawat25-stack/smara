@@ -1458,3 +1458,6 @@ manager, an encrypted off-host backup target, and an authenticated Cloudflare
 WAF/rate-limit review. Syntarus server-side metadata-filter enforcement also
 remains advisory and is not claimed as secure. No MemoryOS source/schema/data
 was changed.
+
+The production checker is copied into the service image so the same artifact
+used for deployment can run `./scripts/check-production-config.sh --full`.
