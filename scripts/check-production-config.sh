@@ -45,6 +45,19 @@ if [ "$full" = true ]; then
       printf '%s=configured\n' "$key"
     fi
   done
+  # A production agent must have either the legacy provider triple or at least
+  # one operator-defined profile. Keys may be supplied through *_FILE values.
+  if ! present SMARA_LLM_PROFILES && ! present SMARA_LLM_BASE_URL; then
+    echo 'LLM provider is missing: configure SMARA_LLM_PROFILES or SMARA_LLM_BASE_URL/SMARA_LLM_API_KEY/SMARA_LLM_MODEL.'
+    fail=1
+  elif ! present SMARA_LLM_PROFILES; then
+    for key in SMARA_LLM_API_KEY SMARA_LLM_MODEL; do
+      if ! present "$key"; then
+        printf '%s=missing (LLM provider)\n' "$key"
+        fail=1
+      fi
+    done
+  fi
   if [ "${SMARA_SANDBOX_ENABLED:-false}" = "true" ]; then
     for key in SMARA_SANDBOX_URL SMARA_SANDBOX_TOKEN; do
       if ! present "$key"; then
