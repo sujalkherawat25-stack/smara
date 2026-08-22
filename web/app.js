@@ -1,4 +1,4 @@
-const state = { tasks: [], actions: [], selected: null, mode: 'development', bridgeToken: null };
+const state = { tasks: [], actions: [], selected: null, mode: 'development', bridgeToken: null, eventStreamAbort: null };
 const $ = (selector) => document.querySelector(selector);
 const account = $('#account');
 account.value = localStorage.getItem('smara-account') || account.value;
@@ -74,6 +74,7 @@ function evidenceCard(item) {
 }
 async function selectTask(id) {
   state.selected = id; render();
+  streamTaskEvents(id);
   const detail = $('#task-detail'); detail.classList.remove('empty'); detail.textContent = 'Loading task details…';
   try {
     const [task, steps, events, artifacts, evidence] = await Promise.all([
@@ -81,6 +82,28 @@ async function selectTask(id) {
     ]);
     detail.innerHTML = `<header><div><p class="eyebrow">${escape(task.workspace_id)}</p><h2>${escape(task.title)}</h2><p class="muted">${escape(task.objective)}</p></div>${badge(task.status)}</header><div class="columns"><section class="panel"><h3>Plan</h3><ul>${steps.map(s => `<li><b>${escape(s.name)}</b> ${badge(s.status)}</li>`).join('') || '<li>No steps recorded.</li>'}</ul></section><section class="panel"><h3>Evidence ledger</h3><p class="muted">Only verified sources are used in the report. Quality flags stay visible for review.</p><ul class="evidence-list">${evidence.map(evidenceCard).join('') || '<li>No research evidence.</li>'}</ul></section><section class="panel"><h3>Artifacts</h3><ul>${artifacts.map(a => `<li><b>${escape(a.name)}</b><br>${escape((a.content || '').slice(0, 180))}</li>`).join('') || '<li>No artifacts.</li>'}</ul></section></div><section class="panel"><h3>Activity</h3><ul class="activity">${events.map(e => `<li>${new Date(e.created_at).toLocaleString()} — ${escape(e.type)}</li>`).join('') || '<li>No events.</li>'}</ul></section>`;
   } catch (error) { detail.textContent = error.message; notice(error.message, true); }
+}
+async function streamTaskEvents(id) {
+  if (state.eventStreamAbort) state.eventStreamAbort.abort();
+  const controller = new AbortController(); state.eventStreamAbort = controller;
+  try {
+    const response = await fetch(`/v1/tasks/${id}/events/stream`, { headers: headers(), signal: controller.signal });
+    if (!response.ok || !response.body) return;
+    const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
+    while (!controller.signal.aborted) {
+      const { value, done } = await reader.read(); if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split('\n\n'); buffer = frames.pop() || '';
+      for (const frame of frames) {
+        const line = frame.split('\n').find(item => item.startsWith('data: ')); if (!line) continue;
+        try {
+          const payload = JSON.parse(line.slice(6));
+          if (frame.includes('event: done')) { notice(`Task ${payload.status}.`); continue; }
+          if (payload.type) notice(`Task update: ${payload.type.replaceAll('_', ' ')}`);
+        } catch (_) { /* Ignore a partial or malformed progress frame; polling remains active. */ }
+      }
+    }
+  } catch (error) { if (error.name !== 'AbortError') notice('Live task updates paused; polling continues.', true); }
 }
 function openApproval(id) {
   const action = state.actions.find(a => a.id === id); if (!action) return;

@@ -35,6 +35,23 @@ def _print(value: Any) -> None:
     print(json.dumps(value, indent=2, default=str))
 
 
+def _watch_stream(client: httpx.Client, task_id: str) -> None:
+    with client.stream("GET", f"/v1/tasks/{task_id}/events/stream", headers={"Accept": "text/event-stream"}) as response:
+        if response.status_code >= 400:
+            raise RuntimeError(f"{response.status_code}: event stream unavailable")
+        event_name = "task_update"
+        for line in response.iter_lines():
+            if not line:
+                continue
+            if line.startswith("event: "):
+                event_name = line.removeprefix("event: ")
+            elif line.startswith("data: "):
+                payload = json.loads(line.removeprefix("data: "))
+                _print({"event": event_name, "data": payload})
+                if event_name == "done":
+                    return
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="smara", description="Smara task and agent client")
     parser.add_argument("--api", default=os.getenv("SMARA_API_URL", "http://127.0.0.1:8080"))
@@ -111,16 +128,7 @@ def main(argv: list[str] | None = None) -> int:
             elif args.task_command == "evidence":
                 _print(_request(client, "GET", f"/v1/research/{args.task_id}/evidence"))
             elif args.task_command == "watch":
-                previous: Any = None
-                while True:
-                    result = _request(client, "GET", f"/v1/tasks/{args.task_id}/events")
-                    if result != previous:
-                        _print(result)
-                        previous = result
-                    status = _request(client, "GET", f"/v1/tasks/{args.task_id}")["status"]
-                    if status in {"completed", "failed", "cancelled"}:
-                        return 0
-                    time.sleep(2)
+                _watch_stream(client, args.task_id)
             elif args.task_command in {"approve", "deny"}:
                 _print(_request(client, "POST", f"/v1/tasks/{args.task_id}/approval", json={
                     "approved": args.task_command == "approve", "note": args.note,

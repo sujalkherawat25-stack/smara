@@ -79,8 +79,10 @@ progress but never model chain-of-thought or raw upstream error strings.
 supplied public HTTP(S) source URLs. If no URLs are supplied, the first task
 step uses the configured provider-neutral search adapter to discover public
 sources before retrieval. Configure `SMARA_SEARCH_PROVIDER`,
-`SMARA_SEARCH_API_KEY`, and `SMARA_SEARCH_URL` on the server; the provider key
-never leaves the API process. The worker retrieves only safe public text/HTML
+`SMARA_SEARCH_API_KEY`, and (optionally) `SMARA_SEARCH_URL` on the server. The
+provider can be `brave`, `serper`, or `tavily`; when the URL is omitted Smara
+selects the provider's official endpoint. The provider key never leaves the
+API process. The worker retrieves only safe public text/HTML
 sources, records failures rather than inventing content, hashes each retrieved
 source, verifies the usable evidence, and writes a cited Markdown artifact.
 
@@ -93,6 +95,11 @@ Each verified source also records transparent quality signals: publication-date
 presence, HTTPS use, configured domain policy, and deterministic token-level
 agreement with other retrieved sources. These signals are advisory and remain
 visible in the Web/CLI; they never become hidden claims or bypass approval.
+
+Task progress is durable and can be followed live with
+`GET /v1/tasks/{task_id}/events/stream`. The Web task board listens to this SSE
+stream and the CLI `task watch` command uses it too; reconnecting starts from
+the durable event ledger, so a closed browser does not lose work.
 
 This slice does not use an LLM to infer claims or deliver reports externally.
 Those remain separate, approval-gated capabilities.

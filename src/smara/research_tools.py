@@ -33,6 +33,11 @@ class WebSearchTool:
 
     name = "research.web_search"
     max_results = 8
+    default_urls = {
+        "brave": "https://api.search.brave.com/res/v1/web/search",
+        "serper": "https://google.serper.dev/search",
+        "tavily": "https://api.tavily.com/search",
+    }
 
     def __init__(self, http_client: httpx.AsyncClient | None = None):
         self._http = http_client
@@ -51,6 +56,7 @@ class WebSearchTool:
             raise ResearchToolError("Smara web-search provider is not configured.")
 
         provider = settings.search_provider.strip().lower()
+        search_url = settings.search_url.strip() or self.default_urls.get(provider, "")
         count = max(1, min(self.max_results, int(max_results)))
         domains = [str(domain).strip().lower() for domain in (include_domains or []) if str(domain).strip()]
         search_query = query
@@ -61,7 +67,7 @@ class WebSearchTool:
         try:
             if provider == "brave":
                 response = await client.get(
-                    settings.search_url,
+                    search_url,
                     params={"q": search_query, "count": count},
                     headers={"Accept": "application/json", "X-Subscription-Token": settings.search_api_key},
                 )
@@ -70,13 +76,22 @@ class WebSearchTool:
                 hits = [SearchHit(str(item.get("url") or ""), str(item.get("title") or ""), str(item.get("description") or ""), provider) for item in items]
             elif provider == "serper":
                 response = await client.post(
-                    settings.search_url,
+                    search_url,
                     headers={"X-API-KEY": settings.search_api_key, "Content-Type": "application/json"},
                     json={"q": search_query, "num": count},
                 )
                 response.raise_for_status()
                 items = response.json().get("organic") or []
                 hits = [SearchHit(str(item.get("link") or ""), str(item.get("title") or ""), str(item.get("snippet") or ""), provider) for item in items]
+            elif provider == "tavily":
+                response = await client.post(
+                    search_url,
+                    headers={"Content-Type": "application/json"},
+                    json={"api_key": settings.search_api_key, "query": search_query, "search_depth": "basic", "max_results": count, "include_answer": False, "include_raw_content": False},
+                )
+                response.raise_for_status()
+                items = response.json().get("results") or []
+                hits = [SearchHit(str(item.get("url") or ""), str(item.get("title") or ""), str(item.get("content") or ""), provider) for item in items]
             else:
                 raise ResearchToolError(f"Unsupported Smara search provider: {provider}.")
         except ResearchToolError:

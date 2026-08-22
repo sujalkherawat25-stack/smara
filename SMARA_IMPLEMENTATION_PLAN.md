@@ -1148,3 +1148,31 @@ short-test-key JWT warnings and bind-mounted pytest-cache warning remain.
 Next: add explicit research progress events/SSE so Web and CLI can show each
 discovery, fetch, and verification transition live, then introduce bounded LLM
 synthesis only after those source states are complete.
+
+### 2026-08-22 — Memento extraction slice 7: Tavily verification and live task progress
+
+Completed the next slice without changing the Syntarus/MemoryOS core:
+
+- added a provider-neutral Tavily search adapter beside Brave and Serper;
+  its API key is read only by the server-side research tool and is never written
+  to source, tests, browser state, task payloads, or memory;
+- made the search URL optional so each supported provider uses its official
+  endpoint by default while explicit deployments may still override it;
+- added `GET /v1/tasks/{task_id}/events/stream`, an account-scoped SSE view of
+  the durable task event ledger with keepalives and a terminal `done` frame;
+- changed CLI `task watch` to consume the same SSE contract and added a Web
+  listener that shows live task-update notices while the existing detail view
+  refreshes normally; and
+- kept the existing durable event endpoint unchanged for polling clients.
+
+Verified: the clean Docker-mounted suite passes **40 tests**; the supplied
+Tavily key produced three live results from the disposable API container and
+was not persisted; rebuilt API/worker images and all Compose services are
+healthy; an actual Postgres-backed worker task emitted `task.created`,
+`task.started`, `step.completed`, `task.completed`, and the final SSE `done`
+frame; and the API/worker logs contained no errors.
+
+Next: add reconnect/resume semantics (`Last-Event-ID`) and richer Web event
+rendering, then introduce bounded LLM synthesis only after research evidence
+states are complete. No LLM provider key is required for the current search,
+retrieval, verification, or event-stream work.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -432,6 +433,33 @@ async def get_task(task_id: str, user: str = Depends(account_id)):
 async def task_events(task_id: str, user: str = Depends(account_id)):
     try: return {"events": store.events(task_id, user)}
     except KeyError: raise HTTPException(404, "Task not found")
+
+
+@app.get("/v1/tasks/{task_id}/events/stream")
+async def task_events_stream(task_id: str, user: str = Depends(account_id)):
+    """Stream durable task events without exposing reasoning or secrets."""
+    try:
+        store.get(task_id, user)
+    except KeyError:
+        raise HTTPException(404, "Task not found")
+
+    async def emit():
+        sent = 0
+        started = time.monotonic()
+        while time.monotonic() - started < 900:
+            events = store.events(task_id, user)
+            for event in events[sent:]:
+                yield f"event: task_update\ndata: {json.dumps(event, default=str)}\n\n"
+            sent = len(events)
+            task = store.get(task_id, user)
+            if task["status"] in {"completed", "failed", "cancelled"}:
+                yield f"event: done\ndata: {json.dumps({'status': task['status']})}\n\n"
+                return
+            yield ": keepalive\n\n"
+            await asyncio.sleep(1)
+        yield "event: done\ndata: {\"status\":\"timeout\"}\n\n"
+
+    return StreamingResponse(emit(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 @app.get("/v1/tasks/{task_id}/steps")
 async def task_steps(task_id: str, user: str = Depends(account_id)):
