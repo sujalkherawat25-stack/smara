@@ -10,8 +10,104 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
+from urllib.parse import urlparse
 
 import httpx
+
+
+class _TerminalUI:
+    """Small, dependency-free terminal shell for the hosted agent.
+
+    It deliberately uses only ANSI styling so the CLI stays fast to install
+    and works in PowerShell, Windows Terminal, and ordinary Unix terminals.
+    ``plain`` disables styling while keeping the same readable layout.
+    """
+
+    _colors = {
+        "blue": "\x1b[38;5;111m",
+        "cyan": "\x1b[38;5;80m",
+        "green": "\x1b[38;5;114m",
+        "muted": "\x1b[38;5;245m",
+        "red": "\x1b[38;5;210m",
+        "yellow": "\x1b[38;5;221m",
+        "reset": "\x1b[0m",
+        "bold": "\x1b[1m",
+    }
+
+    def __init__(self, *, plain: bool = False):
+        self.enabled = bool(sys.stdout.isatty() and not plain)
+        encoding = (getattr(sys.stdout, "encoding", "") or "").lower()
+        self.glyph = {
+            "brand": "✦" if "utf" in encoding else ">",
+            "online": "●" if "utf" in encoding else "*",
+            "offline": "○" if "utf" in encoding else "o",
+            "prompt": "❯" if "utf" in encoding else ">",
+            "phase": "·" if "utf" in encoding else "-",
+            "status": "↳" if "utf" in encoding else ">",
+            "tool": "⚙" if "utf" in encoding else "+",
+            "ok": "✓" if "utf" in encoding else "OK",
+            "error": "✗" if "utf" in encoding else "!",
+        }
+
+    def paint(self, text: str, color: str) -> str:
+        if not self.enabled:
+            return text
+        return f"{self._colors.get(color, '')}{text}{self._colors['reset']}"
+
+    def banner(self, *, api_url: str, session: str, workspace: str, authenticated: bool) -> None:
+        host = urlparse(api_url).netloc or api_url
+        auth = self.paint(f"{self.glyph['online']} connected", "green") if authenticated else self.paint(f"{self.glyph['offline']} not logged in", "yellow")
+        print()
+        print(self.paint(f"  {self.glyph['brand']}  SMARA", "bold"))
+        print(f"  {auth}  {self.paint(host, 'muted')}")
+        print(f"  {self.paint('session', 'muted')} {self.paint(session, 'cyan')}  {self.glyph['phase']}  {self.paint('workspace', 'muted')} {self.paint(workspace, 'cyan')}")
+        print(f"  {self.paint('Type /help for commands | Ctrl+C cancels a turn', 'muted')}")
+        print()
+
+    def prompt(self) -> str:
+        return self.paint(f"you {self.glyph['prompt']} ", "blue")
+
+    def assistant(self) -> None:
+        print(self.paint(f"\nsmara {self.glyph['prompt']} ", "green"), end="", flush=True)
+
+    def phase(self, name: str) -> None:
+        print(f"  {self.paint(self.glyph['phase'], 'blue')} {self.paint(name, 'muted')}")
+
+    def status(self, label: str) -> None:
+        print(f"  {self.paint(self.glyph['status'], 'muted')} {self.paint(label, 'muted')}")
+
+    def tool_call(self, name: str) -> None:
+        print(f"  {self.paint(self.glyph['tool'], 'yellow')} {self.paint(name, 'yellow')}")
+
+    def tool_result(self, name: str, ok: bool) -> None:
+        mark = self.glyph["ok"] if ok else self.glyph["error"]
+        color = "green" if ok else "red"
+        print(f"  {self.paint(mark, color)} {self.paint(name, color)}")
+
+    def done(self, *, total_ms: int | None = None, tools_used: int | None = None) -> None:
+        parts = []
+        if total_ms is not None:
+            parts.append(f"{total_ms} ms")
+        if tools_used:
+            parts.append(f"{tools_used} tool{'s' if tools_used != 1 else ''}")
+        if parts:
+            separator = f" {self.glyph['phase']} "
+            print(f"\n  {self.paint(self.glyph['phase'], 'muted')} {self.paint(separator.join(parts), 'muted')}")
+
+    def error(self, message: str) -> None:
+        print(f"\n  {self.paint(self.glyph['error'], 'red')} {self.paint(message, 'red')}", file=sys.stderr)
+
+    def help(self) -> None:
+        print(self.paint("\nSmara commands", "bold"))
+        print("  /help                 Show this help")
+        print("  /sessions             List saved sessions")
+        print("  /new NAME             Start or switch to a session")
+        print("  /workspace NAME       Change the active workspace")
+        print("  /status               Check hosted connection and tools")
+        print("  /tools                List available agent tools")
+        print("  /tasks                List your durable tasks")
+        print("  /exit                 Leave chat")
+        print("\n  Ctrl+C cancels the current turn; Ctrl+D exits.\n")
 
 
 def _client(args: argparse.Namespace) -> httpx.Client:
@@ -103,17 +199,27 @@ def _session_id(name: str, sessions: dict[str, dict[str, str]]) -> str:
     return str(sessions[name]["conversation_id"])
 
 
-def _stream_chat(client: httpx.Client, *, message: str, workspace: str, conversation_id: str, model_profile: str | None = None) -> str:
+def _stream_chat(
+    client: httpx.Client,
+    *,
+    message: str,
+    workspace: str,
+    conversation_id: str,
+    model_profile: str | None = None,
+    ui: _TerminalUI | None = None,
+) -> str:
     """Print a safe streaming turn and return the conversation id.
 
     The API emits bounded status/tool/token events. We intentionally render
     tool previews and final text, never model chain-of-thought or credentials.
     """
+    ui = ui or _TerminalUI(plain=True)
     payload = {"message": message, "workspace_id": workspace, "conversation_id": conversation_id}
     if model_profile:
         payload["model_profile"] = model_profile
     final_text = ""
     event_name = "message"
+    done_data: dict[str, Any] = {}
     try:
         with client.stream("POST", "/v1/chat/stream", json=payload, headers={"Accept": "text/event-stream"}) as response:
             if response.status_code >= 400:
@@ -143,18 +249,25 @@ def _stream_chat(client: httpx.Client, *, message: str, workspace: str, conversa
                     print(text, end="", flush=True)
                     final_text += text
                 elif event_name == "tool_call":
-                    print(f"\n[tool] {data.get('name', 'unknown')}", file=sys.stderr)
+                    ui.tool_call(str(data.get("name", "unknown")))
                 elif event_name == "tool_result":
-                    state = "ok" if data.get("ok") else "failed"
-                    print(f"[tool {state}] {data.get('name', 'unknown')}", file=sys.stderr)
+                    ui.tool_result(str(data.get("name", "unknown")), bool(data.get("ok")))
                 elif event_name == "phase":
-                    print(f"[{data.get('phase', 'working')}]", file=sys.stderr)
+                    ui.phase(str(data.get("phase", "working")))
                 elif event_name == "status":
-                    print(f"[{data.get('label', data.get('message', 'working'))}]", file=sys.stderr)
+                    ui.status(str(data.get("label", data.get("message", "working"))))
+                elif event_name == "done":
+                    done_data = data
                 elif event_name == "error":
                     raise RuntimeError(str(data.get("message", "Smara chat failed.")))
     except (httpx.HTTPError, json.JSONDecodeError) as exc:
         raise RuntimeError("Smara chat stream disconnected; retry the turn.") from exc
+    if not final_text.strip():
+        raise RuntimeError("Smara returned no answer. Check the hosted model provider and try again.")
+    ui.done(
+        total_ms=int(done_data["total_ms"]) if str(done_data.get("total_ms", "")).isdigit() else None,
+        tools_used=int(done_data["tools_used"]) if str(done_data.get("tools_used", "")).isdigit() else None,
+    )
     print()
     return final_text
 
@@ -162,10 +275,11 @@ def _stream_chat(client: httpx.Client, *, message: str, workspace: str, conversa
 def _interactive_chat(client: httpx.Client, args: argparse.Namespace) -> None:
     sessions = _load_sessions()
     conversation_id = _session_id(args.session, sessions)
-    print(f"Smara chat · session {args.session} (type /help or /exit)")
+    ui = _TerminalUI(plain=args.plain)
+    ui.banner(api_url=args.api, session=args.session, workspace=args.workspace, authenticated=bool(client.headers.get("Authorization")))
     while True:
         try:
-            message = input("you> ").strip()
+            message = input(ui.prompt()).strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return
@@ -174,19 +288,56 @@ def _interactive_chat(client: httpx.Client, args: argparse.Namespace) -> None:
         if message in {"/exit", "/quit"}:
             return
         if message == "/help":
-            print("/sessions  list saved sessions\n/new NAME   switch to a new session\n/exit       leave chat")
+            ui.help()
             continue
         if message == "/sessions":
-            print("\n".join(sorted(sessions)) or "(no saved sessions)")
+            for name in sorted(sessions):
+                print(f" {'*' if name == args.session else ' '} {name}")
+            if not sessions:
+                print(" (no saved sessions)")
             continue
         if message.startswith("/new"):
             name = message[4:].strip() or "default"
             args.session = name
             conversation_id = _session_id(name, sessions)
-            print(f"Switched to session {name}.")
+            print(f"Switched to {ui.paint(name, 'cyan')}.")
             continue
-        print("smara> ", end="", flush=True)
-        _stream_chat(client, message=message, workspace=args.workspace, conversation_id=conversation_id, model_profile=args.model_profile)
+        if message.startswith("/workspace"):
+            workspace = message[len("/workspace"):].strip()
+            if workspace:
+                args.workspace = workspace
+                print(f"Workspace set to {ui.paint(args.workspace, 'cyan')}.")
+            else:
+                print(f"Active workspace: {ui.paint(args.workspace, 'cyan')}")
+            continue
+        if message == "/status":
+            try:
+                _request(client, "GET", "/health")
+                tools = _request(client, "GET", "/v1/tools")
+                if isinstance(tools, list):
+                    count = len(tools)
+                elif isinstance(tools, dict) and isinstance(tools.get("tools"), list):
+                    count = len(tools["tools"])
+                else:
+                    count = "available"
+                print(f" {ui.paint(ui.glyph['ok'], 'green')} hosted API healthy | {count} tools")
+            except (RuntimeError, httpx.HTTPError) as exc:
+                ui.error(str(exc))
+            continue
+        if message == "/tools":
+            _print(_request(client, "GET", "/v1/tools"))
+            continue
+        if message == "/tasks":
+            _print(_request(client, "GET", "/v1/tasks"))
+            continue
+        ui.assistant()
+        try:
+            _stream_chat(client, message=message, workspace=args.workspace, conversation_id=conversation_id, model_profile=args.model_profile, ui=ui)
+        except KeyboardInterrupt:
+            print()
+            ui.error("Turn cancelled. Your session is still available.")
+        except (RuntimeError, httpx.HTTPError) as exc:
+            ui.error(str(exc))
 
 
 def _browser_login(client: httpx.Client, args: argparse.Namespace) -> None:
@@ -255,6 +406,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--api", default=os.getenv("SMARA_API_URL", "http://127.0.0.1:8080"))
     parser.add_argument("--token", default=os.getenv("SMARA_TOKEN", ""), help="Smara bearer token")
     parser.add_argument("--dev-account", default=os.getenv("SMARA_DEV_ACCOUNT", ""), help="development only")
+    parser.add_argument("--plain", action="store_true", help="disable terminal colors and symbols")
     commands = parser.add_subparsers(dest="command", required=True)
     ask = commands.add_parser("ask", help="short direct conversation")
     ask.add_argument("message")
@@ -265,6 +417,7 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument("--session", default="default")
     chat.add_argument("--workspace", default="default")
     chat.add_argument("--model-profile", default=None, help="operator-configured model profile")
+    chat.add_argument("--plain", action="store_true", default=argparse.SUPPRESS, help="disable terminal colors and symbols")
     login = commands.add_parser("login", help="approve this CLI in Smara Web (or exchange a legacy code)")
     login.add_argument("code", nargs="?", help="legacy one-time pairing code")
     login.add_argument("--auth-url", help="browser authorization URL template containing {device_code}")

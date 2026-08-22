@@ -1648,3 +1648,13 @@ an empty turn because the API emits compact SSE frames whose JSON contains the
 event `type`; the CLI only looked for a separate `event:` line. The CLI now
 accepts both forms, renders status labels safely, and has a regression test for
 the compact contract. A hosted staging turn was verified end-to-end.
+
+### 2026-08-23 — CLI interaction shell
+
+The CLI now has a lightweight terminal shell rather than raw debug prompts:
+connection/session/workspace banner, readable phase and tool markers, timing,
+`/help`, `/sessions`, `/new`, `/workspace`, `/status`, `/tools`, and `/tasks`,
+plus graceful Ctrl+C cancellation and no-answer detection. ANSI styling is
+automatic with a legacy-terminal ASCII fallback; `--plain` is available for
+logs and scripts. This remains a thin hosted client, so no second agent brain
+or local Docker runtime is introduced.

@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json
 
-import httpx
-
 from smara.cli import _stream_chat
 
 
-def test_stream_chat_reads_compact_typed_sse(monkeypatch, capsys):
+def test_stream_chat_reads_compact_typed_sse(capsys):
     frames = [
         f"data: {json.dumps({'type': 'phase', 'phase': 'answer'})}\n\n",
         f"data: {json.dumps({'type': 'token', 'text': 'Hello from Smara.'})}\n\n",
@@ -35,4 +33,5 @@ def test_stream_chat_reads_compact_typed_sse(monkeypatch, capsys):
     assert _stream_chat(FakeClient(), message="hi", workspace="default", conversation_id="cli_test") == "Hello from Smara."
     captured = capsys.readouterr()
     assert "Hello from Smara." in captured.out
-    assert "[answer]" in captured.err
+    assert "answer" in captured.out
+    assert "1 ms" in captured.out
