@@ -63,6 +63,9 @@ smara --api https://smara.example.com login
 # Legacy fallback: after Smara Web displays a one-time pairing code:
 smara --api https://smara.example.com login smara_<one-time-code>
 smara --api https://smara.example.com --token <cli-token> tasks
+smara --api https://smara.example.com chat --session work
+smara --api https://smara.example.com chat -q "Summarize my current tasks" --model-profile cheap
+smara --api https://smara.example.com plugins
 ```
 
 `smara login` uses a short-lived device code, opens the browser, and polls
@@ -74,6 +77,13 @@ directory; use `--print-token` only with the legacy flow when a script
 explicitly needs it.
 `smara logout` removes that token. `task watch` resumes after a dropped SSE
 connection using the last durable event ID.
+
+`smara chat` is an interactive streaming client. Session names map to stable
+conversation IDs in the local Smara session file, while the agent, memory, and
+tools remain hosted. `/new NAME`, `/sessions`, and `/exit` are supported. Model
+profiles are operator allowlists configured with `SMARA_LLM_PROFILES` (JSON)
+and `SMARA_LLM_DEFAULT_PROFILE`; profile secrets should use `api_key_env` and
+are never returned by the API.
 
 `smara ask "..."` is a bounded direct conversation. It requires a configured
 OpenAI-compatible provider (`SMARA_LLM_*`), retrieves context only through the

@@ -36,6 +36,7 @@ class Settings:
     llm_provider: str = os.getenv("SMARA_LLM_PROVIDER", "configured model provider")
     llm_profiles: str = os.getenv("SMARA_LLM_PROFILES", "")
     llm_default_profile: str = os.getenv("SMARA_LLM_DEFAULT_PROFILE", "")
+    plugin_manifests: str = os.getenv("SMARA_PLUGIN_MANIFESTS", "")
     research_synthesis_enabled: bool = os.getenv("SMARA_RESEARCH_SYNTHESIS_ENABLED", "false").lower() == "true"
     cli_token_secret: str = os.getenv("SMARA_CLI_TOKEN_SECRET", "")
     cli_token_ttl_days: int = int(os.getenv("SMARA_CLI_TOKEN_TTL_DAYS", "30"))
@@ -53,6 +54,8 @@ class Settings:
     capture_vision_model: str = os.getenv("SMARA_CAPTURE_VISION_MODEL", "")
     # Disabled until a separately isolated sandbox service is deployed.
     sandbox_enabled: bool = os.getenv("SMARA_SANDBOX_ENABLED", "false").lower() == "true"
+    sandbox_url: str = os.getenv("SMARA_SANDBOX_URL", "")
+    sandbox_token: str = os.getenv("SMARA_SANDBOX_TOKEN", "")
 
 
 settings = Settings()

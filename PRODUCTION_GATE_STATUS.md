@@ -54,6 +54,8 @@ has been cut over.
 - The Docker sandbox command is not yet a live hosted executor. Before enabling
   `SMARA_SANDBOX_ENABLED`, deploy a separate sandbox service with its own
   runtime, resource limits, network policy, and request authentication.
+  The worker now supports that narrow remote `/v1/run` contract and the full
+  configuration gate rejects an enabled sandbox without both URL and token.
 
 ## Cutover rule
 

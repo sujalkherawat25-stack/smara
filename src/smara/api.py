@@ -30,6 +30,7 @@ from .hardening import RedisFixedWindowLimiter
 from .observability import configure_sentry
 from .tool_registry import ToolContext, ToolError, default_tool_registry
 from .provider_routing import resolve_profile
+from .plugins import manifests
 
 configure_sentry(settings.sentry_dsn)
 app = FastAPI(title="Smara Control Plane", version="0.1.0")
@@ -192,6 +193,19 @@ async def health(): return {"ok": True, "memory_boundary": "syntarus-sdk-only", 
 async def list_tools(user: str = Depends(account_id)):
     """Return the safe tools currently available to the agent runtime."""
     return {"tools": default_tool_registry().describe()}
+
+@app.get("/v1/plugins")
+async def list_plugins(user: str = Depends(account_id)):
+    """List built-in and explicitly configured plugin descriptors.
+
+    This is a catalogue only; untrusted plugin code is never imported by the
+    API process. External MCP execution needs a separately authenticated
+    adapter and approval policy.
+    """
+    try:
+        return {"plugins": manifests(settings.plugin_manifests)}
+    except ValueError as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 @app.post("/v1/tools/{tool_name}")
 async def invoke_tool(tool_name: str, body: ToolInvokeRequest, user: str = Depends(account_id)):

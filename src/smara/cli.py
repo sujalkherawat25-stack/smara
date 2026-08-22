@@ -290,6 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
     deny.add_argument("task_id")
     deny.add_argument("--note", default="Denied from Smara CLI")
     commands.add_parser("tools", help="list safe tools available to the agent")
+    commands.add_parser("plugins", help="list enabled built-in and declared plugin descriptors")
     tool = commands.add_parser("tool", help="invoke one safe read-only tool")
     tool.add_argument("name")
     tool.add_argument("--arguments", default="{}", help="JSON object of tool arguments")
@@ -350,6 +351,8 @@ def main(argv: list[str] | None = None) -> int:
                 _print(_request(client, "GET", "/v1/tasks"))
             elif args.command == "tools":
                 _print(_request(client, "GET", "/v1/tools"))
+            elif args.command == "plugins":
+                _print(_request(client, "GET", "/v1/plugins"))
             elif args.command == "tool":
                 try:
                     arguments = json.loads(args.arguments)

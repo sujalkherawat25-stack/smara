@@ -11,7 +11,7 @@ from .config import settings
 from .store import TaskStore, open_task_store
 from .syntarus_adapter import SyntarusMemory
 from .research import OpenAIResearchSynthesizer, ResearchExecutor
-from .sandbox import run as run_sandbox
+from .sandbox import run as run_sandbox, run_remote as run_remote_sandbox
 from .agent_runtime import OpenAICompatibleProvider
 from .agent_step import BoundedAgentStepRuntime
 from .tool_registry import ToolContext, default_tool_registry
@@ -158,7 +158,13 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
             command = payload.get("command")
             if not isinstance(command, str):
                 raise RuntimeError("Sandbox step requires a command payload.")
-            result = run_sandbox(command)
+            if settings.sandbox_url and settings.sandbox_token:
+                result = await run_remote_sandbox(settings.sandbox_url, settings.sandbox_token, command)
+            else:
+                # Local tests may inject sandbox_enabled=True and monkeypatch
+                # this bounded recipe. The long-lived production worker only
+                # enables claims when a remote service is configured below.
+                result = run_sandbox(command)
             store.complete_step(task["step_id"], task["account_id"], result)
             return True
     # Executor integration is intentionally explicit. This worker has no
@@ -181,7 +187,7 @@ async def main() -> None:
         memory = SyntarusMemory(AsyncMemoryClient(settings.syntarus_api_key, base_url=settings.syntarus_base_url))
     try:
         while True:
-            worked = await run_once(store, memory, sandbox_enabled=settings.sandbox_enabled)
+            worked = await run_once(store, memory, sandbox_enabled=settings.sandbox_enabled and bool(settings.sandbox_url and settings.sandbox_token))
             await asyncio.sleep(0.2 if worked else 2)
     finally:
         if memory and hasattr(memory._client, "aclose"):

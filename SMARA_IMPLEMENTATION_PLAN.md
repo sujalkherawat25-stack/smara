@@ -1588,3 +1588,26 @@ steps from live claims until a separately isolated sandbox service is deployed.
 Local tests can explicitly enable the recipe; production must provide a
 narrowly authenticated service with its own network, CPU, memory, PID, disk,
 and lifetime limits before enabling the setting.
+
+### 2026-08-22 — Six-workstream continuation
+
+Started the next six workstreams without touching MemoryOS. Smara now has an
+interactive `smara chat` client with named local session records, streaming
+tool/status output, `/new`, `/sessions`, and `/exit`; the agent and memory stay
+hosted and the direct API remains bounded. Operator allowlisted model profiles
+(`SMARA_LLM_PROFILES` plus `api_key_env`) provide multi-provider routing without
+putting provider secrets in browser or task data, while the legacy single
+provider variables remain compatible.
+
+Hosted agent steps can now request `desktop.request_action`. This creates a
+new durable desktop child task in `waiting_approval`; it never executes local
+work from the hosted worker. The paired desktop still enforces capability,
+root, allowlist, approval, and lease checks.
+
+The plugin surface now exposes a declarative built-in/opt-in MCP-style
+catalogue at `/v1/plugins`; arbitrary Python plugins are deliberately not
+imported. The sandbox boundary now supports a separately authenticated remote
+`/v1/run` service contract, and the production gate rejects an enabled sandbox
+without its URL and token. A real isolated sandbox service, parent
+`ai.syntarus.com` browser handoff, production secret-manager operations, and
+full MCP execution remain deployment/next-phase work.

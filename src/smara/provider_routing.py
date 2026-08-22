@@ -59,6 +59,10 @@ def resolve_profile(*, raw: str, requested: str | None, fallback_base_url: str, 
     profiles = load_profiles(raw, fallback_base_url=fallback_base_url, fallback_key=fallback_key, fallback_model=fallback_model, fallback_provider=fallback_provider)
     name = requested or fallback_provider or "default"
     profile = profiles.get(name)
+    if profile is None and requested is None and len(profiles) == 1:
+        profile = next(iter(profiles.values()))
+    if profile is None and requested is None and "default" in profiles:
+        profile = profiles["default"]
     if profile is None:
         raise ValueError(f"Unknown model profile '{name}'. Choose one configured by the operator.")
     return profile

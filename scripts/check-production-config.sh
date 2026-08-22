@@ -39,6 +39,17 @@ if [ "$full" = true ]; then
       printf '%s=configured\n' "$key"
     fi
   done
+  if [ "${SMARA_SANDBOX_ENABLED:-false}" = "true" ]; then
+    for key in SMARA_SANDBOX_URL SMARA_SANDBOX_TOKEN; do
+      eval "value=\${$key:-}"
+      if [ -z "$value" ]; then
+        printf '%s=missing (sandbox enabled)\n' "$key"
+        fail=1
+      else
+        printf '%s=configured\n' "$key"
+      fi
+    done
+  fi
 fi
 
 if [ "$fail" -ne 0 ]; then
