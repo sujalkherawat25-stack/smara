@@ -24,7 +24,7 @@ has been cut over.
   `pg_restore`, and restored into a disposable Postgres 16 container. The
   restore contained all 14 recorded Smara schema versions. The live database
   was not modified.
-- Repository tests pass in the clean Docker environment (67 tests, with only
+- Repository tests pass in the clean Docker environment (68 tests, with only
   the existing short-JWT and bind-mounted-cache warnings).
 - Account export/deletion, approval gates, bounded sandbox recipes, safe
   integration writes, dead-letter retention, and Syntarus SDK-only memory
