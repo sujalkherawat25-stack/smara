@@ -266,7 +266,7 @@ class TaskStore:
             row = c.execute("SELECT task_id,task_run_id FROM task_steps WHERE id=? AND task_id IN (SELECT id FROM tasks WHERE account_id=?)", (step_id, account_id)).fetchone()
             if not row: raise KeyError(step_id)
             task_id, run_id = row["task_id"], row["task_run_id"]
-            c.execute("UPDATE task_steps SET status='completed',lease_owner=NULL,lease_expires_at=NULL WHERE id=? AND status='running'", (step_id,))
+            c.execute("UPDATE task_steps SET status='completed',lease_owner=NULL,lease_expires_at=NULL,last_error=NULL,retry_at=NULL WHERE id=? AND status='running'", (step_id,))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "step.completed", '{"result":"recorded"}', now))
             cancelled = c.execute("SELECT cancel_requested FROM tasks WHERE id=?", (task_id,)).fetchone()["cancel_requested"]
             if cancelled:
@@ -447,7 +447,7 @@ class TaskStore:
             c.execute("BEGIN IMMEDIATE")
             rows = c.execute("""SELECT t.*,s.id AS step_id,s.task_run_id,s.idempotency_key,s.name,s.required_capability,s.executor_payload
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
-              WHERE t.account_id=? AND t.status IN ('queued','running') AND s.status='queued' AND s.executor_kind='desktop' AND (s.retry_at IS NULL OR s.retry_at<=?) AND NOT EXISTS (
+              WHERE t.account_id=? AND t.status IN ('queued','running') AND t.requires_approval=0 AND s.status='queued' AND s.executor_kind='desktop' AND (s.retry_at IS NULL OR s.retry_at<=?) AND NOT EXISTS (
                 SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id WHERE d.step_id=s.id AND parent.status!='completed')
               ORDER BY t.created_at,s.ordinal""", (executor["account_id"], now)).fetchall()
             row = next((dict(item) for item in rows if item["required_capability"] in capabilities), None)
@@ -696,7 +696,7 @@ class PostgresTaskStore(TaskStore):
         with self._connect() as c:
             rows = c.execute("""SELECT t.*,s.id AS step_id,s.task_run_id,s.idempotency_key,s.name,s.required_capability,s.executor_payload
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
-              WHERE t.account_id=%s AND t.status IN ('queued','running') AND s.status='queued' AND s.executor_kind='desktop' AND (s.retry_at IS NULL OR s.retry_at<=%s) AND NOT EXISTS (
+              WHERE t.account_id=%s AND t.status IN ('queued','running') AND t.requires_approval=FALSE AND s.status='queued' AND s.executor_kind='desktop' AND (s.retry_at IS NULL OR s.retry_at<=%s) AND NOT EXISTS (
                 SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id WHERE d.step_id=s.id AND parent.status!='completed')
               ORDER BY t.created_at,s.ordinal FOR UPDATE OF s SKIP LOCKED""", (executor["account_id"], now)).fetchall()
             row = next((dict(item) for item in rows if item["required_capability"] in capabilities), None)

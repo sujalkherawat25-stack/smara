@@ -89,6 +89,34 @@ The CLI is the same hosted client: `smara tools`, `smara tool calculate
 --arguments '{"expression":"2+2"}'`, `smara desktop list`, and
 `smara desktop pair`. It stores no task or memory database locally.
 
+### Persistent desktop executor
+
+The independent `smara-desktop` command is the local executor. It makes only
+outbound HTTPS requests, stores its paired device token in the operating
+system's Smara config directory, and waits for a hosted lease before doing
+anything. Start with the least-privileged pairing:
+
+```powershell
+smara desktop pair --capability local_file_read
+smara-desktop --pair ABCD1234 --api https://smara.example.com --allow-root C:\Users\you\Documents
+```
+
+The desktop currently supports bounded `local_file_read` (hash/proof by
+default, content only when the approved payload explicitly requests it),
+atomic `local_file_write`, allowlisted `local_terminal`, and allowlisted
+`local_browser` URL opening. Terminal and browser capabilities must be
+declared during pairing and configured locally with `--terminal-allow` or
+`--browser-domain`; the executor rejects undeclared capabilities, unapproved
+tasks, shell operators, path traversal, symlink escapes, oversized files, and
+unbounded commands. `--once` is available for a single-step smoke test.
+
+The agent manifest also includes read-only Gmail search, Calendar listing,
+Drive metadata search, and GitHub repository listing. They run only when the
+account has a connected credential; all external writes remain durable,
+approval-gated integration actions. Inside a hosted agent task, the model may
+also create an `integration.request_approval` intent; this only places an
+editable preview in the approval inbox and never calls the provider itself.
+
 ## First research workflow
 
 `POST /v1/research` accepts a question and optionally up to twelve explicitly

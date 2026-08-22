@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 import httpx
 
 from syntarus import AsyncMemoryClient
@@ -14,6 +15,9 @@ from .sandbox import run as run_sandbox
 from .agent_runtime import OpenAICompatibleProvider
 from .agent_step import BoundedAgentStepRuntime
 from .tool_registry import ToolContext, default_tool_registry
+from .integrations import IntegrationExecutor
+from .vault import SecretVault
+from .integration_oauth import refresh_google
 
 
 async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
@@ -43,12 +47,32 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
             provider = OpenAICompatibleProvider(base_url=settings.llm_base_url, api_key=settings.llm_api_key, model=settings.llm_model)
             with_client = httpx.AsyncClient(timeout=httpx.Timeout(12.0), follow_redirects=False)
             async with with_client as client:
+                async def integration_runner(provider_name: str, action: str, payload: dict) -> str:
+                    if not settings.integration_master_keys:
+                        raise RuntimeError("Integration credentials are not configured on this worker.")
+                    connection = store.integration(task["account_id"], provider_name)
+                    credential = store.encrypted_integration_credential(connection["id"])
+                    secret = SecretVault(settings.integration_master_keys).decrypt(credential["encrypted_secret"])
+                    if provider_name in {"gmail", "calendar", "drive"}:
+                        token = json.loads(secret)
+                        expires_in = int(token.get("expires_in", 3600))
+                        if int(token.get("obtained_at", 0)) + expires_in - 60 <= int(time.time()):
+                            token = await refresh_google(token)
+                            secret = json.dumps(token)
+                            store.store_integration_credential(task["account_id"], provider_name, "oauth_token", SecretVault(settings.integration_master_keys).encrypt(secret))
+                    return await IntegrationExecutor(client).execute(provider_name, action, payload, secret)
+
+                def integration_requester(provider_name: str, action: str, preview: str, idempotency_key: str, payload: dict) -> dict:
+                    result = store.request_integration_action(task["account_id"], provider_name, action, preview, idempotency_key, payload)
+                    record("agent.approval_requested", {"provider": provider_name, "action": action, "status": result.get("status"), "action_id": result.get("id")})
+                    return result
+
                 def record(event_type: str, payload: dict) -> None:
                     store.append_event(task["id"], event_type, json.dumps(payload, ensure_ascii=False)[:2_000])
-                result = await BoundedAgentStepRuntime(provider, default_tool_registry(client)).run(
+                result = await BoundedAgentStepRuntime(provider, default_tool_registry(client, integration_runner=integration_runner, integration_requester=integration_requester)).run(
                     task=task,
                     memory_context=context,
-                    tool_context=ToolContext(task["account_id"], task["workspace_id"], client),
+                    tool_context=ToolContext(task["account_id"], task["workspace_id"], client, integration_runner, integration_requester),
                     event_hook=record,
                 )
             if memory is not None:
@@ -62,7 +86,6 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
                 raise RuntimeError("Sandbox execution requires an approval-gated task.")
             payload = task.get("executor_payload") or {}
             if isinstance(payload, str):
-                import json
                 payload = json.loads(payload)
             command = payload.get("command")
             if not isinstance(command, str):

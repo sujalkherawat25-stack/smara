@@ -1,0 +1,309 @@
+"""Persistent, outbound-only Smara Desktop executor.
+
+The desktop process is deliberately a small capability runner.  It never
+opens an inbound listener and it never receives a task unless the hosted API
+has leased a step to its paired executor.  Risky capabilities must be paired
+explicitly and the task must already have passed Smara's approval gate.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shlex
+import subprocess
+import tempfile
+import time
+import webbrowser
+from dataclasses import dataclass, field
+from pathlib import Path
+from urllib.parse import urlparse
+
+import httpx
+
+
+MAX_FILE_BYTES = 256 * 1024
+MAX_OUTPUT_CHARS = 32_000
+MAX_COMMAND_SECONDS = 60
+DEFAULT_CAPABILITIES = ["local_file_read"]
+STATE_ENV = "SMARA_DESKTOP_STATE"
+
+
+def default_state_path() -> Path:
+    configured = os.getenv(STATE_ENV)
+    if configured:
+        return Path(configured)
+    root = Path(os.getenv("APPDATA", Path.home() / ".config")) / "Smara"
+    return root / "desktop.json"
+
+
+def _save_state(path: Path, state: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    if os.name != "nt":
+        path.chmod(0o600)
+
+
+def _load_state(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise RuntimeError(f"Desktop pairing state is unavailable: {path}") from exc
+    if not isinstance(value, dict) or not value.get("executor_id") or not value.get("token") or not value.get("smara_url"):
+        raise RuntimeError("Desktop pairing state is invalid; pair this device again.")
+    return value
+
+
+def _headers(state: dict) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {state['token']}",
+        "X-Smara-Executor-Id": state["executor_id"],
+        "Accept": "application/json",
+    }
+
+
+def pair(api_url: str, code: str, state_path: Path, *, allowed_roots: list[str] | None = None) -> dict:
+    """Consume a one-time pairing code and persist only the scoped device token."""
+    response = httpx.post(f"{api_url.rstrip('/')}/v1/executors/pair", json={"code": code.upper()}, timeout=15)
+    response.raise_for_status()
+    state = {**response.json(), "smara_url": api_url.rstrip("/"), "allowed_roots": allowed_roots or []}
+    _save_state(state_path, state)
+    return state
+
+
+def _roots(state: dict) -> list[Path]:
+    values = state.get("allowed_roots") or []
+    if not isinstance(values, list):
+        raise RuntimeError("Desktop approved roots are invalid.")
+    roots = [Path(item).expanduser().resolve() for item in values if isinstance(item, str) and item.strip()]
+    if not roots:
+        raise RuntimeError("No local folders are approved. Pair with --allow-root before using file capabilities.")
+    return roots
+
+
+def _inside_root(path: Path, roots: list[Path]) -> bool:
+    return any(path == root or root in path.parents for root in roots)
+
+
+def _target(raw: object, roots: list[Path], *, must_exist: bool) -> Path:
+    if not isinstance(raw, str) or not raw.strip():
+        raise RuntimeError("A local path is required.")
+    candidate = Path(raw).expanduser()
+    # Resolve the parent even when creating a new file; this rejects traversal
+    # and symlink escapes without following an attacker-controlled target.
+    try:
+        prospective = candidate.resolve(strict=False)
+        if not _inside_root(prospective, roots):
+            raise RuntimeError("Requested path is outside the desktop owner's approved folders.")
+        if must_exist:
+            target = candidate.resolve(strict=True)
+        else:
+            parent = candidate.parent.resolve(strict=True)
+            target = parent / candidate.name
+    except RuntimeError:
+        raise
+    except OSError as exc:
+        raise RuntimeError("Requested local path does not exist or is inaccessible.") from exc
+    if not _inside_root(target, roots):
+        raise RuntimeError("Requested path is outside the desktop owner's approved folders.")
+    if must_exist and target.is_symlink():
+        raise RuntimeError("Symlinked files are not allowed.")
+    return target
+
+
+def _read_file(payload: dict, roots: list[Path]) -> str:
+    target = _target(payload.get("path"), roots, must_exist=True)
+    if not target.is_file():
+        raise RuntimeError("Requested local path is not a regular file.")
+    size = target.stat().st_size
+    if size > MAX_FILE_BYTES:
+        raise RuntimeError(f"Requested local file exceeds the {MAX_FILE_BYTES} byte limit.")
+    content = target.read_bytes()
+    result: dict[str, object] = {
+        "action": "local_file_read",
+        "file_name": target.name,
+        "bytes_read": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "content_shared": False,
+    }
+    # Sharing content must be explicit in the task payload.  It is bounded and
+    # only reachable after the hosted approval gate has released the step.
+    if payload.get("share_content") is True:
+        result["content_shared"] = True
+        result["content"] = content.decode("utf-8", errors="replace")[:MAX_FILE_BYTES]
+    return json.dumps(result, ensure_ascii=False)
+
+
+def _write_file(payload: dict, roots: list[Path]) -> str:
+    target = _target(payload.get("path"), roots, must_exist=False)
+    content = payload.get("content")
+    if not isinstance(content, str):
+        raise RuntimeError("local_file_write requires text content.")
+    data = content.encode("utf-8")
+    if len(data) > MAX_FILE_BYTES:
+        raise RuntimeError(f"Written content exceeds the {MAX_FILE_BYTES} byte limit.")
+    if target.exists() and target.is_symlink():
+        raise RuntimeError("Symlinked files are not allowed.")
+    mode = "a" if payload.get("append") is True else "w"
+    if mode == "a":
+        with target.open("ab") as handle:
+            if handle.tell() + len(data) > MAX_FILE_BYTES:
+                raise RuntimeError("Appended content exceeds the file size limit.")
+            handle.write(data)
+    else:
+        # Atomic replacement keeps a crash from leaving a partial file.
+        with tempfile.NamedTemporaryFile("wb", dir=target.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(data)
+        try:
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+    return json.dumps({"action": "local_file_write", "file_name": target.name, "bytes_written": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+
+
+def _terminal(payload: dict, roots: list[Path], state: dict) -> str:
+    raw = payload.get("argv")
+    if isinstance(raw, list) and all(isinstance(item, str) for item in raw):
+        argv = [item for item in raw if item]
+    elif isinstance(payload.get("command"), str):
+        command = payload["command"]
+        if any(char in command for char in "|&;><`\n\r"):
+            raise RuntimeError("Shell operators are not allowed; provide an argv list instead.")
+        argv = shlex.split(command, posix=os.name != "nt")
+    else:
+        raise RuntimeError("local_terminal requires an argv list or bounded command.")
+    if not argv:
+        raise RuntimeError("local_terminal received an empty command.")
+    allowlist = state.get("terminal_allowlist") or []
+    if not isinstance(allowlist, list) or not allowlist:
+        raise RuntimeError("Terminal capability is disabled until an executable allowlist is configured.")
+    executable = Path(argv[0]).name.lower()
+    if executable not in {str(item).lower() for item in allowlist if isinstance(item, str)}:
+        raise RuntimeError(f"Executable '{executable}' is not in the desktop allowlist.")
+    cwd_value = payload.get("cwd") or str(roots[0])
+    cwd = _target(cwd_value, roots, must_exist=True)
+    if not cwd.is_dir():
+        raise RuntimeError("Terminal working directory is not an approved folder.")
+    safe_env = {key: value for key, value in os.environ.items() if not any(marker in key.upper() for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD"))}
+    try:
+        completed = subprocess.run(argv, cwd=cwd, env=safe_env, shell=False, capture_output=True, text=True, timeout=MAX_COMMAND_SECONDS, check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Terminal command exceeded {MAX_COMMAND_SECONDS} seconds.") from exc
+    output = (completed.stdout or "") + ("\n" + completed.stderr if completed.stderr else "")
+    return json.dumps({"action": "local_terminal", "argv": argv, "exit_code": completed.returncode, "output": output[:MAX_OUTPUT_CHARS]}, ensure_ascii=False)
+
+
+def _browser(payload: dict, state: dict) -> str:
+    url = payload.get("url")
+    if not isinstance(url, str) or url.startswith("javascript:"):
+        raise RuntimeError("local_browser requires a safe HTTP(S) URL.")
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise RuntimeError("Only HTTP(S) browser URLs are allowed.")
+    domains = state.get("browser_domains") or []
+    if not isinstance(domains, list) or not domains or not any(parsed.hostname == item or parsed.hostname.endswith("." + item) for item in domains if isinstance(item, str)):
+        raise RuntimeError("Browser URL is outside the configured desktop domain allowlist.")
+    if not webbrowser.open(url, new=0, autoraise=False):
+        raise RuntimeError("The operating system did not accept the browser request.")
+    return json.dumps({"action": "local_browser", "url": url, "opened": True})
+
+
+def execute_step(step: dict, state: dict) -> str:
+    """Dispatch one leased step; never dispatch an undeclared capability."""
+    if step.get("requires_approval"):
+        raise RuntimeError("Desktop refused a step that has not passed Smara approval.")
+    capability = step.get("required_capability")
+    declared = set(state.get("capabilities") or DEFAULT_CAPABILITIES)
+    if capability not in declared:
+        raise RuntimeError("This desktop capability was not declared during pairing.")
+    payload = step.get("executor_payload")
+    if not isinstance(payload, dict):
+        raise RuntimeError("The desktop step payload is invalid.")
+    roots = _roots(state)
+    if capability == "local_file_read":
+        return _read_file(payload, roots)
+    if capability == "local_file_write":
+        return _write_file(payload, roots)
+    if capability == "local_terminal":
+        return _terminal(payload, roots, state)
+    if capability == "local_browser":
+        return _browser(payload, state)
+    raise RuntimeError(f"Desktop capability '{capability}' is not installed.")
+
+
+@dataclass
+class DesktopRunner:
+    state_path: Path
+    poll_seconds: float = 2.0
+    heartbeat_seconds: float = 20.0
+    _last_heartbeat: float = field(default=0.0, init=False)
+
+    def run_once(self, client: httpx.Client, state: dict) -> bool:
+        now = time.monotonic()
+        if now - self._last_heartbeat >= self.heartbeat_seconds:
+            response = client.post(f"{state['smara_url']}/v1/executors/heartbeat", headers=_headers(state), json={"capabilities": state.get("capabilities", DEFAULT_CAPABILITIES)})
+            response.raise_for_status()
+            self._last_heartbeat = now
+        response = client.post(f"{state['smara_url']}/v1/executors/claim", headers=_headers(state))
+        response.raise_for_status()
+        step = response.json().get("step")
+        if not step:
+            return False
+        try:
+            result = execute_step(step, state)
+            client.post(f"{state['smara_url']}/v1/executors/steps/{step['step_id']}/complete", headers=_headers(state), json={"result": result}).raise_for_status()
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+            client.post(f"{state['smara_url']}/v1/executors/steps/{step['step_id']}/fail", headers=_headers(state), json={"error": str(exc)[:2_000]}).raise_for_status()
+        return True
+
+    def run_forever(self) -> None:
+        state = _load_state(self.state_path)
+        with httpx.Client(timeout=20, follow_redirects=False) as client:
+            delay = self.poll_seconds
+            while True:
+                try:
+                    self.run_once(client, state)
+                    delay = self.poll_seconds
+                except KeyboardInterrupt:
+                    return
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code in {401, 403}:
+                        raise RuntimeError("Desktop credentials were rejected; pair this device again.") from exc
+                    delay = min(delay * 2, 30)
+                except httpx.HTTPError:
+                    delay = min(delay * 2, 30)
+                time.sleep(delay)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Smara's outbound-only local executor")
+    parser.add_argument("--api", default=os.getenv("SMARA_API_URL", "http://127.0.0.1:8080"))
+    parser.add_argument("--pair", help="one-time pairing code from Smara Web or CLI")
+    parser.add_argument("--state", type=Path, default=default_state_path())
+    parser.add_argument("--allow-root", action="append", default=[], help="approved local folder; repeat as needed")
+    parser.add_argument("--terminal-allow", action="append", default=[], help="allowed terminal executable basename; repeat as needed")
+    parser.add_argument("--browser-domain", action="append", default=[], help="allowed browser domain; repeat as needed")
+    parser.add_argument("--pair-only", action="store_true", help="pair and save state without starting the executor loop")
+    parser.add_argument("--once", action="store_true", help="claim at most one step and exit")
+    args = parser.parse_args(argv)
+    if args.pair:
+        state = pair(args.api, args.pair, args.state, allowed_roots=args.allow_root)
+        state["terminal_allowlist"] = args.terminal_allow
+        state["browser_domains"] = args.browser_domain
+        _save_state(args.state, state)
+        print(f"Paired {state['executor_id']} with {state['smara_url']}; state saved to {args.state}")
+        if args.pair_only:
+            return 0
+    if args.once:
+        state = _load_state(args.state)
+        with httpx.Client(timeout=20, follow_redirects=False) as client:
+            DesktopRunner(args.state).run_once(client, state)
+        return 0
+    DesktopRunner(args.state).run_forever()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -42,4 +42,13 @@ def test_desktop_failure_returns_the_step_to_its_retry_contract(tmp_path: Path):
     step = store.claim_for_executor(desktop["executor_id"], desktop["token"])
     assert step
     assert store.fail_executor_step(desktop["executor_id"], desktop["token"], step["step_id"], "outside approved root") == "retrying"
-    assert store.get(task["id"], "acct_1")["status"] == "queued"
+
+
+def test_desktop_executor_cannot_claim_before_task_approval(tmp_path: Path):
+    store = TaskStore(tmp_path / "smara.db")
+    desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop", ["local_file_read"])["code"])
+    task = store.create("acct_1", "work", "Read", "Read", True, [{"name": "read", "executor_kind": "desktop", "required_capability": "local_file_read"}])
+    assert store.claim_for_executor(desktop["executor_id"], desktop["token"]) is None
+    store.decide(task["id"], "acct_1", True, "approved")
+    assert store.claim_for_executor(desktop["executor_id"], desktop["token"]) is not None
+    assert store.get(task["id"], "acct_1")["status"] == "running"

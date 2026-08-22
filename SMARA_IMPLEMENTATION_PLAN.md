@@ -1267,3 +1267,41 @@ The CLI control surface is complete for the current hosted contracts. A live
 Grok/OpenAI-compatible key is **not** needed to test CLI task creation,
 research, watch, approvals, tools, or desktop pairing. It is needed only for
 live `smara ask` and model-backed `agent.execute` verification.
+
+### 2026-08-22 — Desktop executor and integration-selection slice
+
+Implemented the next missing agent slice in the independent Smara repository:
+
+- added the persistent outbound-only `smara-desktop` process with secure local
+  state, one-time pairing, heartbeat, lease polling, bounded backoff, and
+  graceful credential rejection;
+- added explicit local capabilities for file read, atomic file write,
+  allowlisted terminal execution, and allowlisted browser opening;
+- rejected undeclared capabilities, unapproved task steps, path traversal,
+  symlink escapes, shell operators, oversized files, secret-like environment
+  variables, and unbounded command time;
+- added a server-side Postgres/SQLite claim guard so desktop workers cannot
+  lease a task before its approval gate has been cleared;
+- connected read-only Gmail search, Calendar listing, Drive metadata search,
+  and GitHub repository listing to bounded model tool selection. External
+  writes remain durable integration intents and keep the existing approval
+  worker path; the model can create an approval intent but cannot execute it;
+  and
+- updated the native Smara Web device/memory screens to use `smara-desktop`
+  and state plainly that Syntarus metadata filters are not security isolation
+  until the hosted Memory API enforces them.
+
+Verified: clean Docker suite passes **58 tests**; API/worker health is good;
+the live tool catalog exposes the read-only integration tools; and a
+disposable Grok `grok-3-mini` task selected `calculate`, recorded tool events,
+and completed with result `133`. The Grok key was supplied only as a transient
+worker environment variable and was not written to source, `.env`, logs, or
+task data.
+
+Still pending outside this slice: a full local desktop end-to-end smoke task
+against a real paired Windows process, production gateway/WAF and secret
+manager configuration, off-host backup/restore and Sentry drills, native
+cutover of the existing `ai.syntarus.com` Web, and Syntarus server-side
+metadata-filter enforcement. The Web task/control screens in this repository
+are already native; the public cutover is a deployment step, not a MemoryOS
+pipeline change.

@@ -12,7 +12,7 @@ import json
 import math
 import operator
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Awaitable, Callable, Protocol
 
 import httpx
 
@@ -40,6 +40,8 @@ class ToolContext:
     account_id: str
     workspace_id: str
     http_client: httpx.AsyncClient | None = None
+    integration_runner: Callable[[str, str, dict[str, Any]], Awaitable[str]] | None = None
+    integration_requester: Callable[[str, str, str, str, dict[str, Any]], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -188,6 +190,72 @@ class ResearchFetchTool:
         return ToolResult(True, _bounded(json.dumps(data, ensure_ascii=False)), citations=[url.strip()])
 
 
+class IntegrationReadTool:
+    """Read-only integration adapter exposed to bounded model tool selection.
+
+    External writes never enter this registry.  They remain durable action
+    intents in the integration ledger and require the existing approval UI.
+    """
+
+    def __init__(self, name: str, description: str, provider: str, action: str, properties: dict[str, Any] | None = None):
+        self._provider = provider
+        self._action = action
+        self.spec = ToolSpec(
+            name,
+            description,
+            {"type": "object", "properties": properties or {}, "additionalProperties": False},
+            side_effecting=False,
+            requires_approval=False,
+        )
+
+    async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        if context.integration_runner is None:
+            raise ToolError("This integration is not configured for the agent worker.")
+        try:
+            result = await context.integration_runner(self._provider, self._action, arguments)
+        except Exception as exc:
+            raise ToolError(f"Integration read failed: {str(exc)[:300]}") from exc
+        return ToolResult(True, _bounded(result))
+
+
+class IntegrationApprovalRequestTool:
+    """Create an approval-gated intent without touching the external provider."""
+
+    spec = ToolSpec(
+        "integration.request_approval",
+        "Create a durable external-action preview for the user to approve; never performs the action.",
+        {
+            "type": "object",
+            "properties": {
+                "provider": {"type": "string", "enum": ["gmail", "calendar", "telegram", "github", "drive"]},
+                "action": {"type": "string", "maxLength": 120},
+                "preview": {"type": "string", "minLength": 1, "maxLength": 2_000},
+                "idempotency_key": {"type": "string", "minLength": 8, "maxLength": 200},
+                "payload": {"type": "object", "maxProperties": 30},
+            },
+            "required": ["provider", "action", "preview", "idempotency_key"],
+            "additionalProperties": False,
+        },
+    )
+
+    async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        if context.integration_requester is None:
+            raise ToolError("Approval requests are available only inside a hosted task.")
+        provider = arguments.get("provider")
+        action = arguments.get("action")
+        preview = arguments.get("preview")
+        key = arguments.get("idempotency_key")
+        if not all(isinstance(item, str) and item.strip() for item in (provider, action, preview, key)):
+            raise ToolError("An integration approval request needs provider, action, preview, and idempotency_key.")
+        if not isinstance(arguments.get("payload", {}), dict):
+            raise ToolError("Integration approval payload must be an object.")
+        try:
+            result = context.integration_requester(provider, action, preview, key, arguments.get("payload", {}))
+        except Exception as exc:
+            raise ToolError(f"Approval request failed: {str(exc)[:300]}") from exc
+        return ToolResult(True, _bounded(json.dumps({"approval_required": result.get("status") == "awaiting_approval", "status": result.get("status"), "action_id": result.get("id")}, ensure_ascii=False)))
+
+
 class ToolRegistry:
     def __init__(self, tools: list[Tool] | None = None):
         self._tools: dict[str, Tool] = {}
@@ -223,10 +291,17 @@ class ToolRegistry:
         return ToolResult(result.ok, _bounded(result.content), list(result.citations)[:20], dict(result.meta))
 
 
-def default_tool_registry(http_client: httpx.AsyncClient | None = None) -> ToolRegistry:
-    return ToolRegistry([
+def default_tool_registry(http_client: httpx.AsyncClient | None = None, *, integration_runner: Callable[[str, str, dict[str, Any]], Awaitable[str]] | None = None, integration_requester: Callable[[str, str, str, str, dict[str, Any]], dict[str, Any]] | None = None) -> ToolRegistry:
+    registry = ToolRegistry([
         CurrentTimeTool(),
         CalculateTool(),
         ResearchSearchTool(http_client),
         ResearchFetchTool(http_client),
     ])
+    registry.register(IntegrationReadTool("integration.gmail.search", "Search connected Gmail messages (read-only).", "gmail", "gmail.search", {"query": {"type": "string", "maxLength": 200}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}}))
+    registry.register(IntegrationReadTool("integration.calendar.list", "List connected Calendar events (read-only).", "calendar", "calendar.list", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}))
+    registry.register(IntegrationReadTool("integration.drive.search", "Search connected Drive file metadata (read-only).", "drive", "drive.search", {"query": {"type": "string", "maxLength": 200}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}}))
+    registry.register(IntegrationReadTool("integration.github.list", "List connected GitHub repositories (read-only).", "github", "github.list", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}))
+    if integration_requester is not None:
+        registry.register(IntegrationApprovalRequestTool())
+    return registry

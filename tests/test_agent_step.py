@@ -75,3 +75,26 @@ def test_agent_step_requires_provider_configuration():
         assert "provider is not configured" in str(exc)
     else:
         raise AssertionError("missing provider must stop the agent step")
+
+
+def test_agent_step_can_only_request_external_approval():
+    provider = FakeProvider([
+        json.dumps({"action": "tool", "name": "integration.request_approval", "arguments": {
+            "provider": "gmail", "action": "gmail.send", "preview": "Send update",
+            "idempotency_key": "send-update-1", "payload": {"to": "user@example.com"},
+        }}),
+        json.dumps({"action": "final", "answer": "I requested approval before sending."}),
+    ])
+
+    def requester(provider_name, action, preview, key, payload):
+        return {"id": "iact_test", "status": "awaiting_approval"}
+
+    async def execute():
+        return await BoundedAgentStepRuntime(provider, default_tool_registry(integration_requester=requester)).run(
+            task={"objective": "Send the update by email"},
+            tool_context=ToolContext("acct_test", "workspace", integration_requester=requester),
+        )
+
+    result = asyncio.run(execute())
+    assert result.tools_used == 1
+    assert result.text == "I requested approval before sending."
