@@ -182,6 +182,12 @@ review rather than disappearing after retries. The API has an abuse limit and
 safe browser headers; deploy a gateway/WAF in front of it for distributed rate
 limits.
 
+For a production schema migration, use the same image and database URL as the
+services: `smara-migrate` reports applied/pending versions, while
+`smara-migrate --apply` applies only pending SQL files. It never prints the
+database URL or copies MemoryOS data. Run it before the API/worker rollout and
+keep the previous deployment available for rollback.
+
 Use `scripts/backup-postgres.sh` for a nightly encrypted-storage database
 backup and `scripts/verify-backup.sh backup.dump` to validate an archive. A
 release is not complete until a documented restore is exercised into a fresh,

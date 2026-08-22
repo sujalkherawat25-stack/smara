@@ -1305,3 +1305,24 @@ cutover of the existing `ai.syntarus.com` Web, and Syntarus server-side
 metadata-filter enforcement. The Web task/control screens in this repository
 are already native; the public cutover is a deployment step, not a MemoryOS
 pipeline change.
+
+### 2026-08-22 — Migration and Web reconnection slice
+
+Started the remaining rollout/migration work without moving any MemoryOS data:
+
+- added the packaged `smara-migrate` command; it reports applied/pending
+  Postgres schema versions and applies only pending migrations with
+  `--apply`, without printing database credentials;
+- kept the existing migration boundary explicit so the Smara cutover can be
+  rolled back to the previous deployment without rewriting Syntarus memories;
+- made the native Web task event stream reconnect with bounded exponential
+  backoff and `Last-Event-ID` replay after network drops; task details refresh
+  as durable events arrive while the existing periodic refresh remains a
+  fallback; and
+- verified the clean Docker suite again: **58 tests passed**, the migration CLI
+  is present in the production image, and API/worker services restarted cleanly.
+
+Remaining migration work is deployment-level: run the command against the
+target production Postgres, shadow-test selected existing accounts, then
+perform a reversible beta cutover of `ai.syntarus.com`. No account IDs or
+Syntarus memory records should be rewritten.
