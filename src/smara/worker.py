@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import httpx
 
 from syntarus import AsyncMemoryClient
 from .config import settings
@@ -9,6 +11,9 @@ from .store import TaskStore, open_task_store
 from .syntarus_adapter import SyntarusMemory
 from .research import OpenAIResearchSynthesizer, ResearchExecutor
 from .sandbox import run as run_sandbox
+from .agent_runtime import OpenAICompatibleProvider
+from .agent_step import BoundedAgentStepRuntime
+from .tool_registry import ToolContext, default_tool_registry
 
 
 async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
@@ -33,6 +38,22 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
             if outcome.report and memory is not None:
                 await memory.remember_verified_research(task, outcome.report, outcome.verified_evidence_count)
             store.complete_step(task["step_id"], task["account_id"], outcome.text)
+            return True
+        if task["name"] == "agent.execute":
+            provider = OpenAICompatibleProvider(base_url=settings.llm_base_url, api_key=settings.llm_api_key, model=settings.llm_model)
+            with_client = httpx.AsyncClient(timeout=httpx.Timeout(12.0), follow_redirects=False)
+            async with with_client as client:
+                def record(event_type: str, payload: dict) -> None:
+                    store.append_event(task["id"], event_type, json.dumps(payload, ensure_ascii=False)[:2_000])
+                result = await BoundedAgentStepRuntime(provider, default_tool_registry(client)).run(
+                    task=task,
+                    memory_context=context,
+                    tool_context=ToolContext(task["account_id"], task["workspace_id"], client),
+                    event_hook=record,
+                )
+            if memory is not None:
+                await memory.remember_completion(task, result.text)
+            store.complete_step(task["step_id"], task["account_id"], result.text)
             return True
         if task.get("executor_kind") == "sandbox":
             # Sandbox tasks must begin at a visible approval gate. The task

@@ -1228,3 +1228,25 @@ the four safe tools without requiring an LLM provider.
 Remaining next: connect tool selection to a bounded agent-step runtime, then
 add approval-backed integration tools and desktop routing. The research live
 provider and optional synthesis remain separately configuration-gated.
+
+### 2026-08-22 — Memento extraction slice 11: bounded agent-step runtime and CLI parity
+
+Connected the safe registry to one hosted `agent.execute` task step:
+
+- the runtime gives the provider a fixed tool manifest and allows at most three
+  model/tool turns plus one bounded final response;
+- only registered read-only tools can be selected; tool requests and bounded
+  result previews become durable task events without exposing credentials;
+- invalid model decisions, empty answers, missing providers, and tool failures
+  stop safely rather than granting implicit shell/browser access; and
+- the CLI now lists/invokes safe tools and can list or create desktop executor
+  pairings, while remaining a thin authenticated hosted client.
+
+Verified: runtime contract tests and the clean Docker suite pass; the live API
+tool/catalog path remains healthy. Live model-backed `agent.execute` still
+needs a configured OpenAI-compatible provider key; without one it fails
+explicitly and does not perform work.
+
+Remaining: approval-backed integration tool execution, a persistent desktop
+executor client/routing, and live model-provider verification. The overall
+architecture is in place, but those capabilities are not yet complete.

@@ -79,6 +79,10 @@ SSRF-safe URL retrieval. Read-only tools may be invoked through
 `POST /v1/tools/{name}`; side-effecting tools are deliberately rejected there
 and must run as approved durable tasks.
 
+The CLI is the same hosted client: `smara tools`, `smara tool calculate
+--arguments '{"expression":"2+2"}'`, `smara desktop list`, and
+`smara desktop pair`. It stores no task or memory database locally.
+
 ## First research workflow
 
 `POST /v1/research` accepts a question and optionally up to twelve explicitly

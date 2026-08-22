@@ -87,6 +87,17 @@ def build_parser() -> argparse.ArgumentParser:
     deny = task_commands.add_parser("deny")
     deny.add_argument("task_id")
     deny.add_argument("--note", default="Denied from Smara CLI")
+    commands.add_parser("tools", help="list safe tools available to the agent")
+    tool = commands.add_parser("tool", help="invoke one safe read-only tool")
+    tool.add_argument("name")
+    tool.add_argument("--arguments", default="{}", help="JSON object of tool arguments")
+    tool.add_argument("--workspace", default="default")
+    desktop = commands.add_parser("desktop", help="pair or inspect a local desktop executor")
+    desktop_commands = desktop.add_subparsers(dest="desktop_command", required=True)
+    desktop_commands.add_parser("list")
+    pair = desktop_commands.add_parser("pair")
+    pair.add_argument("--name", default="Smara desktop")
+    pair.add_argument("--capability", action="append", dest="capabilities", default=None)
     return parser
 
 
@@ -116,6 +127,20 @@ def main(argv: list[str] | None = None) -> int:
                 }))
             elif args.command == "tasks":
                 _print(_request(client, "GET", "/v1/tasks"))
+            elif args.command == "tools":
+                _print(_request(client, "GET", "/v1/tools"))
+            elif args.command == "tool":
+                try:
+                    arguments = json.loads(args.arguments)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError("--arguments must be a JSON object") from exc
+                if not isinstance(arguments, dict):
+                    raise RuntimeError("--arguments must be a JSON object")
+                _print(_request(client, "POST", f"/v1/tools/{args.name}", json={"arguments": arguments, "workspace_id": args.workspace}))
+            elif args.command == "desktop" and args.desktop_command == "list":
+                _print(_request(client, "GET", "/v1/executors"))
+            elif args.command == "desktop" and args.desktop_command == "pair":
+                _print(_request(client, "POST", "/v1/executors/pairings", json={"name": args.name, "capabilities": args.capabilities or ["local_file_read"]}))
             elif args.task_command == "show":
                 result = {
                     "task": _request(client, "GET", f"/v1/tasks/{args.task_id}"),
