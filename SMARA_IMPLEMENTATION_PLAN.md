@@ -1640,3 +1640,11 @@ through the public bundle plus `/health` and `/readyz`. The parent shell has the
 matching ready-message listener prepared and its TypeScript production build
 passes; it still requires the normal existing frontend deployment before that
 extra retry path is live.
+
+### 2026-08-23 — Hosted CLI stream compatibility fix
+
+The hosted chat provider was configured and reachable, but `smara chat` showed
+an empty turn because the API emits compact SSE frames whose JSON contains the
+event `type`; the CLI only looked for a separate `event:` line. The CLI now
+accepts both forms, renders status labels safely, and has a regression test for
+the compact contract. A hosted staging turn was verified end-to-end.
