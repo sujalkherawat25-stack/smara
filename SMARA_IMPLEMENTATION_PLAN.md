@@ -1547,3 +1547,9 @@ The old copy/paste pairing command remains available as a compatibility
 fallback. The control UI recognizes `?cli_device=...` and presents an explicit
 approval action without exposing credentials. MemoryOS code and schemas remain
 untouched.
+
+The implementation was deployed to staging with migration `015` applied. A
+public disposable device flow passed through Cloudflare: request creation,
+signed browser approval, and terminal polling returned `approved` without
+printing the bearer. The full deployed test suite passes **67 tests**. The
+legacy pairing flow and existing task/SSE behavior remain intact.
