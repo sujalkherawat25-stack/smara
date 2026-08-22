@@ -1,6 +1,18 @@
 const state = { tasks: [], schedules: [], actions: [], selected: null, mode: 'development', bridgeToken: null, eventStreamAbort: null, eventIds: {}, cliDeviceCode: new URLSearchParams(location.search).get('cli_device') };
 const $ = (selector) => document.querySelector(selector);
 const account = $('#account');
+
+// When embedded in the authenticated Smara shell, request the short-lived
+// bridge token instead of relying on the parent guessing when this document's
+// module has finished installing its message listener.  The parent validates
+// the origin and iframe source before replying.
+const CONTROL_PARENT_ORIGIN = 'https://ai.syntarus.com';
+function announceControlReady() {
+  if (window.parent === window) return;
+  window.parent.postMessage({ type: 'smara-control-ready' }, CONTROL_PARENT_ORIGIN);
+}
+announceControlReady();
+window.addEventListener('pageshow', announceControlReady);
 account.value = localStorage.getItem('smara-account') || account.value;
 account.addEventListener('change', () => { localStorage.setItem('smara-account', account.value.trim()); refresh(); });
 
@@ -46,9 +58,11 @@ async function refresh() {
 // no signing key, session cookie, or account identifier is exposed to this app.
 window.addEventListener('message', (event) => {
   if (event.origin !== 'https://ai.syntarus.com') return;
+  if (event.source !== window.parent) return;
   const data = event.data;
   if (!data || data.type !== 'smara-control-token' || typeof data.token !== 'string') return;
   state.bridgeToken = data.token;
+  window.parent.postMessage({ type: 'smara-control-token-ack' }, CONTROL_PARENT_ORIGIN);
   maybeShowCliApproval();
   refresh();
 });
