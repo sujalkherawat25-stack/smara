@@ -75,17 +75,20 @@ progress but never model chain-of-thought or raw upstream error strings.
 
 ## First research workflow
 
-`POST /v1/research` accepts a question and one to twelve explicitly supplied
-public HTTP(S) source URLs. The worker retrieves only safe public text/HTML
+`POST /v1/research` accepts a question and optionally up to twelve explicitly
+supplied public HTTP(S) source URLs. If no URLs are supplied, the first task
+step uses the configured provider-neutral search adapter to discover public
+sources before retrieval. Configure `SMARA_SEARCH_PROVIDER`,
+`SMARA_SEARCH_API_KEY`, and `SMARA_SEARCH_URL` on the server; the provider key
+never leaves the API process. The worker retrieves only safe public text/HTML
 sources, records failures rather than inventing content, hashes each retrieved
 source, verifies the usable evidence, and writes a cited Markdown artifact.
 
 - `GET /v1/research/{task_id}/evidence` returns the durable evidence ledger.
 - `GET /v1/tasks/{task_id}/artifacts` returns the cited report artifact.
 
-This first slice does not discover sources automatically, use an LLM to infer
-claims, or deliver reports externally. Those are separate, approval-gated
-capabilities.
+This slice does not use an LLM to infer claims or deliver reports externally.
+Those remain separate, approval-gated capabilities.
 
 ## Integrations and approvals
 

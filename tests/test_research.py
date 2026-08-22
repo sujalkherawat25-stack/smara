@@ -4,6 +4,7 @@ from pathlib import Path
 import httpx
 
 from smara.research import ResearchExecutor
+from smara.research_tools import SearchHit
 from smara.store import TaskStore
 from smara.syntarus_adapter import SyntarusMemory
 from smara.worker import run_once
@@ -62,3 +63,33 @@ def test_research_worker_writes_only_verified_report_to_memory(tmp_path: Path, m
     assert fake.write["metadata"]["memory_kind"] == "verified_research"
     assert fake.write["metadata"]["workspace_id"] == "project-a"
     assert fake.write["run_id"].startswith("run_")
+
+
+def test_research_graph_discovers_sources_before_retrieval(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create_research("acct_1", "project-a", "Discovered evidence", "Which source explains solar energy?", [])
+
+    class FakeSearch:
+        async def search(self, query, **_kwargs):
+            assert "solar" in query
+            return [SearchHit("https://example.com/source", "Primary Source", "Solar evidence", "test")]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/html"}, text="<html><title>Primary Source</title><body>Solar energy produces electricity from sunlight. This discovered example source has enough readable text to support a transparent evidence ledger and deterministic report generation without invented claims.</body></html>")
+
+    async def execute():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=False) as client:
+            executor = ResearchExecutor(store, client, FakeSearch())
+            names = []
+            for _ in range(4):
+                step = store.claim_one("test-worker")
+                assert step
+                names.append(step["name"])
+                outcome = await executor.run_step(step)
+                store.complete_step(step["step_id"], "acct_1", outcome.text)
+            return names
+
+    assert asyncio.run(execute()) == ["research.discover_sources", "research.fetch_sources", "research.verify_evidence", "research.write_report"]
+    evidence = store.evidence(task["id"], "acct_1")
+    assert evidence[0]["status"] == "verified"
+    assert store.get(task["id"], "acct_1")["status"] == "completed"

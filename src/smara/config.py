@@ -36,6 +36,10 @@ class Settings:
     llm_provider: str = os.getenv("SMARA_LLM_PROVIDER", "configured model provider")
     cli_token_secret: str = os.getenv("SMARA_CLI_TOKEN_SECRET", "")
     cli_token_ttl_days: int = int(os.getenv("SMARA_CLI_TOKEN_TTL_DAYS", "30"))
+    search_provider: str = os.getenv("SMARA_SEARCH_PROVIDER", "brave")
+    search_api_key: str = os.getenv("SMARA_SEARCH_API_KEY", "")
+    search_url: str = os.getenv("SMARA_SEARCH_URL", "https://api.search.brave.com/res/v1/web/search")
+    search_timeout_seconds: float = float(os.getenv("SMARA_SEARCH_TIMEOUT_SECONDS", "12"))
 
 
 settings = Settings()

@@ -326,15 +326,15 @@ class TaskStore:
 
     def create_research(self, account_id: str, workspace_id: str, title: str, question: str, sources: list[str]) -> dict:
         task_id, run_id, now = f"task_{uuid.uuid4().hex}", f"run_{uuid.uuid4().hex}", _now()
-        step_ids = [f"step_{uuid.uuid4().hex}" for _ in range(3)]
-        steps = ("research.fetch_sources", "research.verify_evidence", "research.write_report")
+        steps = (("research.fetch_sources", "research.verify_evidence", "research.write_report") if sources else ("research.discover_sources", "research.fetch_sources", "research.verify_evidence", "research.write_report"))
+        step_ids = [f"step_{uuid.uuid4().hex}" for _ in steps]
         with self._connect() as c:
             c.execute("INSERT INTO tasks(id,account_id,workspace_id,title,objective,status,requires_approval,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", (task_id, account_id, workspace_id, title, question, "queued", False, now, now))
             c.execute("INSERT INTO task_runs(id,task_id,attempt,status,created_at) VALUES(?,?,?,?,?)", (run_id, task_id, 1, "queued", now))
             for ordinal, (step_id, name) in enumerate(zip(step_ids, steps), start=1):
                 c.execute("INSERT INTO task_steps(id,task_id,task_run_id,ordinal,name,status,idempotency_key,lease_owner,lease_expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)", (step_id, task_id, run_id, ordinal, name, "queued", f"task:{task_id}:step:{ordinal}", None, None, now))
-            c.execute("INSERT INTO task_step_dependencies VALUES(?,?)", (step_ids[1], step_ids[0]))
-            c.execute("INSERT INTO task_step_dependencies VALUES(?,?)", (step_ids[2], step_ids[1]))
+            for parent, child in zip(step_ids, step_ids[1:]):
+                c.execute("INSERT INTO task_step_dependencies VALUES(?,?)", (child, parent))
             for source in sources:
                 c.execute(
                     "INSERT INTO research_evidence(id,task_id,url,status,created_at) VALUES(?,?,?,?,?)",
@@ -343,6 +343,16 @@ class TaskStore:
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.created", '{"source":"research_api"}', now))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "research.planned", f'{{"source_count":{len(sources)}}}', now))
         return self.get(task_id, account_id)
+
+    def add_evidence(self, task_id: str, account_id: str, url: str, *, title: str | None = None) -> bool:
+        """Add a discovered source exactly once and preserve task ownership."""
+        self.get(task_id, account_id)
+        with self._connect() as c:
+            result = c.execute(
+                "INSERT INTO research_evidence(id,task_id,url,status,title,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(task_id,url) DO NOTHING",
+                (f"evidence_{uuid.uuid4().hex}", task_id, url, "pending", title, _now()),
+            )
+            return result.rowcount == 1
 
     def evidence(self, task_id: str, account_id: str) -> list[dict]:
         self.get(task_id, account_id)

@@ -1095,3 +1095,29 @@ Next: add the first independent research tool family (web search, safe URL
 retrieval, source verification, and citations) behind Smara's provider-neutral
 tool boundary, then connect it to the existing research evidence ledger without
 importing Memento or MemoryOS modules.
+
+### 2026-08-22 — Memento extraction slice 5: provider-neutral research discovery
+
+Moved the first research capability behind Smara-owned boundaries:
+
+- added a small `research_tools` registry with Brave and Serper HTTP adapters;
+- added bounded public-URL retrieval as a reusable tool while preserving the
+  existing SSRF, redirect, content-type, size, excerpt, and hash checks;
+- allowed `POST /v1/research` to omit source URLs, which adds a durable
+  `research.discover_sources` graph step before fetch, verification, and report;
+- deduplicated discovered URLs into the existing evidence ledger, so every
+  source still receives a status, content hash, claim, confidence, and citation;
+- kept search credentials server-side and documented the four search settings;
+  no provider key is returned to clients or written to Syntarus memory; and
+- added focused adapter, missing-configuration, and discovery-graph tests.
+
+Verified: images rebuilt, all Compose services healthy, live no-URL research
+task created the four-step discovery graph and was cancelled safely, and the
+complete clean-container suite passes **38 tests**. The only warnings are the
+pre-existing short test JWT key and bind-mounted pytest-cache warnings. A real
+search provider key is still required for production discovery; explicit source
+URL research remains available without one.
+
+Next: expose research progress/evidence more clearly in the Web and CLI, then
+add source-level verification rules (publication date, domain policy, and
+cross-source agreement) before any LLM synthesis is introduced.

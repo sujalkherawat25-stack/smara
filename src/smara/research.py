@@ -67,12 +67,53 @@ class ResearchStepResult:
     verified_evidence_count: int = 0
 
 
+@dataclass(frozen=True)
+class RetrievedSource:
+    title: str
+    excerpt: str
+    content_sha256: str
+    retrieved_at: str
+
+
+async def fetch_public_source(client: httpx.AsyncClient, initial_url: str) -> RetrievedSource:
+    """Read one public HTML/text source with redirect and size limits."""
+    current_url = initial_url
+    for _ in range(5):
+        if not _is_public_http_url(current_url):
+            raise ValueError("Source URL or redirect target is not publicly routable HTTP(S).")
+        response = await client.get(current_url)
+        if response.is_redirect:
+            location = response.headers.get("location")
+            if not location:
+                raise ValueError("Source returned a redirect without a location.")
+            current_url = urljoin(current_url, location)
+            continue
+        response.raise_for_status()
+        content_type = response.headers.get("content-type", "").lower()
+        raw = response.content[:MAX_SOURCE_BYTES]
+        if len(response.content) > MAX_SOURCE_BYTES:
+            raise ValueError("Source exceeded the 1 MB retrieval limit.")
+        if "html" not in content_type and not content_type.startswith("text/plain"):
+            raise ValueError(f"Unsupported source content type: {content_type or 'unknown'}")
+        extracted = _TextExtractor()
+        extracted.feed(raw.decode(response.encoding or "utf-8", errors="replace"))
+        excerpt = re.sub(r"\s+", " ", html.unescape(" ".join(extracted.parts))).strip()[:MAX_EXCERPT_CHARS]
+        if len(excerpt) < 80:
+            raise ValueError("Source did not contain enough readable text to cite.")
+        title = extracted.title.strip()[:500] or urlparse(str(response.url)).hostname or initial_url
+        return RetrievedSource(title, excerpt, hashlib.sha256(raw).hexdigest(), _now())
+    raise ValueError("Source exceeded the redirect limit.")
+
+
 class ResearchExecutor:
-    def __init__(self, store: TaskStore, http_client: httpx.AsyncClient | None = None):
+    def __init__(self, store: TaskStore, http_client: httpx.AsyncClient | None = None, search_tool=None):
         self._store = store
         self._http = http_client
+        self._search_tool = search_tool
 
     async def run_step(self, task: dict) -> ResearchStepResult:
+        if task["name"] == "research.discover_sources":
+            return await self._discover_sources(task)
         if task["name"] == "research.fetch_sources":
             return await self._fetch_sources(task)
         if task["name"] == "research.verify_evidence":
@@ -80,6 +121,18 @@ class ResearchExecutor:
         if task["name"] == "research.write_report":
             return self._write_report(task)
         raise ValueError(f"Unsupported research step: {task['name']}")
+
+    async def _discover_sources(self, task: dict) -> ResearchStepResult:
+        from .research_tools import ResearchToolError, WebSearchTool
+        try:
+            hits = await (self._search_tool or WebSearchTool()).search(task["objective"], max_results=5)
+        except ResearchToolError as exc:
+            raise ValueError(str(exc)) from exc
+        added = sum(self._store.add_evidence(task["id"], task["account_id"], hit.url, title=hit.title) for hit in hits)
+        self._store.append_event(task["id"], "research.sources_discovered", f'{{"found":{len(hits)},"added":{added}}}')
+        if not added:
+            raise ValueError("The configured web-search provider returned no usable public sources.")
+        return ResearchStepResult(f"Discovered {added} public source(s) for the evidence ledger.")
 
     async def _fetch_sources(self, task: dict) -> ResearchStepResult:
         evidence = self._store.evidence(task["id"], task["account_id"])
@@ -94,21 +147,8 @@ class ResearchExecutor:
                     self._store.update_evidence(item["id"], task["id"], status="blocked", error="Only publicly routable HTTP(S) source URLs are allowed.")
                     continue
                 try:
-                    response = await self._safe_get(client, item["url"])
-                    response.raise_for_status()
-                    content_type = response.headers.get("content-type", "").lower()
-                    raw = response.content[:MAX_SOURCE_BYTES]
-                    if len(response.content) > MAX_SOURCE_BYTES:
-                        raise ValueError("Source exceeded the 1 MB retrieval limit.")
-                    if "html" not in content_type and not content_type.startswith("text/plain"):
-                        raise ValueError(f"Unsupported source content type: {content_type or 'unknown'}")
-                    extracted = _TextExtractor()
-                    extracted.feed(raw.decode(response.encoding or "utf-8", errors="replace"))
-                    excerpt = re.sub(r"\s+", " ", html.unescape(" ".join(extracted.parts))).strip()[:MAX_EXCERPT_CHARS]
-                    if len(excerpt) < 80:
-                        raise ValueError("Source did not contain enough readable text to cite.")
-                    title = extracted.title.strip()[:500] or urlparse(str(response.url)).hostname or item["url"]
-                    self._store.update_evidence(item["id"], task["id"], status="fetched", title=title, retrieved_at=_now(), content_sha256=hashlib.sha256(raw).hexdigest(), excerpt=excerpt)
+                    source = await fetch_public_source(client, item["url"])
+                    self._store.update_evidence(item["id"], task["id"], status="fetched", title=source.title, retrieved_at=source.retrieved_at, content_sha256=source.content_sha256, excerpt=source.excerpt)
                     fetched += 1
                 except (httpx.HTTPError, ValueError) as exc:
                     self._store.update_evidence(item["id"], task["id"], status="failed", error=str(exc)[:1000])
@@ -117,21 +157,6 @@ class ResearchExecutor:
                 await client.aclose()
         self._store.append_event(task["id"], "research.sources_retrieved", f'{{"fetched":{fetched}}}')
         return ResearchStepResult(f"Retrieved {fetched} source(s); failed or blocked sources remain visible in the evidence ledger.")
-
-    async def _safe_get(self, client: httpx.AsyncClient, initial_url: str) -> httpx.Response:
-        current_url = initial_url
-        for _ in range(5):
-            if not _is_public_http_url(current_url):
-                raise ValueError("Redirect target is not a publicly routable HTTP(S) URL.")
-            response = await client.get(current_url)
-            if response.is_redirect:
-                location = response.headers.get("location")
-                if not location:
-                    raise ValueError("Source returned a redirect without a location.")
-                current_url = urljoin(current_url, location)
-                continue
-            return response
-        raise ValueError("Source exceeded the redirect limit.")
 
     def _verify_evidence(self, task: dict) -> ResearchStepResult:
         evidence = self._store.evidence(task["id"], task["account_id"])

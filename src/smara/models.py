@@ -80,7 +80,7 @@ class ResearchTaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     question: str = Field(min_length=5, max_length=20_000)
     workspace_id: str = Field(default="default", min_length=1, max_length=128)
-    sources: list[AnyHttpUrl] = Field(min_length=1, max_length=12)
+    sources: list[AnyHttpUrl] = Field(default_factory=list, max_length=12)
 
 
 class EvidenceView(BaseModel):
