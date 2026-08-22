@@ -30,6 +30,9 @@ class Settings:
     rate_limit_per_minute: int = int(os.getenv("SMARA_RATE_LIMIT_PER_MINUTE", "120"))
     sentry_dsn: str = os.getenv("SMARA_SENTRY_DSN", "")
     redis_url: str = os.getenv("SMARA_REDIS_URL", "")
+    llm_base_url: str = os.getenv("SMARA_LLM_BASE_URL", "")
+    llm_api_key: str = os.getenv("SMARA_LLM_API_KEY", "")
+    llm_model: str = os.getenv("SMARA_LLM_MODEL", "")
 
 
 settings = Settings()

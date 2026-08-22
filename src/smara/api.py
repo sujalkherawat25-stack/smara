@@ -16,8 +16,10 @@ import httpx
 import jwt
 
 from .config import settings
-from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, TaskCreate, TaskView
+from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, TaskCreate, TaskView
 from .store import open_task_store
+from .agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime
+from .syntarus_adapter import SyntarusMemory
 from .vault import SecretVault
 from . import integration_oauth
 from . import push
@@ -39,6 +41,22 @@ source_web_dir = Path(__file__).resolve().parents[2] / "web"
 web_dir = source_web_dir if source_web_dir.is_dir() else Path("/app/web")
 if web_dir.is_dir():
     app.mount("/app", StaticFiles(directory=web_dir, html=True), name="smara-web")
+
+
+def _agent_runtime() -> SmaraAgentRuntime:
+    """Construct the runtime without importing any MemoryOS implementation."""
+    memory = None
+    if settings.syntarus_api_key:
+        from syntarus import AsyncMemoryClient
+        memory = SyntarusMemory(AsyncMemoryClient(settings.syntarus_api_key, base_url=settings.syntarus_base_url))
+    return SmaraAgentRuntime(
+        OpenAICompatibleProvider(
+            base_url=settings.llm_base_url,
+            api_key=settings.llm_api_key,
+            model=settings.llm_model,
+        ),
+        memory=memory,
+    )
 
 @app.get("/", include_in_schema=False)
 async def web_root():
@@ -153,6 +171,28 @@ async def readyz():
         return {"ok": True}
     except Exception:
         raise HTTPException(503, "Smara database is not ready.")
+
+
+@app.post("/v1/chat", response_model=ChatResponse)
+async def chat(body: ChatRequest, user: str = Depends(account_id)):
+    """Short direct chat; durable tool work must be created as a task instead."""
+    runtime = _agent_runtime()
+    try:
+        turn = await runtime.chat(
+            account_id=user,
+            workspace_id=body.workspace_id,
+            message=body.message,
+            conversation_id=body.conversation_id,
+        )
+        return ChatResponse(**turn.__dict__)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(502, "The configured Smara model provider rejected this chat request.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    finally:
+        memory = getattr(runtime, "_memory", None)
+        if memory is not None:
+            await memory.aclose()
 
 @app.post("/v1/tasks", response_model=TaskView, status_code=201)
 async def create_task(body: TaskCreate, user: str = Depends(account_id)):

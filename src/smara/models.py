@@ -44,6 +44,20 @@ class TaskView(BaseModel):
     updated_at: datetime
 
 
+class ChatRequest(BaseModel):
+    """A short conversational turn; durable work belongs in TaskCreate."""
+    message: str = Field(min_length=1, max_length=20_000)
+    workspace_id: str = Field(default="default", min_length=1, max_length=128)
+    conversation_id: str | None = Field(default=None, max_length=160)
+
+
+class ChatResponse(BaseModel):
+    conversation_id: str
+    message: str
+    memory_used: bool
+    model: str | None = None
+
+
 class ApprovalDecision(BaseModel):
     approved: bool
     note: str = Field(default="", max_length=2_000)

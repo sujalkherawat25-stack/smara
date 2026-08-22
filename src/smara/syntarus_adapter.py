@@ -49,6 +49,22 @@ class SyntarusMemory:
         result = await self._client.search(task["objective"], user_id=scope.user_id, top_k=8, filters={"workspace_id": scope.workspace_id, "status": "verified"})
         return str(result.get("context", result.get("context_string", "")))[:12_000]
 
+    async def context_for_conversation(self, query: str, *, account_id: str, workspace_id: str) -> str:
+        """Conversation retrieval through the same SDK-only boundary.
+
+        Workspace metadata is transmitted for the future server-enforced scoped
+        retrieval release. Until that platform feature exists it is provenance,
+        not an authorization guarantee; account isolation remains the API's
+        enforced boundary.
+        """
+        result = await self._client.search(
+            query,
+            user_id=account_id,
+            top_k=8,
+            filters={"workspace_id": workspace_id, "status": "verified"},
+        )
+        return str(result.get("context", result.get("context_string", "")))[:12_000]
+
     async def remember_completion(self, task: dict, result: str) -> dict:
         # Only a verified final outcome is written; task logs remain in Smara.
         scope = MemoryScope(task["account_id"], task["workspace_id"], task["id"], task.get("task_run_id", task["id"]))
@@ -69,3 +85,8 @@ class SyntarusMemory:
             metadata=metadata,
             idempotency_key=f"smara-research-{task['id']}",
         )
+
+    async def aclose(self) -> None:
+        close = getattr(self._client, "aclose", None)
+        if close is not None:
+            await close()

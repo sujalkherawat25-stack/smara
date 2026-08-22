@@ -41,6 +41,24 @@ never sent to an LLM automatically.
 service a server-side Syntarus project key; never send it to web, phone, or
 desktop clients.
 
+## CLI and extracted agent runtime
+
+`smara` is a thin client of this API, not a second local agent or memory store.
+It is the first migration surface for Memento's agent behaviour and lets us
+test the same task graph used by Web, Desktop, and Phone:
+
+```powershell
+smara --api http://127.0.0.1:8080 --dev-account acct_local tasks
+smara --api http://127.0.0.1:8080 --dev-account acct_local run "Prepare a cited report"
+smara --api http://127.0.0.1:8080 --dev-account acct_local task watch task_xxx
+```
+
+`smara ask "..."` is intentionally a short direct conversation. It requires a
+configured OpenAI-compatible provider (`SMARA_LLM_*`) and can retrieve context
+only through the Syntarus SDK adapter. Work that takes time, needs tools,
+creates an artifact, or needs approval must use `smara run` so it survives a
+closed terminal or browser.
+
 ## First research workflow
 
 `POST /v1/research` accepts a question and one to twelve explicitly supplied

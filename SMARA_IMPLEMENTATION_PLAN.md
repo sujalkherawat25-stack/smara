@@ -720,3 +720,300 @@ and deletion, and proof that sandbox execution cannot begin before approval.
 The existing live Compose deployment was verified before the Redis image
 rebuild; its final Redis runtime check must be repeated once the production
 image rebuild finishes on the target host.
+
+### 2026-08-20 — Smara Control integration completed
+
+Connected the independent Smara Control service to the existing Smara web
+without exposing control credentials to the browser:
+
+- the web app now opens Control from its sidebar or Settings workspace area;
+- the backend issues a short-lived, account-bound bridge token only to an
+  authenticated Smara session;
+- Control accepts that token through a tightly scoped `postMessage` handshake
+  and uses it for its API calls;
+- direct visits to `control-staging.syntarus.com` remain denied by design;
+- the Control app is frameable only by `https://ai.syntarus.com`, while other
+  routes remain protected; and
+- a cache-busting embed URL prevents old frame-blocking browser responses from
+  hiding the newly allowed Control app.
+
+Verified: public Smara health, Control health, CSP/frame policy, the rendered
+frontend bundle, and a temporary end-to-end authenticated bridge request all
+passed. The Control repository changes are pushed; the MemoryOS working tree
+remains intentionally unmerged because it contains unrelated user changes.
+
+## Next implementation focus: tighten Smara Web first
+
+The next work should make the web app the dependable command centre before
+expanding desktop execution:
+
+1. Replace remaining development identity paths with the production Smara
+   gateway/session everywhere in the web UI.
+2. Make the task board fully live: SSE/WebSocket event fan-out, reconnect and
+   replay from the append-only event cursor, optimistic updates with safe
+   rollback, and visible worker/device/integration health.
+3. Finish research UX: source ledger, claim-to-citation links, failed-source
+   explanations, artifact versioning, and export/download.
+4. Finish approval UX: clear side-effect preview, editable payload, expiry,
+   cancellation, and the same approval state on web, phone, and desktop.
+5. Add workspace/task memory controls that reflect the actual Syntarus SDK
+   contract. Until the provider enforces metadata filters, show the limitation
+   and never imply that a filter is security isolation.
+6. Add web-level reliability tests: refresh during a running task, reconnect
+   after network loss, duplicate-submit/idempotency, account isolation, and
+   approval/cancellation race cases.
+7. Repeat the production Redis limiter check and complete the external Phase 7
+   operations: gateway/WAF, secret manager and rotation, encrypted off-host
+   backup/restore drill, Sentry alerts, and sandbox wiring for only approved
+   risky steps.
+
+## How the web–Control–desktop connection works
+
+In simple terms:
+
+```text
+You sign in to Smara Web
+        |
+        | short-lived proof: "this is account X"
+        v
+Smara Control panel
+        |
+        | creates tasks, shows events, approvals, evidence
+        v
+Hosted Smara API + workers
+        |
+        | if a step needs the computer, wait for the paired desktop
+        v
+Smara Desktop executor
+        |
+        | performs only the declared, approved local capability
+        v
+Result/artifact -> task timeline -> web/phone
+```
+
+Control is the cockpit, not a second account system. The web session proves
+who the user is; the short-lived bridge token lets the embedded Control panel
+act for that account; the hosted API remains the authority for tasks, leases,
+approvals, and audit events. Desktop is a separately paired executor with its
+own revocable device token and capability list. It never receives the user's
+master credentials and it never opens a public inbound port.
+
+The practical user flow is: create or inspect a task in Smara Web, watch the
+same events in Control, approve any risky step from the web/phone/desktop, and
+let a named desktop execute only when the task explicitly requires a local
+file, terminal, browser, or other declared capability. The next web phase will
+make this flow smooth and observable before adding more desktop powers.
+
+## Product UX decision: one Smara Web, internal Control services
+
+The separate Control page and iframe are transitional development surfaces,
+not the final product experience. The final Smara Web must present one unified
+application with native screens for:
+
+```text
+Chat | Tasks | Research/Evidence | Approvals | Devices |
+Integrations | Memory | Settings
+```
+
+During stabilization, the Control service may remain a separate internal
+backend because its task, approval, executor, and integration contracts can be
+tested and rolled back independently of the chat and MemoryOS pipeline. This
+is an implementation boundary, not a second user-facing product.
+
+### Native web consolidation work
+
+1. Rebuild the Control task board as native Smara Web components.
+2. Move approvals, evidence, artifacts, device status, integrations, and
+   memory controls into the existing Smara navigation and settings screens.
+3. Use the authenticated Smara session directly through a same-origin server
+   boundary; do not expose bridge secrets to browser code.
+4. Remove the Control iframe, separate Control sidebar item, and direct
+   Control-page navigation only after native screens pass the same live-task,
+   approval, account-isolation, and reconnect tests.
+5. Keep the backend service boundary until production metrics show that a
+   consolidation is safe; merging frontend screens does not require changing
+   the Syntarus memory pipeline.
+
+### Completion criteria
+
+Users should be able to use Smara without knowing that a Control service ever
+existed separately. Chat remains the conversational entry point; Tasks,
+Research, Approvals, Devices, Integrations, Memory, and Settings become the
+operational surfaces for inspecting and controlling the same durable task
+state.
+
+## Memento-to-Smara migration: make Smara the independent agent product
+
+### Decision
+
+The current Memento agent implementation lives inside the sensitive MemoryOS
+repository and serves `ai.syntarus.com`. Smara will become the independent
+agent product, while MemoryOS becomes the Syntarus memory platform only.
+
+This is an extraction, not a direct copy of `app/memento/`. Memento currently
+imports MemoryOS internals such as fused retrieval, ingestion, Redis state,
+and infrastructure clients. Copying those imports into Smara would recreate
+the coupling this architecture is intended to remove.
+
+### Target responsibility split
+
+```text
+memoryos repository                         smara repository
+-------------------                         ----------------
+Syntarus Memory API                          Agent runtime and chat API
+Syntarus SDK                                 Task graph, workers, scheduler
+Memory storage/retrieval pipeline            Web, CLI, Desktop, Phone clients
+Qdrant / Neo4j / Redis memory operations     Tool and integration registry
+Memory extraction/consolidation workers      Approvals, artifacts, events
+                                              packages/syntarus-adapter
+```
+
+Smara must use the public Syntarus SDK/API only. It must not import MemoryOS
+Python modules or directly access Qdrant, Neo4j, or MemoryOS Redis state.
+
+### Public routing after cutover
+
+The public name remains stable for users:
+
+```text
+today
+ai.syntarus.com -> MemoryOS frontend + embedded Memento API
+
+target
+ai.syntarus.com -> Smara Web + Smara API/workers -> Syntarus SDK -> MemoryOS API
+```
+
+The domain is not coupled to the source repository. Existing Syntarus public
+API/SDK endpoints remain available independently and must not be broken by the
+Smara cutover.
+
+### New Smara runtime boundary
+
+Create a provider-neutral runtime in Smara with no MemoryOS imports:
+
+```text
+packages/agent-runtime/
+  runtime                one bounded agent/task-step reasoning loop
+  provider-router        configured LLM/provider selection and fallback
+  tool-registry          allowed tools and schemas
+  context-builder        prompt, task, artifact, and memory assembly
+  policies               approval, capability, cost, and time policies
+  streaming              normalized token/event output
+  evaluation             repeatable task and safety evaluations
+
+packages/syntarus-adapter/
+  implements MemoryPort through the published Syntarus SDK only
+```
+
+The runtime depends on stable interfaces (`MemoryPort`, `TaskPort`,
+`ToolPort`, `EventPort`, and `ArtifactPort`) rather than concrete databases or
+MemoryOS modules.
+
+### Feature extraction sequence
+
+Port Memento behavior in tested slices, never as one large migration:
+
+1. streamed direct chat and provider/model configuration;
+2. scoped memory retrieval through `syntarus-adapter`;
+3. verified memory write-back through `syntarus-adapter`;
+4. provider-neutral tool registry and safe built-in tools;
+5. cited research/evidence workflow and artifacts;
+6. approvals, task graph execution, retries, and cancellation;
+7. Gmail, Calendar, Telegram, and other integration adapters;
+8. attachments, voice, and multimodal processing;
+9. scheduler/proactive delivery and desktop executor routing.
+
+For each slice, add contract tests and behavior comparisons before moving to
+the next one. The source Memento implementation remains unchanged while the
+equivalent Smara slice is being proven.
+
+### Identity and existing memory continuity
+
+Syntarus memories are already keyed by Memento account IDs. During migration:
+
+- export only the account identity records required by Smara;
+- preserve existing `account_id` values exactly;
+- issue new Smara sessions against those same account IDs;
+- allow a fresh sign-in at cutover rather than attempting to preserve old
+  browser session cookies; and
+- do not copy/rewrite memory contents, Qdrant payloads, or Neo4j records.
+
+Preserving the account ID allows the new Smara agent to retrieve the same
+existing Syntarus memory without altering the sensitive memory pipeline.
+
+### Shadow testing and cutover
+
+Before switching public traffic, use shadow mode for selected internal/beta
+accounts:
+
+```text
+incoming request
+  -> existing Memento produces the real response
+  -> Smara receives a safe shadow copy
+       -> compare context retrieval, tool plan, result quality, latency, cost
+       -> never perform external actions in shadow mode
+```
+
+Then perform a controlled beta cutover of `ai.syntarus.com` to Smara Web and
+Smara API. Keep the previous Memento deployment available for immediate
+rollback until the new chat, memory, tasks, approvals, integrations, and
+desktop path meet release gates.
+
+Only after the cutover is stable:
+
+1. retire the separate Control iframe and user-facing Control site;
+2. retain task-control services internally where they remain useful;
+3. remove Memento agent routes/code from MemoryOS in a separate, reviewed
+   change; and
+4. keep all Syntarus API/SDK compatibility guarantees intact.
+
+### First implementation milestone after current work
+
+Build the Smara CLI as a thin authenticated client of the new Smara API and
+task graph. It is the primary agent test harness and power-user interface:
+
+```text
+smara login
+smara ask "..."
+smara run "..."
+smara tasks list
+smara task watch <task-id>
+smara task approve <approval-id>
+smara task cancel <task-id>
+smara desktop pair
+```
+
+The CLI must contain no independent memory database or agent loop. A task
+started through CLI must remain visible and resumable through Smara Web, Phone,
+and Desktop after the terminal is closed.
+
+### 2026-08-22 — Memento extraction slice 1: independent runtime boundary and CLI
+
+Started the Memento-to-Smara migration without copying MemoryOS imports:
+
+- added `smara.agent_runtime`, a small provider-neutral direct-conversation
+  runtime modelled after the safe retrieve-then-answer boundary of Memento;
+- added an OpenAI-compatible provider adapter, configured only through Smara
+  deployment environment variables, so Groq/xAI/OpenAI-compatible providers
+  can be selected without changing the task system;
+- extended the existing Syntarus-only adapter with conversation context lookup
+  and explicit client cleanup; no Qdrant, Neo4j, Redis, or MemoryOS module is
+  imported by the new runtime;
+- added `POST /v1/chat` for bounded direct chat. It fails clearly when no
+  provider is configured and tells the runtime to avoid claiming external work;
+- added the installable `smara` CLI with `ask`, `run`, `tasks`, `task show`,
+  `task watch`, `task approve`, `task deny`, and `task cancel`; and
+- documented that the CLI is a thin HTTP client of the hosted API/task graph,
+  never a second local agent or memory store.
+
+Verified: three focused runtime/CLI tests pass, Python compilation passes, and
+the CLI command help renders. The full repository test suite could not run in
+the shared local virtual environment because it has an incompatible preexisting
+FastAPI/Starlette pair; the repository Docker verification is pending Docker
+Desktop being started. This is an environment issue, not treated as a passing
+full-suite result.
+
+Next: add authenticated CLI device/login flow through the existing Smara/Memento
+identity bridge, then extract Memento's provider error classification and
+streaming event contract into Smara. Only after those are tested should the
+tool registry and Memento research behavior be ported.
