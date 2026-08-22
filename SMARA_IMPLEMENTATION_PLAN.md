@@ -1576,3 +1576,15 @@ handoff for the new device login; and a real isolated hosted sandbox backend.
 Operational gates still block cutover: integration key ring, Sentry, VAPID,
 off-host encrypted backups, distributed rate limits, and server-enforced
 Syntarus metadata isolation.
+
+### 2026-08-22 — Sandbox capability gate
+
+The audit also verified that `sandbox.py` is a bounded Docker command recipe,
+not a deployed executor: the Smara worker image intentionally has no Docker
+CLI or host socket. Mounting `/var/run/docker.sock` would give an untrusted
+task a dangerous path to the host, so that shortcut is rejected. The worker
+now accepts `SMARA_SANDBOX_ENABLED=false` by default and excludes sandbox
+steps from live claims until a separately isolated sandbox service is deployed.
+Local tests can explicitly enable the recipe; production must provide a
+narrowly authenticated service with its own network, CPU, memory, PID, disk,
+and lifetime limits before enabling the setting.

@@ -335,7 +335,8 @@ class TaskStore:
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.cancel_requested", '{"source":"user"}', now))
         return self.get(task_id, account_id)
 
-    def claim_one(self, worker_id: str = "worker", lease_seconds: int = 60) -> dict | None:
+    def claim_one(self, worker_id: str = "worker", lease_seconds: int = 60,
+                  executor_kinds: tuple[str, ...] = ("hosted", "sandbox")) -> dict | None:
         with self._connect() as c:
             c.execute("BEGIN IMMEDIATE")
             now = _now()
@@ -346,9 +347,10 @@ class TaskStore:
                 c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL WHERE id=?", (item["id"],))
                 c.execute("UPDATE tasks SET status='queued',updated_at=? WHERE id=? AND status='running'", (now, item["task_id"]))
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", item["task_id"], "step.lease_expired", '{"recovered":true}', now))
-            row = c.execute("""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name, s.executor_kind, s.executor_payload
+            executor_clause = "s.executor_kind IN ('hosted','sandbox')" if set(executor_kinds) == {"hosted", "sandbox"} else "s.executor_kind IN ('hosted')"
+            row = c.execute(f"""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name, s.executor_kind, s.executor_payload
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
-              WHERE t.status IN ('queued','running') AND s.status='queued' AND s.executor_kind IN ('hosted','sandbox') AND (s.retry_at IS NULL OR s.retry_at <= ?) AND NOT EXISTS (
+              WHERE t.status IN ('queued','running') AND s.status='queued' AND {executor_clause} AND (s.retry_at IS NULL OR s.retry_at <= ?) AND NOT EXISTS (
                 SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id
                 WHERE d.step_id=s.id AND parent.status!='completed')
               ORDER BY t.created_at,s.ordinal LIMIT 1""", (now,)).fetchone()
@@ -774,7 +776,8 @@ class PostgresTaskStore(TaskStore):
                 due.append({"schedule_id": schedule["id"], "task_id": task_id, "account_id": schedule["account_id"]})
         return due
 
-    def claim_one(self, worker_id: str = "worker", lease_seconds: int = 60) -> dict | None:
+    def claim_one(self, worker_id: str = "worker", lease_seconds: int = 60,
+                  executor_kinds: tuple[str, ...] = ("hosted", "sandbox")) -> dict | None:
         """Atomically lease one ready step without competing workers colliding.
 
         The SQLite implementation uses ``BEGIN IMMEDIATE``. In Postgres the
@@ -792,9 +795,10 @@ class PostgresTaskStore(TaskStore):
                 c.execute("UPDATE tasks SET status='queued',updated_at=%s WHERE id=%s AND status='running'", (now, item["task_id"]))
                 c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", item["task_id"], "step.lease_expired", '{"recovered":true}', now))
 
-            row = c.execute("""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name, s.executor_kind, s.executor_payload
+            executor_clause = "s.executor_kind IN ('hosted','sandbox')" if set(executor_kinds) == {"hosted", "sandbox"} else "s.executor_kind IN ('hosted')"
+            row = c.execute(f"""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name, s.executor_kind, s.executor_payload
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
-              WHERE t.status IN ('queued','running') AND s.status='queued' AND s.executor_kind IN ('hosted','sandbox') AND (s.retry_at IS NULL OR s.retry_at <= %s) AND NOT EXISTS (
+              WHERE t.status IN ('queued','running') AND s.status='queued' AND {executor_clause} AND (s.retry_at IS NULL OR s.retry_at <= %s) AND NOT EXISTS (
                 SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id
                 WHERE d.step_id=s.id AND parent.status!='completed')
               ORDER BY t.created_at,s.ordinal

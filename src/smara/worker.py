@@ -45,8 +45,11 @@ async def _memory_write(memory: SyntarusMemory | None, task: dict, store: TaskSt
         store.append_event(task["id"], "memory.unavailable", json.dumps({"operation": "write"}))
 
 
-async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
-    task = store.claim_one()
+async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_enabled: bool | None = None) -> bool:
+    # ``None`` preserves local tests/development; the long-lived worker passes
+    # the explicit deployment setting, which defaults to false.
+    allowed = ("hosted", "sandbox") if sandbox_enabled is not False else ("hosted",)
+    task = store.claim_one(executor_kinds=allowed)
     if task is None:
         return False
     if task["status"] == "waiting_approval":
@@ -151,7 +154,7 @@ async def main() -> None:
         memory = SyntarusMemory(AsyncMemoryClient(settings.syntarus_api_key, base_url=settings.syntarus_base_url))
     try:
         while True:
-            worked = await run_once(store, memory)
+            worked = await run_once(store, memory, sandbox_enabled=settings.sandbox_enabled)
             await asyncio.sleep(0.2 if worked else 2)
     finally:
         if memory and hasattr(memory._client, "aclose"):

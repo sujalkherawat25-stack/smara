@@ -49,6 +49,8 @@ class Settings:
     capture_vision_base_url: str = os.getenv("SMARA_CAPTURE_VISION_BASE_URL", "")
     capture_vision_api_key: str = os.getenv("SMARA_CAPTURE_VISION_API_KEY", "")
     capture_vision_model: str = os.getenv("SMARA_CAPTURE_VISION_MODEL", "")
+    # Disabled until a separately isolated sandbox service is deployed.
+    sandbox_enabled: bool = os.getenv("SMARA_SANDBOX_ENABLED", "false").lower() == "true"
 
 
 settings = Settings()

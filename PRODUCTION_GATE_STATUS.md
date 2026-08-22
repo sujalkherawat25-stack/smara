@@ -29,6 +29,9 @@ has been cut over.
 - Account export/deletion, approval gates, bounded sandbox recipes, safe
   integration writes, dead-letter retention, and Syntarus SDK-only memory
   access are covered by the repository tests.
+- Sandbox execution is fail-closed in the live worker: `SMARA_SANDBOX_ENABLED`
+  defaults to false, and a disabled deployment does not claim sandbox steps.
+  This avoids the unsafe shortcut of mounting the host Docker socket.
 
 ## Blocked until deployment credentials/operations are supplied
 
@@ -48,6 +51,9 @@ has been cut over.
   secure cross-project isolation.
 - A real Windows paired-desktop smoke task, production Sentry event, and VAPID
   push delivery require their corresponding deployment credentials/devices.
+- The Docker sandbox command is not yet a live hosted executor. Before enabling
+  `SMARA_SANDBOX_ENABLED`, deploy a separate sandbox service with its own
+  runtime, resource limits, network policy, and request authentication.
 
 ## Cutover rule
 

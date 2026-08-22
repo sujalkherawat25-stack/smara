@@ -47,8 +47,17 @@ def test_sandbox_step_runs_only_after_durable_approval(tmp_path: Path, monkeypat
     }])
     called: list[str] = []
     monkeypatch.setattr("smara.worker.run_sandbox", lambda command: called.append(command) or "passed")
-    assert __import__("asyncio").run(run_once(store, None))
+    assert __import__("asyncio").run(run_once(store, None, sandbox_enabled=True))
     assert called == [] and store.get(task["id"], "acct_1")["status"] == "waiting_approval"
     store.decide(task["id"], "acct_1", True, "run it")
-    assert __import__("asyncio").run(run_once(store, None))
+    assert __import__("asyncio").run(run_once(store, None, sandbox_enabled=True))
     assert called == ["pytest -q"] and store.get(task["id"], "acct_1")["status"] == "completed"
+
+
+def test_sandbox_is_not_claimed_when_deployment_capability_is_disabled(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Check code", "Run a test", False, [{
+        "name": "sandbox.test", "executor_kind": "sandbox", "executor_payload": {"command": "pytest -q"},
+    }])
+    assert __import__("asyncio").run(run_once(store, None, sandbox_enabled=False)) is False
+    assert store.get(task["id"], "acct_1")["status"] == "queued"
