@@ -1017,3 +1017,30 @@ Next: add authenticated CLI device/login flow through the existing Smara/Memento
 identity bridge, then extract Memento's provider error classification and
 streaming event contract into Smara. Only after those are tested should the
 tool registry and Memento research behavior be ported.
+
+### 2026-08-22 — Memento extraction slice 2: safe streaming and provider errors
+
+Reused two proven Memento contracts without importing Memento infrastructure:
+
+- added provider-neutral error classification with stable client-facing kinds
+  (`invalid_key`, `no_credits`, `rate_limit`, `timeout`, `provider_down`, and
+  related cases); raw upstream errors are never sent to clients;
+- added a safe Server-Sent Event contract (`phase`, `status`, `token`, `done`,
+  `error`) for Smara direct chat. It deliberately exposes operational progress
+  but not chain-of-thought; and
+- added `POST /v1/chat/stream`. When no provider is configured it returns an
+  explicit `not_configured` event rather than an ambiguous failure or a hidden
+  fallback.
+
+Verified: Docker Desktop Compose stack rebuilt with API, worker, scheduler,
+integration worker, Postgres, and Redis healthy. A real durable task completed
+through API and worker with four stored events. The real stream endpoint
+returned correct SSE frames and safe `not_configured` handling. The complete
+Smara test suite ran inside a disposable clean production-image container:
+**33 passed**. The only warning was pytest cache permission on the bind mount.
+
+Next: authenticated CLI device/login flow using a new, narrowly scoped
+short-lived device-code/token contract that Memento can mint during the
+transition. Then extract the first Memento tool family (web research and source
+retrieval) into Smara's provider-neutral tool registry and connect it to the
+existing evidence-ledger task graph.

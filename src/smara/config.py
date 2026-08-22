@@ -33,6 +33,7 @@ class Settings:
     llm_base_url: str = os.getenv("SMARA_LLM_BASE_URL", "")
     llm_api_key: str = os.getenv("SMARA_LLM_API_KEY", "")
     llm_model: str = os.getenv("SMARA_LLM_MODEL", "")
+    llm_provider: str = os.getenv("SMARA_LLM_PROVIDER", "configured model provider")
 
 
 settings = Settings()

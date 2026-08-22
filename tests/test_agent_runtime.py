@@ -1,6 +1,7 @@
 import asyncio
 
 from smara.agent_runtime import SmaraAgentRuntime
+from smara import agent_events, llm_errors
 import httpx
 
 from smara.cli import _request, build_parser
@@ -58,3 +59,22 @@ def test_cli_request_is_a_thin_http_client():
     with httpx.Client(transport=httpx.MockTransport(handler), base_url="https://smara.test") as client:
         assert _request(client, "POST", "/v1/tasks", json={"title": "Test"}) == {"id": "task_1"}
     assert seen == {"method": "POST", "path": "/v1/tasks"}
+
+
+def test_provider_errors_have_stable_safe_client_contract():
+    error = type("ProviderError", (Exception,), {"status_code": 429})("rate limit reached")
+    kind, message = llm_errors.describe(error, provider="Test Provider")
+    assert kind == "rate_limit"
+    assert "Test Provider" in message
+    assert "rate limit reached" not in message
+    kind, message = llm_errors.describe(RuntimeError("No Smara chat provider is configured."))
+    assert kind == "not_configured"
+    assert "not configured" in message
+
+
+def test_stream_events_do_not_expose_reasoning_or_raw_errors():
+    assert '"type": "phase"' in agent_events.phase("retrieve")
+    assert '"type": "token"' in agent_events.token("A final answer")
+    error = agent_events.error("safe message", kind="timeout")
+    assert '"kind": "timeout"' in error
+    assert "reasoning" not in error

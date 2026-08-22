@@ -59,6 +59,11 @@ only through the Syntarus SDK adapter. Work that takes time, needs tools,
 creates an artifact, or needs approval must use `smara run` so it survives a
 closed terminal or browser.
 
+`POST /v1/chat/stream` provides the same direct turn as safe Server-Sent Events
+for Web and CLI clients. Its stable event names (`phase`, `status`, `token`,
+`done`, `error`) are adapted from Memento's proven contract. They expose useful
+progress but never model chain-of-thought or raw upstream error strings.
+
 ## First research workflow
 
 `POST /v1/research` accepts a question and one to twelve explicitly supplied

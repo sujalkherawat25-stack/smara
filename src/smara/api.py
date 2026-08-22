@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import httpx
@@ -19,6 +19,7 @@ from .config import settings
 from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, TaskCreate, TaskView
 from .store import open_task_store
 from .agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime
+from . import agent_events, llm_errors
 from .syntarus_adapter import SyntarusMemory
 from .vault import SecretVault
 from . import integration_oauth
@@ -193,6 +194,37 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
         memory = getattr(runtime, "_memory", None)
         if memory is not None:
             await memory.aclose()
+
+
+@app.post("/v1/chat/stream")
+async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
+    """SSE view of direct chat, using Memento-compatible safe event names."""
+    async def emit():
+        started_at = time.perf_counter()
+        runtime = _agent_runtime()
+        try:
+            yield agent_events.phase("retrieve")
+            yield agent_events.status("Retrieving relevant shared context")
+            turn = await runtime.chat(
+                account_id=user,
+                workspace_id=body.workspace_id,
+                message=body.message,
+                conversation_id=body.conversation_id,
+            )
+            yield agent_events.phase("answer")
+            yield agent_events.token(turn.message)
+            yield agent_events.done(memory_used=turn.memory_used, total_ms=agent_events.elapsed_ms(started_at))
+        except Exception as exc:
+            kind, message = llm_errors.describe(exc, provider=settings.llm_provider)
+            yield agent_events.error(message, kind=kind)
+        finally:
+            memory = getattr(runtime, "_memory", None)
+            if memory is not None:
+                await memory.aclose()
+
+    return StreamingResponse(
+        emit(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 @app.post("/v1/tasks", response_model=TaskView, status_code=201)
 async def create_task(body: TaskCreate, user: str = Depends(account_id)):
