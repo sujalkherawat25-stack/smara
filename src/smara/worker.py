@@ -21,6 +21,30 @@ from .integration_oauth import refresh_google
 from .capture_processing import process_capture
 
 
+async def _memory_context(memory: SyntarusMemory | None, task: dict, store: TaskStore) -> str:
+    """Memory enriches a task but never prevents the task from running."""
+    if memory is None:
+        return ""
+    try:
+        return await memory.context_for_task(task)
+    except Exception:
+        store.append_event(task["id"], "memory.unavailable", json.dumps({"operation": "search"}))
+        return ""
+
+
+async def _memory_write(memory: SyntarusMemory | None, task: dict, store: TaskStore, operation: str, **kwargs: object) -> None:
+    """Record memory write outages without turning a completed task into a retry."""
+    if memory is None:
+        return
+    try:
+        if operation == "research":
+            await memory.remember_verified_research(task, kwargs["report"], int(kwargs["evidence_count"]))
+        else:
+            await memory.remember_completion(task, str(kwargs["result"]))
+    except Exception:
+        store.append_event(task["id"], "memory.unavailable", json.dumps({"operation": "write"}))
+
+
 async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
     task = store.claim_one()
     if task is None:
@@ -29,8 +53,7 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
         return True
     try:
         context = ""
-        if memory is not None:
-            context = await memory.context_for_task(task)
+        context = await _memory_context(memory, task, store)
         if task["name"].startswith("research."):
             synthesizer = None
             if settings.research_synthesis_enabled:
@@ -40,8 +63,8 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
                     model=settings.llm_model,
                 )
             outcome = await ResearchExecutor(store, synthesizer=synthesizer).run_step(task)
-            if outcome.report and memory is not None:
-                await memory.remember_verified_research(task, outcome.report, outcome.verified_evidence_count)
+            if outcome.report:
+                await _memory_write(memory, task, store, "research", report=outcome.report, evidence_count=outcome.verified_evidence_count)
             store.complete_step(task["step_id"], task["account_id"], outcome.text)
             return True
         if task["name"] == "capture.process":
@@ -91,8 +114,7 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
                     tool_context=ToolContext(task["account_id"], task["workspace_id"], client, integration_runner, integration_requester),
                     event_hook=record,
                 )
-            if memory is not None:
-                await memory.remember_completion(task, result.text)
+            await _memory_write(memory, task, store, "completion", result=result.text)
             store.complete_step(task["step_id"], task["account_id"], result.text)
             return True
         if task.get("executor_kind") == "sandbox":
@@ -115,8 +137,7 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
         result = "Task accepted by Smara. Executor integration is required to perform external actions."
         if context:
             result += " Relevant shared memory was retrieved."
-        if memory is not None:
-            await memory.remember_completion(task, result)
+        await _memory_write(memory, task, store, "completion", result=result)
         store.complete_step(task["step_id"], task["account_id"], result)
     except Exception as exc:
         store.fail_step(task["step_id"], task["account_id"], str(exc))
