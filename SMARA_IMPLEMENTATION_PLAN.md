@@ -1478,3 +1478,11 @@ The next smoke task reached the xAI provider but was rejected with
 provider credential (invalid/expired/wrong project or model access), not the
 Smara task graph or model wiring. Do not copy a new key into Git or send it in
 chat; replace it only in the VM secret environment and restart Smara services.
+
+The replacement xAI key was verified transiently against `/v1/models` and the
+exact chat-completions request returned HTTP 200. A disposable hosted Smara
+task then completed with `grok-3-mini`, including `agent.tool_requested`,
+`agent.tool_completed`, and `task.completed` events. The separate Syntarus
+memory project key still reports an unavailable-memory event; the worker now
+continues the task and records that condition instead of retrying/failing the
+agent. MemoryOS remains untouched and metadata filtering remains advisory.
