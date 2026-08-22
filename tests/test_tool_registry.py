@@ -95,3 +95,24 @@ def test_agent_can_create_only_an_approval_intent_for_external_work():
         assert captured[0][0:2] == ("gmail", "gmail.send")
 
     asyncio.run(execute())
+
+
+def test_agent_desktop_request_creates_intent_without_running_local_action():
+    captured = []
+
+    def requester(capability, preview, payload):
+        captured.append((capability, preview, payload))
+        return {"task_id": "task_desktop", "status": "waiting_approval", "capability": capability}
+
+    async def execute():
+        registry = default_tool_registry(desktop_requester=requester)
+        result = await registry.invoke(
+            "desktop.request_action",
+            {"capability": "local_file_read", "preview": "Read the approved notes", "payload": {"path": "C:/notes.md"}},
+            ToolContext("acct_test", "workspace", desktop_requester=requester),
+        )
+        data = json.loads(result.content)
+        assert data["approval_required"] is True and data["task_id"] == "task_desktop"
+        assert captured[0][0] == "local_file_read"
+
+    asyncio.run(execute())

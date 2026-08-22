@@ -129,7 +129,16 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
 
                 def record(event_type: str, payload: dict) -> None:
                     store.append_event(task["id"], event_type, json.dumps(payload, ensure_ascii=False)[:2_000])
-                result = await BoundedAgentStepRuntime(provider, default_tool_registry(client, integration_runner=integration_runner, integration_requester=integration_requester)).run(
+                def desktop_requester(capability: str, preview: str, payload: dict) -> dict:
+                    child = store.create(
+                        task["account_id"], task["workspace_id"], f"Desktop: {preview[:80]}", preview,
+                        True,
+                        [{"name": f"desktop.{capability}", "executor_kind": "desktop", "required_capability": capability, "executor_payload": payload}],
+                    )
+                    record("agent.desktop_task_requested", {"task_id": child["id"], "capability": capability})
+                    return {"task_id": child["id"], "status": child["status"], "capability": capability}
+
+                result = await BoundedAgentStepRuntime(provider, default_tool_registry(client, integration_runner=integration_runner, integration_requester=integration_requester, desktop_requester=desktop_requester)).run(
                     task=task,
                     memory_context=context,
                     tool_context=ToolContext(task["account_id"], task["workspace_id"], client, integration_runner, integration_requester),

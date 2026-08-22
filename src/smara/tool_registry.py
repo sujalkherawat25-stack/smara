@@ -42,6 +42,7 @@ class ToolContext:
     http_client: httpx.AsyncClient | None = None
     integration_runner: Callable[[str, str, dict[str, Any]], Awaitable[str]] | None = None
     integration_requester: Callable[[str, str, str, str, dict[str, Any]], dict[str, Any]] | None = None
+    desktop_requester: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -256,6 +257,39 @@ class IntegrationApprovalRequestTool:
         return ToolResult(True, _bounded(json.dumps({"approval_required": result.get("status") == "awaiting_approval", "status": result.get("status"), "action_id": result.get("id")}, ensure_ascii=False)))
 
 
+class DesktopActionRequestTool:
+    """Create an approved desktop step; never executes on the worker host."""
+
+    spec = ToolSpec(
+        "desktop.request_action",
+        "Create a durable approval-gated task for a paired desktop capability. The local action is not run by this chat step.",
+        {
+            "type": "object",
+            "properties": {
+                "capability": {"type": "string", "enum": ["local_file_read", "local_file_write", "local_terminal", "local_browser"]},
+                "preview": {"type": "string", "minLength": 1, "maxLength": 1_000},
+                "payload": {"type": "object", "maxProperties": 30},
+            },
+            "required": ["capability", "preview", "payload"],
+            "additionalProperties": False,
+        },
+    )
+
+    async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        if context.desktop_requester is None:
+            raise ToolError("Desktop actions are available only inside an approved hosted task.")
+        capability, preview, payload = arguments.get("capability"), arguments.get("preview"), arguments.get("payload")
+        if not isinstance(capability, str) or capability not in set(self.spec.parameters["properties"]["capability"]["enum"]):
+            raise ToolError("Desktop capability is not supported.")
+        if not isinstance(preview, str) or not preview.strip() or not isinstance(payload, dict):
+            raise ToolError("Desktop action needs a preview and object payload.")
+        try:
+            result = context.desktop_requester(capability, preview[:1_000], payload)
+        except Exception as exc:
+            raise ToolError(f"Desktop task request failed: {str(exc)[:300]}") from exc
+        return ToolResult(True, _bounded(json.dumps({"approval_required": True, **result}, ensure_ascii=False)))
+
+
 class ToolRegistry:
     def __init__(self, tools: list[Tool] | None = None):
         self._tools: dict[str, Tool] = {}
@@ -291,7 +325,7 @@ class ToolRegistry:
         return ToolResult(result.ok, _bounded(result.content), list(result.citations)[:20], dict(result.meta))
 
 
-def default_tool_registry(http_client: httpx.AsyncClient | None = None, *, integration_runner: Callable[[str, str, dict[str, Any]], Awaitable[str]] | None = None, integration_requester: Callable[[str, str, str, str, dict[str, Any]], dict[str, Any]] | None = None) -> ToolRegistry:
+def default_tool_registry(http_client: httpx.AsyncClient | None = None, *, integration_runner: Callable[[str, str, dict[str, Any]], Awaitable[str]] | None = None, integration_requester: Callable[[str, str, str, str, dict[str, Any]], dict[str, Any]] | None = None, desktop_requester: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None) -> ToolRegistry:
     registry = ToolRegistry([
         CurrentTimeTool(),
         CalculateTool(),
@@ -304,4 +338,6 @@ def default_tool_registry(http_client: httpx.AsyncClient | None = None, *, integ
     registry.register(IntegrationReadTool("integration.github.list", "List connected GitHub repositories (read-only).", "github", "github.list", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}))
     if integration_requester is not None:
         registry.register(IntegrationApprovalRequestTool())
+    if desktop_requester is not None:
+        registry.register(DesktopActionRequestTool())
     return registry
