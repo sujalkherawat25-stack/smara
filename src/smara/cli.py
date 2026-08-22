@@ -130,6 +130,14 @@ def _stream_chat(client: httpx.Client, *, message: str, workspace: str, conversa
                     data = json.loads(line.removeprefix("data: "))
                 except json.JSONDecodeError:
                     continue
+                # Smara's API uses the compact SSE form (`data: {"type":
+                # "token", ...}`) while some compatible gateways also send
+                # an explicit `event:` line.  Prefer the payload type so the
+                # CLI cannot silently drop a valid response when the event
+                # line is omitted.
+                payload_type = data.get("type")
+                if isinstance(payload_type, str) and payload_type:
+                    event_name = payload_type
                 if event_name == "token":
                     text = str(data.get("text", ""))
                     print(text, end="", flush=True)
@@ -142,7 +150,7 @@ def _stream_chat(client: httpx.Client, *, message: str, workspace: str, conversa
                 elif event_name == "phase":
                     print(f"[{data.get('phase', 'working')}]", file=sys.stderr)
                 elif event_name == "status":
-                    print(f"[{data.get('message', 'working')}]", file=sys.stderr)
+                    print(f"[{data.get('label', data.get('message', 'working'))}]", file=sys.stderr)
                 elif event_name == "error":
                     raise RuntimeError(str(data.get("message", "Smara chat failed.")))
     except (httpx.HTTPError, json.JSONDecodeError) as exc:
