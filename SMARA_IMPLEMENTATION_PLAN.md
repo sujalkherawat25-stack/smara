@@ -1347,3 +1347,15 @@ Implemented the next Memento-to-Smara migration slice for proactive work:
 The clean Docker suite now passes **60 tests**. The remaining proactive work is
 delivery channels (web push/Telegram when configured), recurrence policy beyond
 fixed intervals, and production VM rollout.
+
+### 2026-08-22 — Scheduled Web Push notification hook
+
+Added the first delivery-channel hook for proactive runs. When Web Push/VAPID
+is configured, the scheduler sends an account-scoped notification after it
+creates a scheduled task; when push is not configured or delivery fails, the
+task remains durable and execution continues. Notification work runs outside
+the scheduler's database transaction and never bypasses task approval.
+
+The clean suite remains **60 tests passed** and the rebuilt scheduler starts
+without errors. Telegram delivery and production VAPID configuration remain
+deployment/provider work.

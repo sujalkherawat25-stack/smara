@@ -201,7 +201,7 @@ class TaskStore:
                 while next_run <= current: next_run += timedelta(seconds=schedule["interval_seconds"])
                 c.execute("UPDATE schedules SET next_run_at=?,last_run_at=?,last_task_id=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE id=?", (next_run.isoformat(), now, task_id, now, schedule["id"]))
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "schedule.fired", json.dumps({"schedule_id": schedule["id"]}), now))
-                due.append({"schedule_id": schedule["id"], "task_id": task_id})
+                due.append({"schedule_id": schedule["id"], "task_id": task_id, "account_id": schedule["account_id"]})
         return due
 
     def create_cli_pairing(self, account_id: str, name: str, ttl_seconds: int = 600) -> dict:
@@ -712,7 +712,7 @@ class PostgresTaskStore(TaskStore):
                 while next_run <= current: next_run += timedelta(seconds=schedule["interval_seconds"])
                 c.execute("UPDATE schedules SET next_run_at=%s,last_run_at=%s,last_task_id=%s,lease_owner=NULL,lease_expires_at=NULL,updated_at=%s WHERE id=%s", (next_run.isoformat(), now, task_id, now, schedule["id"]))
                 c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", task_id, "schedule.fired", json.dumps({"schedule_id": schedule["id"]}), now))
-                due.append({"schedule_id": schedule["id"], "task_id": task_id})
+                due.append({"schedule_id": schedule["id"], "task_id": task_id, "account_id": schedule["account_id"]})
         return due
 
     def claim_one(self, worker_id: str = "worker", lease_seconds: int = 60) -> dict | None:

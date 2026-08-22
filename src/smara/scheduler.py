@@ -10,6 +10,7 @@ import logging
 
 from .config import settings
 from .store import open_task_store
+from . import push
 
 log = logging.getLogger("smara.scheduler")
 
@@ -20,6 +21,14 @@ async def main() -> None:
             fired = store.fire_due_schedules(limit=20)
             if fired:
                 log.info("created %s scheduled task run(s)", len(fired))
+                for item in fired:
+                    try:
+                        schedule = store.schedule(item["schedule_id"], item["account_id"])
+                        await asyncio.to_thread(push.send, store, schedule["account_id"], "Smara scheduled task", f"{schedule['title']} is ready for review or execution.", "/app/")
+                    except Exception:
+                        # Delivery is optional and must never prevent the durable
+                        # task run from existing or being processed.
+                        log.exception("scheduled-task notification failed")
         except Exception:
             log.exception("schedule tick failed")
         await asyncio.sleep(30)
