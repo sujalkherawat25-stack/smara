@@ -103,7 +103,11 @@ ID; Web reconnects send `Last-Event-ID` so a dropped connection resumes from
 the durable ledger instead of silently skipping progress.
 
 This slice does not use an LLM to infer claims or deliver reports externally.
-Those remain separate, approval-gated capabilities.
+Those remain separate, approval-gated capabilities. An optional
+`SMARA_RESEARCH_SYNTHESIS_ENABLED=true` setting enables bounded synthesis using
+the configured OpenAI-compatible model, but only after evidence is verified.
+Every model citation must match the ledger; invalid, unavailable, or
+unconfigured synthesis safely falls back to the deterministic cited report.
 
 ## Integrations and approvals
 

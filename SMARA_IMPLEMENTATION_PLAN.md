@@ -1189,3 +1189,20 @@ Hardened the live progress contract:
 
 This remains a progress-only channel: it exposes task/step state and never
 streams model chain-of-thought, provider credentials, or raw upstream errors.
+
+### 2026-08-22 — Memento extraction slice 9: bounded evidence-only synthesis
+
+Added optional report synthesis after deterministic evidence verification:
+
+- the worker can use the configured OpenAI-compatible provider only when
+  `SMARA_RESEARCH_SYNTHESIS_ENABLED=true`;
+- the prompt receives verified excerpts and citation labels only, with bounded
+  input/output size, zero temperature, and no provider-side tool access;
+- returned citations are validated against the evidence ledger and unknown or
+  missing citations are rejected; and
+- provider failures, invalid output, missing configuration, or disabled mode
+  produce the existing deterministic cited report and a durable fallback/skip
+  event instead of losing the task.
+
+No LLM key is required for the default behavior or the test suite. A real
+provider key is only needed to exercise the optional synthesis path live.

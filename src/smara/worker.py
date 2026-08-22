@@ -7,7 +7,7 @@ from syntarus import AsyncMemoryClient
 from .config import settings
 from .store import TaskStore, open_task_store
 from .syntarus_adapter import SyntarusMemory
-from .research import ResearchExecutor
+from .research import OpenAIResearchSynthesizer, ResearchExecutor
 from .sandbox import run as run_sandbox
 
 
@@ -22,7 +22,14 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None) -> bool:
         if memory is not None:
             context = await memory.context_for_task(task)
         if task["name"].startswith("research."):
-            outcome = await ResearchExecutor(store).run_step(task)
+            synthesizer = None
+            if settings.research_synthesis_enabled:
+                synthesizer = OpenAIResearchSynthesizer(
+                    base_url=settings.llm_base_url,
+                    api_key=settings.llm_api_key,
+                    model=settings.llm_model,
+                )
+            outcome = await ResearchExecutor(store, synthesizer=synthesizer).run_step(task)
             if outcome.report and memory is not None:
                 await memory.remember_verified_research(task, outcome.report, outcome.verified_evidence_count)
             store.complete_step(task["step_id"], task["account_id"], outcome.text)

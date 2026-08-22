@@ -4,7 +4,7 @@ from pathlib import Path
 
 import httpx
 
-from smara.research import ResearchExecutor
+from smara.research import OpenAIResearchSynthesizer, ResearchExecutor
 from smara.research_tools import SearchHit
 from smara.store import TaskStore
 from smara.syntarus_adapter import SyntarusMemory
@@ -43,6 +43,99 @@ def test_research_executor_creates_verified_evidence_and_cited_artifact(tmp_path
     assert "missing_publication_date" not in json.loads(evidence[0]["quality_flags"])
     assert "[1]" in artifacts[0]["content"]
     assert store.get(task["id"], "acct_1")["status"] == "completed"
+
+
+def test_research_synthesis_is_limited_to_verified_citations(tmp_path: Path):
+    store, task = _research_store(tmp_path)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/html"}, text="<html><title>Primary Source</title><body>Solar energy produces electricity from sunlight. This verified example source has enough readable text to support a transparent evidence ledger and deterministic report generation without invented claims.</body></html>")
+
+    class FakeSynthesizer:
+        async def synthesize(self, *, question: str, evidence: list[dict]) -> str:
+            assert question.startswith("What does")
+            assert [item["citation_label"] for item in evidence] == ["[1]"]
+            return "Solar energy can produce electricity from sunlight. [1]"
+
+    async def execute() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=False) as client:
+            executor = ResearchExecutor(store, client, synthesizer=FakeSynthesizer())
+            for expected in ("research.fetch_sources", "research.verify_evidence", "research.write_report"):
+                step = store.claim_one("synthesis-worker")
+                assert step and step["name"] == expected
+                outcome = await executor.run_step(step)
+                store.complete_step(step["step_id"], "acct_1", outcome.text)
+
+    asyncio.run(execute())
+    report = store.artifacts(task["id"], "acct_1")[0]["content"]
+    assert "## Synthesized findings" in report
+    assert "Solar energy can produce electricity" in report
+    assert "## Sources" in report
+    assert any(event["type"] == "research.report_synthesized" for event in store.events(task["id"], "acct_1"))
+
+
+def test_invalid_research_synthesis_falls_back_to_deterministic_report(tmp_path: Path):
+    store, task = _research_store(tmp_path)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/html"}, text="<html><title>Primary Source</title><body>Solar energy produces electricity from sunlight. This verified example source has enough readable text to support a transparent evidence ledger and deterministic report generation without invented claims.</body></html>")
+
+    class InvalidSynthesizer:
+        async def synthesize(self, **_kwargs) -> str:
+            return "This claim cites a source that was not provided. [9]"
+
+    async def execute() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=False) as client:
+            executor = ResearchExecutor(store, client, synthesizer=InvalidSynthesizer())
+            for expected in ("research.fetch_sources", "research.verify_evidence", "research.write_report"):
+                step = store.claim_one("fallback-worker")
+                assert step and step["name"] == expected
+                outcome = await executor.run_step(step)
+                store.complete_step(step["step_id"], "acct_1", outcome.text)
+
+    asyncio.run(execute())
+    report = store.artifacts(task["id"], "acct_1")[0]["content"]
+    assert "## Evidence-backed notes" in report
+    assert "This claim cites a source that was not provided" not in report
+    assert any(event["type"] == "research.report_synthesis_fallback" for event in store.events(task["id"], "acct_1"))
+
+
+def test_openai_research_synthesizer_bounds_request_and_keeps_citations(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "Supported finding. [1]"}}]}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update(url=url, headers=headers, json=json)
+            return FakeResponse()
+
+    monkeypatch.setattr("smara.research.httpx.AsyncClient", lambda **_kwargs: FakeClient())
+
+    async def execute():
+        return await OpenAIResearchSynthesizer(
+            base_url="https://llm.example/v1", api_key="test-provider-key", model="small-model"
+        ).synthesize(
+            question="What is supported?",
+            evidence=[{"citation_label": "[1]", "title": "Source", "url": "https://example.com", "excerpt": "Verified context."}],
+        )
+
+    assert asyncio.run(execute()) == "Supported finding. [1]"
+    assert captured["url"] == "https://llm.example/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer test-provider-key"
+    assert captured["json"]["max_tokens"] == 1000
+    assert "[[1]]" not in captured["json"]["messages"][1]["content"]
 
 
 def test_quality_verification_records_cross_source_agreement(tmp_path: Path):

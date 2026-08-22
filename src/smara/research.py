@@ -78,6 +78,61 @@ class ResearchStepResult:
     verified_evidence_count: int = 0
 
 
+class ResearchSynthesisError(RuntimeError):
+    """A bounded research synthesis could not produce a safe cited answer."""
+
+
+class OpenAIResearchSynthesizer:
+    """Optional citation-constrained synthesis over verified evidence only."""
+
+    def __init__(self, *, base_url: str, api_key: str, model: str, timeout_seconds: float = 45.0):
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._model = model
+        self._timeout_seconds = timeout_seconds
+
+    async def synthesize(self, *, question: str, evidence: list[dict]) -> str:
+        if not self._base_url or not self._api_key or not self._model:
+            raise ResearchSynthesisError("research synthesis provider is not configured")
+        context = "\n\n".join(
+            f"{item['citation_label']} {item.get('title') or item['url']}\n{item.get('excerpt') or ''}"
+            for item in evidence[:8]
+        )[:12_000]
+        system = (
+            "You write a concise research synthesis from verified evidence. "
+            "Use only the supplied evidence; do not add outside facts, URLs, or citations. "
+            "Every factual sentence must end with one or more supplied citation labels such as [1]. "
+            "If the evidence is insufficient, say so clearly. Return plain Markdown, no preamble."
+        )
+        payload = {
+            "model": self._model,
+            "temperature": 0,
+            "max_tokens": 1000,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": f"Question: {question[:4_000]}\n\nVerified evidence:\n{context}"},
+            ],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+                response = await client.post(
+                    f"{self._base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self._api_key}"},
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            raise ResearchSynthesisError("research synthesis provider is unavailable") from exc
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ResearchSynthesisError("research synthesis provider returned an invalid response") from exc
+        if not isinstance(content, str):
+            raise ResearchSynthesisError("research synthesis provider returned invalid text")
+        return content.strip()
+
+
 @dataclass(frozen=True)
 class RetrievedSource:
     title: str
@@ -149,10 +204,11 @@ async def fetch_public_source(client: httpx.AsyncClient, initial_url: str) -> Re
 
 
 class ResearchExecutor:
-    def __init__(self, store: TaskStore, http_client: httpx.AsyncClient | None = None, search_tool=None):
+    def __init__(self, store: TaskStore, http_client: httpx.AsyncClient | None = None, search_tool=None, synthesizer=None):
         self._store = store
         self._http = http_client
         self._search_tool = search_tool
+        self._synthesizer = synthesizer
 
     async def run_step(self, task: dict) -> ResearchStepResult:
         if task["name"] == "research.discover_sources":
@@ -162,7 +218,7 @@ class ResearchExecutor:
         if task["name"] == "research.verify_evidence":
             return self._verify_evidence(task)
         if task["name"] == "research.write_report":
-            return self._write_report(task)
+            return await self._write_report(task)
         raise ValueError(f"Unsupported research step: {task['name']}")
 
     async def _discover_sources(self, task: dict) -> ResearchStepResult:
@@ -232,12 +288,38 @@ class ResearchExecutor:
         self._store.append_event(task["id"], "research.evidence_verified", f'{{"verified":{verified_count},"agreement_sources":{sum(1 for count in agreement.values() if count)}}}')
         return ResearchStepResult(f"Verified {verified_count} retrieved source(s); quality flags remain visible in the ledger.", verified_evidence_count=verified_count)
 
-    def _write_report(self, task: dict) -> ResearchStepResult:
+    @staticmethod
+    def _validate_synthesis(content: str, evidence: list[dict]) -> str:
+        content = content.strip()
+        if not content or len(content) > 8_000:
+            raise ResearchSynthesisError("research synthesis was empty or exceeded its output limit")
+        labels = {str(item.get("citation_label") or "").strip("[]") for item in evidence}
+        citations = set(re.findall(r"\[(\d+)\]", content))
+        if not citations or not citations.issubset(labels):
+            raise ResearchSynthesisError("research synthesis contained an invalid citation")
+        return content
+
+    async def _write_report(self, task: dict) -> ResearchStepResult:
         evidence = self._store.evidence(task["id"], task["account_id"])
         verified = [item for item in evidence if item["status"] == "verified"]
         if not verified:
             raise ValueError("No verified evidence is available for a report.")
-        lines = [f"# {task['title']}", "", "## Research question", task["objective"], "", "## Evidence-backed notes"]
+        synthesis = None
+        if self._synthesizer is not None:
+            try:
+                synthesis = self._validate_synthesis(
+                    await self._synthesizer.synthesize(question=task["objective"], evidence=verified), verified
+                )
+                self._store.append_event(task["id"], "research.report_synthesized", json.dumps({"citations": len(set(re.findall(r"\[(\d+)\]", synthesis)))}))
+            except ResearchSynthesisError as exc:
+                self._store.append_event(task["id"], "research.report_synthesis_fallback", json.dumps({"reason": str(exc)}))
+        else:
+            self._store.append_event(task["id"], "research.report_synthesis_skipped", '{"reason":"not_configured"}')
+        lines = [f"# {task['title']}", "", "## Research question", task["objective"], ""]
+        if synthesis:
+            lines += ["## Synthesized findings", synthesis, "", "## Evidence ledger"]
+        else:
+            lines += ["## Evidence-backed notes"]
         for item in verified:
             quality = ", ".join(json.loads(item.get("quality_flags") or "[]")) or "passed"
             lines += [f"### {item['citation_label']} {item['title']}", item["excerpt"], f"Quality checks: {quality}", "", f"Source: {item['url']}", ""]
