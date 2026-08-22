@@ -1406,3 +1406,17 @@ replacement work is still production identity/session rollout, Telegram channel
 worker, recurrence/delivery policy, Windows desktop smoke/installer, external
 gateway/WAF/secrets/backups/Sentry drills, Syntarus server-side filter
 enforcement, and the reversible `ai.syntarus.com` cutover.
+
+### 2026-08-22 — Staging migration race fix
+
+The first real VM staging restart exposed a concurrency bug: API, worker,
+scheduler, and integration-worker all initialise the Postgres store, and two
+containers could apply/record the same migration at once. The migration runner
+now takes a Postgres advisory lock for the migration section, rechecks each
+version while holding that lock, and uses an idempotent version insert. This is
+safe for rolling restarts and multiple replicas without changing task or memory
+data.
+
+The local Docker suite remains **64 passed, 3 warnings**. The fix is ready for a
+second staging restart; the first restart was intentionally stopped before any
+production-domain change.

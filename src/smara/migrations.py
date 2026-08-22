@@ -21,13 +21,20 @@ def apply_postgres_migrations(database_url: str | None = None) -> None:
         raise RuntimeError(f"Smara migration directory is missing: {migration_dir}")
     with psycopg.connect(url, autocommit=True) as con:
         with con.cursor() as cur:
-            cur.execute("CREATE TABLE IF NOT EXISTS smara_schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())")
-            applied = {row[0] for row in cur.execute("SELECT version FROM smara_schema_migrations")}
-            for migration in sorted(migration_dir.glob("*.sql")):
-                if migration.name in applied:
-                    continue
-                cur.execute(migration.read_text(encoding="utf-8"))
-                cur.execute("INSERT INTO smara_schema_migrations(version) VALUES(%s)", (migration.name,))
+            # API, worker, scheduler, and integration-worker all initialise
+            # the store. A session-level advisory lock prevents two fresh
+            # containers from running the same DDL/insertion concurrently.
+            cur.execute("SELECT pg_advisory_lock(hashtext('smara:migrations'))")
+            try:
+                cur.execute("CREATE TABLE IF NOT EXISTS smara_schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())")
+                for migration in sorted(migration_dir.glob("*.sql")):
+                    cur.execute("SELECT 1 FROM smara_schema_migrations WHERE version=%s", (migration.name,))
+                    if cur.fetchone() is not None:
+                        continue
+                    cur.execute(migration.read_text(encoding="utf-8"))
+                    cur.execute("INSERT INTO smara_schema_migrations(version) VALUES(%s) ON CONFLICT (version) DO NOTHING", (migration.name,))
+            finally:
+                cur.execute("SELECT pg_advisory_unlock(hashtext('smara:migrations'))")
 
 
 def migration_status(database_url: str | None = None) -> dict[str, list[str]]:
