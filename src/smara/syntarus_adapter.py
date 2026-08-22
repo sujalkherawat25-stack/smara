@@ -37,6 +37,23 @@ class MemoryScope:
 class SyntarusMemory:
     def __init__(self, client: MemoryPort): self._client = client
 
+    async def _search(self, query: str, *, user_id: str, workspace_id: str) -> dict:
+        """Use optional provider filters without breaking older SDK releases.
+
+        Account identity is always sent.  Metadata filtering is advisory until
+        the hosted Syntarus API enforces it, so an SDK that predates the
+        ``filters`` argument can safely fall back to the account-scoped search.
+        We only retry the specific Python signature error; provider/network
+        failures are allowed to propagate to the worker retry contract.
+        """
+        filters = {"workspace_id": workspace_id, "status": "verified"}
+        try:
+            return await self._client.search(query, user_id=user_id, top_k=8, filters=filters)
+        except TypeError as exc:
+            if "unexpected keyword argument 'filters'" not in str(exc):
+                raise
+            return await self._client.search(query, user_id=user_id, top_k=8)
+
     async def context_for_task(self, task: dict) -> str:
         """Retrieve shared account context; scope provenance is never omitted.
 
@@ -46,7 +63,7 @@ class SyntarusMemory:
         pretend an unimplemented provider filter is enforced.
         """
         scope = MemoryScope(task["account_id"], task["workspace_id"], task["id"], task["task_run_id"])
-        result = await self._client.search(task["objective"], user_id=scope.user_id, top_k=8, filters={"workspace_id": scope.workspace_id, "status": "verified"})
+        result = await self._search(task["objective"], user_id=scope.user_id, workspace_id=scope.workspace_id)
         return str(result.get("context", result.get("context_string", "")))[:12_000]
 
     async def context_for_conversation(self, query: str, *, account_id: str, workspace_id: str) -> str:
@@ -57,12 +74,7 @@ class SyntarusMemory:
         not an authorization guarantee; account isolation remains the API's
         enforced boundary.
         """
-        result = await self._client.search(
-            query,
-            user_id=account_id,
-            top_k=8,
-            filters={"workspace_id": workspace_id, "status": "verified"},
-        )
+        result = await self._search(query, user_id=account_id, workspace_id=workspace_id)
         return str(result.get("context", result.get("context_string", "")))[:12_000]
 
     async def remember_completion(self, task: dict, result: str) -> dict:

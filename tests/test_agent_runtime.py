@@ -42,6 +42,14 @@ class FakeSyntarus:
         return {"ok": True}
 
 
+class LegacySyntarus:
+    async def search(self, query, *, user_id, top_k=10):
+        return {"context": f"legacy context for {user_id}"}
+
+    async def add(self, **kwargs):
+        return {"ok": True}
+
+
 def test_runtime_reuses_syntarus_only_through_memory_port():
     provider, sdk = FakeProvider(), FakeSyntarus()
     runtime = SmaraAgentRuntime(provider, SyntarusMemory(sdk))
@@ -54,6 +62,15 @@ def test_runtime_reuses_syntarus_only_through_memory_port():
     assert sdk.kwargs["filters"]["workspace_id"] == "work"
     assert "Sujal prefers concise reports." in provider.system
     assert "external action" in provider.system
+
+
+def test_runtime_falls_back_for_sdk_without_metadata_filters():
+    runtime = SmaraAgentRuntime(FakeProvider(), SyntarusMemory(LegacySyntarus()))
+    turn = asyncio.run(runtime.chat(
+        account_id="acct_legacy", workspace_id="work", message="Recall my context"
+    ))
+    assert turn.memory_used is True
+    assert "legacy context" in turn.message or turn.message == "A bounded direct response."
 
 
 def test_runtime_chat_promotes_the_bounded_read_only_tool_loop():
