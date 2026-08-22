@@ -1626,3 +1626,17 @@ VAPID, off-host backup configuration, distributed edge-rate-limit review, the
 real desktop smoke, and Syntarus server-side metadata enforcement. A
 `PRODUCTION_RUNBOOK.md` now records the exact operator sequence. No proxy
 switch or MemoryOS source change was made.
+
+### 2026-08-22 — Control iframe bridge reliability fix
+
+The hosted Control iframe could show `Authenticated account assertion is
+required` even while the parent Smara shell reported that a token was fetched.
+The cause was a one-way, load-timed `postMessage`, compounded by Cloudflare
+caching the old `app.js` bundle. Smara now announces iframe readiness and
+acknowledges receipt of the short-lived token, and the app script URL carries a
+bridge version query so a deployment cannot reuse the stale bundle. The fix is
+published as commits `ba8b57a` and `986bcf2`, deployed to staging, and verified
+through the public bundle plus `/health` and `/readyz`. The parent shell has the
+matching ready-message listener prepared and its TypeScript production build
+passes; it still requires the normal existing frontend deployment before that
+extra retry path is live.
