@@ -18,7 +18,7 @@ import httpx
 import jwt
 
 from .config import settings
-from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, CliPairingExchange, CliPairingStart, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, TaskCreate, TaskView
+from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, CliPairingExchange, CliPairingStart, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, TaskCreate, TaskView, ToolInvokeRequest
 from .store import open_task_store
 from .agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime
 from . import agent_events, llm_errors
@@ -28,6 +28,7 @@ from . import integration_oauth
 from . import push
 from .hardening import RedisFixedWindowLimiter
 from .observability import configure_sentry
+from .tool_registry import ToolContext, ToolError, default_tool_registry
 
 configure_sentry(settings.sentry_dsn)
 app = FastAPI(title="Smara Control Plane", version="0.1.0")
@@ -170,6 +171,23 @@ def artifact_view(row: dict) -> ArtifactView:
 
 @app.get("/health")
 async def health(): return {"ok": True, "memory_boundary": "syntarus-sdk-only", "auth_mode": "development" if settings.dev_mode else "signed-gateway"}
+
+@app.get("/v1/tools")
+async def list_tools(user: str = Depends(account_id)):
+    """Return the safe tools currently available to the agent runtime."""
+    return {"tools": default_tool_registry().describe()}
+
+@app.post("/v1/tools/{tool_name}")
+async def invoke_tool(tool_name: str, body: ToolInvokeRequest, user: str = Depends(account_id)):
+    """Run one read-only tool; side effects must use the durable task graph."""
+    async with httpx.AsyncClient(timeout=httpx.Timeout(12.0), follow_redirects=False) as client:
+        try:
+            result = await default_tool_registry(client).invoke(
+                tool_name, body.arguments, ToolContext(user, body.workspace_id, client)
+            )
+        except ToolError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    return {"ok": result.ok, "content": result.content, "citations": result.citations, "meta": result.meta}
 
 @app.get("/readyz")
 async def readyz():

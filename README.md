@@ -73,6 +73,12 @@ for Web and CLI clients. Its stable event names (`phase`, `status`, `token`,
 `done`, `error`) are adapted from Memento's proven contract. They expose useful
 progress but never model chain-of-thought or raw upstream error strings.
 
+The provider-neutral safe tool registry is available at `GET /v1/tools`. The
+initial tools are UTC time, bounded arithmetic, public research search, and
+SSRF-safe URL retrieval. Read-only tools may be invoked through
+`POST /v1/tools/{name}`; side-effecting tools are deliberately rejected there
+and must run as approved durable tasks.
+
 ## First research workflow
 
 `POST /v1/research` accepts a question and optionally up to twelve explicitly

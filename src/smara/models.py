@@ -58,6 +58,11 @@ class ChatResponse(BaseModel):
     model: str | None = None
 
 
+class ToolInvokeRequest(BaseModel):
+    arguments: dict[str, Any] = Field(default_factory=dict, max_length=20)
+    workspace_id: str = Field(default="default", min_length=1, max_length=128)
+
+
 class CliPairingStart(BaseModel):
     name: str = Field(default="Smara CLI", min_length=1, max_length=120)
 

@@ -1206,3 +1206,25 @@ Added optional report synthesis after deterministic evidence verification:
 
 No LLM key is required for the default behavior or the test suite. A real
 provider key is only needed to exercise the optional synthesis path live.
+
+### 2026-08-22 — Memento extraction slice 10: safe provider-neutral tool registry
+
+Added the first Smara-owned tool boundary without importing Memento or
+MemoryOS internals:
+
+- defined tool specs, bounded results, account/workspace context, and an
+  approval-aware registry;
+- registered only read-only UTC time, AST-validated arithmetic, provider-
+  neutral research search, and SSRF-safe URL retrieval;
+- added authenticated `GET /v1/tools` discovery and `POST /v1/tools/{name}`
+  invocation for this safe subset; and
+- rejected unknown arguments and all future side-effecting/approval tools from
+  direct invocation, preserving the durable task graph as the only action path.
+
+Verified: the clean Docker suite passes **46 tests**, calculator code execution
+is rejected, fetch results remain bounded and cited, and the live API exposes
+the four safe tools without requiring an LLM provider.
+
+Remaining next: connect tool selection to a bounded agent-step runtime, then
+add approval-backed integration tools and desktop routing. The research live
+provider and optional synthesis remain separately configuration-gated.
