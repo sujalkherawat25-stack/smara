@@ -1506,3 +1506,18 @@ schemas, or production data. Metadata filters remain advisory until the
 Syntarus server enforces them. The next live check is CLI pairing/login and
 watching a task against this same hosted API; research-provider credentials and
 the remaining production hardening gates are still separate work.
+
+### 2026-08-22 — CLI pairing and durable watch verification
+
+The disposable CLI flow passed against the private staging API: a signed
+gateway assertion created a one-time pairing code, the CLI exchanged it and
+stored the bearer locally without printing it, authenticated task listing
+worked, and a calculator task completed through the same hosted worker. The
+CLI then resumed the durable SSE stream and observed the full event sequence
+through `task.completed`.
+
+The public Cloudflare edge currently returns HTTP 403/1010 for the pairing
+POST, while the VM-local API accepts the same signed request. This is a WAF/
+edge policy issue to resolve before public CLI pairing is called production
+ready; no application authentication bypass was added. The temporary smoke
+account/task are disposable staging data.
