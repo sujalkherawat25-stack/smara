@@ -107,6 +107,11 @@ class CliPairingExchange(BaseModel):
     code: str = Field(min_length=12, max_length=160)
 
 
+class CliDeviceAuthorize(BaseModel):
+    """Browser approval for a CLI device authorization request."""
+    device_code: str = Field(min_length=20, max_length=220)
+
+
 class ApprovalDecision(BaseModel):
     approved: bool
     note: str = Field(default="", max_length=2_000)

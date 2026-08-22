@@ -23,6 +23,25 @@ def test_cli_pairing_is_single_use_and_stores_only_hash(tmp_path):
         store.consume_cli_pairing(pairing["code"])
 
 
+def test_cli_device_authorization_requires_browser_approval(tmp_path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    request = store.create_cli_device_request("Test laptop")
+    assert store.poll_cli_device(request["device_code"])["status"] == "pending"
+    approved = store.authorize_cli_device(request["device_code"], "acct_1")
+    assert approved["account_id"] == "acct_1"
+    result = store.poll_cli_device(request["device_code"])
+    assert result == {"status": "approved", "account_id": "acct_1", "name": "Test laptop"}
+    assert store.poll_cli_device(request["device_code"])["status"] == "used"
+
+
+def test_cli_device_request_cannot_be_approved_twice(tmp_path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    request = store.create_cli_device_request("Test laptop")
+    store.authorize_cli_device(request["device_code"], "acct_1")
+    with pytest.raises(KeyError):
+        store.authorize_cli_device(request["device_code"], "acct_2")
+
+
 def test_account_id_accepts_only_scoped_cli_jwt(monkeypatch):
     secret = "cli-secret-for-tests-32-bytes!"
     monkeypatch.setattr(api, "settings", Settings(dev_mode=False, cli_token_secret=secret))

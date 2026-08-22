@@ -1535,3 +1535,15 @@ tasks and created a disposable calculator task, and `task watch` received the
 durable SSE stream through `task.completed`. Cloudflare 403/1010 is resolved
 for this exact API surface. The smoke task used account `acct_cli_edge_smoke`
 and remains disposable staging data.
+
+### 2026-08-22 — Smooth browser-based CLI login
+
+The CLI now supports a standard short-lived device authorization flow. `smara
+login` requests a high-entropy device code, opens the Smara control page, and
+polls until the signed-in browser session explicitly approves the device. The
+server stores only a hash, binds the request to the approving account, issues a
+scoped `smara-cli` token once, and expires or consumes the request atomically.
+The old copy/paste pairing command remains available as a compatibility
+fallback. The control UI recognizes `?cli_device=...` and presents an explicit
+approval action without exposing credentials. MemoryOS code and schemas remain
+untouched.

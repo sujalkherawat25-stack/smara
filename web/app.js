@@ -1,4 +1,4 @@
-const state = { tasks: [], schedules: [], actions: [], selected: null, mode: 'development', bridgeToken: null, eventStreamAbort: null, eventIds: {} };
+const state = { tasks: [], schedules: [], actions: [], selected: null, mode: 'development', bridgeToken: null, eventStreamAbort: null, eventIds: {}, cliDeviceCode: new URLSearchParams(location.search).get('cli_device') };
 const $ = (selector) => document.querySelector(selector);
 const account = $('#account');
 account.value = localStorage.getItem('smara-account') || account.value;
@@ -49,8 +49,16 @@ window.addEventListener('message', (event) => {
   const data = event.data;
   if (!data || data.type !== 'smara-control-token' || typeof data.token !== 'string') return;
   state.bridgeToken = data.token;
+  maybeShowCliApproval();
   refresh();
 });
+function maybeShowCliApproval() {
+  if (!state.cliDeviceCode || !state.bridgeToken) return;
+  $('#cli-code').textContent = `CLI device …${state.cliDeviceCode.slice(-8)}`;
+  $('#cli-expires').textContent = 'Approve this device to finish signing in. The request expires shortly.';
+  $('#cli-approve').hidden = false;
+  $('#cli-dialog').showModal();
+}
 function render() {
   $('#task-total').textContent = state.tasks.length;
   const active = state.tasks.filter(t => !['completed', 'failed', 'cancelled'].includes(t.status));
@@ -167,6 +175,16 @@ $('#pair-cli').onclick = async () => {
     $('#cli-code').textContent = pairing.code;
     $('#cli-expires').textContent = `Expires at ${new Date(pairing.expires_at).toLocaleTimeString()}. Do not share this code.`;
     $('#cli-dialog').showModal();
+  } catch (error) { notice(error.message, true); }
+};
+$('#cli-approve').onclick = async () => {
+  if (!state.cliDeviceCode) return;
+  try {
+    await api('/v1/cli/device/authorize', { method: 'POST', body: JSON.stringify({ device_code: state.cliDeviceCode }) });
+    $('#cli-dialog').close();
+    history.replaceState({}, '', `${location.pathname}${location.hash}`);
+    state.cliDeviceCode = null;
+    notice('CLI device approved. Return to your terminal.');
   } catch (error) { notice(error.message, true); }
 };
 $('#capture-form').addEventListener('submit', async event => {

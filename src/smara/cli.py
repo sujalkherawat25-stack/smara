@@ -6,8 +6,10 @@ import json
 import os
 import sys
 import time
+import webbrowser
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -69,6 +71,33 @@ def _clear_token() -> None:
         pass
 
 
+def _browser_login(client: httpx.Client, args: argparse.Namespace) -> None:
+    """Run a short-lived browser device flow; no bearer is shown in output."""
+    request = _request(client, "GET", "/v1/cli/device/request", params={"name": "Smara CLI"})
+    device_code = request["device_code"]
+    configured_url = args.auth_url or os.getenv("SMARA_CLI_AUTH_URL", "")
+    if configured_url:
+        auth_url = configured_url.replace("{device_code}", quote(device_code, safe=""))
+    else:
+        auth_url = f"{args.api.rstrip('/')}/app/?cli_device={quote(device_code, safe='')}"
+    print("Opening Smara in your browser. Approve this CLI device to continue…", file=sys.stderr)
+    if not webbrowser.open(auth_url):
+        print(f"Open this URL to approve the CLI device:\n{auth_url}", file=sys.stderr)
+    deadline = time.monotonic() + max(30, args.timeout)
+    interval = max(1, int(request.get("interval", 2)))
+    while time.monotonic() < deadline:
+        result = _request(client, "GET", "/v1/cli/device/poll", params={"device_code": device_code})
+        status = result.get("status")
+        if status == "approved":
+            _save_token(result)
+            print(f"Smara CLI login saved to {_token_path()}")
+            return
+        if status in {"expired", "used"}:
+            raise RuntimeError("Smara CLI device request expired or was already used.")
+        time.sleep(interval)
+    raise RuntimeError("Timed out waiting for browser approval. Run `smara login` again.")
+
+
 def _watch_stream(client: httpx.Client, task_id: str) -> None:
     last_event_id = ""
     for attempt in range(4):
@@ -112,8 +141,10 @@ def build_parser() -> argparse.ArgumentParser:
     ask = commands.add_parser("ask", help="short direct conversation")
     ask.add_argument("message")
     ask.add_argument("--workspace", default="default")
-    login = commands.add_parser("login", help="exchange a one-time Web pairing code for a CLI token")
-    login.add_argument("code")
+    login = commands.add_parser("login", help="approve this CLI in Smara Web (or exchange a legacy code)")
+    login.add_argument("code", nargs="?", help="legacy one-time pairing code")
+    login.add_argument("--auth-url", help="browser authorization URL template containing {device_code}")
+    login.add_argument("--timeout", type=int, default=300, help="seconds to wait for browser approval")
     login.add_argument("--print-token", action="store_true", help="print the bearer token instead of only saving it")
     commands.add_parser("logout", help="remove the locally saved CLI token")
     run = commands.add_parser("run", help="create a durable approval-gated task")
@@ -163,12 +194,17 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "ask":
                 _print(_request(client, "POST", "/v1/chat", json={"message": args.message, "workspace_id": args.workspace}))
             elif args.command == "login":
-                result = _request(client, "POST", "/v1/cli/device/exchange", json={"code": args.code})
-                _save_token(result)
-                if args.print_token:
-                    print(result["access_token"])
+                if args.code:
+                    result = _request(client, "POST", "/v1/cli/device/exchange", json={"code": args.code})
+                    _save_token(result)
+                    if args.print_token:
+                        print(result["access_token"])
+                    else:
+                        print(f"Smara CLI login saved to {_token_path()}")
                 else:
-                    print(f"Smara CLI login saved to {_token_path()}")
+                    if args.print_token:
+                        raise RuntimeError("--print-token is only available with a legacy pairing code.")
+                    _browser_login(client, args)
             elif args.command == "logout":
                 _clear_token()
                 print("Smara CLI token removed.")

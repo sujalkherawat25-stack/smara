@@ -9,7 +9,7 @@ import base64
 import secrets
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +18,7 @@ import httpx
 import jwt
 
 from .config import settings
-from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, CliPairingExchange, CliPairingStart, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, ScheduleCreate, ScheduleView, TaskCreate, TaskView, ToolInvokeRequest
+from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, CliDeviceAuthorize, CliPairingExchange, CliPairingStart, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, ScheduleCreate, ScheduleView, TaskCreate, TaskView, ToolInvokeRequest
 from .store import open_task_store
 from .agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime
 from . import agent_events, llm_errors
@@ -216,6 +216,46 @@ async def start_cli_pairing(body: CliPairingStart, user: str = Depends(account_i
     return store.create_cli_pairing(user, body.name)
 
 
+def _issue_cli_token(account_id: str, name: str) -> dict:
+    if not settings.cli_token_secret:
+        raise HTTPException(503, "CLI authentication is not configured on this Smara deployment.")
+    now = int(time.time())
+    expires_in = max(1, settings.cli_token_ttl_days) * 86400
+    token = jwt.encode({
+        "sub": account_id, "name": name, "jti": f"cli_{secrets.token_hex(16)}",
+        "iat": now, "exp": now + expires_in,
+        "aud": "smara-cli", "iss": "smara-api",
+    }, settings.cli_token_secret, algorithm="HS256")
+    return {"access_token": token, "token_type": "bearer", "expires_in": expires_in}
+
+
+@app.get("/v1/cli/device/request")
+async def request_cli_device(name: str = Query(default="Smara CLI", min_length=1, max_length=120)):
+    """Start a browser-authorized CLI login; the random code is never persisted plaintext."""
+    if not settings.cli_token_secret:
+        raise HTTPException(503, "CLI authentication is not configured on this Smara deployment.")
+    return store.create_cli_device_request(name)
+
+
+@app.post("/v1/cli/device/authorize")
+async def authorize_cli_device(body: CliDeviceAuthorize, user: str = Depends(account_id)):
+    """Approve a CLI request from the already authenticated Smara Web session."""
+    try:
+        result = store.authorize_cli_device(body.device_code, user)
+    except KeyError as exc:
+        raise HTTPException(409, "CLI request is expired, already approved, or invalid.") from exc
+    return {"ok": True, "name": result["name"]}
+
+
+@app.get("/v1/cli/device/poll")
+async def poll_cli_device(device_code: str = Query(..., min_length=20, max_length=220)):
+    """Poll a device request without exposing account identity before approval."""
+    result = store.poll_cli_device(device_code)
+    if result["status"] == "approved":
+        return {"status": "approved", **_issue_cli_token(result["account_id"], result["name"])}
+    return result
+
+
 @app.post("/v1/cli/device/exchange")
 async def exchange_cli_pairing(body: CliPairingExchange):
     """Exchange a one-time Web-issued code for a scoped CLI bearer token."""
@@ -225,13 +265,7 @@ async def exchange_cli_pairing(body: CliPairingExchange):
         pairing = store.consume_cli_pairing(body.code)
     except KeyError as exc:
         raise HTTPException(401, "CLI pairing code is invalid, expired, or already used.") from exc
-    now = int(time.time())
-    token = jwt.encode({
-        "sub": pairing["account_id"], "name": pairing["name"], "jti": f"cli_{secrets.token_hex(16)}",
-        "iat": now, "exp": now + max(1, settings.cli_token_ttl_days) * 86400,
-        "aud": "smara-cli", "iss": "smara-api",
-    }, settings.cli_token_secret, algorithm="HS256")
-    return {"access_token": token, "token_type": "bearer", "expires_in": max(1, settings.cli_token_ttl_days) * 86400}
+    return _issue_cli_token(pairing["account_id"], pairing["name"])
 
 
 @app.post("/v1/chat", response_model=ChatResponse)

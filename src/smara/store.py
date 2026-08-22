@@ -104,6 +104,12 @@ class TaskStore:
             CREATE TABLE IF NOT EXISTS cli_pairings (
               code_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, name TEXT NOT NULL,
               expires_at TEXT NOT NULL, consumed_at TEXT);
+            CREATE TABLE IF NOT EXISTS cli_device_requests (
+              device_code_hash TEXT PRIMARY KEY, name TEXT NOT NULL,
+              account_id TEXT, expires_at TEXT NOT NULL,
+              approved_at TEXT, consumed_at TEXT);
+            CREATE INDEX IF NOT EXISTS idx_cli_device_requests_active
+              ON cli_device_requests (expires_at) WHERE consumed_at IS NULL;
             CREATE TABLE IF NOT EXISTS schedules (
               id TEXT PRIMARY KEY, account_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
               title TEXT NOT NULL, objective TEXT NOT NULL, interval_seconds INTEGER NOT NULL,
@@ -228,6 +234,56 @@ class TaskStore:
                 raise KeyError("cli pairing")
             c.execute("UPDATE cli_pairings SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL", (now, code_hash))
             return dict(row)
+
+    def create_cli_device_request(self, name: str, ttl_seconds: int = 600) -> dict:
+        """Create a high-entropy device request; only its hash is stored."""
+        device_code = f"smara_device_{secrets.token_urlsafe(32)}"
+        now = datetime.now(timezone.utc)
+        expires_at = (now + timedelta(seconds=ttl_seconds)).isoformat()
+        with self._connect() as c:
+            c.execute(
+                "INSERT INTO cli_device_requests(device_code_hash,name,account_id,expires_at,approved_at,consumed_at) VALUES(?,?,?,?,NULL,NULL)",
+                (hashlib.sha256(device_code.encode()).hexdigest(), name, None, expires_at),
+            )
+        return {"device_code": device_code, "expires_at": expires_at, "interval": 2, "name": name}
+
+    def authorize_cli_device(self, device_code: str, account_id: str) -> dict:
+        """Bind a pending browser request to the authenticated account exactly once."""
+        now = _now(); code_hash = hashlib.sha256(device_code.encode()).hexdigest()
+        with self._connect() as c:
+            row = c.execute(
+                "SELECT * FROM cli_device_requests WHERE device_code_hash=? AND consumed_at IS NULL AND expires_at>?",
+                (code_hash, now),
+            ).fetchone()
+            if not row or row["account_id"]:
+                raise KeyError("cli device request")
+            c.execute(
+                "UPDATE cli_device_requests SET account_id=?,approved_at=? WHERE device_code_hash=? AND account_id IS NULL AND consumed_at IS NULL",
+                (account_id, now, code_hash),
+            )
+            return {"name": row["name"], "account_id": account_id, "approved_at": now}
+
+    def poll_cli_device(self, device_code: str) -> dict:
+        """Atomically issue one terminal device result; pending requests stay pollable."""
+        now = _now(); code_hash = hashlib.sha256(device_code.encode()).hexdigest()
+        with self._connect() as c:
+            row = c.execute("SELECT * FROM cli_device_requests WHERE device_code_hash=?", (code_hash,)).fetchone()
+            if not row:
+                return {"status": "expired"}
+            if row["consumed_at"]:
+                return {"status": "used"}
+            expires_at = row["expires_at"].isoformat() if isinstance(row["expires_at"], datetime) else row["expires_at"]
+            if expires_at <= now:
+                return {"status": "expired"}
+            if not row["account_id"]:
+                return {"status": "pending", "interval": 2}
+            updated = c.execute(
+                "UPDATE cli_device_requests SET consumed_at=? WHERE device_code_hash=? AND consumed_at IS NULL",
+                (now, code_hash),
+            )
+            if getattr(updated, "rowcount", 1) != 1:
+                return {"status": "used"}
+            return {"status": "approved", "account_id": row["account_id"], "name": row["name"]}
 
     def get(self, task_id: str, account_id: str) -> dict:
         with self._connect() as c:
