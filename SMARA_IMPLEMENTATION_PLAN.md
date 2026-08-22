@@ -1073,3 +1073,25 @@ Next: expose the pairing start action from the existing authenticated Smara
 Web/Memento settings surface, then port Memento's first tool family—web search,
 safe URL retrieval, source verification, and citations—into Smara's tool
 registry and research task graph.
+
+### 2026-08-22 — Memento extraction slice 4: Smara Web CLI pairing action
+
+Added the first user-facing entry point for the CLI to the existing Smara Web
+surface. The account area now opens a short-lived one-time code from
+`POST /v1/cli/device/start` and explains the safe handoff:
+`smara login <code>`. The code is displayed once, is never copied into a URL,
+and does not expose the browser session or signing secrets. This keeps the
+control experience in Smara Web rather than creating another control product.
+
+Verified: the static Web bundle contains the pairing action and dialog, Node
+syntax validation passes, the rebuilt Compose stack is healthy, a live Web/API
+smoke request returns a pairing code, and the complete disposable-container
+suite passes **35 tests** (only the existing two short-test-key JWT warnings and
+the bind-mounted pytest-cache warning remain). The deployment still needs a
+real `SMARA_CLI_TOKEN_SECRET` in its secret manager before code exchange is
+enabled; the current development `.env` intentionally leaves it blank.
+
+Next: add the first independent research tool family (web search, safe URL
+retrieval, source verification, and citations) behind Smara's provider-neutral
+tool boundary, then connect it to the existing research evidence ledger without
+importing Memento or MemoryOS modules.

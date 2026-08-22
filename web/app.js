@@ -97,6 +97,14 @@ $('#task-form').addEventListener('submit', async event => {
   try { await api('/v1/tasks', { method: 'POST', body: JSON.stringify({ title: form.title.value, objective: form.objective.value, workspace_id: form.workspace.value, requires_approval: form.approval.checked, steps: [{ name: 'execute_task' }] }) }); $('#task-dialog').close(); form.reset(); await refresh(); notice('Task created.'); } catch (error) { notice(error.message, true); }
 });
 $('#pair-desktop').onclick = async () => { try { const pairing = await api('/v1/executors/pairings', { method: 'POST', body: JSON.stringify({ name: 'My desktop', capabilities: ['local_file_read'] }) }); $('#device-list').innerHTML = `<article class="card"><h3>Pair this desktop</h3><p>Run the Memento bridge command with this one-time code. It expires at ${new Date(pairing.expires_at).toLocaleTimeString()}.</p><p class="pair-code">${pairing.code}</p></article>`; } catch (error) { notice(error.message, true); } };
+$('#pair-cli').onclick = async () => {
+  try {
+    const pairing = await api('/v1/cli/device/start', { method: 'POST', body: JSON.stringify({ name: 'Smara CLI' }) });
+    $('#cli-code').textContent = pairing.code;
+    $('#cli-expires').textContent = `Expires at ${new Date(pairing.expires_at).toLocaleTimeString()}. Do not share this code.`;
+    $('#cli-dialog').showModal();
+  } catch (error) { notice(error.message, true); }
+};
 $('#capture-form').addEventListener('submit', async event => {
   event.preventDefault(); const form = event.currentTarget; if (event.submitter.value !== 'submit') return $('#capture-dialog').close();
   try {
