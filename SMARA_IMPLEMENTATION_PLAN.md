@@ -1611,3 +1611,18 @@ imported. The sandbox boundary now supports a separately authenticated remote
 without its URL and token. A real isolated sandbox service, parent
 `ai.syntarus.com` browser handoff, production secret-manager operations, and
 full MCP execution remain deployment/next-phase work.
+
+### 2026-08-22 — Production-readiness execution pass
+
+The staging VM was audited without changing `ai.syntarus.com`. Smara is on
+commit `70f9ca0`, all 15 migrations are applied, public health/readiness pass,
+and the clean Docker suite passes **76 tests**. The existing Memento health
+endpoints also pass read-only checks.
+
+The VM currently has no secret-manager client, off-host backup client, or
+Cloudflare API credential, and no Windows desktop is paired. The full gate
+therefore correctly remains blocked by integration encryption keys, Sentry,
+VAPID, off-host backup configuration, distributed edge-rate-limit review, the
+real desktop smoke, and Syntarus server-side metadata enforcement. A
+`PRODUCTION_RUNBOOK.md` now records the exact operator sequence. No proxy
+switch or MemoryOS source change was made.
