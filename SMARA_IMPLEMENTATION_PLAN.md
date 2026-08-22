@@ -1420,3 +1420,18 @@ data.
 The local Docker suite remains **64 passed, 3 warnings**. The fix is ready for a
 second staging restart; the first restart was intentionally stopped before any
 production-domain change.
+
+### 2026-08-22 — Staging deployment verification
+
+Pulled the verified `9a89dd4` release into the VM's existing
+`smara-staging` Compose project and rebuilt it under the original project name
+(avoiding a duplicate stack/port collision). The staging release now has all
+API, worker, scheduler, integration-worker, Postgres, and Redis containers
+running. Public checks passed for `/health` and `/app/`, and an in-container
+signed gateway probe successfully authenticated an account and listed the
+read-only tool catalogue.
+
+The production `ai.syntarus.com` MemoryOS/Memento stack was not changed. The
+next cutover gate is capability shadow-testing against that domain, followed by
+a reversible proxy switch only after authentication, chat, tasks, research,
+approvals, schedules, memory, and rollback checks pass.
