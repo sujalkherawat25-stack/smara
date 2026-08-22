@@ -40,6 +40,8 @@ class Settings:
     search_api_key: str = os.getenv("SMARA_SEARCH_API_KEY", "")
     search_url: str = os.getenv("SMARA_SEARCH_URL", "https://api.search.brave.com/res/v1/web/search")
     search_timeout_seconds: float = float(os.getenv("SMARA_SEARCH_TIMEOUT_SECONDS", "12"))
+    research_allowed_domains: str = os.getenv("SMARA_RESEARCH_ALLOWED_DOMAINS", "")
+    research_blocked_domains: str = os.getenv("SMARA_RESEARCH_BLOCKED_DOMAINS", "")
 
 
 settings = Settings()

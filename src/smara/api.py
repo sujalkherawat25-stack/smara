@@ -157,7 +157,11 @@ def view(row: dict) -> TaskView:
 
 
 def evidence_view(row: dict) -> EvidenceView:
-    return EvidenceView(**{**row, "retrieved_at": _as_datetime(row["retrieved_at"]) if row.get("retrieved_at") else None})
+    quality_flags = row.get("quality_flags") or []
+    if isinstance(quality_flags, str):
+        try: quality_flags = json.loads(quality_flags)
+        except json.JSONDecodeError: quality_flags = []
+    return EvidenceView(**{**row, "retrieved_at": _as_datetime(row["retrieved_at"]) if row.get("retrieved_at") else None, "quality_flags": quality_flags, "agreement_count": int(row.get("agreement_count") or 0)})
 
 
 def artifact_view(row: dict) -> ArtifactView:

@@ -65,6 +65,13 @@ function render() {
   if (!active.length && state.tasks.length) notice('All current tasks are at a safe terminal state.');
 }
 function actionCard(action) { return `<article class="card"><h3>${escape(action.action)}</h3><p>${escape(action.preview)}</p><p>${badge(action.status)} · ${escape(action.provider || 'integration')}</p><button data-approve="${action.id}">Review and decide</button></article>`; }
+function evidenceCard(item) {
+  const flags = Array.isArray(item.quality_flags) && item.quality_flags.length ? item.quality_flags.join(', ') : 'quality checks passed';
+  const url = /^https?:\/\//i.test(item.url || '') ? escape(item.url) : '#';
+  const published = item.published_at ? ` · published ${escape(item.published_at)}` : '';
+  const agreement = item.agreement_count ? ` · agrees with ${item.agreement_count} source(s)` : '';
+  return `<li class="evidence-item"><div><a href="${url}" target="_blank" rel="noreferrer">${escape(item.citation_label || 'Source')} — ${escape(item.title || item.url)}</a> ${badge(item.status)}</div><small>${escape(item.domain_policy || 'unclassified')}${published}${agreement}</small><small class="quality">${escape(flags)}</small>${item.error ? `<small class="error-text">${escape(item.error)}</small>` : ''}</li>`;
+}
 async function selectTask(id) {
   state.selected = id; render();
   const detail = $('#task-detail'); detail.classList.remove('empty'); detail.textContent = 'Loading task details…';
@@ -72,7 +79,7 @@ async function selectTask(id) {
     const [task, steps, events, artifacts, evidence] = await Promise.all([
       api(`/v1/tasks/${id}`), api(`/v1/tasks/${id}/steps`).then(x => x.steps), api(`/v1/tasks/${id}/events`).then(x => x.events), api(`/v1/tasks/${id}/artifacts`).then(x => x), api(`/v1/research/${id}/evidence`).catch(() => []),
     ]);
-    detail.innerHTML = `<header><div><p class="eyebrow">${escape(task.workspace_id)}</p><h2>${escape(task.title)}</h2><p class="muted">${escape(task.objective)}</p></div>${badge(task.status)}</header><div class="columns"><section class="panel"><h3>Plan</h3><ul>${steps.map(s => `<li><b>${escape(s.name)}</b> ${badge(s.status)}</li>`).join('') || '<li>No steps recorded.</li>'}</ul></section><section class="panel"><h3>Evidence</h3><ul>${evidence.map(e => `<li>${escape(e.citation_label || 'Source')} — ${escape(e.title || e.url)} ${badge(e.status)}</li>`).join('') || '<li>No research evidence.</li>'}</ul></section><section class="panel"><h3>Artifacts</h3><ul>${artifacts.map(a => `<li><b>${escape(a.name)}</b><br>${escape((a.content || '').slice(0, 180))}</li>`).join('') || '<li>No artifacts.</li>'}</ul></section></div><section class="panel"><h3>Activity</h3><ul class="activity">${events.map(e => `<li>${new Date(e.created_at).toLocaleString()} — ${escape(e.type)}</li>`).join('') || '<li>No events.</li>'}</ul></section>`;
+    detail.innerHTML = `<header><div><p class="eyebrow">${escape(task.workspace_id)}</p><h2>${escape(task.title)}</h2><p class="muted">${escape(task.objective)}</p></div>${badge(task.status)}</header><div class="columns"><section class="panel"><h3>Plan</h3><ul>${steps.map(s => `<li><b>${escape(s.name)}</b> ${badge(s.status)}</li>`).join('') || '<li>No steps recorded.</li>'}</ul></section><section class="panel"><h3>Evidence ledger</h3><p class="muted">Only verified sources are used in the report. Quality flags stay visible for review.</p><ul class="evidence-list">${evidence.map(evidenceCard).join('') || '<li>No research evidence.</li>'}</ul></section><section class="panel"><h3>Artifacts</h3><ul>${artifacts.map(a => `<li><b>${escape(a.name)}</b><br>${escape((a.content || '').slice(0, 180))}</li>`).join('') || '<li>No artifacts.</li>'}</ul></section></div><section class="panel"><h3>Activity</h3><ul class="activity">${events.map(e => `<li>${new Date(e.created_at).toLocaleString()} — ${escape(e.type)}</li>`).join('') || '<li>No events.</li>'}</ul></section>`;
   } catch (error) { detail.textContent = error.message; notice(error.message, true); }
 }
 function openApproval(id) {

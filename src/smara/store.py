@@ -56,9 +56,11 @@ class TaskStore:
               PRIMARY KEY(step_id,depends_on_step_id), CHECK(step_id <> depends_on_step_id));
             CREATE TABLE IF NOT EXISTS research_evidence (
               id TEXT PRIMARY KEY, task_id TEXT NOT NULL, url TEXT NOT NULL,
-              title TEXT, status TEXT NOT NULL, retrieved_at TEXT,
+              title TEXT, status TEXT NOT NULL, retrieved_at TEXT, published_at TEXT,
               content_sha256 TEXT, excerpt TEXT, claim TEXT, confidence REAL,
-              citation_label TEXT, error TEXT, created_at TEXT NOT NULL,
+              citation_label TEXT, error TEXT, domain_policy TEXT NOT NULL DEFAULT 'unclassified',
+              quality_flags TEXT NOT NULL DEFAULT '[]', agreement_count INTEGER NOT NULL DEFAULT 0,
+              verification_notes TEXT, created_at TEXT NOT NULL,
               UNIQUE(task_id,url));
             CREATE TABLE IF NOT EXISTS artifacts (
               id TEXT PRIMARY KEY, task_id TEXT NOT NULL, kind TEXT NOT NULL,
@@ -119,6 +121,16 @@ class TaskStore:
             for name, definition in (("payload", "TEXT NOT NULL DEFAULT '{}'"), ("approval_note", "TEXT NOT NULL DEFAULT ''"), ("lease_owner", "TEXT"), ("lease_expires_at", "TEXT"), ("attempts", "INTEGER NOT NULL DEFAULT 0"), ("last_error", "TEXT"), ("result_summary", "TEXT")):
                 if name not in action_columns:
                     c.execute(f"ALTER TABLE integration_action_log ADD COLUMN {name} {definition}")
+            evidence_columns = {row[1] for row in c.execute("PRAGMA table_info(research_evidence)")}
+            for name, definition in (
+                ("published_at", "TEXT"),
+                ("domain_policy", "TEXT NOT NULL DEFAULT 'unclassified'"),
+                ("quality_flags", "TEXT NOT NULL DEFAULT '[]'"),
+                ("agreement_count", "INTEGER NOT NULL DEFAULT 0"),
+                ("verification_notes", "TEXT"),
+            ):
+                if name not in evidence_columns:
+                    c.execute(f"ALTER TABLE research_evidence ADD COLUMN {name} {definition}")
 
     def create(self, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None) -> dict:
         task_id, now = f"task_{uuid.uuid4().hex}", _now()
@@ -359,10 +371,11 @@ class TaskStore:
         with self._connect() as c:
             return [dict(row) for row in c.execute("SELECT * FROM research_evidence WHERE task_id=? ORDER BY created_at,id", (task_id,))]
 
-    def update_evidence(self, evidence_id: str, task_id: str, *, status: str, title: str | None = None, retrieved_at: str | None = None, content_sha256: str | None = None, excerpt: str | None = None, claim: str | None = None, confidence: float | None = None, citation_label: str | None = None, error: str | None = None) -> None:
+    def update_evidence(self, evidence_id: str, task_id: str, *, status: str, title: str | None = None, retrieved_at: str | None = None, published_at: str | None = None, content_sha256: str | None = None, excerpt: str | None = None, claim: str | None = None, confidence: float | None = None, citation_label: str | None = None, error: str | None = None, domain_policy: str | None = None, quality_flags: list[str] | None = None, agreement_count: int | None = None, verification_notes: str | None = None) -> None:
         with self._connect() as c:
             c.execute("""UPDATE research_evidence SET status=?,title=?,retrieved_at=?,content_sha256=?,excerpt=?,claim=?,confidence=?,citation_label=?,error=?
-              WHERE id=? AND task_id=?""", (status, title, retrieved_at, content_sha256, excerpt, claim, confidence, citation_label, error, evidence_id, task_id))
+              ,published_at=COALESCE(?,published_at),domain_policy=COALESCE(?,domain_policy),quality_flags=COALESCE(?,quality_flags),agreement_count=COALESCE(?,agreement_count),verification_notes=COALESCE(?,verification_notes)
+              WHERE id=? AND task_id=?""", (status, title, retrieved_at, content_sha256, excerpt, claim, confidence, citation_label, error, published_at, domain_policy, json.dumps(quality_flags) if quality_flags is not None else None, agreement_count, verification_notes, evidence_id, task_id))
 
     def append_event(self, task_id: str, event_type: str, payload: str = "{}") -> None:
         with self._connect() as c:

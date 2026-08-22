@@ -1121,3 +1121,30 @@ URL research remains available without one.
 Next: expose research progress/evidence more clearly in the Web and CLI, then
 add source-level verification rules (publication date, domain policy, and
 cross-source agreement) before any LLM synthesis is introduced.
+
+### 2026-08-22 — Memento extraction slice 6: evidence quality and operator views
+
+Completed the next research safety layer without adding LLM synthesis:
+
+- added migration `013_research_quality.sql` and matching SQLite upgrades for
+  publication date, domain policy, quality flags, agreement count, and notes;
+- added deterministic checks before evidence is verified: HTTPS signal,
+  optional allow/block domain policy, publication-date signal, and token-level
+  cross-source agreement;
+- kept weak evidence visible and usable only as explicitly flagged verified
+  evidence—no silent confidence inflation and no hidden claim generation;
+- expanded the Smara Web evidence ledger with safe source links, status,
+  publication date, domain policy, agreement count, quality flags, and errors;
+- added CLI `research` and `task evidence` commands, and included the ledger in
+  `task show`; and
+- added regression coverage for publication metadata, agreement scoring, and
+  the enriched API evidence view.
+
+Verified: migration 013 applied to live Postgres, the enriched evidence API
+serialized correctly, the CLI command is installed, all Compose services are
+healthy, and the clean-container suite passes **39 tests**. Only the existing
+short-test-key JWT warnings and bind-mounted pytest-cache warning remain.
+
+Next: add explicit research progress events/SSE so Web and CLI can show each
+discovery, fetch, and verification transition live, then introduce bounded LLM
+synthesis only after those source states are complete.

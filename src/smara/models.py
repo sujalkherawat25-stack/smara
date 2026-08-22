@@ -90,12 +90,17 @@ class EvidenceView(BaseModel):
     title: str | None = None
     status: Literal["pending", "fetched", "verified", "failed", "blocked"]
     retrieved_at: datetime | None = None
+    published_at: str | None = None
     content_sha256: str | None = None
     excerpt: str | None = None
     claim: str | None = None
     confidence: float | None = None
     citation_label: str | None = None
     error: str | None = None
+    domain_policy: Literal["allowed", "unclassified", "blocked"] = "unclassified"
+    quality_flags: list[str] = Field(default_factory=list)
+    agreement_count: int = 0
+    verification_notes: str | None = None
 
 
 class ArtifactView(BaseModel):

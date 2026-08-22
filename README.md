@@ -86,6 +86,13 @@ source, verifies the usable evidence, and writes a cited Markdown artifact.
 
 - `GET /v1/research/{task_id}/evidence` returns the durable evidence ledger.
 - `GET /v1/tasks/{task_id}/artifacts` returns the cited report artifact.
+- `smara research "question"` creates a research task; `smara task evidence <id>`
+  prints its source ledger from PowerShell or a terminal.
+
+Each verified source also records transparent quality signals: publication-date
+presence, HTTPS use, configured domain policy, and deterministic token-level
+agreement with other retrieved sources. These signals are advisory and remain
+visible in the Web/CLI; they never become hidden claims or bypass approval.
 
 This slice does not use an LLM to infer claims or deliver reports externally.
 Those remain separate, approval-gated capabilities.

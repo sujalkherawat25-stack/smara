@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import html
 import ipaddress
+import json
 import re
 import socket
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from .config import settings
 from .store import TaskStore
 
 MAX_SOURCE_BYTES = 1_000_000
@@ -25,9 +27,18 @@ class _TextExtractor(HTMLParser):
         self.title = ""
         self._in_title = False
         self.parts: list[str] = []
+        self.published_at: str | None = None
 
-    def handle_starttag(self, tag: str, _attrs) -> None:
-        self._in_title = tag.lower() == "title"
+    def handle_starttag(self, tag: str, attrs) -> None:
+        tag = tag.lower()
+        self._in_title = tag == "title"
+        values = {str(key).lower(): str(value).strip() for key, value in attrs if value}
+        if tag == "time" and values.get("datetime") and not self.published_at:
+            self.published_at = values["datetime"][:100]
+        if tag == "meta" and not self.published_at:
+            key = (values.get("property") or values.get("name") or values.get("itemprop") or "").lower()
+            if key in {"article:published_time", "datepublished", "date", "pubdate", "dc.date"} and values.get("content"):
+                self.published_at = values["content"][:100]
 
     def handle_endtag(self, tag: str) -> None:
         if tag.lower() == "title": self._in_title = False
@@ -73,6 +84,38 @@ class RetrievedSource:
     excerpt: str
     content_sha256: str
     retrieved_at: str
+    published_at: str | None = None
+
+
+def _domain_policy(url: str) -> str:
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    allowed = [item.strip().lower().lstrip(".") for item in settings.research_allowed_domains.split(",") if item.strip()]
+    blocked = [item.strip().lower().lstrip(".") for item in settings.research_blocked_domains.split(",") if item.strip()]
+    matches = lambda domain: host == domain or host.endswith(f".{domain}")
+    if any(matches(domain) for domain in blocked):
+        return "blocked"
+    if allowed and not any(matches(domain) for domain in allowed):
+        return "unclassified"
+    return "allowed" if allowed else "unclassified"
+
+
+def _agreement_counts(items: list[dict]) -> dict[str, int]:
+    token_sets = {
+        item["id"]: set(re.findall(r"[a-z0-9]{4,}", (item.get("excerpt") or "").lower()))
+        for item in items
+    }
+    counts: dict[str, int] = {}
+    for item in items:
+        own = token_sets[item["id"]]
+        count = 0
+        for other in items:
+            if other["id"] == item["id"]:
+                continue
+            shared = own & token_sets[other["id"]]
+            if len(shared) >= 3 and len(shared) / max(1, min(len(own), len(token_sets[other["id"]]))) >= 0.08:
+                count += 1
+        counts[item["id"]] = count
+    return counts
 
 
 async def fetch_public_source(client: httpx.AsyncClient, initial_url: str) -> RetrievedSource:
@@ -101,7 +144,7 @@ async def fetch_public_source(client: httpx.AsyncClient, initial_url: str) -> Re
         if len(excerpt) < 80:
             raise ValueError("Source did not contain enough readable text to cite.")
         title = extracted.title.strip()[:500] or urlparse(str(response.url)).hostname or initial_url
-        return RetrievedSource(title, excerpt, hashlib.sha256(raw).hexdigest(), _now())
+        return RetrievedSource(title, excerpt, hashlib.sha256(raw).hexdigest(), _now(), extracted.published_at)
     raise ValueError("Source exceeded the redirect limit.")
 
 
@@ -146,9 +189,13 @@ class ResearchExecutor:
                 if not _is_public_http_url(item["url"]):
                     self._store.update_evidence(item["id"], task["id"], status="blocked", error="Only publicly routable HTTP(S) source URLs are allowed.")
                     continue
+                policy = _domain_policy(item["url"])
+                if policy == "blocked":
+                    self._store.update_evidence(item["id"], task["id"], status="blocked", domain_policy=policy, error="Source domain is blocked by Smara policy.")
+                    continue
                 try:
                     source = await fetch_public_source(client, item["url"])
-                    self._store.update_evidence(item["id"], task["id"], status="fetched", title=source.title, retrieved_at=source.retrieved_at, content_sha256=source.content_sha256, excerpt=source.excerpt)
+                    self._store.update_evidence(item["id"], task["id"], status="fetched", title=source.title, retrieved_at=source.retrieved_at, published_at=source.published_at, content_sha256=source.content_sha256, excerpt=source.excerpt, domain_policy=policy)
                     fetched += 1
                 except (httpx.HTTPError, ValueError) as exc:
                     self._store.update_evidence(item["id"], task["id"], status="failed", error=str(exc)[:1000])
@@ -163,12 +210,27 @@ class ResearchExecutor:
         fetched = [item for item in evidence if item["status"] == "fetched"]
         if not fetched:
             raise ValueError("No retrievable sources were available; Smara will not generate an uncited report.")
+        agreement = _agreement_counts(fetched)
+        verified_count = 0
         for index, item in enumerate(fetched, start=1):
-            confidence = 0.85 if item["url"].startswith("https://") and len(item.get("excerpt") or "") >= 500 else 0.65
+            flags: list[str] = []
+            if not item["url"].startswith("https://"):
+                flags.append("http_source")
+            if not item.get("published_at"):
+                flags.append("missing_publication_date")
+            if item.get("domain_policy", "unclassified") == "unclassified":
+                flags.append("domain_unclassified")
+            if agreement.get(item["id"], 0):
+                flags.append("cross_source_agreement")
+            elif len(fetched) > 1:
+                flags.append("no_cross_source_agreement")
+            confidence = min(0.95, 0.55 + (0.1 if item["url"].startswith("https://") else 0) + (0.1 if len(item.get("excerpt") or "") >= 500 else 0) + (0.05 if item.get("published_at") else 0) + (0.15 if agreement.get(item["id"], 0) else 0))
             claim = f"Evidence retrieved from {item.get('title') or item['url']}."
-            self._store.update_evidence(item["id"], task["id"], status="verified", title=item.get("title"), retrieved_at=item.get("retrieved_at"), content_sha256=item.get("content_sha256"), excerpt=item.get("excerpt"), claim=claim, confidence=confidence, citation_label=f"[{index}]")
-        self._store.append_event(task["id"], "research.evidence_verified", f'{{"verified":{len(fetched)}}}')
-        return ResearchStepResult(f"Verified {len(fetched)} retrieved source(s).", verified_evidence_count=len(fetched))
+            notes = "Quality checks: " + (", ".join(flags) if flags else "passed")
+            self._store.update_evidence(item["id"], task["id"], status="verified", title=item.get("title"), retrieved_at=item.get("retrieved_at"), published_at=item.get("published_at"), content_sha256=item.get("content_sha256"), excerpt=item.get("excerpt"), claim=claim, confidence=confidence, citation_label=f"[{index}]", domain_policy=item.get("domain_policy", "unclassified"), quality_flags=flags, agreement_count=agreement.get(item["id"], 0), verification_notes=notes)
+            verified_count += 1
+        self._store.append_event(task["id"], "research.evidence_verified", f'{{"verified":{verified_count},"agreement_sources":{sum(1 for count in agreement.values() if count)}}}')
+        return ResearchStepResult(f"Verified {verified_count} retrieved source(s); quality flags remain visible in the ledger.", verified_evidence_count=verified_count)
 
     def _write_report(self, task: dict) -> ResearchStepResult:
         evidence = self._store.evidence(task["id"], task["account_id"])
@@ -177,7 +239,8 @@ class ResearchExecutor:
             raise ValueError("No verified evidence is available for a report.")
         lines = [f"# {task['title']}", "", "## Research question", task["objective"], "", "## Evidence-backed notes"]
         for item in verified:
-            lines += [f"### {item['citation_label']} {item['title']}", item["excerpt"], "", f"Source: {item['url']}", ""]
+            quality = ", ".join(json.loads(item.get("quality_flags") or "[]")) or "passed"
+            lines += [f"### {item['citation_label']} {item['title']}", item["excerpt"], f"Quality checks: {quality}", "", f"Source: {item['url']}", ""]
         failures = [item for item in evidence if item["status"] in {"failed", "blocked"}]
         if failures:
             lines += ["## Limitations", f"{len(failures)} supplied source(s) could not be retrieved or were blocked. They were not used for any report content.", ""]

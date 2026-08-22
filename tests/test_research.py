@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 
 import httpx
@@ -21,7 +22,7 @@ def test_research_executor_creates_verified_evidence_and_cited_artifact(tmp_path
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url == httpx.URL("https://example.com/source")
-        return httpx.Response(200, headers={"content-type": "text/html"}, text="<html><title>Primary Source</title><body>Solar energy produces electricity from sunlight. This verified example source has enough readable text to support a transparent evidence ledger and deterministic report generation without invented claims.</body></html>")
+        return httpx.Response(200, headers={"content-type": "text/html"}, text="<html><title>Primary Source</title><meta property='article:published_time' content='2026-08-22'><body>Solar energy produces electricity from sunlight. This verified example source has enough readable text to support a transparent evidence ledger and deterministic report generation without invented claims.</body></html>")
 
     async def execute() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=False) as client:
@@ -38,8 +39,32 @@ def test_research_executor_creates_verified_evidence_and_cited_artifact(tmp_path
     assert evidence[0]["status"] == "verified"
     assert evidence[0]["content_sha256"]
     assert evidence[0]["citation_label"] == "[1]"
+    assert evidence[0]["published_at"] == "2026-08-22"
+    assert "missing_publication_date" not in json.loads(evidence[0]["quality_flags"])
     assert "[1]" in artifacts[0]["content"]
     assert store.get(task["id"], "acct_1")["status"] == "completed"
+
+
+def test_quality_verification_records_cross_source_agreement(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create_research("acct_1", "project-a", "Agreement", "Compare solar sources", ["https://example.com/a", "https://example.com/b"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/html"}, text="<html><title>Solar source</title><meta name='datePublished' content='2026-08-22'><body>Solar energy produces electricity from sunlight and reduces emissions. This source reports the same solar energy evidence with enough context for agreement scoring and transparent citation.</body></html>")
+
+    async def execute():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=False) as client:
+            executor = ResearchExecutor(store, client)
+            for expected in ("research.fetch_sources", "research.verify_evidence"):
+                step = store.claim_one("quality-worker")
+                assert step and step["name"] == expected
+                outcome = await executor.run_step(step)
+                store.complete_step(step["step_id"], "acct_1", outcome.text)
+
+    asyncio.run(execute())
+    evidence = store.evidence(task["id"], "acct_1")
+    assert all(item["agreement_count"] == 1 for item in evidence)
+    assert all("cross_source_agreement" in json.loads(item["quality_flags"]) for item in evidence)
 
 
 def test_research_worker_writes_only_verified_report_to_memory(tmp_path: Path, monkeypatch):

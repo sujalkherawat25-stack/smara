@@ -51,12 +51,19 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--title", default="Smara task")
     run.add_argument("--workspace", default="default")
     run.add_argument("--no-approval", action="store_true")
+    research = commands.add_parser("research", help="create a cited research task")
+    research.add_argument("question")
+    research.add_argument("--title", default="Smara research")
+    research.add_argument("--workspace", default="default")
+    research.add_argument("--source", action="append", default=[], help="explicit source URL; repeat as needed")
     tasks = commands.add_parser("tasks", help="list durable tasks")
     task = commands.add_parser("task", help="inspect or control one task")
     task_commands = task.add_subparsers(dest="task_command", required=True)
     for name in ("show", "watch", "cancel"):
         command = task_commands.add_parser(name)
         command.add_argument("task_id")
+    evidence = task_commands.add_parser("evidence", help="show a research task's evidence ledger")
+    evidence.add_argument("task_id")
     approval = task_commands.add_parser("approve")
     approval.add_argument("task_id")
     approval.add_argument("--note", default="Approved from Smara CLI")
@@ -83,14 +90,26 @@ def main(argv: list[str] | None = None) -> int:
                     "requires_approval": not args.no_approval,
                     "steps": [{"name": "agent.execute"}],
                 }))
+            elif args.command == "research":
+                _print(_request(client, "POST", "/v1/research", json={
+                    "title": args.title,
+                    "question": args.question,
+                    "workspace_id": args.workspace,
+                    "sources": args.source,
+                }))
             elif args.command == "tasks":
                 _print(_request(client, "GET", "/v1/tasks"))
             elif args.task_command == "show":
-                _print({
+                result = {
                     "task": _request(client, "GET", f"/v1/tasks/{args.task_id}"),
                     "steps": _request(client, "GET", f"/v1/tasks/{args.task_id}/steps"),
                     "events": _request(client, "GET", f"/v1/tasks/{args.task_id}/events"),
-                })
+                }
+                try: result["evidence"] = _request(client, "GET", f"/v1/research/{args.task_id}/evidence")
+                except RuntimeError: pass
+                _print(result)
+            elif args.task_command == "evidence":
+                _print(_request(client, "GET", f"/v1/research/{args.task_id}/evidence"))
             elif args.task_command == "watch":
                 previous: Any = None
                 while True:
