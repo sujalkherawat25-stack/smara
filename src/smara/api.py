@@ -236,15 +236,17 @@ async def exchange_cli_pairing(body: CliPairingExchange):
 
 @app.post("/v1/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, user: str = Depends(account_id)):
-    """Short direct chat; durable tool work must be created as a task instead."""
+    """Direct chat with bounded read-only tools; writes remain durable tasks."""
     runtime = _agent_runtime()
     try:
-        turn = await runtime.chat(
-            account_id=user,
-            workspace_id=body.workspace_id,
-            message=body.message,
-            conversation_id=body.conversation_id,
-        )
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=False) as client:
+            turn = await runtime.chat_with_tools(
+                account_id=user,
+                workspace_id=body.workspace_id,
+                message=body.message,
+                conversation_id=body.conversation_id,
+                http_client=client,
+            )
         return ChatResponse(**turn.__dict__)
     except httpx.HTTPStatusError as exc:
         raise HTTPException(502, "The configured Smara model provider rejected this chat request.") from exc
@@ -258,23 +260,52 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
 
 @app.post("/v1/chat/stream")
 async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
-    """SSE view of direct chat, using Memento-compatible safe event names."""
+    """SSE view of direct chat and bounded read-only tool progress."""
     async def emit():
         started_at = time.perf_counter()
         runtime = _agent_runtime()
+        queue: asyncio.Queue[str] = asyncio.Queue()
+
+        def event_hook(event_type: str, payload: dict) -> None:
+            if event_type == "agent.tool_requested":
+                queue.put_nowait(agent_events.tool_call(str(payload.get("tool", "unknown"))))
+            elif event_type == "agent.tool_completed":
+                queue.put_nowait(agent_events.tool_result(
+                    str(payload.get("tool", "unknown")),
+                    ok=bool(payload.get("ok")),
+                    preview=str(payload.get("preview", "")),
+                ))
+
+        async def run_chat():
+            async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=False) as client:
+                return await runtime.chat_with_tools(
+                    account_id=user,
+                    workspace_id=body.workspace_id,
+                    message=body.message,
+                    conversation_id=body.conversation_id,
+                    http_client=client,
+                    event_hook=event_hook,
+                )
+
+        task = asyncio.create_task(run_chat())
         try:
             yield agent_events.phase("retrieve")
             yield agent_events.status("Retrieving relevant shared context")
-            turn = await runtime.chat(
-                account_id=user,
-                workspace_id=body.workspace_id,
-                message=body.message,
-                conversation_id=body.conversation_id,
-            )
+            yield agent_events.phase("reason_act")
+            while not task.done():
+                try:
+                    yield await asyncio.wait_for(queue.get(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    continue
+            while not queue.empty():
+                yield queue.get_nowait()
+            turn = await task
             yield agent_events.phase("answer")
             yield agent_events.token(turn.message)
-            yield agent_events.done(memory_used=turn.memory_used, total_ms=agent_events.elapsed_ms(started_at))
+            yield agent_events.done(memory_used=turn.memory_used, tools_used=turn.tools_used, total_ms=agent_events.elapsed_ms(started_at))
         except Exception as exc:
+            if not task.done():
+                task.cancel()
             kind, message = llm_errors.describe(exc, provider=settings.llm_provider)
             yield agent_events.error(message, kind=kind)
         finally:

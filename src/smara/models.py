@@ -91,6 +91,7 @@ class ChatResponse(BaseModel):
     message: str
     memory_used: bool
     model: str | None = None
+    tools_used: int = 0
 
 
 class ToolInvokeRequest(BaseModel):

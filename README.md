@@ -68,11 +68,13 @@ directory; use `--print-token` only when a script explicitly needs it.
 `smara logout` removes that token. `task watch` resumes after a dropped SSE
 connection using the last durable event ID.
 
-`smara ask "..."` is intentionally a short direct conversation. It requires a
-configured OpenAI-compatible provider (`SMARA_LLM_*`) and can retrieve context
-only through the Syntarus SDK adapter. Work that takes time, needs tools,
-creates an artifact, or needs approval must use `smara run` so it survives a
-closed terminal or browser.
+`smara ask "..."` is a bounded direct conversation. It requires a configured
+OpenAI-compatible provider (`SMARA_LLM_*`), retrieves context only through the
+Syntarus SDK adapter, and may use the same bounded read-only tools as hosted
+task steps (calculation, research search/retrieval, and configured read-only
+integrations). Work that takes time, creates an artifact, or needs approval
+must use `smara run` so it survives a closed terminal or browser. Direct chat
+can never send, edit, delete, execute local commands, or bypass an approval.
 
 The pairing flow is deliberately two-part: an already authenticated Web or
 Memento session starts the code, and the terminal exchanges it once. Smara
@@ -80,10 +82,11 @@ stores only a hash of the code; the CLI bearer uses a separate signing secret
 and is accepted only for the `smara-cli` audience. A future device settings
 screen will list and revoke issued CLI devices.
 
-`POST /v1/chat/stream` provides the same direct turn as safe Server-Sent Events
-for Web and CLI clients. Its stable event names (`phase`, `status`, `token`,
-`done`, `error`) are adapted from Memento's proven contract. They expose useful
-progress but never model chain-of-thought or raw upstream error strings.
+`POST /v1/chat/stream` provides the same bounded turn as safe Server-Sent
+Events for Web and CLI clients. Its stable event names (`phase`, `status`,
+`tool_call`, `tool_result`, `token`, `done`, `error`) are adapted from
+Memento's proven contract. They expose useful progress but never model
+chain-of-thought, provider credentials, or raw upstream error strings.
 
 The provider-neutral safe tool registry is available at `GET /v1/tools`. The
 initial tools are UTC time, bounded arithmetic, public research search, and

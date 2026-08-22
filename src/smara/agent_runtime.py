@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Callable, Protocol
 
 import httpx
+
+from .agent_step import BoundedAgentStepRuntime
+from .tool_registry import ToolContext, default_tool_registry
 
 
 class ConversationMemory(Protocol):
@@ -31,6 +34,7 @@ class ChatTurn:
     message: str
     memory_used: bool
     model: str | None
+    tools_used: int = 0
 
 
 class OpenAICompatibleProvider:
@@ -103,4 +107,52 @@ class SmaraAgentRuntime:
             message=answer,
             memory_used=bool(context),
             model=getattr(self._provider, "_model", None),
+        )
+
+    async def chat_with_tools(
+        self,
+        *,
+        account_id: str,
+        workspace_id: str,
+        message: str,
+        conversation_id: str | None = None,
+        http_client: httpx.AsyncClient | None = None,
+        event_hook: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> ChatTurn:
+        """Run the same bounded read-only tool loop used by hosted tasks.
+
+        Direct chat can search, fetch, calculate, and inspect configured
+        read-only integrations. Side effects remain unavailable here and must
+        be represented by an approved durable task.
+        """
+        context = ""
+        if self._memory is not None:
+            try:
+                context = await self._memory.context_for_conversation(
+                    message, account_id=account_id, workspace_id=workspace_id
+                )
+            except Exception:
+                context = ""
+        conversation = conversation_id or f"chat_{uuid.uuid4().hex}"
+        result = await BoundedAgentStepRuntime(
+            self._provider,
+            default_tool_registry(http_client),
+        ).run(
+            task={
+                "id": conversation,
+                "task_run_id": f"run_{conversation}",
+                "account_id": account_id,
+                "workspace_id": workspace_id,
+                "objective": message,
+            },
+            memory_context=context,
+            tool_context=ToolContext(account_id, workspace_id, http_client),
+            event_hook=event_hook,
+        )
+        return ChatTurn(
+            conversation_id=conversation,
+            message=result.text,
+            memory_used=bool(context),
+            model=getattr(self._provider, "_model", None),
+            tools_used=result.tools_used,
         )

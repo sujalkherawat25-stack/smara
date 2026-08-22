@@ -18,6 +18,21 @@ class FakeProvider:
         return "A bounded direct response."
 
 
+class ToolProvider:
+    _base_url = "https://llm.example/v1"
+    _api_key = "test-key"
+    _model = "small-model"
+
+    def __init__(self):
+        self.calls = 0
+
+    async def complete(self, *, system: str, message: str) -> str:
+        self.calls += 1
+        if self.calls == 1:
+            return '{"action":"tool","name":"calculate","arguments":{"expression":"2+2"}}'
+        return '{"action":"final","answer":"The result is 4."}'
+
+
 class FakeSyntarus:
     async def search(self, query, **kwargs):
         self.query, self.kwargs = query, kwargs
@@ -39,6 +54,15 @@ def test_runtime_reuses_syntarus_only_through_memory_port():
     assert sdk.kwargs["filters"]["workspace_id"] == "work"
     assert "Sujal prefers concise reports." in provider.system
     assert "external action" in provider.system
+
+
+def test_runtime_chat_promotes_the_bounded_read_only_tool_loop():
+    runtime = SmaraAgentRuntime(ToolProvider())
+    turn = asyncio.run(runtime.chat_with_tools(
+        account_id="acct_1", workspace_id="work", message="Calculate 2+2"
+    ))
+    assert turn.message == "The result is 4."
+    assert turn.tools_used == 1
 
 
 def test_cli_has_only_api_control_commands():

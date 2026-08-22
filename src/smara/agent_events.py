@@ -29,12 +29,23 @@ def token(text: str) -> str:
     return frame({"type": "token", "text": text})
 
 
+def tool_call(name: str) -> str:
+    return frame({"type": "tool_call", "name": name})
+
+
+def tool_result(name: str, *, ok: bool, preview: str = "") -> str:
+    payload: dict[str, Any] = {"type": "tool_result", "name": name, "ok": ok}
+    if preview:
+        payload["preview"] = preview[:500]
+    return frame(payload)
+
+
 def error(message: str, *, kind: str) -> str:
     return frame({"type": "error", "message": message, "kind": kind, "recoverable": False})
 
 
-def done(*, memory_used: bool, total_ms: int) -> str:
-    return frame({"type": "done", "memories_used": int(memory_used), "tools_used": 0, "total_ms": max(0, total_ms)})
+def done(*, memory_used: bool, total_ms: int, tools_used: int = 0) -> str:
+    return frame({"type": "done", "memories_used": int(memory_used), "tools_used": max(0, tools_used), "total_ms": max(0, total_ms)})
 
 
 def elapsed_ms(started_at: float) -> int:

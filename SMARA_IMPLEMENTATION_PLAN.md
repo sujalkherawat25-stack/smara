@@ -1384,3 +1384,25 @@ is desired), real Windows desktop smoke, Telegram delivery, recurrence policy,
 production gateway/secrets/backups/Sentry, reversible `ai.syntarus.com` cutover,
 and Syntarus server-side metadata enforcement. MemoryOS source and schema were
 not modified.
+
+### 2026-08-22 — Direct agent tool-loop parity
+
+Promoted the already-tested bounded task-step runtime into direct Smara chat:
+
+- `/v1/chat` and `/v1/chat/stream` now use the same provider-neutral,
+  max-three-turn tool loop as hosted `agent.execute` steps;
+- direct chat can use only bounded read-only tools and configured read-only
+  integration adapters, while every write, local action, artifact-producing
+  workflow, and approval remains a durable task;
+- SSE now reports `tool_call` and bounded `tool_result` frames and includes the
+  tool count in `done`, without exposing chain-of-thought or raw provider
+  errors; and
+- added regression coverage for model tool selection and final-answer
+  behavior.
+
+Focused agent/control tests pass (**17 passed**). The full-suite and rebuilt
+service verification is the release gate for this slice. Remaining full-Memento
+replacement work is still production identity/session rollout, Telegram channel
+worker, recurrence/delivery policy, Windows desktop smoke/installer, external
+gateway/WAF/secrets/backups/Sentry drills, Syntarus server-side filter
+enforcement, and the reversible `ai.syntarus.com` cutover.
