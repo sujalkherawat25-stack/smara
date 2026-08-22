@@ -1044,3 +1044,32 @@ short-lived device-code/token contract that Memento can mint during the
 transition. Then extract the first Memento tool family (web research and source
 retrieval) into Smara's provider-neutral tool registry and connect it to the
 existing evidence-ledger task graph.
+
+### 2026-08-22 — Memento extraction slice 3: authenticated CLI pairing
+
+Implemented the CLI identity bridge without moving MemoryOS authentication
+internals into Smara:
+
+- added durable, account-scoped CLI pairing codes with a ten-minute lifetime;
+- stores only a SHA-256 hash of each pairing code and marks it consumed before
+  issuing a token, so a code cannot be replayed;
+- added `POST /v1/cli/device/start`, called by an already authenticated
+  Smara/Memento Web session during the transition;
+- added `POST /v1/cli/device/exchange`, which returns a separate `smara-cli`
+  audience JWT signed by its own secret; and
+- added `smara login <one-time-code>` to the thin CLI client.
+
+The CLI bearer is accepted only with the `smara-cli` audience and `smara-api`
+issuer. It is not accepted as a browser bridge token, and browser/gateway
+secrets are not reused. The deployment must configure
+`SMARA_CLI_TOKEN_SECRET` through its secret manager before enabling the flow.
+
+Verified: migration 012 is packaged and applied to live Compose Postgres; an
+isolated production-mode API test passed from signed gateway assertion through
+one-time pairing, token exchange, and authenticated task listing; all services
+remain healthy; and the complete clean-container suite passes **35 tests**.
+
+Next: expose the pairing start action from the existing authenticated Smara
+Web/Memento settings surface, then port Memento's first tool family—web search,
+safe URL retrieval, source verification, and citations—into Smara's tool
+registry and research task graph.

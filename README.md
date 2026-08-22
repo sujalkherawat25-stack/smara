@@ -51,6 +51,9 @@ test the same task graph used by Web, Desktop, and Phone:
 smara --api http://127.0.0.1:8080 --dev-account acct_local tasks
 smara --api http://127.0.0.1:8080 --dev-account acct_local run "Prepare a cited report"
 smara --api http://127.0.0.1:8080 --dev-account acct_local task watch task_xxx
+# After Smara Web/Memento displays a one-time pairing code:
+smara --api https://smara.example.com login smara_<one-time-code>
+smara --api https://smara.example.com --token <cli-token> tasks
 ```
 
 `smara ask "..."` is intentionally a short direct conversation. It requires a
@@ -58,6 +61,12 @@ configured OpenAI-compatible provider (`SMARA_LLM_*`) and can retrieve context
 only through the Syntarus SDK adapter. Work that takes time, needs tools,
 creates an artifact, or needs approval must use `smara run` so it survives a
 closed terminal or browser.
+
+The pairing flow is deliberately two-part: an already authenticated Web or
+Memento session starts the code, and the terminal exchanges it once. Smara
+stores only a hash of the code; the CLI bearer uses a separate signing secret
+and is accepted only for the `smara-cli` audience. A future device settings
+screen will list and revoke issued CLI devices.
 
 `POST /v1/chat/stream` provides the same direct turn as safe Server-Sent Events
 for Web and CLI clients. Its stable event names (`phase`, `status`, `token`,

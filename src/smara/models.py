@@ -58,6 +58,14 @@ class ChatResponse(BaseModel):
     model: str | None = None
 
 
+class CliPairingStart(BaseModel):
+    name: str = Field(default="Smara CLI", min_length=1, max_length=120)
+
+
+class CliPairingExchange(BaseModel):
+    code: str = Field(min_length=12, max_length=160)
+
+
 class ApprovalDecision(BaseModel):
     approved: bool
     note: str = Field(default="", max_length=2_000)

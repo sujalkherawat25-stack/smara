@@ -5,6 +5,7 @@ import hmac
 import json
 import time
 import base64
+import secrets
 from datetime import datetime
 from pathlib import Path
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
@@ -16,7 +17,7 @@ import httpx
 import jwt
 
 from .config import settings
-from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, TaskCreate, TaskView
+from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, CliPairingExchange, CliPairingStart, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, TaskCreate, TaskView
 from .store import open_task_store
 from .agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime
 from . import agent_events, llm_errors
@@ -105,23 +106,24 @@ def account_id(
     if isinstance(authorization, str) and authorization:
         if not authorization.startswith("Bearer "):
             raise HTTPException(401, "Invalid authorization scheme.")
-        if not settings.control_bridge_secret:
-            raise HTTPException(503, "Smara Control session bridge is not configured.")
-        try:
-            claims = jwt.decode(
-                authorization.removeprefix("Bearer "),
-                settings.control_bridge_secret,
-                algorithms=["HS256"],
-                audience="smara-control",
-                issuer="ai.syntarus.com",
-                options={"require": ["sub", "exp", "iat", "aud", "iss"]},
-            )
-        except jwt.InvalidTokenError:
-            raise HTTPException(401, "Invalid or expired Smara Control session.")
-        subject = claims.get("sub")
-        if not isinstance(subject, str) or not subject.startswith("acct_"):
-            raise HTTPException(401, "Invalid Smara Control account.")
-        return subject
+        token = authorization.removeprefix("Bearer ")
+        if settings.control_bridge_secret:
+            try:
+                claims = jwt.decode(token, settings.control_bridge_secret, algorithms=["HS256"], audience="smara-control", issuer="ai.syntarus.com", options={"require": ["sub", "exp", "iat", "aud", "iss"]})
+                subject = claims.get("sub")
+                if isinstance(subject, str) and subject.startswith("acct_"):
+                    return subject
+            except jwt.InvalidTokenError:
+                pass
+        if settings.cli_token_secret:
+            try:
+                claims = jwt.decode(token, settings.cli_token_secret, algorithms=["HS256"], audience="smara-cli", issuer="smara-api", options={"require": ["sub", "exp", "iat", "aud", "iss", "jti"]})
+                subject = claims.get("sub")
+                if isinstance(subject, str) and subject.startswith("acct_"):
+                    return subject
+            except jwt.InvalidTokenError:
+                pass
+        raise HTTPException(401, "Invalid or expired Smara session token.")
 
     if not settings.gateway_signing_secret:
         raise HTTPException(503, "Production identity gateway is not configured.")
@@ -172,6 +174,30 @@ async def readyz():
         return {"ok": True}
     except Exception:
         raise HTTPException(503, "Smara database is not ready.")
+
+
+@app.post("/v1/cli/device/start")
+async def start_cli_pairing(body: CliPairingStart, user: str = Depends(account_id)):
+    """Called by an authenticated Web/Memento session to authorize a CLI."""
+    return store.create_cli_pairing(user, body.name)
+
+
+@app.post("/v1/cli/device/exchange")
+async def exchange_cli_pairing(body: CliPairingExchange):
+    """Exchange a one-time Web-issued code for a scoped CLI bearer token."""
+    if not settings.cli_token_secret:
+        raise HTTPException(503, "CLI authentication is not configured on this Smara deployment.")
+    try:
+        pairing = store.consume_cli_pairing(body.code)
+    except KeyError as exc:
+        raise HTTPException(401, "CLI pairing code is invalid, expired, or already used.") from exc
+    now = int(time.time())
+    token = jwt.encode({
+        "sub": pairing["account_id"], "name": pairing["name"], "jti": f"cli_{secrets.token_hex(16)}",
+        "iat": now, "exp": now + max(1, settings.cli_token_ttl_days) * 86400,
+        "aud": "smara-cli", "iss": "smara-api",
+    }, settings.cli_token_secret, algorithm="HS256")
+    return {"access_token": token, "token_type": "bearer", "expires_in": max(1, settings.cli_token_ttl_days) * 86400}
 
 
 @app.post("/v1/chat", response_model=ChatResponse)

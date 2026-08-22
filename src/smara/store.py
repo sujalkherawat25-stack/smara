@@ -99,6 +99,9 @@ class TaskStore:
               id TEXT PRIMARY KEY, task_id TEXT NOT NULL, step_id TEXT NOT NULL,
               account_id TEXT NOT NULL, error TEXT NOT NULL, attempts INTEGER NOT NULL,
               created_at TEXT NOT NULL, resolved_at TEXT);
+            CREATE TABLE IF NOT EXISTS cli_pairings (
+              code_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, name TEXT NOT NULL,
+              expires_at TEXT NOT NULL, consumed_at TEXT);
             """)
             # Backward-compatible local development upgrades for databases
             # created before retry state existed.
@@ -134,6 +137,31 @@ class TaskStore:
                     c.execute("INSERT INTO task_step_dependencies VALUES(?,?)", (step_ids[ordinal], step_ids[parent]))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.created", '{"source":"api"}', now))
         return self.get(task_id, account_id)
+
+    def create_cli_pairing(self, account_id: str, name: str, ttl_seconds: int = 600) -> dict:
+        """Create a single-use code; only its hash is stored."""
+        code = f"smara_{secrets.token_urlsafe(18)}"
+        now = datetime.now(timezone.utc)
+        expires_at = (now + timedelta(seconds=ttl_seconds)).isoformat()
+        with self._connect() as c:
+            c.execute(
+                "INSERT INTO cli_pairings(code_hash,account_id,name,expires_at,consumed_at) VALUES(?,?,?,?,NULL)",
+                (hashlib.sha256(code.encode()).hexdigest(), account_id, name, expires_at),
+            )
+        return {"code": code, "expires_at": expires_at, "name": name}
+
+    def consume_cli_pairing(self, code: str) -> dict:
+        now = _now()
+        code_hash = hashlib.sha256(code.encode()).hexdigest()
+        with self._connect() as c:
+            row = c.execute(
+                "SELECT * FROM cli_pairings WHERE code_hash=? AND consumed_at IS NULL AND expires_at>?",
+                (code_hash, now),
+            ).fetchone()
+            if not row:
+                raise KeyError("cli pairing")
+            c.execute("UPDATE cli_pairings SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL", (now, code_hash))
+            return dict(row)
 
     def get(self, task_id: str, account_id: str) -> dict:
         with self._connect() as c:

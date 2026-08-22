@@ -34,6 +34,8 @@ class Settings:
     llm_api_key: str = os.getenv("SMARA_LLM_API_KEY", "")
     llm_model: str = os.getenv("SMARA_LLM_MODEL", "")
     llm_provider: str = os.getenv("SMARA_LLM_PROVIDER", "configured model provider")
+    cli_token_secret: str = os.getenv("SMARA_CLI_TOKEN_SECRET", "")
+    cli_token_ttl_days: int = int(os.getenv("SMARA_CLI_TOKEN_TTL_DAYS", "30"))
 
 
 settings = Settings()

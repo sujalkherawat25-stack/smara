@@ -44,6 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     ask = commands.add_parser("ask", help="short direct conversation")
     ask.add_argument("message")
     ask.add_argument("--workspace", default="default")
+    login = commands.add_parser("login", help="exchange a one-time Web pairing code for a CLI token")
+    login.add_argument("code")
     run = commands.add_parser("run", help="create a durable approval-gated task")
     run.add_argument("objective")
     run.add_argument("--title", default="Smara task")
@@ -70,6 +72,9 @@ def main(argv: list[str] | None = None) -> int:
         with _client(args) as client:
             if args.command == "ask":
                 _print(_request(client, "POST", "/v1/chat", json={"message": args.message, "workspace_id": args.workspace}))
+            elif args.command == "login":
+                result = _request(client, "POST", "/v1/cli/device/exchange", json={"code": args.code})
+                print(result["access_token"])
             elif args.command == "run":
                 _print(_request(client, "POST", "/v1/tasks", json={
                     "title": args.title,
