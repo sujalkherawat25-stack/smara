@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -13,8 +14,9 @@ import httpx
 
 def _client(args: argparse.Namespace) -> httpx.Client:
     headers: dict[str, str] = {"Accept": "application/json"}
-    if args.token:
-        headers["Authorization"] = f"Bearer {args.token}"
+    token = args.token or _load_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     if args.dev_account:
         headers["X-Smara-Account-Id"] = args.dev_account
     return httpx.Client(base_url=args.api.rstrip("/"), headers=headers, timeout=30)
@@ -35,21 +37,70 @@ def _print(value: Any) -> None:
     print(json.dumps(value, indent=2, default=str))
 
 
+def _token_path() -> Path:
+    configured = os.getenv("SMARA_TOKEN_FILE")
+    if configured:
+        return Path(configured)
+    root = Path(os.getenv("APPDATA", Path.home() / ".config")) / "Smara"
+    return root / "token.json"
+
+
+def _load_token() -> str:
+    try:
+        data = json.loads(_token_path().read_text(encoding="utf-8"))
+        token = data.get("access_token")
+        return token if isinstance(token, str) else ""
+    except (OSError, ValueError):
+        return ""
+
+
+def _save_token(result: dict[str, Any]) -> None:
+    path = _token_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"access_token": result["access_token"], "expires_in": result.get("expires_in")}), encoding="utf-8")
+    if os.name != "nt":
+        path.chmod(0o600)
+
+
+def _clear_token() -> None:
+    try:
+        _token_path().unlink()
+    except FileNotFoundError:
+        pass
+
+
 def _watch_stream(client: httpx.Client, task_id: str) -> None:
-    with client.stream("GET", f"/v1/tasks/{task_id}/events/stream", headers={"Accept": "text/event-stream"}) as response:
-        if response.status_code >= 400:
-            raise RuntimeError(f"{response.status_code}: event stream unavailable")
-        event_name = "task_update"
-        for line in response.iter_lines():
-            if not line:
-                continue
-            if line.startswith("event: "):
-                event_name = line.removeprefix("event: ")
-            elif line.startswith("data: "):
-                payload = json.loads(line.removeprefix("data: "))
-                _print({"event": event_name, "data": payload})
-                if event_name == "done":
-                    return
+    last_event_id = ""
+    for attempt in range(4):
+        stream_headers = {"Accept": "text/event-stream"}
+        if last_event_id:
+            stream_headers["Last-Event-ID"] = last_event_id
+        try:
+            with client.stream("GET", f"/v1/tasks/{task_id}/events/stream", headers=stream_headers) as response:
+                if response.status_code >= 400:
+                    raise RuntimeError(f"{response.status_code}: event stream unavailable")
+                event_name = "task_update"
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("id: "):
+                        last_event_id = line.removeprefix("id: ")
+                    elif line.startswith("event: "):
+                        event_name = line.removeprefix("event: ")
+                    elif line.startswith("data: "):
+                        payload = json.loads(line.removeprefix("data: "))
+                        _print({"event": event_name, "data": payload})
+                        if event_name == "done":
+                            return
+            if attempt == 3:
+                raise RuntimeError("event stream disconnected after four attempts")
+            print("smara: event stream disconnected; resuming…", file=sys.stderr)
+            time.sleep(1)
+        except (httpx.HTTPError, json.JSONDecodeError) as exc:
+            if attempt == 3:
+                raise RuntimeError("event stream disconnected after four attempts") from exc
+            print("smara: event stream unavailable; retrying…", file=sys.stderr)
+            time.sleep(1)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -63,6 +114,8 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--workspace", default="default")
     login = commands.add_parser("login", help="exchange a one-time Web pairing code for a CLI token")
     login.add_argument("code")
+    login.add_argument("--print-token", action="store_true", help="print the bearer token instead of only saving it")
+    commands.add_parser("logout", help="remove the locally saved CLI token")
     run = commands.add_parser("run", help="create a durable approval-gated task")
     run.add_argument("objective")
     run.add_argument("--title", default="Smara task")
@@ -74,6 +127,8 @@ def build_parser() -> argparse.ArgumentParser:
     research.add_argument("--workspace", default="default")
     research.add_argument("--source", action="append", default=[], help="explicit source URL; repeat as needed")
     tasks = commands.add_parser("tasks", help="list durable tasks")
+    tasks_commands = tasks.add_subparsers(dest="tasks_command")
+    tasks_commands.add_parser("list", help="list durable tasks")
     task = commands.add_parser("task", help="inspect or control one task")
     task_commands = task.add_subparsers(dest="task_command", required=True)
     for name in ("show", "watch", "cancel"):
@@ -109,7 +164,14 @@ def main(argv: list[str] | None = None) -> int:
                 _print(_request(client, "POST", "/v1/chat", json={"message": args.message, "workspace_id": args.workspace}))
             elif args.command == "login":
                 result = _request(client, "POST", "/v1/cli/device/exchange", json={"code": args.code})
-                print(result["access_token"])
+                _save_token(result)
+                if args.print_token:
+                    print(result["access_token"])
+                else:
+                    print(f"Smara CLI login saved to {_token_path()}")
+            elif args.command == "logout":
+                _clear_token()
+                print("Smara CLI token removed.")
             elif args.command == "run":
                 _print(_request(client, "POST", "/v1/tasks", json={
                     "title": args.title,

@@ -49,12 +49,18 @@ test the same task graph used by Web, Desktop, and Phone:
 
 ```powershell
 smara --api http://127.0.0.1:8080 --dev-account acct_local tasks
+smara --api http://127.0.0.1:8080 --dev-account acct_local tasks list
 smara --api http://127.0.0.1:8080 --dev-account acct_local run "Prepare a cited report"
 smara --api http://127.0.0.1:8080 --dev-account acct_local task watch task_xxx
 # After Smara Web/Memento displays a one-time pairing code:
 smara --api https://smara.example.com login smara_<one-time-code>
 smara --api https://smara.example.com --token <cli-token> tasks
 ```
+
+`smara login <one-time-code>` saves the scoped bearer in the user CLI config
+directory; use `--print-token` only when a script explicitly needs it.
+`smara logout` removes that token. `task watch` resumes after a dropped SSE
+connection using the last durable event ID.
 
 `smara ask "..."` is intentionally a short direct conversation. It requires a
 configured OpenAI-compatible provider (`SMARA_LLM_*`) and can retrieve context

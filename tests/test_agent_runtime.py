@@ -44,6 +44,9 @@ def test_runtime_reuses_syntarus_only_through_memory_port():
 def test_cli_has_only_api_control_commands():
     parser = build_parser()
     assert parser.parse_args(["tasks"]).command == "tasks"
+    assert parser.parse_args(["tasks", "list"]).tasks_command == "list"
+    assert parser.parse_args(["desktop", "pair", "--capability", "local_file_read"]).desktop_command == "pair"
+    assert parser.parse_args(["tool", "calculate"]).name == "calculate"
     args = parser.parse_args(["run", "Prepare a report", "--title", "Report"])
     assert args.objective == "Prepare a report"
     assert args.title == "Report"
@@ -59,6 +62,16 @@ def test_cli_request_is_a_thin_http_client():
     with httpx.Client(transport=httpx.MockTransport(handler), base_url="https://smara.test") as client:
         assert _request(client, "POST", "/v1/tasks", json={"title": "Test"}) == {"id": "task_1"}
     assert seen == {"method": "POST", "path": "/v1/tasks"}
+
+
+def test_cli_token_storage_can_be_saved_and_removed(tmp_path, monkeypatch):
+    from smara import cli
+    token_file = tmp_path / "token.json"
+    monkeypatch.setenv("SMARA_TOKEN_FILE", str(token_file))
+    cli._save_token({"access_token": "token-value", "expires_in": 60})
+    assert cli._load_token() == "token-value"
+    cli._clear_token()
+    assert cli._load_token() == ""
 
 
 def test_provider_errors_have_stable_safe_client_contract():

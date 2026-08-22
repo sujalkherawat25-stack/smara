@@ -1250,3 +1250,20 @@ explicitly and does not perform work.
 Remaining: approval-backed integration tool execution, a persistent desktop
 executor client/routing, and live model-provider verification. The overall
 architecture is in place, but those capabilities are not yet complete.
+
+### 2026-08-22 — Memento extraction slice 12: CLI completion hardening
+
+Completed the CLI milestone itself:
+
+- added the documented `tasks list` form while preserving `tasks` shorthand;
+- `login` now saves the scoped bearer locally without printing it by default,
+  with explicit `--print-token` and `logout` controls;
+- `task watch` reconnects up to three times and resumes with `Last-Event-ID`;
+- parser coverage now includes tools, desktop pairing, token lifecycle, and
+  the documented task commands; and
+- the CLI remains a thin HTTP client with no local task, memory, or agent loop.
+
+The CLI control surface is complete for the current hosted contracts. A live
+Grok/OpenAI-compatible key is **not** needed to test CLI task creation,
+research, watch, approvals, tools, or desktop pairing. It is needed only for
+live `smara ask` and model-backed `agent.execute` verification.
