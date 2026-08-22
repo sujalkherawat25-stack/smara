@@ -794,7 +794,7 @@ class PostgresTaskStore(TaskStore):
 
             row = c.execute("""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name, s.executor_kind, s.executor_payload
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
-              WHERE t.status IN ('queued','running') AND s.status='queued' AND s.executor_kind='hosted' AND (s.retry_at IS NULL OR s.retry_at <= %s) AND NOT EXISTS (
+              WHERE t.status IN ('queued','running') AND s.status='queued' AND s.executor_kind IN ('hosted','sandbox') AND (s.retry_at IS NULL OR s.retry_at <= %s) AND NOT EXISTS (
                 SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id
                 WHERE d.step_id=s.id AND parent.status!='completed')
               ORDER BY t.created_at,s.ordinal

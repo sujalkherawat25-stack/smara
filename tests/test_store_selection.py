@@ -24,6 +24,7 @@ def test_no_database_url_keeps_sqlite_for_local_development(tmp_path):
 
 def test_postgres_claim_uses_a_skip_locked_row_lease():
     assert "FOR UPDATE OF s SKIP LOCKED" in inspect.getsource(store.PostgresTaskStore.claim_one)
+    assert "s.executor_kind IN ('hosted','sandbox')" in inspect.getsource(store.PostgresTaskStore.claim_one)
 
 
 def test_api_accepts_postgres_timestamp_objects():
