@@ -1461,3 +1461,20 @@ was changed.
 
 The production checker is copied into the service image so the same artifact
 used for deployment can run `./scripts/check-production-config.sh --full`.
+
+### 2026-08-22 — First hosted-model smoke test
+
+Staging had the literal template text
+`<a Grok model enabled for your account>` in `SMARA_LLM_MODEL`; it was replaced
+with the previously tested low-cost `grok-3-mini` value. A disposable agent task
+then exposed an SDK-version compatibility issue: the installed Syntarus SDK did
+not accept the optional `filters` keyword. Smara now retries the same
+account-scoped search without advisory metadata filters when an older SDK
+signature is detected; no MemoryOS code or pipeline was changed. The clean
+suite passes **65 tests**.
+
+The next smoke task reached the xAI provider but was rejected with
+`Project API key was rejected`. The remaining blocker is therefore the staging
+provider credential (invalid/expired/wrong project or model access), not the
+Smara task graph or model wiring. Do not copy a new key into Git or send it in
+chat; replace it only in the VM secret environment and restart Smara services.
