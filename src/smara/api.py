@@ -7,7 +7,7 @@ import json
 import time
 import base64
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -18,7 +18,7 @@ import httpx
 import jwt
 
 from .config import settings
-from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, CliPairingExchange, CliPairingStart, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, TaskCreate, TaskView, ToolInvokeRequest
+from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, CliPairingExchange, CliPairingStart, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, ScheduleCreate, ScheduleView, TaskCreate, TaskView, ToolInvokeRequest
 from .store import open_task_store
 from .agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime
 from . import agent_events, llm_errors
@@ -168,6 +168,17 @@ def evidence_view(row: dict) -> EvidenceView:
 
 def artifact_view(row: dict) -> ArtifactView:
     return ArtifactView(**{**row, "created_at": _as_datetime(row["created_at"])})
+
+def schedule_view(row: dict) -> ScheduleView:
+    return ScheduleView(**{
+        **row,
+        "enabled": bool(row["enabled"]),
+        "requires_approval": bool(row["requires_approval"]),
+        "next_run_at": _as_datetime(row["next_run_at"]),
+        "last_run_at": _as_datetime(row["last_run_at"]) if row.get("last_run_at") else None,
+        "created_at": _as_datetime(row["created_at"]),
+        "updated_at": _as_datetime(row["updated_at"]),
+    })
 
 @app.get("/health")
 async def health(): return {"ok": True, "memory_boundary": "syntarus-sdk-only", "auth_mode": "development" if settings.dev_mode else "signed-gateway"}
@@ -426,6 +437,25 @@ async def create_research_task(body: ResearchTaskCreate, user: str = Depends(acc
 @app.get("/v1/tasks", response_model=list[TaskView])
 async def list_tasks(user: str = Depends(account_id)):
     return [view(row) for row in store.list(user)]
+
+@app.get("/v1/schedules", response_model=list[ScheduleView])
+async def list_schedules(user: str = Depends(account_id)):
+    return [schedule_view(row) for row in store.schedules(user)]
+
+@app.post("/v1/schedules", response_model=ScheduleView, status_code=201)
+async def create_schedule(body: ScheduleCreate, user: str = Depends(account_id)):
+    starts_at = body.starts_at or (datetime.now(timezone.utc) + timedelta(seconds=body.interval_seconds))
+    if starts_at.tzinfo is None:
+        starts_at = starts_at.replace(tzinfo=timezone.utc)
+    steps = [step.model_dump() for step in body.steps]
+    return schedule_view(store.create_schedule(user, body.workspace_id, body.title, body.objective, body.interval_seconds, starts_at.isoformat(), body.requires_approval, steps))
+
+@app.delete("/v1/schedules/{schedule_id}", status_code=204)
+async def cancel_schedule(schedule_id: str, user: str = Depends(account_id)):
+    try:
+        store.cancel_schedule(schedule_id, user)
+    except KeyError:
+        raise HTTPException(404, "Schedule not found.")
 
 @app.get("/v1/dead-letters")
 async def list_dead_letters(user: str = Depends(account_id)):

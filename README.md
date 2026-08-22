@@ -146,6 +146,12 @@ stream and the CLI `task watch` command uses it too. Each update has an event
 ID; Web reconnects send `Last-Event-ID` so a dropped connection resumes from
 the durable ledger instead of silently skipping progress.
 
+Schedules use the same task graph rather than a second execution engine. Create
+one with `POST /v1/schedules` and an `interval_seconds` value between 60 and
+2,592,000; the separate scheduler process creates a normal task run when due.
+Each run keeps its own approval setting, and stopping a schedule prevents future
+runs without altering completed history.
+
 This slice does not use an LLM to infer claims or deliver reports externally.
 Those remain separate, approval-gated capabilities. An optional
 `SMARA_RESEARCH_SYNTHESIS_ENABLED=true` setting enables bounded synthesis using

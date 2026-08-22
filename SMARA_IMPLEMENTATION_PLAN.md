@@ -1326,3 +1326,24 @@ Remaining migration work is deployment-level: run the command against the
 target production Postgres, shadow-test selected existing accounts, then
 perform a reversible beta cutover of `ai.syntarus.com`. No account IDs or
 Syntarus memory records should be rewritten.
+
+### 2026-08-22 — Durable schedules and proactive task runs
+
+Implemented the next Memento-to-Smara migration slice for proactive work:
+
+- added Postgres migration `014_schedules.sql` plus the equivalent SQLite
+  development schema;
+- added account-scoped schedule create/list/stop APIs with bounded fixed
+  intervals (one minute through thirty days);
+- added an atomic scheduler that creates ordinary task-graph runs under
+  Postgres `FOR UPDATE SKIP LOCKED` and SQLite transaction locking, so two
+  scheduler replicas cannot create the same run;
+- preserved task approvals: a schedule can require approval on every run, and
+  the scheduler never executes tools or provider actions itself;
+- added native Web schedule controls for creation, next-run visibility, and
+  stopping a schedule; and
+- verified a disposable due schedule created a real Postgres-backed task run.
+
+The clean Docker suite now passes **60 tests**. The remaining proactive work is
+delivery channels (web push/Telegram when configured), recurrence policy beyond
+fixed intervals, and production VM rollout.

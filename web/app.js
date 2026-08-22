@@ -1,4 +1,4 @@
-const state = { tasks: [], actions: [], selected: null, mode: 'development', bridgeToken: null, eventStreamAbort: null, eventIds: {} };
+const state = { tasks: [], schedules: [], actions: [], selected: null, mode: 'development', bridgeToken: null, eventStreamAbort: null, eventIds: {} };
 const $ = (selector) => document.querySelector(selector);
 const account = $('#account');
 account.value = localStorage.getItem('smara-account') || account.value;
@@ -33,8 +33,8 @@ async function refresh() {
     }
     account.disabled = Boolean(state.bridgeToken);
     $('#auth-mode').textContent = state.bridgeToken ? 'Connected to your Smara account' : state.mode === 'development' ? 'Development account' : 'Signed-in gateway';
-    [state.tasks, state.actions, state.integrations, state.devices] = await Promise.all([
-      api('/v1/tasks'), api('/v1/integration-actions').then(x => x.actions), api('/v1/integrations').then(x => x.integrations), api('/v1/executors').then(x => x.executors),
+    [state.tasks, state.schedules, state.actions, state.integrations, state.devices] = await Promise.all([
+      api('/v1/tasks'), api('/v1/schedules'), api('/v1/integration-actions').then(x => x.actions), api('/v1/integrations').then(x => x.integrations), api('/v1/executors').then(x => x.executors),
     ]);
     render();
     notice(`Updated ${new Date().toLocaleTimeString()}`);
@@ -62,6 +62,8 @@ function render() {
   document.querySelectorAll('[data-approve]').forEach(el => el.onclick = () => openApproval(el.dataset.approve));
   $('#integration-list').innerHTML = state.integrations.length ? state.integrations.map(i => `<article class="card"><h3>${escape(i.display_name || i.provider)}</h3><p>${badge(i.policy)} ${badge(i.health)}</p><p>Scopes: ${escape((i.granted_scopes || []).join(', ') || 'none')}</p></article>`).join('') : '<div class="empty">No integrations configured.</div>';
   $('#device-list').innerHTML = state.devices.length ? state.devices.map(d => `<article class="card"><h3>${escape(d.name)}</h3><p>${badge(d.status)} ${d.last_seen_at ? `Last seen ${new Date(d.last_seen_at).toLocaleString()}` : 'Not yet online'}</p><p>${escape((d.capabilities || []).join(', '))}</p></article>`).join('') : '<div class="empty">No paired desktop executor.</div>';
+  $('#schedule-list').innerHTML = state.schedules.length ? state.schedules.map(schedule => `<article class="card"><h3>${escape(schedule.title)}</h3><p>${escape(schedule.objective.slice(0, 160))}</p><p>${badge(schedule.enabled ? 'enabled' : 'disabled')} · every ${Math.round(schedule.interval_seconds / 60)} minute(s)</p><p class="muted">Next run: ${new Date(schedule.next_run_at).toLocaleString()}</p>${schedule.last_task_id ? `<p class="muted">Last task: ${escape(schedule.last_task_id)}</p>` : ''}${schedule.enabled ? `<button data-cancel-schedule="${schedule.id}" class="secondary">Stop schedule</button>` : ''}</article>`).join('') : '<div class="empty">No schedules yet.</div>';
+  document.querySelectorAll('[data-cancel-schedule]').forEach(el => el.onclick = () => cancelSchedule(el.dataset.cancelSchedule));
   if (!active.length && state.tasks.length) notice('All current tasks are at a safe terminal state.');
 }
 function actionCard(action) { return `<article class="card"><h3>${escape(action.action)}</h3><p>${escape(action.preview)}</p><p>${badge(action.status)} · ${escape(action.provider || 'integration')}</p><button data-approve="${action.id}">Review and decide</button></article>`; }
@@ -145,11 +147,19 @@ $('#approval-form').addEventListener('submit', async event => {
   } catch (error) { notice(error.message, true); }
 });
 $('#new-task').onclick = () => $('#task-dialog').showModal();
+$('#new-schedule').onclick = () => $('#schedule-dialog').showModal();
 $('#capture').onclick = () => $('#capture-dialog').showModal();
 $('#task-form').addEventListener('submit', async event => {
   event.preventDefault(); if (event.submitter.value !== 'submit') return $('#task-dialog').close(); const form = event.currentTarget;
   try { await api('/v1/tasks', { method: 'POST', body: JSON.stringify({ title: form.title.value, objective: form.objective.value, workspace_id: form.workspace.value, requires_approval: form.approval.checked, steps: [{ name: 'execute_task' }] }) }); $('#task-dialog').close(); form.reset(); await refresh(); notice('Task created.'); } catch (error) { notice(error.message, true); }
 });
+$('#schedule-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (event.submitter.value !== 'submit') return $('#schedule-dialog').close(); const form = event.currentTarget;
+  try { await api('/v1/schedules', { method: 'POST', body: JSON.stringify({ title: form.title.value, objective: form.objective.value, workspace_id: form.workspace.value, interval_seconds: Number(form.interval.value) * 60, requires_approval: form.approval.checked, steps: [{ name: 'execute_task' }] }) }); $('#schedule-dialog').close(); form.reset(); await refresh(); notice('Schedule created.'); } catch (error) { notice(error.message, true); }
+});
+async function cancelSchedule(id) {
+  try { await api(`/v1/schedules/${id}`, { method: 'DELETE' }); await refresh(); notice('Schedule stopped.'); } catch (error) { notice(error.message, true); }
+}
 $('#pair-desktop').onclick = async () => { try { const pairing = await api('/v1/executors/pairings', { method: 'POST', body: JSON.stringify({ name: 'My desktop', capabilities: ['local_file_read'] }) }); $('#device-list').innerHTML = `<article class="card"><h3>Pair this desktop</h3><p>Run <code>smara-desktop --pair ${pairing.code} --api ${location.origin} --allow-root &lt;folder&gt;</code> once in PowerShell. This one-time code expires at ${new Date(pairing.expires_at).toLocaleTimeString()}.</p><p class="pair-code">${pairing.code}</p><p class="muted">Only local file reads are enabled by this pairing. Add terminal or browser capabilities only with a separate, reviewed pairing.</p></article>`; } catch (error) { notice(error.message, true); } };
 $('#pair-cli').onclick = async () => {
   try {

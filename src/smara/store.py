@@ -104,6 +104,14 @@ class TaskStore:
             CREATE TABLE IF NOT EXISTS cli_pairings (
               code_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, name TEXT NOT NULL,
               expires_at TEXT NOT NULL, consumed_at TEXT);
+            CREATE TABLE IF NOT EXISTS schedules (
+              id TEXT PRIMARY KEY, account_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+              title TEXT NOT NULL, objective TEXT NOT NULL, interval_seconds INTEGER NOT NULL,
+              steps_json TEXT NOT NULL, requires_approval INTEGER NOT NULL DEFAULT 1,
+              next_run_at TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+              last_run_at TEXT, last_task_id TEXT, lease_owner TEXT, lease_expires_at TEXT,
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS schedules_due_idx ON schedules(enabled,next_run_at);
             """)
             # Backward-compatible local development upgrades for databases
             # created before retry state existed.
@@ -132,23 +140,69 @@ class TaskStore:
                 if name not in evidence_columns:
                     c.execute(f"ALTER TABLE research_evidence ADD COLUMN {name} {definition}")
 
-    def create(self, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None) -> dict:
-        task_id, now = f"task_{uuid.uuid4().hex}", _now()
+    def _insert_task(self, c, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None, *, now: str | None = None) -> str:
+        task_id, now = f"task_{uuid.uuid4().hex}", now or _now()
         steps = steps or [{"name": "execute_task", "depends_on": []}]
+        c.execute("INSERT INTO tasks(id,account_id,workspace_id,title,objective,status,requires_approval,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", (task_id, account_id, workspace_id, title, objective, "queued", requires_approval, now, now))
+        run_id = f"run_{uuid.uuid4().hex}"
+        c.execute("INSERT INTO task_runs(id,task_id,attempt,status,created_at) VALUES(?,?,?,?,?)", (run_id, task_id, 1, "queued", now))
+        step_ids: list[str] = []
+        for ordinal, step in enumerate(steps, start=1):
+            step_id = f"step_{uuid.uuid4().hex}"; step_ids.append(step_id)
+            c.execute("""INSERT INTO task_steps(id,task_id,task_run_id,ordinal,name,status,idempotency_key,lease_owner,lease_expires_at,created_at,required_capability,executor_kind,executor_payload)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (step_id, task_id, run_id, ordinal, step["name"], "queued", f"task:{task_id}:step:{ordinal}", None, None, now, step.get("required_capability"), step.get("executor_kind", "hosted"), json.dumps(step.get("executor_payload", {}))))
+        for ordinal, step in enumerate(steps):
+            for parent in step.get("depends_on", []):
+                c.execute("INSERT INTO task_step_dependencies VALUES(?,?)", (step_ids[ordinal], step_ids[parent]))
+        c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.created", '{"source":"api"}', now))
+        return task_id
+
+    def create(self, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None) -> dict:
         with self._connect() as c:
-            c.execute("INSERT INTO tasks(id,account_id,workspace_id,title,objective,status,requires_approval,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", (task_id, account_id, workspace_id, title, objective, "queued", requires_approval, now, now))
-            run_id = f"run_{uuid.uuid4().hex}"
-            c.execute("INSERT INTO task_runs(id,task_id,attempt,status,created_at) VALUES(?,?,?,?,?)", (run_id, task_id, 1, "queued", now))
-            step_ids: list[str] = []
-            for ordinal, step in enumerate(steps, start=1):
-                step_id = f"step_{uuid.uuid4().hex}"; step_ids.append(step_id)
-                c.execute("""INSERT INTO task_steps(id,task_id,task_run_id,ordinal,name,status,idempotency_key,lease_owner,lease_expires_at,created_at,required_capability,executor_kind,executor_payload)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (step_id, task_id, run_id, ordinal, step["name"], "queued", f"task:{task_id}:step:{ordinal}", None, None, now, step.get("required_capability"), step.get("executor_kind", "hosted"), json.dumps(step.get("executor_payload", {}))))
-            for ordinal, step in enumerate(steps):
-                for parent in step.get("depends_on", []):
-                    c.execute("INSERT INTO task_step_dependencies VALUES(?,?)", (step_ids[ordinal], step_ids[parent]))
-            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.created", '{"source":"api"}', now))
+            task_id = self._insert_task(c, account_id, workspace_id, title, objective, requires_approval, steps)
         return self.get(task_id, account_id)
+
+    def create_schedule(self, account_id: str, workspace_id: str, title: str, objective: str, interval_seconds: int, next_run_at: str, requires_approval: bool, steps: list[dict]) -> dict:
+        now = _now(); schedule_id = f"schedule_{uuid.uuid4().hex}"
+        with self._connect() as c:
+            c.execute("INSERT INTO schedules(id,account_id,workspace_id,title,objective,interval_seconds,steps_json,requires_approval,next_run_at,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (schedule_id, account_id, workspace_id, title, objective, interval_seconds, json.dumps(steps), requires_approval, next_run_at, True, now, now))
+        return self.schedule(schedule_id, account_id)
+
+    def schedule(self, schedule_id: str, account_id: str) -> dict:
+        with self._connect() as c:
+            row = c.execute("SELECT * FROM schedules WHERE id=? AND account_id=?", (schedule_id, account_id)).fetchone()
+        if not row: raise KeyError(schedule_id)
+        return self._schedule_row(row)
+
+    def schedules(self, account_id: str) -> list[dict]:
+        with self._connect() as c:
+            rows = c.execute("SELECT * FROM schedules WHERE account_id=? ORDER BY next_run_at,id", (account_id,)).fetchall()
+        return [self._schedule_row(row) for row in rows]
+
+    @staticmethod
+    def _schedule_row(row) -> dict:
+        result = dict(row); result["steps"] = json.loads(result.pop("steps_json")); result["enabled"] = bool(result["enabled"]); result["requires_approval"] = bool(result["requires_approval"]); return result
+
+    def cancel_schedule(self, schedule_id: str, account_id: str) -> None:
+        with self._connect() as c:
+            result = c.execute("UPDATE schedules SET enabled=FALSE,updated_at=? WHERE id=? AND account_id=?", (_now(), schedule_id, account_id))
+        if result.rowcount != 1: raise KeyError(schedule_id)
+
+    def fire_due_schedules(self, scheduler_id: str = "scheduler", limit: int = 10) -> list[dict]:
+        now = _now(); due: list[dict] = []
+        with self._connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            c.execute("UPDATE schedules SET lease_owner=NULL,lease_expires_at=NULL WHERE lease_expires_at IS NOT NULL AND lease_expires_at<?", (now,))
+            rows = c.execute("SELECT * FROM schedules WHERE enabled=1 AND next_run_at<=? AND (lease_expires_at IS NULL OR lease_expires_at<=?) ORDER BY next_run_at,id LIMIT ?", (now, now, limit)).fetchall()
+            for row in rows:
+                schedule = self._schedule_row(row); task_id = self._insert_task(c, schedule["account_id"], schedule["workspace_id"], schedule["title"], schedule["objective"], schedule["requires_approval"], schedule["steps"], now=now)
+                next_run = schedule["next_run_at"] if isinstance(schedule["next_run_at"], datetime) else datetime.fromisoformat(schedule["next_run_at"])
+                current = datetime.fromisoformat(now)
+                while next_run <= current: next_run += timedelta(seconds=schedule["interval_seconds"])
+                c.execute("UPDATE schedules SET next_run_at=?,last_run_at=?,last_task_id=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE id=?", (next_run.isoformat(), now, task_id, now, schedule["id"]))
+                c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "schedule.fired", json.dumps({"schedule_id": schedule["id"]}), now))
+                due.append({"schedule_id": schedule["id"], "task_id": task_id})
+        return due
 
     def create_cli_pairing(self, account_id: str, name: str, ttl_seconds: int = 600) -> dict:
         """Create a single-use code; only its hash is stored."""
@@ -645,6 +699,21 @@ class PostgresTaskStore(TaskStore):
         except ImportError as exc:
             raise RuntimeError("Postgres runtime requires `psycopg[binary]`; install Smara dependencies.") from exc
         return _PostgresConnection(psycopg.connect(self.database_url, row_factory=dict_row))
+
+    def fire_due_schedules(self, scheduler_id: str = "scheduler", limit: int = 10) -> list[dict]:
+        """Create due task runs under Postgres row locks so replicas cannot duplicate them."""
+        now = _now(); due: list[dict] = []
+        with self._connect() as c:
+            rows = c.execute("SELECT * FROM schedules WHERE enabled=TRUE AND next_run_at<=%s AND (lease_expires_at IS NULL OR lease_expires_at<=%s) ORDER BY next_run_at,id LIMIT %s FOR UPDATE SKIP LOCKED", (now, now, limit)).fetchall()
+            for row in rows:
+                schedule = self._schedule_row(row)
+                task_id = self._insert_task(c, schedule["account_id"], schedule["workspace_id"], schedule["title"], schedule["objective"], schedule["requires_approval"], schedule["steps"], now=now)
+                next_run = schedule["next_run_at"] if isinstance(schedule["next_run_at"], datetime) else datetime.fromisoformat(schedule["next_run_at"]); current = datetime.fromisoformat(now)
+                while next_run <= current: next_run += timedelta(seconds=schedule["interval_seconds"])
+                c.execute("UPDATE schedules SET next_run_at=%s,last_run_at=%s,last_task_id=%s,lease_owner=NULL,lease_expires_at=NULL,updated_at=%s WHERE id=%s", (next_run.isoformat(), now, task_id, now, schedule["id"]))
+                c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", task_id, "schedule.fired", json.dumps({"schedule_id": schedule["id"]}), now))
+                due.append({"schedule_id": schedule["id"], "task_id": task_id})
+        return due
 
     def claim_one(self, worker_id: str = "worker", lease_seconds: int = 60) -> dict | None:
         """Atomically lease one ready step without competing workers colliding.
