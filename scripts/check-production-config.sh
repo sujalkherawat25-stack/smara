@@ -8,10 +8,17 @@ full=false
 if [ "${1:-}" = "--full" ]; then full=true; fi
 
 fail=0
+present() {
+  key="$1"
+  eval "value=\${$key:-}"
+  if [ -n "$value" ]; then return 0; fi
+  file_key="${key}_FILE"
+  eval "file=\${$file_key:-}"
+  [ -n "$file" ] && [ -s "$file" ]
+}
 required="SMARA_DATABASE_URL SMARA_POSTGRES_PASSWORD SMARA_REDIS_URL SMARA_GATEWAY_SIGNING_SECRET SMARA_CONTROL_BRIDGE_SECRET SMARA_INTEGRATION_MASTER_KEYS SYNTARUS_API_KEY SMARA_PUBLIC_BASE_URL"
 for key in $required; do
-  eval "value=\${$key:-}"
-  if [ -z "$value" ]; then
+  if ! present "$key"; then
     printf '%s=missing\n' "$key"
     fail=1
   else
@@ -31,8 +38,7 @@ esac
 
 if [ "$full" = true ]; then
   for key in SMARA_CLI_TOKEN_SECRET SMARA_SENTRY_DSN SMARA_VAPID_PUBLIC_KEY SMARA_VAPID_PRIVATE_KEY; do
-    eval "value=\${$key:-}"
-    if [ -z "$value" ]; then
+    if ! present "$key"; then
       printf '%s=missing (full gate)\n' "$key"
       fail=1
     else
@@ -41,8 +47,7 @@ if [ "$full" = true ]; then
   done
   if [ "${SMARA_SANDBOX_ENABLED:-false}" = "true" ]; then
     for key in SMARA_SANDBOX_URL SMARA_SANDBOX_TOKEN; do
-      eval "value=\${$key:-}"
-      if [ -z "$value" ]; then
+      if ! present "$key"; then
         printf '%s=missing (sandbox enabled)\n' "$key"
         fail=1
       else

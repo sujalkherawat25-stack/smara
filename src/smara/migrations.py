@@ -61,6 +61,7 @@ def migration_status(database_url: str | None = None) -> dict[str, list[str]]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Inspect or apply Smara PostgreSQL migrations")
     parser.add_argument("--apply", action="store_true", help="apply pending migrations")
+    parser.add_argument("--status", action="store_true", help="show migration status without applying changes")
     args = parser.parse_args(argv)
     before = migration_status()
     if args.apply and before["pending"]:
