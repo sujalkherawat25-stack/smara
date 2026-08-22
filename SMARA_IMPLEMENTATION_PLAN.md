@@ -1176,3 +1176,16 @@ Next: add reconnect/resume semantics (`Last-Event-ID`) and richer Web event
 rendering, then introduce bounded LLM synthesis only after research evidence
 states are complete. No LLM provider key is required for the current search,
 retrieval, verification, or event-stream work.
+
+### 2026-08-22 — Memento extraction slice 8: resumable task event streams
+
+Hardened the live progress contract:
+
+- SSE task updates now carry the durable event ID in an `id:` field;
+- clients may send `Last-Event-ID`, and the API resumes after that event while
+  preserving account ownership checks; and
+- the Web listener remembers the last event per selected task and resumes after
+  a transient disconnect without changing the polling fallback.
+
+This remains a progress-only channel: it exposes task/step state and never
+streams model chain-of-thought, provider credentials, or raw upstream errors.

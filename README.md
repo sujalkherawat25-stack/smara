@@ -98,8 +98,9 @@ visible in the Web/CLI; they never become hidden claims or bypass approval.
 
 Task progress is durable and can be followed live with
 `GET /v1/tasks/{task_id}/events/stream`. The Web task board listens to this SSE
-stream and the CLI `task watch` command uses it too; reconnecting starts from
-the durable event ledger, so a closed browser does not lose work.
+stream and the CLI `task watch` command uses it too. Each update has an event
+ID; Web reconnects send `Last-Event-ID` so a dropped connection resumes from
+the durable ledger instead of silently skipping progress.
 
 This slice does not use an LLM to infer claims or deliver reports externally.
 Those remain separate, approval-gated capabilities.

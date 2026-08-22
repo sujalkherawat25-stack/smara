@@ -1,4 +1,4 @@
-const state = { tasks: [], actions: [], selected: null, mode: 'development', bridgeToken: null, eventStreamAbort: null };
+const state = { tasks: [], actions: [], selected: null, mode: 'development', bridgeToken: null, eventStreamAbort: null, eventIds: {} };
 const $ = (selector) => document.querySelector(selector);
 const account = $('#account');
 account.value = localStorage.getItem('smara-account') || account.value;
@@ -87,7 +87,9 @@ async function streamTaskEvents(id) {
   if (state.eventStreamAbort) state.eventStreamAbort.abort();
   const controller = new AbortController(); state.eventStreamAbort = controller;
   try {
-    const response = await fetch(`/v1/tasks/${id}/events/stream`, { headers: headers(), signal: controller.signal });
+    const streamHeaders = headers();
+    if (state.eventIds[id]) streamHeaders['Last-Event-ID'] = state.eventIds[id];
+    const response = await fetch(`/v1/tasks/${id}/events/stream`, { headers: streamHeaders, signal: controller.signal });
     if (!response.ok || !response.body) return;
     const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
     while (!controller.signal.aborted) {
@@ -95,6 +97,8 @@ async function streamTaskEvents(id) {
       buffer += decoder.decode(value, { stream: true });
       const frames = buffer.split('\n\n'); buffer = frames.pop() || '';
       for (const frame of frames) {
+        const eventId = frame.split('\n').find(item => item.startsWith('id: '));
+        if (eventId) state.eventIds[id] = eventId.slice(4);
         const line = frame.split('\n').find(item => item.startsWith('data: ')); if (!line) continue;
         try {
           const payload = JSON.parse(line.slice(6));

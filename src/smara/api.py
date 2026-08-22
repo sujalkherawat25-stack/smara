@@ -436,7 +436,7 @@ async def task_events(task_id: str, user: str = Depends(account_id)):
 
 
 @app.get("/v1/tasks/{task_id}/events/stream")
-async def task_events_stream(task_id: str, user: str = Depends(account_id)):
+async def task_events_stream(task_id: str, last_event_id: str | None = Header(default=None, alias="Last-Event-ID"), user: str = Depends(account_id)):
     """Stream durable task events without exposing reasoning or secrets."""
     try:
         store.get(task_id, user)
@@ -445,11 +445,17 @@ async def task_events_stream(task_id: str, user: str = Depends(account_id)):
 
     async def emit():
         sent = 0
+        if last_event_id:
+            existing = store.events(task_id, user)
+            for index, event in enumerate(existing):
+                if event["id"] == last_event_id:
+                    sent = index + 1
+                    break
         started = time.monotonic()
         while time.monotonic() - started < 900:
             events = store.events(task_id, user)
             for event in events[sent:]:
-                yield f"event: task_update\ndata: {json.dumps(event, default=str)}\n\n"
+                yield f"id: {event['id']}\nevent: task_update\ndata: {json.dumps(event, default=str)}\n\n"
             sent = len(events)
             task = store.get(task_id, user)
             if task["status"] in {"completed", "failed", "cancelled"}:
