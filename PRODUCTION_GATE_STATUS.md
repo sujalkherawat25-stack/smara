@@ -1,7 +1,8 @@
 # Smara production-gate status
 
-Updated 2026-08-22 after the browser CLI device-flow rollout and the
-Postgres sandbox-claim fix. This is an operational checklist, not a claim that `ai.syntarus.com`
+Updated 2026-08-22 after the interactive CLI, desktop action bridge, provider
+profiles, and sandbox service-boundary rollout. This is an operational
+checklist, not a claim that `ai.syntarus.com`
 has been cut over.
 
 ## Passed
@@ -24,7 +25,7 @@ has been cut over.
   `pg_restore`, and restored into a disposable Postgres 16 container. The
   restore contained all 14 recorded Smara schema versions. The live database
   was not modified.
-- Repository tests pass in the clean Docker environment (68 tests, with only
+- Repository tests pass in the clean Docker environment (74 tests, with only
   the existing short-JWT and bind-mounted-cache warnings).
 - Account export/deletion, approval gates, bounded sandbox recipes, safe
   integration writes, dead-letter retention, and Syntarus SDK-only memory
@@ -56,6 +57,10 @@ has been cut over.
   runtime, resource limits, network policy, and request authentication.
   The worker now supports that narrow remote `/v1/run` contract and the full
   configuration gate rejects an enabled sandbox without both URL and token.
+- Interactive CLI sessions, allowlisted model profiles, declarative plugin
+  catalogue, and approval-gated desktop action requests are covered by the
+  current repository tests. They do not by themselves configure provider keys,
+  a real MCP server, or a Windows desktop.
 
 ## Cutover rule
 
