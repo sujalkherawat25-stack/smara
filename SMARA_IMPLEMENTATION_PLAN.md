@@ -1829,8 +1829,26 @@ Implemented locally:
 
 Next action:
 
-1. Deploy migration 016 and the updated services to control staging.
-2. Verify a real two-turn hosted conversation, incremental token frames, and a
-   newly issued device's revoke/logout behavior.
+1. ~~Deploy migration 016 and the updated services to control staging.~~ Done.
+2. ~~Verify a real two-turn hosted conversation, incremental token frames, and
+   a newly issued device's revoke/logout behavior.~~ Done.
 3. Begin **Sequence 2** with one least-privileged Windows desktop executor and
    prove the complete approval-gated local action round trip.
+
+### Staging verification evidence
+
+- Deployed commit `3120fd8` to `control-staging.syntarus.com`; migration 016
+  applied through normal API startup.
+- Hosted two-turn CLI session recalled the temporary codename `Juniper` from
+  the durable conversation store.
+- A live provider response produced 30 incremental `token` frames, exactly one
+  `done` frame, and zero error frames.
+- Disposable registered CLI device test: list count 1, revoke returned HTTP
+  204, and the revoked token immediately returned HTTP 401. The smoke record
+  was removed afterwards.
+- API, task worker, scheduler, Redis, Postgres, and integration worker are all
+  running. A pre-existing invalid staging integration encryption placeholder
+  was safely rotated because the grant table contained zero records; the
+  environment file remains mode 600 and no key value was printed.
+
+**Sequence 1 status: complete and live-verified. Sequence 2 is current.**
