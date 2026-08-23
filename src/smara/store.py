@@ -675,9 +675,9 @@ class TaskStore:
             rows = c.execute(
                 """SELECT DISTINCT t.* FROM tasks t
                 JOIN task_steps s ON s.task_id=t.id
-                WHERE t.account_id=? AND s.name LIKE 'research.%'
+                WHERE t.account_id=? AND s.name LIKE ?
                 ORDER BY t.updated_at DESC LIMIT ?""",
-                (account_id, max(1, min(100, limit))),
+                (account_id, "research.%", max(1, min(100, limit))),
             ).fetchall()
         return [dict(row) for row in rows]
 
