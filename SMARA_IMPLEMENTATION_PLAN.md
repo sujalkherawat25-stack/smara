@@ -1658,3 +1658,152 @@ plus graceful Ctrl+C cancellation and no-answer detection. ANSI styling is
 automatic with a legacy-terminal ASCII fallback; `--plain` is available for
 logs and scripts. This remains a thin hosted client, so no second agent brain
 or local Docker runtime is introduced.
+
+## 2026-08-24 audit — current state and next implementation sequence
+
+This audit reconciles the original phase checklist with the code and staging
+deployment. Older `Next:` notes in the implementation log are historical; the
+sequence below is the current source of truth.
+
+### What is complete
+
+- **Phase 0 foundation:** independent repository, signed-gateway identity,
+  Postgres migrations, Redis event fan-out/rate limiting, health/readiness,
+  structured observability hooks, and a staging deployment that uses only the
+  public Syntarus SDK.
+- **Phase 1 task control plane:** durable task runs and dependency steps,
+  approvals, Postgres leases, bounded retries, cancellation, replayable events,
+  idempotency, recovery, schedules, and dead-letter retention.
+- **Phase 3 research core:** provider-neutral discovery, safe retrieval,
+  evidence ledger, source-quality signals, citation validation, cited Markdown
+  artifacts, optional bounded synthesis, and resumable progress events.
+- **CLI foundation:** browser device login, chat, task CRUD/control, research,
+  evidence, approvals, resumable task watching, tool catalogue, desktop
+  pairing, provider profiles, and a lightweight interactive terminal shell.
+- **Repository-owned safety controls:** encrypted integration credential
+  contract, account export/deletion, web-push and capture boundaries, Sentry
+  integration hooks, backup/verification scripts, a fail-closed remote sandbox
+  contract, and advisory Syntarus metadata handling.
+
+Public checks on 2026-08-24 passed for Smara staging `/health` and `/readyz` and
+for the existing `ai.syntarus.com/health`. This confirms both deployments are
+alive; it does **not** mean production cutover or feature parity is complete.
+
+### What is partial
+
+- **Phase 2 memory:** account-scoped retrieval and verified write-back use the
+  Syntarus SDK, but workspace/status metadata remains advisory. Smara does not
+  yet provide complete inspect/correct/pin/delete controls through the SDK.
+  Do not modify the sensitive MemoryOS pipeline for this phase; keep unsupported
+  workspace security claims disabled until the public API provides enforcement.
+- **Phase 4 desktop:** pairing, heartbeat/polling, capability checks, leases,
+  file read/write, allowlisted terminal, and allowlisted browser actions exist.
+  A real Windows end-to-end task, revocation drill, installer, auto-start, safe
+  update path, and long-running reliability test are still missing.
+- **Phase 5 integrations:** registry, OAuth/credential contracts, read tools,
+  approval intents, idempotent execution worker, and initial Gmail, Calendar,
+  Drive, GitHub, and Telegram adapters exist. Real provider credentials,
+  rotation, reconnect, and production send/write drills are not complete.
+- **Phase 6 clients:** the separate Control PWA has tasks, schedules,
+  approvals, evidence, devices, integrations, memory messaging, capture, and
+  push hooks. It is still a transitional iframe/control surface rather than
+  the final native `ai.syntarus.com` Smara Web experience. Phone is a PWA
+  companion, not a native mobile product.
+- **Phase 7 hardening:** repository controls exist, while the real secret
+  manager, off-host encrypted backups, Sentry alerts, VAPID delivery,
+  authenticated edge-rate-limit review, isolated sandbox service, rotation
+  drills, fault injection, and explicit per-task cost/resource budgets remain
+  operational work.
+
+### Important product gaps
+
+1. CLI session names currently preserve a stable conversation ID, but the
+   hosted runtime does not yet persist and rebuild bounded multi-turn chat
+   history. The CLI also lacks inline approval decisions and a richer live
+   durable-task view.
+2. The model provider returns a completed answer to Smara before Smara emits a
+   token frame; the transport contract is streaming, but provider-token-level
+   output is not yet truly incremental.
+3. External plugin entries are safe declarative descriptors only. A real,
+   authenticated, allowlisted MCP/remote-tool execution adapter is not built.
+4. Artifact storage is adequate for the current slice, but production object
+   storage, versioning, secure download links, retention, and large-file policy
+   are not complete.
+5. Shadow comparison, beta routing, account-ID continuity checks, rollback
+   rehearsal, and final Memento retirement have not been performed. Therefore
+   the independent Smara deployment cannot yet fully replace Memento at
+   `ai.syntarus.com`.
+
+### Next implementation sequence
+
+#### Sequence 1 — Finish the agent and CLI contract
+
+1. Add bounded, account-scoped conversation turns and summaries in Smara
+   Postgres; session resume must restore real context, not only an ID.
+2. Normalize true provider-token streaming while preserving safe phase/tool
+   events and cancellation.
+3. Add CLI approval inbox/approve/deny, live task summary, session history,
+   device list/revoke, and clear reconnect/error states.
+4. Add regression tests for multi-turn continuity, interrupted streams,
+   approval races, expired login, and closed-terminal task continuation.
+
+#### Sequence 2 — Prove Smara Desktop as a real executor
+
+1. Pair a least-privileged Windows executor against staging.
+2. Run the complete round trip: Web/CLI task -> approval -> desktop file read ->
+   approval-gated write -> allowlisted terminal/browser -> result artifact.
+3. Test disconnect/reconnect, lease expiry, cancellation, duplicate prevention,
+   capability denial, token revocation, and PC restart recovery.
+4. Package the verified executor with installer, auto-start, logs, safe update,
+   and an obvious pause/revoke control.
+
+#### Sequence 3 — Build one native Smara Web
+
+1. Move Tasks, Research/Evidence, Approvals, Devices, Integrations, Memory, and
+   Settings into the independent Smara Web application as native screens.
+2. Connect Chat to the same task graph so long/risky work becomes a visible
+   durable task while short read-only chat stays immediate.
+3. Use one same-origin authenticated boundary and remove the iframe bridge only
+   after reconnect, account-isolation, approval, and refresh tests pass.
+4. Add artifact version/download UX and explicit advisory-memory labels.
+
+#### Sequence 4 — Activate integrations and phone delivery safely
+
+1. Inject the integration key ring and OAuth credentials through a real secret
+   manager; run a rotation drill before storing production grants.
+2. Verify Gmail, Calendar, Drive, GitHub, and Telegram read/write flows with
+   editable approval previews and idempotent retry tests.
+3. Configure VAPID and test notification delivery, capture, approval, and
+   scheduled-task completion on a real phone.
+
+#### Sequence 5 — Shadow evaluation and production operations
+
+1. Build read-only Memento-versus-Smara shadow evaluation for selected beta
+   accounts: retrieval relevance, answer/task quality, tool plan, latency,
+   cost, and safety-policy agreement. Shadow mode must never perform actions.
+2. Configure encrypted off-host backups and pass a disposable restore drill;
+   configure Sentry alerts and inject a verified test event.
+3. Review Cloudflare distributed limits for all authenticated API traffic,
+   deploy the isolated sandbox service only for approved risky steps, and add
+   per-task token/cost/time/resource budgets.
+4. Run security, fault-injection, restart, concurrency, account-isolation, and
+   rollback tests. Keep Syntarus workspace filters advisory.
+
+#### Sequence 6 — Reversible beta cutover
+
+1. Preserve existing account IDs and issue fresh Smara sessions; never rewrite
+   Syntarus memories.
+2. Route only selected beta accounts from `ai.syntarus.com` to Smara while the
+   existing Memento deployment remains available for immediate rollback.
+3. Expand traffic only when chat, tasks, approvals, research, integrations,
+   desktop, schedules, memory continuity, cost, and reliability gates pass.
+4. After a stable observation period, make Smara the public agent, retire the
+   user-facing Control iframe, and remove Memento agent code from MemoryOS in a
+   separate reviewed change. MemoryOS remains the Syntarus memory product.
+
+### Immediate next action
+
+Start **Sequence 1**. It closes the largest correctness gap in the new agent
+experience and gives Web/Desktop work a stable conversational contract. In
+parallel, prepare one disposable Windows folder and least-privileged desktop
+pairing for Sequence 2; do not start production cutover or MemoryOS cleanup.
