@@ -43,7 +43,7 @@ def test_cli_device_request_cannot_be_approved_twice(tmp_path):
 
 
 def test_account_id_accepts_only_scoped_cli_jwt(monkeypatch):
-    secret = "cli-secret-for-tests-32-bytes!"
+    secret = "cli-secret-for-tests-at-least-32-bytes!"
     monkeypatch.setattr(api, "settings", Settings(dev_mode=False, cli_token_secret=secret))
     now = int(time.time())
     token = jwt.encode({"sub": "acct_1", "name": "test", "jti": "cli_1", "iat": now, "exp": now + 60, "aud": "smara-cli", "iss": "smara-api"}, secret, algorithm="HS256")

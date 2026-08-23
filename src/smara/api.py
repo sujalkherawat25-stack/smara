@@ -128,7 +128,13 @@ def account_id(
                 claims = jwt.decode(token, settings.cli_token_secret, algorithms=["HS256"], audience="smara-cli", issuer="smara-api", options={"require": ["sub", "exp", "iat", "aud", "iss", "jti"]})
                 subject = claims.get("sub")
                 if isinstance(subject, str) and subject.startswith("acct_"):
+                    if claims.get("device_registered") is True:
+                        jti = claims.get("jti")
+                        if not isinstance(jti, str) or not store.cli_device_active(subject, jti):
+                            raise HTTPException(401, "This Smara CLI device has expired or been revoked.")
                     return subject
+            except HTTPException:
+                raise
             except jwt.InvalidTokenError:
                 pass
         raise HTTPException(401, "Invalid or expired Smara session token.")
@@ -240,8 +246,11 @@ def _issue_cli_token(account_id: str, name: str) -> dict:
         raise HTTPException(503, "CLI authentication is not configured on this Smara deployment.")
     now = int(time.time())
     expires_in = max(1, settings.cli_token_ttl_days) * 86400
+    jti = f"cli_{secrets.token_hex(16)}"
+    expires_at = datetime.fromtimestamp(now + expires_in, timezone.utc).isoformat()
+    store.register_cli_device(account_id, name, jti, expires_at)
     token = jwt.encode({
-        "sub": account_id, "name": name, "jti": f"cli_{secrets.token_hex(16)}",
+        "sub": account_id, "name": name, "jti": jti, "device_registered": True,
         "iat": now, "exp": now + expires_in,
         "aud": "smara-cli", "iss": "smara-api",
     }, settings.cli_token_secret, algorithm="HS256")
@@ -287,9 +296,69 @@ async def exchange_cli_pairing(body: CliPairingExchange):
     return _issue_cli_token(pairing["account_id"], pairing["name"])
 
 
+@app.get("/v1/cli/devices")
+async def list_cli_devices(user: str = Depends(account_id)):
+    return {"devices": store.cli_devices(user)}
+
+
+@app.delete("/v1/cli/devices/current", status_code=204)
+async def revoke_current_cli_device(authorization: str | None = Header(default=None), user: str = Depends(account_id)):
+    if not isinstance(authorization, str) or not authorization.startswith("Bearer ") or not settings.cli_token_secret:
+        raise HTTPException(400, "Current request is not authenticated as a CLI device.")
+    try:
+        claims = jwt.decode(
+            authorization.removeprefix("Bearer "), settings.cli_token_secret,
+            algorithms=["HS256"], audience="smara-cli", issuer="smara-api",
+            options={"require": ["sub", "exp", "iat", "aud", "iss", "jti"]},
+        )
+        jti = claims["jti"]
+        store.revoke_cli_jti(user, jti)
+    except (jwt.InvalidTokenError, KeyError) as exc:
+        raise HTTPException(404, "Current CLI device was not found or is already revoked.") from exc
+
+
+@app.delete("/v1/cli/devices/{device_id}", status_code=204)
+async def revoke_cli_device(device_id: str, user: str = Depends(account_id)):
+    try:
+        store.revoke_cli_device(user, device_id)
+    except KeyError as exc:
+        raise HTTPException(404, "CLI device was not found or is already revoked.") from exc
+
+
+def _conversation(body: ChatRequest, user: str) -> tuple[str, list[dict], str]:
+    conversation_id = body.conversation_id or f"chat_{secrets.token_hex(16)}"
+    try:
+        history = store.conversation_history(conversation_id, user, body.workspace_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Conversation was not found in this account and workspace.") from exc
+    return conversation_id, history, store.conversation_summary(conversation_id, user, body.workspace_id)
+
+
+@app.get("/v1/conversations")
+async def list_conversations(user: str = Depends(account_id)):
+    return {"conversations": store.conversations(user)}
+
+
+@app.get("/v1/conversations/{conversation_id}/turns")
+async def conversation_turns(conversation_id: str, workspace_id: str = Query(default="default", min_length=1, max_length=128), user: str = Depends(account_id)):
+    try:
+        return {"conversation_id": conversation_id, "turns": store.conversation_history(conversation_id, user, workspace_id, limit=40, max_chars=30_000)}
+    except KeyError as exc:
+        raise HTTPException(404, "Conversation was not found in this account and workspace.") from exc
+
+
+@app.delete("/v1/conversations/{conversation_id}", status_code=204)
+async def delete_conversation(conversation_id: str, user: str = Depends(account_id)):
+    try:
+        store.delete_conversation(conversation_id, user)
+    except KeyError as exc:
+        raise HTTPException(404, "Conversation was not found.") from exc
+
+
 @app.post("/v1/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, user: str = Depends(account_id)):
     """Direct chat with bounded read-only tools; writes remain durable tasks."""
+    conversation_id, history, summary = _conversation(body, user)
     runtime = _agent_runtime(body.model_profile)
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=False) as client:
@@ -297,9 +366,12 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
                 account_id=user,
                 workspace_id=body.workspace_id,
                 message=body.message,
-                conversation_id=body.conversation_id,
+                conversation_id=conversation_id,
+                conversation_history=history,
+                conversation_summary=summary,
                 http_client=client,
             )
+        store.append_conversation_exchange(conversation_id, user, body.workspace_id, body.message, turn.message, turn.model)
         return ChatResponse(**turn.__dict__)
     except httpx.HTTPStatusError as exc:
         raise HTTPException(502, "The configured Smara model provider rejected this chat request.") from exc
@@ -314,10 +386,12 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
 @app.post("/v1/chat/stream")
 async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
     """SSE view of direct chat and bounded read-only tool progress."""
+    conversation_id, history, summary = _conversation(body, user)
     async def emit():
         started_at = time.perf_counter()
         runtime = _agent_runtime(body.model_profile)
         queue: asyncio.Queue[str] = asyncio.Queue()
+        answer_started = False
 
         def event_hook(event_type: str, payload: dict) -> None:
             if event_type == "agent.tool_requested":
@@ -329,15 +403,25 @@ async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
                     preview=str(payload.get("preview", "")),
                 ))
 
+        def token_hook(text: str) -> None:
+            nonlocal answer_started
+            if not answer_started:
+                queue.put_nowait(agent_events.phase("answer"))
+                answer_started = True
+            queue.put_nowait(agent_events.token(text))
+
         async def run_chat():
             async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=False) as client:
                 return await runtime.chat_with_tools(
                     account_id=user,
                     workspace_id=body.workspace_id,
                     message=body.message,
-                    conversation_id=body.conversation_id,
+                    conversation_id=conversation_id,
+                    conversation_history=history,
+                    conversation_summary=summary,
                     http_client=client,
                     event_hook=event_hook,
+                    token_hook=token_hook,
                 )
 
         task = asyncio.create_task(run_chat())
@@ -353,8 +437,7 @@ async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
             while not queue.empty():
                 yield queue.get_nowait()
             turn = await task
-            yield agent_events.phase("answer")
-            yield agent_events.token(turn.message)
+            store.append_conversation_exchange(conversation_id, user, body.workspace_id, body.message, turn.message, turn.model)
             yield agent_events.done(memory_used=turn.memory_used, tools_used=turn.tools_used, total_ms=agent_events.elapsed_ms(started_at))
         except Exception as exc:
             if not task.done():
@@ -362,6 +445,9 @@ async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
             kind, message = llm_errors.describe(exc, provider=settings.llm_provider)
             yield agent_events.error(message, kind=kind)
         finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
             memory = getattr(runtime, "_memory", None)
             if memory is not None:
                 await memory.aclose()

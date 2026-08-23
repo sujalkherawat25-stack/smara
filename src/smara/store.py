@@ -110,6 +110,27 @@ class TaskStore:
               approved_at TEXT, consumed_at TEXT);
             CREATE INDEX IF NOT EXISTS idx_cli_device_requests_active
               ON cli_device_requests (expires_at) WHERE consumed_at IS NULL;
+            CREATE TABLE IF NOT EXISTS cli_devices (
+              jti_hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, name TEXT NOT NULL,
+              expires_at TEXT NOT NULL, created_at TEXT NOT NULL,
+              last_seen_at TEXT, revoked_at TEXT);
+            CREATE INDEX IF NOT EXISTS cli_devices_account
+              ON cli_devices(account_id,created_at);
+            CREATE TABLE IF NOT EXISTS conversations (
+              id TEXT PRIMARY KEY, account_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+              summary TEXT NOT NULL DEFAULT '', summarized_through INTEGER NOT NULL DEFAULT 0,
+              next_sequence INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS conversations_account_updated
+              ON conversations(account_id,updated_at);
+            CREATE TABLE IF NOT EXISTS conversation_turns (
+              id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, account_id TEXT NOT NULL,
+              sequence INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL,
+              model TEXT, created_at TEXT NOT NULL,
+              UNIQUE(conversation_id,sequence),
+              FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE);
+            CREATE INDEX IF NOT EXISTS conversation_turns_recent
+              ON conversation_turns(conversation_id,sequence);
             CREATE TABLE IF NOT EXISTS schedules (
               id TEXT PRIMARY KEY, account_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
               title TEXT NOT NULL, objective TEXT NOT NULL, interval_seconds INTEGER NOT NULL,
@@ -145,6 +166,9 @@ class TaskStore:
             ):
                 if name not in evidence_columns:
                     c.execute(f"ALTER TABLE research_evidence ADD COLUMN {name} {definition}")
+            conversation_columns = {row[1] for row in c.execute("PRAGMA table_info(conversations)")}
+            if "summarized_through" not in conversation_columns:
+                c.execute("ALTER TABLE conversations ADD COLUMN summarized_through INTEGER NOT NULL DEFAULT 0")
 
     def _insert_task(self, c, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None, *, now: str | None = None) -> str:
         task_id, now = f"task_{uuid.uuid4().hex}", now or _now()
@@ -284,6 +308,149 @@ class TaskStore:
             if getattr(updated, "rowcount", 1) != 1:
                 return {"status": "used"}
             return {"status": "approved", "account_id": row["account_id"], "name": row["name"]}
+
+    def register_cli_device(self, account_id: str, name: str, jti: str, expires_at: str) -> None:
+        now = _now()
+        with self._connect() as c:
+            c.execute(
+                "INSERT INTO cli_devices(jti_hash,account_id,name,expires_at,created_at,last_seen_at,revoked_at) VALUES(?,?,?,?,?,?,NULL)",
+                (hashlib.sha256(jti.encode()).hexdigest(), account_id, name, expires_at, now, now),
+            )
+
+    def cli_device_active(self, account_id: str, jti: str, *, touch: bool = True) -> bool:
+        jti_hash, now = hashlib.sha256(jti.encode()).hexdigest(), _now()
+        with self._connect() as c:
+            row = c.execute(
+                "SELECT last_seen_at FROM cli_devices WHERE jti_hash=? AND account_id=? AND revoked_at IS NULL AND expires_at>?",
+                (jti_hash, account_id, now),
+            ).fetchone()
+            if row and touch:
+                threshold = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+                c.execute(
+                    "UPDATE cli_devices SET last_seen_at=? WHERE jti_hash=? AND (last_seen_at IS NULL OR last_seen_at<?)",
+                    (now, jti_hash, threshold),
+                )
+        return bool(row)
+
+    def cli_devices(self, account_id: str) -> list[dict]:
+        with self._connect() as c:
+            rows = c.execute(
+                "SELECT jti_hash,name,expires_at,created_at,last_seen_at,revoked_at FROM cli_devices WHERE account_id=? ORDER BY created_at DESC",
+                (account_id,),
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["id"] = f"cli_{item['jti_hash'][:16]}"
+            item.pop("jti_hash", None)
+            result.append(item)
+        return result
+
+    def revoke_cli_jti(self, account_id: str, jti: str) -> None:
+        with self._connect() as c:
+            result = c.execute(
+                "UPDATE cli_devices SET revoked_at=? WHERE account_id=? AND jti_hash=? AND revoked_at IS NULL",
+                (_now(), account_id, hashlib.sha256(jti.encode()).hexdigest()),
+            )
+        if result.rowcount != 1:
+            raise KeyError("cli device")
+
+    def revoke_cli_device(self, account_id: str, device_id: str) -> None:
+        prefix = device_id.removeprefix("cli_")
+        if len(prefix) != 16 or any(character not in "0123456789abcdef" for character in prefix.lower()):
+            raise KeyError(device_id)
+        with self._connect() as c:
+            rows = c.execute(
+                "SELECT jti_hash FROM cli_devices WHERE account_id=? AND jti_hash LIKE ? AND revoked_at IS NULL",
+                (account_id, f"{prefix}%"),
+            ).fetchall()
+            if len(rows) != 1:
+                raise KeyError(device_id)
+            c.execute("UPDATE cli_devices SET revoked_at=? WHERE account_id=? AND jti_hash=?", (_now(), account_id, rows[0]["jti_hash"]))
+
+    def conversation_history(self, conversation_id: str, account_id: str, workspace_id: str, *, limit: int = 16, max_chars: int = 12_000) -> list[dict]:
+        limit = max(1, min(40, limit)); max_chars = max(1_000, min(30_000, max_chars))
+        with self._connect() as c:
+            owner = c.execute("SELECT account_id,workspace_id FROM conversations WHERE id=?", (conversation_id,)).fetchone()
+            if owner and (owner["account_id"] != account_id or owner["workspace_id"] != workspace_id):
+                raise KeyError(conversation_id)
+            rows = c.execute(
+                "SELECT role,content,model,sequence,created_at FROM conversation_turns WHERE conversation_id=? AND account_id=? ORDER BY sequence DESC LIMIT ?",
+                (conversation_id, account_id, limit),
+            ).fetchall()
+        selected, used = [], 0
+        for row in rows:
+            item = dict(row); content = str(item.get("content") or "")
+            remaining = max_chars - used
+            if remaining <= 0:
+                break
+            item["content"] = content[:remaining]
+            used += len(item["content"])
+            selected.append(item)
+        return list(reversed(selected))
+
+    def conversation_summary(self, conversation_id: str, account_id: str, workspace_id: str) -> str:
+        with self._connect() as c:
+            row = c.execute(
+                "SELECT summary FROM conversations WHERE id=? AND account_id=? AND workspace_id=?",
+                (conversation_id, account_id, workspace_id),
+            ).fetchone()
+        return str(row["summary"] or "") if row else ""
+
+    def append_conversation_exchange(self, conversation_id: str, account_id: str, workspace_id: str, user_message: str, assistant_message: str, model: str | None = None) -> None:
+        now = _now()
+        with self._connect() as c:
+            c.execute(
+                "INSERT INTO conversations(id,account_id,workspace_id,summary,summarized_through,next_sequence,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
+                (conversation_id, account_id, workspace_id, "", 0, 0, now, now),
+            )
+            owner = c.execute("SELECT account_id,workspace_id,summary,summarized_through FROM conversations WHERE id=?", (conversation_id,)).fetchone()
+            if not owner or owner["account_id"] != account_id or owner["workspace_id"] != workspace_id:
+                raise KeyError(conversation_id)
+            sequence = c.execute(
+                "UPDATE conversations SET next_sequence=next_sequence+2,updated_at=? WHERE id=? RETURNING next_sequence",
+                (now, conversation_id),
+            ).fetchone()["next_sequence"]
+            c.execute(
+                "INSERT INTO conversation_turns(id,conversation_id,account_id,sequence,role,content,model,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (f"turn_{uuid.uuid4().hex}", conversation_id, account_id, sequence - 1, "user", user_message[:20_000], None, now),
+            )
+            c.execute(
+                "INSERT INTO conversation_turns(id,conversation_id,account_id,sequence,role,content,model,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (f"turn_{uuid.uuid4().hex}", conversation_id, account_id, sequence, "assistant", assistant_message[:20_000], model, now),
+            )
+            summarized_through = int(owner["summarized_through"] or 0)
+            if sequence - summarized_through > 32:
+                cutoff = sequence - 16
+                rows = c.execute(
+                    "SELECT role,content FROM conversation_turns WHERE conversation_id=? AND sequence>? AND sequence<=? ORDER BY sequence",
+                    (conversation_id, summarized_through, cutoff),
+                ).fetchall()
+                compacted = "\n".join(
+                    f"{'User' if row['role'] == 'user' else 'Smara'}: {str(row['content'])[:2_000]}" for row in rows
+                )
+                summary = (str(owner["summary"] or "") + "\n" + compacted).strip()[-8_000:]
+                c.execute(
+                    "UPDATE conversations SET summary=?,summarized_through=? WHERE id=?",
+                    (summary, cutoff, conversation_id),
+                )
+                c.execute("DELETE FROM conversation_turns WHERE conversation_id=? AND sequence<=?", (conversation_id, cutoff))
+
+    def conversations(self, account_id: str, *, limit: int = 50) -> list[dict]:
+        with self._connect() as c:
+            rows = c.execute(
+                "SELECT id,workspace_id,summary,summarized_through,next_sequence,created_at,updated_at FROM conversations WHERE account_id=? ORDER BY updated_at DESC LIMIT ?",
+                (account_id, max(1, min(100, limit))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_conversation(self, conversation_id: str, account_id: str) -> None:
+        with self._connect() as c:
+            row = c.execute("SELECT id FROM conversations WHERE id=? AND account_id=?", (conversation_id, account_id)).fetchone()
+            if not row:
+                raise KeyError(conversation_id)
+            c.execute("DELETE FROM conversation_turns WHERE conversation_id=? AND account_id=?", (conversation_id, account_id))
+            c.execute("DELETE FROM conversations WHERE id=? AND account_id=?", (conversation_id, account_id))
 
     def get(self, task_id: str, account_id: str) -> dict:
         with self._connect() as c:
@@ -432,6 +599,9 @@ class TaskStore:
                 "steps": [dict(row) for row in c.execute(f"SELECT * FROM task_steps WHERE task_id IN ({placeholders}) ORDER BY ordinal", task_ids)],
                 "artifacts": [dict(row) for row in c.execute(f"SELECT * FROM artifacts WHERE task_id IN ({placeholders}) ORDER BY created_at", task_ids)],
                 "dead_letters": self.dead_letters(account_id),
+                "conversations": [dict(row) for row in c.execute("SELECT * FROM conversations WHERE account_id=? ORDER BY created_at", (account_id,))],
+                "conversation_turns": [dict(row) for row in c.execute("SELECT * FROM conversation_turns WHERE account_id=? ORDER BY conversation_id,sequence", (account_id,))],
+                "cli_devices": [dict(row) for row in c.execute("SELECT name,expires_at,created_at,last_seen_at,revoked_at FROM cli_devices WHERE account_id=? ORDER BY created_at", (account_id,))],
                 "integrations": [dict(row) for row in c.execute("SELECT id,account_id,provider,display_name,policy,granted_scopes,health,created_at,updated_at FROM integration_connections WHERE account_id=?", (account_id,))],
                 "integration_actions": [dict(row) for row in c.execute("SELECT * FROM integration_action_log WHERE account_id=? ORDER BY created_at", (account_id,))],
             }
@@ -444,6 +614,9 @@ class TaskStore:
             c.execute("DELETE FROM integration_oauth_states WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM integration_connections WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM push_subscriptions WHERE account_id=?", (account_id,))
+            c.execute("DELETE FROM conversation_turns WHERE account_id=?", (account_id,))
+            c.execute("DELETE FROM conversations WHERE account_id=?", (account_id,))
+            c.execute("DELETE FROM cli_devices WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM desktop_executors WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM executor_pairings WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM task_dead_letters WHERE account_id=?", (account_id,))

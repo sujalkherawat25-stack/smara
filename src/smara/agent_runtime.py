@@ -8,8 +8,10 @@ separately tested slices.
 """
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass
+from collections.abc import AsyncIterator
 from typing import Any, Callable, Protocol
 
 import httpx
@@ -26,6 +28,7 @@ class ConversationMemory(Protocol):
 
 class ChatProvider(Protocol):
     async def complete(self, *, system: str, message: str) -> str: ...
+    def stream_complete(self, *, system: str, message: str) -> AsyncIterator[str]: ...
 
 
 @dataclass(frozen=True)
@@ -73,6 +76,45 @@ class OpenAICompatibleProvider:
             raise RuntimeError("Configured provider returned an empty chat response.")
         return content.strip()
 
+    async def stream_complete(self, *, system: str, message: str) -> AsyncIterator[str]:
+        """Yield normalized OpenAI-compatible content deltas."""
+        if not self._base_url or not self._api_key or not self._model:
+            raise RuntimeError("No Smara chat provider is configured.")
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            async with client.stream(
+                "POST",
+                f"{self._base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                json={
+                    "model": self._model,
+                    "temperature": 0.2,
+                    "max_tokens": 1200,
+                    "stream": True,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": message},
+                    ],
+                },
+            ) as response:
+                response.raise_for_status()
+                yielded = False
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line.removeprefix("data:").strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(payload)
+                        content = data["choices"][0]["delta"].get("content")
+                    except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+                        continue
+                    if isinstance(content, str) and content:
+                        yielded = True
+                        yield content
+                if not yielded:
+                    raise RuntimeError("Configured provider returned an empty chat stream.")
+
 
 class SmaraAgentRuntime:
     """The first independently deployable Smara agent-runtime boundary."""
@@ -81,8 +123,22 @@ class SmaraAgentRuntime:
         self._provider = provider
         self._memory = memory
 
+    @staticmethod
+    def _recent_conversation(history: list[dict[str, Any]] | None) -> str:
+        if not history:
+            return ""
+        lines: list[str] = []
+        for turn in history[-16:]:
+            role = "User" if turn.get("role") == "user" else "Smara"
+            content = str(turn.get("content") or "").strip()
+            if content:
+                lines.append(f"{role}: {content[:4_000]}")
+        return "\n".join(lines)[-12_000:]
+
     async def chat(
-        self, *, account_id: str, workspace_id: str, message: str, conversation_id: str | None = None
+        self, *, account_id: str, workspace_id: str, message: str, conversation_id: str | None = None,
+        conversation_history: list[dict[str, Any]] | None = None,
+        conversation_summary: str = "",
     ) -> ChatTurn:
         context = ""
         if self._memory is not None:
@@ -101,6 +157,11 @@ class SmaraAgentRuntime:
         )
         if context:
             system += "\n\nRelevant shared Syntarus memory (may be incomplete):\n" + context[:12_000]
+        recent = self._recent_conversation(conversation_history)
+        if conversation_summary.strip():
+            system += "\n\nBounded summary of earlier conversation:\n" + conversation_summary.strip()[-8_000:]
+        if recent:
+            system += "\n\nRecent conversation context (oldest to newest):\n" + recent
         answer = await self._provider.complete(system=system, message=message)
         return ChatTurn(
             conversation_id=conversation_id or f"chat_{uuid.uuid4().hex}",
@@ -116,8 +177,11 @@ class SmaraAgentRuntime:
         workspace_id: str,
         message: str,
         conversation_id: str | None = None,
+        conversation_history: list[dict[str, Any]] | None = None,
+        conversation_summary: str = "",
         http_client: httpx.AsyncClient | None = None,
         event_hook: Callable[[str, dict[str, Any]], None] | None = None,
+        token_hook: Callable[[str], None] | None = None,
     ) -> ChatTurn:
         """Run the same bounded read-only tool loop used by hosted tasks.
 
@@ -133,6 +197,11 @@ class SmaraAgentRuntime:
                 )
             except Exception:
                 context = ""
+        if conversation_summary.strip():
+            context = (context + "\n\nBounded summary of earlier conversation:\n" + conversation_summary.strip()[-8_000:]).strip()
+        recent = self._recent_conversation(conversation_history)
+        if recent:
+            context = (context + "\n\nRecent conversation context (oldest to newest):\n" + recent).strip()
         conversation = conversation_id or f"chat_{uuid.uuid4().hex}"
         result = await BoundedAgentStepRuntime(
             self._provider,
@@ -148,6 +217,7 @@ class SmaraAgentRuntime:
             memory_context=context,
             tool_context=ToolContext(account_id, workspace_id, http_client),
             event_hook=event_hook,
+            token_hook=token_hook,
         )
         return ChatTurn(
             conversation_id=conversation,

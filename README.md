@@ -75,15 +75,21 @@ prints the approval URL. `smara login <one-time-code>` remains a compatibility
 fallback and both flows save the scoped bearer in the user CLI config
 directory; use `--print-token` only with the legacy flow when a script
 explicitly needs it.
-`smara logout` removes that token. `task watch` resumes after a dropped SSE
+`smara logout` revokes the current CLI device on the server and removes its
+local token. `smara devices` lists active CLI devices and
+`smara devices revoke <device-id>` revokes another device. Legacy tokens issued
+before the device registry remain usable until their normal expiry and become
+revocable after the next login. `task watch` resumes after a dropped SSE
 connection using the last durable event ID.
 
-`smara chat` is an interactive streaming client. Session names map to stable
-conversation IDs in the local Smara session file, while the agent, memory, and
-tools remain hosted. `/new NAME`, `/sessions`, and `/exit` are supported. Model
-profiles are operator allowlists configured with `SMARA_LLM_PROFILES` (JSON)
-and `SMARA_LLM_DEFAULT_PROFILE`; profile secrets should use `api_key_env` and
-are never returned by the API.
+`smara chat` is an interactive streaming client. Session names map to stable,
+account-scoped conversations. Successful user/assistant exchanges are persisted
+on the hosted service, recent turns are restored on resume, and older turns are
+compacted into a bounded rolling summary. `/new NAME`, `/sessions`, `/history`,
+`/approvals`, `/approve ID`, `/deny ID`, `/devices`, `/revoke ID`, and `/exit`
+are supported. Model profiles are operator allowlists configured with
+`SMARA_LLM_PROFILES` (JSON) and `SMARA_LLM_DEFAULT_PROFILE`; profile secrets
+should use `api_key_env` and are never returned by the API.
 
 `smara ask "..."` is a bounded direct conversation. It requires a configured
 OpenAI-compatible provider (`SMARA_LLM_*`), retrieves context only through the
@@ -95,9 +101,10 @@ can never send, edit, delete, execute local commands, or bypass an approval.
 
 The pairing flow is deliberately two-part: an already authenticated Web or
 Memento session starts the code, and the terminal exchanges it once. Smara
-stores only a hash of the code; the CLI bearer uses a separate signing secret
-and is accepted only for the `smara-cli` audience. A future device settings
-screen will list and revoke issued CLI devices.
+stores only hashes of pairing codes and issued device IDs; the CLI bearer uses
+a separate signing secret and is accepted only for the `smara-cli` audience.
+Issued devices can be listed and revoked without exposing their bearer or raw
+JWT identifier.
 
 `POST /v1/chat/stream` provides the same bounded turn as safe Server-Sent
 Events for Web and CLI clients. Its stable event names (`phase`, `status`,

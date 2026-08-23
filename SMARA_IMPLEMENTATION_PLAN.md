@@ -1807,3 +1807,30 @@ Start **Sequence 1**. It closes the largest correctness gap in the new agent
 experience and gives Web/Desktop work a stable conversational contract. In
 parallel, prepare one disposable Windows folder and least-privileged desktop
 pairing for Sequence 2; do not start production cutover or MemoryOS cleanup.
+
+---
+
+## 2026-08-24 — Sequence 1 completed: durable conversation and CLI contract
+
+Implemented locally:
+
+- Added migration `016_conversations_and_cli_devices.sql` for account-scoped
+  conversations, ordered turns, bounded summaries, and revocable CLI devices.
+- Hosted chat now restores recent conversation context and a compacted earlier
+  summary. Account and workspace boundaries are enforced by storage queries.
+- Final answers now stream provider tokens incrementally; safe phase/tool events
+  remain visible and an interrupted client cancels in-flight chat work.
+- CLI now includes history, approval inbox/approve/deny, device list/revoke, and
+  server-side logout revocation controls.
+- Audit export and account deletion include conversations and CLI devices while
+  excluding bearer tokens and raw JWT identifiers.
+- Full local verification passed: **83 tests**, including ordering, isolation,
+  compaction, streaming, device revocation, and deletion coverage.
+
+Next action:
+
+1. Deploy migration 016 and the updated services to control staging.
+2. Verify a real two-turn hosted conversation, incremental token frames, and a
+   newly issued device's revoke/logout behavior.
+3. Begin **Sequence 2** with one least-privileged Windows desktop executor and
+   prove the complete approval-gated local action round trip.

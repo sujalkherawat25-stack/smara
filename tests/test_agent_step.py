@@ -19,6 +19,14 @@ class FakeProvider:
         return self.responses.pop(0)
 
 
+class StreamingProvider(FakeProvider):
+    async def stream_complete(self, *, system: str, message: str):
+        self.calls.append((system, message))
+        for token in ("The result ", "is 42."):
+            await asyncio.sleep(0)
+            yield token
+
+
 def test_agent_step_selects_only_registry_tool_and_returns_final_answer():
     provider = FakeProvider([
         json.dumps({"action": "tool", "name": "calculate", "arguments": {"expression": "6 * 7"}}),
@@ -38,6 +46,25 @@ def test_agent_step_selects_only_registry_tool_and_returns_final_answer():
     assert result.tools_used == 1
     assert [event[0] for event in events] == ["agent.tool_requested", "agent.tool_completed"]
     assert events[1][1]["ok"] is True
+
+
+def test_agent_step_streams_final_provider_tokens_after_bounded_planning():
+    provider = StreamingProvider([
+        json.dumps({"action": "final", "answer": "The result is 42."}),
+    ])
+    tokens = []
+
+    async def execute():
+        return await BoundedAgentStepRuntime(provider, default_tool_registry()).run(
+            task={"objective": "Calculate 6 * 7"},
+            tool_context=ToolContext("acct_test", "workspace"),
+            token_hook=tokens.append,
+        )
+
+    result = asyncio.run(execute())
+    assert tokens == ["The result ", "is 42."]
+    assert result.text == "The result is 42."
+    assert "do not return a JSON envelope" in provider.calls[-1][0]
 
 
 def test_agent_step_never_grants_unregistered_tool_access():

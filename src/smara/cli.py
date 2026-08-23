@@ -106,6 +106,12 @@ class _TerminalUI:
         print("  /status               Check hosted connection and tools")
         print("  /tools                List available agent tools")
         print("  /tasks                List your durable tasks")
+        print("  /history              Show recent turns in this session")
+        print("  /approvals            Show work waiting for approval")
+        print("  /approve ID           Approve a task or integration action")
+        print("  /deny ID              Deny a task or integration action")
+        print("  /devices              List authorized CLI devices")
+        print("  /revoke ID            Revoke a CLI device")
         print("  /exit                 Leave chat")
         print("\n  Ctrl+C cancels the current turn; Ctrl+D exits.\n")
 
@@ -272,6 +278,21 @@ def _stream_chat(
     return final_text
 
 
+def _pending_approvals(client: httpx.Client) -> dict[str, list[dict]]:
+    tasks = _request(client, "GET", "/v1/tasks")
+    actions = _request(client, "GET", "/v1/integration-actions")
+    return {
+        "tasks": [item for item in tasks if item.get("status") == "waiting_approval"] if isinstance(tasks, list) else [],
+        "actions": [item for item in actions if item.get("status") == "awaiting_approval"] if isinstance(actions, list) else [],
+    }
+
+
+def _decide_approval(client: httpx.Client, identifier: str, approved: bool) -> Any:
+    if identifier.startswith("iact_"):
+        return _request(client, "POST", f"/v1/integration-actions/{identifier}/approval", json={"approved": approved, "note": "Decided from Smara CLI"})
+    return _request(client, "POST", f"/v1/tasks/{identifier}/approval", json={"approved": approved, "note": "Decided from Smara CLI"})
+
+
 def _interactive_chat(client: httpx.Client, args: argparse.Namespace) -> None:
     sessions = _load_sessions()
     conversation_id = _session_id(args.session, sessions)
@@ -329,6 +350,24 @@ def _interactive_chat(client: httpx.Client, args: argparse.Namespace) -> None:
             continue
         if message == "/tasks":
             _print(_request(client, "GET", "/v1/tasks"))
+            continue
+        if message == "/history":
+            _print(_request(client, "GET", f"/v1/conversations/{conversation_id}/turns", params={"workspace_id": args.workspace}))
+            continue
+        if message == "/approvals":
+            _print(_pending_approvals(client))
+            continue
+        if message.startswith("/approve ") or message.startswith("/deny "):
+            command, identifier = message.split(maxsplit=1)
+            _print(_decide_approval(client, identifier.strip(), command == "/approve"))
+            continue
+        if message == "/devices":
+            _print(_request(client, "GET", "/v1/cli/devices"))
+            continue
+        if message.startswith("/revoke "):
+            identifier = message.split(maxsplit=1)[1].strip()
+            _request(client, "DELETE", f"/v1/cli/devices/{identifier}")
+            print(f"Revoked {identifier}.")
             continue
         ui.assistant()
         try:
@@ -452,6 +491,12 @@ def build_parser() -> argparse.ArgumentParser:
     deny.add_argument("--note", default="Denied from Smara CLI")
     commands.add_parser("tools", help="list safe tools available to the agent")
     commands.add_parser("plugins", help="list enabled built-in and declared plugin descriptors")
+    commands.add_parser("approvals", help="list tasks and integration actions awaiting approval")
+    devices = commands.add_parser("devices", help="list or revoke authorized CLI devices")
+    device_commands = devices.add_subparsers(dest="device_command")
+    device_commands.add_parser("list")
+    revoke = device_commands.add_parser("revoke")
+    revoke.add_argument("device_id")
     tool = commands.add_parser("tool", help="invoke one safe read-only tool")
     tool.add_argument("name")
     tool.add_argument("--arguments", default="{}", help="JSON object of tool arguments")
@@ -491,8 +536,14 @@ def main(argv: list[str] | None = None) -> int:
                         raise RuntimeError("--print-token is only available with a legacy pairing code.")
                     _browser_login(client, args)
             elif args.command == "logout":
+                try:
+                    _request(client, "DELETE", "/v1/cli/devices/current")
+                except (RuntimeError, httpx.HTTPError):
+                    # Local token removal must still work when offline or when
+                    # logging out a legacy unregistered token.
+                    pass
                 _clear_token()
-                print("Smara CLI token removed.")
+                print("Smara CLI device revoked and local token removed.")
             elif args.command == "run":
                 _print(_request(client, "POST", "/v1/tasks", json={
                     "title": args.title,
@@ -514,6 +565,13 @@ def main(argv: list[str] | None = None) -> int:
                 _print(_request(client, "GET", "/v1/tools"))
             elif args.command == "plugins":
                 _print(_request(client, "GET", "/v1/plugins"))
+            elif args.command == "approvals":
+                _print(_pending_approvals(client))
+            elif args.command == "devices" and args.device_command in {None, "list"}:
+                _print(_request(client, "GET", "/v1/cli/devices"))
+            elif args.command == "devices" and args.device_command == "revoke":
+                _request(client, "DELETE", f"/v1/cli/devices/{args.device_id}")
+                print(f"Revoked {args.device_id}.")
             elif args.command == "tool":
                 try:
                     arguments = json.loads(args.arguments)

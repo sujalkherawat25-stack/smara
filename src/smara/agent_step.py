@@ -54,6 +54,7 @@ class BoundedAgentStepRuntime:
         memory_context: str = "",
         tool_context: ToolContext,
         event_hook: Callable[[str, dict[str, Any]], None] | None = None,
+        token_hook: Callable[[str], None] | None = None,
     ) -> AgentStepResult:
         if not getattr(self._provider, "_base_url", "") or not getattr(self._provider, "_api_key", "") or not getattr(self._provider, "_model", ""):
             raise AgentStepError("Smara agent model provider is not configured.")
@@ -89,6 +90,14 @@ class BoundedAgentStepRuntime:
                 answer = decision.get("answer")
                 if not isinstance(answer, str) or not answer.strip():
                     raise AgentStepError("Smara agent provider returned an empty final answer.")
+                if token_hook:
+                    return AgentStepResult(await self._stream_final(
+                        objective=objective,
+                        context=memory_context,
+                        observations=observations,
+                        draft=answer.strip(),
+                        token_hook=token_hook,
+                    ), tools_used)
                 return AgentStepResult(answer.strip()[:MAX_AGENT_OUTPUT_CHARS], tools_used)
             if action != "tool":
                 raise AgentStepError("Smara agent provider returned an unsupported action.")
@@ -115,10 +124,62 @@ class BoundedAgentStepRuntime:
             f"Verified tool observations:\n{'\n'.join(observations)[-8_000:]}\n\n"
             "Return only a concise final answer grounded in these observations. Do not claim work you did not perform."
         )[:MAX_AGENT_PROMPT_CHARS]
-        answer = (await self._provider.complete(system=system, message=final_message)).strip()
+        if token_hook:
+            answer = await self._stream_final(
+                objective=objective,
+                context=memory_context,
+                observations=observations,
+                draft="",
+                token_hook=token_hook,
+            )
+        else:
+            answer = (await self._provider.complete(system=system, message=final_message)).strip()
         if not answer:
             raise AgentStepError("Smara agent provider returned an empty final answer.")
         decision = _decode_decision(answer)
         if decision and isinstance(decision.get("answer"), str):
             answer = decision["answer"]
         return AgentStepResult(answer[:MAX_AGENT_OUTPUT_CHARS], tools_used)
+
+    async def _stream_final(
+        self,
+        *,
+        objective: str,
+        context: str,
+        observations: list[str],
+        draft: str,
+        token_hook: Callable[[str], None],
+    ) -> str:
+        system = (
+            "You are Smara, a concise and honest personal/work agent. Answer the user directly. "
+            "Use only the supplied context and verified tool observations. Never claim an external "
+            "side effect. Do not expose chain-of-thought and do not return a JSON envelope."
+        )
+        message = (
+            f"User request:\n{objective}\n\n"
+            f"Relevant context (possibly empty):\n{context[:8_000]}\n\n"
+            f"Verified tool observations:\n{'\n'.join(observations)[-6_000:] or '(none)'}\n\n"
+            f"Planning-pass draft (use only if accurate):\n{draft[:4_000] or '(none)'}\n\n"
+            "Return only the final answer."
+        )[:MAX_AGENT_PROMPT_CHARS]
+        parts: list[str] = []
+        stream = getattr(self._provider, "stream_complete", None)
+        if callable(stream):
+            async for chunk in stream(system=system, message=message):
+                if not isinstance(chunk, str) or not chunk:
+                    continue
+                remaining = MAX_AGENT_OUTPUT_CHARS - sum(len(part) for part in parts)
+                if remaining <= 0:
+                    break
+                bounded = chunk[:remaining]
+                parts.append(bounded)
+                token_hook(bounded)
+        else:
+            answer = (await self._provider.complete(system=system, message=message)).strip()
+            if answer:
+                parts.append(answer[:MAX_AGENT_OUTPUT_CHARS])
+                token_hook(parts[0])
+        answer = "".join(parts).strip()
+        if not answer:
+            raise AgentStepError("Smara agent provider returned an empty final answer.")
+        return answer

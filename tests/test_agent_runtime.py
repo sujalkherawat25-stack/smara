@@ -93,6 +93,9 @@ def test_cli_has_only_api_control_commands():
     assert args.title == "Report"
     assert build_parser().parse_args(["login"]).code is None
     assert build_parser().parse_args(["login", "smara_legacy_code"]).code == "smara_legacy_code"
+    assert build_parser().parse_args(["approvals"]).command == "approvals"
+    assert build_parser().parse_args(["devices"]).device_command is None
+    assert build_parser().parse_args(["devices", "revoke", "cli_1234567890abcdef"]).device_id == "cli_1234567890abcdef"
 
 
 def test_cli_request_is_a_thin_http_client():
