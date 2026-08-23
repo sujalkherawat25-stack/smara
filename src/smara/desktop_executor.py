@@ -16,6 +16,7 @@ import logging
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 import time
 import webbrowser
@@ -388,7 +389,7 @@ class DesktopRunner:
                 time.sleep(delay)
 
 
-def main(argv: list[str] | None = None) -> int:
+def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Smara's outbound-only local executor")
     parser.add_argument("--api", default=os.getenv("SMARA_API_URL", "http://127.0.0.1:8080"))
     parser.add_argument("--pair", help="one-time pairing code from Smara Web or CLI")
@@ -447,6 +448,24 @@ def main(argv: list[str] | None = None) -> int:
     with _single_runner(args.state):
         DesktopRunner(args.state).run_forever()
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    try:
+        return _main(argv)
+    except RuntimeError as exc:
+        print(f"Smara Desktop: {exc}", file=sys.stderr)
+        return 1
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in {401, 403}:
+            message = "Desktop credentials were rejected; revoke the old desktop and pair this device again."
+        else:
+            message = f"Hosted Smara rejected the request (HTTP {exc.response.status_code})."
+        print(f"Smara Desktop: {message}", file=sys.stderr)
+        return 1
+    except httpx.HTTPError:
+        print("Smara Desktop: hosted Smara is temporarily unreachable; check the connection and try again.", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
