@@ -612,6 +612,11 @@ async def decide_integration_action(action_id: str, body: IntegrationActionDecis
 async def create_research_task(body: ResearchTaskCreate, user: str = Depends(account_id)):
     return view(store.create_research(user, body.workspace_id, body.title, body.question, [str(source) for source in body.sources]))
 
+
+@app.get("/v1/research", response_model=list[TaskView])
+async def list_research_tasks(user: str = Depends(account_id)):
+    return [view(row) for row in store.research_tasks(user)]
+
 @app.get("/v1/tasks", response_model=list[TaskView])
 async def list_tasks(user: str = Depends(account_id)):
     return [view(row) for row in store.list(user)]

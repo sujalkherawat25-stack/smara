@@ -1879,9 +1879,71 @@ Completed:
 
 Still required before Sequence 2 is fully closed:
 
-1. Deploy the new desktop revocation/artifact API to staging.
-2. Verify a completed live task exposes three result artifacts.
-3. Revoke the disposable Windows executor and prove its next heartbeat returns
-   401, then remove the disposable local state/folder.
-4. Run an install/restart/reconnect drill using a deliberately paired beta
-   executor; do not auto-start the disposable smoke executor.
+1. ~~Deploy the new desktop revocation/artifact API to staging.~~ Done.
+2. ~~Verify a completed live task exposes a result artifact.~~ Done; the
+   multi-step graph completed before artifact deployment, followed by a fresh
+   one-step live artifact verification.
+3. ~~Revoke the disposable Windows executor and prove its next heartbeat
+   returns 401, then remove the disposable local state/folder.~~ Done.
+4. ~~Run an install/restart/reconnect drill using a deliberately paired beta
+   executor.~~ Done with a separate read-only executor.
+
+### Final Sequence 2 evidence
+
+- Fresh staging task completed with one `desktop_step_result` artifact.
+- Disposable executor was revoked through the account-scoped API; its next
+  claim exited 1 with a concise credential-rejected message and no traceback.
+- Disposable local states/logs/files were removed after revocation.
+- Installed `Smara Desktop Executor (Staging Beta)` for the current Windows
+  user. It is restricted to `local_file_read` inside the dedicated
+  `SmaraWorkspace` folder, starts with limited privileges, and has no terminal,
+  write, browser, inbound port, or Docker access.
+- Stop/start drill passed: scheduled task returned to `Running`, hosted status
+  is `active`, a fresh heartbeat was recorded, and the saved state contains a
+  DPAPI token but no plaintext token.
+
+**Sequence 2 status: complete and live-verified. Sequence 3 is current.**
+
+---
+
+## 2026-08-24 — Sequence 3 native Smara Web implementation
+
+Implemented locally:
+
+- Replaced the control-only landing screen with one native Smara workspace:
+  Chat, Tasks, Research, Schedules, Approvals, Integrations, Desktop, and
+  Memory now share one responsive shell.
+- Chat restores durable conversations and turns, streams provider tokens and
+  safe progress events, cancels in-flight work, and can promote long or risky
+  requests into the same visible approval-first task graph.
+- Tasks expose the plan, verified evidence ledger, artifacts, and durable
+  activity. The approval inbox now handles both task approvals and integration
+  actions from one place.
+- Research has a native creation/list screen backed by a new account-scoped
+  `GET /v1/research` endpoint. Starting URLs are optional; source retrieval and
+  verification still run through the existing research task graph.
+- Desktop and CLI devices can be inspected and revoked from the same Web
+  workspace. Existing integration, schedule, notification, and memory-control
+  surfaces remain available.
+- Added explicit cache invalidation and network-first service-worker behavior
+  so a deployed UI update cannot remain hidden behind the old cached control
+  screen.
+- Desktop and 390px mobile browser checks passed. The composer remains visible,
+  navigation is usable without horizontal overflow, native research creation
+  succeeds, and chat-to-task promotion opens the resulting durable task.
+- Full local verification passes: **87 tests**, plus JavaScript syntax checks.
+
+Remaining Sequence 3 release gate:
+
+1. Deploy this version to control staging and repeat authenticated API/static
+   browser smoke checks.
+2. The existing Memento page may continue embedding Smara temporarily during
+   beta. Remove that iframe only when `ai.syntarus.com` routes to this native
+   Smara Web through one same-origin session boundary during Sequence 6.
+3. Artifact version/download polish and the final advisory-memory wording stay
+   part of the pre-cutover UX pass; current artifacts and memory controls are
+   functional.
+
+**Sequence 3 implementation is complete locally; staging verification is
+current. Sequence 4 must not receive production grants until its secret-manager
+and rotation gate passes.**

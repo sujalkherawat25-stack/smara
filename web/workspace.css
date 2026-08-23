@@ -1,0 +1,60 @@
+.chat-layout {
+  height: calc(100vh - 185px);
+  min-height: 480px;
+  max-height: 720px;
+}
+
+.conversation-panel,
+.chat-panel {
+  min-height: 0;
+}
+
+.conversation-list {
+  max-height: calc(100% - 52px);
+}
+
+.chat-panel {
+  height: 100%;
+}
+
+.composer {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+@media (max-width: 760px) {
+  .sidebar nav,
+  .conversation-list {
+    scrollbar-width: none;
+  }
+
+  .sidebar nav::-webkit-scrollbar,
+  .conversation-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .chat-layout {
+    height: calc(100vh - 225px);
+    min-height: 480px;
+    max-height: none;
+  }
+
+  .conversation-panel {
+    max-height: 118px;
+  }
+
+  .conversation-list {
+    overflow-y: hidden;
+  }
+
+  .chat-panel {
+    height: 100%;
+  }
+
+  .composer {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .composer textarea {
+    grid-column: 1 / -1;
+  }
+}

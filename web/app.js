@@ -1,4 +1,10 @@
-const state = { tasks: [], schedules: [], actions: [], selected: null, mode: 'development', bridgeToken: null, eventStreamAbort: null, eventIds: {}, cliDeviceCode: new URLSearchParams(location.search).get('cli_device') };
+const state = {
+  tasks: [], research: [], schedules: [], actions: [], integrations: [], devices: [], cliDevices: [], conversations: [],
+  selected: null, mode: 'development', bridgeToken: null, eventStreamAbort: null, eventIds: {},
+  chatAbort: null, chatBusy: false,
+  conversationId: localStorage.getItem('smara-conversation-id') || `chat_web_${crypto.randomUUID().replaceAll('-', '')}`,
+  cliDeviceCode: new URLSearchParams(location.search).get('cli_device'),
+};
 const $ = (selector) => document.querySelector(selector);
 const account = $('#account');
 
@@ -45,10 +51,11 @@ async function refresh() {
     }
     account.disabled = Boolean(state.bridgeToken);
     $('#auth-mode').textContent = state.bridgeToken ? 'Connected to your Smara account' : state.mode === 'development' ? 'Development account' : 'Signed-in gateway';
-    [state.tasks, state.schedules, state.actions, state.integrations, state.devices] = await Promise.all([
-      api('/v1/tasks'), api('/v1/schedules'), api('/v1/integration-actions').then(x => x.actions), api('/v1/integrations').then(x => x.integrations), api('/v1/executors').then(x => x.executors),
+    [state.tasks, state.research, state.schedules, state.actions, state.integrations, state.devices, state.cliDevices, state.conversations] = await Promise.all([
+      api('/v1/tasks'), api('/v1/research'), api('/v1/schedules'), api('/v1/integration-actions').then(x => x.actions), api('/v1/integrations').then(x => x.integrations), api('/v1/executors').then(x => x.executors), api('/v1/cli/devices').then(x => x.devices), api('/v1/conversations').then(x => x.conversations),
     ]);
     render();
+    if (!state.chatBusy) await loadConversation(state.conversationId, { quiet: true });
     notice(`Updated ${new Date().toLocaleTimeString()}`);
   } catch (error) { notice(error.message, true); }
 }
@@ -73,22 +80,157 @@ function maybeShowCliApproval() {
   $('#cli-approve').hidden = false;
   $('#cli-dialog').showModal();
 }
+
+function renderConversations() {
+  const list = $('#conversation-list');
+  const conversations = [...state.conversations];
+  if (!conversations.some(item => item.id === state.conversationId)) {
+    conversations.unshift({ id: state.conversationId, updated_at: null, next_sequence: 0 });
+  }
+  list.innerHTML = conversations.slice(0, 30).map(item => {
+    const label = item.next_sequence ? `Conversation · ${Math.floor(item.next_sequence / 2)} turn(s)` : 'New conversation';
+    const updated = item.updated_at ? new Date(item.updated_at).toLocaleString() : 'Not started';
+    return `<button class="conversation ${item.id === state.conversationId ? 'active' : ''}" data-conversation="${escape(item.id)}"><b>${escape(label)}</b><small>${escape(updated)}</small></button>`;
+  }).join('');
+  document.querySelectorAll('[data-conversation]').forEach(button => button.onclick = () => selectConversation(button.dataset.conversation));
+}
+
+function setConversation(id) {
+  state.conversationId = id;
+  localStorage.setItem('smara-conversation-id', id);
+  $('#chat-messages').dataset.loaded = '';
+  renderConversations();
+}
+
+async function selectConversation(id) {
+  if (state.chatAbort) state.chatAbort.abort();
+  setConversation(id);
+  await loadConversation(id);
+}
+
+function chatMessage(role, text = '') {
+  const article = document.createElement('article');
+  article.className = `message ${role}`;
+  const label = document.createElement('b');
+  label.textContent = role === 'user' ? 'You' : 'Smara';
+  const content = document.createElement('div');
+  content.className = 'message-content';
+  content.textContent = text;
+  article.append(label, content);
+  $('#chat-messages').append(article);
+  $('#chat-messages').scrollTop = $('#chat-messages').scrollHeight;
+  return content;
+}
+
+async function loadConversation(id, { quiet = false } = {}) {
+  const messages = $('#chat-messages');
+  if (quiet && messages.dataset.loaded === id) return;
+  try {
+    const turns = await api(`/v1/conversations/${encodeURIComponent(id)}/turns`).then(result => result.turns).catch(error => {
+      if (/not found/i.test(error.message)) return [];
+      throw error;
+    });
+    if (id !== state.conversationId || state.chatBusy) return;
+    messages.replaceChildren();
+    if (!turns.length) {
+      messages.innerHTML = '<div class="empty"><h2>What can I help with?</h2><p>Short read-only work happens here. Long or risky work becomes a visible task with approvals.</p></div>';
+    } else {
+      turns.forEach(turn => chatMessage(turn.role, turn.content));
+    }
+    messages.dataset.loaded = id;
+  } catch (error) {
+    if (!quiet) notice(error.message, true);
+  }
+}
+
+async function sendChat(message) {
+  if (state.chatBusy) return;
+  state.chatBusy = true;
+  $('#chat-form button').disabled = true;
+  const messages = $('#chat-messages');
+  if (messages.querySelector('.empty')) messages.replaceChildren();
+  chatMessage('user', message);
+  const answer = chatMessage('assistant', '');
+  const controller = new AbortController(); state.chatAbort = controller;
+  $('#chat-progress').textContent = 'Starting…';
+  try {
+    const response = await fetch('/v1/chat/stream', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...headers() }, signal: controller.signal,
+      body: JSON.stringify({ message, conversation_id: state.conversationId, workspace_id: 'default' }),
+    });
+    if (!response.ok || !response.body) throw new Error((await response.json().catch(() => ({}))).detail || `Chat failed (${response.status})`);
+    const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
+    while (true) {
+      const { value, done } = await reader.read(); if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split('\n\n'); buffer = frames.pop() || '';
+      for (const frame of frames) {
+        const line = frame.split('\n').find(item => item.startsWith('data: ')); if (!line) continue;
+        const payload = JSON.parse(line.slice(6));
+        if (payload.type === 'token') { answer.textContent += payload.text || ''; messages.scrollTop = messages.scrollHeight; }
+        else if (payload.type === 'phase') $('#chat-progress').textContent = payload.phase === 'answer' ? 'Answering…' : `${payload.phase.replaceAll('_', ' ')}…`;
+        else if (payload.type === 'status') $('#chat-progress').textContent = payload.label || 'Working…';
+        else if (payload.type === 'tool_call') $('#chat-progress').textContent = `Using ${payload.name}…`;
+        else if (payload.type === 'error') throw new Error(payload.message || 'Chat failed.');
+        else if (payload.type === 'done') $('#chat-progress').textContent = `Done in ${(payload.total_ms / 1000).toFixed(1)}s`;
+      }
+    }
+    if (!answer.textContent.trim()) answer.textContent = 'Smara completed the turn without a visible answer.';
+    messages.dataset.loaded = state.conversationId;
+    await refresh();
+  } catch (error) {
+    if (error.name !== 'AbortError') { answer.textContent = `I could not complete that turn: ${error.message}`; notice(error.message, true); }
+  } finally {
+    state.chatBusy = false;
+    $('#chat-form button').disabled = false;
+    if (state.chatAbort === controller) state.chatAbort = null;
+  }
+}
+
 function render() {
   $('#task-total').textContent = state.tasks.length;
   const active = state.tasks.filter(t => !['completed', 'failed', 'cancelled'].includes(t.status));
   $('#task-list').innerHTML = state.tasks.length ? state.tasks.map(task => `<article class="task ${task.id === state.selected ? 'selected' : ''}" data-task="${task.id}"><div><h3>${escape(task.title)}</h3><p>${escape(task.objective.slice(0, 140))}</p></div>${badge(task.status)}</article>`).join('') : `<div class="empty">No tasks yet. Create work you want Smara to coordinate.</div>`;
   document.querySelectorAll('[data-task]').forEach(el => el.onclick = () => selectTask(el.dataset.task));
   const waiting = state.actions.filter(a => a.status === 'awaiting_approval');
-  $('#approval-count').textContent = waiting.length ? waiting.length : '';
-  $('#approval-list').innerHTML = waiting.length ? waiting.map(actionCard).join('') : '<div class="empty">Nothing needs approval right now.</div>';
+  const waitingTasks = state.tasks.filter(task => task.status === 'waiting_approval');
+  $('#approval-count').textContent = waiting.length + waitingTasks.length || '';
+  $('#approval-list').innerHTML = waiting.length || waitingTasks.length ? [
+    ...waitingTasks.map(taskApprovalCard), ...waiting.map(actionCard),
+  ].join('') : '<div class="empty">Nothing needs approval right now.</div>';
   document.querySelectorAll('[data-approve]').forEach(el => el.onclick = () => openApproval(el.dataset.approve));
+  document.querySelectorAll('[data-task-decision]').forEach(el => el.onclick = () => decideTask(el.dataset.taskDecision, el.dataset.decision === 'approve'));
   $('#integration-list').innerHTML = state.integrations.length ? state.integrations.map(i => `<article class="card"><h3>${escape(i.display_name || i.provider)}</h3><p>${badge(i.policy)} ${badge(i.health)}</p><p>Scopes: ${escape((i.granted_scopes || []).join(', ') || 'none')}</p></article>`).join('') : '<div class="empty">No integrations configured.</div>';
-  $('#device-list').innerHTML = state.devices.length ? state.devices.map(d => `<article class="card"><h3>${escape(d.name)}</h3><p>${badge(d.status)} ${d.last_seen_at ? `Last seen ${new Date(d.last_seen_at).toLocaleString()}` : 'Not yet online'}</p><p>${escape((d.capabilities || []).join(', '))}</p></article>`).join('') : '<div class="empty">No paired desktop executor.</div>';
+  $('#device-list').innerHTML = state.devices.length ? state.devices.map(d => `<article class="card"><h3>${escape(d.name)}</h3><p>${badge(d.status)} ${d.last_seen_at ? `Last seen ${new Date(d.last_seen_at).toLocaleString()}` : 'Not yet online'}</p><p>${escape((d.capabilities || []).join(', '))}</p>${d.status === 'active' ? `<button class="danger compact" data-revoke-desktop="${escape(d.id)}">Revoke</button>` : ''}</article>`).join('') : '<div class="empty">No paired desktop executor.</div>';
+  $('#cli-device-list').innerHTML = state.cliDevices.length ? state.cliDevices.map(d => `<article class="card"><h3>${escape(d.name)}</h3><p>${d.revoked_at ? badge('revoked') : badge('active')} · ${d.last_seen_at ? `Last seen ${new Date(d.last_seen_at).toLocaleString()}` : 'Not yet used'}</p><p class="muted">Expires ${new Date(d.expires_at).toLocaleString()}</p>${!d.revoked_at ? `<button class="danger compact" data-revoke-cli="${escape(d.id)}">Revoke</button>` : ''}</article>`).join('') : '<div class="empty">No registered CLI devices. Sign in again to register a legacy CLI token.</div>';
+  document.querySelectorAll('[data-revoke-desktop]').forEach(el => el.onclick = () => revokeDesktop(el.dataset.revokeDesktop));
+  document.querySelectorAll('[data-revoke-cli]').forEach(el => el.onclick = () => revokeCli(el.dataset.revokeCli));
+  renderConversations();
   $('#schedule-list').innerHTML = state.schedules.length ? state.schedules.map(schedule => `<article class="card"><h3>${escape(schedule.title)}</h3><p>${escape(schedule.objective.slice(0, 160))}</p><p>${badge(schedule.enabled ? 'enabled' : 'disabled')} · every ${Math.round(schedule.interval_seconds / 60)} minute(s)</p><p class="muted">Next run: ${new Date(schedule.next_run_at).toLocaleString()}</p>${schedule.last_task_id ? `<p class="muted">Last task: ${escape(schedule.last_task_id)}</p>` : ''}${schedule.enabled ? `<button data-cancel-schedule="${schedule.id}" class="secondary">Stop schedule</button>` : ''}</article>`).join('') : '<div class="empty">No schedules yet.</div>';
+  $('#research-list').innerHTML = state.research.length ? state.research.map(task => `<article class="card"><h3>${escape(task.title)}</h3><p>${escape(task.objective.slice(0, 180))}</p><p>${badge(task.status)}</p><button data-research-task="${escape(task.id)}" class="secondary">Open evidence</button></article>`).join('') : '<div class="empty">No research runs yet.</div>';
+  document.querySelectorAll('[data-research-task]').forEach(el => el.onclick = async () => { document.querySelector('[data-view="tasks"]').click(); await selectTask(el.dataset.researchTask); });
   document.querySelectorAll('[data-cancel-schedule]').forEach(el => el.onclick = () => cancelSchedule(el.dataset.cancelSchedule));
   if (!active.length && state.tasks.length) notice('All current tasks are at a safe terminal state.');
 }
 function actionCard(action) { return `<article class="card"><h3>${escape(action.action)}</h3><p>${escape(action.preview)}</p><p>${badge(action.status)} · ${escape(action.provider || 'integration')}</p><button data-approve="${action.id}">Review and decide</button></article>`; }
+function taskApprovalCard(task) { return `<article class="card"><h3>${escape(task.title)}</h3><p>${escape(task.objective)}</p><p>${badge(task.status)} · durable task</p><div class="actions left"><button data-task-decision="${escape(task.id)}" data-decision="approve">Approve</button><button class="danger" data-task-decision="${escape(task.id)}" data-decision="deny">Deny</button></div></article>`; }
+
+async function decideTask(id, approved) {
+  try {
+    await api(`/v1/tasks/${id}/approval`, { method: 'POST', body: JSON.stringify({ approved, note: `${approved ? 'Approved' : 'Denied'} in Smara Web.` }) });
+    await refresh(); notice(`Task ${approved ? 'approved' : 'denied'}.`);
+  } catch (error) { notice(error.message, true); }
+}
+
+async function revokeDesktop(id) {
+  if (!confirm('Revoke this desktop? It will stop receiving local work immediately.')) return;
+  try { await api(`/v1/executors/${encodeURIComponent(id)}`, { method: 'DELETE' }); await refresh(); notice('Desktop revoked.'); } catch (error) { notice(error.message, true); }
+}
+
+async function revokeCli(id) {
+  if (!confirm('Revoke this CLI device? Its saved login will stop working immediately.')) return;
+  try { await api(`/v1/cli/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }); await refresh(); notice('CLI device revoked.'); } catch (error) { notice(error.message, true); }
+}
 function evidenceCard(item) {
   const flags = Array.isArray(item.quality_flags) && item.quality_flags.length ? item.quality_flags.join(', ') : 'quality checks passed';
   const url = /^https?:\/\//i.test(item.url || '') ? escape(item.url) : '#';
@@ -170,7 +312,41 @@ $('#approval-form').addEventListener('submit', async event => {
 });
 $('#new-task').onclick = () => $('#task-dialog').showModal();
 $('#new-schedule').onclick = () => $('#schedule-dialog').showModal();
+$('#new-research').onclick = () => $('#research-dialog').showModal();
 $('#capture').onclick = () => $('#capture-dialog').showModal();
+$('#new-chat').onclick = () => {
+  if (state.chatAbort) state.chatAbort.abort();
+  setConversation(`chat_web_${crypto.randomUUID().replaceAll('-', '')}`);
+  $('#chat-messages').innerHTML = '<div class="empty"><h2>What can I help with?</h2><p>Short read-only work happens here. Long or risky work becomes a visible task with approvals.</p></div>';
+  $('#chat-progress').textContent = '';
+  $('#chat-form').message.focus();
+};
+$('#chat-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget; const message = form.message.value.trim();
+  if (!message) return;
+  form.message.value = '';
+  await sendChat(message);
+});
+$('#chat-form').message.addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#chat-form').requestSubmit(); }
+});
+$('#chat-task').onclick = async () => {
+  const message = $('#chat-form').message.value.trim();
+  if (!message) return notice('Describe the work before creating a task.', true);
+  try {
+    const task = await api('/v1/tasks', { method: 'POST', body: JSON.stringify({
+      title: message.length > 90 ? `${message.slice(0, 87)}…` : message,
+      objective: message, workspace_id: 'default', requires_approval: true,
+      steps: [{ name: 'execute_task' }],
+    }) });
+    $('#chat-form').message.value = '';
+    await refresh();
+    document.querySelectorAll('.nav,.view').forEach(el => el.classList.remove('active'));
+    document.querySelector('[data-view="tasks"]').classList.add('active'); $('#tasks').classList.add('active'); $('#title').textContent = 'Tasks';
+    await selectTask(task.id); notice('Durable task created. Review its plan and approval before execution.');
+  } catch (error) { notice(error.message, true); }
+};
 $('#task-form').addEventListener('submit', async event => {
   event.preventDefault(); if (event.submitter.value !== 'submit') return $('#task-dialog').close(); const form = event.currentTarget;
   try { await api('/v1/tasks', { method: 'POST', body: JSON.stringify({ title: form.title.value, objective: form.objective.value, workspace_id: form.workspace.value, requires_approval: form.approval.checked, steps: [{ name: 'execute_task' }] }) }); $('#task-dialog').close(); form.reset(); await refresh(); notice('Task created.'); } catch (error) { notice(error.message, true); }
@@ -178,6 +354,14 @@ $('#task-form').addEventListener('submit', async event => {
 $('#schedule-form').addEventListener('submit', async event => {
   event.preventDefault(); if (event.submitter.value !== 'submit') return $('#schedule-dialog').close(); const form = event.currentTarget;
   try { await api('/v1/schedules', { method: 'POST', body: JSON.stringify({ title: form.title.value, objective: form.objective.value, workspace_id: form.workspace.value, interval_seconds: Number(form.interval.value) * 60, requires_approval: form.approval.checked, steps: [{ name: 'execute_task' }] }) }); $('#schedule-dialog').close(); form.reset(); await refresh(); notice('Schedule created.'); } catch (error) { notice(error.message, true); }
+});
+$('#research-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (event.submitter.value !== 'submit') return $('#research-dialog').close(); const form = event.currentTarget;
+  try {
+    const sources = form.sources.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+    const task = await api('/v1/research', { method: 'POST', body: JSON.stringify({ title: form.title.value, question: form.question.value, workspace_id: form.workspace.value, sources }) });
+    $('#research-dialog').close(); form.reset(); await refresh(); document.querySelector('[data-view="research"]').click(); notice(`Research started: ${task.title}`);
+  } catch (error) { notice(error.message, true); }
 });
 async function cancelSchedule(id) {
   try { await api(`/v1/schedules/${id}`, { method: 'DELETE' }); await refresh(); notice('Schedule stopped.'); } catch (error) { notice(error.message, true); }

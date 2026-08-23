@@ -11,6 +11,16 @@ from smara.syntarus_adapter import SyntarusMemory
 from smara.worker import run_once
 
 
+def test_research_task_listing_excludes_ordinary_tasks(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    research = store.create_research("acct_1", "default", "Sources", "Find verified sources", [])
+    store.create("acct_1", "default", "Ordinary", "Not research", False)
+    store.create_research("acct_2", "default", "Other account", "Keep isolated", [])
+
+    values = store.research_tasks("acct_1")
+    assert [item["id"] for item in values] == [research["id"]]
+
+
 def _research_store(tmp_path: Path) -> tuple[TaskStore, dict]:
     store = TaskStore(str(tmp_path / "smara.db"))
     task = store.create_research("acct_1", "project-a", "Solar evidence", "What does this source say about solar energy?", ["https://example.com/source"])

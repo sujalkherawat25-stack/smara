@@ -670,6 +670,17 @@ class TaskStore:
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "research.planned", f'{{"source_count":{len(sources)}}}', now))
         return self.get(task_id, account_id)
 
+    def research_tasks(self, account_id: str, *, limit: int = 50) -> list[dict]:
+        with self._connect() as c:
+            rows = c.execute(
+                """SELECT DISTINCT t.* FROM tasks t
+                JOIN task_steps s ON s.task_id=t.id
+                WHERE t.account_id=? AND s.name LIKE 'research.%'
+                ORDER BY t.updated_at DESC LIMIT ?""",
+                (account_id, max(1, min(100, limit))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def add_evidence(self, task_id: str, account_id: str, url: str, *, title: str | None = None) -> bool:
         """Add a discovered source exactly once and preserve task ownership."""
         self.get(task_id, account_id)
