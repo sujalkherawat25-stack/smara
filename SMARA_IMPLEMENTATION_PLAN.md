@@ -1995,3 +1995,19 @@ Operational gates still required for Sequence 4:
 
 **Sequence 4 code is ready for staging verification. Production activation is
 blocked only on operator-owned secret-manager/provider configuration.**
+
+### Sequence 4 staging evidence
+
+- Deployed commit `af6a635`; migration status reports **17 applied, 0 pending**.
+- API, worker, scheduler, integration worker, Postgres, and Redis are running.
+- Authenticated integration listing returns successfully and the v3 native UI
+  contains the secure Telegram dialog and all five provider cards.
+- Staging currently has zero real connections. GitHub OAuth deliberately
+  returns HTTP 503 and Web Push reports no public key because operator OAuth and
+  VAPID secrets have not been configured. This is the correct fail-closed state,
+  not a code failure.
+
+**Next executable work:** choose/configure the VM secret manager and disposable
+provider test accounts to close Sequence 4 operational drills. Until those are
+available, proceed only with Sequence 5's offline/read-only evaluation and
+fault-test harnesses; do not simulate successful external delivery.**
