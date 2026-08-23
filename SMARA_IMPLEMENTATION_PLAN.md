@@ -1933,17 +1933,25 @@ Implemented locally:
   succeeds, and chat-to-task promotion opens the resulting durable task.
 - Full local verification passes: **87 tests**, plus JavaScript syntax checks.
 
-Remaining Sequence 3 release gate:
+Sequence 3 release evidence:
 
-1. Deploy this version to control staging and repeat authenticated API/static
-   browser smoke checks.
-2. The existing Memento page may continue embedding Smara temporarily during
+- Deployed native workspace commit `3ed8e34` and Postgres compatibility fix
+  `a4a1603` to `control-staging.syntarus.com`.
+- Health/readiness passed; the deployed HTML references the v2 cache-busted
+  workspace and a live browser sees all eight native navigation surfaces.
+- The authenticated research-list request initially exposed a Postgres-only
+  literal-percent placeholder bug that SQLite tests could not reveal. The LIKE
+  pattern is now parameterized, a regression test was added, **88 tests pass**,
+  and the live endpoint returns HTTP 200.
+
+Deferred only to the reversible cutover:
+
+1. The existing Memento page may continue embedding Smara temporarily during
    beta. Remove that iframe only when `ai.syntarus.com` routes to this native
    Smara Web through one same-origin session boundary during Sequence 6.
-3. Artifact version/download polish and the final advisory-memory wording stay
+2. Artifact version/download polish and the final advisory-memory wording stay
    part of the pre-cutover UX pass; current artifacts and memory controls are
    functional.
 
-**Sequence 3 implementation is complete locally; staging verification is
-current. Sequence 4 must not receive production grants until its secret-manager
-and rotation gate passes.**
+**Sequence 3 is complete and live-verified. Sequence 4 is current. It must not
+receive production grants until its secret-manager and rotation gate passes.**
