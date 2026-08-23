@@ -24,6 +24,10 @@ def test_native_web_workspace_includes_chat_and_control_surfaces():
     assert "/v1/cli/devices" in script
     assert "/v1/executors/" in script
     assert "/v1/tasks/${id}/approval" in script
+    assert "INTEGRATION_PROVIDERS" in script
+    assert "/oauth/start" in script
+    assert 'id="integration-dialog"' in html
+    assert "type=\"password\"" in html
 
 
 def test_web_does_not_render_chat_tokens_as_html():

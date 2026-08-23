@@ -5,6 +5,13 @@ const state = {
   conversationId: localStorage.getItem('smara-conversation-id') || `chat_web_${crypto.randomUUID().replaceAll('-', '')}`,
   cliDeviceCode: new URLSearchParams(location.search).get('cli_device'),
 };
+const INTEGRATION_PROVIDERS = [
+  { id: 'gmail', name: 'Gmail', detail: 'Search mail and approval-gated sending.', auth: 'oauth' },
+  { id: 'calendar', name: 'Google Calendar', detail: 'Read events and approval-gated event creation.', auth: 'oauth' },
+  { id: 'drive', name: 'Google Drive', detail: 'Search file metadata without downloading private files.', auth: 'oauth' },
+  { id: 'github', name: 'GitHub', detail: 'List repositories and approval-gated content commits.', auth: 'oauth' },
+  { id: 'telegram', name: 'Telegram', detail: 'Deliver approved updates and scheduled-task notifications.', auth: 'token' },
+];
 const $ = (selector) => document.querySelector(selector);
 const account = $('#account');
 
@@ -200,7 +207,12 @@ function render() {
   ].join('') : '<div class="empty">Nothing needs approval right now.</div>';
   document.querySelectorAll('[data-approve]').forEach(el => el.onclick = () => openApproval(el.dataset.approve));
   document.querySelectorAll('[data-task-decision]').forEach(el => el.onclick = () => decideTask(el.dataset.taskDecision, el.dataset.decision === 'approve'));
-  $('#integration-list').innerHTML = state.integrations.length ? state.integrations.map(i => `<article class="card"><h3>${escape(i.display_name || i.provider)}</h3><p>${badge(i.policy)} ${badge(i.health)}</p><p>Scopes: ${escape((i.granted_scopes || []).join(', ') || 'none')}</p></article>`).join('') : '<div class="empty">No integrations configured.</div>';
+  $('#integration-list').innerHTML = INTEGRATION_PROVIDERS.map(provider => {
+    const connection = state.integrations.find(item => item.provider === provider.id);
+    if (connection) return `<article class="card"><h3>${escape(connection.display_name || provider.name)}</h3><p>${escape(provider.detail)}</p><p>${badge(connection.policy)} ${badge(connection.health)}</p><p>Scopes: ${escape((connection.granted_scopes || []).join(', ') || 'provider default')}</p>${connection.health !== 'healthy' ? `<button data-connect-integration="${provider.id}">${provider.auth === 'oauth' ? 'Reconnect' : 'Configure token'}</button>` : '<p class="success-text">Connected</p>'}</article>`;
+    return `<article class="card"><h3>${escape(provider.name)}</h3><p>${escape(provider.detail)}</p><p>${badge('not_connected')}</p><button data-connect-integration="${provider.id}">Connect</button></article>`;
+  }).join('');
+  document.querySelectorAll('[data-connect-integration]').forEach(el => el.onclick = () => connectIntegration(el.dataset.connectIntegration));
   $('#device-list').innerHTML = state.devices.length ? state.devices.map(d => `<article class="card"><h3>${escape(d.name)}</h3><p>${badge(d.status)} ${d.last_seen_at ? `Last seen ${new Date(d.last_seen_at).toLocaleString()}` : 'Not yet online'}</p><p>${escape((d.capabilities || []).join(', '))}</p>${d.status === 'active' ? `<button class="danger compact" data-revoke-desktop="${escape(d.id)}">Revoke</button>` : ''}</article>`).join('') : '<div class="empty">No paired desktop executor.</div>';
   $('#cli-device-list').innerHTML = state.cliDevices.length ? state.cliDevices.map(d => `<article class="card"><h3>${escape(d.name)}</h3><p>${d.revoked_at ? badge('revoked') : badge('active')} · ${d.last_seen_at ? `Last seen ${new Date(d.last_seen_at).toLocaleString()}` : 'Not yet used'}</p><p class="muted">Expires ${new Date(d.expires_at).toLocaleString()}</p>${!d.revoked_at ? `<button class="danger compact" data-revoke-cli="${escape(d.id)}">Revoke</button>` : ''}</article>`).join('') : '<div class="empty">No registered CLI devices. Sign in again to register a legacy CLI token.</div>';
   document.querySelectorAll('[data-revoke-desktop]').forEach(el => el.onclick = () => revokeDesktop(el.dataset.revokeDesktop));
@@ -212,6 +224,42 @@ function render() {
   document.querySelectorAll('[data-cancel-schedule]').forEach(el => el.onclick = () => cancelSchedule(el.dataset.cancelSchedule));
   if (!active.length && state.tasks.length) notice('All current tasks are at a safe terminal state.');
 }
+
+async function connectIntegration(provider) {
+  if (provider === 'telegram') {
+    $('#integration-dialog').showModal();
+    return;
+  }
+  try {
+    const result = await api(`/v1/integrations/${encodeURIComponent(provider)}/oauth/start`);
+    const popup = window.open(result.authorization_url, `smara-${provider}-oauth`, 'popup,width=620,height=760');
+    if (!popup) throw new Error('Allow pop-ups for Smara, then try connecting again.');
+    notice(`${provider} authorization opened. Return here after approving it.`);
+  } catch (error) { notice(error.message, true); }
+}
+
+window.addEventListener('focus', () => {
+  if (state.bridgeToken || state.mode === 'development') refresh();
+});
+
+$('#integration-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    await api('/v1/integrations/telegram', { method: 'PUT', body: JSON.stringify({
+      display_name: form.display_name.value.trim(), policy: form.policy.value,
+      granted_scopes: [], health: 'not_connected',
+    }) });
+    await api('/v1/integrations/telegram/credential', { method: 'PUT', body: JSON.stringify({
+      kind: 'bot_token', secret: form.token.value,
+    }) });
+    form.token.value = '';
+    $('#integration-dialog').close();
+    await refresh();
+    notice('Telegram connected securely. Sends still require approval.');
+  } catch (error) { notice(error.message, true); }
+});
+
 function actionCard(action) { return `<article class="card"><h3>${escape(action.action)}</h3><p>${escape(action.preview)}</p><p>${badge(action.status)} · ${escape(action.provider || 'integration')}</p><button data-approve="${action.id}">Review and decide</button></article>`; }
 function taskApprovalCard(task) { return `<article class="card"><h3>${escape(task.title)}</h3><p>${escape(task.objective)}</p><p>${badge(task.status)} · durable task</p><div class="actions left"><button data-task-decision="${escape(task.id)}" data-decision="approve">Approve</button><button class="danger" data-task-decision="${escape(task.id)}" data-decision="deny">Deny</button></div></article>`; }
 

@@ -33,7 +33,10 @@ async def run_once(store: TaskStore, vault: SecretVault, worker_id: str = "integ
             result = await IntegrationExecutor(http).execute(connection["provider"], action["action"], action["payload"], secret)
         store.complete_integration_action(action["id"], worker_id, result=result)
     except Exception as exc:
-        store.complete_integration_action(action["id"], worker_id, error=str(exc))
+        retryable = isinstance(exc, (httpx.TimeoutException, httpx.TransportError))
+        if isinstance(exc, httpx.HTTPStatusError):
+            retryable = exc.response.status_code == 429 or exc.response.status_code >= 500
+        store.fail_integration_action(action["id"], worker_id, str(exc), retryable=retryable)
     return True
 
 

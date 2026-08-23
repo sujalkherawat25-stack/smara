@@ -21,6 +21,21 @@
   grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
+select {
+  font: inherit;
+  background: #0f141d;
+  color: #fff;
+  border: 1px solid #3a455b;
+  border-radius: 7px;
+  padding: 10px;
+  min-width: 0;
+}
+
+.success-text {
+  color: #98edbf !important;
+  font-weight: 700;
+}
+
 @media (max-width: 760px) {
   .sidebar nav,
   .conversation-list {

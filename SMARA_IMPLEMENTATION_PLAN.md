@@ -1955,3 +1955,43 @@ Deferred only to the reversible cutover:
 
 **Sequence 3 is complete and live-verified. Sequence 4 is current. It must not
 receive production grants until its secret-manager and rotation gate passes.**
+
+---
+
+## 2026-08-24 — Sequence 4 implementation pass
+
+Implemented:
+
+- The native Integrations screen now presents Gmail, Calendar, Drive, GitHub,
+  and Telegram as first-class provider cards instead of showing only existing
+  database rows.
+- Google/GitHub connections open the existing account-scoped OAuth/PKCE flow in
+  a separate consent window. The callback stores only encrypted credentials and
+  shows a clear completion page; returning focus refreshes the native workspace.
+- Telegram has a password-style token setup dialog. The token is submitted only
+  over the authenticated API, encrypted before database storage, cleared from
+  the form, and never read back into the browser.
+- Added migration `017_integration_retry_contract.sql`. Integration leases now
+  carry a bounded retry schedule. Transient read-only calls may retry under the
+  same idempotency record; external writes fail closed after ambiguous provider
+  failures so Gmail/Telegram actions cannot be duplicated silently.
+- Added regression coverage for delayed safe-read retry, same-record reuse, and
+  no automatic external-write retry. The complete local suite passes **89
+  tests**, JavaScript syntax passes, and the integration UI was exercised in a
+  real desktop browser. A missing local vault key correctly failed closed.
+
+Operational gates still required for Sequence 4:
+
+1. Choose and authorize a production secret manager for the VM, then inject the
+   integration key ring, OAuth client secrets, and VAPID private key through
+   mounted secret files. The repository and browser must never contain them.
+2. Run the documented key-ring rotation drill before any real grant is stored.
+3. Supply Google OAuth, GitHub OAuth, Telegram bot, and VAPID configuration and
+   perform real read/write/reconnect tests with disposable test accounts. Every
+   external write must be edited/approved in Smara before dispatch.
+4. Test capture, push approval, and scheduled-task completion on an actual
+   phone. These gates require operator-owned provider accounts and cannot be
+   truthfully completed with fabricated credentials.
+
+**Sequence 4 code is ready for staging verification. Production activation is
+blocked only on operator-owned secret-manager/provider configuration.**

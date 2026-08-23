@@ -86,7 +86,8 @@ class TaskStore:
               action TEXT NOT NULL, preview TEXT NOT NULL, idempotency_key TEXT NOT NULL,
               risk TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}',
               approval_note TEXT NOT NULL DEFAULT '', lease_owner TEXT, lease_expires_at TEXT,
-              attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, result_summary TEXT, created_at TEXT NOT NULL,
+              attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 3,
+              retry_at TEXT, last_error TEXT, result_summary TEXT, created_at TEXT NOT NULL,
               UNIQUE(account_id,idempotency_key));
             CREATE TABLE IF NOT EXISTS integration_credentials (
               connection_id TEXT PRIMARY KEY, kind TEXT NOT NULL, encrypted_secret TEXT NOT NULL,
@@ -153,7 +154,7 @@ class TaskStore:
             if "cancel_requested" not in task_columns:
                 c.execute("ALTER TABLE tasks ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
             action_columns = {row[1] for row in c.execute("PRAGMA table_info(integration_action_log)")}
-            for name, definition in (("payload", "TEXT NOT NULL DEFAULT '{}'"), ("approval_note", "TEXT NOT NULL DEFAULT ''"), ("lease_owner", "TEXT"), ("lease_expires_at", "TEXT"), ("attempts", "INTEGER NOT NULL DEFAULT 0"), ("last_error", "TEXT"), ("result_summary", "TEXT")):
+            for name, definition in (("payload", "TEXT NOT NULL DEFAULT '{}'"), ("approval_note", "TEXT NOT NULL DEFAULT ''"), ("lease_owner", "TEXT"), ("lease_expires_at", "TEXT"), ("attempts", "INTEGER NOT NULL DEFAULT 0"), ("max_attempts", "INTEGER NOT NULL DEFAULT 3"), ("retry_at", "TEXT"), ("last_error", "TEXT"), ("result_summary", "TEXT")):
                 if name not in action_columns:
                     c.execute(f"ALTER TABLE integration_action_log ADD COLUMN {name} {definition}")
             evidence_columns = {row[1] for row in c.execute("PRAGMA table_info(research_evidence)")}
@@ -926,11 +927,11 @@ class TaskStore:
         with self._connect() as c:
             c.execute("BEGIN IMMEDIATE")
             c.execute("UPDATE integration_action_log SET status='approved',lease_owner=NULL,lease_expires_at=NULL WHERE status='running' AND lease_expires_at<?", (now,))
-            row = c.execute("SELECT * FROM integration_action_log WHERE status='approved' ORDER BY created_at LIMIT 1").fetchone()
+            row = c.execute("SELECT * FROM integration_action_log WHERE status='approved' AND (retry_at IS NULL OR retry_at<=?) ORDER BY created_at LIMIT 1", (now,)).fetchone()
             if not row:
                 return None
             result = dict(row); until = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
-            c.execute("UPDATE integration_action_log SET status='running',lease_owner=?,lease_expires_at=?,attempts=attempts+1 WHERE id=?", (worker_id, until, result["id"]))
+            c.execute("UPDATE integration_action_log SET status='running',lease_owner=?,lease_expires_at=?,attempts=attempts+1,retry_at=NULL WHERE id=?", (worker_id, until, result["id"]))
             result.update({"status": "running", "lease_owner": worker_id, "lease_expires_at": until, "attempts": result["attempts"] + 1})
             result["payload"] = json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
             return result
@@ -944,6 +945,19 @@ class TaskStore:
                 c.execute("UPDATE integration_action_log SET status='failed',lease_owner=NULL,lease_expires_at=NULL,last_error=? WHERE id=?", (error[:2000], action_id))
             else:
                 c.execute("UPDATE integration_action_log SET status='completed',lease_owner=NULL,lease_expires_at=NULL,result_summary=? WHERE id=?", ((result or "completed")[:2000], action_id))
+
+    def fail_integration_action(self, action_id: str, worker_id: str, error: str, *, retryable: bool, retry_delay_seconds: int = 5) -> str:
+        """Retry only read-only calls; ambiguous external writes require review."""
+        with self._connect() as c:
+            row = c.execute("SELECT risk,attempts,max_attempts FROM integration_action_log WHERE id=? AND status='running' AND lease_owner=?", (action_id, worker_id)).fetchone()
+            if not row:
+                raise KeyError("integration lease")
+            if retryable and row["risk"] == "read" and row["attempts"] < row["max_attempts"]:
+                retry_at = (datetime.now(timezone.utc) + timedelta(seconds=max(1, retry_delay_seconds))).isoformat()
+                c.execute("UPDATE integration_action_log SET status='approved',lease_owner=NULL,lease_expires_at=NULL,retry_at=?,last_error=? WHERE id=?", (retry_at, error[:2000], action_id))
+                return "retry"
+            c.execute("UPDATE integration_action_log SET status='failed',lease_owner=NULL,lease_expires_at=NULL,retry_at=NULL,last_error=? WHERE id=?", (error[:2000], action_id))
+            return "failed"
 
     def create_capture(self, account_id: str, kind: str, title: str, content: str, mime_type: str = "text/plain") -> dict:
         # Media bytes stay in the account-scoped artifact.  They must never be
@@ -1074,11 +1088,11 @@ class PostgresTaskStore(TaskStore):
         now = _now()
         with self._connect() as c:
             c.execute("UPDATE integration_action_log SET status='approved',lease_owner=NULL,lease_expires_at=NULL WHERE status='running' AND lease_expires_at<%s", (now,))
-            row = c.execute("SELECT * FROM integration_action_log WHERE status='approved' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED").fetchone()
+            row = c.execute("SELECT * FROM integration_action_log WHERE status='approved' AND (retry_at IS NULL OR retry_at<=%s) ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED", (now,)).fetchone()
             if not row:
                 return None
             result = dict(row); until = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
-            c.execute("UPDATE integration_action_log SET status='running',lease_owner=%s,lease_expires_at=%s,attempts=attempts+1 WHERE id=%s", (worker_id, until, result["id"]))
+            c.execute("UPDATE integration_action_log SET status='running',lease_owner=%s,lease_expires_at=%s,attempts=attempts+1,retry_at=NULL WHERE id=%s", (worker_id, until, result["id"]))
             result.update({"status": "running", "lease_owner": worker_id, "lease_expires_at": until, "attempts": result["attempts"] + 1})
             result["payload"] = json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
             return result

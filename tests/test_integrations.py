@@ -62,3 +62,28 @@ def test_gmail_adapter_sends_only_the_approved_payload():
     assert asyncio.run(run()) == "Gmail message accepted by provider."
     assert received["url"] == "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
     assert "raw" in received["body"]
+
+
+def test_transient_read_retry_reuses_same_action_but_external_write_fails_closed(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    store.configure_integration("acct_1", "github", display_name="Repo", policy="assisted", granted_scopes=["repo"], health="healthy")
+
+    read = store.request_integration_action("acct_1", "github", "github.list", "List repositories", "github-list-retry")
+    with store._connect() as connection:
+        connection.execute("UPDATE integration_action_log SET status='approved' WHERE id=?", (read["id"],))
+    claimed = store.claim_integration_action("worker-a")
+    assert claimed and claimed["id"] == read["id"]
+    assert store.fail_integration_action(read["id"], "worker-a", "provider 503", retryable=True, retry_delay_seconds=1) == "retry"
+    assert store.claim_integration_action("worker-b") is None
+    with store._connect() as connection:
+        connection.execute("UPDATE integration_action_log SET retry_at=NULL WHERE id=?", (read["id"],))
+    retried = store.claim_integration_action("worker-b")
+    assert retried and retried["id"] == read["id"] and retried["attempts"] == 2
+    store.complete_integration_action(read["id"], "worker-b", result="safe read completed")
+
+    write = store.request_integration_action("acct_1", "github", "github.push", "Commit reviewed content", "github-write-no-auto-retry")
+    store.decide_integration_action("acct_1", write["id"], True, "approved")
+    claimed_write = store.claim_integration_action("worker-a")
+    assert claimed_write and claimed_write["id"] == write["id"]
+    assert store.fail_integration_action(write["id"], "worker-a", "ambiguous timeout", retryable=True) == "failed"
+    assert store.integration_actions("acct_1")[0]["status"] == "failed"

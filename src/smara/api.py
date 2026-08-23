@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import httpx
@@ -547,7 +547,13 @@ async def finish_integration_oauth(provider: str, code: str, state: str):
         except KeyError:
             store.configure_integration(oauth["account_id"], provider, display_name=provider.title(), policy="assisted", granted_scopes=[], health="not_connected")
         store.store_integration_credential(oauth["account_id"], provider, "oauth_token", encrypted)
-        return {"ok": True, "provider": provider, "connected": True}
+        label = {"gmail": "Gmail", "calendar": "Google Calendar", "drive": "Google Drive", "github": "GitHub"}.get(provider, "Provider")
+        return HTMLResponse(
+            "<!doctype html><meta name='viewport' content='width=device-width'>"
+            "<title>Smara integration connected</title>"
+            "<main style='max-width:36rem;margin:12vh auto;padding:2rem;font:16px system-ui;background:#151a24;color:#eef2ff;border-radius:14px'>"
+            f"<h1>{label} connected</h1><p>The encrypted connection is ready. Return to Smara and close this window.</p></main>"
+        )
     except (KeyError, ValueError, RuntimeError, httpx.HTTPError) as exc:
         raise HTTPException(400, str(exc))
 
