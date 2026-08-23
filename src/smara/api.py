@@ -484,6 +484,14 @@ async def heartbeat_executor(body: ExecutorHeartbeat, identity: tuple[str, str] 
 async def list_executors(user: str = Depends(account_id)):
     return {"executors": store.executors(user)}
 
+
+@app.delete("/v1/executors/{executor_id}", status_code=204)
+async def revoke_executor(executor_id: str, user: str = Depends(account_id)):
+    try:
+        store.revoke_executor(executor_id, user)
+    except KeyError as exc:
+        raise HTTPException(404, "Desktop executor was not found or is already revoked.") from exc
+
 @app.post("/v1/executors/claim")
 async def claim_executor(identity: tuple[str, str] = Depends(executor_identity)):
     try: return {"step": store.claim_for_executor(*identity)}

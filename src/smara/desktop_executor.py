@@ -8,8 +8,11 @@ explicitly and the task must already have passed Smara's approval gate.
 from __future__ import annotations
 
 import argparse
+import base64
+import contextlib
 import hashlib
 import json
+import logging
 import os
 import shlex
 import subprocess
@@ -17,6 +20,7 @@ import tempfile
 import time
 import webbrowser
 from dataclasses import dataclass, field
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -28,6 +32,7 @@ MAX_OUTPUT_CHARS = 32_000
 MAX_COMMAND_SECONDS = 60
 DEFAULT_CAPABILITIES = ["local_file_read"]
 STATE_ENV = "SMARA_DESKTOP_STATE"
+LOG = logging.getLogger("smara.desktop")
 
 
 def default_state_path() -> Path:
@@ -38,9 +43,64 @@ def default_state_path() -> Path:
     return root / "desktop.json"
 
 
+def default_log_path() -> Path:
+    root = Path(os.getenv("LOCALAPPDATA", Path.home() / ".local")) / "Smara" / "logs"
+    return root / "desktop.log"
+
+
+def _protect_windows(value: str) -> str:
+    """Protect an executor bearer with the current Windows user's DPAPI key."""
+    if os.name != "nt":
+        return value
+    import ctypes
+    from ctypes import wintypes
+
+    class DataBlob(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+    raw = value.encode("utf-8")
+    buffer = ctypes.create_string_buffer(raw)
+    source = DataBlob(len(raw), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_byte)))
+    protected = DataBlob()
+    if not ctypes.windll.crypt32.CryptProtectData(ctypes.byref(source), None, None, None, None, 0x1, ctypes.byref(protected)):
+        raise ctypes.WinError()
+    try:
+        return base64.b64encode(ctypes.string_at(protected.pbData, protected.cbData)).decode("ascii")
+    finally:
+        ctypes.windll.kernel32.LocalFree(protected.pbData)
+
+
+def _unprotect_windows(value: str) -> str:
+    if os.name != "nt":
+        return value
+    import ctypes
+    from ctypes import wintypes
+
+    class DataBlob(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+    raw = base64.b64decode(value.encode("ascii"), validate=True)
+    buffer = ctypes.create_string_buffer(raw)
+    source = DataBlob(len(raw), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_byte)))
+    clear = DataBlob()
+    if not ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(source), None, None, None, None, 0x1, ctypes.byref(clear)):
+        raise ctypes.WinError()
+    try:
+        return ctypes.string_at(clear.pbData, clear.cbData).decode("utf-8")
+    finally:
+        ctypes.windll.kernel32.LocalFree(clear.pbData)
+
+
 def _save_state(path: Path, state: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    serialized = dict(state)
+    token = serialized.pop("token", None)
+    if isinstance(token, str) and token:
+        if os.name == "nt":
+            serialized["token_dpapi"] = _protect_windows(token)
+        else:
+            serialized["token"] = token
+    path.write_text(json.dumps(serialized, ensure_ascii=False), encoding="utf-8")
     if os.name != "nt":
         path.chmod(0o600)
 
@@ -50,9 +110,53 @@ def _load_state(path: Path) -> dict:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, ValueError) as exc:
         raise RuntimeError(f"Desktop pairing state is unavailable: {path}") from exc
+    if isinstance(value, dict) and os.name == "nt" and value.get("token_dpapi"):
+        try:
+            value["token"] = _unprotect_windows(value["token_dpapi"])
+        except (OSError, ValueError) as exc:
+            raise RuntimeError("Desktop token cannot be unlocked by this Windows account; pair again.") from exc
     if not isinstance(value, dict) or not value.get("executor_id") or not value.get("token") or not value.get("smara_url"):
         raise RuntimeError("Desktop pairing state is invalid; pair this device again.")
+    if os.name == "nt" and "token_dpapi" not in value:
+        _save_state(path, value)  # one-time migration away from legacy plaintext state
     return value
+
+
+def _pause_path(state_path: Path) -> Path:
+    return state_path.with_suffix(state_path.suffix + ".paused")
+
+
+@contextlib.contextmanager
+def _single_runner(state_path: Path):
+    """Hold a non-blocking file lock so two executor loops cannot run together."""
+    lock_path = state_path.with_suffix(state_path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+b")
+    if handle.tell() == 0:
+        handle.write(b"0")
+        handle.flush()
+    handle.seek(0)
+    try:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        handle.close()
+        raise RuntimeError("Smara Desktop is already running for this state file.") from exc
+    try:
+        yield
+    finally:
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
 
 def _headers(state: dict) -> dict[str, str]:
@@ -251,11 +355,14 @@ class DesktopRunner:
         step = response.json().get("step")
         if not step:
             return False
+        LOG.info("claimed step %s capability=%s", step.get("step_id"), step.get("required_capability"))
         try:
             result = execute_step(step, state)
             client.post(f"{state['smara_url']}/v1/executors/steps/{step['step_id']}/complete", headers=_headers(state), json={"result": result}).raise_for_status()
+            LOG.info("completed step %s", step.get("step_id"))
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
             client.post(f"{state['smara_url']}/v1/executors/steps/{step['step_id']}/fail", headers=_headers(state), json={"error": str(exc)[:2_000]}).raise_for_status()
+            LOG.warning("failed step %s: %s", step.get("step_id"), str(exc)[:300])
         return True
 
     def run_forever(self) -> None:
@@ -263,6 +370,9 @@ class DesktopRunner:
         with httpx.Client(timeout=20, follow_redirects=False) as client:
             delay = self.poll_seconds
             while True:
+                if _pause_path(self.state_path).exists():
+                    time.sleep(min(max(self.poll_seconds, 1.0), 5.0))
+                    continue
                 try:
                     self.run_once(client, state)
                     delay = self.poll_seconds
@@ -274,6 +384,7 @@ class DesktopRunner:
                     delay = min(delay * 2, 30)
                 except httpx.HTTPError:
                     delay = min(delay * 2, 30)
+                    LOG.warning("hosted service unavailable; retrying in %.1f seconds", delay)
                 time.sleep(delay)
 
 
@@ -287,7 +398,38 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--browser-domain", action="append", default=[], help="allowed browser domain; repeat as needed")
     parser.add_argument("--pair-only", action="store_true", help="pair and save state without starting the executor loop")
     parser.add_argument("--once", action="store_true", help="claim at most one step and exit")
+    parser.add_argument("--pause", action="store_true", help="pause claims for the configured state")
+    parser.add_argument("--resume", action="store_true", help="resume claims for the configured state")
+    parser.add_argument("--status", action="store_true", help="print safe local executor status")
+    parser.add_argument("--log", type=Path, default=default_log_path(), help="rotating desktop log path")
     args = parser.parse_args(argv)
+    args.log.parent.mkdir(parents=True, exist_ok=True)
+    handler = RotatingFileHandler(args.log, maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    LOG.setLevel(logging.INFO)
+    if not LOG.handlers:
+        LOG.addHandler(handler)
+    if args.pause:
+        _pause_path(args.state).parent.mkdir(parents=True, exist_ok=True)
+        _pause_path(args.state).write_text("paused\n", encoding="utf-8")
+        print("Smara Desktop is paused. No new local work will be claimed.")
+        return 0
+    if args.resume:
+        _pause_path(args.state).unlink(missing_ok=True)
+        print("Smara Desktop is active.")
+        return 0
+    if args.status:
+        state = _load_state(args.state)
+        print(json.dumps({
+            "paired": True,
+            "paused": _pause_path(args.state).exists(),
+            "executor_id": state["executor_id"],
+            "smara_url": state["smara_url"],
+            "capabilities": state.get("capabilities", DEFAULT_CAPABILITIES),
+            "allowed_roots": state.get("allowed_roots", []),
+            "log": str(args.log),
+        }, indent=2))
+        return 0
     if args.pair:
         state = pair(args.api, args.pair, args.state, allowed_roots=args.allow_root)
         state["terminal_allowlist"] = args.terminal_allow
@@ -298,10 +440,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
     if args.once:
         state = _load_state(args.state)
-        with httpx.Client(timeout=20, follow_redirects=False) as client:
-            DesktopRunner(args.state).run_once(client, state)
+        with _single_runner(args.state), httpx.Client(timeout=20, follow_redirects=False) as client:
+            if not _pause_path(args.state).exists():
+                DesktopRunner(args.state).run_once(client, state)
         return 0
-    DesktopRunner(args.state).run_forever()
+    with _single_runner(args.state):
+        DesktopRunner(args.state).run_forever()
     return 0
 
 

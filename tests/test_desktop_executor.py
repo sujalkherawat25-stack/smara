@@ -18,6 +18,10 @@ def test_paired_desktop_claims_only_declared_capability(tmp_path: Path):
     assert step["executor_payload"] == {"path": "approved.txt"}
     store.complete_executor_step(desktop["executor_id"], desktop["token"], step["step_id"], "Read-only action completed.")
     assert store.get(task["id"], "acct_1")["status"] == "completed"
+    artifacts = store.artifacts(task["id"], "acct_1")
+    assert len(artifacts) == 1
+    assert artifacts[0]["kind"] == "desktop_step_result"
+    assert artifacts[0]["content"] == "Read-only action completed."
 
 
 def test_pairing_is_single_use_and_capability_is_enforced(tmp_path: Path):
@@ -52,3 +56,19 @@ def test_desktop_executor_cannot_claim_before_task_approval(tmp_path: Path):
     store.decide(task["id"], "acct_1", True, "approved")
     assert store.claim_for_executor(desktop["executor_id"], desktop["token"]) is not None
     assert store.get(task["id"], "acct_1")["status"] == "running"
+
+
+def test_desktop_revoke_is_account_scoped_and_immediate(tmp_path: Path):
+    store = TaskStore(tmp_path / "smara.db")
+    desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop", ["local_file_read"])["code"])
+    try:
+        store.revoke_executor(desktop["executor_id"], "acct_2")
+        assert False, "another account must not revoke this desktop"
+    except KeyError:
+        pass
+    store.revoke_executor(desktop["executor_id"], "acct_1")
+    try:
+        store.executor(desktop["executor_id"], desktop["token"])
+        assert False, "revoked desktop credentials must stop working immediately"
+    except KeyError:
+        pass

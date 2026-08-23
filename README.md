@@ -141,7 +141,26 @@ atomic `local_file_write`, allowlisted `local_terminal`, and allowlisted
 declared during pairing and configured locally with `--terminal-allow` or
 `--browser-domain`; the executor rejects undeclared capabilities, unapproved
 tasks, shell operators, path traversal, symlink escapes, oversized files, and
-unbounded commands. `--once` is available for a single-step smoke test.
+unbounded commands. Each completed local step creates a visible task-result
+artifact. On Windows the scoped executor bearer is protected with the current
+user's DPAPI key instead of being stored as readable JSON. A single-instance
+lock prevents duplicate runners, and bounded rotating logs are stored under
+the user's local Smara directory.
+
+`--once` is available for a single-step smoke test. Operational controls are:
+
+```powershell
+smara-desktop --status
+smara-desktop --pause
+smara-desktop --resume
+smara desktop list
+smara desktop revoke desktop_ID
+```
+
+After pairing is verified, `scripts/install-smara-desktop.ps1` registers the
+executor for the current Windows user at sign-in with limited privileges and
+duplicate-instance prevention. `scripts/uninstall-smara-desktop.ps1` removes
+auto-start; revoke the executor separately to invalidate its server token.
 
 The agent manifest also includes read-only Gmail search, Calendar listing,
 Drive metadata search, and GitHub repository listing. They run only when the

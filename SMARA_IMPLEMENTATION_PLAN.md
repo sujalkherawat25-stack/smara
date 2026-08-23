@@ -1852,3 +1852,36 @@ Next action:
   environment file remains mode 600 and no key value was printed.
 
 **Sequence 1 status: complete and live-verified. Sequence 2 is current.**
+
+---
+
+## 2026-08-24 — Sequence 2 implementation and first live round trip
+
+Completed:
+
+- Paired a disposable, outbound-only Windows executor to control staging with
+  only file-read, file-write, and one locally allowlisted terminal capability.
+- Created a three-step dependent task graph on staging. It remained blocked
+  until explicit approval, then read within the approved folder, atomically
+  wrote a new file, ran the allowlisted command, and completed with nine
+  durable events. No inbound desktop port or Docker service was used.
+- Added immediate, account-scoped desktop revocation to the API and CLI.
+- Added a durable `desktop_step_result` artifact for every completed local
+  step so Web/CLI can display what the desktop returned.
+- Protected Windows executor tokens at rest with per-user DPAPI, including
+  automatic migration of legacy plaintext state.
+- Added single-runner locking, pause/resume/status controls, bounded rotating
+  logs, reconnect logging, and current-user Windows scheduled-task install and
+  uninstall scripts.
+- Local verification now passes **84 tests**. A real state migration confirmed
+  that the plaintext token field disappeared and the DPAPI field is present;
+  pause/status/resume behavior also passed.
+
+Still required before Sequence 2 is fully closed:
+
+1. Deploy the new desktop revocation/artifact API to staging.
+2. Verify a completed live task exposes three result artifacts.
+3. Revoke the disposable Windows executor and prove its next heartbeat returns
+   401, then remove the disposable local state/folder.
+4. Run an install/restart/reconnect drill using a deliberately paired beta
+   executor; do not auto-start the disposable smoke executor.

@@ -539,7 +539,15 @@ class TaskStore:
             task["updated_at"] = now
             return task
 
-    def complete_step(self, step_id: str, account_id: str, result: str) -> None:
+    def complete_step(
+        self,
+        step_id: str,
+        account_id: str,
+        result: str,
+        *,
+        artifact_kind: str | None = None,
+        artifact_name: str | None = None,
+    ) -> None:
         now = _now()
         with self._connect() as c:
             row = c.execute("SELECT task_id,task_run_id FROM task_steps WHERE id=? AND task_id IN (SELECT id FROM tasks WHERE account_id=?)", (step_id, account_id)).fetchone()
@@ -548,6 +556,26 @@ class TaskStore:
             c.execute("UPDATE task_steps SET status='completed',lease_owner=NULL,lease_expires_at=NULL,last_error=NULL,retry_at=NULL WHERE id=? AND status='running'", (step_id,))
             completion_payload = json.dumps({"result": str(result)[:2_000]}, ensure_ascii=False)
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "step.completed", completion_payload, now))
+            if artifact_kind:
+                content = str(result)[:20_000]
+                artifact_id = f"artifact_{uuid.uuid4().hex}"
+                c.execute(
+                    "INSERT INTO artifacts(id,task_id,kind,name,uri,sha256,content,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                    (
+                        artifact_id,
+                        task_id,
+                        artifact_kind,
+                        artifact_name or f"{step_id}.txt",
+                        f"inline://artifacts/{artifact_id}",
+                        hashlib.sha256(content.encode()).hexdigest(),
+                        content,
+                        now,
+                    ),
+                )
+                c.execute(
+                    "INSERT INTO task_events VALUES(?,?,?,?,?)",
+                    (f"evt_{uuid.uuid4().hex}", task_id, "artifact.created", json.dumps({"kind": artifact_kind}), now),
+                )
             cancelled = c.execute("SELECT cancel_requested FROM tasks WHERE id=?", (task_id,)).fetchone()["cancel_requested"]
             if cancelled:
                 c.execute("UPDATE task_runs SET status='cancelled' WHERE id=?", (run_id,))
@@ -727,6 +755,15 @@ class TaskStore:
             result.append(item)
         return result
 
+    def revoke_executor(self, executor_id: str, account_id: str) -> None:
+        with self._connect() as c:
+            result = c.execute(
+                "UPDATE desktop_executors SET status='revoked' WHERE id=? AND account_id=? AND status='active'",
+                (executor_id, account_id),
+            )
+        if result.rowcount != 1:
+            raise KeyError(executor_id)
+
     def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 60) -> dict | None:
         executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
         with self._connect() as c:
@@ -749,14 +786,20 @@ class TaskStore:
             return row
 
     def complete_executor_step(self, executor_id: str, token: str, step_id: str, result: str) -> None:
-        self.executor(executor_id, token)
+        executor = self.executor(executor_id, token)
         with self._connect() as c:
             row = c.execute("SELECT task_id FROM task_steps WHERE id=? AND lease_owner=? AND status='running'", (step_id, executor_id)).fetchone()
             if not row: raise KeyError("lease")
             task_id = row["task_id"]
             c.execute("UPDATE executor_leases SET completed_at=? WHERE step_id=? AND executor_id=?", (_now(), step_id, executor_id))
-        task = self.get(task_id, self.executor(executor_id, token)["account_id"])
-        self.complete_step(step_id, task["account_id"], result)
+        task = self.get(task_id, executor["account_id"])
+        self.complete_step(
+            step_id,
+            task["account_id"],
+            result,
+            artifact_kind="desktop_step_result",
+            artifact_name=f"{step_id}.json",
+        )
 
     def fail_executor_step(self, executor_id: str, token: str, step_id: str, error: str) -> str:
         executor = self.executor(executor_id, token)

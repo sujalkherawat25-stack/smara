@@ -504,6 +504,8 @@ def build_parser() -> argparse.ArgumentParser:
     desktop = commands.add_parser("desktop", help="pair or inspect a local desktop executor")
     desktop_commands = desktop.add_subparsers(dest="desktop_command", required=True)
     desktop_commands.add_parser("list")
+    desktop_revoke = desktop_commands.add_parser("revoke")
+    desktop_revoke.add_argument("executor_id")
     pair = desktop_commands.add_parser("pair")
     pair.add_argument("--name", default="Smara desktop")
     pair.add_argument("--capability", action="append", dest="capabilities", default=None)
@@ -582,6 +584,9 @@ def main(argv: list[str] | None = None) -> int:
                 _print(_request(client, "POST", f"/v1/tools/{args.name}", json={"arguments": arguments, "workspace_id": args.workspace}))
             elif args.command == "desktop" and args.desktop_command == "list":
                 _print(_request(client, "GET", "/v1/executors"))
+            elif args.command == "desktop" and args.desktop_command == "revoke":
+                _request(client, "DELETE", f"/v1/executors/{args.executor_id}")
+                print(f"Revoked desktop executor {args.executor_id}.")
             elif args.command == "desktop" and args.desktop_command == "pair":
                 _print(_request(client, "POST", "/v1/executors/pairings", json={"name": args.name, "capabilities": args.capabilities or ["local_file_read"]}))
             elif args.task_command == "show":

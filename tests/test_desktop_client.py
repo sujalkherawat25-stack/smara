@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -41,3 +42,7 @@ def test_desktop_state_round_trip_is_json(tmp_path: Path):
     path = tmp_path / "desktop.json"
     _save_state(path, {"executor_id": "desktop_1", "token": "opaque", "smara_url": "http://smara"})
     assert _load_state(path)["executor_id"] == "desktop_1"
+    if os.name == "nt":
+        stored = path.read_text(encoding="utf-8")
+        assert "opaque" not in stored
+        assert "token_dpapi" in stored

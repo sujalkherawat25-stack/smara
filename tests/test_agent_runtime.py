@@ -87,6 +87,7 @@ def test_cli_has_only_api_control_commands():
     assert parser.parse_args(["tasks"]).command == "tasks"
     assert parser.parse_args(["tasks", "list"]).tasks_command == "list"
     assert parser.parse_args(["desktop", "pair", "--capability", "local_file_read"]).desktop_command == "pair"
+    assert parser.parse_args(["desktop", "revoke", "desktop_1"]).desktop_command == "revoke"
     assert parser.parse_args(["tool", "calculate"]).name == "calculate"
     args = parser.parse_args(["run", "Prepare a report", "--title", "Report"])
     assert args.objective == "Prepare a report"
