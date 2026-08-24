@@ -2002,10 +2002,19 @@ blocked only on operator-owned secret-manager/provider configuration.**
 - API, worker, scheduler, integration worker, Postgres, and Redis are running.
 - Authenticated integration listing returns successfully and the v3 native UI
   contains the secure Telegram dialog and all five provider cards.
-- Staging currently has zero real connections. GitHub OAuth deliberately
-  returns HTTP 503 and Web Push reports no public key because operator OAuth and
-  VAPID secrets have not been configured. This is the correct fail-closed state,
-  not a code failure.
+- Staging currently has zero real provider connections. GitHub OAuth deliberately
+  returns HTTP 503 because operator OAuth credentials have not been configured.
+  This is the correct fail-closed state, not a code failure.
+- Deployed commit `282ea5e` added reusable protected VAPID provisioning. The
+  staging key pair was generated on the VM without printing either key; the
+  private key is mode `0600`, mounted read-only into the API container, and the
+  browser public key endpoint reports a valid 87-character key. A safe push
+  probe delivered to zero recipients because no real browser/phone subscription
+  exists yet. End-to-end phone delivery therefore remains an operational test,
+  not a completed claim.
+- The VAPID host-file mount is an interim staging control. Before production,
+  OAuth secrets, the integration key ring, and the VAPID private key must come
+  from the authorized cloud secret manager and pass the rotation drill.
 
 **Next executable work:** choose/configure the VM secret manager and disposable
 provider test accounts to close Sequence 4 operational drills. Until those are
