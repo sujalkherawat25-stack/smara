@@ -850,6 +850,38 @@ The current Memento agent implementation lives inside the sensitive MemoryOS
 repository and serves `ai.syntarus.com`. Smara will become the independent
 agent product, while MemoryOS becomes the Syntarus memory platform only.
 
+### UI consolidation decision — 2026-08-25
+
+There must be **one user-facing Smara Web experience**: the polished existing
+Memento interface at `ai.syntarus.com`. The separate Control PWA is a
+transitional operator/test surface only; it must not be presented as a second
+product or required for normal use.
+
+Do **not** copy Memento wholesale into the Smara repository. Memento's current
+UI is valuable, but its agent implementation imports sensitive MemoryOS
+internals. Copying the whole application would carry that coupling forward.
+Instead, retain the Memento visual shell while replacing its agent-facing
+requests in small, tested slices with the independent Smara API:
+
+```text
+ai.syntarus.com
+  existing Memento-quality Web UI
+      -> same-origin authenticated Smara gateway
+          -> independent Smara API / task workers / desktop executor
+              -> public Syntarus SDK
+                  -> MemoryOS memory platform
+```
+
+The browser must never handle a Smara signing secret. During the transition it
+can receive a short-lived account assertion from the same-origin Memento
+backend, but the final native screens should use a same-origin gateway/proxy
+so the separate Control origin and iframe disappear from normal user flows.
+
+Immediate UX rule: direct visits to `control-staging.syntarus.com/app/` are
+for internal testing and cannot authenticate themselves. They must show a
+clear internal-preview explanation rather than a misleading account input or
+generic authentication error. Normal users enter through `ai.syntarus.com`.
+
 This is an extraction, not a direct copy of `app/memento/`. Memento currently
 imports MemoryOS internals such as fused retrieval, ingestion, Redis state,
 and infrastructure clients. Copying those imports into Smara would recreate
