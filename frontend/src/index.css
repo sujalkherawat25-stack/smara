@@ -1,0 +1,493 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Brand typography ───────────────────────────────────────────────────────── */
+/* Body / UI: Plus Jakarta Sans · Display / headings / logo: Nunito */
+body {
+  font-family: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* iOS Safari: stop pull-to-refresh from accidentally firing inside chat. */
+  overscroll-behavior-y: contain;
+  /* NOTE: Safe-area insets used to live here as body padding — that broke
+     mobile layouts because the App container uses h-screen (100vh) and the
+     body padding pushed everything past the viewport, making the document
+     itself scroll and the header disappear on scroll-down. Safe-area insets
+     now live INSIDE the App container (App.tsx header pt + chat input pb)
+     so the 100vh container fits exactly. */
+}
+.font-display {
+  font-family: "Nunito", system-ui, -apple-system, sans-serif;
+}
+
+/* ── Mobile UX polish ─────────────────────────────────────────────────────── */
+/* iOS Safari auto-zooms any input with font-size < 16px on focus. Force 16px
+   on inputs/textareas to prevent the jarring zoom-in on Indian users' phones. */
+@media (max-width: 767px) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+}
+
+/* Tap highlights on iOS look like glitches — kill them and use our own
+   active state via Tailwind's active:opacity utilities. */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Smooth scrolling for in-app navigation. */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Prevent horizontal scroll on the body — any panel overflowing horizontally
+   is a layout bug we want to surface, not have the browser absorb. */
+html, body {
+  overflow-x: hidden;
+}
+
+/* Small shared details that make the shell feel like one product surface. */
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+}
+
+button, textarea, input {
+  font-family: inherit;
+}
+
+.app-header {
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.chat-composer {
+  position: relative;
+  background: color-mix(in srgb, var(--bg-surface) 94%, var(--accent) 6%) !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12), var(--shadow-sm) !important;
+}
+
+.chat-composer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(115deg, rgba(255,255,255,0.035), transparent 38%);
+}
+
+.keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border: 1px solid var(--border-default);
+  border-bottom-color: var(--border-accent);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* Data rendered by the agent should feel like an inspectable workspace, not
+   pasted markdown. The row hover is deliberately subtle so it works in both
+   themes without turning every cell into a coloured tile. */
+.data-table-wrap {
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  scrollbar-width: thin;
+}
+
+.data-table {
+  border-collapse: separate !important;
+  border-spacing: 0;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.data-table-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  letter-spacing: 0.02em;
+  background: linear-gradient(135deg, var(--bg-elevated), var(--bg-card)) !important;
+  border-bottom-color: var(--border-accent) !important;
+}
+
+.data-table-cell {
+  transition: background-color 120ms ease;
+}
+
+.data-table tbody tr:nth-child(even) .data-table-cell {
+  background: color-mix(in srgb, var(--accent) 3%, transparent);
+}
+
+.data-table tbody tr:hover .data-table-cell {
+  background: var(--accent-dim);
+}
+
+.visual-kind {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border: 1px solid var(--border-accent);
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--accent-dim);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.visual-fixed {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.visual-stage {
+  position: relative;
+  background-color: var(--bg-base);
+  background-image: radial-gradient(var(--graph-dot) 0.7px, transparent 0.7px);
+  background-size: 18px 18px;
+  min-height: 180px;
+  isolation: isolate;
+}
+
+.visual-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--bg-base) 18%, transparent));
+  opacity: 0.35;
+}
+
+.visual-stage > div {
+  position: relative;
+  z-index: 1;
+  min-width: max-content;
+  min-height: 180px;
+}
+
+.visual-node {
+  cursor: pointer;
+  transition: filter 140ms ease;
+}
+
+.visual-node:hover {
+  filter: brightness(1.18) drop-shadow(0 0 8px color-mix(in srgb, var(--accent) 35%, transparent));
+}
+
+.visual-menu {
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-lg);
+}
+
+.visual-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 9px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.visual-menu-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ── Dark theme (default) ───────────────────────────────────────────────────── */
+:root,
+[data-theme="dark"] {
+  /* Backgrounds — warm midnight (a hair warmer than pure indigo to pair
+     with rose gold). Smara is ancient + intelligent. */
+  --bg-base:     #0b0a14;
+  --bg-surface:  #110f1c;
+  --bg-elevated: #181626;
+  --bg-card:     #141221;
+  --bg-input:    #0e0d18;
+
+  /* Rose Gold primary (#C9A96E) + warm cream secondary that still reads
+     as a distinct "success/live" signal */
+  --accent:       #C9A96E;
+  --accent-soft:  rgba(201, 169, 110, 0.13);
+  --accent-dim:   rgba(201, 169, 110, 0.06);
+  --accent2:      #6ee7b7;
+  --accent2-soft: rgba(110, 231, 183, 0.12);
+
+  --border-dim:     rgba(201, 169, 110, 0.08);
+  --border-default: rgba(201, 169, 110, 0.14);
+  --border-accent:  rgba(201, 169, 110, 0.32);
+
+  /* Text — warm-cream on midnight */
+  --text-primary:   #ece4d4;
+  --text-secondary: #c2b89e;
+  --text-muted:     #897f66;
+  --text-dim:       #3c3527;
+
+  --shadow-sm:  0 2px 8px rgba(0,0,0,0.4);
+  --shadow-md:  0 4px 16px rgba(0,0,0,0.5);
+  --shadow-lg:  0 12px 40px rgba(0,0,0,0.6);
+  --shadow-xl:  0 24px 64px rgba(0,0,0,0.7);
+
+  --glass-bg:     rgba(17, 15, 28, 0.80);
+  --glass-border: rgba(201, 169, 110, 0.14);
+
+  --minimap-mask: rgba(9, 8, 16, 0.78);
+  --graph-bg:    #08070d;
+  --graph-dot:   rgba(201, 169, 110, 0.32);
+  --node-bg:     rgba(20, 18, 33, 0.94);
+  --tooltip-bg:  rgba(14, 12, 24, 0.96);
+  --drawer-bg:   rgba(14, 12, 24, 0.97);
+  --backdrop:    rgba(6, 5, 12, 0.78);
+  --panel-backdrop: rgba(0, 0, 0, 0.30);
+
+  /* User message bubble — warm midnight to deep rose gold whisper */
+  --user-bubble-bg: linear-gradient(135deg, #1d1830 0%, #3a2c14 100%);
+  --user-bubble-border: rgba(201, 169, 110, 0.20);
+
+  --body-weight: 400;
+  --scrollbar: #3a3322;
+}
+
+/* ── Light theme — parchment / aged manuscript ─────────────────────────────── */
+/* Design intent: avoid pure #fff. Cream/parchment base (#F5F0E8) gives Smara
+   a "living document, memory journal" feel that ties to the Sanskrit meaning
+   without being literal. Gold shifts deeper (#B8934A) to hold contrast on
+   warm bg; text is warm near-black (#1a160e) — never pure black, so the
+   warmth carries top to bottom. */
+[data-theme="light"] {
+  /* Parchment base + nested surfaces. Cards sit a hair brighter than base
+     to feel like sheets laid on the desk, not embossed into it. */
+  --bg-base:     #F5F0E8;   /* parchment — the desk */
+  --bg-surface:  #FBF7EF;   /* slightly brighter — a page laid down */
+  --bg-elevated: #EEE7D6;   /* sub-surface tint for nav rails, headers */
+  --bg-card:     #FBF7EF;   /* same brightness as surface — settings, modals */
+  --bg-input:    #EFE8D8;   /* input wells sit slightly into the page */
+
+  /* Deeper gold (#B8934A) — slightly more saturated than the dark-mode
+     #C9A96E so it doesn't get washed out on cream. Same family, different stop. */
+  --accent:       #B8934A;
+  --accent-soft:  rgba(184, 147, 74, 0.12);
+  --accent-dim:   rgba(184, 147, 74, 0.06);
+  /* Emerald for "live/connected/success" — a touch deeper than dark-mode
+     mint so it reads as a real signal on parchment. */
+  --accent2:      #0E9C6A;
+  --accent2-soft: rgba(14, 156, 106, 0.12);
+
+  --border-dim:     rgba(184, 147, 74, 0.12);
+  --border-default: rgba(184, 147, 74, 0.22);
+  --border-accent:  rgba(184, 147, 74, 0.38);
+
+  /* Text — warm near-black walking down to dim walnut. Never #000. */
+  --text-primary:   #1a160e;
+  --text-secondary: #4a3c22;
+  --text-muted:     #7a6644;
+  --text-dim:       #b09775;
+
+  /* Warm shadows — never gray. */
+  --shadow-sm:  0 2px 8px rgba(60, 40, 12, 0.08);
+  --shadow-md:  0 4px 16px rgba(60, 40, 12, 0.11);
+  --shadow-lg:  0 12px 40px rgba(60, 40, 12, 0.14);
+  --shadow-xl:  0 24px 64px rgba(60, 40, 12, 0.18);
+
+  --glass-bg:     rgba(251, 247, 239, 0.85);
+  --glass-border: rgba(184, 147, 74, 0.16);
+
+  --minimap-mask: rgba(245, 240, 232, 0.80);
+  --graph-bg:    #EFE7D2;
+  --graph-dot:   rgba(184, 147, 74, 0.24);
+  --node-bg:     rgba(251, 247, 239, 0.97);
+  --tooltip-bg:  rgba(251, 247, 239, 0.97);
+  --drawer-bg:   rgba(245, 240, 232, 0.97);
+  --backdrop:    rgba(26, 22, 14, 0.40);
+  --panel-backdrop: rgba(26, 22, 14, 0.10);
+
+  /* User bubble: deeper cream → warm gold tint for clear differentiation
+     against the parchment base. Reads as "your voice on the page". */
+  --user-bubble-bg: linear-gradient(135deg, #EFE6D2 0%, #DCC495 100%);
+  --user-bubble-border: rgba(184, 147, 74, 0.32);
+
+  --body-weight: 500;
+  --scrollbar: #B8934A;
+}
+
+/* ── Light mode — bolder, darker text globally ─────────────────────────────── */
+[data-theme="light"] body {
+  font-weight: 500;
+  -webkit-font-smoothing: auto;
+}
+[data-theme="light"] p,
+[data-theme="light"] span,
+[data-theme="light"] div,
+[data-theme="light"] textarea,
+[data-theme="light"] input,
+[data-theme="light"] button {
+  font-weight: inherit;
+}
+[data-theme="light"] h1,
+[data-theme="light"] h2,
+[data-theme="light"] h3 {
+  font-weight: 700;
+}
+[data-theme="light"] .text-sm,
+[data-theme="light"] .text-xs,
+[data-theme="light"] .text-base {
+  font-weight: 500;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar { width: 3px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar);
+    border-radius: 2px;
+  }
+}
+
+/* ── Glass morphism ────────────────────────────────────────────────────────── */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  border: 1px solid var(--glass-border);
+}
+
+/* ── Gradient text ─────────────────────────────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Graph node entrance ───────────────────────────────────────────────────── */
+.animate-node-enter {
+  animation: node-enter 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes node-enter {
+  0%   { opacity: 0; transform: scale(0.2); }
+  70%  { opacity: 1; transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+/* ── Edge flow animation ───────────────────────────────────────────────────── */
+@keyframes edge-flow {
+  from { stroke-dashoffset: 20; }
+  to   { stroke-dashoffset: 0; }
+}
+.edge-animated {
+  animation: edge-flow 0.6s linear infinite;
+}
+
+/* ── Fade-in ───────────────────────────────────────────────────────────────── */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fade-in 0.3s ease-out; }
+
+/* ── Panel slide-in ────────────────────────────────────────────────────────── */
+@keyframes panel-in {
+  from { opacity: 0; transform: scale(0.96) translateY(6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-panel-in { animation: panel-in 0.25s cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* ── Typing dots ───────────────────────────────────────────────────────────── */
+@keyframes dot-bounce {
+  0%, 80%, 100% { transform: translateY(0);    opacity: 0.4; }
+  40%           { transform: translateY(-4px); opacity: 1;   }
+}
+.dot-bounce {
+  animation: dot-bounce 1.2s ease-in-out infinite;
+}
+
+/* ── Orb pulse ─────────────────────────────────────────────────────────────── */
+@keyframes orb-pulse {
+  0%, 100% { opacity: 0.15; transform: scale(1); }
+  50%      { opacity: 0.30; transform: scale(1.08); }
+}
+.orb-pulse {
+  animation: orb-pulse 3s ease-in-out infinite;
+}
+
+/* ── Smara logo (neural mandala) entrance ──────────────────────────────────── */
+/* Anchor every group's scale to the SVG centre so the pop comes from (16,16). */
+.smara-logo-animated .sl-center,
+.smara-logo-animated .sl-inner,
+.smara-logo-animated .sl-outer,
+.smara-logo-animated .sl-lines {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.smara-logo-animated .sl-center { animation: smara-pop 0.55s 0.05s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
+.smara-logo-animated .sl-inner  { animation: smara-pop 0.70s 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
+.smara-logo-animated .sl-lines  { animation: smara-fade 0.65s 0.55s ease-out backwards; }
+.smara-logo-animated .sl-outer  { animation: smara-pop 0.80s 0.95s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
+@keyframes smara-pop {
+  0%   { opacity: 0; transform: scale(0.35); }
+  70%  { opacity: 1; transform: scale(1.10); }
+  100% { transform: scale(1); }
+}
+@keyframes smara-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── React Flow override ───────────────────────────────────────────────────── */
+.react-flow__renderer { background: transparent !important; }
+
+/* ── Graph controls (+/-/fit) ──────────────────────────────────────────────── */
+.graph-controls {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border-default) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2) !important;
+  overflow: hidden;
+  padding: 0 !important;
+}
+.graph-controls .react-flow__controls-button {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid var(--border-dim) !important;
+  color: var(--text-muted) !important;
+  width: 28px !important;
+  height: 28px !important;
+  padding: 6px !important;
+  transition: background 0.15s, color 0.15s !important;
+}
+.graph-controls .react-flow__controls-button:last-child {
+  border-bottom: none !important;
+}
+.graph-controls .react-flow__controls-button:hover {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+}
+.graph-controls .react-flow__controls-button svg {
+  fill: currentColor !important;
+  stroke: none !important;
+  max-width: 12px !important;
+  max-height: 12px !important;
+}

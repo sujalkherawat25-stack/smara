@@ -1,0 +1,48 @@
+{
+  "name": "smara-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mediapipe/camera_utils": "^0.3.1675466862",
+    "@mediapipe/hands": "^0.4.1675469240",
+    "@react-three/drei": "^9.96.0",
+    "@react-three/fiber": "^8.15.12",
+    "@tanstack/react-query": "5.62.8",
+    "@types/canvas-confetti": "^1.9.0",
+    "@types/dagre": "^0.7.54",
+    "@types/three": "^0.150.0",
+    "@xyflow/react": "12.3.6",
+    "canvas-confetti": "^1.9.4",
+    "clsx": "2.1.1",
+    "dagre": "^0.8.5",
+    "highlight.js": "11.10.0",
+    "lucide-react": "^0.468.0",
+    "mermaid": "^11.16.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-markdown": "9.0.1",
+    "rehype-highlight": "7.0.1",
+    "remark-gfm": "4.0.0",
+    "tailwindcss": "3.4.17",
+    "three": "^0.150.0",
+    "zustand": "5.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/react": "18.3.18",
+    "@types/react-dom": "18.3.5",
+    "@vitejs/plugin-react": "4.3.4",
+    "autoprefixer": "10.4.20",
+    "postcss": "8.4.49",
+    "type-fest": "^5.8.0",
+    "typescript": "5.7.2",
+    "vite": "6.0.5"
+  }
+}

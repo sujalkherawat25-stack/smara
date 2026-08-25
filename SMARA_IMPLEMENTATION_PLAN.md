@@ -255,3 +255,23 @@ Start **P0**: extract/reuse the Memento frontend shell into Smara and connect
 only the chat and task surfaces through the Smara gateway. Keep the current
 Memento production deployment unchanged until the first native slice passes
 live account, refresh, task-event, approval, and rollback tests.
+
+## 9. Implementation log
+
+### 2026-08-26 — P0 slice 1 started
+
+- Added `smara/frontend/`, a UI-only copy of the existing Memento frontend
+  shell. No MemoryOS backend, agent loop, storage client, or provider secret
+  was copied.
+- Added `smara/frontend/src/lib/smaraGateway.ts`. In opt-in bridge mode it
+  obtains a short-lived control token from the existing authenticated web
+  session and sends Smara API requests with that token. The browser never
+  signs requests and never receives the gateway secret.
+- Adapted the copied chat stream to Smara's `/v1/chat/stream` and the task
+  helper to Smara's `/v1/tasks`/`cancel` contract. Existing Memento routes
+  remain the default when `VITE_SMARA_MODE=false`.
+- Added a frontend migration README and environment template. This is a
+  reversible source-level slice; it is not a public cutover.
+- Verified the copied UI with TypeScript strict compilation using the existing
+  frontend dependency tree. Next P0 slice: native Smara task/research views,
+  same-origin deployment wiring, and live account/refresh/approval tests.

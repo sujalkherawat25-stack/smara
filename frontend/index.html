@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Smara — Built to remember. Designed to act.</title>
+    <link rel="icon" type="image/svg+xml" href="/smara.svg" />
+    <!-- Brand fonts: Nunito (display / headings / logo) + Plus Jakarta Sans (body / UI) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <!-- Google Identity Services — used by the sign-in screen.
+         Async/defer is fine; SignInScreen waits for window.google before using it. -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+  </head>
+  <body class="bg-gray-950 text-gray-100 antialiased">
+    <div id="root"></div>
+    <!-- React app mounts here via src/main.tsx -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
