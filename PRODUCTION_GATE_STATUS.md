@@ -22,8 +22,9 @@ has been cut over.
   public request/approval/poll path; rate limiting remains enabled outside it.
 - A staging custom-format Postgres dump was checksum-verified, read by
   `pg_restore`, and restored into a disposable Postgres 16 container. The
-  restore contained all 14 recorded Smara schema versions. The live database
-  was not modified.
+  2026-08-25 restore contained all 17 recorded Smara schema versions and 17
+  staging tasks. The live database was not modified; backup files are now
+  forced to owner-only mode by the script.
 - Repository tests pass locally (**93 tests**) with Python compilation and Web
   JavaScript syntax checks. The current changes still require the clean Docker
   run after deployment.

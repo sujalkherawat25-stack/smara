@@ -2059,7 +2059,8 @@ Defects found and fixed in this pass:
    timeouts, and network failures consume the retry budget.
 5. Backup scripts now target an explicit Compose project through
    `SMARA_COMPOSE_PROJECT`, preventing staging backups from silently addressing
-   the wrong project.
+   the wrong project. A fresh archive exposed permissive host defaults, so the
+   script now also forces owner-only permissions with `umask 077`.
 6. The obsolete xAI staging model `grok-3-mini` was replaced operationally by
    `grok-4.3`; no repository secret was added.
 
@@ -2079,3 +2080,16 @@ Current external blockers:
 chat/research matrix, deploy and verify this pass, run a current 17-migration
 backup/restore drill, then start one-account shadow/beta routing with rollback.
 MemoryOS remains the independent Syntarus memory engine throughout.**
+
+### Current backup/restore evidence
+
+- Commit `bd1f9b5` was deployed and both API and worker were recreated cleanly.
+- A fresh custom-format Postgres archive passed SHA-256 verification and
+  `pg_restore --list`.
+- The archive restored into the explicitly named disposable Postgres 16
+  container with `--exit-on-error`; the restored database contained all **17**
+  schema migrations and **17** staging tasks. The disposable container was
+  removed and the live database was never modified.
+- The staging archive and checksum were corrected to mode `0600`. This proves
+  recoverability on the VM; encrypted off-host transfer/retention is still an
+  open production gate.

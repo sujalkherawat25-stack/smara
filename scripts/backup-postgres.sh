@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+umask 077
 
 # Run from a deployed Smara checkout. BACKUP_DIR must be durable storage, not
 # the application container's writable layer. This produces a portable custom
