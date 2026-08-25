@@ -1,6 +1,8 @@
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from smara.store import TaskStore
 from smara.syntarus_adapter import SyntarusMemory
 from smara.worker import run_once
@@ -17,6 +19,17 @@ def test_task_requires_approval_before_work(tmp_path: Path):
     task = store.create("acct_1", "work", "Send report", "Prepare the report", True)
     assert store.claim_one()["status"] == "waiting_approval"
     assert store.decide(task["id"], "acct_1", True, "Looks good")["status"] == "queued"
+
+
+def test_denied_task_cancels_queued_steps_and_cannot_be_decided_twice(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Unsafe", "Do not execute", True)
+    assert store.claim_one()["status"] == "waiting_approval"
+    assert store.decide(task["id"], "acct_1", False, "No")["status"] == "cancelled"
+    assert store.steps(task["id"], "acct_1")[0]["status"] == "cancelled"
+    assert store.claim_one() is None
+    with pytest.raises(ValueError, match="not awaiting approval"):
+        store.decide(task["id"], "acct_1", True, "Too late")
 
 
 def test_worker_uses_only_memory_adapter(tmp_path: Path):
@@ -68,6 +81,20 @@ def test_failed_step_retries_with_a_bounded_budget(tmp_path: Path):
         outcome = store.fail_step(claimed["step_id"], "acct_1", "temporary upstream failure", retry_delay_seconds=0)
         assert outcome == ("failed" if attempt == 3 else "retrying")
     assert store.get(task["id"], "acct_1")["status"] == "failed"
+
+
+def test_nonretryable_step_failure_stops_immediately(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Invalid provider", "Fail safely", False)
+    claimed = store.claim_one("worker")
+    assert claimed is not None
+    outcome = store.fail_step(
+        claimed["step_id"], "acct_1", "Provider rejected its API credentials.", retryable=False
+    )
+    assert outcome == "failed"
+    assert store.get(task["id"], "acct_1")["status"] == "failed"
+    assert store.steps(task["id"], "acct_1")[0]["attempts"] == 1
+    assert store.claim_one("worker") is None
 
 
 def test_cancellation_stops_future_steps_but_not_running_step(tmp_path: Path):

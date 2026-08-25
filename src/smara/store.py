@@ -480,11 +480,17 @@ class TaskStore:
         return bool(row and row["status"] == "approved")
 
     def decide(self, task_id: str, account_id: str, approved: bool, note: str) -> dict:
-        self.get(task_id, account_id); now = _now(); status = "approved" if approved else "denied"
+        task = self.get(task_id, account_id)
+        if not task["requires_approval"] or task["status"] not in {"queued", "waiting_approval"}:
+            raise ValueError("Task is not awaiting approval.")
+        now = _now(); status = "approved" if approved else "denied"
         with self._connect() as c:
             c.execute("INSERT INTO approvals(task_id,status,note,decided_at) VALUES(?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET status=excluded.status,note=excluded.note,decided_at=excluded.decided_at", (task_id, status, note, now))
             next_status = "queued" if approved else "cancelled"
             c.execute("UPDATE tasks SET status=?,requires_approval=?,updated_at=? WHERE id=?", (next_status, not approved, now, task_id))
+            if not approved:
+                c.execute("UPDATE task_steps SET status='cancelled' WHERE task_id=? AND status='queued'", (task_id,))
+                c.execute("UPDATE task_runs SET status='cancelled' WHERE task_id=? AND status!='completed'", (task_id,))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, f"approval.{status}", '{"source":"user"}', now))
         return self.get(task_id, account_id)
 
@@ -589,13 +595,13 @@ class TaskStore:
                 c.execute("UPDATE tasks SET status='completed',updated_at=? WHERE id=?", (now, task_id))
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.completed", '{"result":"recorded"}', now))
 
-    def fail_step(self, step_id: str, account_id: str, error: str, retry_delay_seconds: int = 5) -> str:
+    def fail_step(self, step_id: str, account_id: str, error: str, retry_delay_seconds: int = 5, *, retryable: bool = True) -> str:
         """Record a bounded failure. Returns `retrying` or terminal `failed`."""
         now = _now()
         with self._connect() as c:
             row = c.execute("SELECT task_id,task_run_id,attempts,max_attempts FROM task_steps WHERE id=? AND task_id IN (SELECT id FROM tasks WHERE account_id=?)", (step_id, account_id)).fetchone()
             if not row: raise KeyError(step_id)
-            retry = row["attempts"] < row["max_attempts"]
+            retry = retryable and row["attempts"] < row["max_attempts"]
             if retry:
                 retry_at = (datetime.now(timezone.utc) + timedelta(seconds=retry_delay_seconds)).isoformat()
                 c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL,retry_at=?,last_error=? WHERE id=?", (retry_at, error[:2000], step_id))

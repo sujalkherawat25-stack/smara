@@ -1,7 +1,6 @@
 # Smara production-gate status
 
-Updated 2026-08-22 after the interactive CLI, desktop action bridge, provider
-profiles, and sandbox service-boundary rollout. This is an operational
+Updated 2026-08-25 after the core beta-readiness workflow audit. This is an operational
 checklist, not a claim that `ai.syntarus.com`
 has been cut over.
 
@@ -25,8 +24,9 @@ has been cut over.
   `pg_restore`, and restored into a disposable Postgres 16 container. The
   restore contained all 14 recorded Smara schema versions. The live database
   was not modified.
-- Repository tests pass in the clean Docker environment (76 tests, with only
-  the existing short-JWT and bind-mounted-cache warnings).
+- Repository tests pass locally (**93 tests**) with Python compilation and Web
+  JavaScript syntax checks. The current changes still require the clean Docker
+  run after deployment.
 - Account export/deletion, approval gates, bounded sandbox recipes, safe
   integration writes, dead-letter retention, and Syntarus SDK-only memory
   access are covered by the repository tests.
@@ -36,11 +36,14 @@ has been cut over.
 
 ## Blocked until deployment credentials/operations are supplied
 
-- The staging environment is missing `SMARA_INTEGRATION_MASTER_KEYS`,
-  `SMARA_SENTRY_DSN`, and the VAPID key pair. `SMARA_CLI_TOKEN_SECRET` is
-  configured and the browser device-login flow is verified.
-  The full configuration gate intentionally fails until these are stored in a
-  real secret manager and injected into every replica.
+- The staging integration key ring, CLI signing secret, Syntarus key, and VAPID
+  key pair are configured. VAPID's private key is a protected read-only host
+  mount for staging; all of these still need the production secret-manager and
+  rotation drill. `SMARA_SENTRY_DSN` remains missing, so the full gate fails.
+- The xAI key configured on staging is disabled. The obsolete `grok-3-mini`
+  model name was corrected to `grok-4.3`, but live chat remains blocked until a
+  fresh key is installed. Search discovery is also blocked because no
+  `SMARA_SEARCH_API_KEY` is configured.
 - The tested backup is on the VM for the disposable drill. A scheduled,
   encrypted **off-host** destination and a retention policy still need to be
   selected and configured.
@@ -50,8 +53,9 @@ has been cut over.
 - Syntarus server-side metadata-filter enforcement is not yet deployed. Smara
   continues to label workspace/status filters advisory; it must not be called
   secure cross-project isolation.
-- A real Windows paired-desktop smoke task, production Sentry event, and VAPID
-  push delivery require their corresponding deployment credentials/devices.
+- A Windows paired-desktop smoke task already passed. A production Sentry event
+  and real phone VAPID delivery still require their corresponding deployment
+  credentials/device subscription.
 - The Docker sandbox command is not yet a live hosted executor. Before enabling
   `SMARA_SANDBOX_ENABLED`, deploy a separate sandbox service with its own
   runtime, resource limits, network policy, and request authentication.

@@ -132,6 +132,16 @@ def test_provider_errors_have_stable_safe_client_contract():
     assert "not configured" in message
 
 
+def test_httpx_status_and_disabled_key_are_classified_without_leaking_detail():
+    request = httpx.Request("POST", "https://provider.example/v1/chat/completions")
+    response = httpx.Response(403, request=request)
+    error = httpx.HTTPStatusError("API key secret-value is disabled", request=request, response=response)
+    kind, message = llm_errors.describe(error, provider="Test Provider")
+    assert kind == "invalid_key"
+    assert "rejected" in message
+    assert "secret-value" not in message
+
+
 def test_stream_events_do_not_expose_reasoning_or_raw_errors():
     assert '"type": "phase"' in agent_events.phase("retrieve")
     assert '"type": "token"' in agent_events.token("A final answer")

@@ -21,11 +21,14 @@ KIND_UNKNOWN = "unknown"
 def classify(exc: Exception | str) -> str:
     message = str(exc).lower()
     status = getattr(exc, "status_code", None)
+    if status is None:
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
     if "no smara chat provider is configured" in message:
         return KIND_NOT_CONFIGURED
     if status == 402 or any(value in message for value in ("insufficient_quota", "insufficient credits", "credit balance", "payment required")):
         return KIND_NO_CREDITS
-    if status == 401 or any(value in message for value in ("invalid api key", "invalid_api_key", "unauthorized", "authenticationerror")):
+    if status in {401, 403} or any(value in message for value in ("invalid api key", "invalid_api_key", "api key", "permission-denied", "unauthorized", "authenticationerror")):
         return KIND_INVALID_KEY
     if status == 429 or "rate limit" in message or "rate_limit" in message:
         return KIND_RATE_LIMIT

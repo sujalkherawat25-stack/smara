@@ -20,6 +20,7 @@ from .vault import SecretVault
 from .integration_oauth import refresh_google
 from .capture_processing import process_capture
 from .provider_routing import resolve_profile
+from . import llm_errors
 
 
 async def _memory_context(memory: SyntarusMemory | None, task: dict, store: TaskStore) -> str:
@@ -176,7 +177,19 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
         await _memory_write(memory, task, store, "completion", result=result)
         store.complete_step(task["step_id"], task["account_id"], result)
     except Exception as exc:
-        store.fail_step(task["step_id"], task["account_id"], str(exc))
+        kind = llm_errors.classify(exc) if task.get("name") == "agent.execute" else llm_errors.KIND_UNKNOWN
+        if kind != llm_errors.KIND_UNKNOWN:
+            safe_error = llm_errors.user_message(kind, provider=settings.llm_provider)
+            retryable = kind in {
+                llm_errors.KIND_RATE_LIMIT,
+                llm_errors.KIND_PROVIDER_DOWN,
+                llm_errors.KIND_TIMEOUT,
+                llm_errors.KIND_NETWORK,
+            }
+        else:
+            safe_error = str(exc)
+            retryable = True
+        store.fail_step(task["step_id"], task["account_id"], safe_error, retryable=retryable)
     return True
 
 

@@ -2020,3 +2020,62 @@ blocked only on operator-owned secret-manager/provider configuration.**
 provider test accounts to close Sequence 4 operational drills. Until those are
 available, proceed only with Sequence 5's offline/read-only evaluation and
 fault-test harnesses; do not simulate successful external delivery.**
+
+---
+
+## 2026-08-25 — Core beta-readiness and Sequence 5 audit pass
+
+Verified locally and on `control-staging.syntarus.com` without enabling Google,
+GitHub, Telegram, the sandbox, or other external-write integrations:
+
+- the repository suite passes **93 tests**; Python compilation and browser
+  JavaScript syntax checks pass;
+- calculation and current-time tools work through the authenticated CLI;
+- explicit-source research fetched an official public page, blocked a loopback
+  SSRF attempt, produced a verified evidence ledger with content hash, created
+  a cited durable artifact, and completed the three-step research graph;
+- an approval-gated task never executed and denial cancelled it; a scheduler
+  fired on its real 30-second tick, produced an approval-gated task, and was
+  stopped cleanly;
+- a public-SDK-only memory drill accepted an explicit durable fact, completed
+  its ingestion event, exposed it in account export, and retrieved it through
+  search. No MemoryOS source, schema, or pipeline was changed;
+- a synthetic empty account listed no tasks, received 404 for another account's
+  task, and an invalid signed assertion received 401;
+- the known-disabled model credential exercised the retry/dead-letter path and
+  reached its bounded terminal state without performing an external action.
+
+Defects found and fixed in this pass:
+
+1. Production now rejects legacy CLI bearer tokens that are not registered in
+   the revocable device table. Existing legacy CLI sessions must perform one
+   fresh browser login after deployment.
+2. Denying an approval now cancels queued child steps and the task run, and a
+   terminal/non-waiting task cannot be approved again.
+3. Provider error classification now reads real `httpx` response status codes;
+   disabled/forbidden API credentials produce a safe actionable error instead
+   of the generic fallback.
+4. Permanent model failures fail once; only rate limits, provider outages,
+   timeouts, and network failures consume the retry budget.
+5. Backup scripts now target an explicit Compose project through
+   `SMARA_COMPOSE_PROJECT`, preventing staging backups from silently addressing
+   the wrong project.
+6. The obsolete xAI staging model `grok-3-mini` was replaced operationally by
+   `grok-4.3`; no repository secret was added.
+
+Current external blockers:
+
+- xAI returns HTTP 403 because the configured key is disabled. A fresh key is
+  required for multi-turn chat, agent tool-selection, synthesis, and model
+  failure/recovery verification.
+- search discovery is unconfigured. A fresh server-side Tavily/Brave/Serper key
+  is required for query-to-source research; explicit URL research is healthy.
+- Sentry, off-host encrypted backup storage, real phone subscription delivery,
+  isolated sandbox deployment, and the real Memento-versus-Smara shadow cohort
+  are still operational gates.
+
+**Cutover decision:** Smara is not yet authorized to replace Memento at
+`ai.syntarus.com`. After the two provider keys are installed, finish the live
+chat/research matrix, deploy and verify this pass, run a current 17-migration
+backup/restore drill, then start one-account shadow/beta routing with rollback.
+MemoryOS remains the independent Syntarus memory engine throughout.**

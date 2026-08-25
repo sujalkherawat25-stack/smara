@@ -128,10 +128,11 @@ def account_id(
                 claims = jwt.decode(token, settings.cli_token_secret, algorithms=["HS256"], audience="smara-cli", issuer="smara-api", options={"require": ["sub", "exp", "iat", "aud", "iss", "jti"]})
                 subject = claims.get("sub")
                 if isinstance(subject, str) and subject.startswith("acct_"):
-                    if claims.get("device_registered") is True:
-                        jti = claims.get("jti")
-                        if not isinstance(jti, str) or not store.cli_device_active(subject, jti):
-                            raise HTTPException(401, "This Smara CLI device has expired or been revoked.")
+                    if claims.get("device_registered") is not True:
+                        raise HTTPException(401, "This legacy Smara CLI login must be renewed in the browser.")
+                    jti = claims.get("jti")
+                    if not isinstance(jti, str) or not store.cli_device_active(subject, jti):
+                        raise HTTPException(401, "This Smara CLI device has expired or been revoked.")
                     return subject
             except HTTPException:
                 raise
@@ -723,6 +724,7 @@ async def task_artifacts(task_id: str, user: str = Depends(account_id)):
 async def approve(task_id: str, body: ApprovalDecision, user: str = Depends(account_id)):
     try: return view(store.decide(task_id, user, body.approved, body.note))
     except KeyError: raise HTTPException(404, "Task not found")
+    except ValueError as exc: raise HTTPException(409, str(exc)) from exc
 
 @app.post("/v1/tasks/{task_id}/cancel", response_model=TaskView)
 async def cancel_task(task_id: str, user: str = Depends(account_id)):
