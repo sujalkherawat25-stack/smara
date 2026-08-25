@@ -2125,3 +2125,118 @@ MemoryOS remains the independent Syntarus memory engine throughout.**
 - The staging archive and checksum were corrected to mode `0600`. This proves
   recoverability on the VM; encrypted off-host transfer/retention is still an
   open production gate.
+
+---
+
+## 2026-08-26 — Canonical vision status (use this section for next work)
+
+This section supersedes older historical `Next:` notes above. It describes the
+requested target: Smara is the independent agent product, MemoryOS remains the
+Syntarus memory platform, and `ai.syntarus.com` eventually presents one
+Memento-quality Smara experience.
+
+### Already implemented and verified
+
+- Independent Smara repository and Docker services for API, Postgres, Redis,
+  task worker, scheduler, and integration worker.
+- Account-scoped signed gateway authentication and browser/device CLI login.
+- Durable task graph with dependencies, leases, retries, cancellation,
+  approvals, idempotency, event replay, schedules, and dead-letter handling.
+- Hosted agent runtime using a configurable OpenAI-compatible provider. Live
+  Grok chat, conversation continuity, and provider error handling have passed.
+- Research discovery through Tavily, safe source retrieval, SSRF blocking,
+  verification, evidence ledger, citations, and a synthesized report artifact.
+- Syntarus public-SDK retrieval and verified write-back. MemoryOS source and
+  memory schemas were not changed.
+- CLI chat, research, tasks, approvals, device management, tools, and session
+  shell. It is a hosted client, not a second local agent brain.
+- Desktop executor protocol with pairing, capabilities, file operations,
+  allowlisted terminal/browser contracts, leases, revocation, DPAPI token
+  protection, pause/resume, and a live staging round trip.
+- Integration contracts and approval-gated adapters for Gmail, Calendar,
+  Drive, GitHub, and Telegram outbound delivery.
+- Transitional Smara Control PWA with task, research, approval, schedule,
+  desktop, integration, memory, capture, and push surfaces.
+- Repository-level tests, health/readiness checks, protected backups, and a
+  disposable Postgres restore drill.
+
+### Remaining work, in exact order
+
+#### 1. Make one user-facing web product (largest product gap)
+
+- Keep the existing Memento visual shell at `ai.syntarus.com`.
+- Add a same-origin Smara gateway in the Memento backend that forwards the
+  signed account identity to Smara; browser code must never receive a signing
+  secret.
+- Route Memento chat, task creation, research, approvals, and live activity to
+  Smara one slice at a time.
+- Replace the current Control iframe only after those native flows pass
+  refresh/reconnect/account-isolation/approval tests.
+- Keep the standalone Control PWA internal-only during migration; do not make
+  users open `control-staging.syntarus.com` directly.
+
+#### 2. Finish the local executor product
+
+- Run a longer real Windows test covering disconnect, lease expiry, cancellation,
+  duplicate prevention, revocation, restart, and a safe update.
+- Package a signed installer/auto-start path with visible pause and revoke
+  controls.
+- Wire only explicitly approved terminal/browser steps to a real isolated
+  sandbox; arbitrary code execution is not yet a production capability.
+
+#### 3. Finish real provider/channel operations
+
+- Put integration keys, OAuth secrets, VAPID private key, and signing keys in a
+  real VM/cloud secret manager; perform a rotation drill.
+- Test disposable Gmail, Calendar, Drive, GitHub, and Telegram accounts with
+  approval previews and idempotent retry behavior.
+- Add Telegram inbound conversation support if Telegram is meant to be a full
+  chat channel; the current Smara adapter is outbound approved delivery.
+- Verify a real phone push subscription and scheduled-task notification.
+
+#### 4. Finish memory-control boundaries without touching MemoryOS core
+
+- Keep account isolation and public SDK retrieval/write-back enabled.
+- Keep workspace/status metadata filters explicitly **advisory**, not secure,
+  until the hosted Syntarus API enforces them server-side.
+- Add user-facing inspect/correct/pin/delete controls only when the public SDK
+  contract supports them; do not edit Qdrant/Neo4j/pipeline code for this.
+
+#### 5. Finish production operations
+
+- Move backups to encrypted off-host storage and test retention/restore there.
+- Configure Sentry alerts and verify one test event reaches the project.
+- Complete Cloudflare/WAF distributed rate-limit review for authenticated API
+  traffic.
+- Add explicit per-task token, cost, wall-clock, and resource budgets.
+- Run security, fault-injection, concurrency, restart, account-isolation, and
+  rollback tests.
+- Add object storage, signed downloads, artifact versioning, retention, and
+  large-file policy for production reports.
+
+#### 6. Reversibly replace Memento at `ai.syntarus.com`
+
+- Preserve existing account IDs and Syntarus memories; issue fresh Smara
+  sessions at cutover.
+- Shadow Smara for selected beta accounts while Memento remains authoritative;
+  compare answer quality, retrieval, tools, latency, cost, and safety.
+- Route one beta cohort to Smara, monitor, and rehearse rollback.
+- Expand gradually only after chat, tasks, research, approvals, integrations,
+  schedules, memory continuity, desktop, and notifications pass.
+- Retire only the Memento **agent serving path** after a stable observation
+  period. Keep MemoryOS/Continuum APIs and the Memento source available for
+  rollback and historical compatibility.
+
+### Honest completion estimate
+
+Using the six product areas above (core runtime 25%, CLI/cloud execution 20%,
+desktop 15%, integrations/channels 10%, one-web-product migration 15%,
+production/cutover 15%), the current state is approximately:
+
+- **Agent code and contracts: ~75% complete.**
+- **Production product vision and `ai.syntarus.com` replacement: ~60%
+  complete; ~40% remains.**
+
+The missing 40% is mostly integration, operational verification, native
+Memento-to-Smara routing, sandboxing, and reversible cutover—not a need to
+rewrite the task graph or MemoryOS memory engine.
