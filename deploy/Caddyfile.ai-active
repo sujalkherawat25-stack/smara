@@ -32,7 +32,8 @@ ai.syntarus.com {
 
     # Existing Memento app remains the root catch-all.
     handle {
-        reverse_proxy localhost:3000 {
+        # The existing Memento frontend is published by Docker on 127.0.0.1:8080.
+        reverse_proxy 127.0.0.1:8080 {
             # Pass real IP so backend logs are accurate
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-Proto {scheme}
