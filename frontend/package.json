@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
+    "dev": "vite --config vite.config.mjs",
+    "build": "tsc && vite build --config vite.config.mjs",
+    "preview": "vite preview --config vite.config.mjs",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

@@ -23,3 +23,7 @@ unchanged during migration and rollback.
 The first migrated slices are chat streaming and task listing/cancellation.
 Research evidence, approvals, schedules, integrations, desktop, and memory
 screens remain on their existing routes until each slice is adapted and tested.
+
+The build uses `vite.config.mjs` explicitly. This avoids a Windows/esbuild
+configuration-loader failure seen when resolving the copied TypeScript config
+from the monorepo parent path.

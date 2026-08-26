@@ -279,6 +279,10 @@ live account, refresh, task-event, approval, and rollback tests.
 - Added a native Research form in the Work view. It creates a durable
   `/v1/research` task with optional validated source URLs; the same selected
   task then exposes verified evidence, citations, and report artifacts.
+- Added an explicit JavaScript Vite config for the migrated app. The
+  production bundle now completes successfully (5,147 modules transformed),
+  and a local browser smoke check reaches the expected sign-in screen without
+  runtime UI errors when the API is stopped.
 - Added a frontend migration README and environment template. This is a
   reversible source-level slice; it is not a public cutover.
 - Verified the copied UI with TypeScript strict compilation and the Smara
