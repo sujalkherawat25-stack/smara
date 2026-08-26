@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "@/stores/authStore";
 import SmaraLogo from "@/components/SmaraLogo";
-import { Box, Mail } from "lucide-react";
+import { Mail } from "lucide-react";
 
 declare global {
   interface Window {
@@ -15,7 +15,7 @@ declare global {
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
-export default function SignInScreen({ onOpenHologram }: { onOpenHologram?: () => void }) {
+export default function SignInScreen() {
   const buttonRef = useRef<HTMLDivElement>(null);
   const signInWithGoogleToken = useAuthStore((s) => s.signInWithGoogleToken);
   const requestEmailOtp = useAuthStore((s) => s.requestEmailOtp);
@@ -66,7 +66,6 @@ export default function SignInScreen({ onOpenHologram }: { onOpenHologram?: () =
         </div>
         {submitting && <p className="text-gray-500 text-xs">Signing you in…</p>}
         {error && !submitting && <p className="text-red-400 text-xs mt-2">{error}</p>}
-        {onOpenHologram && <button onClick={onOpenHologram} className="mt-4 px-5 py-2.5 bg-gradient-to-r from-cyan-500 via-teal-400 to-blue-500 text-slate-950 text-xs font-mono font-bold rounded-xl shadow-lg shadow-cyan-500/40 hover:scale-105 transition-all flex items-center gap-2 cursor-pointer"><Box size={16} /><span>Launch 3D Hologram Lab (Interactive Engine)</span></button>}
         <p className="text-gray-600 text-xs mt-6">Google and email sign-in use the same secure Syntarus account.</p>
       </div>
     </div>

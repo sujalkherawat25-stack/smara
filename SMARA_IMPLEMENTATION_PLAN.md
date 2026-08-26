@@ -331,3 +331,13 @@ tests pass.
   `/smara-api/health` `200`, unauthenticated `/smara-api/v1/tasks` `401`,
   root `ai.syntarus.com/` `200`, Caddy active. This is still a reversible
   staging mount, not a public replacement.
+
+### 2026-08-26 — Remove non-product Hologram Lab
+
+- Removed the Hologram Lab source folder and every route, menu entry, and
+  unauthenticated launch button from the Smara frontend. The product now opens
+  directly into chat/work flows without the experimental 3D lab or its camera
+  and hand-tracking code.
+- TypeScript strict compilation still passes. The Windows Vite build remains
+  blocked by the known sandbox/esbuild path-resolution restriction; the
+  production image must be built in Docker on the VM.

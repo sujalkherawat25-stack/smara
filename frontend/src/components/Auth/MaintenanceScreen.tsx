@@ -9,9 +9,7 @@
  */
 
 import SmaraLogo from "@/components/SmaraLogo";
-import { Box } from "lucide-react";
-
-export default function MaintenanceScreen({ onOpenHologram }: { onOpenHologram?: () => void }) {
+export default function MaintenanceScreen() {
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col items-center justify-center px-6">
       <div className="flex flex-col items-center gap-6 max-w-md text-center">
@@ -29,15 +27,6 @@ export default function MaintenanceScreen({ onOpenHologram }: { onOpenHologram?:
           Reconnecting…
         </div>
 
-        {onOpenHologram && (
-          <button
-            onClick={onOpenHologram}
-            className="mt-3 px-5 py-2.5 bg-gradient-to-r from-cyan-500 via-teal-400 to-blue-500 text-slate-950 text-xs font-mono font-bold rounded-xl shadow-lg shadow-cyan-500/40 hover:scale-105 transition-all flex items-center gap-2 cursor-pointer"
-          >
-            <Box size={16} />
-            <span>Launch 3D Hologram Lab (Interactive Engine)</span>
-          </button>
-        )}
       </div>
     </div>
   );

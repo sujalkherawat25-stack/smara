@@ -20,8 +20,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useTelegramStore } from "@/stores/telegramStore";
 import { useNotificationsStore } from "@/stores/notificationsStore";
 import { smaraModeEnabled } from "@/lib/smaraGateway";
-import { Sun, Moon, ArrowLeft, Network, Database, Clock, Plus, Settings, LogOut, Send, Box, ListChecks } from "lucide-react";
-import { HologramLabContainer } from "@/hologram/components/HologramLabContainer";
+import { Sun, Moon, ArrowLeft, Network, Database, Clock, Plus, Settings, LogOut, Send, ListChecks } from "lucide-react";
 
 /**
  * App — top-level auth gate.
@@ -38,22 +37,9 @@ import { HologramLabContainer } from "@/hologram/components/HologramLabContainer
 export default function App() {
   const status = useAuthStore((s) => s.status);
   const loadAccount = useAuthStore((s) => s.loadAccount);
-  const [forceHologram, setForceHologram] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.location.pathname === "/hologram" || window.location.search.includes("hologram");
-  });
-
   useEffect(() => {
     loadAccount();
   }, [loadAccount]);
-
-  if (forceHologram) {
-    return (
-      <div className="fixed inset-0 z-50 bg-[#040814]">
-        <HologramLabContainer onClose={() => setForceHologram(false)} />
-      </div>
-    );
-  }
 
   if (status === "loading") {
     return (
@@ -67,11 +53,11 @@ export default function App() {
   }
 
   if (status === "unreachable") {
-    return <MaintenanceScreen onOpenHologram={() => setForceHologram(true)} />;
+    return <MaintenanceScreen />;
   }
 
   if (status === "signed_out") {
-    return <SignInScreen onOpenHologram={() => setForceHologram(true)} />;
+    return <SignInScreen />;
   }
 
   return <AuthenticatedApp />;
@@ -156,7 +142,7 @@ function AuthenticatedApp() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [refreshTg]);
-  const isPanel = view === "work" || view === "graph" || view === "memory" || view === "settings" || view === "control" || view === "hologram";
+  const isPanel = view === "work" || view === "graph" || view === "memory" || view === "settings" || view === "control";
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -303,16 +289,6 @@ function AuthenticatedApp() {
             )}
           </button>
 
-          {/* Desktop-only: 3D Hologram Lab button */}
-          <button
-            onClick={() => setView("hologram")}
-            title="MemoryOS 3D Hologram Lab"
-            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-cyan-500/40 bg-cyan-950/40 text-cyan-300 hover:bg-cyan-900/60 transition-all font-mono text-xs font-semibold shadow-lg shadow-cyan-950/50"
-          >
-            <Box size={13} className="text-cyan-400 animate-pulse" />
-            <span>3D Lab</span>
-          </button>
-
           {/* Notification bell — drains the proactive-fallback queue when
               Telegram isn't reachable. Visible on every device. */}
           <NotificationBell />
@@ -386,18 +362,13 @@ function AuthenticatedApp() {
                 </button>
               </div>
 
-              {/* Nav — New chat + Projects + 3D Hologram Lab */}
+              {/* Nav — New chat, projects, and work */}
               <div className="flex flex-col gap-1 px-2.5 pt-3 pb-2 shrink-0">
                 <SidebarNavRow
                   icon={<Plus size={15} />}
                   label="New chat"
                   shortcut="⌘ N"
                   onClick={() => { newChat(); setSidebarOpen(false); }}
-                />
-                <SidebarNavRow
-                  icon={<Box size={15} className="text-cyan-400" />}
-                  label="3D Hologram Lab"
-                  onClick={() => { setView("hologram"); setSidebarOpen(false); }}
                 />
                 <SidebarNavRow
                   icon={<ListChecks size={15} />}
@@ -529,12 +500,6 @@ function AuthenticatedApp() {
             </PanelView>
           )}
 
-          {/* 3D Hologram Lab View */}
-          {view === "hologram" && (
-            <div className="fixed inset-0 z-50 bg-[#040814]">
-              <HologramLabContainer onClose={backToChat} />
-            </div>
-          )}
         </div>
 
         {/* PDF preview — persistent side panel, pushes the chat column aside
