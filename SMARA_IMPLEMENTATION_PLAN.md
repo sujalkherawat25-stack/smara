@@ -159,6 +159,26 @@ Hologram Lab has already been removed from the Smara UI and source.
    but stop serving it publicly. MemoryOS continues as the Syntarus memory
    backend/product.
 
+### Auth acceptance runbook (staging)
+
+Run this at `https://ai.syntarus.com/smara/` in a normal browser:
+
+1. Confirm the Google button is visible, choose the intended Google account,
+   and confirm the app opens the Smara workspace (not the sign-in screen).
+2. Refresh the page. The same account should remain signed in and conversations
+   should load from the hosted Smara store.
+3. Send a short chat, then open Work and create a harmless read-only task.
+   Confirm the task and its events are visible after a refresh.
+4. Sign out and reload. The app should return to sign-in; protected Smara
+   pages must not show another account's tasks or conversations.
+5. If email OTP is enabled for the deployment, repeat with an email address:
+   request the code, enter the six digits from the delivery mailbox, and
+   verify that it creates the same normal session flow.
+
+The public checks that can be automated without a user session are:
+`GET /v1/auth/config` = 200 with a client ID, `GET /v1/auth/me` = 401,
+`POST /v1/auth/control-token` = 401, and `/smara-api/v1/conversations` = 401.
+
 ## 7. Honest completion estimate
 
 For the **focused hosted + desktop vision** (not the deferred backlog):
@@ -241,7 +261,8 @@ focused hosted/desktop release.
   while keeping reasoning bounded and not exposing chain-of-thought.
 - Local verification remains green (95 backend tests, frontend type-check).
   Public health and route smoke checks pass; authenticated browser shadow
-  testing, VM rebuild of this commit, and the final root cutover remain gates.
+  testing and the final root cutover remain gates. The VM rebuild and public
+  auth configuration smoke check for this commit are complete.
 
 ### 2026-08-26 — Runtime authentication configuration
 
