@@ -26,9 +26,9 @@ has been cut over.
   staging tasks. The live database was not modified; backup files are now
   forced to owner-only mode by the script.
 - Repository tests pass locally (**113 tests**) with Python compilation,
-  frontend type-check, and production frontend build. The current lease
-  heartbeat change still requires a clean Docker rollout before the live
-  desktop smoke is repeated.
+  frontend type-check, and production frontend build. The lease-heartbeat
+  change is now deployed and the live Postgres desktop claim/heartbeat/
+  completion smoke passed.
 - Account export/deletion, approval gates, bounded sandbox recipes, safe
   integration writes, dead-letter retention, and Syntarus SDK-only memory
   access are covered by the repository tests.
@@ -42,11 +42,10 @@ has been cut over.
   key pair are configured. VAPID's private key is a protected read-only host
   mount for staging; all of these still need the production secret-manager and
   rotation drill. `SMARA_SENTRY_DSN` remains missing, so the full gate fails.
-- Staging xAI `grok-4.3` and Tavily search are configured. Disposable live
-  checks passed for a Grok response, Tavily discovery, a tool-backed agent
-  turn, cited research retrieval, and the Postgres desktop approval workflow.
-  The new desktop step-heartbeat code still needs to be deployed and repeated
-  in that smoke run.
+- Staging xAI `grok-4.3` and Tavily search are configured. Live checks passed
+  for a Grok response, Tavily discovery and page retrieval, a calculator tool
+  turn, an end-to-end research turn with a fetched citation URL, and the
+  Postgres desktop approval/claim/heartbeat/completion workflow.
 - The tested backup is on the VM for the disposable drill. A scheduled,
   encrypted **off-host** destination and a retention policy still need to be
   selected and configured.

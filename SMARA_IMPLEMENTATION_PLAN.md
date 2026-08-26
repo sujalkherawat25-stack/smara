@@ -123,9 +123,9 @@ Hologram Lab has already been removed from the Smara UI and source.
 
 1. **Mostly done:** adapt the Memento agent-loop behavior into Smara's
    provider-neutral runtime. Deterministic triage, bounded tool reasoning,
-   streaming, memory context, and phase events are live. Remaining: exercise
-   the real configured model against representative tool prompts and verify
-   approval pauses through the hosted API.
+   streaming, memory context, and phase events are live. Live staging smokes
+   now cover the configured Grok model, calculator, Tavily discovery/page
+   retrieval, cited research, and the Postgres desktop approval path.
 2. **In progress:** native Smara calls now cover chat streaming, hosted
    conversation history/recents, durable tasks/events, research evidence,
    approvals, schedules, and executor settings. Remaining: authenticated
@@ -352,3 +352,13 @@ focused hosted/desktop release.
 - Added regression coverage for refresh, cancellation, and stale-executor
   rejection, including the runner's request ordering. The local suite now
   passes 113 tests.
+
+### 2026-08-27 — Live provider and executor verification
+
+- Rebuilt the staging API/worker/scheduler/integration-worker from the pushed
+  lease-heartbeat commit. Public health/readiness, the configured Grok model,
+  Tavily discovery and bounded page retrieval, calculator tool selection, and
+  a two-tool cited research turn all passed without exposing credentials.
+- A disposable Postgres account/task verified the hosted desktop approval,
+  lease claim, heartbeat refresh, and completion contract in the deployed
+  image. The existing root Memento route remains unchanged.
