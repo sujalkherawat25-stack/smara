@@ -251,10 +251,12 @@ Smara is ready to replace the public Memento agent when all of these are true:
 
 ## 8. Immediate next action
 
-Start **P0**: extract/reuse the Memento frontend shell into Smara and connect
-only the chat and task surfaces through the Smara gateway. Keep the current
-Memento production deployment unchanged until the first native slice passes
-live account, refresh, task-event, approval, and rollback tests.
+Continue **P0** with a reversible staging mount of the migrated shell. The
+shell and gateway are now source-complete for chat, tasks, research, and
+account-scoped routing; next expose the bundle behind an authenticated
+same-origin staging path and run live refresh, task-event, approval, and
+rollback tests. Keep the current Memento production deployment unchanged
+until those tests pass.
 
 ## 9. Implementation log
 
@@ -294,6 +296,9 @@ live account, refresh, task-event, approval, and rollback tests.
   bridge token, while unreplaced Memento/MemoryOS memory, graph, stats, upload,
   and feedback routes stay on the existing authenticated origin. Enabling
   bridge mode therefore cannot break the remaining legacy panels.
+- Verified the staged gateway contract against the VM: the rebuilt auth route
+  is present on `ai.syntarus.com`, unauthenticated calls return `401`, and a
+  disposable account-scoped bridge assertion is accepted by the Smara API.
 - Added a frontend migration README and environment template. This is a
   reversible source-level slice; it is not a public cutover.
 - Verified the copied UI with TypeScript strict compilation and the Smara
