@@ -64,6 +64,19 @@ export function listSmaraTasks(): Promise<SmaraTask[]> {
   return json<SmaraTask[]>("/v1/tasks");
 }
 
+export function createSmaraResearch(input: {
+  title: string;
+  question: string;
+  workspace_id?: string;
+  sources?: string[];
+}): Promise<SmaraTask> {
+  return json<SmaraTask>("/v1/research", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...input, workspace_id: input.workspace_id || "default" }),
+  });
+}
+
 export function getSmaraTask(taskId: string): Promise<SmaraTask> {
   return json<SmaraTask>(`/v1/tasks/${encodeURIComponent(taskId)}`);
 }

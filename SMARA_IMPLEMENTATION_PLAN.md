@@ -276,6 +276,9 @@ live account, refresh, task-event, approval, and rollback tests.
   mode, preserving rollback while the remaining screens migrate.
 - Switched active-task updates from repeated polling to Smara's durable
   `/v1/tasks/{id}/events/stream`, retaining a slow refresh as reconnect repair.
+- Added a native Research form in the Work view. It creates a durable
+  `/v1/research` task with optional validated source URLs; the same selected
+  task then exposes verified evidence, citations, and report artifacts.
 - Added a frontend migration README and environment template. This is a
   reversible source-level slice; it is not a public cutover.
 - Verified the copied UI with TypeScript strict compilation and the Smara
