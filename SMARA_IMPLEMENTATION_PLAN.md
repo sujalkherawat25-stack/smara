@@ -299,6 +299,10 @@ until those tests pass.
 - Verified the staged gateway contract against the VM: the rebuilt auth route
   is present on `ai.syntarus.com`, unauthenticated calls return `401`, and a
   disposable account-scoped bridge assertion is accepted by the Smara API.
+- Added a reversible production UI mount: a small nginx frontend image builds
+  the migrated shell under `/smara/`, while `/smara-api/` is stripped and
+  proxied to the Smara API. The existing root Memento app remains untouched
+  until browser shadow tests pass.
 - Added a frontend migration README and environment template. This is a
   reversible source-level slice; it is not a public cutover.
 - Verified the copied UI with TypeScript strict compilation and the Smara

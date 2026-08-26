@@ -1,0 +1,11 @@
+# Add these handlers inside the existing ai.syntarus.com site block, before
+# its catch-all reverse_proxy to the Memento frontend. They create a reversible
+# staging mount: the current app remains at / while Smara is tested at /smara/.
+
+handle_path /smara-api/* {
+    reverse_proxy 127.0.0.1:8090
+}
+
+handle_path /smara/* {
+    reverse_proxy 127.0.0.1:8081
+}
