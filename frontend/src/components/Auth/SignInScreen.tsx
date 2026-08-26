@@ -13,7 +13,10 @@ declare global {
   }
 }
 
-const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+// The client ID is public configuration, not a secret. Prefer the backend's
+// runtime value so OAuth changes do not require rebuilding the Smara bundle.
+// Keep the build-time value as a safe fallback for offline/dev environments.
+const ENV_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? "";
 
 export default function SignInScreen() {
   const buttonRef = useRef<HTMLDivElement>(null);
@@ -21,21 +24,55 @@ export default function SignInScreen() {
   const requestEmailOtp = useAuthStore((s) => s.requestEmailOtp);
   const verifyEmailOtp = useAuthStore((s) => s.verifyEmailOtp);
   const error = useAuthStore((s) => s.error);
-  const [misconfigured, setMisconfigured] = useState(false);
+  const [clientId, setClientId] = useState(ENV_CLIENT_ID);
+  const [authConfigLoading, setAuthConfigLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
 
+  // Fetch public auth configuration at runtime. This endpoint is deliberately
+  // unauthenticated and contains no credentials; email OTP remains available
+  // if Google is not configured.
   useEffect(() => {
-    if (!CLIENT_ID) { setMisconfigured(true); return; }
+    let cancelled = false;
+    const controller = new AbortController();
+    fetch("/v1/auth/config", {
+      method: "GET",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`auth config failed (${response.status})`);
+        return (await response.json()) as { google_client_id?: unknown };
+      })
+      .then((config) => {
+        if (cancelled) return;
+        const runtimeId = typeof config.google_client_id === "string"
+          ? config.google_client_id.trim()
+          : "";
+        setClientId(runtimeId || ENV_CLIENT_ID);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // A temporary config failure must not break email sign-in or an
+        // already-built development fallback.
+        setClientId((current) => current || ENV_CLIENT_ID);
+      })
+      .finally(() => { if (!cancelled) setAuthConfigLoading(false); });
+    return () => { cancelled = true; controller.abort(); };
+  }, []);
+
+  useEffect(() => {
+    if (!clientId) return;
     let cancelled = false;
     let attempts = 0;
     function init() {
       if (cancelled) return;
       if (!window.google?.accounts?.id) { attempts += 1; if (attempts <= 100) setTimeout(init, 100); return; }
       window.google.accounts.id.initialize({
-        client_id: CLIENT_ID!,
+        client_id: clientId,
         callback: async (resp) => { setSubmitting(true); try { await signInWithGoogleToken(resp.credential); } catch { /* store displays the error */ } finally { setSubmitting(false); } },
         auto_select: false,
         cancel_on_tap_outside: true,
@@ -44,7 +81,9 @@ export default function SignInScreen() {
     }
     init();
     return () => { cancelled = true; };
-  }, [signInWithGoogleToken]);
+  }, [clientId, signInWithGoogleToken]);
+
+  const googleUnavailable = !authConfigLoading && !clientId;
 
   const sendCode = async () => { setSubmitting(true); try { await requestEmailOtp(email); setCodeSent(true); } finally { setSubmitting(false); } };
   const verifyCode = async () => { setSubmitting(true); try { await verifyEmailOtp(email, code); } finally { setSubmitting(false); } };
@@ -54,7 +93,8 @@ export default function SignInScreen() {
       <div className="flex flex-col items-center gap-6 max-w-md text-center">
         <SmaraLogo size={64} animate />
         <div className="space-y-2"><h1 className="text-3xl font-bold font-display">Welcome to Smara</h1><p className="text-gray-400 text-sm">Sign in to keep your conversations, memories, and ideas connected across devices.</p></div>
-        {!misconfigured && <div ref={buttonRef} className={submitting ? "opacity-50 pointer-events-none" : ""} />}
+        {clientId && <div ref={buttonRef} className={submitting ? "opacity-50 pointer-events-none" : ""} />}
+        {googleUnavailable && <p className="text-amber-400 text-xs">Google sign-in is not configured yet. You can still use email sign-in.</p>}
         <div className="w-full max-w-sm border-t border-gray-800 pt-5 mt-2">
           <p className="text-gray-400 text-sm mb-3">Or use email</p>
           <div className="flex gap-2">

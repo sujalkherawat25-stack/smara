@@ -242,3 +242,15 @@ focused hosted/desktop release.
 - Local verification remains green (95 backend tests, frontend type-check).
   Public health and route smoke checks pass; authenticated browser shadow
   testing, VM rebuild of this commit, and the final root cutover remain gates.
+
+### 2026-08-26 — Runtime authentication configuration
+
+- Smara sign-in now reads the public Google OAuth client ID from the existing
+  `/v1/auth/config` endpoint at runtime, with a build-time value retained only
+  as a development fallback.
+- This keeps the Google button available on the hosted Smara mount when the
+  backend is configured and avoids rebuilding the UI for a public client-ID
+  change. Email OTP remains available if Google is disabled.
+- Local verification: 95 Smara backend tests and frontend type-check pass.
+  The remaining auth gate is a real beta-account sign-in and authenticated
+  browser shadow run in staging.
