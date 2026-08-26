@@ -10,6 +10,9 @@ has been cut over.
   running under the original `smara-staging` Compose project.
 - `/health` and `/readyz` pass locally and through
   `https://control-staging.syntarus.com`.
+- The tested Smara Caddy configuration is now installed at `/etc/caddy/Caddyfile`
+  after validation, with `/etc/caddy/Caddyfile.pre-smara-20260827` retained for
+  rollback; Caddy reloaded successfully.
 - Signed gateway authentication was exercised in the staging API container;
   an account-scoped request received the read-only tool catalogue.
 - The Postgres migration runner now serializes concurrent service startup with

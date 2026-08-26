@@ -362,3 +362,7 @@ focused hosted/desktop release.
 - A disposable Postgres account/task verified the hosted desktop approval,
   lease claim, heartbeat refresh, and completion contract in the deployed
   image. The existing root Memento route remains unchanged.
+- The validated Smara Caddy file is now persistent across Caddy restarts, with
+  a dated rollback copy retained on the VM. Public `/smara/`, `/smara/work`,
+  `/smara-api/health`, `/smara-api/readyz`, root Memento, and auth-config routes
+  all returned HTTP 200 after reload.
