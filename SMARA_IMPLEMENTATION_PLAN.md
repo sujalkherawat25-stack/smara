@@ -327,3 +327,13 @@ focused hosted/desktop release.
 - Verification: 109 backend tests, Python compile check, frontend type-check,
   and production frontend build all pass. The build reports only an existing
   non-blocking large-chunk optimization warning.
+
+### 2026-08-26 — Live desktop approval workflow fix
+
+- A disposable Postgres smoke test found that the hosted worker skipped queued
+  desktop steps completely, leaving them invisible until approval. The worker
+  now advances only the approval transition; after approval, the paired
+  desktop executor alone can lease and complete the local step.
+- Local regression coverage remains green (109 backend tests). The staging
+  service must be redeployed with this fix before repeating the live desktop
+  smoke test.

@@ -14,7 +14,8 @@ def test_paired_desktop_claims_only_declared_capability(tmp_path: Path):
         "name": "desktop.read_file", "depends_on": [], "executor_kind": "desktop", "required_capability": "local_file_read", "executor_payload": {"path": "approved.txt"},
     }])
 
-    assert store.claim_one("hosted-worker") is None
+    pending = store.claim_one("hosted-worker")
+    assert pending and pending["status"] == "waiting_approval"
     store.decide(task["id"], "acct_1", True, "approved")
     step = store.claim_for_executor(desktop["executor_id"], desktop["token"])
     assert step and step["step_id"]

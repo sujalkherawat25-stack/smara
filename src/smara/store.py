@@ -560,6 +560,10 @@ class TaskStore:
                     event_type, payload = "step.lease_expired", '{"recovered":true}'
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", item["task_id"], event_type, payload, now))
             executor_clause = "s.executor_kind IN ('hosted','sandbox')" if set(executor_kinds) == {"hosted", "sandbox"} else "s.executor_kind IN ('hosted')"
+            # The hosted worker may advance a queued desktop task to the
+            # visible approval gate, but must never claim an approved desktop
+            # step. The paired desktop executor owns that second transition.
+            executor_clause = f"({executor_clause} OR (s.executor_kind='desktop' AND t.requires_approval=1))"
             row = c.execute(f"""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name, s.executor_kind, s.executor_payload
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
               WHERE t.status IN ('queued','running') AND s.status='queued' AND {executor_clause} AND (s.retry_at IS NULL OR s.retry_at <= ?) AND NOT EXISTS (
@@ -1148,6 +1152,9 @@ class PostgresTaskStore(TaskStore):
                 c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", item["task_id"], event_type, payload, now))
 
             executor_clause = "s.executor_kind IN ('hosted','sandbox')" if set(executor_kinds) == {"hosted", "sandbox"} else "s.executor_kind IN ('hosted')"
+            # Surface desktop work for approval without granting the hosted
+            # worker any local execution authority.
+            executor_clause = f"({executor_clause} OR (s.executor_kind='desktop' AND t.requires_approval=TRUE))"
             row = c.execute(f"""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name, s.executor_kind, s.executor_payload
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
               WHERE t.status IN ('queued','running') AND s.status='queued' AND {executor_clause} AND (s.retry_at IS NULL OR s.retry_at <= %s) AND NOT EXISTS (
