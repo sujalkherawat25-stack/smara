@@ -270,8 +270,14 @@ live account, refresh, task-event, approval, and rollback tests.
 - Adapted the copied chat stream to Smara's `/v1/chat/stream` and the task
   helper to Smara's `/v1/tasks`/`cancel` contract. Existing Memento routes
   remain the default when `VITE_SMARA_MODE=false`.
+- Added a native `Work` panel for Smara task selection, live activity polling,
+  dependency-step status, approval/denial, cancellation, research evidence,
+  and artifacts. The old Control iframe remains available only outside bridge
+  mode, preserving rollback while the remaining screens migrate.
 - Added a frontend migration README and environment template. This is a
   reversible source-level slice; it is not a public cutover.
-- Verified the copied UI with TypeScript strict compilation using the existing
-  frontend dependency tree. Next P0 slice: native Smara task/research views,
-  same-origin deployment wiring, and live account/refresh/approval tests.
+- Verified the copied UI with TypeScript strict compilation and the Smara
+  backend suite (93 tests). Vite's production bundle is currently blocked by
+  the Windows sandbox's esbuild path-resolution error; the original frontend
+  reproduces the same toolchain error. Next P0 slice: same-origin deployment
+  wiring and live account/refresh/approval tests.

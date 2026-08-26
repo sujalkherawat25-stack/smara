@@ -8,6 +8,7 @@ import Notifications from "@/components/Notifications";
 import NotificationBell from "@/components/NotificationBell";
 import SettingsPanel from "@/components/Settings/SettingsPanel";
 import ControlPanel from "@/components/Control/ControlPanel";
+import SmaraWorkPanel from "@/components/SmaraWorkPanel";
 import SmaraLogo from "@/components/SmaraLogo";
 import SignInScreen from "@/components/Auth/SignInScreen";
 import MaintenanceScreen from "@/components/Auth/MaintenanceScreen";
@@ -18,6 +19,7 @@ import { useChatStore } from "@/stores/chatStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useTelegramStore } from "@/stores/telegramStore";
 import { useNotificationsStore } from "@/stores/notificationsStore";
+import { smaraModeEnabled } from "@/lib/smaraGateway";
 import { Sun, Moon, ArrowLeft, Network, Database, Clock, Plus, Settings, LogOut, Send, Box, ListChecks } from "lucide-react";
 import { HologramLabContainer } from "@/hologram/components/HologramLabContainer";
 
@@ -154,7 +156,7 @@ function AuthenticatedApp() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [refreshTg]);
-  const isPanel = view === "graph" || view === "memory" || view === "settings" || view === "control" || view === "hologram";
+  const isPanel = view === "work" || view === "graph" || view === "memory" || view === "settings" || view === "control" || view === "hologram";
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -399,8 +401,8 @@ function AuthenticatedApp() {
                 />
                 <SidebarNavRow
                   icon={<ListChecks size={15} />}
-                  label="Control"
-                  onClick={() => { setView("control"); setSidebarOpen(false); }}
+                  label={smaraModeEnabled() ? "Work" : "Control"}
+                  onClick={() => { setView(smaraModeEnabled() ? "work" : "control"); setSidebarOpen(false); }}
                 />
               </div>
 
@@ -503,7 +505,7 @@ function AuthenticatedApp() {
               }
               onBack={backToChat}
             >
-              <SettingsPanel onOpenControl={() => setView("control")} />
+              <SettingsPanel onOpenControl={() => setView(smaraModeEnabled() ? "work" : "control")} />
             </PanelView>
           )}
 
@@ -514,6 +516,16 @@ function AuthenticatedApp() {
               onBack={backToChat}
             >
               <ControlPanel />
+            </PanelView>
+          )}
+
+          {view === "work" && (
+            <PanelView
+              title="Work"
+              icon={<div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "var(--accent2-soft)" }}><ListChecks size={12} style={{ color: "var(--accent2)" }} /></div>}
+              onBack={backToChat}
+            >
+              <SmaraWorkPanel />
             </PanelView>
           )}
 
