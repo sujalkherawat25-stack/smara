@@ -78,6 +78,37 @@ export async function getSmaraEvents(taskId: string): Promise<SmaraEvent[]> {
   return result.events;
 }
 
+/** Consume the durable task SSE stream until completion or cancellation. */
+export async function streamSmaraEvents(
+  taskId: string,
+  signal: AbortSignal,
+  onEvent: (event: SmaraEvent) => void,
+): Promise<void> {
+  const response = await smaraFetch(`/v1/tasks/${encodeURIComponent(taskId)}/events/stream`, {
+    headers: { Accept: "text/event-stream" },
+    signal,
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(`Task event stream failed (${response.status})`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) return;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary: number;
+    while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const data = frame.split("\n").find((line) => line.startsWith("data:"));
+      if (!data) continue;
+      try { onEvent(JSON.parse(data.slice(5).trim()) as SmaraEvent); } catch { /* keep the stream alive */ }
+    }
+  }
+}
+
 export function getSmaraEvidence(taskId: string): Promise<SmaraEvidence[]> {
   return json<SmaraEvidence[]>(`/v1/research/${encodeURIComponent(taskId)}/evidence`);
 }

@@ -270,10 +270,12 @@ live account, refresh, task-event, approval, and rollback tests.
 - Adapted the copied chat stream to Smara's `/v1/chat/stream` and the task
   helper to Smara's `/v1/tasks`/`cancel` contract. Existing Memento routes
   remain the default when `VITE_SMARA_MODE=false`.
-- Added a native `Work` panel for Smara task selection, live activity polling,
+- Added a native `Work` panel for Smara task selection, live activity,
   dependency-step status, approval/denial, cancellation, research evidence,
   and artifacts. The old Control iframe remains available only outside bridge
   mode, preserving rollback while the remaining screens migrate.
+- Switched active-task updates from repeated polling to Smara's durable
+  `/v1/tasks/{id}/events/stream`, retaining a slow refresh as reconnect repair.
 - Added a frontend migration README and environment template. This is a
   reversible source-level slice; it is not a public cutover.
 - Verified the copied UI with TypeScript strict compilation and the Smara

@@ -8,6 +8,7 @@ import {
   getSmaraEvents,
   getSmaraSteps,
   listSmaraTasks,
+  streamSmaraEvents,
   type SmaraArtifact,
   type SmaraEvidence,
   type SmaraEvent,
@@ -63,8 +64,13 @@ export default function SmaraWorkPanel() {
     void loadDetails(selectedId);
     const active = selected?.status === "queued" || selected?.status === "running" || selected?.status === "waiting_approval";
     if (!active) return;
-    const timer = window.setInterval(() => { void refresh(); void loadDetails(selectedId); }, 3000);
-    return () => window.clearInterval(timer);
+    const controller = new AbortController();
+    // The stream carries durable events without polling. A low-frequency
+    // refresh repairs any missed event after a proxy reconnect.
+    void streamSmaraEvents(selectedId, controller.signal, () => { void loadDetails(selectedId); void refresh(); })
+      .catch(() => { if (!controller.signal.aborted) void loadDetails(selectedId); });
+    const timer = window.setInterval(() => { void refresh(); }, 15_000);
+    return () => { controller.abort(); window.clearInterval(timer); };
   }, [selectedId, selected?.status, loadDetails, refresh]);
 
   async function decide(approved: boolean) {
