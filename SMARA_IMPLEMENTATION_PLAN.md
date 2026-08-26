@@ -303,6 +303,12 @@ until those tests pass.
   the migrated shell under `/smara/`, while `/smara-api/` is stripped and
   proxied to the Smara API. The existing root Memento app remains untouched
   until browser shadow tests pass.
+- Built and started the frontend on the staging VM at `127.0.0.1:8081`, then
+  loaded the route through Caddy's admin API for a live, reversible check:
+  `/smara/` serves the new bundle, `/smara-api/health` returns `200`, hashed
+  assets and client-side routes return `200`, and the root app still serves as
+  before. The persistent root-owned Caddyfile still needs one privileged
+  reload; no public root-path cutover has been made.
 - Added a frontend migration README and environment template. This is a
   reversible source-level slice; it is not a public cutover.
 - Verified the copied UI with TypeScript strict compilation and the Smara
