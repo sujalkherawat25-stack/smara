@@ -2,16 +2,24 @@ import { useState, useRef, useEffect } from "react";
 import { MoreHorizontal, Trash2, Pencil, Check, MessageSquare } from "lucide-react";
 import { useConversationsStore } from "@/stores/conversationsStore";
 import { useChatStore } from "@/stores/chatStore";
+import { smaraModeEnabled } from "@/lib/smaraGateway";
 import clsx from "clsx";
 
 export default function RecentsPanel({ onSelect }: { onSelect?: () => void }) {
   const { conversations, activeId, remove, rename } = useConversationsStore();
   const { loadConversation, sessionId } = useChatStore();
+  const loadRemoteConversation = useConversationsStore((s) => s.loadRemoteConversation);
 
   function handleSelect(convId: string) {
     const conv = useConversationsStore.getState().select(convId);
     if (!conv) return;
     loadConversation(conv.id, conv.conversationId, conv.messages);
+    if (smaraModeEnabled()) {
+      void loadRemoteConversation(conv.id, conv.conversationId, conv.workspaceId || "default").catch(() => {
+        // The cached turn list remains visible if a proxy reconnects while a
+        // user is opening a conversation.
+      });
+    }
     onSelect?.();
   }
 

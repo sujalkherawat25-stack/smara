@@ -65,7 +65,14 @@ async function controlToken(): Promise<string> {
   if (cachedToken && now < tokenExpiresAt - 15_000) return cachedToken;
   if (tokenPromise) return tokenPromise;
 
-  tokenPromise = fetch(tokenPath, { credentials: "include" })
+  // The bridge endpoint is a state-changing mint operation. Keep the
+  // session cookie on this same-origin POST; using GET here returned 405 and
+  // left the Smara panels looking disconnected even for signed-in users.
+  tokenPromise = fetch(tokenPath, {
+    method: "POST",
+    credentials: "include",
+    headers: { Accept: "application/json" },
+  })
     .then(async (response) => {
       if (!response.ok) throw new Error(`Smara session bridge failed (${response.status})`);
       const payload = await response.json() as {
@@ -102,7 +109,14 @@ export async function smaraFetch(path: string, init: RequestInit = {}): Promise<
     return fetch(path, { ...init, credentials: init.credentials ?? "include" });
   }
   const token = await controlToken();
-  return fetch(smaraUrl(path), withJsonHeaders(init, token));
+  const response = await fetch(smaraUrl(path), withJsonHeaders(init, token));
+  // A deploy, secret rotation, or revoked bridge token can invalidate a
+  // cached assertion before its advertised TTL. Refresh once on auth failure
+  // so a normal retry is transparent to the UI. Do not loop indefinitely.
+  if (response.status !== 401 && response.status !== 403) return response;
+  resetSmaraToken();
+  const refreshed = await controlToken();
+  return fetch(smaraUrl(path), withJsonHeaders(init, refreshed));
 }
 
 /** Raw streaming request for the chat SSE endpoint. */

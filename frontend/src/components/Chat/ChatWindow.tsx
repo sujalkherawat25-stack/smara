@@ -34,12 +34,19 @@ export default function ChatWindow() {
   const setDeepReasoning = useChatStore((s) => s.setDeepReasoning);
   const account = useAuthStore((s) => s.account);
   const setAccountScope = useConversationsStore((s) => s.setAccountScope);
+  const hydrateFromServer = useConversationsStore((s) => s.hydrateFromServer);
   const focusedSmara = smaraModeEnabled();
 
   // Never reuse browser-local recents across accounts on a shared browser.
   useEffect(() => {
     setAccountScope(account?.account_id ?? null);
-  }, [account?.account_id, setAccountScope]);
+    if (focusedSmara && account?.account_id) {
+      void hydrateFromServer().catch(() => {
+        // Keep the local draft cache usable during a transient bridge or
+        // deployment failure; the next app focus will reconcile it again.
+      });
+    }
+  }, [account?.account_id, focusedSmara, hydrateFromServer, setAccountScope]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);

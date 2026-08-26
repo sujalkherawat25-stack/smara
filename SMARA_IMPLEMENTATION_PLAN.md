@@ -220,3 +220,21 @@ focused hosted/desktop release.
 - Verified frontend type-check, Smara backend tests, VM Docker build, public
   health/readiness, and disposable account-scoped task/research workflows.
 - Authenticated browser shadow tests and final public cutover remain pending.
+
+### 2026-08-26 — Hosted bridge and conversation continuity
+
+- Fixed the browser-to-Smara session bridge to use the backend's authenticated
+  `POST /v1/auth/control-token` contract; added one safe token refresh when a
+  deploy or rotation invalidates a cached assertion.
+- Smara-mode API calls now consistently use the bridge client, including
+  executor settings and durable work actions. A successful 204 is handled
+  without attempting to parse an empty JSON body.
+- Reconciled the native chat recents with Smara's hosted conversation index,
+  loaded remote turns when a conversation is opened, and removed conversations
+  from the hosted store when the user deletes them. Local drafts remain safe
+  during a temporary outage.
+- Added deterministic Memento-style triage/phase events to the Smara runtime
+  while keeping reasoning bounded and not exposing chain-of-thought.
+- Local verification remains green (95 backend tests, frontend type-check).
+  Public health and route smoke checks pass; authenticated browser shadow
+  testing, VM rebuild of this commit, and the final root cutover remain gates.

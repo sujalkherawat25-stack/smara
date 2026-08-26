@@ -440,7 +440,17 @@ class TaskStore:
     def conversations(self, account_id: str, *, limit: int = 50) -> list[dict]:
         with self._connect() as c:
             rows = c.execute(
-                "SELECT id,workspace_id,summary,summarized_through,next_sequence,created_at,updated_at FROM conversations WHERE account_id=? ORDER BY updated_at DESC LIMIT ?",
+                """SELECT c.id,c.workspace_id,c.summary,c.summarized_through,
+                          c.next_sequence,c.created_at,c.updated_at,
+                          (SELECT substr(t.content, 1, 120)
+                             FROM conversation_turns t
+                            WHERE t.conversation_id=c.id
+                              AND t.account_id=c.account_id
+                              AND t.role='user'
+                            ORDER BY t.sequence ASC LIMIT 1) AS first_message
+                     FROM conversations c
+                    WHERE c.account_id=?
+                    ORDER BY c.updated_at DESC LIMIT ?""",
                 (account_id, max(1, min(100, limit))),
             ).fetchall()
         return [dict(row) for row in rows]
