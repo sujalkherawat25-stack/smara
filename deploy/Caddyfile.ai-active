@@ -10,7 +10,7 @@
 
 ai.syntarus.com {
     # Reversible Smara staging mount. Caddy strips the public prefixes so the
-    # browser still uses normal /v1 routes and the API sees its original paths.
+    # browser keeps the ai.syntarus.com session while Smara receives /v1/*.
     handle_path /smara-api/* {
         reverse_proxy 127.0.0.1:8090 {
             header_up X-Real-IP {remote_host}
@@ -30,29 +30,20 @@ ai.syntarus.com {
         }
     }
 
-    # Existing Memento frontend remains the catch-all at the root path.
+    # Existing Memento app remains the root catch-all.
     handle {
-        reverse_proxy localhost:8080 {
+        reverse_proxy localhost:3000 {
+            # Pass real IP so backend logs are accurate
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-Proto {scheme}
+
+            # SSE: flush immediately, keep connection alive for up to 1h
             flush_interval -1
             transport http {
                 read_timeout  1h
                 write_timeout 1h
             }
         }
-    }
-
-    # Deploys briefly recreate the frontend/backend containers (docker compose
-    # up --build). While the frontend container itself is down, Caddy can't
-    # even reach nginx to get the SPA's own maintenance handling — it fails
-    # right here at the reverse_proxy. Serve a static page instead of Caddy's
-    # bare-bones default error screen so visitors see something reassuring.
-    # Update REPO_PATH if this repo isn't cloned into that exact location.
-    handle_errors 502 503 504 {
-        root * /root/memoryos/caddy
-        rewrite * /maintenance.html
-        file_server
     }
 
     # Compress responses
@@ -76,5 +67,36 @@ ai.syntarus.com {
             roll_keep     5
         }
         level INFO
+    }
+}
+
+
+bridge.syntarus.com {
+    reverse_proxy 127.0.0.1:8787
+    encode gzip
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}
+
+
+control-staging.syntarus.com {
+    reverse_proxy 127.0.0.1:8090 {
+        header_up X-Real-IP {remote_host}
+    }
+    encode gzip
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Content-Security-Policy "frame-ancestors https://ai.syntarus.com"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+    log {
+        output file /var/log/caddy/smara-control-staging.log {
+            roll_size 50mb
+            roll_keep 5
+        }
     }
 }
