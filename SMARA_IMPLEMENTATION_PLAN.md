@@ -111,7 +111,7 @@ Hologram Lab has already been removed from the Smara UI and source.
 - CLI beta foundation using the hosted API.
 - Desktop pairing/executor foundation with allowlists and safety contracts.
 - Reversible `/smara/` and `/smara-api/` staging mount at `ai.syntarus.com`.
-- Local suite (93 Smara backend tests), frontend type-check, VM Docker build,
+- Local suite (95 Smara backend tests), frontend type-check, VM Docker build,
   live health checks, and disposable account/task/research/approval smoke test.
 
 ## 6. Remaining work, in order
