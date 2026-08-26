@@ -251,12 +251,13 @@ Smara is ready to replace the public Memento agent when all of these are true:
 
 ## 8. Immediate next action
 
-Continue **P0** with a reversible staging mount of the migrated shell. The
-shell and gateway are now source-complete for chat, tasks, research, and
-account-scoped routing; next expose the bundle behind an authenticated
-same-origin staging path and run live refresh, task-event, approval, and
-rollback tests. Keep the current Memento production deployment unchanged
-until those tests pass.
+Finish the P0 native-screen migration and shadow test the `/smara/` mount.
+The route is now persistent and the shell/gateway are source-complete for
+chat, tasks, research, and account-scoped routing. Remaining P0 work is to
+replace the legacy Memento calls in the copied panels, remove the temporary
+Control iframe, and run live refresh, task-event, approval, and rollback
+tests. Keep the current Memento production deployment unchanged until those
+tests pass.
 
 ## 9. Implementation log
 
@@ -307,12 +308,26 @@ until those tests pass.
   loaded the route through Caddy's admin API for a live, reversible check:
   `/smara/` serves the new bundle, `/smara-api/health` returns `200`, hashed
   assets and client-side routes return `200`, and the root app still serves as
-  before. The persistent root-owned Caddyfile still needs one privileged
-  reload; no public root-path cutover has been made.
+  before. Persisted the root-owned Caddyfile and reloaded Caddy; the root
+  Memento frontend is explicitly kept on its live Docker port `8080` after a
+  regression check. No public root-path cutover has been made.
 - Added a frontend migration README and environment template. This is a
   reversible source-level slice; it is not a public cutover.
 - Verified the copied UI with TypeScript strict compilation and the Smara
   backend suite (93 tests). Vite's production bundle is currently blocked by
   the Windows sandbox's esbuild path-resolution error; the original frontend
-  reproduces the same toolchain error. Next P0 slice: deploy the auth bridge
-  route and run live account/refresh/approval tests through the staging origin.
+  reproduces the same toolchain error. Next P0 slice: run live account,
+  refresh, task-event, research, and approval tests through the staging origin,
+  then finish the remaining native-panel migration before cutover.
+
+### 2026-08-26 — Persistent mount verification
+
+- Persisted `/smara/` and `/smara-api/` in `/etc/caddy/Caddyfile` and reloaded
+  Caddy successfully.
+- Corrected the root catch-all to the actual Memento frontend listener
+  `127.0.0.1:8080`; a regression had briefly produced `502` at `/` after the
+  first persisted snapshot. Rechecked and restored `200` at the root.
+- Final VM checks: `/smara/` `200`, `/smara/work` `200`,
+  `/smara-api/health` `200`, unauthenticated `/smara-api/v1/tasks` `401`,
+  root `ai.syntarus.com/` `200`, Caddy active. This is still a reversible
+  staging mount, not a public replacement.
