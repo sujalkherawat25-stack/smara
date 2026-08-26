@@ -341,3 +341,15 @@ tests pass.
 - TypeScript strict compilation still passes. The Windows Vite build remains
   blocked by the known sandbox/esbuild path-resolution restriction; the
   production image must be built in Docker on the VM.
+
+### 2026-08-26 — Staging replacement smoke test
+
+- Rebuilt the frontend from the pushed removal commit on the staging VM and
+  confirmed `/smara/`, `/smara/work`, `/smara-api/health`, and the existing
+  root app all return successfully.
+- Ran an account-scoped disposable API workflow using the production signing
+  contract: tool catalogue, approval gate, worker completion, durable events,
+  research execution, evidence retrieval, and account deletion all passed.
+- The live browser currently reaches the Smara sign-in screen with no console
+  errors. Authenticated browser shadow tests remain pending until a user signs
+  in; no credentials or cookies were inspected or changed.
