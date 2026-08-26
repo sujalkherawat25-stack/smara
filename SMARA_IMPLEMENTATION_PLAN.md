@@ -275,3 +275,18 @@ focused hosted/desktop release.
 - Local verification: 95 Smara backend tests and frontend type-check pass.
   The remaining auth gate is a real beta-account sign-in and authenticated
   browser shadow run in staging.
+
+### 2026-08-26 — Hosted bridge 500 hotfix
+
+- Diagnosed the authenticated chat failure as a stale root auth image: the
+  running service had `SMARA_CONTROL_BRIDGE_SECRET` in its environment, but
+  its Settings class did not yet expose the field used by the control-token
+  route. This caused an `AttributeError` and HTTP 500 before Smara could start
+  a stream.
+- Added the missing bridge-secret and token-TTL settings to the running auth
+  service and restarted only that backend. The bridge setting loads, startup
+  logs are clean, and the Smara API remains healthy. MemoryOS storage and
+  retrieval code were not changed.
+- The remaining verification is user-session based: refresh the Smara page,
+  send a short chat, and confirm the stream starts. The unauthenticated guard
+  continues to return 401 as intended.
