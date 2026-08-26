@@ -36,10 +36,18 @@ async function controlToken(): Promise<string> {
   tokenPromise = fetch(tokenPath, { credentials: "include" })
     .then(async (response) => {
       if (!response.ok) throw new Error(`Smara session bridge failed (${response.status})`);
-      const payload = await response.json() as { token?: string; expires_in?: number };
+      const payload = await response.json() as {
+        token?: string;
+        // The backend wire contract uses the explicit *_seconds name. Keep
+        // the older alias readable for already deployed auth services during
+        // the staged migration.
+        expires_in_seconds?: number;
+        expires_in?: number;
+      };
       if (!payload.token) throw new Error("Smara session bridge returned no token.");
       cachedToken = payload.token;
-      tokenExpiresAt = Date.now() + Math.max(30, payload.expires_in ?? 300) * 1000;
+      const ttl = payload.expires_in_seconds ?? payload.expires_in ?? 60;
+      tokenExpiresAt = Date.now() + Math.max(30, Math.min(ttl, 300)) * 1000;
       return payload.token;
     })
     .finally(() => { tokenPromise = null; });

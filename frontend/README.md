@@ -14,6 +14,13 @@ VITE_SMARA_API_URL=https://control-staging.syntarus.com
 VITE_SMARA_CONTROL_TOKEN_PATH=/v1/auth/control-token
 ```
 
+For the final same-origin deployment, serve this bundle from the authenticated
+Smara web origin and leave `VITE_SMARA_API_URL` empty. The existing auth service
+must have `POST /v1/auth/control-token` enabled and share
+`SMARA_CONTROL_BRIDGE_SECRET` with the Smara API. The endpoint returns a
+short-lived JWT (`expires_in_seconds`, bounded to 30–300 seconds); the browser
+never receives the signing secret.
+
 The browser first uses the existing authenticated web session to obtain a
 short-lived Smara control token, then sends it as a bearer token to Smara. No
 gateway or provider secret is shipped to the browser. With `VITE_SMARA_MODE`

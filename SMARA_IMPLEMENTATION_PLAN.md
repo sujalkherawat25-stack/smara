@@ -283,10 +283,17 @@ live account, refresh, task-event, approval, and rollback tests.
   production bundle now completes successfully (5,147 modules transformed),
   and a local browser smoke check reaches the expected sign-in screen without
   runtime UI errors when the API is stopped.
+- Added the missing authenticated bridge contract to the existing Memento auth
+  service: `POST /v1/auth/control-token` mints a bounded, Smara-scoped JWT from
+  the signed-in account session. The signing secret is separate from session
+  and worker secrets and is shared only through deployment secret managers.
+- Matched the frontend bridge cache to the API's `expires_in_seconds` response
+  (while accepting the old alias during rollout), preventing stale or
+  needlessly long-lived browser tokens.
 - Added a frontend migration README and environment template. This is a
   reversible source-level slice; it is not a public cutover.
 - Verified the copied UI with TypeScript strict compilation and the Smara
   backend suite (93 tests). Vite's production bundle is currently blocked by
   the Windows sandbox's esbuild path-resolution error; the original frontend
-  reproduces the same toolchain error. Next P0 slice: same-origin deployment
-  wiring and live account/refresh/approval tests.
+  reproduces the same toolchain error. Next P0 slice: deploy the auth bridge
+  route and run live account/refresh/approval tests through the staging origin.

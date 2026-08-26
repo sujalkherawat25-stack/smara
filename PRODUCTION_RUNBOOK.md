@@ -52,11 +52,14 @@ capabilities in the first pairing unless explicitly needed.
 
 ## 5. Existing Smara shell
 
-The Memento/MemoryOS frontend already obtains a short-lived Control bridge token
-and sends it to the embedded Smara iframe. Set its production build variable
-to the production Control hostname, verify the iframe receives the token, and
-test browser CLI approval from the same signed-in account. This repository must
-not modify the protected MemoryOS pipeline.
+The Memento/MemoryOS auth service now exposes `POST /v1/auth/control-token`.
+It validates the existing httpOnly account session and returns a 30–300 second
+JWT containing only the account subject, Smara audience, and issuer. Configure
+the same independently generated `SMARA_CONTROL_BRIDGE_SECRET` in the auth
+service and Smara API secret managers; never put it in frontend variables.
+Set the migrated frontend to bridge mode, verify it obtains the token with
+`credentials: include`, and test browser CLI approval from the same signed-in
+account. This repository must not modify the protected MemoryOS pipeline.
 
 ## 6. Memory isolation
 
