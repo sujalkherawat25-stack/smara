@@ -10,7 +10,7 @@ import socket
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html.parser import HTMLParser
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlsplit, urlunsplit
 
 import httpx
 
@@ -19,6 +19,75 @@ from .store import TaskStore
 
 MAX_SOURCE_BYTES = 1_000_000
 MAX_EXCERPT_CHARS = 1_800
+_TRACKING_QUERY_KEYS = {
+    "fbclid", "gclid", "msclkid", "ref", "ref_src", "source",
+    "utm_campaign", "utm_content", "utm_medium", "utm_source", "utm_term",
+}
+_DISCOVERY_ONLY_HOSTS = {
+    "aiagentsdirectory.com", "aiagentstore.ai", "youtube.com", "www.youtube.com",
+    "youtu.be", "reddit.com", "www.reddit.com", "quora.com", "medium.com",
+    "substack.com", "news.google.com",
+}
+_PRIMARY_ROOTS = {
+    "anthropic.com", "bnbchain.org", "cloud.google.com", "developers.google.com",
+    "github.com", "microsoft.com", "nvidia.com", "okta.com", "openai.com",
+    "perplexity.ai", "snowflake.com", "x.ai",
+}
+_REPUTABLE_REPORTING_ROOTS = {
+    "apnews.com", "bloomberg.com", "reuters.com", "techcrunch.com",
+    "theverge.com", "wired.com", "wsj.com", "nytimes.com", "ft.com",
+}
+
+
+def canonical_source_url(url: str) -> str:
+    """Normalize a public URL for deduplication without changing its target."""
+    parsed = urlsplit(url.strip())
+    host = (parsed.hostname or "").lower().rstrip(".")
+    try:
+        host = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        pass
+    try:
+        port = parsed.port
+    except ValueError:
+        # Leave malformed ports untouched; the normal public-URL validator
+        # will reject the source before retrieval.
+        port = None
+    netloc = host
+    if port and not ((parsed.scheme.lower() == "http" and port == 80) or (parsed.scheme.lower() == "https" and port == 443)):
+        netloc = f"{host}:{port}"
+    path = parsed.path or "/"
+    if path != "/":
+        path = path.rstrip("/") or "/"
+    query = urlencode(
+        [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+         if key.lower() not in _TRACKING_QUERY_KEYS and not key.lower().startswith("utm_")],
+        doseq=True,
+    )
+    return urlunsplit((parsed.scheme.lower(), netloc, path, query, ""))
+
+
+def source_quality(url: str, title: str = "", snippet: str = "") -> tuple[str, list[str]]:
+    """Classify a result so weak discovery leads cannot look like proof.
+
+    This is deliberately advisory rather than a hard allowlist: the agent can
+    still follow an unusual source, but the evidence ledger and final prompt
+    make its lower confidence explicit.
+    """
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    root = ".".join(host.split(".")[-2:]) if host.count(".") >= 1 else host
+    lower_text = f"{title} {snippet}".lower()
+    if host in _DISCOVERY_ONLY_HOSTS or root in _DISCOVERY_ONLY_HOSTS:
+        return "discovery_only", ["discovery_only_source"]
+    if host.endswith(".gov") or host.endswith(".edu") or host.endswith(".ac.uk") or root in _PRIMARY_ROOTS:
+        return "primary", ["primary_source"]
+    if host.startswith(("docs.", "developer.", "developers.", "blog.", "press.", "newsroom.", "research.")):
+        return "primary", ["primary_source"]
+    if root in _REPUTABLE_REPORTING_ROOTS:
+        return "secondary", ["independent_reporting"]
+    if "official announcement" in lower_text or "press release" in lower_text:
+        return "secondary", ["reported_official_claim"]
+    return "unclassified", ["unclassified_source"]
 
 
 class _TextExtractor(HTMLParser):
@@ -227,6 +296,12 @@ class ResearchExecutor:
             hits = await (self._search_tool or WebSearchTool()).search(task["objective"], max_results=5)
         except ResearchToolError as exc:
             raise ValueError(str(exc)) from exc
+        # Keep all usable leads available, but put first-party and reputable
+        # reporting ahead of directories, videos, and other discovery-only
+        # pages. This improves the default evidence set without hard-blocking
+        # a niche source when it is the only lead returned.
+        quality_order = {"primary": 0, "secondary": 1, "unclassified": 2, "discovery_only": 3}
+        hits = sorted(hits, key=lambda hit: quality_order.get(getattr(hit, "quality", "unclassified"), 2))
         added = sum(self._store.add_evidence(task["id"], task["account_id"], hit.url, title=hit.title) for hit in hits)
         self._store.append_event(task["id"], "research.sources_discovered", f'{{"found":{len(hits)},"added":{added}}}')
         if not added:
@@ -270,6 +345,8 @@ class ResearchExecutor:
         verified_count = 0
         for index, item in enumerate(fetched, start=1):
             flags: list[str] = []
+            tier, source_flags = source_quality(item["url"], item.get("title") or "", item.get("excerpt") or "")
+            flags.extend(source_flags)
             if not item["url"].startswith("https://"):
                 flags.append("http_source")
             if not item.get("published_at"):
@@ -280,9 +357,9 @@ class ResearchExecutor:
                 flags.append("cross_source_agreement")
             elif len(fetched) > 1:
                 flags.append("no_cross_source_agreement")
-            confidence = min(0.95, 0.55 + (0.1 if item["url"].startswith("https://") else 0) + (0.1 if len(item.get("excerpt") or "") >= 500 else 0) + (0.05 if item.get("published_at") else 0) + (0.15 if agreement.get(item["id"], 0) else 0))
-            claim = f"Evidence retrieved from {item.get('title') or item['url']}."
-            notes = "Quality checks: " + (", ".join(flags) if flags else "passed")
+            confidence = min(0.95, 0.55 + (0.1 if item["url"].startswith("https://") else 0) + (0.1 if len(item.get("excerpt") or "") >= 500 else 0) + (0.05 if item.get("published_at") else 0) + (0.15 if agreement.get(item["id"], 0) else 0) + (0.1 if tier == "primary" else 0) - (0.2 if tier == "discovery_only" else 0))
+            claim = f"Evidence retrieved from {item.get('title') or item['url']} (source tier: {tier})."
+            notes = "Quality checks: " + (", ".join(dict.fromkeys(flags)) if flags else "passed")
             self._store.update_evidence(item["id"], task["id"], status="verified", title=item.get("title"), retrieved_at=item.get("retrieved_at"), published_at=item.get("published_at"), content_sha256=item.get("content_sha256"), excerpt=item.get("excerpt"), claim=claim, confidence=confidence, citation_label=f"[{index}]", domain_policy=item.get("domain_policy", "unclassified"), quality_flags=flags, agreement_count=agreement.get(item["id"], 0), verification_notes=notes)
             verified_count += 1
         self._store.append_event(task["id"], "research.evidence_verified", f'{{"verified":{verified_count},"agreement_sources":{sum(1 for count in agreement.values() if count)}}}')
@@ -322,7 +399,8 @@ class ResearchExecutor:
             lines += ["## Evidence-backed notes"]
         for item in verified:
             quality = ", ".join(json.loads(item.get("quality_flags") or "[]")) or "passed"
-            lines += [f"### {item['citation_label']} {item['title']}", item["excerpt"], f"Quality checks: {quality}", "", f"Source: {item['url']}", ""]
+            published = item.get("published_at") or "not provided"
+            lines += [f"### {item['citation_label']} {item['title']}", item["excerpt"], f"Published: {published}", f"Quality checks: {quality}", "", f"Source: {item['url']}", ""]
         failures = [item for item in evidence if item["status"] in {"failed", "blocked"}]
         if failures:
             lines += ["## Limitations", f"{len(failures)} supplied source(s) could not be retrieved or were blocked. They were not used for any report content.", ""]

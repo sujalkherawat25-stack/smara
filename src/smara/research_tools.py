@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import httpx
 
 from .config import settings
-from .research import RetrievedSource, fetch_public_source
+from .research import RetrievedSource, canonical_source_url, fetch_public_source, source_quality
 
 
 class ResearchToolError(RuntimeError):
@@ -26,6 +26,8 @@ class SearchHit:
     title: str
     snippet: str
     provider: str
+    quality: str = "unclassified"
+    quality_flags: tuple[str, ...] = ()
 
 
 class WebSearchTool:
@@ -84,10 +86,13 @@ class WebSearchTool:
                 items = response.json().get("organic") or []
                 hits = [SearchHit(str(item.get("link") or ""), str(item.get("title") or ""), str(item.get("snippet") or ""), provider) for item in items]
             elif provider == "tavily":
+                depth = str(getattr(settings, "search_depth", "advanced")).lower()
+                if depth not in {"basic", "advanced"}:
+                    depth = "advanced"
                 response = await client.post(
                     search_url,
                     headers={"Content-Type": "application/json"},
-                    json={"api_key": settings.search_api_key, "query": search_query, "search_depth": "basic", "max_results": count, "include_answer": False, "include_raw_content": False},
+                    json={"api_key": settings.search_api_key, "query": search_query, "search_depth": depth, "max_results": count, "include_answer": False, "include_raw_content": False},
                 )
                 response.raise_for_status()
                 items = response.json().get("results") or []
@@ -109,8 +114,14 @@ class WebSearchTool:
             parsed = urlparse(url)
             if not url or url in seen or parsed.scheme not in {"http", "https"} or not parsed.hostname:
                 continue
-            seen.add(url)
-            result.append(SearchHit(url, hit.title[:500] or parsed.hostname, hit.snippet[:1200], hit.provider))
+            canonical = canonical_source_url(url)
+            if canonical in seen:
+                continue
+            seen.add(canonical)
+            title = hit.title[:500] or parsed.hostname
+            snippet = hit.snippet[:1200]
+            quality, flags = source_quality(canonical, title, snippet)
+            result.append(SearchHit(canonical, title, snippet, hit.provider, quality, tuple(flags)))
             if len(result) >= count:
                 break
         return result

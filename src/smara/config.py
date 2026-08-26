@@ -59,6 +59,10 @@ class Settings:
     search_provider: str = os.getenv("SMARA_SEARCH_PROVIDER", "brave")
     search_api_key: str = _secret("SMARA_SEARCH_API_KEY")
     search_url: str = os.getenv("SMARA_SEARCH_URL", "")
+    # Advanced Tavily retrieval returns stronger page-level leads for research
+    # while remaining provider-neutral. Operators may choose "basic" when
+    # latency/cost matters more than recall.
+    search_depth: str = os.getenv("SMARA_SEARCH_DEPTH", "advanced").lower()
     search_timeout_seconds: float = float(os.getenv("SMARA_SEARCH_TIMEOUT_SECONDS", "12"))
     research_allowed_domains: str = os.getenv("SMARA_RESEARCH_ALLOWED_DOMAINS", "")
     research_blocked_domains: str = os.getenv("SMARA_RESEARCH_BLOCKED_DOMAINS", "")

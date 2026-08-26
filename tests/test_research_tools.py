@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import httpx
 
 from smara import research_tools
+from smara.research import canonical_source_url, source_quality
 
 
 def test_brave_search_adapter_returns_public_deduplicated_hits(monkeypatch):
@@ -79,3 +80,59 @@ def test_tavily_search_adapter_keeps_key_server_side(monkeypatch):
     hits = asyncio.run(execute())
     assert hits[0].provider == "tavily"
     assert hits[0].url == "https://example.com/tavily"
+
+
+def test_source_urls_are_canonicalized_and_quality_is_visible(monkeypatch):
+    monkeypatch.setattr(
+        research_tools,
+        "settings",
+        SimpleNamespace(
+            search_provider="brave",
+            search_api_key="test-key",
+            search_url="https://search.test/web",
+            search_timeout_seconds=2,
+        ),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"web": {"results": [
+            {"url": "https://openai.com/news/agents/?utm_source=feed", "title": "Official announcement", "description": "Primary source"},
+            {"url": "https://openai.com/news/agents/", "title": "Duplicate", "description": "Same primary source"},
+            {"url": "https://aiagentsdirectory.com/news", "title": "Directory", "description": "Discovery listing"},
+        ]}})
+
+    async def execute():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await research_tools.WebSearchTool(client).search("agents", max_results=5)
+
+    hits = asyncio.run(execute())
+    assert len(hits) == 2
+    assert hits[0].url == "https://openai.com/news/agents"
+    assert hits[0].quality == "primary"
+    assert "primary_source" in hits[0].quality_flags
+    assert hits[1].quality == "discovery_only"
+    assert canonical_source_url("https://example.com/a/?utm_medium=x#section") == "https://example.com/a"
+    assert source_quality("https://www.youtube.com/watch?v=abc")[0] == "discovery_only"
+
+
+def test_tavily_uses_advanced_depth_by_default(monkeypatch):
+    monkeypatch.setattr(
+        research_tools,
+        "settings",
+        SimpleNamespace(
+            search_provider="tavily",
+            search_api_key="tavily-test-key",
+            search_url="",
+            search_timeout_seconds=2,
+        ),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.content.find(b'"search_depth":"advanced"') >= 0
+        return httpx.Response(200, json={"results": []})
+
+    async def execute():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await research_tools.WebSearchTool(client).search("quality")
+
+    assert asyncio.run(execute()) == []

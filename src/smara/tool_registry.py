@@ -16,6 +16,7 @@ from typing import Any, Awaitable, Callable, Protocol
 
 import httpx
 
+from .research import source_quality
 from .research_tools import FetchUrlTool as ResearchFetchUrlTool
 from .research_tools import ResearchToolError, WebSearchTool as ResearchWebSearchTool
 
@@ -160,8 +161,27 @@ class ResearchSearchTool:
             hits = await self._tool.search(query, max_results=arguments.get("max_results", 5), include_domains=arguments.get("include_domains"))
         except ResearchToolError as exc:
             raise ToolError(str(exc)) from exc
-        data = [{"title": hit.title, "url": hit.url, "snippet": hit.snippet, "provider": hit.provider} for hit in hits]
-        return ToolResult(True, _bounded(json.dumps(data, ensure_ascii=False)), citations=[hit.url for hit in hits])
+        data = {
+            "results": [
+                {
+                    "title": hit.title,
+                    "url": hit.url,
+                    "snippet": hit.snippet,
+                    "provider": hit.provider,
+                    "source_quality": hit.quality,
+                    "quality_flags": list(hit.quality_flags),
+                }
+                for hit in hits
+            ],
+            "citation_policy": (
+                "Search results are discovery leads. For factual claims, fetch the "
+                "source URL and cite retrieved page content. Prefer primary sources; "
+                "discovery_only sources require independent confirmation."
+            ),
+        }
+        # Search URLs are leads, not verified evidence. Do not label them as
+        # citations until research.fetch_url has retrieved the page.
+        return ToolResult(True, _bounded(json.dumps(data, ensure_ascii=False)), citations=[])
 
 
 class ResearchFetchTool:
@@ -187,7 +207,16 @@ class ResearchFetchTool:
             source = await self._tool.fetch(url.strip()[:2_000])
         except (httpx.HTTPError, ValueError) as exc:
             raise ToolError(str(exc)) from exc
-        data = {"title": source.title, "excerpt": source.excerpt, "retrieved_at": source.retrieved_at, "content_sha256": source.content_sha256}
+        quality, flags = source_quality(url.strip(), source.title, source.excerpt)
+        data = {
+            "title": source.title,
+            "excerpt": source.excerpt,
+            "retrieved_at": source.retrieved_at,
+            "published_at": source.published_at,
+            "content_sha256": source.content_sha256,
+            "source_quality": quality,
+            "quality_flags": flags,
+        }
         return ToolResult(True, _bounded(json.dumps(data, ensure_ascii=False)), citations=[url.strip()])
 
 

@@ -290,3 +290,20 @@ focused hosted/desktop release.
 - The remaining verification is user-session based: refresh the Smara page,
   send a short chat, and confirm the stream starts. The unauthenticated guard
   continues to return 401 as intended.
+
+### 2026-08-26 — Research source-quality hardening
+
+- Search URLs are now canonicalized (tracking parameters and fragments are
+  removed) and duplicate results are discarded before they reach the agent.
+- Search hits expose advisory source tiers (`primary`, `secondary`,
+  `unclassified`, or `discovery_only`). First-party and reputable reporting
+  are ranked ahead of directories, videos, and other discovery-only leads.
+- Search results are explicitly treated as discovery leads, not verified
+  citations. The agent is instructed to fetch a source before making factual
+  claims; fetched evidence carries publication date, source tier, and quality
+  flags into the ledger and final report.
+- Tavily uses `advanced` depth by default for stronger research retrieval;
+  operators may set `SMARA_SEARCH_DEPTH=basic` when latency/cost is the higher
+  priority. No tools or agent actions were removed.
+- Verification: the full Smara suite passes (97 tests). Live deployment and
+  public health smoke checks remain part of the staging rollout below.
