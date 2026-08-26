@@ -1,0 +1,80 @@
+# MemoryOS — Caddy TLS config for ai.syntarus.com
+#
+# Caddy auto-provisions and renews the Let's Encrypt certificate.
+#
+# To activate on the Oracle server:
+#   1. Add DNS A record: ai → <oracle-ip>  (in your DNS provider)
+#   2. sudo ln -sf ~/memoryos/caddy/Caddyfile /etc/caddy/Caddyfile
+#   3. sudo systemctl enable --now caddy
+#   4. ./scripts/deploy.sh --tls
+
+ai.syntarus.com {
+    # Reversible Smara staging mount. Caddy strips the public prefixes so the
+    # browser still uses normal /v1 routes and the API sees its original paths.
+    handle_path /smara-api/* {
+        reverse_proxy 127.0.0.1:8090 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            flush_interval -1
+            transport http {
+                read_timeout  1h
+                write_timeout 1h
+            }
+        }
+    }
+
+    handle_path /smara/* {
+        reverse_proxy 127.0.0.1:8081 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Existing Memento frontend remains the catch-all at the root path.
+    handle {
+        reverse_proxy localhost:8080 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            flush_interval -1
+            transport http {
+                read_timeout  1h
+                write_timeout 1h
+            }
+        }
+    }
+
+    # Deploys briefly recreate the frontend/backend containers (docker compose
+    # up --build). While the frontend container itself is down, Caddy can't
+    # even reach nginx to get the SPA's own maintenance handling — it fails
+    # right here at the reverse_proxy. Serve a static page instead of Caddy's
+    # bare-bones default error screen so visitors see something reassuring.
+    # Update REPO_PATH if this repo isn't cloned into that exact location.
+    handle_errors 502 503 504 {
+        root * /root/memoryos/caddy
+        rewrite * /maintenance.html
+        file_server
+    }
+
+    # Compress responses
+    encode gzip
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options    "nosniff"
+        # Allow embedding the app via <iframe> on the syntarus marketing site.
+        # frame-ancestors (CSP) supersedes the old X-Frame-Options: SAMEORIGIN,
+        # which would otherwise block the iframe on www.syntarus.com.
+        Content-Security-Policy   "frame-ancestors 'self' https://www.syntarus.com https://syntarus.com"
+        Referrer-Policy           "strict-origin-when-cross-origin"
+    }
+
+    # Caddy logs
+    log {
+        output file /var/log/caddy/memoryos.log {
+            roll_size     50mb
+            roll_keep     5
+        }
+        level INFO
+    }
+}
