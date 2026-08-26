@@ -118,16 +118,20 @@ Hologram Lab has already been removed from the Smara UI and source.
 
 ### P0 — Make Smara Web one native product
 
-1. Adapt the Memento agent loop behavior into Smara's provider-neutral runtime;
-   verify triage, bounded ReAct/tool calls, streaming, memory context, and
-   approval pauses through Smara endpoints.
-2. Finish replacing legacy Memento calls in copied panels with the Smara API:
-   chat/history, tasks/events, research/evidence, approvals, schedules,
-   settings/provider status, and desktop devices.
-3. Remove the temporary Control iframe and duplicate navigation after native
-   flows pass refresh, reconnect, account-isolation, and approval tests.
-4. Run authenticated browser shadow tests with a real beta account. Keep the
-   current root Memento route unchanged until these pass.
+1. **Mostly done:** adapt the Memento agent-loop behavior into Smara's
+   provider-neutral runtime. Deterministic triage, bounded tool reasoning,
+   streaming, memory context, and phase events are live. Remaining: exercise
+   the real configured model against representative tool prompts and verify
+   approval pauses through the hosted API.
+2. **In progress:** native Smara calls now cover chat streaming, hosted
+   conversation history/recents, durable tasks/events, research evidence,
+   approvals, schedules, and executor settings. Remaining: authenticated
+   browser shadow tests across refresh, reconnect, and account isolation.
+3. **Done for the focused shell:** the temporary Control iframe and duplicate
+   navigation are no longer mounted in Smara mode. Legacy components remain in
+   source only as a rollback path until the shadow run is accepted.
+4. **Pending:** run the authenticated browser shadow suite with a real beta
+   account. Keep the current root Memento route unchanged until it passes.
 
 ### P1 — Make the desktop executor dependable
 
@@ -163,7 +167,7 @@ For the **focused hosted + desktop vision** (not the deferred backlog):
 |---|---:|---|
 | Hosted agent/task/research runtime | 80% | Memento behavior parity and edge cases |
 | CLI hosted client | 85% | parity polish and authenticated workflow tests |
-| Native Smara Web | 55% | legacy panel migration and iframe removal |
+| Native Smara Web | 70% | authenticated shadow tests and final legacy cleanup |
 | Desktop local executor | 70% | Windows reliability and packaging |
 | Production operations/cutover | 45% | secrets, observability, shadow run, rollback |
 
