@@ -332,9 +332,9 @@ tests pass.
   root `ai.syntarus.com/` `200`, Caddy active. This is still a reversible
   staging mount, not a public replacement.
 
-### 2026-08-26 — Remove non-product Hologram Lab
+### 2026-08-26 — Remove non-product visual lab
 
-- Removed the Hologram Lab source folder and every route, menu entry, and
+- Removed the experimental visual-lab source folder and every route, menu entry, and
   unauthenticated launch button from the Smara frontend. The product now opens
   directly into chat/work flows without the experimental 3D lab or its camera
   and hand-tracking code.
