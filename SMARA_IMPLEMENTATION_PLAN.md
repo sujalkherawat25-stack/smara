@@ -290,6 +290,10 @@ live account, refresh, task-event, approval, and rollback tests.
 - Matched the frontend bridge cache to the API's `expires_in_seconds` response
   (while accepting the old alias during rollout), preventing stale or
   needlessly long-lived browser tokens.
+- Made the gateway route-aware: migrated Smara API families use the short-lived
+  bridge token, while unreplaced Memento/MemoryOS memory, graph, stats, upload,
+  and feedback routes stay on the existing authenticated origin. Enabling
+  bridge mode therefore cannot break the remaining legacy panels.
 - Added a frontend migration README and environment template. This is a
   reversible source-level slice; it is not a public cutover.
 - Verified the copied UI with TypeScript strict compilation and the Smara
