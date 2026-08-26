@@ -64,6 +64,23 @@ export function listSmaraTasks(): Promise<SmaraTask[]> {
   return json<SmaraTask[]>("/v1/tasks");
 }
 
+export function createSmaraTask(input: {
+  title: string;
+  objective: string;
+  workspace_id?: string;
+  requires_approval?: boolean;
+}): Promise<SmaraTask> {
+  return json<SmaraTask>("/v1/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...input,
+      workspace_id: input.workspace_id || "default",
+      requires_approval: input.requires_approval ?? true,
+    }),
+  });
+}
+
 export function createSmaraResearch(input: {
   title: string;
   question: string;

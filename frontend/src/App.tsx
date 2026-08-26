@@ -2,12 +2,8 @@ import { useEffect, useState } from "react";
 import ChatWindow from "@/components/Chat/ChatWindow";
 import PdfPreviewPanel from "@/components/Chat/PdfPreviewPanel";
 import RecentsPanel from "@/components/Chat/RecentsPanel";
-import GraphCanvas from "@/components/Graph/GraphCanvas";
-import MemoryPanel from "@/components/Memory/MemoryPanel";
 import Notifications from "@/components/Notifications";
-import NotificationBell from "@/components/NotificationBell";
 import SettingsPanel from "@/components/Settings/SettingsPanel";
-import ControlPanel from "@/components/Control/ControlPanel";
 import SmaraWorkPanel from "@/components/SmaraWorkPanel";
 import SmaraLogo from "@/components/SmaraLogo";
 import SignInScreen from "@/components/Auth/SignInScreen";
@@ -17,10 +13,7 @@ import { useThemeStore } from "@/stores/themeStore";
 import { useViewStore } from "@/stores/viewStore";
 import { useChatStore } from "@/stores/chatStore";
 import { useAuthStore } from "@/stores/authStore";
-import { useTelegramStore } from "@/stores/telegramStore";
-import { useNotificationsStore } from "@/stores/notificationsStore";
-import { smaraModeEnabled } from "@/lib/smaraGateway";
-import { Sun, Moon, ArrowLeft, Network, Database, Clock, Plus, Settings, LogOut, Send, ListChecks } from "lucide-react";
+import { Sun, Moon, ArrowLeft, Clock, Plus, Settings, LogOut, ListChecks } from "lucide-react";
 
 /**
  * App — top-level auth gate.
@@ -80,13 +73,8 @@ function AuthenticatedApp() {
     () => typeof window !== "undefined" && window.innerWidth >= 768,
   );
 
-  const tgLinked = useTelegramStore((s) => s.status?.linked ?? false);
-  const refreshTg = useTelegramStore((s) => s.refresh);
-
-  useEffect(() => {
-    // One-shot Telegram link status probe so the header chip is accurate
-    // immediately after sign-in.
-    refreshTg();
+  /* Legacy channel status is intentionally not mounted in the focused shell. */
+  /*
 
     // J3: Google's consent flow lands back here with ?google=connected /
     // declined / error. Surface the outcome as a toast and clean the URL.
@@ -122,8 +110,9 @@ function AuthenticatedApp() {
         null, "", window.location.pathname + (rest ? `?${rest}` : ""),
       );
     }
-  }, [refreshTg]);
+  */
 
+  /*
   // Refresh Telegram link status whenever the tab regains focus or becomes
   // visible. This is the realistic post-/link flow: user generates code on
   // web → switches to Telegram → sends /link CODE → comes back to web tab
@@ -142,7 +131,8 @@ function AuthenticatedApp() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [refreshTg]);
-  const isPanel = view === "work" || view === "graph" || view === "memory" || view === "settings" || view === "control";
+  */
+  const isPanel = view === "work" || view === "settings";
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -261,38 +251,6 @@ function AuthenticatedApp() {
             </span>
           </div>
 
-          {/* Desktop-only: telegram chip */}
-          <button
-            onClick={() => { refreshTg(); openSettings(); }}
-            title={tgLinked ? "Telegram connected — manage" : "Connect Telegram"}
-            className="hidden md:flex items-center gap-1.5 px-2 py-1 rounded-full transition-all duration-150"
-            style={{
-              background: tgLinked ? "var(--accent2-soft)" : "rgba(100,116,139,0.06)",
-              border: `1px solid ${tgLinked ? "rgba(52,211,153,0.20)" : "var(--border-dim)"}`,
-            }}
-          >
-            <Send
-              size={11}
-              style={{ color: tgLinked ? "var(--accent2)" : "var(--text-muted)" }}
-            />
-            <span
-              className="text-[11px]"
-              style={{ color: tgLinked ? "var(--accent2)" : "var(--text-muted)" }}
-            >
-              {tgLinked ? "telegram" : "link"}
-            </span>
-            {tgLinked && (
-              <div
-                className="w-1.5 h-1.5 rounded-full"
-                style={{ background: "var(--accent2)", boxShadow: "0 0 5px var(--accent2)" }}
-              />
-            )}
-          </button>
-
-          {/* Notification bell — drains the proactive-fallback queue when
-              Telegram isn't reachable. Visible on every device. */}
-          <NotificationBell />
-
           {/* Settings — ALWAYS visible (mobile's single right-side action) */}
           <IconButton onClick={openSettings} title="Settings">
             <Settings size={14} />
@@ -372,8 +330,8 @@ function AuthenticatedApp() {
                 />
                 <SidebarNavRow
                   icon={<ListChecks size={15} />}
-                  label={smaraModeEnabled() ? "Work" : "Control"}
-                  onClick={() => { setView(smaraModeEnabled() ? "work" : "control"); setSidebarOpen(false); }}
+                  label="Work"
+                  onClick={() => { setView("work"); setSidebarOpen(false); }}
                 />
               </div>
 
@@ -433,39 +391,7 @@ function AuthenticatedApp() {
             />
           )}
 
-          {/* Graph panel */}
-          {view === "graph" && (
-            <PanelView
-              title="Knowledge Graph"
-              icon={
-                <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "var(--accent-soft)" }}>
-                  <Network size={12} style={{ color: "var(--accent)" }} />
-                </div>
-              }
-              onBack={backToChat}
-            >
-              <GraphCanvas />
-            </PanelView>
-          )}
-
-          {/* Memory panel */}
-          {view === "memory" && (
-            <PanelView
-              title="Memories"
-              icon={
-                <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "var(--accent2-soft)" }}>
-                  <Database size={12} style={{ color: "var(--accent2)" }} />
-                </div>
-              }
-              onBack={backToChat}
-              narrow
-            >
-              <MemoryPanel />
-            </PanelView>
-          )}
-
-          {/* Projects panel — F8 document corpus */}
-          {/* Settings panel — Connections / LLM connectors / Automation */}
+          {/* Settings panel — account, hosted runtime, and desktop */}
           {view === "settings" && (
             <PanelView
               title="Settings"
@@ -476,17 +402,7 @@ function AuthenticatedApp() {
               }
               onBack={backToChat}
             >
-              <SettingsPanel onOpenControl={() => setView(smaraModeEnabled() ? "work" : "control")} />
-            </PanelView>
-          )}
-
-          {view === "control" && (
-            <PanelView
-              title="Control"
-              icon={<div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "var(--accent2-soft)" }}><ListChecks size={12} style={{ color: "var(--accent2)" }} /></div>}
-              onBack={backToChat}
-            >
-              <ControlPanel />
+              <SettingsPanel onOpenControl={() => setView("work")} />
             </PanelView>
           )}
 

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type View = "chat" | "work" | "graph" | "memory" | "settings" | "control";
+export type View = "chat" | "work" | "settings";
 
 interface ViewStore {
   view: View;

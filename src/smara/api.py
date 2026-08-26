@@ -395,7 +395,11 @@ async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
         answer_started = False
 
         def event_hook(event_type: str, payload: dict) -> None:
-            if event_type == "agent.tool_requested":
+            if event_type == "agent.phase":
+                phase_name = payload.get("phase")
+                if phase_name in {"triage", "retrieve", "reason_act", "answer"}:
+                    queue.put_nowait(agent_events.phase(str(phase_name)))
+            elif event_type == "agent.tool_requested":
                 queue.put_nowait(agent_events.tool_call(str(payload.get("tool", "unknown"))))
             elif event_type == "agent.tool_completed":
                 queue.put_nowait(agent_events.tool_result(
@@ -427,9 +431,7 @@ async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
 
         task = asyncio.create_task(run_chat())
         try:
-            yield agent_events.phase("retrieve")
-            yield agent_events.status("Retrieving relevant shared context")
-            yield agent_events.phase("reason_act")
+            yield agent_events.status("Preparing a bounded Smara response")
             while not task.done():
                 try:
                     yield await asyncio.wait_for(queue.get(), timeout=0.1)

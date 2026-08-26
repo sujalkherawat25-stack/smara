@@ -46,6 +46,9 @@ async function request<T>(
     throw new ApiError(res.status, err.detail ?? res.statusText);
   }
 
+  // DELETE endpoints intentionally return 204 with no JSON body. Treat that
+  // as a successful request instead of trying to parse an empty response.
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 

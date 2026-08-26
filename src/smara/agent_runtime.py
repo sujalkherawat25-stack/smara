@@ -9,6 +9,7 @@ separately tested slices.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from dataclasses import dataclass
 from collections.abc import AsyncIterator
@@ -38,6 +39,34 @@ class ChatTurn:
     memory_used: bool
     model: str | None
     tools_used: int = 0
+
+
+_CHITCHAT_RE = re.compile(
+    r"^(?:hi|hello|hey|hiya|yo|thanks?|thank you|good morning|good afternoon|"
+    r"good evening|how are you(?: doing)?|what can you do|who are you)[!.?\s]*$",
+    re.IGNORECASE,
+)
+_TOOL_HINT_RE = re.compile(
+    r"\b(?:calculate|compute|search|research|look\s+up|find|fetch|weather|"
+    r"latest|today|current|news|time|remember|recall|source|cite|citation)\b",
+    re.IGNORECASE,
+)
+
+
+def _triage(message: str) -> tuple[str, int, bool]:
+    """Cheap local triage so greetings do not pay for a tool-planning loop.
+
+    Memento uses a small model for this decision. Smara keeps the first pass
+    deterministic and zero-cost: only clearly factual/actionable prompts enter
+    the bounded tool loop. The model still decides which registered tool to
+    call once the request is classified as tool-worthy.
+    """
+    text = message.strip()
+    if _CHITCHAT_RE.fullmatch(text):
+        return "chitchat", 1, False
+    hinted = bool(_TOOL_HINT_RE.search(text))
+    complexity = 3 if len(text) > 1_000 or text.count(" and ") >= 2 else 2 if hinted else 1
+    return ("tool_request" if hinted else "conversation"), complexity, hinted
 
 
 class OpenAICompatibleProvider:
@@ -135,6 +164,33 @@ class SmaraAgentRuntime:
                 lines.append(f"{role}: {content[:4_000]}")
         return "\n".join(lines)[-12_000:]
 
+    async def _direct_answer(
+        self,
+        *,
+        system: str,
+        message: str,
+        token_hook: Callable[[str], None] | None = None,
+    ) -> str:
+        """Answer a conversational turn without the tool-planning round trip."""
+        if token_hook:
+            parts: list[str] = []
+            stream = getattr(self._provider, "stream_complete", None)
+            if callable(stream):
+                try:
+                    async for chunk in stream(system=system, message=message):
+                        if isinstance(chunk, str) and chunk:
+                            parts.append(chunk)
+                            token_hook(chunk)
+                except Exception:
+                    # A streaming connection can fail after partial output.
+                    # Do not issue a second answer into the same UI stream.
+                    if parts:
+                        return "".join(parts).strip()
+                    raise
+            if parts:
+                return "".join(parts).strip()
+        return (await self._provider.complete(system=system, message=message)).strip()
+
     async def chat(
         self, *, account_id: str, workspace_id: str, message: str, conversation_id: str | None = None,
         conversation_history: list[dict[str, Any]] | None = None,
@@ -189,6 +245,10 @@ class SmaraAgentRuntime:
         read-only integrations. Side effects remain unavailable here and must
         be represented by an approved durable task.
         """
+        intent, complexity, use_tools = _triage(message)
+        if event_hook:
+            event_hook("agent.phase", {"phase": "triage", "intent": intent, "complexity": complexity})
+
         context = ""
         if self._memory is not None:
             try:
@@ -202,7 +262,30 @@ class SmaraAgentRuntime:
         recent = self._recent_conversation(conversation_history)
         if recent:
             context = (context + "\n\nRecent conversation context (oldest to newest):\n" + recent).strip()
+        if event_hook:
+            event_hook("agent.phase", {"phase": "retrieve"})
         conversation = conversation_id or f"chat_{uuid.uuid4().hex}"
+        if not use_tools:
+            system = (
+                "You are Smara, a helpful personal/work agent. Be concise, warm, and honest. "
+                "Do not claim that you performed an external action. If the user asks for "
+                "real work, explain that it can be started as a durable Smara task."
+            )
+            if context:
+                system += "\n\nRelevant shared Syntarus memory (may be incomplete):\n" + context[:12_000]
+            if event_hook:
+                event_hook("agent.phase", {"phase": "answer"})
+            answer = await self._direct_answer(system=system, message=message, token_hook=token_hook)
+            if not answer:
+                raise RuntimeError("Smara provider returned an empty response.")
+            return ChatTurn(
+                conversation_id=conversation,
+                message=answer,
+                memory_used=bool(context),
+                model=getattr(self._provider, "_model", None),
+            )
+        if event_hook:
+            event_hook("agent.phase", {"phase": "reason_act"})
         result = await BoundedAgentStepRuntime(
             self._provider,
             default_tool_registry(http_client),

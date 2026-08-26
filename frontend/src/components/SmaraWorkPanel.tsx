@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { Check, CircleAlert, FileText, RefreshCw, Square, X } from "lucide-react";
 import {
   cancelSmaraTask,
+  createSmaraTask,
   createSmaraResearch,
   decideSmaraTask,
   getSmaraArtifacts,
@@ -33,6 +34,10 @@ export default function SmaraWorkPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showResearch, setShowResearch] = useState(false);
+  const [showTask, setShowTask] = useState(false);
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskObjective, setTaskObjective] = useState("");
+  const [creatingTask, setCreatingTask] = useState(false);
   const [researchTitle, setResearchTitle] = useState("");
   const [researchQuestion, setResearchQuestion] = useState("");
   const [researchSources, setResearchSources] = useState("");
@@ -117,6 +122,20 @@ export default function SmaraWorkPanel() {
     } finally { setCreatingResearch(false); }
   }
 
+  async function createTask() {
+    const objective = taskObjective.trim();
+    if (objective.length < 5) { setError("Describe the task with at least five characters."); return; }
+    setCreatingTask(true); setError(null);
+    try {
+      const task = await createSmaraTask({ title: taskTitle.trim() || "Smara task", objective });
+      setTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
+      setSelectedId(task.id);
+      setTaskTitle(""); setTaskObjective(""); setShowTask(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not create the task.");
+    } finally { setCreatingTask(false); }
+  }
+
   if (loading) return <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>Loading Smara work…</p>;
 
   return (
@@ -124,10 +143,17 @@ export default function SmaraWorkPanel() {
       <div className="flex items-center justify-between gap-2">
         <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>{tasks.length ? `${tasks.length} task${tasks.length === 1 ? "" : "s"}` : "No durable work yet."}</p>
         <div className="flex items-center gap-2">
-          <button onClick={() => setShowResearch((open) => !open)} className="px-2.5 py-1.5 rounded-md text-[11px]" style={{ border: "1px solid var(--border-dim)", color: "var(--text-secondary)" }}>{showResearch ? "Close research" : "New research"}</button>
+          <button onClick={() => { setShowTask((open) => !open); setShowResearch(false); }} className="px-2.5 py-1.5 rounded-md text-[11px]" style={{ border: "1px solid var(--border-dim)", color: "var(--text-secondary)" }}>{showTask ? "Close task" : "New task"}</button>
+          <button onClick={() => { setShowResearch((open) => !open); setShowTask(false); }} className="px-2.5 py-1.5 rounded-md text-[11px]" style={{ border: "1px solid var(--border-dim)", color: "var(--text-secondary)" }}>{showResearch ? "Close research" : "New research"}</button>
           <button onClick={() => void refresh()} className="p-2 rounded-md" style={{ border: "1px solid var(--border-dim)", color: "var(--text-muted)" }} title="Refresh tasks"><RefreshCw size={14} /></button>
         </div>
       </div>
+      {showTask && <div className="rounded-xl p-3" style={{ background: "var(--bg-card)", border: "1px solid var(--border-dim)" }}>
+        <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>Start durable work</p>
+        <input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Title (optional)" className="mt-2 w-full rounded-md px-2.5 py-2 text-[12px] outline-none" style={{ background: "var(--bg-base)", border: "1px solid var(--border-dim)", color: "var(--text-primary)" }} />
+        <textarea value={taskObjective} onChange={(event) => setTaskObjective(event.target.value)} placeholder="What should Smara do? Risky actions will wait for approval." rows={3} className="mt-2 w-full rounded-md px-2.5 py-2 text-[12px] outline-none resize-y" style={{ background: "var(--bg-base)", border: "1px solid var(--border-dim)", color: "var(--text-primary)" }} />
+        <div className="mt-2 flex justify-end"><button disabled={creatingTask} onClick={() => void createTask()} className="px-3 py-1.5 rounded-md text-[11px]" style={{ background: "var(--accent)", color: "#07111f", opacity: creatingTask ? 0.6 : 1 }}>{creatingTask ? "Creating…" : "Create task"}</button></div>
+      </div>}
       {showResearch && <div className="rounded-xl p-3" style={{ background: "var(--bg-card)", border: "1px solid var(--border-dim)" }}>
         <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>Start cited research</p>
         <input value={researchTitle} onChange={(event) => setResearchTitle(event.target.value)} placeholder="Title (optional)" className="mt-2 w-full rounded-md px-2.5 py-2 text-[12px] outline-none" style={{ background: "var(--bg-base)", border: "1px solid var(--border-dim)", color: "var(--text-primary)" }} />

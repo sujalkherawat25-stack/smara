@@ -82,6 +82,34 @@ def test_runtime_chat_promotes_the_bounded_read_only_tool_loop():
     assert turn.tools_used == 1
 
 
+def test_runtime_triage_short_circuits_greetings_without_planner_round_trip():
+    provider = FakeProvider()
+    events = []
+    runtime = SmaraAgentRuntime(provider)
+    turn = asyncio.run(runtime.chat_with_tools(
+        account_id="acct_1", workspace_id="work", message="hi",
+        event_hook=lambda name, payload: events.append((name, payload)),
+    ))
+    assert turn.message == "A bounded direct response."
+    assert events == [
+        ("agent.phase", {"phase": "triage", "intent": "chitchat", "complexity": 1}),
+        ("agent.phase", {"phase": "retrieve"}),
+        ("agent.phase", {"phase": "answer"}),
+    ]
+
+
+def test_runtime_emits_memento_style_phases_for_tool_turn():
+    events = []
+    runtime = SmaraAgentRuntime(ToolProvider())
+    asyncio.run(runtime.chat_with_tools(
+        account_id="acct_1", workspace_id="work", message="calculate 2+2",
+        event_hook=lambda name, payload: events.append((name, payload)),
+    ))
+    assert [payload["phase"] for name, payload in events if name == "agent.phase"] == [
+        "triage", "retrieve", "reason_act",
+    ]
+
+
 def test_cli_has_only_api_control_commands():
     parser = build_parser()
     assert parser.parse_args(["tasks"]).command == "tasks"

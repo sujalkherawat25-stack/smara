@@ -1,6 +1,5 @@
 import { useRef, useEffect, useState, useMemo, useCallback, KeyboardEvent } from "react";
 import { useChatStore } from "@/stores/chatStore";
-import { useViewStore } from "@/stores/viewStore";
 import MessageBubble from "./MessageBubble";
 import StreamingMessage from "./StreamingMessage";
 import AgentRunCanvas from "./AgentRunCanvas";
@@ -11,6 +10,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useConversationsStore } from "@/stores/conversationsStore";
 import { apiClient, ApiError } from "@/api/client";
 import { ArrowUp, Square, Network, Database, Paperclip, Camera, FileText, Image as ImageIcon, X, Loader2, Sparkles } from "lucide-react";
+import { smaraModeEnabled } from "@/lib/smaraGateway";
 
 interface Attachment {
   id: string;
@@ -32,9 +32,9 @@ export default function ChatWindow() {
   const stop = useChatStore((s) => s.stop);
   const deepReasoning = useChatStore((s) => s.deepReasoning);
   const setDeepReasoning = useChatStore((s) => s.setDeepReasoning);
-  const { view, setView } = useViewStore();
   const account = useAuthStore((s) => s.account);
   const setAccountScope = useConversationsStore((s) => s.setAccountScope);
+  const focusedSmara = smaraModeEnabled();
 
   // Never reuse browser-local recents across accounts on a shared browser.
   useEffect(() => {
@@ -69,6 +69,10 @@ export default function ChatWindow() {
   }, [input]);
 
   const uploadFiles = async (files: FileList | File[]) => {
+    if (focusedSmara) {
+      setUploadError("File attachments are not enabled in the focused hosted release yet.");
+      return;
+    }
     setUploadError(null);
     const list = Array.from(files);
     for (const file of list) {
@@ -298,34 +302,36 @@ export default function ChatWindow() {
                 : "var(--shadow-sm)",
             }}
           >
-            {/* Attach (browse) button */}
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isStreaming}
-              className="shrink-0 grid place-items-center w-8 h-8 rounded-xl transition-colors duration-150"
-              style={{ color: "var(--text-muted)", opacity: isStreaming ? 0.4 : 1 }}
-              title="Attach a document or image (PDF, Word, Excel, PPT, CSV, JPG, PNG)"
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-elevated)"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-            >
-              <Paperclip size={15} />
-            </button>
+            {!focusedSmara && <>
+              {/* Attach (browse) button */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isStreaming}
+                className="shrink-0 grid place-items-center w-8 h-8 rounded-xl transition-colors duration-150"
+                style={{ color: "var(--text-muted)", opacity: isStreaming ? 0.4 : 1 }}
+                title="Attach a document or image (PDF, Word, Excel, PPT, CSV, JPG, PNG)"
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-elevated)"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+              >
+                <Paperclip size={15} />
+              </button>
 
-            {/* Camera button — opens phone camera on mobile, image picker on desktop */}
-            <button
-              onClick={() => cameraInputRef.current?.click()}
-              disabled={isStreaming}
-              className="shrink-0 grid place-items-center w-8 h-8 rounded-xl transition-colors duration-150"
-              style={{ color: "var(--text-muted)", opacity: isStreaming ? 0.4 : 1 }}
-              title="Take a photo with the camera (mobile) or pick an image (desktop)"
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-elevated)"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-            >
-              <Camera size={15} />
-            </button>
+              {/* Camera button — opens phone camera on mobile, image picker on desktop */}
+              <button
+                onClick={() => cameraInputRef.current?.click()}
+                disabled={isStreaming}
+                className="shrink-0 grid place-items-center w-8 h-8 rounded-xl transition-colors duration-150"
+                style={{ color: "var(--text-muted)", opacity: isStreaming ? 0.4 : 1 }}
+                title="Take a photo with the camera (mobile) or pick an image (desktop)"
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-elevated)"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+              >
+                <Camera size={15} />
+              </button>
 
-            {/* Real-time, interruptible speech-to-speech conversation. */}
-            <SmaraVoice />
+              {/* Real-time, interruptible speech-to-speech conversation. */}
+              <SmaraVoice />
+            </>}
 
             <textarea
               ref={taRef}
@@ -380,20 +386,22 @@ export default function ChatWindow() {
           {/* Toolbar */}
           <div className="flex items-center justify-between mt-2.5 px-1">
             <div className="flex items-center gap-1.5">
-              <ToolbarBtn
-                active={view === "graph"}
-                onClick={() => setView(view === "graph" ? "chat" : "graph")}
-                icon={<Network size={12} />}
-                label="Knowledge"
-                accentColor="var(--accent)"
-              />
-              <ToolbarBtn
-                active={view === "memory"}
-                onClick={() => setView(view === "memory" ? "chat" : "memory")}
-                icon={<Database size={12} />}
-                label="Memory"
-                accentColor="var(--accent2)"
-              />
+              {!focusedSmara && <>
+                <ToolbarBtn
+                  active={false}
+                  onClick={() => undefined}
+                  icon={<Network size={12} />}
+                  label="Knowledge"
+                  accentColor="var(--accent)"
+                />
+                <ToolbarBtn
+                  active={false}
+                  onClick={() => undefined}
+                  icon={<Database size={12} />}
+                  label="Memory"
+                  accentColor="var(--accent2)"
+                />
+              </>}
               <ToolbarBtn
                 active={deepReasoning}
                 onClick={() => setDeepReasoning(!deepReasoning)}

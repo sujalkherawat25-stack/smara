@@ -42,6 +42,8 @@ import { useGoogleStore } from "@/stores/googleStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { apiClient, ApiError } from "@/api/client";
+import { smaraModeEnabled } from "@/lib/smaraGateway";
+import SmaraFocusedSettings from "./SmaraFocusedSettings";
 
 // ── Section identity ────────────────────────────────────────────────────────
 // `id` follows "group:item" so the URL/route could be added later without a
@@ -69,6 +71,11 @@ interface SectionGroup {
 }
 
 export default function SettingsPanel({ onOpenControl }: { onOpenControl?: () => void }) {
+  if (smaraModeEnabled()) return <SmaraFocusedSettings onOpenWork={onOpenControl} />;
+  return <LegacySettingsPanel onOpenControl={onOpenControl} />;
+}
+
+function LegacySettingsPanel({ onOpenControl }: { onOpenControl?: () => void }) {
   // ── Domain refresh on mount ──────────────────────────────────────────
   const refreshTelegram = useTelegramStore((s) => s.refresh);
   const refreshReminders = useRemindersStore((s) => s.refresh);
