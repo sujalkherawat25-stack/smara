@@ -21,6 +21,10 @@ has been cut over.
   error.
 - The Redis-backed fixed-window limiter is enabled when `SMARA_REDIS_URL` is
   present; production refuses the local-only fallback.
+- A bounded burst through the public hostname with a short-lived synthetic
+  signed account returned 120 successful tool-catalogue responses followed by
+  5 HTTP 429 responses, confirming authenticated limiter behavior without
+  printing a credential.
 - Cloudflare/Caddy/TLS/security headers are visible on the staging public
   endpoint. The narrowly scoped CLI device WAF rule is verified through the
   public request/approval/poll path; rate limiting remains enabled outside it.

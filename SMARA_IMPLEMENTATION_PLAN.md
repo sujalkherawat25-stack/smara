@@ -367,3 +367,6 @@ focused hosted/desktop release.
   `/smara-api/health`, `/smara-api/readyz`, root Memento, and auth-config routes
   all returned HTTP 200 after reload; a full Caddy restart also kept `/readyz`
   healthy.
+- A public authenticated burst smoke returned 120 HTTP 200 responses followed
+  by 5 HTTP 429 responses, confirming the Redis-backed Smara limiter through the
+  deployed edge without exposing a real account credential.
