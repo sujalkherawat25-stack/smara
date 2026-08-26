@@ -518,6 +518,14 @@ async def claim_executor(identity: tuple[str, str] = Depends(executor_identity))
     try: return {"step": store.claim_for_executor(*identity)}
     except KeyError: raise HTTPException(401, "Executor credentials are invalid or revoked.")
 
+@app.post("/v1/executors/steps/{step_id}/heartbeat")
+async def heartbeat_executor_step(step_id: str, identity: tuple[str, str] = Depends(executor_identity)):
+    """Refresh only the lease owned by this paired desktop executor."""
+    try:
+        return store.heartbeat_executor_step(*identity, step_id)
+    except KeyError:
+        raise HTTPException(409, "Step is not leased to this executor.")
+
 @app.post("/v1/executors/steps/{step_id}/complete")
 async def complete_executor_step(step_id: str, body: ExecutorComplete, identity: tuple[str, str] = Depends(executor_identity)):
     try:

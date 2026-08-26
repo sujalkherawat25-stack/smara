@@ -162,6 +162,11 @@ executor for the current Windows user at sign-in with limited privileges and
 duplicate-instance prevention. `scripts/uninstall-smara-desktop.ps1` removes
 auto-start; revoke the executor separately to invalidate its server token.
 
+The executor claims a three-minute desktop step lease by default and calls
+`POST /v1/executors/steps/{step_id}/heartbeat` immediately before completion.
+The refresh is account- and executor-scoped; a cancelled step is not extended,
+and a stale executor cannot finalize work recovered by another paired device.
+
 The agent manifest also includes read-only Gmail search, Calendar listing,
 Drive metadata search, and GitHub repository listing. They run only when the
 account has a connected credential; all external writes remain durable,

@@ -1,6 +1,6 @@
 # Smara Implementation Plan
 
-**Status date:** 2026-08-26
+**Status date:** 2026-08-27
 **Repository:** `sujalkherawat25-stack/smara`
 **Public target:** `https://ai.syntarus.com`
 
@@ -110,8 +110,11 @@ Hologram Lab has already been removed from the Smara UI and source.
 - Syntarus SDK memory retrieval/write-back adapter; MemoryOS core untouched.
 - CLI beta foundation using the hosted API.
 - Desktop pairing/executor foundation with allowlists and safety contracts.
+- Desktop step leases now refresh immediately before completion on both the
+  SQLite development store and the live Postgres store; stale executors cannot
+  finalize a lease recovered by another executor.
 - Reversible `/smara/` and `/smara-api/` staging mount at `ai.syntarus.com`.
-- Local suite (109 Smara backend tests), frontend type-check, VM Docker build,
+- Local suite (113 Smara backend tests), frontend type-check, VM Docker build,
   live health checks, and disposable account/task/research/approval smoke test.
 
 ## 6. Remaining work, in order
@@ -337,3 +340,15 @@ focused hosted/desktop release.
 - Local regression coverage remains green (109 backend tests). The staging
   service must be redeployed with this fix before repeating the live desktop
   smoke test.
+
+### 2026-08-27 — Desktop lease reliability
+
+- Added an authenticated desktop step-heartbeat endpoint backed by the same
+  lease state machine in SQLite and Postgres. The paired executor refreshes its
+  lease before reporting completion; cancellation is observed without
+  extending the lease, and a stale/recovered executor receives a conflict.
+- Increased the desktop claim lease default to three minutes while keeping
+  explicit shorter leases available for tests and recovery drills.
+- Added regression coverage for refresh, cancellation, and stale-executor
+  rejection, including the runner's request ordering. The local suite now
+  passes 113 tests.

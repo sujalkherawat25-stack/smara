@@ -1,6 +1,6 @@
 # Smara production-gate status
 
-Updated 2026-08-25 after the core beta-readiness workflow audit. This is an operational
+Updated 2026-08-27 after the desktop lease reliability audit. This is an operational
 checklist, not a claim that `ai.syntarus.com`
 has been cut over.
 
@@ -25,9 +25,10 @@ has been cut over.
   2026-08-25 restore contained all 17 recorded Smara schema versions and 17
   staging tasks. The live database was not modified; backup files are now
   forced to owner-only mode by the script.
-- Repository tests pass locally (**93 tests**) with Python compilation and Web
-  JavaScript syntax checks. The current changes still require the clean Docker
-  run after deployment.
+- Repository tests pass locally (**113 tests**) with Python compilation,
+  frontend type-check, and production frontend build. The current lease
+  heartbeat change still requires a clean Docker rollout before the live
+  desktop smoke is repeated.
 - Account export/deletion, approval gates, bounded sandbox recipes, safe
   integration writes, dead-letter retention, and Syntarus SDK-only memory
   access are covered by the repository tests.
@@ -41,10 +42,11 @@ has been cut over.
   key pair are configured. VAPID's private key is a protected read-only host
   mount for staging; all of these still need the production secret-manager and
   rotation drill. `SMARA_SENTRY_DSN` remains missing, so the full gate fails.
-- The xAI key configured on staging is disabled. The obsolete `grok-3-mini`
-  model name was corrected to `grok-4.3`, but live chat remains blocked until a
-  fresh key is installed. Search discovery is also blocked because no
-  `SMARA_SEARCH_API_KEY` is configured.
+- Staging xAI `grok-4.3` and Tavily search are configured. Disposable live
+  checks passed for a Grok response, Tavily discovery, a tool-backed agent
+  turn, cited research retrieval, and the Postgres desktop approval workflow.
+  The new desktop step-heartbeat code still needs to be deployed and repeated
+  in that smoke run.
 - The tested backup is on the VM for the disposable drill. A scheduled,
   encrypted **off-host** destination and a retention policy still need to be
   selected and configured.

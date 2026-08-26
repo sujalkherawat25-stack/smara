@@ -860,7 +860,7 @@ class TaskStore:
         if result.rowcount != 1:
             raise KeyError(executor_id)
 
-    def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 60) -> dict | None:
+    def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 180) -> dict | None:
         executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
         with self._connect() as c:
             c.execute("BEGIN IMMEDIATE")
@@ -899,6 +899,40 @@ class TaskStore:
             row["executor_payload"] = json.loads(row["executor_payload"]) if isinstance(row["executor_payload"], str) else row["executor_payload"]
             row["lease_owner"] = executor_id; row["lease_expires_at"] = until; row["status"] = "running"
             return row
+
+    def heartbeat_executor_step(self, executor_id: str, token: str, step_id: str, lease_seconds: int = 180) -> dict:
+        """Refresh a desktop step lease immediately before finalizing it.
+
+        Desktop actions are local and may take longer than a normal polling
+        interval.  Refreshing only the matching executor's lease prevents a
+        stale client from completing a step that another executor has already
+        recovered.  Cancellation is reported without extending the lease so
+        the running action can finish at its safe boundary.
+        """
+        self.executor(executor_id, token)
+        now = _now(); until = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
+        with self._connect() as c:
+            row = c.execute(
+                """SELECT s.task_id,s.status,s.lease_owner,t.cancel_requested
+                   FROM task_steps s JOIN tasks t ON t.id=s.task_id
+                  WHERE s.id=?""",
+                (step_id,),
+            ).fetchone()
+            if not row or row["status"] != "running" or row["lease_owner"] != executor_id:
+                raise KeyError("lease")
+            if row["cancel_requested"]:
+                return {"ok": False, "cancel_requested": True, "step_id": step_id}
+            updated = c.execute(
+                "UPDATE task_steps SET lease_expires_at=? WHERE id=? AND status='running' AND lease_owner=?",
+                (until, step_id, executor_id),
+            )
+            if updated.rowcount != 1:
+                raise KeyError("lease")
+            c.execute(
+                "UPDATE executor_leases SET expires_at=? WHERE step_id=? AND executor_id=? AND completed_at IS NULL",
+                (until, step_id, executor_id),
+            )
+        return {"ok": True, "cancel_requested": False, "step_id": step_id, "lease_expires_at": until}
 
     def complete_executor_step(self, executor_id: str, token: str, step_id: str, result: str) -> None:
         executor = self.executor(executor_id, token)
@@ -1181,7 +1215,7 @@ class PostgresTaskStore(TaskStore):
             task["updated_at"] = now
             return task
 
-    def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 60) -> dict | None:
+    def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 180) -> dict | None:
         """Postgres desktop claim with the same SKIP LOCKED lease guarantee."""
         executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
         with self._connect() as c:
@@ -1217,6 +1251,34 @@ class PostgresTaskStore(TaskStore):
             row["executor_payload"] = json.loads(row["executor_payload"]) if isinstance(row["executor_payload"], str) else row["executor_payload"]
             row.update({"lease_owner": executor_id, "lease_expires_at": until, "status": "running"})
             return row
+
+    def heartbeat_executor_step(self, executor_id: str, token: str, step_id: str, lease_seconds: int = 180) -> dict:
+        """Postgres equivalent of the desktop step lease refresh contract."""
+        self.executor(executor_id, token)
+        now = _now(); until = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
+        with self._connect() as c:
+            row = c.execute(
+                """SELECT s.task_id,s.status,s.lease_owner,t.cancel_requested
+                   FROM task_steps s JOIN tasks t ON t.id=s.task_id
+                  WHERE s.id=%s
+                  FOR UPDATE OF s""",
+                (step_id,),
+            ).fetchone()
+            if not row or row["status"] != "running" or row["lease_owner"] != executor_id:
+                raise KeyError("lease")
+            if row["cancel_requested"]:
+                return {"ok": False, "cancel_requested": True, "step_id": step_id}
+            updated = c.execute(
+                "UPDATE task_steps SET lease_expires_at=%s WHERE id=%s AND status='running' AND lease_owner=%s",
+                (until, step_id, executor_id),
+            )
+            if updated.rowcount != 1:
+                raise KeyError("lease")
+            c.execute(
+                "UPDATE executor_leases SET expires_at=%s WHERE step_id=%s AND executor_id=%s AND completed_at IS NULL",
+                (until, step_id, executor_id),
+            )
+        return {"ok": True, "cancel_requested": False, "step_id": step_id, "lease_expires_at": until}
 
     def claim_integration_action(self, worker_id: str = "integration-worker", lease_seconds: int = 60) -> dict | None:
         now = _now()

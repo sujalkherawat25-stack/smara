@@ -364,6 +364,14 @@ class DesktopRunner:
         LOG.info("claimed step %s capability=%s", step.get("step_id"), step.get("required_capability"))
         try:
             result = execute_step(step, state)
+            # A desktop action can use most of its lease (for example a
+            # bounded terminal command). Refresh it once before completion so
+            # a delayed network response cannot finalize a lease another
+            # executor has already recovered.
+            client.post(
+                f"{state['smara_url']}/v1/executors/steps/{step['step_id']}/heartbeat",
+                headers=_headers(state),
+            ).raise_for_status()
             client.post(f"{state['smara_url']}/v1/executors/steps/{step['step_id']}/complete", headers=_headers(state), json={"result": result}).raise_for_status()
             LOG.info("completed step %s", step.get("step_id"))
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:

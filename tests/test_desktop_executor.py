@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime, timezone
 
 import pytest
 
@@ -69,6 +70,57 @@ def test_desktop_expired_lease_is_recovered_by_next_executor_poll(tmp_path: Path
     recovered = store.claim_for_executor(second["executor_id"], second["token"])
     assert recovered and recovered["step_id"] == claimed["step_id"]
     assert recovered["lease_owner"] == second["executor_id"]
+
+
+def test_desktop_step_heartbeat_refreshes_only_current_lease(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop", ["local_file_read"])["code"])
+    task = store.create("acct_1", "work", "Read", "Read", True, [{
+        "name": "read", "executor_kind": "desktop", "required_capability": "local_file_read",
+    }])
+    store.decide(task["id"], "acct_1", True, "approved")
+    step = store.claim_for_executor(desktop["executor_id"], desktop["token"], lease_seconds=1)
+    assert step
+    before = datetime.fromisoformat(step["lease_expires_at"])
+    refreshed = store.heartbeat_executor_step(desktop["executor_id"], desktop["token"], step["step_id"], lease_seconds=180)
+    after = datetime.fromisoformat(refreshed["lease_expires_at"])
+    assert refreshed["ok"] is True and refreshed["cancel_requested"] is False
+    assert after > before and after > datetime.now(timezone.utc)
+    with store._connect() as connection:
+        lease = connection.execute("SELECT expires_at FROM executor_leases WHERE step_id=?", (step["step_id"],)).fetchone()
+    assert lease and lease["expires_at"] == refreshed["lease_expires_at"]
+
+
+def test_desktop_step_heartbeat_does_not_extend_cancelled_work(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop", ["local_file_read"])["code"])
+    task = store.create("acct_1", "work", "Read", "Read", True, [{
+        "name": "read", "executor_kind": "desktop", "required_capability": "local_file_read",
+    }])
+    store.decide(task["id"], "acct_1", True, "approved")
+    step = store.claim_for_executor(desktop["executor_id"], desktop["token"])
+    assert step
+    store.cancel(task["id"], "acct_1")
+    result = store.heartbeat_executor_step(desktop["executor_id"], desktop["token"], step["step_id"])
+    assert result == {"ok": False, "cancel_requested": True, "step_id": step["step_id"]}
+
+
+def test_stale_desktop_executor_cannot_refresh_recovered_lease(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    first = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop A", ["local_file_read"])["code"])
+    second = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop B", ["local_file_read"])["code"])
+    task = store.create("acct_1", "work", "Read", "Read", True, [{
+        "name": "read", "executor_kind": "desktop", "required_capability": "local_file_read",
+    }])
+    store.decide(task["id"], "acct_1", True, "approved")
+    claimed = store.claim_for_executor(first["executor_id"], first["token"], lease_seconds=1)
+    assert claimed
+    with store._connect() as connection:
+        connection.execute("UPDATE task_steps SET lease_expires_at=? WHERE id=?", ("2000-01-01T00:00:00+00:00", claimed["step_id"]))
+    recovered = store.claim_for_executor(second["executor_id"], second["token"])
+    assert recovered and recovered["lease_owner"] == second["executor_id"]
+    with pytest.raises(KeyError, match="lease"):
+        store.heartbeat_executor_step(first["executor_id"], first["token"], claimed["step_id"])
 
 
 def test_executor_heartbeat_cannot_expand_pairing_capabilities(tmp_path: Path):

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from smara.desktop_executor import execute_step, pair, _load_state, _save_state
+from smara.desktop_executor import DesktopRunner, execute_step, pair, _load_state, _save_state
 
 
 def test_desktop_file_read_write_stays_inside_approved_root(tmp_path: Path):
@@ -46,3 +46,46 @@ def test_desktop_state_round_trip_is_json(tmp_path: Path):
         stored = path.read_text(encoding="utf-8")
         assert "opaque" not in stored
         assert "token_dpapi" in stored
+
+
+def test_desktop_runner_refreshes_step_before_completion(monkeypatch, tmp_path: Path):
+    calls = []
+    step = {
+        "step_id": "step_1",
+        "required_capability": "local_file_read",
+        "executor_payload": {"path": str(tmp_path / "note.txt")},
+    }
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, payload=None):
+            self.payload = payload
+
+        def json(self):
+            return self.payload or {}
+
+        def raise_for_status(self):
+            return None
+
+    class Client:
+        def post(self, path, **kwargs):
+            calls.append(path)
+            if path.endswith("/claim"):
+                return Response({"step": step})
+            return Response()
+
+    monkeypatch.setattr("smara.desktop_executor.execute_step", lambda *_args: "result")
+    state = {
+        "smara_url": "https://smara.example",
+        "executor_id": "desktop_1",
+        "token": "opaque",
+        "capabilities": ["local_file_read"],
+    }
+    assert DesktopRunner(tmp_path / "desktop.json").run_once(Client(), state) is True
+    assert calls == [
+        "https://smara.example/v1/executors/heartbeat",
+        "https://smara.example/v1/executors/claim",
+        "https://smara.example/v1/executors/steps/step_1/heartbeat",
+        "https://smara.example/v1/executors/steps/step_1/complete",
+    ]
