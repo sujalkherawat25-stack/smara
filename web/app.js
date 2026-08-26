@@ -386,7 +386,7 @@ $('#chat-task').onclick = async () => {
     const task = await api('/v1/tasks', { method: 'POST', body: JSON.stringify({
       title: message.length > 90 ? `${message.slice(0, 87)}…` : message,
       objective: message, workspace_id: 'default', requires_approval: true,
-      steps: [{ name: 'execute_task' }],
+      steps: [{ name: 'agent.execute' }],
     }) });
     $('#chat-form').message.value = '';
     await refresh();
@@ -397,11 +397,11 @@ $('#chat-task').onclick = async () => {
 };
 $('#task-form').addEventListener('submit', async event => {
   event.preventDefault(); if (event.submitter.value !== 'submit') return $('#task-dialog').close(); const form = event.currentTarget;
-  try { await api('/v1/tasks', { method: 'POST', body: JSON.stringify({ title: form.title.value, objective: form.objective.value, workspace_id: form.workspace.value, requires_approval: form.approval.checked, steps: [{ name: 'execute_task' }] }) }); $('#task-dialog').close(); form.reset(); await refresh(); notice('Task created.'); } catch (error) { notice(error.message, true); }
+  try { await api('/v1/tasks', { method: 'POST', body: JSON.stringify({ title: form.title.value, objective: form.objective.value, workspace_id: form.workspace.value, requires_approval: form.approval.checked, steps: [{ name: 'agent.execute' }] }) }); $('#task-dialog').close(); form.reset(); await refresh(); notice('Task created.'); } catch (error) { notice(error.message, true); }
 });
 $('#schedule-form').addEventListener('submit', async event => {
   event.preventDefault(); if (event.submitter.value !== 'submit') return $('#schedule-dialog').close(); const form = event.currentTarget;
-  try { await api('/v1/schedules', { method: 'POST', body: JSON.stringify({ title: form.title.value, objective: form.objective.value, workspace_id: form.workspace.value, interval_seconds: Number(form.interval.value) * 60, requires_approval: form.approval.checked, steps: [{ name: 'execute_task' }] }) }); $('#schedule-dialog').close(); form.reset(); await refresh(); notice('Schedule created.'); } catch (error) { notice(error.message, true); }
+  try { await api('/v1/schedules', { method: 'POST', body: JSON.stringify({ title: form.title.value, objective: form.objective.value, workspace_id: form.workspace.value, interval_seconds: Number(form.interval.value) * 60, requires_approval: form.approval.checked, steps: [{ name: 'agent.execute' }] }) }); $('#schedule-dialog').close(); form.reset(); await refresh(); notice('Schedule created.'); } catch (error) { notice(error.message, true); }
 });
 $('#research-form').addEventListener('submit', async event => {
   event.preventDefault(); if (event.submitter.value !== 'submit') return $('#research-dialog').close(); const form = event.currentTarget;

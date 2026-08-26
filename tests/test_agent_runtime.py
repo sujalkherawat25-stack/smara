@@ -18,6 +18,12 @@ class FakeProvider:
         return "A bounded direct response."
 
 
+class CompleteOnlyProvider(FakeProvider):
+    """Provider shape used by an adapter that does not expose streaming."""
+
+    stream_complete = None
+
+
 class ToolProvider:
     _base_url = "https://llm.example/v1"
     _api_key = "test-key"
@@ -31,6 +37,21 @@ class ToolProvider:
         if self.calls == 1:
             return '{"action":"tool","name":"calculate","arguments":{"expression":"2+2"}}'
         return '{"action":"final","answer":"The result is 4."}'
+
+
+class IntegrationToolProvider:
+    _base_url = "https://llm.example/v1"
+    _api_key = "test-key"
+    _model = "small-model"
+
+    def __init__(self):
+        self.calls = 0
+
+    async def complete(self, *, system: str, message: str) -> str:
+        self.calls += 1
+        if self.calls == 1:
+            return '{"action":"tool","name":"integration.gmail.search","arguments":{"query":"from:alice@example.com","limit":3}}'
+        return '{"action":"final","answer":"I found the connected messages."}'
 
 
 class FakeSyntarus:
@@ -82,6 +103,25 @@ def test_runtime_chat_promotes_the_bounded_read_only_tool_loop():
     assert turn.tools_used == 1
 
 
+def test_runtime_passes_connected_integration_runner_to_tool_selection():
+    calls = []
+
+    async def runner(provider, action, payload):
+        calls.append((provider, action, payload))
+        return "Gmail search returned 2 message references."
+
+    runtime = SmaraAgentRuntime(IntegrationToolProvider())
+    turn = asyncio.run(runtime.chat_with_tools(
+        account_id="acct_1",
+        workspace_id="work",
+        message="Search my Gmail for Alice",
+        integration_runner=runner,
+    ))
+    assert turn.message == "I found the connected messages."
+    assert turn.tools_used == 1
+    assert calls == [("gmail", "gmail.search", {"query": "from:alice@example.com", "limit": 3})]
+
+
 def test_runtime_triage_short_circuits_greetings_without_planner_round_trip():
     provider = FakeProvider()
     events = []
@@ -96,6 +136,17 @@ def test_runtime_triage_short_circuits_greetings_without_planner_round_trip():
         ("agent.phase", {"phase": "retrieve"}),
         ("agent.phase", {"phase": "answer"}),
     ]
+
+
+def test_direct_sse_fallback_emits_answer_when_provider_has_no_stream():
+    emitted = []
+    runtime = SmaraAgentRuntime(CompleteOnlyProvider())
+    turn = asyncio.run(runtime.chat_with_tools(
+        account_id="acct_1", workspace_id="work", message="hello",
+        token_hook=emitted.append,
+    ))
+    assert turn.message == "A bounded direct response."
+    assert emitted == ["A bounded direct response."]
 
 
 def test_runtime_emits_memento_style_phases_for_tool_turn():

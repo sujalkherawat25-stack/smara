@@ -111,7 +111,7 @@ Hologram Lab has already been removed from the Smara UI and source.
 - CLI beta foundation using the hosted API.
 - Desktop pairing/executor foundation with allowlists and safety contracts.
 - Reversible `/smara/` and `/smara-api/` staging mount at `ai.syntarus.com`.
-- Local suite (95 Smara backend tests), frontend type-check, VM Docker build,
+- Local suite (109 Smara backend tests), frontend type-check, VM Docker build,
   live health checks, and disposable account/task/research/approval smoke test.
 
 ## 6. Remaining work, in order
@@ -307,3 +307,23 @@ focused hosted/desktop release.
   priority. No tools or agent actions were removed.
 - Verification: the full Smara suite passes (97 tests). Live deployment and
   public health smoke checks remain part of the staging rollout below.
+
+### 2026-08-26 — Workflow and tool reliability hardening
+
+- New task and schedule defaults now enter the real `agent.execute` path;
+  legacy `execute_task` rows remain supported during the transition.
+- Desktop and sandbox steps require an explicit capability and approval. Direct
+  bypasses are rejected, executor heartbeats cannot add capabilities, expired
+  leases honor cancellation, and uncertain terminal/browser/write failures go
+  to dead-letter instead of being replayed.
+- Agent-created desktop child tasks become visible as waiting for approval
+  immediately. The worker now passes the desktop requester through its tool
+  context, so approved local work can be handed to the paired executor.
+- Direct chat now uses the same account-scoped integration read adapter as
+  hosted tasks, including encrypted credential lookup and Google token refresh;
+  external writes remain approval-gated durable intents.
+- Hardened provider stream fallback, research profile selection, account task
+  cleanup, browser allowlists, and Gmail/Calendar/Telegram input bounds.
+- Verification: 109 backend tests, Python compile check, frontend type-check,
+  and production frontend build all pass. The build reports only an existing
+  non-blocking large-chunk optimization warning.

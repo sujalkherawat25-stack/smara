@@ -24,6 +24,7 @@ from .agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime
 from . import agent_events, llm_errors
 from .syntarus_adapter import SyntarusMemory
 from .vault import SecretVault
+from .integrations import connected_integration_runner
 from . import integration_oauth
 from . import push
 from .hardening import RedisFixedWindowLimiter
@@ -156,6 +157,8 @@ def account_id(
     ).hexdigest()
     if not x_smara_gateway_signature or not hmac.compare_digest(expected, x_smara_gateway_signature):
         raise HTTPException(401, "Invalid gateway assertion.")
+    if not x_smara_account_id.startswith("acct_"):
+        raise HTTPException(401, "Invalid account assertion.")
     return x_smara_account_id
 
 def _as_datetime(value: datetime | str) -> datetime:
@@ -360,7 +363,10 @@ async def delete_conversation(conversation_id: str, user: str = Depends(account_
 async def chat(body: ChatRequest, user: str = Depends(account_id)):
     """Direct chat with bounded read-only tools; writes remain durable tasks."""
     conversation_id, history, summary = _conversation(body, user)
-    runtime = _agent_runtime(body.model_profile)
+    try:
+        runtime = _agent_runtime(body.model_profile)
+    except ValueError as exc:
+        raise HTTPException(503, str(exc)) from exc
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=False) as client:
             turn = await runtime.chat_with_tools(
@@ -371,6 +377,9 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
                 conversation_history=history,
                 conversation_summary=summary,
                 http_client=client,
+                integration_runner=connected_integration_runner(
+                    store, user, client, settings.integration_master_keys
+                ),
             )
         store.append_conversation_exchange(conversation_id, user, body.workspace_id, body.message, turn.message, turn.model)
         return ChatResponse(**turn.__dict__)
@@ -390,7 +399,12 @@ async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
     conversation_id, history, summary = _conversation(body, user)
     async def emit():
         started_at = time.perf_counter()
-        runtime = _agent_runtime(body.model_profile)
+        try:
+            runtime = _agent_runtime(body.model_profile)
+        except ValueError as exc:
+            kind, message = llm_errors.describe(exc, provider=settings.llm_provider)
+            yield agent_events.error(message, kind=kind)
+            return
         queue: asyncio.Queue[str] = asyncio.Queue()
         answer_started = False
 
@@ -425,6 +439,9 @@ async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
                     conversation_history=history,
                     conversation_summary=summary,
                     http_client=client,
+                    integration_runner=connected_integration_runner(
+                        store, user, client, settings.integration_master_keys
+                    ),
                     event_hook=event_hook,
                     token_hook=token_hook,
                 )
@@ -482,6 +499,7 @@ async def pair_executor(body: ExecutorPairRequest):
 async def heartbeat_executor(body: ExecutorHeartbeat, identity: tuple[str, str] = Depends(executor_identity)):
     try: return store.heartbeat_executor(*identity, body.capabilities)
     except KeyError: raise HTTPException(401, "Executor credentials are invalid or revoked.")
+    except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
 @app.get("/v1/executors")
 async def list_executors(user: str = Depends(account_id)):

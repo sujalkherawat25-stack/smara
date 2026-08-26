@@ -27,6 +27,21 @@ class StreamingProvider(FakeProvider):
             yield token
 
 
+class FailingStreamProvider(FakeProvider):
+    async def stream_complete(self, *, system: str, message: str):
+        self.calls.append((system, message))
+        if False:
+            yield ""
+        raise RuntimeError("stream unavailable")
+
+
+class PartialStreamProvider(FakeProvider):
+    async def stream_complete(self, *, system: str, message: str):
+        self.calls.append((system, message))
+        yield "Partial answer"
+        raise RuntimeError("connection dropped")
+
+
 def test_agent_step_selects_only_registry_tool_and_returns_final_answer():
     provider = FakeProvider([
         json.dumps({"action": "tool", "name": "calculate", "arguments": {"expression": "6 * 7"}}),
@@ -65,6 +80,43 @@ def test_agent_step_streams_final_provider_tokens_after_bounded_planning():
     assert tokens == ["The result ", "is 42."]
     assert result.text == "The result is 42."
     assert "do not return a JSON envelope" in provider.calls[-1][0]
+
+
+def test_agent_step_falls_back_to_non_stream_when_stream_fails_before_output():
+    provider = FailingStreamProvider([
+        json.dumps({"action": "final", "answer": "Draft"}),
+        "Recovered answer.",
+    ])
+    tokens = []
+
+    async def execute():
+        return await BoundedAgentStepRuntime(provider, default_tool_registry()).run(
+            task={"objective": "Answer"},
+            tool_context=ToolContext("acct_test", "workspace"),
+            token_hook=tokens.append,
+        )
+
+    result = asyncio.run(execute())
+    assert result.text == "Recovered answer."
+    assert tokens == ["Recovered answer."]
+
+
+def test_agent_step_does_not_duplicate_partial_output_after_stream_drop():
+    provider = PartialStreamProvider([
+        json.dumps({"action": "final", "answer": "Draft"}),
+    ])
+    tokens = []
+
+    async def execute():
+        return await BoundedAgentStepRuntime(provider, default_tool_registry()).run(
+            task={"objective": "Answer"},
+            tool_context=ToolContext("acct_test", "workspace"),
+            token_hook=tokens.append,
+        )
+
+    result = asyncio.run(execute())
+    assert result.text == "Partial answer"
+    assert tokens == ["Partial answer"]
 
 
 def test_agent_step_never_grants_unregistered_tool_access():

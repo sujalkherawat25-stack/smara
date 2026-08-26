@@ -165,16 +165,23 @@ class BoundedAgentStepRuntime:
         parts: list[str] = []
         stream = getattr(self._provider, "stream_complete", None)
         if callable(stream):
-            async for chunk in stream(system=system, message=message):
-                if not isinstance(chunk, str) or not chunk:
-                    continue
-                remaining = MAX_AGENT_OUTPUT_CHARS - sum(len(part) for part in parts)
-                if remaining <= 0:
-                    break
-                bounded = chunk[:remaining]
-                parts.append(bounded)
-                token_hook(bounded)
-        else:
+            try:
+                async for chunk in stream(system=system, message=message):
+                    if not isinstance(chunk, str) or not chunk:
+                        continue
+                    remaining = MAX_AGENT_OUTPUT_CHARS - sum(len(part) for part in parts)
+                    if remaining <= 0:
+                        break
+                    bounded = chunk[:remaining]
+                    parts.append(bounded)
+                    token_hook(bounded)
+            except Exception:
+                # A stream can fail before any content (safe to retry through
+                # the non-stream endpoint) or after partial content (do not
+                # issue a second answer and duplicate text in the UI).
+                if parts:
+                    return "".join(parts).strip()
+        if not parts:
             answer = (await self._provider.complete(system=system, message=message)).strip()
             if answer:
                 parts.append(answer[:MAX_AGENT_OUTPUT_CHARS])

@@ -4,6 +4,7 @@ import json
 
 from cryptography.fernet import Fernet
 import httpx
+import pytest
 
 from smara.integrations import IntegrationExecutor
 from smara.store import TaskStore
@@ -62,6 +63,20 @@ def test_gmail_adapter_sends_only_the_approved_payload():
     assert asyncio.run(run()) == "Gmail message accepted by provider."
     assert received["url"] == "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
     assert "raw" in received["body"]
+
+
+def test_external_adapters_reject_unsafe_or_oversized_payloads():
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"ok": True}))) as http:
+            executor = IntegrationExecutor(http)
+            with pytest.raises(ValueError, match="newlines"):
+                await executor.execute("gmail", "gmail.send", {"to": "person@example.com\nBcc:other@example.com", "subject": "Hi", "text": "Body"}, json.dumps({"access_token": "test-token"}))
+            with pytest.raises(ValueError, match="start/end"):
+                await executor.execute("calendar", "calendar.create", {"event": {"summary": "Missing times"}}, json.dumps({"access_token": "test-token"}))
+            with pytest.raises(ValueError, match="requires chat_id and text"):
+                await executor.execute("telegram", "telegram.send", {"chat_id": "1", "text": "x" * 4097}, "bot-token")
+
+    asyncio.run(run())
 
 
 def test_transient_read_retry_reuses_same_action_but_external_write_fails_closed(tmp_path: Path):

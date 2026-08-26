@@ -189,7 +189,10 @@ class SmaraAgentRuntime:
                     raise
             if parts:
                 return "".join(parts).strip()
-        return (await self._provider.complete(system=system, message=message)).strip()
+        answer = (await self._provider.complete(system=system, message=message)).strip()
+        if answer and token_hook:
+            token_hook(answer)
+        return answer
 
     async def chat(
         self, *, account_id: str, workspace_id: str, message: str, conversation_id: str | None = None,
@@ -236,6 +239,7 @@ class SmaraAgentRuntime:
         conversation_history: list[dict[str, Any]] | None = None,
         conversation_summary: str = "",
         http_client: httpx.AsyncClient | None = None,
+        integration_runner: Callable[[str, str, dict[str, Any]], Any] | None = None,
         event_hook: Callable[[str, dict[str, Any]], None] | None = None,
         token_hook: Callable[[str], None] | None = None,
     ) -> ChatTurn:
@@ -288,7 +292,7 @@ class SmaraAgentRuntime:
             event_hook("agent.phase", {"phase": "reason_act"})
         result = await BoundedAgentStepRuntime(
             self._provider,
-            default_tool_registry(http_client),
+            default_tool_registry(http_client, integration_runner=integration_runner),
         ).run(
             task={
                 "id": conversation,
@@ -298,7 +302,7 @@ class SmaraAgentRuntime:
                 "objective": message,
             },
             memory_context=context,
-            tool_context=ToolContext(account_id, workspace_id, http_client),
+            tool_context=ToolContext(account_id, workspace_id, http_client, integration_runner=integration_runner),
             event_hook=event_hook,
             token_hook=token_hook,
         )

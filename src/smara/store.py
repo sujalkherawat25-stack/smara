@@ -173,7 +173,7 @@ class TaskStore:
 
     def _insert_task(self, c, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None, *, now: str | None = None) -> str:
         task_id, now = f"task_{uuid.uuid4().hex}", now or _now()
-        steps = steps or [{"name": "execute_task", "depends_on": []}]
+        steps = steps or [{"name": "agent.execute", "depends_on": []}]
         c.execute("INSERT INTO tasks(id,account_id,workspace_id,title,objective,status,requires_approval,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", (task_id, account_id, workspace_id, title, objective, "queued", requires_approval, now, now))
         run_id = f"run_{uuid.uuid4().hex}"
         c.execute("INSERT INTO task_runs(id,task_id,attempt,status,created_at) VALUES(?,?,?,?,?)", (run_id, task_id, 1, "queued", now))
@@ -489,6 +489,26 @@ class TaskStore:
             row = c.execute("SELECT status FROM approvals WHERE task_id=?", (task_id,)).fetchone()
         return bool(row and row["status"] == "approved")
 
+    def request_approval(self, task_id: str, account_id: str) -> dict:
+        """Expose a newly-created approval task immediately.
+
+        Tasks normally transition from ``queued`` to ``waiting_approval`` when
+        a worker first sees them.  Agent-created child tasks are different:
+        the parent worker is already busy, so waiting for another claim would
+        hide the approval prompt.  This transition is idempotent and keeps the
+        child step unleased until the user decides.
+        """
+        task = self.get(task_id, account_id)
+        if not task["requires_approval"]:
+            raise ValueError("Task does not require approval.")
+        if task["status"] == "queued":
+            now = _now()
+            with self._connect() as c:
+                c.execute("UPDATE tasks SET status='waiting_approval',updated_at=? WHERE id=? AND account_id=? AND status='queued'", (now, task_id, account_id))
+                c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "approval.requested", '{"source":"agent"}', now))
+            task["status"] = "waiting_approval"
+        return task
+
     def decide(self, task_id: str, account_id: str, approved: bool, note: str) -> dict:
         task = self.get(task_id, account_id)
         if not task["requires_approval"] or task["status"] not in {"queued", "waiting_approval"}:
@@ -528,9 +548,17 @@ class TaskStore:
             # step; idempotency remains attached to the external action.
             expired = c.execute("SELECT id,task_id FROM task_steps WHERE status='running' AND lease_expires_at < ?", (now,)).fetchall()
             for item in expired:
-                c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL WHERE id=?", (item["id"],))
-                c.execute("UPDATE tasks SET status='queued',updated_at=? WHERE id=? AND status='running'", (now, item["task_id"]))
-                c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", item["task_id"], "step.lease_expired", '{"recovered":true}', now))
+                cancelled = c.execute("SELECT cancel_requested FROM tasks WHERE id=?", (item["task_id"],)).fetchone()
+                if cancelled and cancelled["cancel_requested"]:
+                    c.execute("UPDATE task_steps SET status='cancelled',lease_owner=NULL,lease_expires_at=NULL WHERE id=?", (item["id"],))
+                    c.execute("UPDATE task_runs SET status='cancelled' WHERE id=(SELECT task_run_id FROM task_steps WHERE id=?)", (item["id"],))
+                    c.execute("UPDATE tasks SET status='cancelled',updated_at=? WHERE id=?", (now, item["task_id"]))
+                    event_type, payload = "task.cancelled", '{"source":"lease_recovery"}'
+                else:
+                    c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL WHERE id=?", (item["id"],))
+                    c.execute("UPDATE tasks SET status='queued',updated_at=? WHERE id=? AND status='running'", (now, item["task_id"]))
+                    event_type, payload = "step.lease_expired", '{"recovered":true}'
+                c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", item["task_id"], event_type, payload, now))
             executor_clause = "s.executor_kind IN ('hosted','sandbox')" if set(executor_kinds) == {"hosted", "sandbox"} else "s.executor_kind IN ('hosted')"
             row = c.execute(f"""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name, s.executor_kind, s.executor_payload
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
@@ -654,6 +682,27 @@ class TaskStore:
     def delete_account(self, account_id: str) -> None:
         """Delete Smara-owned account data and credentials; never touch Syntarus."""
         with self._connect() as c:
+            # SQLite's compact development schema intentionally omits the
+            # production foreign-key graph. Remove every task-owned row
+            # explicitly so account deletion does not leave orphaned events,
+            # evidence, artifacts, dependencies, or executor leases.
+            task_rows = c.execute("SELECT id FROM tasks WHERE account_id=?", (account_id,)).fetchall()
+            task_ids = [row["id"] for row in task_rows]
+            if task_ids:
+                placeholders = ",".join("?" for _ in task_ids)
+                step_rows = c.execute(f"SELECT id FROM task_steps WHERE task_id IN ({placeholders})", task_ids).fetchall()
+                step_ids = [row["id"] for row in step_rows]
+                if step_ids:
+                    step_placeholders = ",".join("?" for _ in step_ids)
+                    c.execute(f"DELETE FROM executor_leases WHERE step_id IN ({step_placeholders})", step_ids)
+                    c.execute(f"DELETE FROM task_step_dependencies WHERE step_id IN ({step_placeholders}) OR depends_on_step_id IN ({step_placeholders})", step_ids + step_ids)
+                c.execute(f"DELETE FROM approvals WHERE task_id IN ({placeholders})", task_ids)
+                c.execute(f"DELETE FROM task_events WHERE task_id IN ({placeholders})", task_ids)
+                c.execute(f"DELETE FROM artifacts WHERE task_id IN ({placeholders})", task_ids)
+                c.execute(f"DELETE FROM research_evidence WHERE task_id IN ({placeholders})", task_ids)
+                c.execute(f"DELETE FROM task_dead_letters WHERE task_id IN ({placeholders})", task_ids)
+                c.execute(f"DELETE FROM task_steps WHERE task_id IN ({placeholders})", task_ids)
+                c.execute(f"DELETE FROM task_runs WHERE task_id IN ({placeholders})", task_ids)
             c.execute("DELETE FROM integration_credentials WHERE connection_id IN (SELECT id FROM integration_connections WHERE account_id=?)", (account_id,))
             c.execute("DELETE FROM integration_action_log WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM integration_oauth_states WHERE account_id=?", (account_id,))
@@ -664,11 +713,22 @@ class TaskStore:
             c.execute("DELETE FROM cli_devices WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM desktop_executors WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM executor_pairings WHERE account_id=?", (account_id,))
-            c.execute("DELETE FROM task_dead_letters WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM tasks WHERE account_id=?", (account_id,))
 
     def create_research(self, account_id: str, workspace_id: str, title: str, question: str, sources: list[str]) -> dict:
         task_id, run_id, now = f"task_{uuid.uuid4().hex}", f"run_{uuid.uuid4().hex}", _now()
+        # User-supplied sources can repeat or differ only by tracking
+        # parameters. Normalize them before the UNIQUE evidence insert so a
+        # harmless duplicate never turns a research request into a 500.
+        from .research import canonical_source_url
+        unique_sources: list[str] = []
+        seen_sources: set[str] = set()
+        for source in sources:
+            canonical = canonical_source_url(str(source))
+            if canonical and canonical not in seen_sources:
+                seen_sources.add(canonical)
+                unique_sources.append(canonical)
+        sources = unique_sources
         steps = (("research.fetch_sources", "research.verify_evidence", "research.write_report") if sources else ("research.discover_sources", "research.fetch_sources", "research.verify_evidence", "research.write_report"))
         step_ids = [f"step_{uuid.uuid4().hex}" for _ in steps]
         with self._connect() as c:
@@ -768,9 +828,13 @@ class TaskStore:
 
     def heartbeat_executor(self, executor_id: str, token: str, capabilities: list[str]) -> dict:
         executor = self.executor(executor_id, token); now = _now()
+        requested = {item.strip() for item in capabilities if isinstance(item, str) and item.strip()}
+        declared = {item for item in executor["capabilities"] if isinstance(item, str)}
+        if requested and not requested.issubset(declared):
+            raise ValueError("Executor heartbeat cannot add capabilities beyond pairing approval.")
         with self._connect() as c:
-            c.execute("UPDATE desktop_executors SET last_seen_at=?,capabilities=? WHERE id=?", (now, json.dumps(sorted(set(capabilities))), executor_id))
-        executor.update({"last_seen_at": now, "capabilities": sorted(set(capabilities))})
+            c.execute("UPDATE desktop_executors SET last_seen_at=? WHERE id=?", (now, executor_id))
+        executor.update({"last_seen_at": now, "capabilities": sorted(declared)})
         return executor
 
     def executors(self, account_id: str) -> list[dict]:
@@ -796,8 +860,23 @@ class TaskStore:
         executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
         with self._connect() as c:
             c.execute("BEGIN IMMEDIATE")
+            expired = c.execute("SELECT id,task_id,task_run_id FROM task_steps WHERE status='running' AND executor_kind='desktop' AND lease_expires_at < ?", (now,)).fetchall()
+            for item in expired:
+                cancelled = c.execute("SELECT cancel_requested FROM tasks WHERE id=?", (item["task_id"],)).fetchone()
+                if cancelled and cancelled["cancel_requested"]:
+                    c.execute("UPDATE task_steps SET status='cancelled',lease_owner=NULL,lease_expires_at=NULL WHERE id=?", (item["id"],))
+                    c.execute("UPDATE task_runs SET status='cancelled' WHERE id=?", (item["task_run_id"],))
+                    c.execute("UPDATE tasks SET status='cancelled',updated_at=? WHERE id=?", (now, item["task_id"]))
+                    event_type, payload = "task.cancelled", '{"source":"executor_lease_recovery"}'
+                else:
+                    c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL WHERE id=?", (item["id"],))
+                    c.execute("UPDATE tasks SET status='queued',updated_at=? WHERE id=? AND status='running'", (now, item["task_id"]))
+                    event_type, payload = "executor.lease_expired", '{"recovered":true}'
+                c.execute("UPDATE executor_leases SET completed_at=? WHERE step_id=? AND completed_at IS NULL", (now, item["id"]))
+                c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", item["task_id"], event_type, payload, now))
             rows = c.execute("""SELECT t.*,s.id AS step_id,s.task_run_id,s.idempotency_key,s.name,s.required_capability,s.executor_payload
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
+              JOIN approvals a ON a.task_id=t.id AND a.status='approved'
               WHERE t.account_id=? AND t.status IN ('queued','running') AND t.requires_approval=0 AND s.status='queued' AND s.executor_kind='desktop' AND (s.retry_at IS NULL OR s.retry_at<=?) AND NOT EXISTS (
                 SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id WHERE d.step_id=s.id AND parent.status!='completed')
               ORDER BY t.created_at,s.ordinal""", (executor["account_id"], now)).fetchall()
@@ -807,6 +886,10 @@ class TaskStore:
             c.execute("UPDATE tasks SET status='running',updated_at=? WHERE id=?", (now, row["id"]))
             c.execute("UPDATE task_runs SET status='running' WHERE id=?", (row["task_run_id"],))
             c.execute("UPDATE task_steps SET status='running',lease_owner=?,lease_expires_at=?,attempts=attempts+1,retry_at=NULL WHERE id=?", (executor_id, until, row["step_id"]))
+            # executor_leases keeps only the current lease for a step. A
+            # retry or recovered lease may have a completed historical row;
+            # remove that row before installing the new current lease.
+            c.execute("DELETE FROM executor_leases WHERE step_id=? AND completed_at IS NOT NULL", (row["step_id"],))
             c.execute("INSERT INTO executor_leases(id,step_id,executor_id,expires_at,created_at) VALUES(?,?,?,?,?)", (f"lease_{uuid.uuid4().hex}", row["step_id"], executor_id, until, now))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", row["id"], "executor.step_claimed", f'{{"executor_id":"{executor_id}"}}', now))
             row["executor_payload"] = json.loads(row["executor_payload"]) if isinstance(row["executor_payload"], str) else row["executor_payload"]
@@ -832,11 +915,15 @@ class TaskStore:
     def fail_executor_step(self, executor_id: str, token: str, step_id: str, error: str) -> str:
         executor = self.executor(executor_id, token)
         with self._connect() as c:
-            row = c.execute("SELECT task_id FROM task_steps WHERE id=? AND lease_owner=? AND status='running'", (step_id, executor_id)).fetchone()
+            row = c.execute("SELECT task_id,required_capability FROM task_steps WHERE id=? AND lease_owner=? AND status='running'", (step_id, executor_id)).fetchone()
             if not row:
                 raise KeyError("lease")
             c.execute("UPDATE executor_leases SET completed_at=? WHERE step_id=? AND executor_id=?", (_now(), step_id, executor_id))
-        return self.fail_step(step_id, executor["account_id"], error, retry_delay_seconds=30)
+        # Reads can be safely retried. Terminal commands, browser opens, and
+        # writes may have happened before a disconnect, so they fail closed
+        # into the dead-letter queue instead of running twice.
+        retryable = row["required_capability"] == "local_file_read"
+        return self.fail_step(step_id, executor["account_id"], error, retry_delay_seconds=30, retryable=retryable)
 
     def configure_integration(self, account_id: str, provider: str, *, display_name: str, policy: str, granted_scopes: list[str], health: str) -> dict:
         now = _now()
@@ -1044,13 +1131,21 @@ class PostgresTaskStore(TaskStore):
         with self._connect() as c:
             now = _now()
             expired = c.execute(
-                "SELECT id,task_id FROM task_steps WHERE status='running' AND lease_expires_at < %s FOR UPDATE SKIP LOCKED",
+                "SELECT id,task_id,task_run_id FROM task_steps WHERE status='running' AND lease_expires_at < %s FOR UPDATE SKIP LOCKED",
                 (now,),
             ).fetchall()
             for item in expired:
-                c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL WHERE id=%s", (item["id"],))
-                c.execute("UPDATE tasks SET status='queued',updated_at=%s WHERE id=%s AND status='running'", (now, item["task_id"]))
-                c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", item["task_id"], "step.lease_expired", '{"recovered":true}', now))
+                cancelled = c.execute("SELECT cancel_requested FROM tasks WHERE id=%s", (item["task_id"],)).fetchone()
+                if cancelled and cancelled["cancel_requested"]:
+                    c.execute("UPDATE task_steps SET status='cancelled',lease_owner=NULL,lease_expires_at=NULL WHERE id=%s", (item["id"],))
+                    c.execute("UPDATE task_runs SET status='cancelled' WHERE id=%s", (item["task_run_id"],))
+                    c.execute("UPDATE tasks SET status='cancelled',updated_at=%s WHERE id=%s", (now, item["task_id"]))
+                    event_type, payload = "task.cancelled", '{"source":"lease_recovery"}'
+                else:
+                    c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL WHERE id=%s", (item["id"],))
+                    c.execute("UPDATE tasks SET status='queued',updated_at=%s WHERE id=%s AND status='running'", (now, item["task_id"]))
+                    event_type, payload = "step.lease_expired", '{"recovered":true}'
+                c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", item["task_id"], event_type, payload, now))
 
             executor_clause = "s.executor_kind IN ('hosted','sandbox')" if set(executor_kinds) == {"hosted", "sandbox"} else "s.executor_kind IN ('hosted')"
             row = c.execute(f"""SELECT t.*, s.id AS step_id, s.task_run_id, s.idempotency_key, s.name, s.executor_kind, s.executor_payload
@@ -1083,8 +1178,23 @@ class PostgresTaskStore(TaskStore):
         """Postgres desktop claim with the same SKIP LOCKED lease guarantee."""
         executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
         with self._connect() as c:
+            expired = c.execute("SELECT id,task_id,task_run_id FROM task_steps WHERE status='running' AND executor_kind='desktop' AND lease_expires_at < %s FOR UPDATE SKIP LOCKED", (now,)).fetchall()
+            for item in expired:
+                cancelled = c.execute("SELECT cancel_requested FROM tasks WHERE id=%s", (item["task_id"],)).fetchone()
+                if cancelled and cancelled["cancel_requested"]:
+                    c.execute("UPDATE task_steps SET status='cancelled',lease_owner=NULL,lease_expires_at=NULL WHERE id=%s", (item["id"],))
+                    c.execute("UPDATE task_runs SET status='cancelled' WHERE id=%s", (item["task_run_id"],))
+                    c.execute("UPDATE tasks SET status='cancelled',updated_at=%s WHERE id=%s", (now, item["task_id"]))
+                    event_type, payload = "task.cancelled", '{"source":"executor_lease_recovery"}'
+                else:
+                    c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL WHERE id=%s", (item["id"],))
+                    c.execute("UPDATE tasks SET status='queued',updated_at=%s WHERE id=%s AND status='running'", (now, item["task_id"]))
+                    event_type, payload = "executor.lease_expired", '{"recovered":true}'
+                c.execute("UPDATE executor_leases SET completed_at=%s WHERE step_id=%s AND completed_at IS NULL", (now, item["id"]))
+                c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", item["task_id"], event_type, payload, now))
             rows = c.execute("""SELECT t.*,s.id AS step_id,s.task_run_id,s.idempotency_key,s.name,s.required_capability,s.executor_payload
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
+              JOIN approvals a ON a.task_id=t.id AND a.status='approved'
               WHERE t.account_id=%s AND t.status IN ('queued','running') AND t.requires_approval=FALSE AND s.status='queued' AND s.executor_kind='desktop' AND (s.retry_at IS NULL OR s.retry_at<=%s) AND NOT EXISTS (
                 SELECT 1 FROM task_step_dependencies d JOIN task_steps parent ON parent.id=d.depends_on_step_id WHERE d.step_id=s.id AND parent.status!='completed')
               ORDER BY t.created_at,s.ordinal FOR UPDATE OF s SKIP LOCKED""", (executor["account_id"], now)).fetchall()
@@ -1094,6 +1204,7 @@ class PostgresTaskStore(TaskStore):
             c.execute("UPDATE tasks SET status='running',updated_at=%s WHERE id=%s", (now, row["id"]))
             c.execute("UPDATE task_runs SET status='running' WHERE id=%s", (row["task_run_id"],))
             c.execute("UPDATE task_steps SET status='running',lease_owner=%s,lease_expires_at=%s,attempts=attempts+1,retry_at=NULL WHERE id=%s", (executor_id, until, row["step_id"]))
+            c.execute("DELETE FROM executor_leases WHERE step_id=%s AND completed_at IS NOT NULL", (row["step_id"],))
             c.execute("INSERT INTO executor_leases(id,step_id,executor_id,expires_at,created_at) VALUES(%s,%s,%s,%s,%s)", (f"lease_{uuid.uuid4().hex}", row["step_id"], executor_id, until, now))
             c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", row["id"], "executor.step_claimed", f'{{"executor_id":"{executor_id}"}}', now))
             row["executor_payload"] = json.loads(row["executor_payload"]) if isinstance(row["executor_payload"], str) else row["executor_payload"]

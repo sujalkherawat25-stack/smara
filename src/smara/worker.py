@@ -62,11 +62,26 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
         if task["name"].startswith("research."):
             synthesizer = None
             if settings.research_synthesis_enabled:
-                synthesizer = OpenAIResearchSynthesizer(
-                    base_url=settings.llm_base_url,
-                    api_key=settings.llm_api_key,
-                    model=settings.llm_model,
-                )
+                # Use the same operator-selected profile as agent.execute.
+                # A profiles-only deployment must not silently lose research
+                # synthesis or accidentally use a different provider.
+                try:
+                    profile = resolve_profile(
+                        raw=settings.llm_profiles,
+                        requested=settings.llm_default_profile or None,
+                        fallback_base_url=settings.llm_base_url,
+                        fallback_key=settings.llm_api_key,
+                        fallback_model=settings.llm_model,
+                        fallback_provider=settings.llm_provider,
+                    )
+                except ValueError:
+                    profile = None
+                if profile is not None:
+                    synthesizer = OpenAIResearchSynthesizer(
+                        base_url=profile.base_url,
+                        api_key=profile.api_key,
+                        model=profile.model,
+                    )
             outcome = await ResearchExecutor(store, synthesizer=synthesizer).run_step(task)
             if outcome.report:
                 await _memory_write(memory, task, store, "research", report=outcome.report, evidence_count=outcome.verified_evidence_count)
@@ -87,7 +102,7 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
                 )
             store.complete_step(task["step_id"], task["account_id"], result)
             return True
-        if task["name"] == "agent.execute":
+        if task["name"] in {"agent.execute", "execute_task"}:
             requested_profile = None
             raw_payload = task.get("executor_payload")
             if isinstance(raw_payload, str):
@@ -136,13 +151,17 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
                         True,
                         [{"name": f"desktop.{capability}", "executor_kind": "desktop", "required_capability": capability, "executor_payload": payload}],
                     )
+                    # Surface the approval immediately. The parent agent is
+                    # already leased, so the normal worker claim transition
+                    # cannot be relied on to make this child visible.
+                    child = store.request_approval(child["id"], task["account_id"])
                     record("agent.desktop_task_requested", {"task_id": child["id"], "capability": capability})
                     return {"task_id": child["id"], "status": child["status"], "capability": capability}
 
                 result = await BoundedAgentStepRuntime(provider, default_tool_registry(client, integration_runner=integration_runner, integration_requester=integration_requester, desktop_requester=desktop_requester)).run(
                     task=task,
                     memory_context=context,
-                    tool_context=ToolContext(task["account_id"], task["workspace_id"], client, integration_runner, integration_requester),
+                    tool_context=ToolContext(task["account_id"], task["workspace_id"], client, integration_runner, integration_requester, desktop_requester),
                     event_hook=record,
                 )
             await _memory_write(memory, task, store, "completion", result=result.text)
@@ -177,7 +196,7 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
         await _memory_write(memory, task, store, "completion", result=result)
         store.complete_step(task["step_id"], task["account_id"], result)
     except Exception as exc:
-        kind = llm_errors.classify(exc) if task.get("name") == "agent.execute" else llm_errors.KIND_UNKNOWN
+        kind = llm_errors.classify(exc) if task.get("name") in {"agent.execute", "execute_task"} else llm_errors.KIND_UNKNOWN
         if kind != llm_errors.KIND_UNKNOWN:
             safe_error = llm_errors.user_message(kind, provider=settings.llm_provider)
             retryable = kind in {

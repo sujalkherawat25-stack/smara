@@ -13,3 +13,13 @@ def test_account_export_is_scoped_and_deletion_removes_smara_data(tmp_path: Path
     store.delete_account("acct_1")
     assert store.list("acct_1") == []
     assert len(store.list("acct_2")) == 1
+    with store._connect() as connection:
+        for table in ("task_events", "task_steps", "task_runs", "approvals", "artifacts", "research_evidence"):
+            assert connection.execute(
+                f"SELECT COUNT(*) AS count FROM {table} WHERE task_id=?",
+                (task["id"],),
+            ).fetchone()["count"] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) AS count FROM executor_leases lease JOIN task_steps step ON step.id=lease.step_id WHERE step.task_id=?",
+            (task["id"],),
+        ).fetchone()["count"] == 0

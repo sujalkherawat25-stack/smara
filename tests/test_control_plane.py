@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,7 @@ import pytest
 from smara.store import TaskStore
 from smara.syntarus_adapter import SyntarusMemory
 from smara.worker import run_once
+from smara import agent_step, worker
 
 
 class FakeSyntarus:
@@ -34,13 +36,47 @@ def test_denied_task_cancels_queued_steps_and_cannot_be_decided_twice(tmp_path: 
 
 def test_worker_uses_only_memory_adapter(tmp_path: Path):
     store, fake = TaskStore(str(tmp_path / "smara.db")), FakeSyntarus()
-    task = store.create("acct_1", "work", "Research", "Find reliable information", False)
+    task = store.create("acct_1", "work", "Research", "Find reliable information", False, [{"name": "memory_only"}])
     assert asyncio.run(run_once(store, SyntarusMemory(fake)))
     assert store.get(task["id"], "acct_1")["status"] == "completed"
     assert fake.writes[0]["user_id"] == "acct_1"
     assert fake.writes[0]["run_id"].startswith("run_")
     assert fake.writes[0]["metadata"]["workspace_id"] == "work"
     assert fake.writes[0]["metadata"]["memory_kind"] == "verified_outcome"
+
+
+def test_new_tasks_default_to_agent_execute_step(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Ask agent", "Use the configured agent", False)
+    assert store.steps(task["id"], "acct_1")[0]["name"] == "agent.execute"
+
+
+def test_agent_worker_receives_desktop_requester_port(tmp_path: Path, monkeypatch):
+    class FakeStepRuntime:
+        def __init__(self, provider, registry):
+            self.registry = registry
+
+        async def run(self, *, task, memory_context, tool_context, event_hook=None, token_hook=None):
+            assert tool_context.desktop_requester is not None
+            child = tool_context.desktop_requester("local_file_read", "Read approved file", {"path": "notes.txt"})
+            assert child["status"] == "waiting_approval"
+            return agent_step.AgentStepResult("Desktop work is awaiting approval.", tools_used=1)
+
+    monkeypatch.setattr(worker, "BoundedAgentStepRuntime", FakeStepRuntime)
+    monkeypatch.setattr(worker, "settings", replace(
+        worker.settings,
+        llm_base_url="https://llm.example/v1",
+        llm_api_key="test-key",
+        llm_model="test-model",
+        llm_provider="default",
+        llm_profiles="",
+    ))
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Agent", "Read a local file", False, [{"name": "agent.execute"}])
+    assert asyncio.run(run_once(store, None))
+    assert store.get(task["id"], "acct_1")["status"] == "completed"
+    children = [row for row in store.list("acct_1") if row["id"] != task["id"]]
+    assert len(children) == 1 and children[0]["requires_approval"] == 1
 
 
 def test_step_lease_prevents_double_claim_and_recovers(tmp_path: Path):

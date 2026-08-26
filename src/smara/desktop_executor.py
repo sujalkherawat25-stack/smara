@@ -305,10 +305,15 @@ def _browser(payload: dict, state: dict) -> str:
     if not isinstance(url, str) or url.startswith("javascript:"):
         raise RuntimeError("local_browser requires a safe HTTP(S) URL.")
     parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
         raise RuntimeError("Only HTTP(S) browser URLs are allowed.")
     domains = state.get("browser_domains") or []
-    if not isinstance(domains, list) or not domains or not any(parsed.hostname == item or parsed.hostname.endswith("." + item) for item in domains if isinstance(item, str)):
+    hostname = parsed.hostname.rstrip(".").lower()
+    allowed_domains = {
+        item.strip().rstrip(".").lower().lstrip(".")
+        for item in domains if isinstance(item, str) and item.strip()
+    }
+    if not allowed_domains or not any(hostname == item or hostname.endswith("." + item) for item in allowed_domains):
         raise RuntimeError("Browser URL is outside the configured desktop domain allowlist.")
     if not webbrowser.open(url, new=0, autoraise=False):
         raise RuntimeError("The operating system did not accept the browser request.")

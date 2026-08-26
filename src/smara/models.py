@@ -14,16 +14,26 @@ class TaskStepInput(BaseModel):
     required_capability: str | None = Field(default=None, min_length=1, max_length=80)
     executor_payload: dict[str, Any] = Field(default_factory=dict, max_length=30)
 
+    @model_validator(mode="after")
+    def validate_executor_contract(self):
+        if self.executor_kind in {"desktop", "sandbox"} and not self.required_capability:
+            raise ValueError("desktop and sandbox steps must declare a required_capability")
+        return self
+
 
 class TaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     objective: str = Field(min_length=1, max_length=20_000)
     workspace_id: str = Field(default="default", min_length=1, max_length=128)
     requires_approval: bool = True
-    steps: list[TaskStepInput] = Field(default_factory=lambda: [TaskStepInput(name="execute_task")], min_length=1, max_length=100)
+    steps: list[TaskStepInput] = Field(default_factory=lambda: [TaskStepInput(name="agent.execute")], min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def validate_step_graph(self):
+        if not self.requires_approval and any(
+            step.executor_kind in {"desktop", "sandbox"} for step in self.steps
+        ):
+            raise ValueError("desktop and sandbox work must require approval")
         for index, step in enumerate(self.steps):
             if len(set(step.depends_on)) != len(step.depends_on):
                 raise ValueError("a step cannot depend on the same step twice")
@@ -51,10 +61,14 @@ class ScheduleCreate(BaseModel):
     interval_seconds: int = Field(ge=60, le=2_592_000)
     starts_at: datetime | None = None
     requires_approval: bool = True
-    steps: list[TaskStepInput] = Field(default_factory=lambda: [TaskStepInput(name="execute_task")], min_length=1, max_length=100)
+    steps: list[TaskStepInput] = Field(default_factory=lambda: [TaskStepInput(name="agent.execute")], min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def validate_step_graph(self):
+        if not self.requires_approval and any(
+            step.executor_kind in {"desktop", "sandbox"} for step in self.steps
+        ):
+            raise ValueError("desktop and sandbox work must require approval")
         for index, step in enumerate(self.steps):
             if len(set(step.depends_on)) != len(step.depends_on):
                 raise ValueError("a step cannot depend on the same step twice")

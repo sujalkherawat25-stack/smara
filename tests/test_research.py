@@ -21,6 +21,18 @@ def test_research_task_listing_excludes_ordinary_tasks(tmp_path: Path):
     assert [item["id"] for item in values] == [research["id"]]
 
 
+def test_research_sources_are_normalized_and_deduplicated(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create_research(
+        "acct_1", "work", "Sources", "Compare sources", [
+            "https://example.com/report/?utm_source=mail#section",
+            "https://example.com/report/",
+        ],
+    )
+    evidence = store.evidence(task["id"], "acct_1")
+    assert [item["url"] for item in evidence] == ["https://example.com/report"]
+
+
 def _research_store(tmp_path: Path) -> tuple[TaskStore, dict]:
     store = TaskStore(str(tmp_path / "smara.db"))
     task = store.create_research("acct_1", "project-a", "Solar evidence", "What does this source say about solar energy?", ["https://example.com/source"])

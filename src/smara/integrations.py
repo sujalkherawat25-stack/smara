@@ -38,6 +38,10 @@ class IntegrationExecutor:
             for key in ("to", "subject", "text"):
                 if not isinstance(payload.get(key), str) or not payload[key]:
                     raise ValueError(f"gmail.send requires {key}.")
+            if any(any(char in payload[key] for char in ("\r", "\n")) for key in ("to", "subject")):
+                raise ValueError("gmail.send recipient and subject cannot contain newlines.")
+            if len(payload["to"]) > 320 or len(payload["subject"]) > 998 or len(payload["text"]) > 100_000:
+                raise ValueError("gmail.send payload exceeds the safe message limits.")
             raw = f"To: {payload['to']}\r\nSubject: {payload['subject']}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n{payload['text']}"
             encoded = base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
             response = await self.http.post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", headers=headers, json={"raw": encoded})
@@ -49,7 +53,7 @@ class IntegrationExecutor:
             return f"Gmail search returned {len(response.json().get('messages', []))} message references."
         if provider == "calendar" and action == "calendar.create":
             event = payload.get("event")
-            if not isinstance(event, dict) or not event.get("summary"):
+            if not isinstance(event, dict) or not event.get("summary") or not isinstance(event.get("start"), dict) or not isinstance(event.get("end"), dict):
                 raise ValueError("calendar.create requires an event with summary and start/end.")
             calendar_id = str(payload.get("calendar_id", "primary"))
             response = await self.http.post(f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events", headers=headers, json=event)
@@ -66,7 +70,8 @@ class IntegrationExecutor:
         raise ValueError(f"Unsupported {provider} action: {action}.")
 
     async def _telegram(self, action: str, payload: dict[str, Any], token: str) -> str:
-        if action != "telegram.send" or not payload.get("chat_id") or not isinstance(payload.get("text"), str):
+        text = payload.get("text")
+        if action != "telegram.send" or not payload.get("chat_id") or not isinstance(text, str) or not text.strip() or len(text) > 4_096:
             raise ValueError("telegram.send requires chat_id and text.")
         response = await self.http.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": payload["chat_id"], "text": payload["text"]})
         response.raise_for_status()
@@ -91,3 +96,36 @@ class IntegrationExecutor:
             response.raise_for_status()
             return "GitHub content commit created."
         raise ValueError(f"Unsupported github action: {action}.")
+
+
+def connected_integration_runner(store, account_id: str, client: httpx.AsyncClient, master_keys: str):
+    """Build the account-scoped adapter shared by chat and task workers.
+
+    This callback reads an already-configured connection only. It never
+    creates credentials or approves writes; external writes remain durable
+    integration intents behind the existing approval workflow.
+    """
+    async def run(provider: str, action: str, payload: dict[str, Any]) -> str:
+        if not master_keys:
+            raise RuntimeError("Integration credentials are not configured on this worker.")
+        connection = store.integration(account_id, provider)
+        credential = store.encrypted_integration_credential(connection["id"])
+        from .vault import SecretVault
+        secret = SecretVault(master_keys).decrypt(credential["encrypted_secret"])
+        if provider in {"gmail", "calendar", "drive"}:
+            from .integration_oauth import refresh_google
+            import time
+            token = json.loads(secret)
+            expires_in = int(token.get("expires_in", 3600))
+            if int(token.get("obtained_at", 0)) + expires_in - 60 <= int(time.time()):
+                token = await refresh_google(token)
+                secret = json.dumps(token)
+                store.store_integration_credential(
+                    account_id,
+                    provider,
+                    "oauth_token",
+                    SecretVault(master_keys).encrypt(secret),
+                )
+        return await IntegrationExecutor(client).execute(provider, action, payload, secret)
+
+    return run
