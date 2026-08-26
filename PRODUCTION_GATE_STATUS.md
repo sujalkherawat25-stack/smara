@@ -12,7 +12,8 @@ has been cut over.
   `https://control-staging.syntarus.com`.
 - The tested Smara Caddy configuration is now installed at `/etc/caddy/Caddyfile`
   after validation, with `/etc/caddy/Caddyfile.pre-smara-20260827` retained for
-  rollback; Caddy reloaded successfully.
+  rollback; Caddy reloaded and then restarted successfully, with `/readyz`
+  still returning 200.
 - Signed gateway authentication was exercised in the staging API container;
   an account-scoped request received the read-only tool catalogue.
 - The Postgres migration runner now serializes concurrent service startup with
