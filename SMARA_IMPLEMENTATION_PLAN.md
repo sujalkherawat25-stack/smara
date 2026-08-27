@@ -404,3 +404,18 @@ focused hosted/desktop release.
 - The native and legacy Work panels now prefer the durable result and filter
   bookkeeping-only markers. Backend regression tests (115), frontend type
   check, and production build pass.
+
+### 2026-08-27 — Production smoke and restore verification
+
+- Rechecked the deployed VM: all Smara services are running, `/health` and
+  `/readyz` return 200, and Postgres reports 18 applied migrations with none
+  pending. Recent API/worker/scheduler logs contain no fatal startup or
+  migration errors.
+- Verified the public UI route (200), the signed account gateway (200), and
+  the unauthenticated task guard (401). A fresh live Postgres backup was
+  checksum-verified and restored into a disposable Postgres 16 container;
+  the disposable resources were removed after the drill.
+- The remaining operational gates are still external: authenticated browser
+  shadowing, a real secret manager and rotation, encrypted off-host backup
+  scheduling, Cloudflare distributed-limit review, Windows restart/reconnect,
+  and any separate sandbox deployment. Sentry remains intentionally skipped.

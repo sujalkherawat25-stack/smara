@@ -46,6 +46,11 @@ has been cut over.
   `GET /v1/tasks/{id}` (rather than the bookkeeping value `recorded`), and
   migration `018_task_result_summary.sql` is applied with **18 applied / 0
   pending**. Legacy rows are backfilled when a meaningful step result exists.
+- A fresh live backup was checksum-verified and restored into a disposable
+  Postgres 16 container. The restore contained both task tables and all **18**
+  recorded Smara migrations; the temporary container and archive were removed
+  after the drill. This validates restore mechanics but is not an off-host
+  backup schedule.
 - Account export/deletion, approval gates, bounded sandbox recipes, safe
   integration writes, dead-letter retention, and Syntarus SDK-only memory
   access are covered by the repository tests.
