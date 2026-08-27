@@ -49,6 +49,10 @@ function eventLabel(event: SmaraEvent): string {
 function latestResult(events: SmaraEvent[]): string | null {
   for (const event of [...events].reverse()) {
     const value = eventPayload(event).result;
+    // `task.completed` carries the bookkeeping marker "recorded". Prefer
+    // the meaningful `step.completed` result instead of showing that marker
+    // as if it were the agent's answer.
+    if (eventType(event) === "task.completed" && value === "recorded") continue;
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return null;
