@@ -114,7 +114,7 @@ Hologram Lab has already been removed from the Smara UI and source.
   SQLite development store and the live Postgres store; stale executors cannot
   finalize a lease recovered by another executor.
 - Reversible `/smara/` and `/smara-api/` staging mount at `ai.syntarus.com`.
-- Local suite (113 Smara backend tests), frontend type-check, VM Docker build,
+- Local suite (114 Smara backend tests), frontend type-check, VM Docker build,
   live health checks, and disposable account/task/research/approval smoke test.
 
 ## 6. Remaining work, in order
@@ -351,7 +351,7 @@ focused hosted/desktop release.
   explicit shorter leases available for tests and recovery drills.
 - Added regression coverage for refresh, cancellation, and stale-executor
   rejection, including the runner's request ordering. The local suite now
-  passes 113 tests.
+  passes 114 tests.
 
 ### 2026-08-27 — Live provider and executor verification
 
