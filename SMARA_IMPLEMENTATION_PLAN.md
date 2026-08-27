@@ -383,3 +383,12 @@ focused hosted/desktop release.
 - User verification: hard-refresh `https://ai.syntarus.com/smara/`, open
   **Work**, select a completed task, and read the **Result** section. Research
   tasks expose **Evidence** and **Artifacts** below it.
+
+### 2026-08-27 — Durable completion result contract
+
+- Terminal `task.completed` events now carry the actual final step result in
+  both SQLite development storage and the inherited Postgres store contract.
+  The old `{"result":"recorded"}` bookkeeping marker no longer hides the
+  answer from the Web UI, CLI, or future clients.
+- Added a regression test; the Smara suite now passes 114 tests. API and worker
+  images were rebuilt on staging and `/health` plus `/readyz` returned 200.
