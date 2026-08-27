@@ -3,6 +3,8 @@
 **Status date:** 2026-08-27
 **Repository:** `sujalkherawat25-stack/smara`
 **Public target:** `https://ai.syntarus.com`
+**Current routing:** Smara is the public root as a reversible beta cutover;
+Memento remains available behind the preserved backend/rollback configuration.
 
 ## 1. Scope reset
 
@@ -191,10 +193,14 @@ Hologram Lab has already been removed from the Smara UI and source.
    compare answer/tool/task/safety/latency/cost results, and verify that
    personal browser/integration steps are handed to the local executor; then
    route one cohort to Smara and rehearse rollback.
-6. After the cohort is stable, make Smara the public agent at
-   `ai.syntarus.com`. Keep Memento source/deployment available for rollback,
-   but stop serving it publicly. MemoryOS continues as the Syntarus memory
-   backend/product.
+6. **Beta cutover completed:** Smara now serves the public root at
+   `ai.syntarus.com`; Memento source/deployment and a dated Caddy configuration
+   remain available for immediate rollback. MemoryOS continues as the Syntarus
+   memory backend/product.
+7. **Pending final promotion:** complete authenticated shadowing, Windows
+   restart/reconnect, operator secret-manager rotation, off-host backup
+   scheduling, and edge-rate-limit review before calling the cutover fully
+   production-ready.
 
 ### Auth acceptance runbook (staging)
 
@@ -229,7 +235,8 @@ For the **focused hosted + desktop vision** (not the deferred backlog):
 | Production operations/cutover | 45% | secrets, observability, shadow run, rollback |
 
 **Focused beta:** roughly 70% complete.
-**Public replacement ready:** roughly 55–60% complete until P0–P2 pass.
+**Public replacement:** Smara is now live as a reversible beta root, but the
+full production-readiness gates are not yet all green.
 
 These are readiness estimates, not lines-of-code measurements. The main risk
 is product consolidation and verification, not rewriting MemoryOS.
@@ -474,3 +481,18 @@ focused hosted/desktop release.
   signed tool/plugin catalogues omit personal integrations, local-only status
   is returned for integration reads, and a credential-write probe is rejected
   before persistence.
+
+### 2026-08-27 — Reversible public root cutover
+
+- Rebuilt the Smara frontend with a root base path and switched Caddy so
+  `https://ai.syntarus.com/` serves Smara. The `/smara/` path remains available
+  as a compatibility route, while `/smara-api/*` continues to reach the
+  independent Smara API.
+- Kept `/v1/*` on the existing Memento/MemoryOS backend for the authenticated
+  session bridge and legacy routes. A dated Caddy copy is retained at
+  `/etc/caddy/Caddyfile.pre-smara-root-cutover-20260827` for immediate rollback;
+  the Memento service and MemoryOS data were not stopped or modified.
+- Public root/UI, auth configuration, unauthenticated guards, Smara readiness,
+  asset delivery, and a Caddy restart all passed after the switch. This is a
+  reversible beta cutover, not a claim that the remaining operational gates
+  are complete.

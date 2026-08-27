@@ -1,8 +1,9 @@
 # Smara production-gate status
 
-Updated 2026-08-27 after the desktop lease reliability audit. This is an operational
-checklist, not a claim that `ai.syntarus.com`
-has been cut over.
+Updated 2026-08-27 after the reversible Smara root cutover. This is an
+operational checklist: Smara is live at the root as a beta deployment, while
+the remaining production gates below are still tracked and Memento rollback is
+preserved.
 
 ## Passed
 
@@ -68,6 +69,12 @@ has been cut over.
   and unchanged root route return 200, signed `/v1/tools` and `/v1/plugins`
   omit personal integrations, `/v1/integrations` reports `mode: local-only`,
   and a credential-write probe returns HTTP 409 without storing the test value.
+- Smara now serves `https://ai.syntarus.com/` as the public root. The frontend
+  was rebuilt with a root base path; `/v1/*` continues to proxy to the existing
+  Memento auth/legacy backend for the session bridge, `/smara-api/*` proxies to
+  Smara, and `/etc/caddy/Caddyfile.pre-smara-root-cutover-20260827` preserves a
+  one-command rollback. The root page, auth config, unauthenticated guards,
+  Smara readiness, and a Caddy restart all passed after the switch.
 
 ## Blocked until deployment credentials/operations are supplied
 
@@ -106,11 +113,12 @@ has been cut over.
 
 ## Cutover rule
 
-Do not replace the existing `ai.syntarus.com` MemoryOS/Memento application yet.
-First inject the missing secrets, configure an off-host encrypted backup, verify
-the gateway/WAF rules, run the full configuration gate and live shadow tests,
-then perform a reversible proxy switch with the previous deployment retained
-for rollback. MemoryOS source, schemas, and stored memories remain untouched.
+The reversible beta root switch is active. Do not delete or stop the existing
+Memento backend until authenticated shadowing, off-host encrypted backups,
+operator-secret rotation, edge-rate-limit review, and Windows executor tests
+are green. If a regression appears, restore
+`/etc/caddy/Caddyfile.pre-smara-root-cutover-20260827`, validate, and reload
+Caddy. MemoryOS source, schemas, and stored memories remain untouched.
 
 Run the repository checker in the deployed image:
 
