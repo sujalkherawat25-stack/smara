@@ -1,7 +1,8 @@
 # Smara
 
 Smara is the independent agent control plane. It owns tasks, approvals, task
-events, executors and integrations. Long-term memory is accessed **only** via
+events, desktop execution requests, and public research. Private integrations
+run on the paired desktop rather than the hosted VM. Long-term memory is accessed **only** via
 the public `syntarus` SDK; this repository must never import MemoryOS internals
 or connect to Qdrant/Neo4j directly.
 
