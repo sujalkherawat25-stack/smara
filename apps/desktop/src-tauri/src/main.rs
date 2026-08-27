@@ -107,6 +107,10 @@ fn log_path() -> PathBuf {
     root.join("Smara").join("logs").join("desktop.log")
 }
 
+fn cli_token_path() -> PathBuf {
+    if let Some(value) = std::env::var_os("SMARA_TOKEN_FILE") { PathBuf::from(value) } else { app_data_dir().join("token.json") }
+}
+
 fn read_json(path: &Path) -> Option<Value> {
     fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok())
 }
@@ -182,7 +186,7 @@ fn process_alive(pid: u32) -> bool {
 }
 
 fn cli_token() -> Result<String, String> {
-    let path = if let Some(value) = std::env::var_os("SMARA_TOKEN_FILE") { PathBuf::from(value) } else { app_data_dir().join("token.json") };
+    let path = cli_token_path();
     let data = read_json(&path).ok_or_else(|| "Sign in with `smara login` before using desktop chat.".to_owned())?;
     data.get("access_token").and_then(Value::as_str).filter(|value| !value.is_empty()).map(str::to_owned).ok_or_else(|| "Smara CLI login is missing; run `smara login` and try again.".to_owned())
 }
@@ -244,7 +248,7 @@ fn current_connection() -> ConnectionState {
     let allowed_roots = configured_list("allowed_roots");
     let terminal_allowlist = configured_list("terminal_allowlist");
     let browser_domains = configured_list("browser_domains");
-    let token_path = if let Some(value) = std::env::var_os("SMARA_TOKEN_FILE") { PathBuf::from(value) } else { app_data_dir().join("token.json") };
+    let token_path = cli_token_path();
     ConnectionState { api_url, workspace, model_profile, paired, executor_id: state.as_ref().and_then(|value| value.get("executor_id")).and_then(Value::as_str).map(str::to_owned), capabilities, allowed_roots, terminal_allowlist, browser_domains, paused: pause_path().exists(), running: pid.is_some(), pid, log_path: log_path().display().to_string(), has_cli_token: read_json(&token_path).map(|value| value.get("access_token").and_then(Value::as_str).map(|token| !token.is_empty()).unwrap_or(false)).unwrap_or(false), last_error: None }
 }
 
@@ -356,7 +360,10 @@ async fn load_tasks() -> Result<Vec<Value>, String> {
     let token = cli_token()?;
     let api_url = current_connection().api_url;
     let response = reqwest::Client::new().get(format!("{api_url}/v1/tasks")).bearer_auth(token).timeout(std::time::Duration::from_secs(12)).send().await.map_err(|error| format!("Could not load hosted tasks: {error}"))?;
-    if response.status() == reqwest::StatusCode::UNAUTHORIZED { return Err("401: Sign in to Smara Web or CLI to load tasks.".to_owned()); }
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        let _ = fs::remove_file(cli_token_path());
+        return Err("401: Your Smara sign-in expired. Sign in again to load tasks.".to_owned());
+    }
     if !response.status().is_success() { return Err(format!("Hosted task list returned HTTP {}", response.status())); }
     let value: Value = response.json().await.map_err(|error| format!("Hosted task list was invalid: {error}"))?;
     Ok(value.as_array().cloned().or_else(|| value.get("tasks").and_then(Value::as_array).cloned()).unwrap_or_default())
@@ -370,16 +377,21 @@ async fn stream_chat(app: AppHandle, args: ChatArgs) -> Result<(), String> {
     if !args.model_profile.trim().is_empty() && args.model_profile.trim() != "default" { payload["model_profile"] = Value::String(args.model_profile.trim().to_owned()); }
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(3600)).build().map_err(|error| format!("Could not prepare chat: {error}"))?;
     let response = client.post(format!("{}/v1/chat/stream", args.api_url.trim_end_matches('/'))).bearer_auth(token).header("Accept", "text/event-stream").json(&payload).send().await.map_err(|error| format!("Could not start chat: {error}"))?;
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        let _ = fs::remove_file(cli_token_path());
+        return Err("Hosted chat returned HTTP 401; your Smara sign-in expired.".to_owned());
+    }
     if !response.status().is_success() { return Err(format!("Hosted chat returned HTTP {}", response.status())); }
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
+    let mut terminal_event = false;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|error| format!("Chat stream disconnected: {error}"))?;
         buffer.push_str(&String::from_utf8_lossy(&chunk));
         while let Some(index) = buffer.find('\n') {
             let line = buffer[..index].trim_end_matches('\r').to_owned();
             buffer.drain(..=index);
-            if let Some(data) = line.strip_prefix("data: ") {
+            if let Some(data) = line.strip_prefix("data:").map(str::trim_start) {
                 if let Ok(value) = serde_json::from_str::<Value>(data) {
                     app.emit("smara-chat-event", value.clone()).map_err(|error| error.to_string())?;
                     if value.get("type").and_then(Value::as_str) == Some("done") || value.get("type").and_then(Value::as_str) == Some("error") { return Ok(()); }
@@ -388,7 +400,10 @@ async fn stream_chat(app: AppHandle, args: ChatArgs) -> Result<(), String> {
         }
     }
     if !buffer.trim().is_empty() {
-        if let Some(data) = buffer.trim().strip_prefix("data: ") { if let Ok(value) = serde_json::from_str::<Value>(data) { app.emit("smara-chat-event", value).map_err(|error| error.to_string())?; } }
+        if let Some(data) = buffer.trim().strip_prefix("data:").map(str::trim_start) { if let Ok(value) = serde_json::from_str::<Value>(data) { terminal_event = matches!(value.get("type").and_then(Value::as_str), Some("done") | Some("error")); app.emit("smara-chat-event", value).map_err(|error| error.to_string())?; } }
+    }
+    if !terminal_event {
+        app.emit("smara-chat-event", json!({"type": "error", "message": "The hosted response ended before Smara finished. Retry this message."})).map_err(|error| error.to_string())?;
     }
     Ok(())
 }

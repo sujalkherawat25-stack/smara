@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChatEvent, ConnectionState, RemoteStatus, TaskSummary } from "./types";
 
+export const isNativeDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
 export const desktop = {
   connection: () => invoke<ConnectionState>("load_connection"),
   saveSettings: (settings: {

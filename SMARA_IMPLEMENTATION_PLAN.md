@@ -157,8 +157,12 @@ Hologram Lab has already been removed from the Smara UI and source.
   SQLite development store and the live Postgres store; stale executors cannot
   finalize a lease recovered by another executor.
 - Reversible `/smara/` and `/smara-api/` staging mount at `ai.syntarus.com`.
-- Local suite (119 Smara backend tests), frontend type-check, VM Docker build,
+- Local suite (120 Smara backend tests), frontend type-check, VM Docker build,
   live health checks, and disposable account/task/research/approval smoke test.
+- Native desktop QA now covers the real Windows WebView shell as well as a
+  browser-safe UI preview. Completed hosted tasks expose their durable final
+  result in Activity, task state auto-refreshes while visible, expired tokens
+  return the user to sign-in, and interrupted SSE streams terminate visibly.
 
 ## 6. Remaining work, in order
 
@@ -244,10 +248,10 @@ For the **focused hosted + desktop vision** (not the deferred backlog):
 | Hosted agent/task/research runtime | 80% | Memento behavior parity and edge cases |
 | CLI hosted client | 85% | parity polish and authenticated workflow tests |
 | Native Smara Web | 70% | authenticated shadow tests and final legacy cleanup |
-| Desktop local executor | 75% | Windows reliability, signing, and update trust |
+| Desktop local executor | 82% | restart drills, signing, and update trust |
 | Production operations/cutover | 45% | secrets, observability, shadow run, rollback |
 
-**Focused beta:** roughly 72% complete.
+**Focused beta:** roughly 74% complete.
 **Public replacement:** Smara is now live as a reversible beta root, but the
 full production-readiness gates are not yet all green.
 

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --port 1420 --configLoader runner",
     "build": "tsc && vite build --configLoader runner",
-    "preview": "vite preview --port 1420",
+    "preview": "vite preview --port 1420 --configLoader runner",
     "tauri": "tauri"
   },
   "dependencies": {

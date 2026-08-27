@@ -69,5 +69,7 @@ Push-Location ../..; .\.venv\Scripts\python.exe -m pytest -q; Pop-Location
 ```
 
 The local Activity screen shows executor state, hosted task status, approvals,
-and the bounded local log. Revoke stops the tracked process before invalidating
+expandable final task results, and the bounded local log. It refreshes while
+visible, and an expired hosted sign-in is cleared rather than appearing as a
+false connected session. Revoke stops the tracked process before invalidating
 the server token, preventing a stale runner from polling during revocation.

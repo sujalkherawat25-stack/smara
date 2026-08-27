@@ -31,7 +31,7 @@ export interface TaskSummary {
   status: string;
   updated_at?: string;
   created_at?: string;
-  result_summary?: string | null;
+  result?: string | null;
 }
 
 export interface ChatEvent {
