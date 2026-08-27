@@ -33,7 +33,7 @@ has been cut over.
   2026-08-25 restore contained all 17 recorded Smara schema versions and 17
   staging tasks. The live database was not modified; backup files are now
   forced to owner-only mode by the script.
-- Repository tests pass locally (**114 tests**) with Python compilation,
+- Repository tests pass locally (**115 tests**) with Python compilation,
   frontend type-check, and production frontend build. The lease-heartbeat
   change is now deployed and the live Postgres desktop claim/heartbeat/
   completion smoke passed. The Work panel also now maps the deployed

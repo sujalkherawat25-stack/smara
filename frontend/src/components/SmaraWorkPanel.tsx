@@ -8,6 +8,7 @@ import {
   getSmaraArtifacts,
   getSmaraEvidence,
   getSmaraEvents,
+  getSmaraTask,
   getSmaraSteps,
   listSmaraTasks,
   streamSmaraEvents,
@@ -47,13 +48,13 @@ function eventLabel(event: SmaraEvent): string {
 }
 
 function latestResult(events: SmaraEvent[]): string | null {
+  const ignored = new Set(["recorded", "completed", "succeeded", "success", "ok"]);
   for (const event of [...events].reverse()) {
     const value = eventPayload(event).result;
     // `task.completed` carries the bookkeeping marker "recorded". Prefer
     // the meaningful `step.completed` result instead of showing that marker
     // as if it were the agent's answer.
-    if (eventType(event) === "task.completed" && value === "recorded") continue;
-    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "string" && value.trim() && !ignored.has(value.trim().toLowerCase())) return value.trim();
   }
   return null;
 }
@@ -96,10 +97,12 @@ export default function SmaraWorkPanel() {
 
   const loadDetails = useCallback(async (taskId: string) => {
     try {
-      const [nextSteps, nextEvents, nextEvidence, nextArtifacts] = await Promise.all([
-        getSmaraSteps(taskId), getSmaraEvents(taskId), getSmaraEvidence(taskId).catch(() => []), getSmaraArtifacts(taskId),
+      const [task, nextSteps, nextEvents, nextEvidence, nextArtifacts] = await Promise.all([
+        getSmaraTask(taskId), getSmaraSteps(taskId), getSmaraEvents(taskId), getSmaraEvidence(taskId).catch(() => []), getSmaraArtifacts(taskId),
       ]);
-      setSteps(nextSteps); setEvents(nextEvents); setEvidence(nextEvidence); setArtifacts(nextArtifacts); setResult(latestResult(nextEvents));
+      setTasks((current) => current.map((item) => item.id === task.id ? task : item));
+      setSteps(nextSteps); setEvents(nextEvents); setEvidence(nextEvidence); setArtifacts(nextArtifacts);
+      setResult(task.result?.trim() || latestResult(nextEvents));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load task details.");
     }

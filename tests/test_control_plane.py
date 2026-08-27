@@ -116,6 +116,24 @@ def test_terminal_event_keeps_the_final_result(tmp_path: Path):
     store.complete_step(step["step_id"], "acct_1", "The final answer is 42.")
     terminal = [event for event in store.events(task["id"], "acct_1") if event["type"] == "task.completed"][-1]
     assert terminal["payload"] == '{"result": "The final answer is 42."}'
+    assert store.get(task["id"], "acct_1")["result_summary"] == "The final answer is 42."
+
+
+def test_legacy_recorded_marker_does_not_hide_recoverable_result(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Legacy", "Recover the answer", False)
+    with store._connect() as con:
+        con.execute(
+            "INSERT INTO task_events VALUES(?,?,?,?,?)",
+            ("evt_legacy", task["id"], "step.completed", '{"result":"Recovered answer"}', "2026-01-01T00:00:00+00:00"),
+        )
+        con.execute(
+            "INSERT INTO task_events VALUES(?,?,?,?,?)",
+            ("evt_marker", task["id"], "task.completed", '{"result":"recorded"}', "2026-01-01T00:00:01+00:00"),
+        )
+    # Re-opening performs the one-time compatibility backfill.
+    reopened = TaskStore(str(tmp_path / "smara.db"))
+    assert reopened.get(task["id"], "acct_1")["result_summary"] == "Recovered answer"
 
 
 def test_failed_step_retries_with_a_bounded_budget(tmp_path: Path):

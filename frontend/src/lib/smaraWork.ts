@@ -8,6 +8,7 @@ export interface SmaraTask {
   objective: string;
   status: "queued" | "running" | "waiting_approval" | "cancelling" | "completed" | "failed" | "cancelled";
   requires_approval: boolean;
+  result?: string | null;
   created_at: string;
   updated_at: string;
 }

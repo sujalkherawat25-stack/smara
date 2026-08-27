@@ -114,7 +114,7 @@ Hologram Lab has already been removed from the Smara UI and source.
   SQLite development store and the live Postgres store; stale executors cannot
   finalize a lease recovered by another executor.
 - Reversible `/smara/` and `/smara-api/` staging mount at `ai.syntarus.com`.
-- Local suite (114 Smara backend tests), frontend type-check, VM Docker build,
+- Local suite (115 Smara backend tests), frontend type-check, VM Docker build,
   live health checks, and disposable account/task/research/approval smoke test.
 
 ## 6. Remaining work, in order
@@ -392,3 +392,15 @@ focused hosted/desktop release.
   answer from the Web UI, CLI, or future clients.
 - Added a regression test; the Smara suite now passes 114 tests. API and worker
   images were rebuilt on staging and `/health` plus `/readyz` returned 200.
+
+### 2026-08-27 — Durable result API and legacy backfill
+
+- Task completion now persists the final textual result on the task row and
+  exposes it as `result` from every task API response. This removes the need
+  for clients to infer the answer from event ordering.
+- Added Postgres migration `018_task_result_summary.sql` plus a local-store
+  compatibility backfill. Historical lifecycle markers such as `recorded`
+  are ignored while useful `step.completed` results are recovered.
+- The native and legacy Work panels now prefer the durable result and filter
+  bookkeeping-only markers. Backend regression tests (115), frontend type
+  check, and production build pass.

@@ -50,6 +50,7 @@ class TaskView(BaseModel):
     objective: str
     status: TaskStatus
     requires_approval: bool
+    result: str | None = Field(default=None, max_length=20_000)
     created_at: datetime
     updated_at: datetime
 

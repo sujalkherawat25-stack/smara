@@ -32,7 +32,7 @@ class TaskStore:
               id TEXT PRIMARY KEY, account_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
               title TEXT NOT NULL, objective TEXT NOT NULL, status TEXT NOT NULL,
               requires_approval INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-              cancel_requested INTEGER NOT NULL DEFAULT 0);
+              cancel_requested INTEGER NOT NULL DEFAULT 0, result_summary TEXT);
             CREATE TABLE IF NOT EXISTS task_events (
               id TEXT PRIMARY KEY, task_id TEXT NOT NULL, type TEXT NOT NULL,
               payload TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -153,6 +153,32 @@ class TaskStore:
             task_columns = {row[1] for row in c.execute("PRAGMA table_info(tasks)")}
             if "cancel_requested" not in task_columns:
                 c.execute("ALTER TABLE tasks ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
+            if "result_summary" not in task_columns:
+                c.execute("ALTER TABLE tasks ADD COLUMN result_summary TEXT")
+            # Recover useful results for local databases created before the
+            # durable task-result column existed. Lifecycle markers such as
+            # "recorded" are deliberately ignored.
+            legacy_tasks = c.execute(
+                "SELECT id FROM tasks WHERE result_summary IS NULL OR TRIM(result_summary)=''"
+            ).fetchall()
+            ignored_results = {"recorded", "completed", "succeeded", "success", "ok"}
+            for task in legacy_tasks:
+                events = c.execute(
+                    "SELECT payload FROM task_events WHERE task_id=? ORDER BY created_at DESC, id DESC",
+                    (task["id"],),
+                ).fetchall()
+                recovered = None
+                for event in events:
+                    try:
+                        payload = json.loads(event["payload"] or "{}")
+                    except (TypeError, json.JSONDecodeError):
+                        continue
+                    value = payload.get("result") if isinstance(payload, dict) else None
+                    if isinstance(value, str) and value.strip() and value.strip().lower() not in ignored_results:
+                        recovered = value.strip()[:2_000]
+                        break
+                if recovered:
+                    c.execute("UPDATE tasks SET result_summary=? WHERE id=?", (recovered, task["id"]))
             action_columns = {row[1] for row in c.execute("PRAGMA table_info(integration_action_log)")}
             for name, definition in (("payload", "TEXT NOT NULL DEFAULT '{}'"), ("approval_note", "TEXT NOT NULL DEFAULT ''"), ("lease_owner", "TEXT"), ("lease_expires_at", "TEXT"), ("attempts", "INTEGER NOT NULL DEFAULT 0"), ("max_attempts", "INTEGER NOT NULL DEFAULT 3"), ("retry_at", "TEXT"), ("last_error", "TEXT"), ("result_summary", "TEXT")):
                 if name not in action_columns:
@@ -634,12 +660,13 @@ class TaskStore:
             pending = c.execute("SELECT COUNT(*) AS count FROM task_steps WHERE task_run_id=? AND status!='completed'", (run_id,)).fetchone()["count"]
             if pending == 0:
                 c.execute("UPDATE task_runs SET status='completed' WHERE id=?", (run_id,))
-                c.execute("UPDATE tasks SET status='completed',updated_at=? WHERE id=?", (now, task_id))
+                final_result = str(result)[:2_000]
+                c.execute("UPDATE tasks SET status='completed',result_summary=?,updated_at=? WHERE id=?", (final_result, now, task_id))
                 # Keep the final answer on the terminal event as well as the
                 # step event. This makes the durable task API self-contained
                 # for the Work panel, CLI, and future clients; "recorded" was
                 # only a bookkeeping marker and hid the useful result.
-                task_result = json.dumps({"result": str(result)[:2_000]}, ensure_ascii=False)
+                task_result = json.dumps({"result": final_result}, ensure_ascii=False)
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.completed", task_result, now))
 
     def fail_step(self, step_id: str, account_id: str, error: str, retry_delay_seconds: int = 5, *, retryable: bool = True) -> str:

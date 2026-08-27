@@ -169,6 +169,9 @@ def view(row: dict) -> TaskView:
     return TaskView(**{
         **row,
         "requires_approval": bool(row["requires_approval"]),
+        # `result_summary` is the durable final answer. Keep the wire name
+        # short and provider-neutral for Web, CLI, and future clients.
+        "result": row.get("result_summary") or None,
         "created_at": _as_datetime(row["created_at"]),
         "updated_at": _as_datetime(row["updated_at"]),
     })
