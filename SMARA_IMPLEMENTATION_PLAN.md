@@ -469,3 +469,8 @@ focused hosted/desktop release.
   LLM/search/Syntarus keys remain server-side as planned.
 - Added regression coverage for the local-only tool/plugin catalogue and
   fail-closed integration worker; the Smara suite now passes 118 tests.
+- Deployed commit `0775f71` to staging. Live checks confirm all seven services
+  are running, 18 migrations are applied, public routes remain healthy, the
+  signed tool/plugin catalogues omit personal integrations, local-only status
+  is returned for integration reads, and a credential-write probe is rejected
+  before persistence.

@@ -63,6 +63,11 @@ has been cut over.
   claiming or decrypting old rows. Browser, file, terminal, and future private
   integrations are local-desktop work; the VM retains only coordination,
   monitoring, operator-owned provider keys, and public research.
+- This policy is deployed on VM commit `0775f71`: all seven services are
+  running, migrations report **18 applied / 0 pending**, the public Smara UI/API
+  and unchanged root route return 200, signed `/v1/tools` and `/v1/plugins`
+  omit personal integrations, `/v1/integrations` reports `mode: local-only`,
+  and a credential-write probe returns HTTP 409 without storing the test value.
 
 ## Blocked until deployment credentials/operations are supplied
 
