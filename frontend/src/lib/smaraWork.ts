@@ -26,8 +26,12 @@ export interface SmaraStep {
 export interface SmaraEvent {
   id: string;
   task_id: string;
-  event_type: string;
-  message: string;
+  /** Stored by the API as `type` and a JSON `payload`. */
+  type?: string;
+  payload?: string | Record<string, unknown>;
+  /** Legacy aliases accepted while older deployments are being drained. */
+  event_type?: string;
+  message?: string;
   created_at: string;
 }
 

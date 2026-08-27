@@ -23,6 +23,37 @@ const statusColor: Record<string, string> = {
   completed: "#34d399", failed: "#f87171", cancelled: "#94a3b8", cancelling: "#f59e0b",
 };
 
+function eventType(event: SmaraEvent): string {
+  return event.type || event.event_type || "task event";
+}
+
+function eventPayload(event: SmaraEvent): Record<string, unknown> {
+  if (event.payload && typeof event.payload === "object") return event.payload;
+  if (typeof event.payload !== "string" || !event.payload.trim()) return {};
+  try {
+    const parsed: unknown = JSON.parse(event.payload);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch { return {}; }
+}
+
+function eventLabel(event: SmaraEvent): string {
+  if (event.message?.trim()) return event.message;
+  const type = eventType(event);
+  const payload = eventPayload(event);
+  if (typeof payload.source === "string") return `${type.replaceAll(".", " ")} · ${payload.source}`;
+  return type.replaceAll(".", " ");
+}
+
+function latestResult(events: SmaraEvent[]): string | null {
+  for (const event of [...events].reverse()) {
+    const value = eventPayload(event).result;
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
 export default function SmaraWorkPanel() {
   const [tasks, setTasks] = useState<SmaraTask[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -30,6 +61,7 @@ export default function SmaraWorkPanel() {
   const [events, setEvents] = useState<SmaraEvent[]>([]);
   const [evidence, setEvidence] = useState<SmaraEvidence[]>([]);
   const [artifacts, setArtifacts] = useState<SmaraArtifact[]>([]);
+  const [result, setResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +95,7 @@ export default function SmaraWorkPanel() {
       const [nextSteps, nextEvents, nextEvidence, nextArtifacts] = await Promise.all([
         getSmaraSteps(taskId), getSmaraEvents(taskId), getSmaraEvidence(taskId).catch(() => []), getSmaraArtifacts(taskId),
       ]);
-      setSteps(nextSteps); setEvents(nextEvents); setEvidence(nextEvidence); setArtifacts(nextArtifacts);
+      setSteps(nextSteps); setEvents(nextEvents); setEvidence(nextEvidence); setArtifacts(nextArtifacts); setResult(latestResult(nextEvents));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load task details.");
     }
@@ -71,7 +103,7 @@ export default function SmaraWorkPanel() {
 
   useEffect(() => { void refresh(false); }, [refresh]);
   useEffect(() => {
-    if (!selectedId) { setSteps([]); setEvents([]); setEvidence([]); setArtifacts([]); return; }
+    if (!selectedId) { setSteps([]); setEvents([]); setEvidence([]); setArtifacts([]); setResult(null); return; }
     void loadDetails(selectedId);
     const active = selected?.status === "queued" || selected?.status === "running" || selected?.status === "waiting_approval";
     if (!active) return;
@@ -177,9 +209,11 @@ export default function SmaraWorkPanel() {
             {selected.status === "waiting_approval" && <div className="mt-4 p-3 rounded-lg flex items-center justify-between gap-2" style={{ background: "rgba(245,158,11,.08)", border: "1px solid rgba(245,158,11,.3)" }}><span className="text-[12px]" style={{ color: "#fbbf24" }}>This task is waiting for your approval.</span><div className="flex gap-2"><button disabled={busy} onClick={() => void decide(true)} className="px-2.5 py-1.5 rounded-md text-[11px]" style={{ background: "#34d399", color: "#06251a" }}><Check size={12} className="inline mr-1" />Approve</button><button disabled={busy} onClick={() => void decide(false)} className="px-2.5 py-1.5 rounded-md text-[11px]" style={{ background: "transparent", color: "#fca5a5", border: "1px solid rgba(248,113,113,.35)" }}><X size={12} className="inline mr-1" />Deny</button></div></div>}
             {!["completed", "failed", "cancelled"].includes(selected.status) && selected.status !== "waiting_approval" && <button disabled={busy} onClick={() => void cancel()} className="mt-3 px-2.5 py-1.5 rounded-md text-[11px]" style={{ color: "#fca5a5", border: "1px solid rgba(248,113,113,.35)" }}><Square size={11} className="inline mr-1" />Cancel task</button>}
             <Section title="Plan"><div className="flex flex-col gap-1.5">{steps.map((step) => <div key={step.id} className="flex items-center gap-2 text-[11px]"><span style={{ color: statusColor[step.status] || "var(--text-muted)" }}>●</span><span style={{ color: "var(--text-secondary)" }}>{step.name}</span><span className="ml-auto" style={{ color: "var(--text-muted)" }}>{step.status}</span></div>)}</div></Section>
-            <Section title="Activity"><div className="flex flex-col gap-1.5">{events.slice(-12).map((event) => <div key={event.id} className="text-[11px]" style={{ color: "var(--text-secondary)" }}><span style={{ color: "var(--text-muted)" }}>{new Date(event.created_at).toLocaleTimeString()}</span> · {event.message || event.event_type}</div>)}{!events.length && <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>No events yet.</span>}</div></Section>
-            {evidence.length > 0 && <Section title={`Evidence (${evidence.length})`}><div className="flex flex-col gap-2">{evidence.map((item) => <a key={item.id} href={item.url} target="_blank" rel="noreferrer" className="text-[11px]" style={{ color: "var(--accent)" }}><FileText size={12} className="inline mr-1" />{item.citation_label || item.title || item.url}<span className="block ml-4" style={{ color: "var(--text-muted)" }}>{item.status}{item.confidence != null ? ` · ${Math.round(item.confidence * 100)}% confidence` : ""}</span></a>)}</div></Section>}
-            {artifacts.length > 0 && <Section title={`Artifacts (${artifacts.length})`}><div className="flex flex-col gap-1">{artifacts.map((artifact) => <div key={artifact.id} className="text-[11px]" style={{ color: "var(--text-secondary)" }}><FileText size={12} className="inline mr-1" />{artifact.name} <span style={{ color: "var(--text-muted)" }}>({artifact.kind})</span></div>)}</div></Section>}
+            {result && <Section title="Result"><div className="rounded-lg p-3 text-[12px] leading-6 whitespace-pre-wrap break-words" style={{ background: "var(--bg-base)", border: "1px solid var(--border-dim)", color: "var(--text-primary)" }}>{result}</div></Section>}
+            {selected.status === "completed" && !result && <Section title="Result"><span className="text-[11px]" style={{ color: "var(--text-muted)" }}>The task completed without a textual result.</span></Section>}
+            <Section title="Activity"><div className="flex flex-col gap-1.5">{events.slice(-12).map((event) => <div key={event.id} className="text-[11px]" style={{ color: "var(--text-secondary)" }}><span style={{ color: "var(--text-muted)" }}>{new Date(event.created_at).toLocaleTimeString()}</span> · {eventLabel(event)}</div>)}{!events.length && <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>No events yet.</span>}</div></Section>
+            {evidence.length > 0 && <Section title={`Evidence (${evidence.length})`}><div className="flex flex-col gap-2">{evidence.map((item) => <details key={item.id} className="rounded-lg p-2" style={{ background: "var(--bg-base)", border: "1px solid var(--border-dim)" }}><summary className="cursor-pointer text-[11px]" style={{ color: "var(--accent)" }}><FileText size={12} className="inline mr-1" />{item.citation_label || item.title || item.url}<span className="ml-2" style={{ color: "var(--text-muted)" }}>{item.status}{item.confidence != null ? ` · ${Math.round(item.confidence * 100)}% confidence` : ""}</span></summary><a href={item.url} target="_blank" rel="noreferrer" className="block mt-2 text-[10px] break-all" style={{ color: "var(--accent)" }}>{item.url}</a>{item.excerpt && <p className="mt-2 text-[11px] leading-5" style={{ color: "var(--text-secondary)" }}>{item.excerpt}</p>}{item.verification_notes && <p className="mt-1 text-[10px]" style={{ color: "var(--text-muted)" }}>{item.verification_notes}</p>}</details>)}</div></Section>}
+            {artifacts.length > 0 && <Section title={`Artifacts (${artifacts.length})`}><div className="flex flex-col gap-2">{artifacts.map((artifact) => <details key={artifact.id} className="rounded-lg p-2" style={{ background: "var(--bg-base)", border: "1px solid var(--border-dim)" }}><summary className="cursor-pointer text-[11px]" style={{ color: "var(--text-secondary)" }}><FileText size={12} className="inline mr-1" />{artifact.name} <span style={{ color: "var(--text-muted)" }}>({artifact.kind})</span></summary>{artifact.content ? <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-5" style={{ color: "var(--text-secondary)" }}>{artifact.content}</pre> : <p className="mt-2 text-[10px]" style={{ color: "var(--text-muted)" }}>Artifact content is stored by Smara but is not available inline.</p>}</details>)}</div></Section>}
             {error && <p className="mt-3 text-[11px] flex items-center gap-1" style={{ color: "#f87171" }}><CircleAlert size={12} />{error}</p>}
           </div>
         )}
