@@ -41,6 +41,11 @@ has been cut over.
   expands evidence and artifact details instead of rendering timestamps only.
   The frontend-only deployment was rebuilt and all Smara services remained
   running.
+- Durable task results are now part of the task API contract. A live
+  account-scoped task smoke after deployment returned its final text through
+  `GET /v1/tasks/{id}` (rather than the bookkeeping value `recorded`), and
+  migration `018_task_result_summary.sql` is applied with **18 applied / 0
+  pending**. Legacy rows are backfilled when a meaningful step result exists.
 - Account export/deletion, approval gates, bounded sandbox recipes, safe
   integration writes, dead-letter retention, and Syntarus SDK-only memory
   access are covered by the repository tests.
