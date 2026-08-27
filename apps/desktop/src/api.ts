@@ -13,6 +13,7 @@ export const desktop = {
     browser_domains: string[];
   }) => invoke<ConnectionState>("save_settings", { settings }),
   checkConnection: (apiUrl: string) => invoke<RemoteStatus>("check_connection", { apiUrl }),
+  login: (apiUrl: string) => invoke<string>("login_cli", { apiUrl }),
   pair: (args: {
     api_url: string;
     code: string;

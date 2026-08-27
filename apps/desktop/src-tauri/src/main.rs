@@ -187,6 +187,48 @@ fn cli_token() -> Result<String, String> {
     data.get("access_token").and_then(Value::as_str).filter(|value| !value.is_empty()).map(str::to_owned).ok_or_else(|| "Smara CLI login is missing; run `smara login` and try again.".to_owned())
 }
 
+#[tauri::command]
+async fn login_cli(api_url: String) -> Result<String, String> {
+    let api_url = api_url.trim().trim_end_matches('/').to_owned();
+    if !(api_url.starts_with("http://") || api_url.starts_with("https://")) {
+        return Err("Smara API URL must start with http:// or https://".to_owned());
+    }
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build().map_err(|error| error.to_string())?;
+    let request = client.get(format!("{api_url}/v1/cli/device/request")).query(&[("name", "Smara Desktop")]).send().await.map_err(|error| format!("Could not start sign-in: {error}"))?;
+    if !request.status().is_success() {
+        return Err(format!("Smara sign-in could not start (HTTP {})", request.status()));
+    }
+    let device: Value = request.json().await.map_err(|error| format!("Smara sign-in returned invalid data: {error}"))?;
+    let device_code = device.get("device_code").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| "Smara sign-in did not return a device code.".to_owned())?;
+    let auth_url = format!("{api_url}/app/?cli_device={device_code}");
+    if !open::that(&auth_url).is_ok() {
+        return Err(format!("Open this URL to finish sign-in: {auth_url}"));
+    }
+    let interval = device.get("interval").and_then(Value::as_u64).unwrap_or(2).clamp(1, 10);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    loop {
+        if std::time::Instant::now() >= deadline {
+            return Err("Sign-in timed out. Choose Sign in again to create a fresh request.".to_owned());
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+        let response = client.get(format!("{api_url}/v1/cli/device/poll")).query(&[("device_code", device_code)]).send().await.map_err(|error| format!("Sign-in polling failed: {error}"))?;
+        if !response.status().is_success() {
+            return Err(format!("Smara sign-in polling returned HTTP {}", response.status()));
+        }
+        let result: Value = response.json().await.map_err(|error| format!("Smara sign-in returned invalid data: {error}"))?;
+        match result.get("status").and_then(Value::as_str) {
+            Some("pending") => continue,
+            Some("expired") | Some("used") => return Err("That sign-in request expired or was already used. Try again.".to_owned()),
+            Some("approved") => {
+                let token = result.get("access_token").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| "Smara sign-in did not return a token.".to_owned())?;
+                write_json(&app_data_dir().join("token.json"), &json!({"access_token": token, "token_type": "bearer", "expires_in": result.get("expires_in").cloned().unwrap_or(Value::Null)}))?;
+                return Ok("Smara Desktop is signed in.".to_owned());
+            }
+            _ => return Err("Smara returned an unknown sign-in status.".to_owned()),
+        }
+    }
+}
+
 fn current_connection() -> ConnectionState {
     let state = read_json(&state_path());
     let preferences = read_json(&preferences_path());
@@ -356,7 +398,7 @@ fn open_web() -> Result<(), String> { open::that("https://ai.syntarus.com").map_
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, stream_chat, open_web])
+        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, stream_chat, open_web])
         .run(tauri::generate_context!())
         .expect("error while running Smara Desktop");
 }

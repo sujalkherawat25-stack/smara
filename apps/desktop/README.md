@@ -23,7 +23,10 @@ The desktop shell finds the Python executor at
 `$env:SMARA_REPO_ROOT\.venv\Scripts\smara-desktop.exe`. You can point to an
 explicit executable instead with `$env:SMARA_DESKTOP_EXECUTABLE`.
 
-Before chat/task history can load, sign in once with the hosted CLI:
+Before chat/task history can load, choose **Sign in** in the app's Settings.
+The app opens the hosted Smara approval page and stores the short-lived device
+token in the local Smara profile. For headless/CLI workflows, the equivalent
+command remains:
 
 ```powershell
 smara --api https://ai.syntarus.com/smara-api login
