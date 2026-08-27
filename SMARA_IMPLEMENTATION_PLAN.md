@@ -149,6 +149,8 @@ Hologram Lab has already been removed from the Smara UI and source.
   embeds it as a Tauri resource, and produces MSI/NSIS installers. The
   artifacts are unsigned beta packages; signing, update trust, and restart
   drills remain release gates.
+- Desktop onboarding includes the hosted browser device-approval flow, so a
+  user can sign in from the app without first installing or invoking the CLI.
 - Hosted personal integrations are disabled by default; the worker and tool
   catalogue fail closed unless an operator explicitly opts in.
 - Desktop step leases now refresh immediately before completion on both the
