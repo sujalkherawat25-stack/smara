@@ -892,6 +892,21 @@ class TaskStore:
         if result.rowcount != 1:
             raise KeyError(executor_id)
 
+    def revoke_executor_with_token(self, executor_id: str, token: str) -> None:
+        """Allow a paired desktop to revoke only its own bearer token.
+
+        The normal account endpoint remains browser/CLI-authenticated. A
+        desktop has no account assertion, so self-revoke is deliberately
+        constrained to the executor id + hashed token it already possesses.
+        """
+        with self._connect() as c:
+            result = c.execute(
+                "UPDATE desktop_executors SET status='revoked' WHERE id=? AND token_hash=? AND status='active'",
+                (executor_id, hashlib.sha256(token.encode()).hexdigest()),
+            )
+        if result.rowcount != 1:
+            raise KeyError(executor_id)
+
     def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 180) -> dict | None:
         executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
         with self._connect() as c:

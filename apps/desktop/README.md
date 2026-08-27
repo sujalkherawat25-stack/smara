@@ -1,0 +1,70 @@
+# Smara Desktop
+
+Smara Desktop is the Windows-native local companion for Smara. It is a thin
+Tauri shell around the existing outbound-only `smara-desktop` executor:
+
+- Smara's hosted service remains the one agent brain, task graph, memory, and
+  approval system.
+- This PC owns browser sessions, files, terminal access, and local artifacts.
+- Nothing local runs because a chat message merely asked for it. The hosted
+  task must be leased to this paired device and pass the approval gate first.
+
+## Run from the repository
+
+From `smara/apps/desktop`:
+
+```powershell
+npm install
+$env:SMARA_REPO_ROOT = (Resolve-Path ../..).Path
+npm run tauri dev
+```
+
+The desktop shell finds the Python executor at
+`$env:SMARA_REPO_ROOT\.venv\Scripts\smara-desktop.exe`. You can point to an
+explicit executable instead with `$env:SMARA_DESKTOP_EXECUTABLE`.
+
+Before chat/task history can load, sign in once with the hosted CLI:
+
+```powershell
+smara --api https://ai.syntarus.com/smara-api login
+```
+
+The CLI token is read from `%APPDATA%\Smara\token.json`; the desktop never
+shows or sends it to the UI. Pairing is completed from Smara Web's Desktop
+settings, then the one-time code is pasted into the app. Start with only an
+approved folder and add terminal/browser allowlists only when needed.
+
+## Build the Windows package
+
+```powershell
+..\..\scripts\build-smara-desktop.ps1
+```
+
+The release artifacts are written under `src-tauri\target\release\bundle\`
+(MSI and NSIS installer). The build script creates a PyInstaller standalone
+executor and embeds it as an installer resource, so the packaged app does not
+need the repository or a Python installation to run approved local work. A
+publisher certificate and signed auto-update channel are still production
+hardening tasks; the app intentionally does not silently download code or
+dependencies.
+
+## Provider/model profiles
+
+The **Model profile** field is only a routing hint such as `default` or
+`sarvam`. Provider URLs and API keys stay in the Smara server configuration
+(or a future explicitly local provider profile); never commit a Sarvam key or
+put a personal credential in this repository. The app forwards the selected
+profile to Smara's hosted chat endpoint and displays connection failures
+without exposing upstream secrets.
+
+## Verification
+
+```powershell
+npm run build
+Push-Location src-tauri; cargo check; Pop-Location
+Push-Location ../..; .\.venv\Scripts\python.exe -m pytest -q; Pop-Location
+```
+
+The local Activity screen shows executor state, hosted task status, approvals,
+and the bounded local log. Revoke stops the tracked process before invalidating
+the server token, preventing a stale runner from polling during revocation.

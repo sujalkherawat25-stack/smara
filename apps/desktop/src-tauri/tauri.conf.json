@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Smara Desktop",
+  "version": "0.1.0",
+  "identifier": "com.syntarus.smara.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Smara Desktop",
+        "width": 1240,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 620,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http: https:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.ico", "icons/icon.icns", "icons/icon.png"],
+    "resources": ["resources/smara-desktop.exe"],
+    "category": "Utility",
+    "shortDescription": "A private, approval-first desktop companion for Smara",
+    "longDescription": "Smara Desktop keeps local files, browser sessions, and terminal work on your PC while the hosted Smara agent plans and monitors approved tasks."
+  }
+}

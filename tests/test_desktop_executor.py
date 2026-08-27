@@ -173,3 +173,13 @@ def test_desktop_revoke_is_account_scoped_and_immediate(tmp_path: Path):
         assert False, "revoked desktop credentials must stop working immediately"
     except KeyError:
         pass
+
+
+def test_desktop_self_revoke_requires_its_own_token(tmp_path: Path):
+    store = TaskStore(tmp_path / "smara.db")
+    desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop", ["local_file_read"])["code"])
+    with pytest.raises(KeyError):
+        store.revoke_executor_with_token(desktop["executor_id"], "wrong-token")
+    store.revoke_executor_with_token(desktop["executor_id"], desktop["token"])
+    with pytest.raises(KeyError):
+        store.executor(desktop["executor_id"], desktop["token"])

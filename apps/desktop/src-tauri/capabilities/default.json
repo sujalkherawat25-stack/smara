@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Smara Desktop's minimal command and event permissions",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

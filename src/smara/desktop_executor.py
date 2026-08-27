@@ -414,6 +414,7 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--once", action="store_true", help="claim at most one step and exit")
     parser.add_argument("--pause", action="store_true", help="pause claims for the configured state")
     parser.add_argument("--resume", action="store_true", help="resume claims for the configured state")
+    parser.add_argument("--revoke", action="store_true", help="revoke this paired desktop on the hosted service and remove local state")
     parser.add_argument("--status", action="store_true", help="print safe local executor status")
     parser.add_argument("--log", type=Path, default=default_log_path(), help="rotating desktop log path")
     args = parser.parse_args(argv)
@@ -431,6 +432,16 @@ def _main(argv: list[str] | None = None) -> int:
     if args.resume:
         _pause_path(args.state).unlink(missing_ok=True)
         print("Smara Desktop is active.")
+        return 0
+    if args.revoke:
+        state = _load_state(args.state)
+        with httpx.Client(timeout=20, follow_redirects=False) as client:
+            response = client.delete(f"{state['smara_url']}/v1/executors/{state['executor_id']}/self-revoke", headers=_headers(state))
+            if response.status_code not in {200, 204}:
+                response.raise_for_status()
+        _pause_path(args.state).unlink(missing_ok=True)
+        args.state.unlink(missing_ok=True)
+        print("Smara Desktop was revoked and local pairing state was removed.")
         return 0
     if args.status:
         state = _load_state(args.state)

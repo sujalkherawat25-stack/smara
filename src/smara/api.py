@@ -533,6 +533,16 @@ async def revoke_executor(executor_id: str, user: str = Depends(account_id)):
     except KeyError as exc:
         raise HTTPException(404, "Desktop executor was not found or is already revoked.") from exc
 
+@app.delete("/v1/executors/{executor_id}/self-revoke", status_code=204)
+async def self_revoke_executor(executor_id: str, identity: tuple[str, str] = Depends(executor_identity)):
+    paired_executor_id, token = identity
+    if paired_executor_id != executor_id:
+        raise HTTPException(403, "An executor may revoke only itself.")
+    try:
+        store.revoke_executor_with_token(executor_id, token)
+    except KeyError as exc:
+        raise HTTPException(404, "Desktop executor was not found or is already revoked.") from exc
+
 @app.post("/v1/executors/claim")
 async def claim_executor(identity: tuple[str, str] = Depends(executor_identity)):
     try: return {"step": store.claim_for_executor(*identity)}

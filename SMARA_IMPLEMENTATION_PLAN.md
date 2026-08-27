@@ -140,6 +140,15 @@ Hologram Lab has already been removed from the Smara UI and source.
 - Syntarus SDK memory retrieval/write-back adapter; MemoryOS core untouched.
 - CLI beta foundation using the hosted API.
 - Desktop pairing/executor foundation with allowlists and safety contracts.
+- Windows-native Smara Desktop beta shell (Tauri + React) around that executor:
+  hosted chat streaming, live activity, task status, pairing, permissions,
+  pause/resume/stop/revoke, reconnect-friendly refresh, and bounded local log
+  visibility. The shell keeps the executor and hosted API as the only runtime
+  paths; it does not add a second agent or memory store.
+- Repeatable Windows packaging now builds a PyInstaller standalone executor,
+  embeds it as a Tauri resource, and produces MSI/NSIS installers. The
+  artifacts are unsigned beta packages; signing, update trust, and restart
+  drills remain release gates.
 - Hosted personal integrations are disabled by default; the worker and tool
   catalogue fail closed unless an operator explicitly opts in.
 - Desktop step leases now refresh immediately before completion on both the
@@ -174,8 +183,10 @@ Hologram Lab has already been removed from the Smara UI and source.
    capability denial, revoke, retries, and duplicate prevention on Windows.
    Confirm the VM cannot claim a `desktop` step and that local browser/file/
    terminal work runs only on the paired PC.
-2. Package a signed installer with safe update, auto-start opt-in, bounded
-   logs, visible pause/revoke, and clear pairing recovery.
+2. The native Tauri shell and self-contained unsigned MSI/NSIS packages now
+   build locally. Remaining: sign the installer and executor, add a trusted
+   update channel, test auto-start opt-in, bounded logs, visible pause/revoke,
+   and clear pairing recovery on clean Windows machines.
 3. Connect only approved terminal/browser/file steps to an isolated sandbox;
    unrestricted arbitrary code is not a production capability.
 
@@ -231,10 +242,10 @@ For the **focused hosted + desktop vision** (not the deferred backlog):
 | Hosted agent/task/research runtime | 80% | Memento behavior parity and edge cases |
 | CLI hosted client | 85% | parity polish and authenticated workflow tests |
 | Native Smara Web | 70% | authenticated shadow tests and final legacy cleanup |
-| Desktop local executor | 70% | Windows reliability and packaging |
+| Desktop local executor | 75% | Windows reliability, signing, and update trust |
 | Production operations/cutover | 45% | secrets, observability, shadow run, rollback |
 
-**Focused beta:** roughly 70% complete.
+**Focused beta:** roughly 72% complete.
 **Public replacement:** Smara is now live as a reversible beta root, but the
 full production-readiness gates are not yet all green.
 

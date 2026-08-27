@@ -177,6 +177,15 @@ will turn an approved request into a local action and return only a bounded
 result/proof. Public research tools are different: they fetch public URLs with
 the operator's server-side search key and cannot see a user's browser session.
 
+### Native Smara Desktop (beta)
+
+`apps/desktop` contains the Windows-native Tauri companion for this executor.
+It provides one lightweight home for hosted chat, task status, local activity,
+pairing, permissions, pause/resume, logs, and revoke. It reuses the Python
+executor and the same hosted API; it does not create a second agent brain or
+memory store. See [`apps/desktop/README.md`](apps/desktop/README.md) for the
+developer run/build commands and the current packaging boundary.
+
 The older hosted integration worker and encrypted credential tables remain as a
 rollback/migration path, but `SMARA_HOSTED_USER_INTEGRATIONS_ENABLED=false`
 keeps them inactive. Never put a user's provider token in the hosted `.env` or
