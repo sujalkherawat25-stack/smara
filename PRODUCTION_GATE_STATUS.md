@@ -36,7 +36,11 @@ has been cut over.
 - Repository tests pass locally (**113 tests**) with Python compilation,
   frontend type-check, and production frontend build. The lease-heartbeat
   change is now deployed and the live Postgres desktop claim/heartbeat/
-  completion smoke passed.
+  completion smoke passed. The Work panel also now maps the deployed
+  `type`/`payload` task-event contract, shows the final task result, and
+  expands evidence and artifact details instead of rendering timestamps only.
+  The frontend-only deployment was rebuilt and all Smara services remained
+  running.
 - Account export/deletion, approval gates, bounded sandbox recipes, safe
   integration writes, dead-letter retention, and Syntarus SDK-only memory
   access are covered by the repository tests.

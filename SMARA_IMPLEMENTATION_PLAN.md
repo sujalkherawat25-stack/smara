@@ -370,3 +370,16 @@ focused hosted/desktop release.
 - A public authenticated burst smoke returned 120 HTTP 200 responses followed
   by 5 HTTP 429 responses, confirming the Redis-backed Smara limiter through the
   deployed edge without exposing a real account credential.
+
+### 2026-08-27 — Work result visibility fix
+
+- Fixed the native Work panel to consume the actual Smara task-event contract
+  (`type`, JSON `payload`, and `created_at`). Completed tasks now show their
+  final textual result, activity entries show event names and useful details,
+  and research evidence/artifacts can be expanded in place.
+- Frontend type-check and production build passed. Only the frontend was
+  rebuilt on staging; the Smara API, workers, databases, and existing root
+  Memento deployment were not changed.
+- User verification: hard-refresh `https://ai.syntarus.com/smara/`, open
+  **Work**, select a completed task, and read the **Result** section. Research
+  tasks expose **Evidence** and **Artifacts** below it.
