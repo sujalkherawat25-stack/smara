@@ -144,7 +144,7 @@ Hologram Lab has already been removed from the Smara UI and source.
   SQLite development store and the live Postgres store; stale executors cannot
   finalize a lease recovered by another executor.
 - Reversible `/smara/` and `/smara-api/` staging mount at `ai.syntarus.com`.
-- Local suite (118 Smara backend tests), frontend type-check, VM Docker build,
+- Local suite (119 Smara backend tests), frontend type-check, VM Docker build,
   live health checks, and disposable account/task/research/approval smoke test.
 
 ## 6. Remaining work, in order
@@ -468,7 +468,7 @@ focused hosted/desktop release.
   is required only for a deliberate legacy hosted-mode opt-in. Operator-owned
   LLM/search/Syntarus keys remain server-side as planned.
 - Added regression coverage for the local-only tool/plugin catalogue and
-  fail-closed integration worker; the Smara suite now passes 118 tests.
+  fail-closed integration worker; the Smara suite now passes 119 tests.
 - Deployed commit `0775f71` to staging. Live checks confirm all seven services
   are running, 18 migrations are applied, public routes remain healthy, the
   signed tool/plugin catalogues omit personal integrations, local-only status
