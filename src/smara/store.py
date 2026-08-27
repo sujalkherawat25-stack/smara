@@ -635,7 +635,12 @@ class TaskStore:
             if pending == 0:
                 c.execute("UPDATE task_runs SET status='completed' WHERE id=?", (run_id,))
                 c.execute("UPDATE tasks SET status='completed',updated_at=? WHERE id=?", (now, task_id))
-                c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.completed", '{"result":"recorded"}', now))
+                # Keep the final answer on the terminal event as well as the
+                # step event. This makes the durable task API self-contained
+                # for the Work panel, CLI, and future clients; "recorded" was
+                # only a bookkeeping marker and hid the useful result.
+                task_result = json.dumps({"result": str(result)[:2_000]}, ensure_ascii=False)
+                c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.completed", task_result, now))
 
     def fail_step(self, step_id: str, account_id: str, error: str, retry_delay_seconds: int = 5, *, retryable: bool = True) -> str:
         """Record a bounded failure. Returns `retrying` or terminal `failed`."""

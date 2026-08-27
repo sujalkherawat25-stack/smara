@@ -108,6 +108,16 @@ def test_dependency_graph_unlocks_next_step(tmp_path: Path):
     assert store.get(task["id"], "acct_1")["status"] == "completed"
 
 
+def test_terminal_event_keeps_the_final_result(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Result", "Return a result", False)
+    step = store.claim_one("worker")
+    assert step is not None
+    store.complete_step(step["step_id"], "acct_1", "The final answer is 42.")
+    terminal = [event for event in store.events(task["id"], "acct_1") if event["type"] == "task.completed"][-1]
+    assert terminal["payload"] == '{"result": "The final answer is 42."}'
+
+
 def test_failed_step_retries_with_a_bounded_budget(tmp_path: Path):
     store = TaskStore(str(tmp_path / "smara.db"))
     task = store.create("acct_1", "work", "Unstable", "Retry safely", False)
