@@ -161,6 +161,21 @@ def account_id(
         raise HTTPException(401, "Invalid account assertion.")
     return x_smara_account_id
 
+
+def _require_hosted_user_integrations() -> None:
+    """Fail closed when a request would store/use a private credential.
+
+    The default hosted deployment is a control plane. Personal OAuth/API
+    credentials and browser sessions belong on the paired local device; the
+    VM runs only operator-owned providers and coordination until a local
+    integration adapter is available.
+    """
+    if not settings.hosted_user_integrations_enabled:
+        raise HTTPException(
+            409,
+            "Personal integrations are local-only on this Smara deployment; no user secret is stored or used on the hosted VM.",
+        )
+
 def _as_datetime(value: datetime | str) -> datetime:
     return value if isinstance(value, datetime) else datetime.fromisoformat(value)
 
@@ -205,7 +220,7 @@ async def health(): return {"ok": True, "memory_boundary": "syntarus-sdk-only", 
 @app.get("/v1/tools")
 async def list_tools(user: str = Depends(account_id)):
     """Return the safe tools currently available to the agent runtime."""
-    return {"tools": default_tool_registry().describe()}
+    return {"tools": default_tool_registry(include_user_integrations=settings.hosted_user_integrations_enabled).describe()}
 
 @app.get("/v1/plugins")
 async def list_plugins(user: str = Depends(account_id)):
@@ -216,7 +231,7 @@ async def list_plugins(user: str = Depends(account_id)):
     adapter and approval policy.
     """
     try:
-        return {"plugins": manifests(settings.plugin_manifests)}
+        return {"plugins": manifests(settings.plugin_manifests, include_user_integrations=settings.hosted_user_integrations_enabled)}
     except ValueError as exc:
         raise HTTPException(503, str(exc)) from exc
 
@@ -225,7 +240,7 @@ async def invoke_tool(tool_name: str, body: ToolInvokeRequest, user: str = Depen
     """Run one read-only tool; side effects must use the durable task graph."""
     async with httpx.AsyncClient(timeout=httpx.Timeout(12.0), follow_redirects=False) as client:
         try:
-            result = await default_tool_registry(client).invoke(
+            result = await default_tool_registry(client, include_user_integrations=settings.hosted_user_integrations_enabled).invoke(
                 tool_name, body.arguments, ToolContext(user, body.workspace_id, client)
             )
         except ToolError as exc:
@@ -380,9 +395,10 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
                 conversation_history=history,
                 conversation_summary=summary,
                 http_client=client,
-                integration_runner=connected_integration_runner(
+                integration_runner=(connected_integration_runner(
                     store, user, client, settings.integration_master_keys
-                ),
+                ) if settings.hosted_user_integrations_enabled else None),
+                include_user_integrations=settings.hosted_user_integrations_enabled,
             )
         store.append_conversation_exchange(conversation_id, user, body.workspace_id, body.message, turn.message, turn.model)
         return ChatResponse(**turn.__dict__)
@@ -442,9 +458,10 @@ async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
                     conversation_history=history,
                     conversation_summary=summary,
                     http_client=client,
-                    integration_runner=connected_integration_runner(
+                    integration_runner=(connected_integration_runner(
                         store, user, client, settings.integration_master_keys
-                    ),
+                    ) if settings.hosted_user_integrations_enabled else None),
+                    include_user_integrations=settings.hosted_user_integrations_enabled,
                     event_hook=event_hook,
                     token_hook=token_hook,
                 )
@@ -544,12 +561,14 @@ async def fail_executor_step(step_id: str, body: ExecutorFailure, identity: tupl
 
 @app.put("/v1/integrations/{provider}")
 async def configure_integration(provider: str, body: IntegrationConfigure, user: str = Depends(account_id)):
+    _require_hosted_user_integrations()
     if provider not in {"gmail", "calendar", "telegram", "github", "drive"}:
         raise HTTPException(404, "Unknown integration provider.")
     return store.configure_integration(user, provider, **body.model_dump())
 
 @app.put("/v1/integrations/{provider}/credential")
 async def store_integration_credential(provider: str, body: IntegrationCredentialInput, user: str = Depends(account_id)):
+    _require_hosted_user_integrations()
     if provider not in {"gmail", "calendar", "telegram", "github", "drive"}:
         raise HTTPException(404, "Unknown integration provider.")
     try:
@@ -561,6 +580,7 @@ async def store_integration_credential(provider: str, body: IntegrationCredentia
 
 @app.get("/v1/integrations/{provider}/oauth/start")
 async def begin_integration_oauth(provider: str, user: str = Depends(account_id)):
+    _require_hosted_user_integrations()
     try:
         url, state, verifier = integration_oauth.begin(provider)
         store.create_oauth_state(user, provider, state, verifier)
@@ -570,6 +590,7 @@ async def begin_integration_oauth(provider: str, user: str = Depends(account_id)
 
 @app.get("/v1/integrations/{provider}/oauth/callback")
 async def finish_integration_oauth(provider: str, code: str, state: str):
+    _require_hosted_user_integrations()
     try:
         oauth = store.consume_oauth_state(state, provider)
         token = await integration_oauth.exchange(provider, code, oauth["code_verifier"])
@@ -591,10 +612,13 @@ async def finish_integration_oauth(provider: str, code: str, state: str):
 
 @app.get("/v1/integrations")
 async def list_integrations(user: str = Depends(account_id)):
-    return {"integrations": store.integrations(user)}
+    if not settings.hosted_user_integrations_enabled:
+        return {"integrations": [], "mode": "local-only"}
+    return {"integrations": store.integrations(user), "mode": "hosted"}
 
 @app.post("/v1/integration-actions", status_code=201)
 async def request_integration_action(body: IntegrationActionCreate, background: BackgroundTasks, user: str = Depends(account_id)):
+    _require_hosted_user_integrations()
     try:
         action = store.request_integration_action(user, body.provider, body.action, body.preview, body.idempotency_key, body.payload)
         if action["status"] == "awaiting_approval":
@@ -605,6 +629,8 @@ async def request_integration_action(body: IntegrationActionCreate, background: 
 
 @app.get("/v1/integration-actions")
 async def list_integration_actions(user: str = Depends(account_id)):
+    if not settings.hosted_user_integrations_enabled:
+        return {"actions": [], "mode": "local-only"}
     return {"actions": store.integration_actions(user)}
 
 @app.get("/v1/push/public-key")
@@ -639,6 +665,7 @@ async def capture_media(title: str = Form(..., max_length=200), file: UploadFile
 
 @app.post("/v1/integration-actions/{action_id}/approval")
 async def decide_integration_action(action_id: str, body: IntegrationActionDecision, user: str = Depends(account_id)):
+    _require_hosted_user_integrations()
     try:
         return store.decide_integration_action(user, action_id, body.approved, body.note, body.edited_preview, body.edited_payload)
     except KeyError:

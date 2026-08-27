@@ -158,10 +158,22 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
                     record("agent.desktop_task_requested", {"task_id": child["id"], "capability": capability})
                     return {"task_id": child["id"], "status": child["status"], "capability": capability}
 
-                result = await BoundedAgentStepRuntime(provider, default_tool_registry(client, integration_runner=integration_runner, integration_requester=integration_requester, desktop_requester=desktop_requester)).run(
+                # In the default local-only security posture, the hosted VM
+                # never receives or decrypts a user's Gmail/Calendar/Drive/
+                # GitHub/Telegram credential. Personal integrations will be
+                # dispatched to a future paired local adapter instead.
+                hosted_runner = integration_runner if settings.hosted_user_integrations_enabled else None
+                hosted_requester = integration_requester if settings.hosted_user_integrations_enabled else None
+                result = await BoundedAgentStepRuntime(provider, default_tool_registry(
+                    client,
+                    integration_runner=hosted_runner,
+                    integration_requester=hosted_requester,
+                    desktop_requester=desktop_requester,
+                    include_user_integrations=settings.hosted_user_integrations_enabled,
+                )).run(
                     task=task,
                     memory_context=context,
-                    tool_context=ToolContext(task["account_id"], task["workspace_id"], client, integration_runner, integration_requester, desktop_requester),
+                    tool_context=ToolContext(task["account_id"], task["workspace_id"], client, hosted_runner, hosted_requester, desktop_requester),
                     event_hook=record,
                 )
             await _memory_write(memory, task, store, "completion", result=result.text)

@@ -54,3 +54,11 @@ def test_production_rejects_wrong_bridge_audience(monkeypatch):
     with pytest.raises(HTTPException) as error:
         api.account_id(authorization=f"Bearer {token}")
     assert error.value.status_code == 401
+
+
+def test_hosted_personal_integrations_are_local_only_by_default(monkeypatch):
+    monkeypatch.setattr(api, "settings", Settings(hosted_user_integrations_enabled=False))
+    with pytest.raises(HTTPException) as error:
+        api._require_hosted_user_integrations()
+    assert error.value.status_code == 409
+    assert "local-only" in str(error.value.detail)

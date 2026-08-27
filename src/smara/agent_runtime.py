@@ -240,14 +240,16 @@ class SmaraAgentRuntime:
         conversation_summary: str = "",
         http_client: httpx.AsyncClient | None = None,
         integration_runner: Callable[[str, str, dict[str, Any]], Any] | None = None,
+        include_user_integrations: bool = True,
         event_hook: Callable[[str, dict[str, Any]], None] | None = None,
         token_hook: Callable[[str], None] | None = None,
     ) -> ChatTurn:
         """Run the same bounded read-only tool loop used by hosted tasks.
 
-        Direct chat can search, fetch, calculate, and inspect configured
-        read-only integrations. Side effects remain unavailable here and must
-        be represented by an approved durable task.
+        Direct chat can search, fetch, and calculate. Personal-account
+        integrations are included only when the deployment explicitly opts
+        in; side effects remain unavailable here and must be represented by an
+        approved durable task.
         """
         intent, complexity, use_tools = _triage(message)
         if event_hook:
@@ -292,7 +294,11 @@ class SmaraAgentRuntime:
             event_hook("agent.phase", {"phase": "reason_act"})
         result = await BoundedAgentStepRuntime(
             self._provider,
-            default_tool_registry(http_client, integration_runner=integration_runner),
+            default_tool_registry(
+                http_client,
+                integration_runner=integration_runner,
+                include_user_integrations=include_user_integrations,
+            ),
         ).run(
             task={
                 "id": conversation,

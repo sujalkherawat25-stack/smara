@@ -9,6 +9,8 @@ import pytest
 from smara.integrations import IntegrationExecutor
 from smara.store import TaskStore
 from smara.vault import SecretVault
+from smara.config import Settings
+from smara import integration_worker
 
 
 def test_integration_policy_and_idempotency_are_account_scoped(tmp_path: Path):
@@ -27,6 +29,16 @@ def test_trusted_does_not_bypass_external_approval_before_executor_exists(tmp_pa
     store.configure_integration("acct_1", "github", display_name="Repo", policy="trusted", granted_scopes=["repo"], health="healthy")
     action = store.request_integration_action("acct_1", "github", "github.push", "Push a reviewed commit", "push-commit-001")
     assert action["status"] == "awaiting_approval"
+
+
+def test_hosted_integration_worker_is_fail_closed_in_local_only_mode(tmp_path: Path, monkeypatch):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    store.configure_integration("acct_1", "telegram", display_name="Alerts", policy="assisted", granted_scopes=[], health="healthy")
+    action = store.request_integration_action("acct_1", "telegram", "telegram.send", "Send status", "local-only-0001", {"chat_id": "1", "text": "Done"})
+    action = store.decide_integration_action("acct_1", action["id"], True, "approved")
+    monkeypatch.setattr(integration_worker, "settings", Settings(hosted_user_integrations_enabled=False))
+    assert asyncio.run(integration_worker.run_once(store, SecretVault(Fernet.generate_key().decode()))) is False
+    assert store.integration_actions("acct_1")[0]["status"] == "approved"
 
 
 def test_approved_action_is_leased_once_and_credential_is_ciphertext(tmp_path: Path):

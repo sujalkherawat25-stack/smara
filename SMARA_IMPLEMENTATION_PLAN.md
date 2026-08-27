@@ -10,7 +10,9 @@ Smara has one focused job: be a dependable personal agent in two forms.
 
 1. **Hosted Smara** — the web app and CLI use one server-side agent, task
    graph, approval system, and Syntarus memory account. Hosted work continues
-   when the user's computer is closed.
+   when the user's computer is closed. The VM uses only operator-owned
+   provider credentials; it does not store or use a user's private account
+   tokens, browser sessions, files, or terminal access.
 2. **Smara Desktop Executor** — an optional paired desktop app runs approved
    terminal, browser, and file actions on the user's PC. It does not contain a
    second agent brain or memory database.
@@ -41,6 +43,27 @@ MemoryOS remains the memory product. Its Qdrant, Neo4j, Redis memory state,
 schemas, Continuum APIs, and core pipeline are protected and are not changed
 to make Smara work. Smara uses the public Syntarus SDK/API through one adapter.
 
+### Control-plane/data-plane security boundary
+
+```text
+Hosted Smara VM (control plane)          User PC (local data plane)
+──────────────────────────────          ────────────────────────────
+Task graph, leases, retries              Browser session and browser actions
+Approvals, schedules, monitoring         Files and terminal commands
+Operator-owned LLM/search keys            Personal OAuth/API credentials
+Public web research retrieval             Local integration adapters (future)
+Syntarus memory API calls                 Desktop executor + local artifacts
+```
+
+The hosted worker is fail-closed for personal integrations by default
+(`SMARA_HOSTED_USER_INTEGRATIONS_ENABLED=false`). It does not decrypt, claim,
+or execute Gmail, Calendar, Drive, GitHub, Telegram, or other user-account
+actions. The existing integration code remains behind an explicit operator
+flag for controlled future use, while the local adapter contract is built.
+`local_browser` means opening an allowlisted URL on the paired PC; it is never
+run by the VM. Public source fetching for research is an HTTP retrieval tool,
+not access to a user's browser session.
+
 The Memento agent implementation remains available in MemoryOS for reference
 and rollback. We will **port/adapt its proven agent behavior** (triage,
 ReAct/tool selection, streaming, memory context, and approval pauses) into the
@@ -58,7 +81,8 @@ duplicate memory pipeline.
   streamed answer, and non-blocking memory write-back.
 - Durable tasks represented by a dependency graph with leases, retries,
   idempotency, cancellation, durable events, and dead-letter recovery.
-- Approval-first execution for external writes and other risky actions.
+- Approval-first records for external writes and other risky actions; private
+  actions are handed to the paired local executor rather than run on the VM.
 - Reliable hosted research: public source retrieval, SSRF protection, source
   verification, evidence ledger, citations, and report artifacts.
 - Schedules/reminders only after restart/retry behavior is verified.
@@ -81,13 +105,17 @@ duplicate memory pipeline.
   prevention.
 - Visible pause/revoke state and bounded rotating logs.
 - Local execution is never silently enabled by a hosted request.
+- Browser, file, terminal, and future personal-account actions stay on the
+  user's PC; only explicit result/proof data returns to the control plane.
 
 ## 4. Explicitly deferred (do not count these as release blockers)
 
 These are backlog items, not part of the focused replacement release:
 
 - Phone/PWA client and phone push/capture.
-- Telegram, WhatsApp, Gmail, Calendar, Drive, and GitHub channels/actions.
+- Hosted Telegram, WhatsApp, Gmail, Calendar, Drive, and GitHub channels or
+  actions. Personal integrations must be implemented as local adapters first;
+  user credentials must not be uploaded to the hosted VM.
 - Billing/subscriptions and a plugin marketplace.
 - Graph visualizers, experimental visual/hologram labs, and extra dashboards.
 - Broad proactive automation or a separate Control PWA.
@@ -110,11 +138,13 @@ Hologram Lab has already been removed from the Smara UI and source.
 - Syntarus SDK memory retrieval/write-back adapter; MemoryOS core untouched.
 - CLI beta foundation using the hosted API.
 - Desktop pairing/executor foundation with allowlists and safety contracts.
+- Hosted personal integrations are disabled by default; the worker and tool
+  catalogue fail closed unless an operator explicitly opts in.
 - Desktop step leases now refresh immediately before completion on both the
   SQLite development store and the live Postgres store; stale executors cannot
   finalize a lease recovered by another executor.
 - Reversible `/smara/` and `/smara-api/` staging mount at `ai.syntarus.com`.
-- Local suite (115 Smara backend tests), frontend type-check, VM Docker build,
+- Local suite (118 Smara backend tests), frontend type-check, VM Docker build,
   live health checks, and disposable account/task/research/approval smoke test.
 
 ## 6. Remaining work, in order
@@ -140,6 +170,8 @@ Hologram Lab has already been removed from the Smara UI and source.
 
 1. Test PC restart, disconnect/reconnect, lease expiry, cancellation,
    capability denial, revoke, retries, and duplicate prevention on Windows.
+   Confirm the VM cannot claim a `desktop` step and that local browser/file/
+   terminal work runs only on the paired PC.
 2. Package a signed installer with safe update, auto-start opt-in, bounded
    logs, visible pause/revoke, and clear pairing recovery.
 3. Connect only approved terminal/browser/file steps to an isolated sandbox;
@@ -147,16 +179,18 @@ Hologram Lab has already been removed from the Smara UI and source.
 
 ### P2 — Production readiness and cutover
 
-1. Put provider, signing, database, and sandbox secrets in a real VM secret
-   manager; perform a rotation drill.
+1. Put only operator-owned provider, signing, database, and sandbox secrets in
+   a real VM secret manager; perform a rotation drill. Do not place user
+   integration credentials in this manager or in Smara Postgres.
 2. Finish encrypted off-host backups and a disposable restore drill.
 3. Configure Sentry/structured logs, authenticated distributed rate limits,
    per-task cost/time/output/resource budgets, and artifact retention.
 4. Run security, fault-injection, restart, concurrency, isolation, and
    rollback tests.
 5. Shadow Smara against Memento for selected beta accounts (no side effects),
-   compare answer/tool/task/safety/latency/cost results, then route one cohort
-   to Smara and rehearse rollback.
+   compare answer/tool/task/safety/latency/cost results, and verify that
+   personal browser/integration steps are handed to the local executor; then
+   route one cohort to Smara and rehearse rollback.
 6. After the cohort is stable, make Smara the public agent at
    `ai.syntarus.com`. Keep Memento source/deployment available for rollback,
    but stop serving it publicly. MemoryOS continues as the Syntarus memory
@@ -419,3 +453,19 @@ focused hosted/desktop release.
   shadowing, a real secret manager and rotation, encrypted off-host backup
   scheduling, Cloudflare distributed-limit review, Windows restart/reconnect,
   and any separate sandbox deployment. Sentry remains intentionally skipped.
+
+### 2026-08-27 — Local-only private execution boundary
+
+- Made the hosted control plane fail closed for personal integrations by
+  default. `SMARA_HOSTED_USER_INTEGRATIONS_ENABLED=false` hides Gmail,
+  Calendar, Drive, GitHub, Telegram, and credential/OAuth tools from the hosted
+  catalogue and rejects hosted credential/action writes.
+- The integration worker now stays idle without claiming or decrypting old
+  approved rows. The hosted worker can still create approval-gated desktop
+  requests; the paired PC is the only place where browser sessions, files,
+  terminal commands, and future personal-account adapters may run.
+- Updated the production checker and operator docs so the integration key ring
+  is required only for a deliberate legacy hosted-mode opt-in. Operator-owned
+  LLM/search/Syntarus keys remain server-side as planned.
+- Added regression coverage for the local-only tool/plugin catalogue and
+  fail-closed integration worker; the Smara suite now passes 118 tests.

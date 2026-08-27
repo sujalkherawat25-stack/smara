@@ -35,6 +35,11 @@ class Settings:
     )
     integration_master_key: str = _secret("SMARA_INTEGRATION_MASTER_KEY")
     integration_master_keys: str = _secret("SMARA_INTEGRATION_MASTER_KEYS", _secret("SMARA_INTEGRATION_MASTER_KEY"))
+    # Personal-account integrations (Gmail, Calendar, Drive, GitHub, Telegram)
+    # are disabled on the hosted control plane by default. User credentials
+    # and browser sessions belong on the paired local device; the VM should
+    # only run operator-owned LLM/public-research services and coordination.
+    hosted_user_integrations_enabled: bool = os.getenv("SMARA_HOSTED_USER_INTEGRATIONS_ENABLED", "false").lower() == "true"
     public_base_url: str = os.getenv("SMARA_PUBLIC_BASE_URL", "http://127.0.0.1:8080")
     google_client_id: str = os.getenv("SMARA_GOOGLE_CLIENT_ID", "")
     google_client_secret: str = _secret("SMARA_GOOGLE_CLIENT_SECRET")

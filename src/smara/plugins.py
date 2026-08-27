@@ -13,13 +13,15 @@ from typing import Any
 _NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
-def manifests(raw: str = "") -> list[dict[str, Any]]:
+def manifests(raw: str = "", *, include_user_integrations: bool = True) -> list[dict[str, Any]]:
     builtins = [
         {"name": "smara-core", "version": "1", "kind": "builtin", "enabled": True, "tools": ["current_time", "calculate"]},
         {"name": "smara-research", "version": "1", "kind": "builtin", "enabled": True, "tools": ["research.web_search", "research.fetch_url"]},
         {"name": "smara-integrations", "version": "1", "kind": "builtin", "enabled": True, "tools": ["integration.*"], "approval_required": True},
         {"name": "smara-desktop", "version": "1", "kind": "builtin", "enabled": True, "tools": ["desktop.request_action"], "approval_required": True},
     ]
+    if not include_user_integrations:
+        builtins = [item for item in builtins if item["name"] != "smara-integrations"]
     if not raw.strip():
         return builtins
     try:

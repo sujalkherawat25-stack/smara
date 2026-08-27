@@ -11,8 +11,10 @@ or connect to Qdrant/Neo4j directly.
 - `worker`: claims durable task steps and invokes an executor.
 - `scheduler`: creates due task runs (the initial implementation is deliberately
   small; recurring schedules are added through the same task API).
-- `integration-worker`: executes only approved, idempotent provider actions;
-  it cannot run until the credential vault key is configured.
+- `integration-worker`: a disabled-by-default compatibility worker for approved,
+  idempotent provider actions. In the hosted control-plane deployment it stays
+  idle and never decrypts user credentials; private integrations run on the
+  paired desktop instead.
 
 For local development, leave `SMARA_DATABASE_URL` empty and set
 `SMARA_DATABASE_PATH=./data/smara.db`.
@@ -167,12 +169,17 @@ The executor claims a three-minute desktop step lease by default and calls
 The refresh is account- and executor-scoped; a cancelled step is not extended,
 and a stale executor cannot finalize work recovered by another paired device.
 
-The agent manifest also includes read-only Gmail search, Calendar listing,
-Drive metadata search, and GitHub repository listing. They run only when the
-account has a connected credential; all external writes remain durable,
-approval-gated integration actions. Inside a hosted agent task, the model may
-also create an `integration.request_approval` intent; this only places an
-editable preview in the approval inbox and never calls the provider itself.
+The hosted control plane intentionally does not advertise Gmail, Calendar,
+Drive, GitHub, Telegram, or other personal-account tools. Their credentials and
+browser sessions remain on the paired desktop, where a future local adapter
+will turn an approved request into a local action and return only a bounded
+result/proof. Public research tools are different: they fetch public URLs with
+the operator's server-side search key and cannot see a user's browser session.
+
+The older hosted integration worker and encrypted credential tables remain as a
+rollback/migration path, but `SMARA_HOSTED_USER_INTEGRATIONS_ENABLED=false`
+keeps them inactive. Never put a user's provider token in the hosted `.env` or
+Smara Postgres.
 
 ## First research workflow
 
@@ -234,14 +241,12 @@ intent and visible preview first. Until a bounded trusted-workflow template is
 added, even `trusted` external actions require approval. An approver can edit
 the preview and action payload before authorizing it.
 
-The credential endpoint stores only Fernet-encrypted ciphertext in Postgres.
-Set `SMARA_INTEGRATION_MASTER_KEYS` from a production secret manager before
-connecting anything. It is an ordered key ring: the first key encrypts and all
-keys decrypt, enabling a no-downtime key rotation. Google (Gmail, Calendar, Drive) and GitHub support OAuth
-authorization-code/PKCE flows once their client IDs, client secrets, and the
-public callback URL are configured. Telegram uses an explicitly stored bot
-token. Supported initial actions are Gmail send/search, Calendar create/list,
-Telegram send, GitHub repository list/content commit, and Drive search.
+The legacy hosted credential endpoint stores only Fernet-encrypted ciphertext in
+Postgres and is disabled in the default deployment. If it is ever enabled for
+a reviewed migration, set `SMARA_HOSTED_USER_INTEGRATIONS_ENABLED=true` and
+inject `SMARA_INTEGRATION_MASTER_KEYS` from a production secret manager; it is
+an ordered key ring that supports no-downtime rotation. This is not the normal
+user path: personal OAuth/API tokens belong on the paired desktop.
 
 No provider credential or OAuth application secret is included in this
 repository. That is intentional: configure them in the deployment environment

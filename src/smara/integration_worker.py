@@ -15,6 +15,11 @@ from .observability import configure_sentry
 
 
 async def run_once(store: TaskStore, vault: SecretVault, worker_id: str = "integration-worker") -> bool:
+    # Personal credentials stay on the user's paired device in the default
+    # hosted deployment. Do not claim an action merely because an old row is
+    # present in the database; it must be explicitly opted in by the operator.
+    if not settings.hosted_user_integrations_enabled:
+        return False
     action = store.claim_integration_action(worker_id)
     if action is None:
         return False
@@ -43,6 +48,9 @@ async def run_once(store: TaskStore, vault: SecretVault, worker_id: str = "integ
 async def main() -> None:
     configure_sentry(settings.sentry_dsn)
     store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
+    if not settings.hosted_user_integrations_enabled:
+        while True:
+            await asyncio.sleep(60)
     # A deployment can run safely before any integration is configured. It
     # never attempts to process approved external work without a vault key.
     if not settings.integration_master_keys:

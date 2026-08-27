@@ -16,7 +16,7 @@ present() {
   eval "file=\${$file_key:-}"
   [ -n "$file" ] && [ -s "$file" ]
 }
-required="SMARA_DATABASE_URL SMARA_POSTGRES_PASSWORD SMARA_REDIS_URL SMARA_GATEWAY_SIGNING_SECRET SMARA_CONTROL_BRIDGE_SECRET SMARA_INTEGRATION_MASTER_KEYS SYNTARUS_API_KEY SMARA_PUBLIC_BASE_URL"
+required="SMARA_DATABASE_URL SMARA_POSTGRES_PASSWORD SMARA_REDIS_URL SMARA_GATEWAY_SIGNING_SECRET SMARA_CONTROL_BRIDGE_SECRET SYNTARUS_API_KEY SMARA_PUBLIC_BASE_URL"
 for key in $required; do
   if ! present "$key"; then
     printf '%s=missing\n' "$key"
@@ -25,6 +25,20 @@ for key in $required; do
     printf '%s=configured\n' "$key"
   fi
 done
+
+# User-account integrations are deliberately local-only on the hosted control
+# plane. Their vault key is required only for the explicitly opt-in legacy
+# hosted mode; the default deployment must not require or receive it.
+if [ "${SMARA_HOSTED_USER_INTEGRATIONS_ENABLED:-false}" = "true" ]; then
+  if ! present "SMARA_INTEGRATION_MASTER_KEYS"; then
+    printf '%s=missing (hosted user integrations enabled)\n' "SMARA_INTEGRATION_MASTER_KEYS"
+    fail=1
+  else
+    printf '%s=configured (hosted user integrations enabled)\n' "SMARA_INTEGRATION_MASTER_KEYS"
+  fi
+else
+  printf '%s=disabled (personal actions stay on paired desktop)\n' "SMARA_HOSTED_USER_INTEGRATIONS_ENABLED"
+fi
 
 if [ "${SMARA_DEV_MODE:-false}" = "true" ]; then
   echo 'SMARA_DEV_MODE must be false outside local development.'

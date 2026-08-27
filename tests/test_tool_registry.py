@@ -22,6 +22,11 @@ def test_default_registry_is_read_only_and_catalogued():
     assert all(tool["parameters"].get("additionalProperties") is False for tool in tools)
 
 
+def test_local_only_catalogue_excludes_user_integrations():
+    names = {tool["name"] for tool in default_tool_registry(include_user_integrations=False).describe()}
+    assert names == {"calculate", "current_time", "research.fetch_url", "research.web_search"}
+
+
 def test_calculator_rejects_code_and_bounds_results():
     registry = default_tool_registry()
     context = ToolContext("acct_test", "workspace")

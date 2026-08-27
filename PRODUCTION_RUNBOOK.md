@@ -6,16 +6,29 @@ does not change MemoryOS source, schemas, or stored memories. Do not switch
 
 ## 1. Secrets
 
-Use the deployment's real secret manager and inject files into the API,
-worker, scheduler, and integration-worker containers. Smara accepts either a
-direct variable or a file variable, for example:
+Use the deployment's real secret manager and inject only operator-owned
+secrets into the API, worker, scheduler, and (if explicitly enabled) the
+integration-worker containers. User OAuth/API tokens and browser sessions must
+stay on the paired desktop. Smara accepts either a direct variable or a file
+variable, for example:
 
 ```text
-SMARA_INTEGRATION_MASTER_KEYS_FILE=/run/secrets/smara_integration_keys
 SMARA_SENTRY_DSN_FILE=/run/secrets/smara_sentry_dsn
 SMARA_VAPID_PUBLIC_KEY_FILE=/run/secrets/smara_vapid_public
 SMARA_VAPID_PRIVATE_KEY_FILE=/run/secrets/smara_vapid_private
 ```
+
+The default hosted posture is:
+
+```text
+SMARA_HOSTED_USER_INTEGRATIONS_ENABLED=false
+```
+
+In this mode the integration worker remains idle, personal integration tools
+are absent from the agent catalogue, and integration credential/OAuth routes
+return a clear local-only response. Only an explicitly reviewed migration may
+set the flag to `true`; that mode additionally requires the encrypted
+integration key ring.
 
 Never commit `.env`, print secret values, or put provider keys in a task,
 browser, CLI token, or log. After injection, run:

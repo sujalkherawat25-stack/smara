@@ -57,6 +57,12 @@ has been cut over.
 - Sandbox execution is fail-closed in the live worker: `SMARA_SANDBOX_ENABLED`
   defaults to false, and a disabled deployment does not claim sandbox steps.
   This avoids the unsafe shortcut of mounting the host Docker socket.
+- Hosted personal integrations are now fail-closed by policy:
+  `SMARA_HOSTED_USER_INTEGRATIONS_ENABLED=false` removes their tools/plugins,
+  rejects credential/OAuth/action writes, and keeps the integration worker from
+  claiming or decrypting old rows. Browser, file, terminal, and future private
+  integrations are local-desktop work; the VM retains only coordination,
+  monitoring, operator-owned provider keys, and public research.
 
 ## Blocked until deployment credentials/operations are supplied
 
@@ -85,6 +91,9 @@ has been cut over.
   runtime, resource limits, network policy, and request authentication.
   The worker now supports that narrow remote `/v1/run` contract and the full
   configuration gate rejects an enabled sandbox without both URL and token.
+- A local integration adapter (Gmail/Calendar/Drive/GitHub/Telegram) is still
+  future work. The hosted API deliberately does not accept those user secrets
+  while that adapter is unfinished.
 - Interactive CLI sessions, allowlisted model profiles, declarative plugin
   catalogue, and approval-gated desktop action requests are covered by the
   current repository tests. They do not by themselves configure provider keys,
