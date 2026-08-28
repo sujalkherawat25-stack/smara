@@ -76,12 +76,24 @@ preserved.
   one-command rollback. The root page, auth config, unauthenticated guards,
   Smara readiness, and a Caddy restart all passed after the switch.
 
-## Blocked until deployment credentials/operations are supplied
+## Deferred by owner for the current beta
+
+The following hardening gates are intentionally postponed. Their safe defaults
+remain in force and they must be reopened before a later production promotion:
+
+- Sentry DSN and alert delivery.
+- Authenticode signing and a trusted Windows update channel.
+- External VM secret manager and live rotation drill.
+- Encrypted off-host backup scheduling and recurring restore drill.
+- Hosted sandbox deployment. `SMARA_SANDBOX_ENABLED=false` remains enforced;
+  private browser/file/terminal work stays on the paired desktop.
+
+## Other open verification items
 
 - The staging integration key ring, CLI signing secret, Syntarus key, and VAPID
   key pair are configured. VAPID's private key is a protected read-only host
-  mount for staging; all of these still need the production secret-manager and
-  rotation drill. `SMARA_SENTRY_DSN` remains missing, so the full gate fails.
+  mount for staging. External secret-manager migration and rotation are
+  intentionally deferred, and `SMARA_SENTRY_DSN` remains unset by decision.
 - Staging xAI `grok-4.3` and Tavily search are configured. Live checks passed
   for a Grok response, Tavily discovery and page retrieval, a calculator tool
   turn, an end-to-end research turn with a fetched citation URL, and the

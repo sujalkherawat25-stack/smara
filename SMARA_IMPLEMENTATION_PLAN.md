@@ -128,6 +128,22 @@ Existing experimental code may stay behind feature flags for rollback, but it
 must not appear in the main navigation or be used as a release criterion. The
 Hologram Lab has already been removed from the Smara UI and source.
 
+### Owner-approved deferrals (2026-08-28)
+
+The following hardening items are deliberately postponed for the current beta
+and are not part of the active implementation sprint:
+
+- Sentry project/DSN and alert delivery.
+- Authenticode signing and a trusted auto-update channel for Windows packages.
+- Migration from the current protected VM environment to an external secret
+  manager and a live rotation drill.
+- Encrypted off-host backup scheduling and recurring restore drills.
+- A hosted sandbox service. `SMARA_SANDBOX_ENABLED` stays `false`; private
+  browser, file, and terminal work remains on the paired desktop.
+
+These are deferred, not complete. They remain release gates for a later
+production promotion, while the current beta keeps fail-closed behavior.
+
 ## 5. What is already implemented
 
 - Independent Smara repository with API, Postgres, Redis, worker, scheduler,
@@ -259,11 +275,12 @@ For the **focused hosted + desktop vision** (not the deferred backlog):
 | CLI hosted client | 85% | parity polish and authenticated workflow tests |
 | Native Smara Web | 70% | authenticated shadow tests and final legacy cleanup |
 | Desktop local executor | 86% | restart drills, signing, and update trust |
-| Production operations/cutover | 45% | secrets, observability, shadow run, rollback |
+| Production operations/cutover | 45% | deferred hardening gates and authenticated shadow run |
 
 **Focused beta:** roughly 77% complete.
-**Public replacement:** Smara is now live as a reversible beta root, but the
-full production-readiness gates are not yet all green.
+**Public replacement:** Smara is live as a reversible beta root. The owner has
+explicitly deferred five production-hardening gates, so this is not a claim of
+full production readiness.
 
 These are readiness estimates, not lines-of-code measurements. The main risk
 is product consolidation and verification, not rewriting MemoryOS.
@@ -296,10 +313,10 @@ Smara can replace the public Memento agent when:
    and confirm no duplicate or hosted-side local execution.
 3. Add the Sarvam key when desired and run one low-cost provider smoke; keep
    Grok as the current hosted default until that smoke passes.
-4. Close the remaining production gates: signed installer/update trust,
-   operator secret-manager rotation, encrypted off-host backup schedule,
-   edge-limit review, structured alerting, sandbox deployment, shadow metrics,
-   and rollback rehearsal.
+4. Keep the five owner-deferred production gates disabled and documented.
+   Reopen them only when the required signing certificate, Sentry account,
+   secret-manager access, off-host backup destination, or isolated sandbox
+   decision is explicitly supplied.
 5. Promote Smara from reversible beta to the permanent public root only after
    all four checks above are recorded green. Keep MemoryOS as the unchanged
    Syntarus memory service and retain Memento only as rollback/reference.
