@@ -623,3 +623,21 @@ focused hosted/desktop release.
 - The NSIS installer now creates a `Smara Desktop.lnk` desktop shortcut and
   removes it on uninstall. A verified shortcut was also created for the current
   Windows release executable.
+
+### 2026-08-28 — Private model profile persistence and Sarvam smoke
+
+- Fixed a beta regression where saving ordinary connection/permission settings
+  rewrote `desktop-ui.json` without preserving `local_model_profiles`. The
+  encrypted key survived, but the UI then reported that the selected profile no
+  longer existed. General saves now merge and retain private provider metadata.
+- Added recovery for the built-in Sarvam/Grok profile metadata when an older
+  install has the selected profile and its encrypted credential but no profile
+  record. The repaired metadata is persisted; custom endpoints remain opt-in
+  because they cannot be reconstructed safely.
+- Verified the existing encrypted Sarvam key against the real
+  `https://api.sarvam.ai/v1/chat/completions` endpoint without printing the key,
+  then sent a real `Reply with the single word OK.` turn through the rebuilt
+  native desktop UI and received `OK`.
+- Rebuilt/restarted the Windows release package. The full Smara suite (122
+  tests), four native Rust tests, frontend type-check/build, and the native UI
+  persistence/chat smoke all pass.
