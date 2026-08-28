@@ -16,6 +16,7 @@ interface Attachment {
   id: string;
   filename: string;
   kind: "document" | "image";
+  size: number;
 }
 
 // Legacy Memento document types. Focused Smara accepts any file type and
@@ -90,14 +91,15 @@ export default function ChatWindow() {
         return;
       }
       const total = list.reduce((sum, file) => sum + file.size, 0);
-      if (total > MAX_BATCH_BYTES) {
+      const alreadyAttached = attachments.reduce((sum, file) => sum + file.size, 0);
+      if (alreadyAttached + total > MAX_BATCH_BYTES) {
         setUploadError("Attachments exceed the 150 MB total limit per message.");
         return;
       }
       setUploading(true);
       try {
         const res = await apiClient.uploadFiles<{
-          attachments: Array<{ id: string; filename: string; content_type?: string }>;
+          attachments: Array<{ id: string; filename: string; content_type?: string; size?: number }>;
         }>("/v1/attachments", list);
         setAttachments((current) => [
           ...current,
@@ -105,6 +107,7 @@ export default function ChatWindow() {
             id: item.id,
             filename: item.filename,
             kind: item.content_type?.startsWith("image/") ? "image" as const : "document" as const,
+            size: item.size ?? 0,
           })),
         ]);
       } catch (e) {
@@ -139,6 +142,7 @@ export default function ChatWindow() {
           id: res.attachment_id,
           filename: res.filename,
           kind: res.kind === "image" ? "image" : "document",
+          size: file.size,
         }]);
       } catch (e) {
         setUploadError(e instanceof ApiError ? e.detail : `Couldn't upload "${file.name}".`);

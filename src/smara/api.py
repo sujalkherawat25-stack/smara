@@ -432,6 +432,8 @@ def _attachment_context(body: ChatRequest, user: str) -> str:
     missing = [attachment_id for attachment_id in body.attachment_ids if attachment_id not in found]
     if missing:
         raise HTTPException(404, "One or more attachments expired or do not belong to this account.")
+    if sum(int(record.get("size", 0)) for record in records) > MAX_BATCH_BYTES:
+        raise HTTPException(413, "Attachments exceed the 150 MB total limit per message.")
     return context
 
 
