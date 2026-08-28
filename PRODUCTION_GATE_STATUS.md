@@ -1,6 +1,6 @@
 # Smara production-gate status
 
-Updated 2026-08-28 after the canonical Smara route cleanup. This is an
+Updated 2026-08-28 after the agent/executor reliability deployment. This is an
 operational checklist: Smara is live at the root as a beta deployment, the
 same-origin `/smara-api` route is retained for clients, and Memento rollback is
 preserved without a second public UI.
@@ -34,7 +34,7 @@ preserved without a second public UI.
   2026-08-25 restore contained all 17 recorded Smara schema versions and 17
   staging tasks. The live database was not modified; backup files are now
   forced to owner-only mode by the script.
-- Repository tests pass locally (**119 tests**) with Python compilation,
+- Repository tests pass locally (**139 tests**) with Python compilation,
   frontend type-check, and production frontend build. The lease-heartbeat
   change is now deployed and the live Postgres desktop claim/heartbeat/
   completion smoke passed. The Work panel also now maps the deployed
@@ -84,6 +84,18 @@ preserved without a second public UI.
 - The native desktop release was stopped and restarted successfully after the
   UX build. The focused desktop/auth/provider suite passed (**26 tests**), and
   the supported unsigned NSIS package rebuilt successfully.
+- Hosted agent work is now bounded by a wall-clock deadline, per-tool timeout,
+  and total tool-call limit. Duplicate identical tool invocations are rejected;
+  transient non-stream calls retry once, and a stream that fails before its
+  first token safely falls back to a normal completion.
+- The current release passed eight native Rust tests, both frontend production
+  builds, a fresh PyInstaller executor build, and a fresh unsigned NSIS package.
+  A real native Windows WebView hosted-chat turn returned `DESKTOP_OK`.
+- The deployed live workflow passed direct Grok chat, calculator execution,
+  Tavily discovery, official-page retrieval, and a cited research answer using
+  the Web/CLI/Desktop SSE contract. The disposable production Postgres check
+  proved that an expired ambiguous terminal lease is failed, audited, and sent
+  to the dead-letter queue rather than replayed.
 
 ## Deferred by owner for the current beta
 
@@ -116,9 +128,11 @@ remain in force and they must be reopened before a later production promotion:
 - Syntarus server-side metadata-filter enforcement is not yet deployed. Smara
   continues to label workspace/status filters advisory; it must not be called
   secure cross-project isolation.
-- A Windows paired-desktop smoke task already passed. The local process restart
-  check is green; a real paired task across PC disconnect/reconnect still needs
-  to be run with the owner's paired account. A production Sentry event and real
+- A Windows paired-desktop smoke task already passed, and the installed native
+  WebView completed a real hosted chat. Automated restart/retry/lease tests and
+  the live Postgres no-replay check are green; a real paired task across a
+  physical PC/app/network disconnect and reconnect still needs to be run with
+  the owner's paired account. A production Sentry event and real
   phone VAPID delivery still require their corresponding deployment
   credentials/device subscription.
 - The Docker sandbox command is not yet a live hosted executor. Before enabling
@@ -147,7 +161,8 @@ remain in force and they must be reopened before a later production promotion:
   state. The UI explains that an allowlist is eligibility, not approval.
 - A failed connection check now clears stale remote-online state, and a native
   chat event subscription failure is surfaced instead of being silently lost.
-- `npm run build`, 122 backend tests, and `cargo check` passed. The NSIS beta
+- `npm run build`, 139 backend tests, eight native Rust tests, and the full
+  package build passed. The NSIS beta
   installer was rebuilt and the release app restarted successfully.
 - The installer includes a Windows Desktop shortcut hook (`Smara Desktop.lnk`)
   with matching uninstall cleanup. The current shortcut target was checked and

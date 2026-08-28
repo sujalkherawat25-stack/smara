@@ -165,7 +165,7 @@ production promotion, while the current beta keeps fail-closed behavior.
   visibility. The shell keeps the executor and hosted API as the only runtime
   paths; it does not add a second agent or memory store.
 - Repeatable Windows packaging now builds a PyInstaller standalone executor,
-  embeds it as a Tauri resource, and produces MSI/NSIS installers. The
+  embeds it as a Tauri resource, and produces the supported NSIS installer. The
   artifacts are unsigned beta packages; signing, update trust, and restart
   drills remain release gates.
 - Desktop onboarding includes the hosted browser device-approval flow, so a
@@ -177,7 +177,8 @@ production promotion, while the current beta keeps fail-closed behavior.
   finalize a lease recovered by another executor.
 - Canonical root UI at `ai.syntarus.com` with the same-origin `/smara-api`
   backend route; no second public Smara UI is required.
-- Local suite (122 Smara backend tests), frontend type-check, VM Docker build,
+- Local suite (139 Smara backend tests), frontend type-check/production build,
+  eight native Rust tests, full Windows executor packaging, VM Docker build,
   live health checks, and disposable account/task/research/approval smoke test.
 - Native desktop QA now covers the real Windows WebView shell as well as a
   browser-safe UI preview. Completed hosted tasks expose their durable final
@@ -209,6 +210,16 @@ production promotion, while the current beta keeps fail-closed behavior.
   avoids native event registration in browser previews, and renders pairing,
   settings, and credential failures inline. The Windows package script now
   fails loudly and builds the supported NSIS beta installer.
+- Hosted agent calls now have a hard wall-clock budget, per-tool timeout, and
+  total tool-call budget. Identical tool requests are not executed twice;
+  transient non-stream provider calls retry once, while a stream failure before
+  its first token falls back to the normal completion endpoint.
+- Desktop lease recovery distinguishes safe reads from uncertain side effects.
+  An expired `local_file_read` can be reclaimed, but terminal, browser, and
+  file-write steps fail closed into the account dead-letter queue instead of
+  being replayed after an ambiguous disconnect.
+- The live beta smoke can now exercise the real Grok/Tavily agent contract and
+  the production Postgres desktop lease-safety rule using disposable accounts.
 
 ## 6. Remaining work, in order
 
@@ -220,11 +231,13 @@ not new work to start during this beta sprint.
 
 ### P0 — Make Smara Web one native product
 
-1. **Mostly done:** adapt the Memento agent-loop behavior into Smara's
+1. **Done for the focused beta:** adapt the Memento agent-loop behavior into Smara's
    provider-neutral runtime. Deterministic triage, bounded tool reasoning,
    streaming, memory context, and phase events are live. Live staging smokes
    now cover the configured Grok model, calculator, Tavily discovery/page
-   retrieval, cited research, and the Postgres desktop approval path.
+   retrieval, cited research, and the Postgres desktop approval path. The
+   runtime now also enforces wall-clock/tool budgets, duplicate-tool rejection,
+   a bounded transient retry, and safe stream-before-first-token fallback.
 2. **In progress:** native Smara calls now cover chat streaming, hosted
    conversation history/recents, durable tasks/events, research evidence,
    approvals, schedules, and executor settings. Remaining: authenticated
@@ -233,19 +246,22 @@ not new work to start during this beta sprint.
    navigation are no longer mounted in Smara mode. Legacy components remain in
    source only as a rollback path until the shadow run is accepted.
 4. **Pending:** run the authenticated browser shadow suite with a real beta
-   account. Keep the current root Memento route unchanged until it passes.
+   account. Keep the preserved Memento/Caddy rollback configuration until it
+   passes; Smara already owns the reversible-beta public root.
 
 ### P1 — Make the desktop executor dependable
 
-1. Test PC restart, disconnect/reconnect, lease expiry, cancellation,
+1. Automated coverage now passes for lease expiry, cancellation,
    capability denial, revoke, retries, and duplicate prevention on Windows.
-   Confirm the VM cannot claim a `desktop` step and that local browser/file/
-   terminal work runs only on the paired PC.
-2. The native Tauri shell and self-contained unsigned MSI/NSIS packages now
+   The production Postgres smoke proves an ambiguous terminal lease is blocked
+   and audited rather than replayed. Remaining: a physical PC/app/network
+   restart and reconnect drill with the owner's paired account.
+2. The native Tauri shell and self-contained unsigned NSIS package now
    build locally. Remaining: sign the installer and executor, add a trusted
    update channel, test auto-start opt-in, bounded logs, visible pause/revoke,
    and clear pairing recovery on clean Windows machines.
-3. Connect only approved terminal/browser/file steps to an isolated sandbox;
+3. Hosted sandbox execution remains owner-deferred and disabled. Local
+   terminal/browser/file steps stay approval-gated on the paired PC;
    unrestricted arbitrary code is not a production capability.
 
 ### P2 — Production readiness and cutover
@@ -254,8 +270,10 @@ not new work to start during this beta sprint.
    a real VM secret manager; perform a rotation drill. Do not place user
    integration credentials in this manager or in Smara Postgres.
 2. Finish encrypted off-host backups and a disposable restore drill.
-3. Configure Sentry/structured logs, authenticated distributed rate limits,
-   per-task cost/time/output/resource budgets, and artifact retention.
+3. Structured safe provider-failure logs, authenticated backend rate limits,
+   and hosted agent time/tool/output budgets are implemented. Remaining for a
+   later production promotion: Sentry delivery, edge-wide rate-limit policy,
+   cost accounting/resource budgets, and formal artifact retention.
 4. Run security, fault-injection, restart, concurrency, isolation, and
    rollback tests.
 5. Shadow Smara against Memento for selected beta accounts (no side effects),
@@ -297,13 +315,13 @@ For the **focused hosted + desktop vision** (not the deferred backlog):
 
 | Area | Approx. complete | Main gap |
 |---|---:|---|
-| Hosted agent/task/research runtime | 80% | Memento behavior parity and edge cases |
-| CLI hosted client | 85% | parity polish and authenticated workflow tests |
-| Native Smara Web | 70% | authenticated shadow tests and final legacy cleanup |
-| Desktop local executor | 86% | restart drills, signing, and update trust |
-| Production operations/cutover | 45% | deferred hardening gates and authenticated shadow run |
+| Hosted agent/task/research runtime | 88% | broader eval corpus, cost accounting, and rare provider edges |
+| CLI hosted client | 86% | authenticated usability polish and long-session soak |
+| Native Smara Web | 72% | authenticated shadow tests and final legacy cleanup |
+| Desktop local executor | 89% | physical restart drill, signing, and update trust |
+| Production operations/cutover | 48% | deferred hardening gates and authenticated shadow run |
 
-**Focused beta:** roughly 77% complete.
+**Focused beta:** roughly 82% complete.
 **Public replacement:** Smara is live as a reversible beta root. The owner has
 explicitly deferred five production-hardening gates, so this is not a claim of
 full production readiness.
@@ -334,19 +352,17 @@ Smara can replace the public Memento agent when:
 1. Run the authenticated Smara Web shadow checklist with a real beta account:
    sign-in, refresh, chat, task result, research evidence, approval, reconnect,
    sign-out, and account isolation.
-2. Run the Windows executor failure drill: pair, approve a harmless local step,
-   restart the PC/app, disconnect/reconnect, cancel, revoke, expire a lease,
-   and confirm no duplicate or hosted-side local execution.
-3. Add the Sarvam key when desired and run one low-cost provider smoke; keep
-   Grok as the current hosted default until that smoke passes. The hosted
-   slots are now present for Sarvam 105B, GLM-5.2 reasoning, and Gemma 4
-   vision; beta entitlements remain an operator check.
+2. Run the remaining physical Windows executor drill: pair, approve a harmless
+   local step, restart the PC/app, disconnect/reconnect, cancel, and revoke.
+   Automated and production-database lease-expiry/no-replay checks are green.
+3. Run the authenticated edge-rate-limit review using the real browser session;
+   the backend Redis limiter and bounded synthetic burst are already green.
 4. Keep the five owner-deferred production gates disabled and documented.
    Reopen them only when the required signing certificate, Sentry account,
    secret-manager access, off-host backup destination, or isolated sandbox
    decision is explicitly supplied.
-5. Promote Smara from reversible beta to the permanent public root only after
-   all four checks above are recorded green. Keep MemoryOS as the unchanged
+5. Promote Smara from reversible beta to a production label only after the
+   active checks above are recorded green. Keep MemoryOS as the unchanged
    Syntarus memory service and retain Memento only as rollback/reference.
 
 ## 10. Historical implementation log
@@ -354,6 +370,31 @@ Smara can replace the public Memento agent when:
 The detailed historical entries below are retained for traceability; they are
 not additional scope. New entries should record only work that advances the
 focused hosted/desktop release.
+
+### 2026-08-28 — Agent and executor reliability closure
+
+- Added a 90-second hosted agent deadline, 20-second per-tool timeout, and
+  three-call tool budget. Repeated identical tool requests are rejected before
+  invocation, which prevents an accidental duplicate side effect inside one
+  reasoning run.
+- Added one bounded retry for transient non-stream provider failures and a
+  normal-completion fallback when a provider stream dies before its first
+  token. Partial streams are never answered a second time.
+- Changed desktop lease recovery to replay only `local_file_read`. An expired
+  terminal, browser, or file-write lease has an uncertain outcome, so Smara now
+  fails it closed, emits `executor.lease_expired_uncertain`, and records an
+  account-scoped dead letter for explicit human review.
+- Safe chat failure logging records only the provider name, classified error
+  kind, and exception type; it never logs prompts, tokens, credentials, or raw
+  provider bodies.
+- Verification passed: 139 Python tests, eight native Rust tests, both Web
+  production builds, PyInstaller executor packaging, and a fresh unsigned NSIS
+  installer. The installed Windows WebView completed a real hosted chat turn.
+- Deployed commits `e72f466` and `89f8a05`. The live disposable workflow passed
+  direct Grok chat, calculator, Tavily discovery, official-page fetch, cited
+  research, task/cancel/isolation checks, and production Postgres no-replay
+  recovery (`desktop_lease=blocked-and-audited`). All seven Compose services
+  remained healthy; MemoryOS source and data were not changed.
 
 ### 2026-08-28 — Beta verification and desktop UX pass
 
