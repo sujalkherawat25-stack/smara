@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import mimetypes
+import base64
 import re
 import secrets
 from datetime import datetime, timezone
@@ -21,6 +22,9 @@ MAX_FILE_BYTES = 100 * 1024 * 1024
 MAX_BATCH_BYTES = 150 * 1024 * 1024
 MAX_ATTACHMENTS_PER_BATCH = 10
 MAX_CONTEXT_CHARS = 120_000
+# Keep multimodal requests bounded even when the upload itself is allowed to
+# be large.  The original file remains available for future local tooling.
+MAX_IMAGE_INLINE_BYTES = 12 * 1024 * 1024
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._ -]+")
 _TEXT_EXTENSIONS = {
@@ -187,3 +191,29 @@ class AttachmentStore:
             if remaining <= 0:
                 break
         return "\n\n".join(parts)[:MAX_CONTEXT_CHARS], records
+
+    def image_inputs(self, account_id: str, attachment_ids: list[str]) -> list[dict[str, str]]:
+        """Return small uploaded images as OpenAI-compatible data URLs.
+
+        This is deliberately opt-in at the runtime: only a profile declared
+        with ``capability=vision`` receives these bytes.  Large images stay in
+        account storage and are described by the normal attachment context,
+        avoiding accidental oversized provider requests.
+        """
+        images: list[dict[str, str]] = []
+        for attachment_id in attachment_ids[:MAX_ATTACHMENTS_PER_BATCH]:
+            record = self.get(account_id, attachment_id)
+            if not record or int(record.get("size", 0)) > MAX_IMAGE_INLINE_BYTES:
+                continue
+            content_type = str(record.get("content_type") or "")
+            if not content_type.startswith("image/"):
+                continue
+            try:
+                encoded = base64.b64encode(Path(record["path"]).read_bytes()).decode("ascii")
+            except (OSError, KeyError):
+                continue
+            images.append({
+                "filename": str(record.get("filename", "image")),
+                "data_url": f"data:{content_type};base64,{encoded}",
+            })
+        return images

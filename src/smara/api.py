@@ -62,15 +62,17 @@ def _agent_runtime(model_profile: str | None = None) -> SmaraAgentRuntime:
         fallback_model=settings.llm_model,
         fallback_provider=settings.llm_provider,
     )
-    return SmaraAgentRuntime(
-        OpenAICompatibleProvider(
-            base_url=profile.base_url,
-            api_key=profile.api_key,
-            model=profile.model,
-            auth_header=profile.auth_header,
-        ),
-        memory=memory,
+    provider = OpenAICompatibleProvider(
+        base_url=profile.base_url,
+        api_key=profile.api_key,
+        model=profile.model,
+        auth_header=profile.auth_header,
     )
+    # Capability is operator-controlled profile metadata.  It determines
+    # whether uploaded image bytes may be sent to the provider; ordinary chat
+    # profiles receive only the safe attachment metadata/preview.
+    provider.capability = profile.capability
+    return SmaraAgentRuntime(provider, memory=memory)
 
 @app.get("/", include_in_schema=False)
 async def web_root():
@@ -263,10 +265,10 @@ async def upload_attachments(
     try:
         for upload in files:
             record = await attachment_store.save(user, upload, size_limit=MAX_FILE_BYTES)
+            saved.append(record)
             total += int(record["size"])
             if total > MAX_BATCH_BYTES:
                 raise ValueError("Attachments exceed the 150 MB total limit per message.")
-            saved.append(record)
     except ValueError as exc:
         for record in saved:
             attachment_store.delete(user, record["id"])
@@ -433,6 +435,16 @@ def _attachment_context(body: ChatRequest, user: str) -> str:
     return context
 
 
+def _attachment_images(body: ChatRequest, user: str, runtime: SmaraAgentRuntime) -> list[dict[str, str]]:
+    """Inline images only for an explicitly vision-capable model profile."""
+    if not body.attachment_ids:
+        return []
+    provider = getattr(runtime, "_provider", None)
+    if getattr(provider, "capability", "chat") != "vision":
+        return []
+    return attachment_store.image_inputs(user, body.attachment_ids)
+
+
 @app.get("/v1/conversations")
 async def list_conversations(user: str = Depends(account_id)):
     return {"conversations": store.conversations(user)}
@@ -464,11 +476,13 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
     except ValueError as exc:
         raise HTTPException(503, str(exc)) from exc
     try:
+        attachment_images = _attachment_images(body, user, runtime)
         async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=False) as client:
             turn = await runtime.chat_with_tools(
                 account_id=user,
                 workspace_id=body.workspace_id,
                 message=body.message,
+                attachment_images=attachment_images,
                 conversation_id=conversation_id,
                 conversation_history=history,
                 conversation_summary=summary,
@@ -529,11 +543,13 @@ async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
             queue.put_nowait(agent_events.token(text))
 
         async def run_chat():
+            attachment_images = _attachment_images(body, user, runtime)
             async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=False) as client:
                 return await runtime.chat_with_tools(
                     account_id=user,
                     workspace_id=body.workspace_id,
                     message=body.message,
+                    attachment_images=attachment_images,
                     conversation_id=conversation_id,
                     conversation_history=history,
                     conversation_summary=summary,

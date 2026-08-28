@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { fileURLToPath, URL } from "node:url";
+import path from "node:path";
 
 // JavaScript config keeps Vite's esbuild config loader out of the Windows
 // parent-directory resolution path that affected the original shell.
@@ -10,7 +10,10 @@ export default defineConfig({
   // for local previews, while production builds use "/".
   base: process.env.VITE_BASE_PATH ?? "/",
   resolve: {
-    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+    // Resolve from the config's working directory.  `fileURLToPath(new URL())`
+    // can be mis-parsed by esbuild on Windows and resolve the alias outside
+    // the project (making production builds fail with an access-denied path).
+    alias: { "@": path.resolve(process.cwd(), "src") },
   },
   server: {
     port: 5173,

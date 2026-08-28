@@ -29,8 +29,8 @@ class ConversationMemory(Protocol):
 
 
 class ChatProvider(Protocol):
-    async def complete(self, *, system: str, message: str) -> str: ...
-    def stream_complete(self, *, system: str, message: str) -> AsyncIterator[str]: ...
+    async def complete(self, *, system: str, message: Any) -> str: ...
+    def stream_complete(self, *, system: str, message: Any) -> AsyncIterator[str]: ...
 
 
 @dataclass(frozen=True)
@@ -87,6 +87,7 @@ class OpenAICompatibleProvider:
         self._model = model
         self._timeout_seconds = timeout_seconds
         self._auth_header = auth_header.strip().lower()
+        self.capability = "chat"
 
     def _headers(self) -> dict[str, str]:
         if self._auth_header in {"api-subscription-key", "api_subscription_key"}:
@@ -146,7 +147,11 @@ class OpenAICompatibleProvider:
                     return joined
         return None
 
-    async def complete(self, *, system: str, message: str) -> str:
+    @staticmethod
+    def _user_content(message: Any) -> Any:
+        return message if isinstance(message, (str, list)) else str(message)
+
+    async def complete(self, *, system: str, message: Any) -> str:
         if not self._base_url or not self._api_key or not self._model:
             raise RuntimeError("No Smara chat provider is configured.")
         async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
@@ -162,7 +167,7 @@ class OpenAICompatibleProvider:
                     "max_tokens": 4096,
                     "messages": [
                         {"role": "system", "content": system},
-                        {"role": "user", "content": message},
+                        {"role": "user", "content": self._user_content(message)},
                     ],
                 },
             )
@@ -175,7 +180,7 @@ class OpenAICompatibleProvider:
             raise RuntimeError("Configured provider returned an empty chat response.")
         return content.strip()
 
-    async def stream_complete(self, *, system: str, message: str) -> AsyncIterator[str]:
+    async def stream_complete(self, *, system: str, message: Any) -> AsyncIterator[str]:
         """Yield normalized OpenAI-compatible content deltas."""
         if not self._base_url or not self._api_key or not self._model:
             raise RuntimeError("No Smara chat provider is configured.")
@@ -191,7 +196,7 @@ class OpenAICompatibleProvider:
                     "stream": True,
                     "messages": [
                         {"role": "system", "content": system},
-                        {"role": "user", "content": message},
+                        {"role": "user", "content": self._user_content(message)},
                     ],
                 },
             ) as response:
@@ -238,7 +243,7 @@ class SmaraAgentRuntime:
         self,
         *,
         system: str,
-        message: str,
+        message: Any,
         token_hook: Callable[[str], None] | None = None,
     ) -> str:
         """Answer a conversational turn without the tool-planning round trip."""
@@ -310,6 +315,7 @@ class SmaraAgentRuntime:
         account_id: str,
         workspace_id: str,
         message: str,
+        attachment_images: list[dict[str, str]] | None = None,
         conversation_id: str | None = None,
         conversation_history: list[dict[str, Any]] | None = None,
         conversation_summary: str = "",
@@ -342,7 +348,9 @@ class SmaraAgentRuntime:
         if conversation_summary.strip():
             context = (context + "\n\nBounded summary of earlier conversation:\n" + conversation_summary.strip()[-8_000:]).strip()
         if attachment_context.strip():
-            context = (context + "\n\nUser attachments (bounded previews):\n" + attachment_context[:120_000]).strip()
+            # Attachments are explicit user input; put them first so the
+            # bounded 12k prompt slice cannot trim them behind old memory.
+            context = ("User attachments (bounded previews):\n" + attachment_context[:120_000] + "\n\n" + context).strip()
         recent = self._recent_conversation(conversation_history)
         if recent:
             context = (context + "\n\nRecent conversation context (oldest to newest):\n" + recent).strip()
@@ -359,7 +367,11 @@ class SmaraAgentRuntime:
                 system += "\n\nRelevant shared Syntarus memory (may be incomplete):\n" + context[:12_000]
             if event_hook:
                 event_hook("agent.phase", {"phase": "answer"})
-            answer = await self._direct_answer(system=system, message=message, token_hook=token_hook)
+            user_content: Any = message
+            if attachment_images:
+                user_content = [{"type": "text", "text": message}]
+                user_content.extend({"type": "image_url", "image_url": {"url": image["data_url"]}} for image in attachment_images)
+            answer = await self._direct_answer(system=system, message=user_content, token_hook=token_hook)
             if not answer:
                 raise RuntimeError("Smara provider returned an empty response.")
             return ChatTurn(
