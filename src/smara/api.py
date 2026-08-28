@@ -496,7 +496,14 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
         store.append_conversation_exchange(conversation_id, user, body.workspace_id, body.message, turn.message, turn.model)
         return ChatResponse(**turn.__dict__)
     except httpx.HTTPStatusError as exc:
-        raise HTTPException(502, "The configured Smara model provider rejected this chat request.") from exc
+        # Keep non-streaming clients (CLI, integrations, API consumers) on
+        # the same safe, actionable error contract as the SSE client.  In
+        # particular Sarvam's beta-gated GLM/Gemma responses become a clear
+        # model-unavailable message rather than an opaque 502.
+        kind, message = llm_errors.describe(
+            exc, provider=body.model_profile or settings.llm_provider
+        )
+        raise HTTPException(503, message, headers={"X-Smara-Error": kind}) from exc
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     finally:
