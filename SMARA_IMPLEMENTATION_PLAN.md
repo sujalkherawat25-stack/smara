@@ -343,6 +343,21 @@ The detailed historical entries below are retained for traceability; they are
 not additional scope. New entries should record only work that advances the
 focused hosted/desktop release.
 
+### 2026-08-28 — Beta verification and desktop UX pass
+
+- Signed staging shadow smoke passed for health/readiness, hosted tool access,
+  disposable task create/cancel, cross-account isolation, and the local-only
+  integration policy. The same harness recorded 120 successful requests and
+  5 expected 429 responses in a bounded limiter review.
+- Desktop Chat now makes sign-in discoverable, avoids dead starter actions,
+  and distinguishes a reachable hosted service from an authenticated session.
+  Settings, pairing, credential, log, and browser-preview failure paths are
+  non-blocking and visible in the app.
+- The Windows package script now checks every native build step and produces
+  the supported unsigned NSIS beta installer. A release process stop/start
+  check and 26 focused desktop/auth/provider tests passed. A real paired
+  disconnect/reconnect task remains an owner-session check.
+
 ### 2026-08-28 — Desktop hosted routing, provider profiles, and local secrets
 
 - Fixed desktop device sign-in to open the Smara Web origin while keeping the
