@@ -44,12 +44,12 @@ approved folder and add terminal/browser allowlists only when needed.
 ```
 
 The release artifacts are written under `src-tauri\target\release\bundle\`
-(MSI and NSIS installer). The build script creates a PyInstaller standalone
+(NSIS installer for the beta). The build script creates a PyInstaller standalone
 executor and embeds it as an installer resource, so the packaged app does not
 need the repository or a Python installation to run approved local work. A
 publisher certificate and signed auto-update channel are still production
 hardening tasks; the app intentionally does not silently download code or
-dependencies.
+dependencies. MSI remains an optional operator build when WiX is available.
 
 ## Hosted provider/model profiles
 

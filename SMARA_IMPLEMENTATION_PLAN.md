@@ -189,8 +189,23 @@ production promotion, while the current beta keeps fail-closed behavior.
   account using an encrypted vault. Approved local terminal steps may request
   an environment-name alias; the secret is injected only into that child
   process and is redacted from returned output.
+- A repeatable `scripts/live_beta_smoke.py` now verifies public health,
+  signed-account task access, cross-account isolation, cancellation, the
+  local-only hosted integration policy, and the bounded rate limiter without
+  printing deployment secrets or retaining test work.
+- Desktop UX now makes sign-in explicit from Chat, disables unauthenticated
+  starter actions, distinguishes reachable from authenticated hosted status,
+  avoids native event registration in browser previews, and renders pairing,
+  settings, and credential failures inline. The Windows package script now
+  fails loudly and builds the supported NSIS beta installer.
 
 ## 6. Remaining work, in order
+
+For the current reversible beta, active implementation is intentionally limited
+to four verification tracks: authenticated Smara Web shadowing, Windows
+executor reconnect testing, edge-limit review, and an optional low-cost Sarvam
+smoke. The broader P1/P2 items below remain documented future gates; they are
+not new work to start during this beta sprint.
 
 ### P0 — Make Smara Web one native product
 
@@ -313,6 +328,7 @@ Smara can replace the public Memento agent when:
    and confirm no duplicate or hosted-side local execution.
 3. Add the Sarvam key when desired and run one low-cost provider smoke; keep
    Grok as the current hosted default until that smoke passes.
+   (The hosted slot is currently absent, so this is intentionally skipped.)
 4. Keep the five owner-deferred production gates disabled and documented.
    Reopen them only when the required signing certificate, Sentry account,
    secret-manager access, off-host backup destination, or isolated sandbox

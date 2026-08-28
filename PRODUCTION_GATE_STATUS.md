@@ -1,6 +1,6 @@
 # Smara production-gate status
 
-Updated 2026-08-27 after the reversible Smara root cutover. This is an
+Updated 2026-08-28 after the reversible Smara root cutover. This is an
 operational checklist: Smara is live at the root as a beta deployment, while
 the remaining production gates below are still tracked and Memento rollback is
 preserved.
@@ -75,6 +75,16 @@ preserved.
   Smara, and `/etc/caddy/Caddyfile.pre-smara-root-cutover-20260827` preserves a
   one-command rollback. The root page, auth config, unauthenticated guards,
   Smara readiness, and a Caddy restart all passed after the switch.
+- The repeatable signed beta smoke passed on staging: public health/readiness,
+  signed tool access, disposable task create/cancel, cross-account task
+  isolation (404), and local-only integration policy. No secret values were
+  printed and no user task was modified.
+- The bounded authenticated limiter review returned **120 HTTP 200** responses
+  followed by **5 HTTP 429** responses. This confirms the backend Redis window;
+  a separate Cloudflare-wide distributed policy review remains open.
+- The native desktop release was stopped and restarted successfully after the
+  UX build. The focused desktop/auth/provider suite passed (**26 tests**), and
+  the supported unsigned NSIS package rebuilt successfully.
 
 ## Deferred by owner for the current beta
 
@@ -107,8 +117,10 @@ remain in force and they must be reopened before a later production promotion:
 - Syntarus server-side metadata-filter enforcement is not yet deployed. Smara
   continues to label workspace/status filters advisory; it must not be called
   secure cross-project isolation.
-- A Windows paired-desktop smoke task already passed. A production Sentry event
-  and real phone VAPID delivery still require their corresponding deployment
+- A Windows paired-desktop smoke task already passed. The local process restart
+  check is green; a real paired task across PC disconnect/reconnect still needs
+  to be run with the owner's paired account. A production Sentry event and real
+  phone VAPID delivery still require their corresponding deployment
   credentials/device subscription.
 - The Docker sandbox command is not yet a live hosted executor. Before enabling
   `SMARA_SANDBOX_ENABLED`, deploy a separate sandbox service with its own
