@@ -85,6 +85,7 @@ function App() {
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [signingIn, setSigningIn] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const assistantId = useRef<string | null>(null);
   const conversationId = useRef(`desktop-${Date.now()}`);
@@ -225,6 +226,8 @@ function App() {
   }
 
   async function signIn(apiUrl = connection.api_url, webUrl = connection.web_url) {
+    if (signingIn) return;
+    setSigningIn(true);
     try {
       setNotice("A browser window will open. Approve Smara Desktop there, then return here.");
       await desktop.login(apiUrl, webUrl);
@@ -233,6 +236,8 @@ function App() {
       setNotice("Smara Desktop is signed in.");
     } catch (error) {
       setNotice(errorMessage(error, "Smara sign-in could not be completed."));
+    } finally {
+      setSigningIn(false);
     }
   }
 
@@ -253,7 +258,7 @@ function App() {
     </aside>
 
     <main className="main-panel">
-      <header className="topbar"><div className="topbar-title"><span className="eyebrow">LOCAL COMPANION</span><h1>{screen === "chat" ? "Chat" : screen === "activity" ? "Activity" : "Settings"}</h1></div><div className="topbar-actions"><StatusPill connection={connection} />{isNativeDesktop && !connection.has_cli_token && <Button kind="quiet" onClick={() => setScreen("settings")}>Sign in</Button>}<span className={`remote-pill ${remote?.ok ? "remote-online" : ""}`}><span className="status-dot" />{!isNativeDesktop ? "UI preview" : remote?.ok ? connection.has_cli_token ? "Hosted connected" : "Hosted ready · sign in" : loading ? "Checking…" : "Hosted offline"}</span><button className="icon-button" onClick={() => void refreshConnection()} aria-label="Refresh connection">↻</button></div></header>
+      <header className="topbar"><div className="topbar-title"><span className="eyebrow">LOCAL COMPANION</span><h1>{screen === "chat" ? "Chat" : screen === "activity" ? "Activity" : "Settings"}</h1></div><div className="topbar-actions"><StatusPill connection={connection} />{isNativeDesktop && !connection.has_cli_token && <Button kind="quiet" onClick={() => void signIn()} disabled={signingIn}>{signingIn ? "Signing in…" : "Sign in"}</Button>}<span className={`remote-pill ${remote?.ok ? "remote-online" : ""}`}><span className="status-dot" />{!isNativeDesktop ? "UI preview" : remote?.ok ? connection.has_cli_token ? "Hosted connected" : "Hosted ready · sign in" : loading ? "Checking…" : "Hosted offline"}</span><button className="icon-button" onClick={() => void refreshConnection()} aria-label="Refresh connection">↻</button></div></header>
       {notice && <div className="notice" role="status"><span>i</span>{notice}<button onClick={() => setNotice(null)} aria-label="Dismiss">×</button></div>}
       {screen === "chat" && <ChatScreen messages={messages} draft={draft} setDraft={setDraft} onSend={() => void send()} onStarter={(value) => void send(value)} streaming={streaming} activity={activity} canChat={connection.has_cli_token || connection.model_profile.startsWith("local:")} localModel={connection.model_profile.startsWith("local:")} onSignIn={() => setScreen("settings")} onOpenWeb={() => void desktop.openWeb()} onClearActivity={() => setActivity([])} transcriptEndRef={transcriptEndRef} />}
       {screen === "activity" && <ActivityScreen connection={connection} tasks={tasks} onRefresh={() => void Promise.all([refreshTasks(), refreshConnection()])} onStart={() => void runAction(desktop.start, "Desktop executor started.")} onStop={() => void runAction(desktop.stop, "Desktop executor stopped.")} onPause={() => void runAction(desktop.pause, "Desktop executor paused.")} onResume={() => void runAction(desktop.resume, "Desktop executor resumed.")} onRevoke={() => { if (window.confirm("Revoke this desktop? Approved local work will stop and you will need to pair again.")) void runAction(desktop.revoke, "Desktop executor revoked. Pair again to reconnect."); }} onOpenWeb={() => void desktop.openWeb()} onReadLog={() => desktop.log()} />}

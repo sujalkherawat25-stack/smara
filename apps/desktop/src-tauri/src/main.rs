@@ -304,6 +304,28 @@ fn cli_token() -> Result<String, String> {
     data.get("access_token").and_then(Value::as_str).filter(|value| !value.is_empty()).map(str::to_owned).ok_or_else(|| "Your Smara sign-in is missing. Open Settings and sign in again.".to_owned())
 }
 
+/// Normalize the public Smara API URL without changing user-owned endpoints.
+/// Older beta builds sometimes saved the public web root as the API URL. That
+/// made `/health` look reachable while every authenticated route 404ed. The
+/// hosted public root is known, so repair only that exact origin/path shape.
+fn normalized_api_url(configured: &str) -> String {
+    let configured = configured.trim();
+    let Ok(mut url) = reqwest::Url::parse(if configured.is_empty() { DEFAULT_API_URL } else { configured }) else {
+        return configured.to_owned();
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return configured.to_owned();
+    }
+    let is_public_smara = url.host_str() == Some("ai.syntarus.com");
+    let path = url.path().trim_end_matches('/');
+    if is_public_smara && (path.is_empty() || path == "/smara") {
+        url.set_path("/smara-api");
+        url.set_query(None);
+        url.set_fragment(None);
+    }
+    url.to_string().trim_end_matches('/').to_owned()
+}
+
 /// The Smara shell lives at `/smara/` on the hosted domain. Older beta
 /// installs saved the domain root, which opened the legacy Memento shell and
 /// could never show the CLI approval dialog. Keep custom URLs intact while
@@ -327,14 +349,16 @@ fn normalized_web_url(api_url: &str, configured: &str) -> String {
 
 #[tauri::command]
 async fn login_cli(api_url: String, web_url: String) -> Result<String, String> {
-    let api_url = api_url.trim().trim_end_matches('/').to_owned();
+    let api_url = normalized_api_url(&api_url);
     if !(api_url.starts_with("http://") || api_url.starts_with("https://")) {
         return Err("Smara API URL must start with http:// or https://".to_owned());
     }
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build().map_err(|error| error.to_string())?;
     let request = client.get(format!("{api_url}/v1/cli/device/request")).query(&[("name", "Smara Desktop")]).send().await.map_err(|error| format!("Could not start sign-in: {error}"))?;
     if !request.status().is_success() {
-        return Err(format!("Smara sign-in could not start (HTTP {})", request.status()));
+        let status = request.status();
+        let detail = request.json::<Value>().await.ok().and_then(|value| value.get("detail").and_then(Value::as_str).map(str::to_owned));
+        return Err(detail.unwrap_or_else(|| format!("Smara sign-in could not start (HTTP {status})")));
     }
     let device: Value = request.json().await.map_err(|error| format!("Smara sign-in returned invalid data: {error}"))?;
     let device_code = device.get("device_code").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| "Smara sign-in did not return a device code.".to_owned())?;
@@ -356,7 +380,9 @@ async fn login_cli(api_url: String, web_url: String) -> Result<String, String> {
         tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
         let response = client.get(format!("{api_url}/v1/cli/device/poll")).query(&[("device_code", device_code)]).send().await.map_err(|error| format!("Sign-in polling failed: {error}"))?;
         if !response.status().is_success() {
-            return Err(format!("Smara sign-in polling returned HTTP {}", response.status()));
+            let status = response.status();
+            let detail = response.json::<Value>().await.ok().and_then(|value| value.get("detail").and_then(Value::as_str).map(str::to_owned));
+            return Err(detail.unwrap_or_else(|| format!("Smara sign-in polling returned HTTP {status}")));
         }
         let result: Value = response.json().await.map_err(|error| format!("Smara sign-in returned invalid data: {error}"))?;
         match result.get("status").and_then(Value::as_str) {
@@ -364,7 +390,10 @@ async fn login_cli(api_url: String, web_url: String) -> Result<String, String> {
             Some("expired") | Some("used") => return Err("That sign-in request expired or was already used. Try again.".to_owned()),
             Some("approved") => {
                 let token = result.get("access_token").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| "Smara sign-in did not return a token.".to_owned())?;
-                write_json(&app_data_dir().join("token.json"), &json!({"access_token": token, "token_type": "bearer", "expires_in": result.get("expires_in").cloned().unwrap_or(Value::Null)}))?;
+                // Write through the same resolver used by cli_token(), so an
+                // explicit SMARA_TOKEN_FILE can never leave the UI signed in
+                // to a file the chat path does not read.
+                write_json(&cli_token_path(), &json!({"access_token": token, "token_type": "bearer", "expires_in": result.get("expires_in").cloned().unwrap_or(Value::Null)}))?;
                 return Ok("Smara Desktop is signed in.".to_owned());
             }
             _ => return Err("Smara returned an unknown sign-in status.".to_owned()),
@@ -375,7 +404,8 @@ async fn login_cli(api_url: String, web_url: String) -> Result<String, String> {
 fn current_connection() -> ConnectionState {
     let state = read_json(&state_path());
     let preferences = read_json(&preferences_path());
-    let api_url = preferences.as_ref().and_then(|value| value.get("api_url")).and_then(Value::as_str).or_else(|| state.as_ref().and_then(|value| value.get("smara_url")).and_then(Value::as_str)).unwrap_or(DEFAULT_API_URL).trim_end_matches('/').to_owned();
+    let configured_api_url = preferences.as_ref().and_then(|value| value.get("api_url")).and_then(Value::as_str).or_else(|| state.as_ref().and_then(|value| value.get("smara_url")).and_then(Value::as_str)).unwrap_or(DEFAULT_API_URL);
+    let api_url = normalized_api_url(configured_api_url);
     let configured_web_url = preferences.as_ref().and_then(|value| value.get("web_url")).and_then(Value::as_str).unwrap_or(DEFAULT_WEB_URL);
     let web_url = normalized_web_url(&api_url, configured_web_url);
     let workspace = preferences.as_ref().and_then(|value| value.get("workspace")).and_then(Value::as_str).unwrap_or("default").to_owned();
@@ -398,9 +428,9 @@ fn load_connection() -> ConnectionState { current_connection() }
 
 #[tauri::command]
 fn save_settings(settings: LocalSettings) -> Result<ConnectionState, String> {
-    let api_url = settings.api_url.trim().trim_end_matches('/');
+    let api_url = normalized_api_url(&settings.api_url);
     if !(api_url.starts_with("http://") || api_url.starts_with("https://")) { return Err("Smara API URL must start with http:// or https://".to_owned()); }
-    let web_url = normalized_web_url(api_url, &settings.web_url);
+    let web_url = normalized_web_url(&api_url, &settings.web_url);
     if !(web_url.starts_with("http://") || web_url.starts_with("https://")) { return Err("Smara Web URL must start with http:// or https://".to_owned()); }
     // Keep provider profile metadata when the general settings form is saved.
     // These profiles point at encrypted local credentials and must never be
@@ -423,10 +453,18 @@ fn save_settings(settings: LocalSettings) -> Result<ConnectionState, String> {
 
 #[tauri::command]
 async fn check_connection(api_url: String) -> Result<RemoteStatus, String> {
-    let api_url = api_url.trim().trim_end_matches('/').to_owned();
+    let api_url = normalized_api_url(&api_url);
     let response = reqwest::Client::new().get(format!("{api_url}/health")).timeout(std::time::Duration::from_secs(8)).send().await.map_err(|error| format!("Hosted Smara is unreachable: {error}"))?;
     let status = response.status();
     if !status.is_success() { return Ok(RemoteStatus { ok: false, api_url, detail: format!("Hosted Smara returned HTTP {status}") }); }
+    let payload = response.json::<Value>().await.map_err(|_| RemoteStatus { ok: false, api_url: api_url.clone(), detail: "This URL returned a web page, not the Smara API. Use an API URL ending in /smara-api.".to_owned() });
+    let payload = match payload {
+        Ok(value) => value,
+        Err(status) => return Ok(status),
+    };
+    if payload.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Ok(RemoteStatus { ok: false, api_url, detail: "Smara API health check did not return ok=true.".to_owned() });
+    }
     Ok(RemoteStatus { ok: true, api_url, detail: "Hosted Smara is ready".to_owned() })
 }
 
@@ -529,7 +567,7 @@ fn resolve_local_secret(name: &str) -> Result<String, String> {
 #[tauri::command]
 fn pair_desktop(args: PairArgs) -> Result<ConnectionState, String> {
     if args.code.trim().len() != 8 { return Err("Pairing code must be 8 characters.".to_owned()); }
-    let mut command_args = vec!["--api".to_owned(), args.api_url.trim_end_matches('/').to_owned(), "--pair".to_owned(), args.code.trim().to_uppercase(), "--pair-only".to_owned(), "--state".to_owned(), state_path().display().to_string()];
+    let mut command_args = vec!["--api".to_owned(), normalized_api_url(&args.api_url), "--pair".to_owned(), args.code.trim().to_uppercase(), "--pair-only".to_owned(), "--state".to_owned(), state_path().display().to_string()];
     for root in args.allowed_roots { command_args.extend(["--allow-root".to_owned(), root]); }
     for executable in args.terminal_allowlist { command_args.extend(["--terminal-allow".to_owned(), executable]); }
     for domain in args.browser_domains { command_args.extend(["--browser-domain".to_owned(), domain]); }
@@ -725,7 +763,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalized_web_url, preserve_local_model_profiles};
+    use super::{normalized_api_url, normalized_web_url, preserve_local_model_profiles};
     use serde_json::json;
 
     #[test]
@@ -741,6 +779,30 @@ mod tests {
         assert_eq!(
             normalized_web_url("https://ai.syntarus.com/smara-api", "https://ai.syntarus.com/custom/"),
             "https://ai.syntarus.com/custom/"
+        );
+    }
+
+    #[test]
+    fn repairs_legacy_public_web_root_used_as_api_url() {
+        assert_eq!(
+            normalized_api_url("https://ai.syntarus.com/"),
+            "https://ai.syntarus.com/smara-api"
+        );
+        assert_eq!(
+            normalized_api_url("https://ai.syntarus.com/smara/"),
+            "https://ai.syntarus.com/smara-api"
+        );
+    }
+
+    #[test]
+    fn keeps_custom_api_origins_unchanged() {
+        assert_eq!(
+            normalized_api_url("http://localhost:8090/"),
+            "http://localhost:8090"
+        );
+        assert_eq!(
+            normalized_api_url("https://example.test/custom-api/"),
+            "https://example.test/custom-api"
         );
     }
 

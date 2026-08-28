@@ -20,3 +20,14 @@ def test_unknown_profile_is_rejected():
 def test_legacy_single_provider_remains_valid():
     profile = resolve_profile(raw="", requested=None, fallback_base_url="https://api.example/v1", fallback_key="key", fallback_model="small", fallback_provider="xai")
     assert (profile.base_url, profile.model, profile.api_key) == ("https://api.example/v1", "small", "key")
+
+
+def test_escaped_dotenv_json_profiles_are_accepted():
+    profiles = load_profiles(
+        r'{\"grok\":{\"base_url\":\"https://api.x.ai/v1\",\"model\":\"grok-test\",\"api_key\":\"secret\"}}',
+        fallback_base_url="",
+        fallback_key="",
+        fallback_model="",
+    )
+    assert profiles["grok"].base_url == "https://api.x.ai/v1"
+    assert profiles["grok"].model == "grok-test"

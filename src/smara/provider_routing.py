@@ -36,7 +36,20 @@ def load_profiles(raw: str, *, fallback_base_url: str, fallback_key: str, fallba
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise ValueError("SMARA_LLM_PROFILES must be valid JSON.") from exc
+            # Some dotenv/Compose setups preserve escaped quotes when a JSON
+            # object is supplied as an environment value (for example,
+            # {\"grok\":{\"model\":\"...\"}}).  Treat that representation
+            # as the same profile document rather than making hosted chat
+            # fail while health and task endpoints continue to work.  We only
+            # remove the quote escape sequence; all other input validation
+            # remains unchanged below.
+            if r'\"' in raw:
+                try:
+                    data = json.loads(raw.replace(r'\"', '"'))
+                except json.JSONDecodeError:
+                    raise ValueError("SMARA_LLM_PROFILES must be valid JSON.") from exc
+            else:
+                raise ValueError("SMARA_LLM_PROFILES must be valid JSON.") from exc
         if not isinstance(data, dict) or len(data) > 12:
             raise ValueError("SMARA_LLM_PROFILES must be an object with at most 12 profiles.")
         for name, value in data.items():
