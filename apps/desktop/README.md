@@ -49,7 +49,9 @@ executor and embeds it as an installer resource, so the packaged app does not
 need the repository or a Python installation to run approved local work. A
 publisher certificate and signed auto-update channel are still production
 hardening tasks; the app intentionally does not silently download code or
-dependencies. MSI remains an optional operator build when WiX is available.
+dependencies. The NSIS installer creates a `Smara Desktop.lnk` shortcut on the
+Windows Desktop and removes that shortcut on uninstall. MSI remains an optional
+operator build when WiX is available.
 
 ## Hosted provider/model profiles
 

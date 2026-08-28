@@ -142,6 +142,9 @@ remain in force and they must be reopened before a later production promotion:
   chat event subscription failure is surfaced instead of being silently lost.
 - `npm run build`, 122 backend tests, and `cargo check` passed. The NSIS beta
   installer was rebuilt and the release app restarted successfully.
+- The installer includes a Windows Desktop shortcut hook (`Smara Desktop.lnk`)
+  with matching uninstall cleanup. The current shortcut target was checked and
+  resolves to the running release executable.
 - A local integration adapter (Gmail/Calendar/Drive/GitHub/Telegram) is still
   future work. The hosted API deliberately does not accept those user secrets
   while that adapter is unfinished.

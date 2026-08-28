@@ -32,6 +32,12 @@
     "resources": ["resources/smara-desktop.exe"],
     "category": "Utility",
     "shortDescription": "A private, approval-first desktop companion for Smara",
-    "longDescription": "Smara Desktop keeps local files, browser sessions, and terminal work on your PC while the hosted Smara agent plans and monitors approved tasks."
+    "longDescription": "Smara Desktop keeps local files, browser sessions, and terminal work on your PC while the hosted Smara agent plans and monitors approved tasks.",
+    "windows": {
+      "nsis": {
+        "startMenuFolder": "Smara",
+        "installerHooks": "nsis-hooks.nsh"
+      }
+    }
   }
 }

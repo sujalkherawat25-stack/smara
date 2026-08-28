@@ -613,3 +613,6 @@ focused hosted/desktop release.
 - Frontend production build, 122 backend tests, and Rust bridge checks passed.
   The unsigned NSIS beta installer was rebuilt and the release desktop was
   restarted successfully. MemoryOS and the hosted API were not changed.
+- The NSIS installer now creates a `Smara Desktop.lnk` desktop shortcut and
+  removes it on uninstall. A verified shortcut was also created for the current
+  Windows release executable.
