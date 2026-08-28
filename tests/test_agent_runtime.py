@@ -245,6 +245,17 @@ def test_provider_errors_have_stable_safe_client_contract():
     kind, message = llm_errors.describe(RuntimeError("No Smara chat provider is configured."))
     assert kind == "not_configured"
     assert "not configured" in message
+    kind, message = llm_errors.describe(RuntimeError("Smara agent model provider is not configured."))
+    assert kind == "not_configured"
+    assert "not configured" in message
+
+
+def test_sarvam_beta_endpoint_is_reported_as_model_unavailable():
+    request = httpx.Request("POST", "https://api.sarvam.ai/v2/chat/completions")
+    response = httpx.Response(400, request=request, text='{"error":{"message":"This endpoint is currently in beta and not available."}}')
+    error = httpx.HTTPStatusError("Client error", request=request, response=response)
+    kind, _ = llm_errors.describe(error, provider="Sarvam")
+    assert kind == "model_unavailable"
 
 
 def test_httpx_status_and_disabled_key_are_classified_without_leaking_detail():

@@ -21,26 +21,38 @@ KIND_UNKNOWN = "unknown"
 def classify(exc: Exception | str) -> str:
     message = str(exc).lower()
     status = getattr(exc, "status_code", None)
+    response_text = ""
     if status is None:
         response = getattr(exc, "response", None)
         status = getattr(response, "status_code", None)
-    if "no smara chat provider is configured" in message:
+    else:
+        response = getattr(exc, "response", None)
+    if response is not None:
+        # Provider bodies are used only for coarse classification. They are
+        # never returned to the client, which keeps keys and request details
+        # out of the stable error contract.
+        try:
+            response_text = response.text.lower()[:2_000]
+        except Exception:
+            response_text = ""
+    diagnostic = f"{message} {response_text}"
+    if "no smara chat provider is configured" in diagnostic or "smara agent model provider is not configured" in diagnostic:
         return KIND_NOT_CONFIGURED
-    if status == 402 or any(value in message for value in ("insufficient_quota", "insufficient credits", "credit balance", "payment required")):
+    if status == 402 or any(value in diagnostic for value in ("insufficient_quota", "insufficient credits", "credit balance", "payment required")):
         return KIND_NO_CREDITS
-    if status in {401, 403} or any(value in message for value in ("invalid api key", "invalid_api_key", "api key", "permission-denied", "unauthorized", "authenticationerror")):
+    if status in {401, 403} or any(value in diagnostic for value in ("invalid api key", "invalid_api_key", "api key", "permission-denied", "unauthorized", "authenticationerror")):
         return KIND_INVALID_KEY
-    if status == 429 or "rate limit" in message or "rate_limit" in message:
+    if status == 429 or "rate limit" in diagnostic or "rate_limit" in diagnostic:
         return KIND_RATE_LIMIT
-    if status == 413 or "context length" in message or "maximum context" in message:
+    if status == 413 or "context length" in diagnostic or "maximum context" in diagnostic:
         return KIND_CONTEXT_TOO_LONG
-    if "model_not_found" in message or "model not found" in message or "decommissioned" in message:
+    if "model_not_found" in diagnostic or "model not found" in diagnostic or "decommissioned" in diagnostic or (status == 400 and any(value in diagnostic for value in ("not available", "beta", "unsupported model"))):
         return KIND_MODEL_UNAVAILABLE
-    if (isinstance(status, int) and status >= 500) or any(value in message for value in ("service unavailable", "bad gateway", "overloaded")):
+    if (isinstance(status, int) and status >= 500) or any(value in diagnostic for value in ("service unavailable", "bad gateway", "overloaded")):
         return KIND_PROVIDER_DOWN
-    if "timeout" in message or "timed out" in message:
+    if "timeout" in diagnostic or "timed out" in diagnostic:
         return KIND_TIMEOUT
-    if any(value in message for value in ("connection", "econnref", "name or service not known")):
+    if any(value in diagnostic for value in ("connection", "econnref", "name or service not known")):
         return KIND_NETWORK
     return KIND_UNKNOWN
 

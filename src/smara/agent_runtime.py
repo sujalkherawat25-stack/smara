@@ -92,6 +92,28 @@ class OpenAICompatibleProvider:
             return {"api-subscription-key": self._api_key}
         return {"Authorization": f"Bearer {self._api_key}"}
 
+    @staticmethod
+    def _content_from_choice(choice: Any) -> str | None:
+        """Read normal text while deliberately ignoring reasoning-only fields."""
+        if not isinstance(choice, dict):
+            return None
+        for container_name in ("message", "delta"):
+            container = choice.get(container_name)
+            if not isinstance(container, dict):
+                continue
+            content = container.get("content")
+            if isinstance(content, str):
+                return content
+            # A few OpenAI-compatible gateways return text blocks instead of a
+            # plain string. Join only explicit text blocks; never surface
+            # reasoning_content to the user.
+            if isinstance(content, list):
+                parts = [item.get("text", "") for item in content if isinstance(item, dict) and isinstance(item.get("text"), str)]
+                joined = "".join(parts)
+                if joined:
+                    return joined
+        return None
+
     async def complete(self, *, system: str, message: str) -> str:
         if not self._base_url or not self._api_key or not self._model:
             raise RuntimeError("No Smara chat provider is configured.")
@@ -102,7 +124,11 @@ class OpenAICompatibleProvider:
                 json={
                     "model": self._model,
                     "temperature": 0.2,
-                    "max_tokens": 1200,
+                    # Reasoning-capable providers (notably Sarvam) may spend
+                    # more than 1,200 tokens internally before emitting the
+                    # visible answer. Keep the final answer bounded by our
+                    # agent runtime, but give the provider enough headroom.
+                    "max_tokens": 4096,
                     "messages": [
                         {"role": "system", "content": system},
                         {"role": "user", "content": message},
@@ -112,7 +138,7 @@ class OpenAICompatibleProvider:
         response.raise_for_status()
         data = response.json()
         try:
-            content = data["choices"][0]["message"]["content"]
+            content = self._content_from_choice(data["choices"][0])
         except (KeyError, IndexError, TypeError) as exc:
             raise RuntimeError("Configured provider returned an invalid chat response.") from exc
         if not isinstance(content, str) or not content.strip():
@@ -131,7 +157,7 @@ class OpenAICompatibleProvider:
                 json={
                     "model": self._model,
                     "temperature": 0.2,
-                    "max_tokens": 1200,
+                    "max_tokens": 4096,
                     "stream": True,
                     "messages": [
                         {"role": "system", "content": system},
@@ -149,7 +175,7 @@ class OpenAICompatibleProvider:
                         break
                     try:
                         data = json.loads(payload)
-                        content = data["choices"][0]["delta"].get("content")
+                        content = self._content_from_choice(data["choices"][0])
                     except (json.JSONDecodeError, KeyError, IndexError, TypeError):
                         continue
                     if isinstance(content, str) and content:

@@ -61,6 +61,8 @@ export interface ChatEvent {
   ok?: boolean;
   preview?: string;
   message?: string;
+  kind?: string;
+  recoverable?: boolean;
   total_ms?: number;
   tools_used?: number;
 }
@@ -71,6 +73,7 @@ export interface ChatMessage {
   text: string;
   pending?: boolean;
   failed?: boolean;
+  error?: string;
 }
 
 export interface ActivityItem {

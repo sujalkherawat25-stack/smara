@@ -22,6 +22,29 @@ def test_legacy_single_provider_remains_valid():
     assert (profile.base_url, profile.model, profile.api_key) == ("https://api.example/v1", "small", "key")
 
 
+def test_profile_inherits_legacy_key_only_for_same_endpoint(monkeypatch):
+    monkeypatch.delenv("MISSING_XAI_KEY", raising=False)
+    profiles = load_profiles(
+        '{"grok":{"base_url":"https://api.x.ai/v1","model":"grok-4.6","api_key_env":"MISSING_XAI_KEY"}}',
+        fallback_base_url="https://api.x.ai/v1",
+        fallback_key="legacy-xai-key",
+        fallback_model="grok-4.3",
+        fallback_provider="xAI",
+    )
+    assert profiles["grok"].api_key == "legacy-xai-key"
+
+
+def test_profile_does_not_inherit_key_for_different_endpoint():
+    profiles = load_profiles(
+        '{"sarvam":{"base_url":"https://api.sarvam.ai/v1","model":"sarvam-105b","api_key_env":"MISSING_SARVAM_KEY"}}',
+        fallback_base_url="https://api.x.ai/v1",
+        fallback_key="legacy-xai-key",
+        fallback_model="grok-4.3",
+        fallback_provider="xAI",
+    )
+    assert profiles["sarvam"].api_key == ""
+
+
 def test_escaped_dotenv_json_profiles_are_accepted():
     profiles = load_profiles(
         r'{\"grok\":{\"base_url\":\"https://api.x.ai/v1\",\"model\":\"grok-test\",\"api_key\":\"secret\"}}',

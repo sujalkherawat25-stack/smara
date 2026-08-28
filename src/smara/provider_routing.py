@@ -97,12 +97,21 @@ def load_profiles(raw: str, *, fallback_base_url: str, fallback_key: str, fallba
             key = os.getenv(key_env, "") if isinstance(key_env, str) else value.get("api_key", "")
             if not isinstance(key, str):
                 key = ""
+            # A profile may intentionally share the legacy provider secret.
+            # This is important during the staged migration: older deployments
+            # have SMARA_LLM_API_KEY populated while a newer profile document
+            # names a not-yet-created provider-specific variable.  Only inherit
+            # when the endpoint is exactly the configured fallback endpoint;
+            # never copy a key across providers or arbitrary URLs.
+            profile_base_url = _valid_base_url(value.get("base_url"))
+            if not key.strip() and fallback_key.strip() and profile_base_url.lower() == fallback_base_url.strip().rstrip("/").lower():
+                key = fallback_key
             model = value.get("model")
             if not isinstance(model, str) or not model.strip():
                 raise ValueError(f"Model profile '{name}' is missing model.")
             profiles[name] = ModelProfile(
                 name,
-                _valid_base_url(value.get("base_url")),
+                profile_base_url,
                 model.strip(),
                 key,
                 _auth_header(value.get("auth_header")),

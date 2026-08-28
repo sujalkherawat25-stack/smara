@@ -101,6 +101,7 @@ h1 { font-size: 20px; letter-spacing: -.03em; }
 .message { max-width: calc(100% - 42px); padding: 11px 13px; border-radius: 12px; color: #e6e6eb; background: var(--panel-soft); font-size: 13px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .message-user .message { color: #10131d; background: #a7baff; }
 .message-failed { color: #ffb8bc; border: 1px solid rgba(255,127,133,.3); background: rgba(255,127,133,.08); }
+.message-error { display: block; margin-top: 9px; padding-top: 8px; border-top: 1px solid rgba(255,127,133,.22); color: #ffb8bc; font-size: 11px; line-height: 1.45; }
 .cursor { display: inline-block; width: 6px; height: 14px; margin-left: 3px; vertical-align: -2px; background: var(--blue); animation: blink 900ms steps(2,end) infinite; }
 .typing { display: inline-flex; gap: 4px; align-items: center; height: 15px; }
 .typing i { width: 5px; height: 5px; border-radius: 50%; background: var(--blue); animation: bounce 850ms infinite ease-in-out; }
