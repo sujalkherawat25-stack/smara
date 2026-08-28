@@ -39,7 +39,7 @@ def expect(response: httpx.Response, status: int, label: str) -> Any:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default=os.getenv("SMARA_SMOKE_BASE_URL", "http://api:8000"))
+    parser.add_argument("--base-url", default=os.getenv("SMARA_SMOKE_BASE_URL", "http://api:8080"))
     parser.add_argument("--account", default=f"acct_shadow_{secrets.token_hex(5)}")
     args = parser.parse_args()
     secret = os.getenv("SMARA_GATEWAY_SIGNING_SECRET")
