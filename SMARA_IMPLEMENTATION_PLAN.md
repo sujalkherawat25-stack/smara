@@ -1,6 +1,6 @@
 # Smara Implementation Plan
 
-**Status date:** 2026-08-28
+**Status date:** 2026-08-29
 **Repository:** `sujalkherawat25-stack/smara`
 **Public target:** `https://ai.syntarus.com`
 **Current routing:** Smara owns the canonical `https://ai.syntarus.com/` root.
@@ -785,3 +785,30 @@ changes; the executor, hosted API, and MemoryOS pipeline are unchanged.
   frontend production build, native desktop tests, Caddy validation, and live
   root/API/retired-route checks before treating the root as the only supported
   entry point.
+
+### 2026-08-29 — Hosted attachments and Sarvam model profiles
+
+- Enabled authenticated Smara Web attachments for any file type: up to 100 MB
+  per file, 150 MB total, and 10 files per upload. Files are account-scoped on
+  the Smara data volume; common text, PDF, Word, Excel, and PowerPoint formats
+  get bounded previews for the agent. Uploads never enter long-term memory.
+- Added the `/v1/attachments` and `/v1/models` API contracts to the same-origin
+  Smara gateway and exposed the paperclip/camera controls in the canonical
+  Web composer. The frontend validates limits before upload and displays
+  uploaded-file chips and actionable errors.
+- Added explicit vision routing: only a profile declared `capability=vision`
+  receives small image data URLs; ordinary profiles receive safe metadata and
+  previews. Large images remain stored but are not inlined into provider calls.
+- Added hosted profiles for Sarvam 105B (`/v1`), GLM-5.2 (`/v2`, reasoning),
+  and Gemma 4 (`/v2`, vision), with provider-native subscription-key auth.
+  Live verification: Sarvam 105B returns HTTP 200; the current key's GLM-5.2
+  and Gemma 4 calls return the provider's beta-access error and are surfaced as
+  `model_unavailable` rather than pretending to be ready.
+- Non-streaming clients now receive the same classified provider errors as the
+  Web SSE client. Attachment text is placed in the explicit user turn so
+  provider gateways cannot silently ignore it. A live authenticated smoke
+  verified upload plus a Sarvam 105B response containing the uploaded phrase.
+- Verification: 143 Python tests, Python compilation, frontend production
+  build, live root/API health, authenticated upload/chat, provider error
+  classification, Grok/Tavily chat-calculator-research workflows, and desktop
+  lease safety all pass. Commits `ba0bdfd`, `f090883`, and `e9f25d2` are pushed.
