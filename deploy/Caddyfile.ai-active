@@ -17,6 +17,9 @@ ai.syntarus.com {
     handle @retired_smara {
         respond "Smara is now available at https://ai.syntarus.com/" 410
     }
+    handle /smara-api {
+        redir /smara-api/ 308
+    }
     handle_path /smara-api/* {
         reverse_proxy 127.0.0.1:8090 {
             header_up X-Real-IP {remote_host}
