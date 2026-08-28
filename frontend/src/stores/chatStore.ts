@@ -26,6 +26,13 @@ const _MEMORY_MUTATING_TOOLS = new Set([
 const BASE_URL = ""; // relative — routed through Vite proxy to backend
 // F3: cookie auth via credentials: "include" — no X-User-ID header anymore.
 
+// The hosted agent has its own bounded execution budget, but a proxy, browser,
+// or provider can still leave a fetch open after that budget has elapsed.  A
+// client-side watchdog guarantees the composer can never remain in the
+// "Thinking" state forever.  Keep this above the server's normal 90s request
+// budget so legitimate research streams are not cut short.
+const STREAM_WATCHDOG_MS = 120_000;
+
 // ── Activity feed types (matches app/memento/events.py wire schema) ──────────
 
 export type AgentPhase = "triage" | "retrieve" | "reason_act" | "answer";
@@ -325,6 +332,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const assistantId = crypto.randomUUID();
 
     const abortController = new AbortController();
+    let timedOut = false;
+    const streamWatchdog = setTimeout(() => {
+      timedOut = true;
+      abortController.abort();
+    }, STREAM_WATCHDOG_MS);
 
     set((s) => ({
       messages: [...s.messages, userMsg],
@@ -378,17 +390,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       while (!finished) {
         const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
+        if (done) {
+          // Some proxies close an SSE response immediately after writing the
+          // final JSON event, without the customary trailing blank line. Feed
+          // that last buffered event through the normal parser instead of
+          // silently losing the `done` frame.
+          if (buffer.trim()) buffer += "\n\n";
+          else break;
+        } else {
+          buffer += decoder.decode(value, { stream: true });
+        }
 
         // SSE frames are separated by a blank line
-        let frameEnd: number;
-        while ((frameEnd = buffer.indexOf("\n\n")) !== -1) {
+        let separator: RegExpMatchArray | null;
+        while ((separator = buffer.match(/\r?\n\r?\n/)) !== null) {
+          const frameEnd = separator.index ?? 0;
           const frame = buffer.slice(0, frameEnd);
-          buffer = buffer.slice(frameEnd + 2);
+          buffer = buffer.slice(frameEnd + separator[0].length);
 
-          for (const line of frame.split("\n")) {
+          for (const line of frame.split(/\r?\n/)) {
             if (finished) break;
             if (!line.startsWith("data:")) continue;
             const raw = line.slice(5).trim();
@@ -636,6 +656,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
           }
         }
+
+        // A final read with no trailing delimiter has now been flushed above;
+        // avoid reading the already-closed stream again.
+        if (done) break;
       }
 
       if (finished && birthdaySaved) {
@@ -706,6 +730,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // AbortError = user clicked stop. Commit whatever tokens arrived so the
       // bubble isn't silently empty; don't log or show an error toast.
       if (err?.name === "AbortError") {
+        if (timedOut) {
+          useNotificationsStore.getState().push({
+            kind: "error",
+            title: "Smara took too long",
+            body: "The request was stopped after two minutes. Try a shorter request or send it again.",
+            ttl_ms: 10000,
+          });
+        }
         const partial = get().streamingText.trim();
         if (partial) {
           const assistantMsg: ConversationMessage = {
@@ -750,6 +782,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
       }
       set({ isStreaming: false, streamingText: "", currentPhase: null, activity: [], _abortController: null });
+    } finally {
+      clearTimeout(streamWatchdog);
     }
   },
 
