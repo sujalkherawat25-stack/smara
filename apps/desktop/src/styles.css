@@ -198,3 +198,43 @@ h1 { font-size: 20px; letter-spacing: -.03em; }
 .provider-dialog .inline-fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .dialog-actions { display:flex; justify-content:flex-end; gap:9px; margin-top:22px; }
 @media (max-width: 620px) { .local-model-heading { align-items:flex-start; flex-direction:column; } .provider-dialog .inline-fields { grid-template-columns:1fr; gap:0; } }
+
+/* Desktop shell sizing: every view owns its scroll area instead of letting
+   long replies push the whole native window past the viewport. */
+html, #root { height: 100%; }
+.main-panel { min-height: 0; overflow: hidden; }
+.chat-layout { height: 100%; min-height: 0; overflow: hidden; }
+.chat-column { height: 100%; min-height: 0; overflow: hidden; }
+.transcript { min-height: 0; flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scroll-behavior: smooth; }
+.transcript > div:last-child { min-height: 1px; }
+.live-rail { min-height: 0; overflow: hidden; }
+.activity-list { min-height: 0; flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.content-page { flex: 1 1 auto; }
+
+/* Use the same green Smara mark in the shell, hero, and assistant messages. */
+.brand-mark { overflow: hidden; padding: 2px; border: 1px solid rgba(101,223,169,.22); background: rgba(101,223,169,.06); box-shadow: 0 0 28px rgba(101,223,169,.13); }
+.brand-mark img, .hero-orb img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.hero-orb { width: 72px; height: 72px; padding: 0; border: 0; border-radius: 50%; background: transparent; box-shadow: 0 12px 55px rgba(101,223,169,.22); }
+.avatar img { display: block; width: 19px; height: 19px; object-fit: contain; }
+.rail-heading-actions { display: inline-flex; align-items: center; gap: 9px; }
+.rail-clear { padding: 3px 0; color: var(--subtle); background: transparent; font-size: 10px; }
+.rail-clear:hover { color: var(--text); }
+
+/* Once a conversation starts, turn the welcome hero into a compact thread
+   header so the transcript gets most of the window. */
+.chat-column.has-messages .hero { display: grid; grid-template-columns: 34px minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; column-gap: 10px; padding: 10px 0 17px; text-align: left; }
+.chat-column.has-messages .hero-orb { grid-row: 1 / 3; width: 34px; height: 34px; margin: 0; }
+.chat-column.has-messages .hero h2 { margin: 0; font-size: 16px; letter-spacing: -.025em; }
+.chat-column.has-messages .hero p { display: none; }
+.chat-column.has-messages .hero .chat-auth-card { grid-column: 1 / -1; margin: 12px 0 0; }
+
+/* Keep scrollbars visible but quiet in the dark native WebView. */
+.transcript::-webkit-scrollbar, .activity-list::-webkit-scrollbar, .content-page::-webkit-scrollbar, .provider-dialog::-webkit-scrollbar { width: 9px; }
+.transcript::-webkit-scrollbar-thumb, .activity-list::-webkit-scrollbar-thumb, .content-page::-webkit-scrollbar-thumb, .provider-dialog::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: var(--stroke); background-clip: padding-box; }
+.transcript::-webkit-scrollbar-thumb:hover, .activity-list::-webkit-scrollbar-thumb:hover, .content-page::-webkit-scrollbar-thumb:hover, .provider-dialog::-webkit-scrollbar-thumb:hover { background: #3b4560; background-clip: padding-box; }
+
+@media (max-width: 720px) {
+  .main-panel { height: calc(100vh - 64px); }
+  .chat-layout { height: 100%; overflow: visible; }
+  .chat-column { height: 100%; min-height: 0; }
+}

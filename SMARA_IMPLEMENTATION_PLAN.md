@@ -641,3 +641,25 @@ focused hosted/desktop release.
 - Rebuilt/restarted the Windows release package. The full Smara suite (122
   tests), four native Rust tests, frontend type-check/build, and the native UI
   persistence/chat smoke all pass.
+
+### 2026-08-28 — Desktop UI audit and scroll/branding fixes
+
+The native Chat screen was audited against the reported Windows-window issues.
+The concrete problems were:
+
+1. The outer flex chain had no `min-height: 0`/bounded overflow contract, so a
+   long transcript could grow the page instead of receiving its own scrollbar.
+2. The transcript had no bottom anchor or follow-latest behavior, making a
+   streamed answer appear to run below the visible window.
+3. The hero and sidebar used a generic purple star/orb that did not match the
+   Smara product mark.
+4. The live activity rail had no explicit inner scroll boundary and its event
+   list could become difficult to inspect after several turns.
+5. There was no small way to clear stale activity without leaving Chat.
+
+The fix is now in the desktop shell: the main panel, chat column, transcript,
+activity rail, settings pages, and provider dialog each have an explicit
+bounded scroll owner; streamed messages follow a bottom anchor; the existing
+green Smara mark is bundled and reused for the sidebar, hero, and assistant
+avatars; activity has its own scroll area and a Clear action. These are UI-only
+changes; the executor, hosted API, and MemoryOS pipeline are unchanged.
