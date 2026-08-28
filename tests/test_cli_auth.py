@@ -76,4 +76,4 @@ def test_account_id_accepts_only_active_registered_cli_device(monkeypatch, tmp_p
 
 
 def test_public_web_auth_url_does_not_open_the_api_fallback():
-    assert _default_browser_auth_url("https://ai.syntarus.com/smara-api", "device code") == "https://ai.syntarus.com/smara/?cli_device=device%20code"
+    assert _default_browser_auth_url("https://ai.syntarus.com/smara-api", "device code") == "https://ai.syntarus.com/?cli_device=device%20code"

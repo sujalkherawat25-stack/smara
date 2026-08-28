@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, ExternalLink, RefreshCw, ShieldCheck } from "lucide-react";
 
-const CONTROL_ORIGIN = (import.meta.env.VITE_CONTROL_URL || "https://control-staging.syntarus.com").replace(/\/$/, "");
+const CONTROL_ORIGIN = (import.meta.env.VITE_CONTROL_URL || (typeof window !== "undefined" ? window.location.origin : "")).replace(/\/$/, "");
 // New URL version deliberately bypasses a browser's cached pre-embed response
 // which carried the old X-Frame-Options: DENY policy.
-const CONTROL_APP_URL = `${CONTROL_ORIGIN}/app/?embed=smara-v3`;
+const CONTROL_APP_URL = `${CONTROL_ORIGIN}/smara-api/app/?embed=smara-v3`;
 
 type ControlToken = { token: string; expires_in_seconds: number };
 

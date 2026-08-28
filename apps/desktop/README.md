@@ -24,7 +24,7 @@ The desktop shell finds the Python executor at
 explicit executable instead with `$env:SMARA_DESKTOP_EXECUTABLE`.
 
 Before chat/task history can load, choose **Sign in** in the app's Settings.
-The app opens the hosted Smara approval page at `/smara/` and stores the
+The app opens the hosted Smara approval page at the canonical site root and stores the
 short-lived device token in the local Smara profile. For headless/CLI workflows, the equivalent
 command remains:
 
@@ -61,7 +61,7 @@ key. The app forwards only the selected profile name to hosted Smara. The
 settings screen also shows whether each local tool credential is configured and
 how many file, terminal, and browser allowlist entries are currently enabled.
 The Web URL is configured separately from the reverse-proxied API URL so sign
-in opens `https://ai.syntarus.com/smara/?cli_device=...`, never the API fallback UI.
+in opens `https://ai.syntarus.com/?cli_device=...`, never the API endpoint.
 
 ## Private desktop model providers
 

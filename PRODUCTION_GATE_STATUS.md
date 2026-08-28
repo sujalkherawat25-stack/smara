@@ -1,9 +1,9 @@
 # Smara production-gate status
 
-Updated 2026-08-28 after the reversible Smara root cutover. This is an
-operational checklist: Smara is live at the root as a beta deployment, while
-the remaining production gates below are still tracked and Memento rollback is
-preserved.
+Updated 2026-08-28 after the canonical Smara route cleanup. This is an
+operational checklist: Smara is live at the root as a beta deployment, the
+same-origin `/smara-api` route is retained for clients, and Memento rollback is
+preserved without a second public UI.
 
 ## Passed
 
@@ -69,12 +69,11 @@ preserved.
   and unchanged root route return 200, signed `/v1/tools` and `/v1/plugins`
   omit personal integrations, `/v1/integrations` reports `mode: local-only`,
   and a credential-write probe returns HTTP 409 without storing the test value.
-- Smara now serves `https://ai.syntarus.com/` as the public root. The frontend
-  was rebuilt with a root base path; `/v1/*` continues to proxy to the existing
-  Memento auth/legacy backend for the session bridge, `/smara-api/*` proxies to
-  Smara, and `/etc/caddy/Caddyfile.pre-smara-root-cutover-20260827` preserves a
-  one-command rollback. The root page, auth config, unauthenticated guards,
-  Smara readiness, and a Caddy restart all passed after the switch.
+- Smara serves `https://ai.syntarus.com/` as the public root. `/v1/*` continues
+  to proxy to the existing Memento auth/legacy backend for the session bridge,
+  while `/smara-api/*` proxies to Smara. The old `/smara/` UI alias and the
+  `control-staging.syntarus.com` service are retired; stale links redirect to
+  the canonical root. A dated Caddy rollback copy remains available.
 - The repeatable signed beta smoke passed on staging: public health/readiness,
   signed tool access, disposable task create/cancel, cross-account task
   isolation (404), and local-only integration policy. No secret values were

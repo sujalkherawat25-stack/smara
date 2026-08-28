@@ -9,8 +9,10 @@
 #   4. ./scripts/deploy.sh --tls
 
 ai.syntarus.com {
-    # Reversible Smara staging mount. Caddy strips the public prefixes so the
-    # browser keeps the ai.syntarus.com session while Smara receives /v1/*.
+    # Smara owns the canonical public root. The API keeps a distinct prefix so
+    # it cannot collide with the legacy MemoryOS/Memento /v1/* bridge routes.
+    @legacy_smara path /smara /smara/*
+    redir @legacy_smara https://ai.syntarus.com/ 308
     handle_path /smara-api/* {
         reverse_proxy 127.0.0.1:8090 {
             header_up X-Real-IP {remote_host}
@@ -23,25 +25,27 @@ ai.syntarus.com {
         }
     }
 
-    handle_path /smara/* {
-        reverse_proxy 127.0.0.1:8081 {
+    # Keep only the legacy auth/session bridge on /v1/* while the frontend is
+    # served by the independent Smara container at the root.
+    handle /v1/* {
+        reverse_proxy 127.0.0.1:8080 {
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-Proto {scheme}
+            flush_interval -1
+            transport http {
+                read_timeout 1h
+                write_timeout 1h
+            }
         }
     }
 
-    # Existing Memento app remains the root catch-all.
     handle {
-        # The existing Memento frontend is published by Docker on 127.0.0.1:8080.
-        reverse_proxy 127.0.0.1:8080 {
-            # Pass real IP so backend logs are accurate
+        reverse_proxy 127.0.0.1:8081 {
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-Proto {scheme}
-
-            # SSE: flush immediately, keep connection alive for up to 1h
             flush_interval -1
             transport http {
-                read_timeout  1h
+                read_timeout 1h
                 write_timeout 1h
             }
         }
@@ -83,21 +87,9 @@ bridge.syntarus.com {
 }
 
 
+# Retire the old staging hostname without leaving a second Smara service
+# running. This temporary redirect protects stale bookmarks while its DNS
+# record is removed from Cloudflare.
 control-staging.syntarus.com {
-    reverse_proxy 127.0.0.1:8090 {
-        header_up X-Real-IP {remote_host}
-    }
-    encode gzip
-    header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains"
-        X-Content-Type-Options "nosniff"
-        Content-Security-Policy "frame-ancestors https://ai.syntarus.com"
-        Referrer-Policy "strict-origin-when-cross-origin"
-    }
-    log {
-        output file /var/log/caddy/smara-control-staging.log {
-            roll_size 50mb
-            roll_keep 5
-        }
-    }
+    redir https://ai.syntarus.com/ 308
 }

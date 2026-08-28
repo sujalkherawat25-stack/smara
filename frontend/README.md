@@ -4,18 +4,19 @@ This directory contains the reused Memento frontend shell. It is intentionally
 UI-only: the MemoryOS backend, Memento agent loop, and storage clients are not
 copied here.
 
-## Transitional bridge mode
+## Hosted bridge mode
 
 Set these values when testing the migrated shell against a Smara deployment:
 
 ```text
 VITE_SMARA_MODE=true
-VITE_SMARA_API_URL=https://control-staging.syntarus.com
+VITE_SMARA_API_URL=/smara-api
 VITE_SMARA_CONTROL_TOKEN_PATH=/v1/auth/control-token
 ```
 
-For the final same-origin deployment, serve this bundle from the authenticated
-Smara web origin and leave `VITE_SMARA_API_URL` empty. The existing auth service
+Serve this bundle from the canonical `https://ai.syntarus.com/` origin. The
+Smara API remains available at the same-origin `/smara-api` prefix; this is an
+API route, not a second UI. The existing auth service
 must have `POST /v1/auth/control-token` enabled and share
 `SMARA_CONTROL_BRIDGE_SECRET` with the Smara API. The endpoint returns a
 short-lived JWT (`expires_in_seconds`, bounded to 30–300 seconds); the browser

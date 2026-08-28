@@ -16,13 +16,13 @@ import httpx
 
 
 def _default_browser_auth_url(api_url: str, device_code: str) -> str:
-    """Keep the public Web route separate from a reverse-proxied API prefix."""
+    """Open the canonical Smara root for browser device approval."""
     base = api_url.rstrip("/")
     encoded = quote(device_code, safe="")
     if base.endswith("/smara-api"):
-        # The hosted Smara shell owns the browser approval screen. The legacy
-        # domain root is the Memento shell and does not consume cli_device.
-        return f"{base.removesuffix('/smara-api')}/smara/?cli_device={encoded}"
+        # The hosted Smara shell now owns the public root. Keep the API path
+        # separate so the browser never opens a duplicate compatibility mount.
+        return f"{base.removesuffix('/smara-api')}/?cli_device={encoded}"
     return f"{base}/app/?cli_device={encoded}"
 
 

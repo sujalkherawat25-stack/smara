@@ -10,7 +10,7 @@ use std::process::{Command, Stdio};
 use tauri::{AppHandle, Emitter};
 
 const DEFAULT_API_URL: &str = "https://ai.syntarus.com/smara-api";
-const DEFAULT_WEB_URL: &str = "https://ai.syntarus.com/smara/";
+const DEFAULT_WEB_URL: &str = "https://ai.syntarus.com/";
 
 #[derive(Debug, Clone, Serialize)]
 struct ConnectionState {
@@ -326,10 +326,9 @@ fn normalized_api_url(configured: &str) -> String {
     url.to_string().trim_end_matches('/').to_owned()
 }
 
-/// The Smara shell lives at `/smara/` on the hosted domain. Older beta
-/// installs saved the domain root, which opened the legacy Memento shell and
-/// could never show the CLI approval dialog. Keep custom URLs intact while
-/// repairing that one known default during login/settings reads.
+/// The Smara shell owns the hosted domain root. Older beta installs saved the
+/// compatibility `/smara/` mount; repair that one known path while keeping
+/// custom URLs intact.
 fn normalized_web_url(api_url: &str, configured: &str) -> String {
     let configured = configured.trim();
     let fallback = DEFAULT_WEB_URL;
@@ -337,9 +336,9 @@ fn normalized_web_url(api_url: &str, configured: &str) -> String {
     let Ok(web) = reqwest::Url::parse(if configured.is_empty() { fallback } else { configured }) else { return configured.to_owned(); };
     let api_path = api.path().trim_end_matches('/');
     let same_host = api.scheme() == web.scheme() && api.host_str() == web.host_str() && api.port_or_known_default() == web.port_or_known_default();
-    if api_path == "/smara-api" && same_host && (web.path().is_empty() || web.path() == "/") {
+    if api_path == "/smara-api" && same_host && web.path().trim_end_matches('/') == "/smara" {
         let mut repaired = web;
-        repaired.set_path("/smara/");
+        repaired.set_path("/");
         repaired.set_query(None);
         repaired.set_fragment(None);
         return repaired.to_string();
@@ -767,10 +766,10 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn repairs_legacy_root_without_dropping_a_dev_port() {
+    fn repairs_legacy_smara_mount_without_dropping_a_dev_port() {
         assert_eq!(
-            normalized_web_url("http://localhost:3000/smara-api", "http://localhost:3000/"),
-            "http://localhost:3000/smara/"
+            normalized_web_url("http://localhost:3000/smara-api", "http://localhost:3000/smara/"),
+            "http://localhost:3000/"
         );
     }
 

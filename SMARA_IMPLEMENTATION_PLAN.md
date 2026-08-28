@@ -3,8 +3,11 @@
 **Status date:** 2026-08-28
 **Repository:** `sujalkherawat25-stack/smara`
 **Public target:** `https://ai.syntarus.com`
-**Current routing:** Smara is the public root as a reversible beta cutover;
-Memento remains available behind the preserved backend/rollback configuration.
+**Current routing:** Smara owns the canonical `https://ai.syntarus.com/` root.
+The API is same-origin at `/smara-api`; the old `/smara/` UI mount and
+`control-staging.syntarus.com` service are retired (old links redirect while
+DNS is cleaned up). Memento remains available only behind the preserved
+backend/rollback configuration.
 
 ## 1. Scope reset
 
@@ -172,7 +175,8 @@ production promotion, while the current beta keeps fail-closed behavior.
 - Desktop step leases now refresh immediately before completion on both the
   SQLite development store and the live Postgres store; stale executors cannot
   finalize a lease recovered by another executor.
-- Reversible `/smara/` and `/smara-api/` staging mount at `ai.syntarus.com`.
+- Canonical root UI at `ai.syntarus.com` with the same-origin `/smara-api`
+  backend route; no second public Smara UI is required.
 - Local suite (122 Smara backend tests), frontend type-check, VM Docker build,
   live health checks, and disposable account/task/research/approval smoke test.
 - Native desktop QA now covers the real Windows WebView shell as well as a
@@ -269,7 +273,7 @@ not new work to start during this beta sprint.
 
 ### Auth acceptance runbook (staging)
 
-Run this at `https://ai.syntarus.com/smara/` in a normal browser:
+Run this at `https://ai.syntarus.com/` in a normal browser:
 
 1. Confirm the Google button is visible, choose the intended Google account,
    and confirm the app opens the Smara workspace (not the sign-in screen).
@@ -707,3 +711,20 @@ changes; the executor, hosted API, and MemoryOS pipeline are unchanged.
   complete mocked OCR round trip. MemoryOS remains untouched. Live Sarvam
   verification is pending the operator placing a fresh key in the VM and
   confirming any GLM/Gemma beta entitlement.
+
+### 2026-08-28 — Canonical public route cleanup
+
+- Confirmed the live root at `https://ai.syntarus.com/` is served by the
+  independent Smara frontend on port 8081. The `/smara/` URL was only a
+  compatibility alias and is now redirected to the root; it is not a second
+  application.
+- Kept `/smara-api/*` because it is the backend API used by the web app, CLI,
+  and desktop. Removing this path without replacing it would make authenticated
+  chat, task control, and pairing fail.
+- Retired the public `control-staging.syntarus.com` service; stale links are
+  redirected to the canonical root while its Cloudflare DNS record is removed.
+- Updated CLI and desktop browser approval URLs to open the root, and updated
+  the embedded control fallback to use the same-origin Smara API route.
+- Verification: 128 Python tests, frontend production build, and 6 native Rust
+  tests pass locally. The live Sarvam 105B endpoint returned HTTP 200 from the
+  running API container.

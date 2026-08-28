@@ -42,7 +42,7 @@ class Settings:
     control_bridge_secret: str = _secret("SMARA_CONTROL_BRIDGE_SECRET")
     allowed_origins: str = os.getenv(
         "SMARA_ALLOWED_ORIGINS",
-        "https://ai.syntarus.com,https://control-staging.syntarus.com",
+        "https://ai.syntarus.com",
     )
     integration_master_key: str = _secret("SMARA_INTEGRATION_MASTER_KEY")
     integration_master_keys: str = _secret("SMARA_INTEGRATION_MASTER_KEYS", _secret("SMARA_INTEGRATION_MASTER_KEY"))
