@@ -663,3 +663,26 @@ bounded scroll owner; streamed messages follow a bottom anchor; the existing
 green Smara mark is bundled and reused for the sidebar, hero, and assistant
 avatars; activity has its own scroll area and a Clear action. These are UI-only
 changes; the executor, hosted API, and MemoryOS pipeline are unchanged.
+
+### 2026-08-28 — Hosted sign-in and cloud-chat connection repair
+
+- Normalized legacy public URLs so `https://ai.syntarus.com/` and
+  `/smara/` are repaired to the API endpoint `/smara-api` before sign-in,
+  pairing, health checks, task loading, and hosted chat. Custom API origins are
+  left unchanged.
+- Made the desktop health check require Smara JSON with `ok=true`; a web page
+  returning HTTP 200 can no longer appear as a connected API. Sign-in now uses
+  the same token-file resolver as hosted chat, preventing a successful browser
+  approval from being written where the chat path cannot read it. The top-bar
+  Sign in action starts the browser approval directly and prevents duplicate
+  sign-in attempts.
+- Hardened hosted model-profile parsing for dotenv/Compose deployments that
+  preserve escaped JSON quote markers. Normal JSON remains the primary format;
+  the compatibility path does not alter the provider schema or expose secrets.
+- Verified locally with 123 Smara tests, five provider-routing tests, six Rust
+  bridge tests, a passing frontend build, and a rebuilt/restarted Windows
+  release. The released app reports `Hosted connected`, and a native hosted
+  chat turn returns `OK`.
+- Deployed commit `e7a2c38` to staging. Live health, authenticated task loading,
+  Grok profile resolution, and `/v1/chat/stream` all pass. No MemoryOS files or
+  data were changed.
