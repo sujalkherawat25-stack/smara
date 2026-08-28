@@ -700,6 +700,9 @@ changes; the executor, hosted API, and MemoryOS pipeline are unchanged.
 - Added bounded Sarvam Document AI OCR for PDF/image captures. It submits a
   job, polls completion, downloads the result archive, and stores only a
   capped text artifact. OCR is deliberately not a chat profile.
+- The Smara Web quick-capture dialog now accepts PDFs and lets the user choose
+  automatic processing, image description, or OCR; the selected mode is sent
+  to the same task-backed capture worker.
 - Added regression coverage for Sarvam headers, profile capabilities, and a
   complete mocked OCR round trip. MemoryOS remains untouched. Live Sarvam
   verification is pending the operator placing a fresh key in the VM and
