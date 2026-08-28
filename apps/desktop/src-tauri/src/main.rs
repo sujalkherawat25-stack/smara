@@ -652,6 +652,29 @@ fn local_delta_text(value: &Value) -> Option<String> {
         .or_else(|| value.get("choices")?.as_array()?.first()?.get("message").and_then(|message| message.get("content")).and_then(Value::as_str).map(str::to_owned))
 }
 
+fn local_event_payload(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with(':') {
+        return None;
+    }
+    // Accept both standard SSE frames and a plain JSON line. Some
+    // OpenAI-compatible gateways ignore stream=true and return one JSON
+    // object (often followed by a newline) instead of `data:` frames.
+    trimmed.strip_prefix("data:").map(str::trim).or_else(|| trimmed.starts_with('{').then_some(trimmed))
+}
+
+fn emit_local_payload(app: &AppHandle, data: &str) -> Result<bool, String> {
+    if data == "[DONE]" {
+        return Ok(false);
+    }
+    let value = serde_json::from_str::<Value>(data).map_err(|_| "Local provider returned invalid JSON.".to_owned())?;
+    if let Some(text) = local_delta_text(&value).filter(|text| !text.is_empty()) {
+        app.emit("smara-chat-event", json!({"type": "token", "text": text})).map_err(|error| error.to_string())?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModelProfile) -> Result<(), String> {
     let secret = resolve_local_secret(&profile.credential_name)?;
     let endpoint = local_chat_endpoint(&profile.base_url);
@@ -682,25 +705,20 @@ async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModel
         while let Some(index) = buffer.find('\n') {
             let line = buffer[..index].trim_end_matches('\r').to_owned();
             buffer.drain(..=index);
-            let Some(data) = line.strip_prefix("data:").map(str::trim_start) else { continue; };
-            if data == "[DONE]" { continue; }
-            if let Ok(value) = serde_json::from_str::<Value>(data) {
-                if let Some(text) = local_delta_text(&value).filter(|text| !text.is_empty()) {
-                    emitted = true;
-                    app.emit("smara-chat-event", json!({"type": "token", "text": text})).map_err(|error| error.to_string())?;
-                }
+            if let Some(data) = local_event_payload(&line) {
+                emitted |= emit_local_payload(&app, data)?;
             }
         }
     }
     // A few OpenAI-compatible gateways ignore stream=true and return one JSON
     // object. Accept that response without making users retry their message.
     if !emitted && !buffer.trim().is_empty() {
-        let raw = buffer.trim().strip_prefix("data:").map(str::trim_start).unwrap_or(buffer.trim());
-        if let Ok(value) = serde_json::from_str::<Value>(raw) {
-            if let Some(text) = local_delta_text(&value).filter(|text| !text.is_empty()) {
-                app.emit("smara-chat-event", json!({"type": "token", "text": text})).map_err(|error| error.to_string())?;
-            }
+        if let Some(raw) = local_event_payload(buffer.trim()) {
+            emitted |= emit_local_payload(&app, raw)?;
         }
+    }
+    if !emitted {
+        return Err(format!("{} returned no visible answer. Check the model name and token limit.", profile.label));
     }
     app.emit("smara-chat-event", json!({"type": "done", "tools_used": 0})).map_err(|error| error.to_string())?;
     Ok(())
@@ -762,8 +780,21 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalized_api_url, normalized_web_url, preserve_local_model_profiles};
+    use super::{local_delta_text, local_event_payload, normalized_api_url, normalized_web_url, preserve_local_model_profiles};
     use serde_json::json;
+
+    #[test]
+    fn local_stream_accepts_sse_and_plain_json_lines() {
+        assert_eq!(local_event_payload("data: {\"choices\":[]}"), Some("{\"choices\":[]}"));
+        assert_eq!(local_event_payload("{\"choices\":[]}"), Some("{\"choices\":[]}"));
+        assert_eq!(local_event_payload(": keepalive"), None);
+    }
+
+    #[test]
+    fn local_stream_reads_message_fallback_without_reasoning_text() {
+        let value = json!({"choices":[{"message":{"content":"hello","reasoning_content":"private"}}]});
+        assert_eq!(local_delta_text(&value).as_deref(), Some("hello"));
+    }
 
     #[test]
     fn repairs_legacy_smara_mount_without_dropping_a_dev_port() {
