@@ -127,6 +127,21 @@ remain in force and they must be reopened before a later production promotion:
   runtime, resource limits, network policy, and request authentication.
   The worker now supports that narrow remote `/v1/run` contract and the full
   configuration gate rejects an enabled sandbox without both URL and token.
+
+## Desktop UX verification — 2026-08-28
+
+- Settings now exposes hosted Automatic/Grok/Sarvam profiles as selectable
+  provider cards. Only the profile name crosses the desktop/hosted boundary;
+  provider keys remain operator-managed on the hosted service.
+- Tavily, GitHub, and custom local credentials have visible configured/not
+  configured status. Local secrets remain encrypted on Windows and are only
+  injected into an approved process through the existing executor contract.
+- Files, terminal, and browser allowlists show live entry counts and On/Off
+  state. The UI explains that an allowlist is eligibility, not approval.
+- A failed connection check now clears stale remote-online state, and a native
+  chat event subscription failure is surfaced instead of being silently lost.
+- `npm run build`, 122 backend tests, and `cargo check` passed. The NSIS beta
+  installer was rebuilt and the release app restarted successfully.
 - A local integration adapter (Gmail/Calendar/Drive/GitHub/Telegram) is still
   future work. The hosted API deliberately does not accept those user secrets
   while that adapter is unfinished.

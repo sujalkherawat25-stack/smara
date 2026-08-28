@@ -53,9 +53,11 @@ dependencies. MSI remains an optional operator build when WiX is available.
 
 ## Hosted provider/model profiles
 
-The model picker exposes `Automatic`, `Grok`, and `Sarvam 105B`. Provider URLs
-and API keys stay in the Smara server configuration; never commit an xAI or
-Sarvam key. The app forwards only the selected profile name to hosted Smara.
+The model picker exposes `Automatic`, `Grok`, and `Sarvam`. Provider URLs and
+API keys stay in the Smara server configuration; never commit an xAI or Sarvam
+key. The app forwards only the selected profile name to hosted Smara. The
+settings screen also shows whether each local tool credential is configured and
+how many file, terminal, and browser allowlist entries are currently enabled.
 The Web URL is configured separately from the reverse-proxied API URL so sign
 in opens `https://ai.syntarus.com/?cli_device=...`, never the API fallback UI.
 

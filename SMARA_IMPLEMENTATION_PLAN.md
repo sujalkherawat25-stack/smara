@@ -595,3 +595,21 @@ focused hosted/desktop release.
   asset delivery, and a Caddy restart all passed after the switch. This is a
   reversible beta cutover, not a claim that the remaining operational gates
   are complete.
+
+### 2026-08-28 — Desktop settings and provider UX pass
+
+- Reworked the native desktop settings surface around three explicit decisions:
+  hosted model profile, local tool credentials, and local execution boundaries.
+  Provider cards now make Automatic, Grok, and Sarvam selection discoverable;
+  the app sends only the profile name and keeps provider keys on the hosted
+  service.
+- Added visible local credential status for Tavily, GitHub, and custom tools,
+  with a clear local-only boundary and per-process injection explanation.
+  Added live counts for approved folders, terminal executables, and browser
+  domains so users can see what is enabled before saving.
+- Hardened desktop connection feedback: failed connection reads clear the
+  remote status instead of leaving stale green state, and failures to attach
+  the native chat event stream are shown in the app.
+- Frontend production build, 122 backend tests, and Rust bridge checks passed.
+  The unsigned NSIS beta installer was rebuilt and the release desktop was
+  restarted successfully. MemoryOS and the hosted API were not changed.
