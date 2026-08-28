@@ -31,3 +31,14 @@ def test_escaped_dotenv_json_profiles_are_accepted():
     )
     assert profiles["grok"].base_url == "https://api.x.ai/v1"
     assert profiles["grok"].model == "grok-test"
+
+
+def test_compose_quote_markers_without_quotes_are_accepted():
+    profiles = load_profiles(
+        r'{\grok\:{\base_url\:\https://api.x.ai/v1\,\model\:\grok-test\,\api_key_env\:\XAI_API_KEY\}}',
+        fallback_base_url="",
+        fallback_key="",
+        fallback_model="",
+    )
+    assert profiles["grok"].base_url == "https://api.x.ai/v1"
+    assert profiles["grok"].model == "grok-test"

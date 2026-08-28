@@ -48,6 +48,18 @@ def load_profiles(raw: str, *, fallback_base_url: str, fallback_key: str, fallba
                     data = json.loads(raw.replace(r'\"', '"'))
                 except json.JSONDecodeError:
                     raise ValueError("SMARA_LLM_PROFILES must be valid JSON.") from exc
+            elif '"' not in raw and "\\" in raw:
+                # Docker Compose also accepts a double-quoted dotenv value
+                # such as {\"grok\":...}; in that form it can remove the
+                # quote characters but leave their escape markers behind,
+                # producing a document where every JSON quote is `\\`.  The
+                # profile schema does not allow backslashes in names, URLs, or
+                # environment-variable names, so restoring those markers is
+                # unambiguous and keeps the deployment backward-compatible.
+                try:
+                    data = json.loads(raw.replace("\\", '"'))
+                except json.JSONDecodeError:
+                    raise ValueError("SMARA_LLM_PROFILES must be valid JSON.") from exc
             else:
                 raise ValueError("SMARA_LLM_PROFILES must be valid JSON.") from exc
         if not isinstance(data, dict) or len(data) > 12:
