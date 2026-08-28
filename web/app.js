@@ -452,7 +452,7 @@ $('#capture-form').addEventListener('submit', async event => {
   event.preventDefault(); const form = event.currentTarget; if (event.submitter.value !== 'submit') return $('#capture-dialog').close();
   try {
     const media = form.media.files[0]; const data = new FormData(); data.append('title', form.title.value);
-    if (media) { data.append('file', media); await api('/v1/captures/media', { method: 'POST', body: data }); }
+    if (media) { data.append('file', media); data.append('analysis', form.analysis.value); await api('/v1/captures/media', { method: 'POST', body: data }); }
     else { data.append('text', form.text.value); await api('/v1/captures/text', { method: 'POST', body: data }); }
     $('#capture-dialog').close(); form.reset(); await refresh(); notice('Capture saved to your inbox.');
   } catch (error) { notice(error.message, true); }
