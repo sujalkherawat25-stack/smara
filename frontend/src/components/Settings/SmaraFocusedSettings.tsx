@@ -28,6 +28,7 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
   const [executors, setExecutors] = useState<Executor[]>([]);
   const [toolCount, setToolCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [runtimeStatus, setRuntimeStatus] = useState<"checking" | "connected" | "unavailable">("checking");
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -41,7 +42,9 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
       ]);
       setExecutors(executorData.executors ?? []);
       setToolCount(tools.tools?.length ?? 0);
+      setRuntimeStatus("connected");
     } catch (cause) {
+      setRuntimeStatus("unavailable");
       setError(cause instanceof ApiError ? cause.detail : "Could not load Smara status.");
     } finally {
       setLoading(false);
@@ -72,7 +75,7 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
             <h2 className="text-[14px] font-semibold" style={{ color: "var(--text-primary)" }}>Hosted Smara</h2>
             <p className="text-[12px] mt-1" style={{ color: "var(--text-muted)" }}>One agent brain for this web app, the CLI, and durable work.</p>
           </div>
-          <span className="flex items-center gap-1 text-[11px]" style={{ color: "#34d399" }}><CheckCircle2 size={13} /> Connected</span>
+          <RuntimeBadge status={runtimeStatus} />
         </div>
         <div className="grid grid-cols-2 gap-2 mt-4">
           <StatusStat label="Account" value={account?.account_id || "—"} />
@@ -116,6 +119,16 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
       {error && <p className="flex items-center gap-1.5 text-[12px]" style={{ color: "#f87171" }}><CircleAlert size={14} />{error}</p>}
     </div>
   );
+}
+
+function RuntimeBadge({ status }: { status: "checking" | "connected" | "unavailable" }) {
+  if (status === "checking") {
+    return <span className="flex items-center gap-1 text-[11px]" style={{ color: "#fbbf24" }}><RefreshCw size={13} className="animate-spin" /> Checking…</span>;
+  }
+  if (status === "unavailable") {
+    return <span className="flex items-center gap-1 text-[11px]" style={{ color: "#f87171" }}><CircleAlert size={13} /> Unavailable</span>;
+  }
+  return <span className="flex items-center gap-1 text-[11px]" style={{ color: "#34d399" }}><CheckCircle2 size={13} /> Connected</span>;
 }
 
 function StatusStat({ label, value }: { label: string; value: string }) {

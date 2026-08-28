@@ -11,8 +11,10 @@
 ai.syntarus.com {
     # Smara owns the canonical public root. The API keeps a distinct prefix so
     # it cannot collide with the legacy MemoryOS/Memento /v1/* bridge routes.
-    @legacy_smara path /smara /smara/*
-    redir @legacy_smara https://ai.syntarus.com/?{http.request.uri.query} 308
+    # The canonical Smara UI is served at /. Keep the former mount explicit
+    # and gone so stale bookmarks do not silently render a second shell.
+    @retired_smara path /smara /smara/*
+    respond @retired_smara "Smara is now available at https://ai.syntarus.com/" 410
     handle_path /smara-api/* {
         reverse_proxy 127.0.0.1:8090 {
             header_up X-Real-IP {remote_host}
@@ -84,12 +86,4 @@ bridge.syntarus.com {
         X-Content-Type-Options "nosniff"
         Referrer-Policy "strict-origin-when-cross-origin"
     }
-}
-
-
-# Retire the old staging hostname without leaving a second Smara service
-# running. This temporary redirect protects stale bookmarks while its DNS
-# record is removed from Cloudflare.
-control-staging.syntarus.com {
-    redir https://ai.syntarus.com/ 308
 }

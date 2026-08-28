@@ -23,7 +23,7 @@ def _default_browser_auth_url(api_url: str, device_code: str) -> str:
         # The hosted Smara shell now owns the public root. Keep the API path
         # separate so the browser never opens a duplicate compatibility mount.
         return f"{base.removesuffix('/smara-api')}/?cli_device={encoded}"
-    return f"{base}/app/?cli_device={encoded}"
+    return f"{base}/?cli_device={encoded}"
 
 
 class _TerminalUI:

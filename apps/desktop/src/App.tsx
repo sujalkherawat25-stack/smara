@@ -5,7 +5,7 @@ import smaraLogo from "./assets/smara-logo.svg";
 
 const fallbackConnection: ConnectionState = {
   api_url: "https://ai.syntarus.com/smara-api",
-  web_url: "https://ai.syntarus.com/smara/",
+  web_url: "https://ai.syntarus.com/",
   workspace: "default",
   model_profile: "default",
   paired: false,

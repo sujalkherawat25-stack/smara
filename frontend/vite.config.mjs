@@ -6,9 +6,8 @@ import { fileURLToPath, URL } from "node:url";
 // parent-directory resolution path that affected the original shell.
 export default defineConfig({
   plugins: [react()],
-  // The staging mount is served below /smara while the existing Memento app
-  // remains at /. Keep this configurable so a later root cutover is one build
-  // variable, not a source rewrite.
+  // The frontend is served at the canonical Smara root. Keep this configurable
+  // for local previews, while production builds use "/".
   base: process.env.VITE_BASE_PATH ?? "/",
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },

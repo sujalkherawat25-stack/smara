@@ -8,7 +8,7 @@ def enabled() -> bool:
     return bool(settings.vapid_public_key and settings.vapid_private_key)
 
 
-def send(store, account_id: str, title: str, body: str, url: str = "/app/") -> int:
+def send(store, account_id: str, title: str, body: str, url: str = "/") -> int:
     if not enabled():
         return 0
     from pywebpush import WebPushException, webpush

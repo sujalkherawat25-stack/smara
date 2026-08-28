@@ -8,12 +8,10 @@ import time
 import base64
 import secrets
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 import httpx
 import jwt
 
@@ -44,12 +42,6 @@ app.add_middleware(
 )
 store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
 limiter = RedisFixedWindowLimiter(settings.redis_url, settings.rate_limit_per_minute, allow_local_fallback=settings.dev_mode)
-source_web_dir = Path(__file__).resolve().parents[2] / "web"
-web_dir = source_web_dir if source_web_dir.is_dir() else Path("/app/web")
-if web_dir.is_dir():
-    app.mount("/app", StaticFiles(directory=web_dir, html=True), name="smara-web")
-
-
 def _agent_runtime(model_profile: str | None = None) -> SmaraAgentRuntime:
     """Construct the runtime without importing any MemoryOS implementation."""
     memory = None
@@ -76,9 +68,10 @@ def _agent_runtime(model_profile: str | None = None) -> SmaraAgentRuntime:
 
 @app.get("/", include_in_schema=False)
 async def web_root():
-    if web_dir.is_dir():
-        return FileResponse(web_dir / "index.html")
-    return {"ok": True}
+    # The browser UI is served by the frontend container at the canonical
+    # public root. Keep this API root metadata-only so an API misroute cannot
+    # accidentally expose a second, stale control surface.
+    return {"ok": True, "service": "smara-api"}
 
 @app.middleware("http")
 async def harden_http(request: Request, call_next):
@@ -92,11 +85,7 @@ async def harden_http(request: Request, call_next):
             return JSONResponse({"detail": "Rate limit exceeded. Try again shortly."}, status_code=429, headers={"Retry-After": "60"})
     response = await call_next(request)
     response.headers.update({"X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin", "Permissions-Policy": "camera=(self), microphone=(self), geolocation=()"})
-    # The Control UI is embedded only by ai.syntarus.com. Caddy applies the
-    # strict frame-ancestors policy; every API route and non-embedded page
-    # remains protected from framing with X-Frame-Options.
-    if not request.url.path.startswith("/app/"):
-        response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Frame-Options"] = "DENY"
     return response
 
 def account_id(
@@ -637,7 +626,7 @@ async def request_integration_action(body: IntegrationActionCreate, background: 
     try:
         action = store.request_integration_action(user, body.provider, body.action, body.preview, body.idempotency_key, body.payload)
         if action["status"] == "awaiting_approval":
-            background.add_task(push.send, store, user, "Smara approval needed", action["preview"], "/app/")
+            background.add_task(push.send, store, user, "Smara approval needed", action["preview"], "/")
         return action
     except KeyError:
         raise HTTPException(409, "Configure this integration before requesting an action.")

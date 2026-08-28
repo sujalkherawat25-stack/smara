@@ -23,11 +23,14 @@ Production must use a Postgres-backed store before multiple API/worker replicas
 are deployed. Redis is for event fan-out only, never the sole task source of
 truth.
 
-## Control app and phone companion
+## Canonical web app and phone companion
 
-The task-first Smara control app is served by the API at `/app/` (or `/`). It
-works responsively on a phone and is installable as a small PWA companion for
-task status and approvals. It does not run a phone executor. In development,
+The task-first Smara web app is served at the canonical `ai.syntarus.com/`
+root by the frontend container. It works responsively on a phone and is
+installable as a small PWA companion for task status and approvals. The
+`/smara-api/` path is API-only; it has no browser control UI. The former
+`/smara/` and `/smara-api/app/` surfaces are retired so users cannot land in a
+stale duplicate shell. It does not run a phone executor. In development,
 enter a local account identifier in the sidebar; production requests rely on
 the signed identity gateway and do not expose an account identifier in browser
 storage.
@@ -73,7 +76,8 @@ smara --api https://smara.example.com chat -q "Summarize my current tasks" --mod
 smara --api https://smara.example.com plugins
 ```
 
-`smara login` uses a short-lived device code, opens the browser, and polls
+`smara login` uses a short-lived device code, opens the canonical Smara root,
+and polls
 until the signed-in Smara Web session approves that device. No bearer token is
 shown or copied. If the browser cannot be opened automatically, the command
 prints the approval URL. `smara login <one-time-code>` remains a compatibility

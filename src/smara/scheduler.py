@@ -24,7 +24,7 @@ async def main() -> None:
                 for item in fired:
                     try:
                         schedule = store.schedule(item["schedule_id"], item["account_id"])
-                        await asyncio.to_thread(push.send, store, schedule["account_id"], "Smara scheduled task", f"{schedule['title']} is ready for review or execution.", "/app/")
+                        await asyncio.to_thread(push.send, store, schedule["account_id"], "Smara scheduled task", f"{schedule['title']} is ready for review or execution.", "/")
                     except Exception:
                         # Delivery is optional and must never prevent the durable
                         # task run from existing or being processed.

@@ -74,10 +74,10 @@ Serve the migrated frontend at the canonical `ai.syntarus.com/` root. Proxy
 `/smara-api/*` to the Smara API with the prefix stripped; the browser still
 obtains its token from `/v1/auth/control-token` on the authenticated
 `ai.syntarus.com` origin with `credentials: include`. The old `/smara/` path
-redirects to `/` and `control-staging.syntarus.com` redirects to the root while
-its DNS record is retired. Test chat, tasks, research, refresh, and approval
-from the same signed-in account. This repository must not modify the protected
-MemoryOS pipeline.
+returns `410 Gone`, and `/smara-api/app/` is not served. The retired
+`control-staging.syntarus.com` hostname has no DNS record. Test chat, tasks,
+research, refresh, and approval from the same signed-in account. This
+repository must not modify the protected MemoryOS pipeline.
 
 ## 6. Memory isolation
 

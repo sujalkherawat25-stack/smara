@@ -86,7 +86,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({
         status: "signed_out",
         account: null,
-        error: "Server not connected. Please try again.",
+        error: err instanceof Error && err.message ? err.message : "Could not sign you in right now. Please try again.",
       });
     }
   },
@@ -99,7 +99,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({
         status: "signed_out",
         account: null,
-        error: "Server not connected. Please try again.",
+        error: err instanceof Error && err.message ? err.message : "Could not sign you in right now. Please try again.",
       });
       throw err; // let the caller decide whether to show a toast
     }

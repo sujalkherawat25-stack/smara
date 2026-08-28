@@ -5,9 +5,9 @@
 **Public target:** `https://ai.syntarus.com`
 **Current routing:** Smara owns the canonical `https://ai.syntarus.com/` root.
 The API is same-origin at `/smara-api`; the old `/smara/` UI mount and
-`control-staging.syntarus.com` service are retired (old links redirect while
-DNS is cleaned up). Memento remains available only behind the preserved
-backend/rollback configuration.
+`control-staging.syntarus.com` service are retired (`/smara/` returns `410`
+and the staging hostname has no DNS record). Memento remains available only
+behind the preserved backend/rollback configuration.
 
 ## 1. Scope reset
 
@@ -728,3 +728,19 @@ changes; the executor, hosted API, and MemoryOS pipeline are unchanged.
 - Verification: 128 Python tests, frontend production build, and 6 native Rust
   tests pass locally. The live Sarvam 105B endpoint returned HTTP 200 from the
   running API container.
+
+### 2026-08-28 — Duplicate control-surface removal
+
+- Retired the API-hosted static control app (`/app/`) and removed its unused
+  frontend iframe component. The canonical React Smara shell at
+  `https://ai.syntarus.com/` is now the only public UI; `/smara-api/` is API
+  only and `/smara/` is an explicit `410 Gone` compatibility response.
+- Removed the obsolete staging Caddy site and deployment mount template.
+  `control-staging.syntarus.com` is DNS-retired; the Compose project remains
+  internal and continues to run the API, worker, scheduler, and data stores.
+- Updated CLI, desktop, push-notification, and scheduler links to open the
+  canonical root. No MemoryOS source, schema, or data was changed.
+- Final verification for this cleanup: run the full Smara Python suite,
+  frontend production build, native desktop tests, Caddy validation, and live
+  root/API/retired-route checks before treating the root as the only supported
+  entry point.

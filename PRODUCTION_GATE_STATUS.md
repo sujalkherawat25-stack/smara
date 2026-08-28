@@ -9,8 +9,8 @@ preserved without a second public UI.
 
 - Staging API, worker, scheduler, integration worker, Postgres, and Redis are
   running under the original `smara-staging` Compose project.
-- `/health` and `/readyz` pass locally and through
-  `https://control-staging.syntarus.com`.
+- `/health` and `/readyz` pass locally and through the canonical
+  `https://ai.syntarus.com/smara-api` endpoint.
 - The tested Smara Caddy configuration is now installed at `/etc/caddy/Caddyfile`
   after validation, with `/etc/caddy/Caddyfile.pre-smara-20260827` retained for
   rollback; Caddy reloaded and then restarted successfully, with `/readyz`
@@ -71,9 +71,9 @@ preserved without a second public UI.
   and a credential-write probe returns HTTP 409 without storing the test value.
 - Smara serves `https://ai.syntarus.com/` as the public root. `/v1/*` continues
   to proxy to the existing Memento auth/legacy backend for the session bridge,
-  while `/smara-api/*` proxies to Smara. The old `/smara/` UI alias and the
-  `control-staging.syntarus.com` service are retired; stale links redirect to
-  the canonical root. A dated Caddy rollback copy remains available.
+  while `/smara-api/*` proxies to Smara. The old `/smara/` route now returns
+  `410 Gone`, `/smara-api/app/` is absent, and the `control-staging.syntarus.com`
+  DNS record/service is retired. A dated Caddy rollback copy remains available.
 - The repeatable signed beta smoke passed on staging: public health/readiness,
   signed tool access, disposable task create/cancel, cross-account task
   isolation (404), and local-only integration policy. No secret values were
@@ -133,7 +133,7 @@ remain in force and they must be reopened before a later production promotion:
   provider cards. Only the profile name crosses the desktop/hosted boundary;
   provider keys remain operator-managed on the hosted service.
 - Desktop sign-in now repairs legacy installs that saved the domain root and
-  opens the real Smara approval shell at `/smara/?cli_device=...`; the native
+  opens the real Smara approval shell at `/?cli_device=...`; the native
   app polls the same request and stores the resulting device token locally.
 - Settings now includes an **Add provider** dialog for private Sarvam, Grok,
   and custom OpenAI-compatible chat endpoints. The Sarvam preset uses the
