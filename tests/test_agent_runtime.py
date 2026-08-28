@@ -44,6 +44,49 @@ def test_provider_uses_sarvam_subscription_header(monkeypatch):
     assert captured["headers"] == {"api-subscription-key": "sarvam-secret"}
 
 
+def test_provider_retries_one_transient_non_stream_failure(monkeypatch):
+    statuses = [503, 200]
+
+    class FakeResponse:
+        headers = {}
+
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                request = httpx.Request("POST", "https://llm.example/v1/chat/completions")
+                response = httpx.Response(self.status_code, request=request)
+                raise httpx.HTTPStatusError("provider unavailable", request=request, response=response)
+
+        def json(self):
+            return {"choices": [{"message": {"content": "recovered"}}]}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            return FakeResponse(statuses.pop(0))
+
+    async def no_wait(_seconds):
+        return None
+
+    monkeypatch.setattr("smara.agent_runtime.httpx.AsyncClient", lambda **_kwargs: FakeClient())
+    monkeypatch.setattr("smara.agent_runtime.asyncio.sleep", no_wait)
+
+    async def exercise():
+        return await OpenAICompatibleProvider(
+            base_url="https://llm.example/v1", api_key="key", model="model"
+        ).complete(system="system", message="hello")
+
+    assert asyncio.run(exercise()) == "recovered"
+    assert statuses == []
+
+
 class FakeProvider:
     def __init__(self):
         self.system = ""
@@ -58,6 +101,13 @@ class CompleteOnlyProvider(FakeProvider):
     """Provider shape used by an adapter that does not expose streaming."""
 
     stream_complete = None
+
+
+class FailingDirectStreamProvider(FakeProvider):
+    async def stream_complete(self, *, system: str, message: str):
+        if False:
+            yield ""
+        raise RuntimeError("temporary stream failure")
 
 
 class ToolProvider:
@@ -177,6 +227,17 @@ def test_runtime_triage_short_circuits_greetings_without_planner_round_trip():
 def test_direct_sse_fallback_emits_answer_when_provider_has_no_stream():
     emitted = []
     runtime = SmaraAgentRuntime(CompleteOnlyProvider())
+    turn = asyncio.run(runtime.chat_with_tools(
+        account_id="acct_1", workspace_id="work", message="hello",
+        token_hook=emitted.append,
+    ))
+    assert turn.message == "A bounded direct response."
+    assert emitted == ["A bounded direct response."]
+
+
+def test_direct_sse_falls_back_when_stream_fails_before_first_token():
+    emitted = []
+    runtime = SmaraAgentRuntime(FailingDirectStreamProvider())
     turn = asyncio.run(runtime.chat_with_tools(
         account_id="acct_1", workspace_id="work", message="hello",
         token_hook=emitted.append,

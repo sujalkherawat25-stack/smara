@@ -1,8 +1,8 @@
 import asyncio
 import json
 
-from smara.agent_step import BoundedAgentStepRuntime
-from smara.tool_registry import ToolContext, default_tool_registry
+from smara.agent_step import AgentStepError, BoundedAgentStepRuntime
+from smara.tool_registry import ToolContext, ToolRegistry, ToolResult, ToolSpec, default_tool_registry
 
 
 class FakeProvider:
@@ -40,6 +40,33 @@ class PartialStreamProvider(FakeProvider):
         self.calls.append((system, message))
         yield "Partial answer"
         raise RuntimeError("connection dropped")
+
+
+class CountingTool:
+    spec = ToolSpec(
+        "count_once",
+        "Return a deterministic observation.",
+        {"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"], "additionalProperties": False},
+    )
+
+    def __init__(self):
+        self.calls = 0
+
+    async def run(self, arguments, context):
+        self.calls += 1
+        return ToolResult(True, f"observed {arguments['value']}")
+
+
+class SlowTool:
+    spec = ToolSpec(
+        "slow_tool",
+        "A deliberately slow test tool.",
+        {"type": "object", "properties": {}, "additionalProperties": False},
+    )
+
+    async def run(self, arguments, context):
+        await asyncio.sleep(0.1)
+        return ToolResult(True, "late result")
 
 
 def test_agent_step_selects_only_registry_tool_and_returns_final_answer():
@@ -177,3 +204,68 @@ def test_agent_step_can_only_request_external_approval():
     result = asyncio.run(execute())
     assert result.tools_used == 1
     assert result.text == "I requested approval before sending."
+
+
+def test_agent_step_does_not_repeat_an_identical_tool_side_effect():
+    tool = CountingTool()
+    request = json.dumps({"action": "tool", "name": "count_once", "arguments": {"value": "one"}})
+    provider = FakeProvider([request, request, json.dumps({"action": "final", "answer": "Used the first observation."})])
+    events = []
+
+    async def execute():
+        return await BoundedAgentStepRuntime(provider, ToolRegistry([tool])).run(
+            task={"objective": "Observe one value"},
+            tool_context=ToolContext("acct_test", "workspace"),
+            event_hook=lambda name, payload: events.append((name, payload)),
+        )
+
+    result = asyncio.run(execute())
+    assert result.text == "Used the first observation."
+    assert result.tools_used == 1
+    assert tool.calls == 1
+    assert any(event[1].get("ok") is False and "Repeated identical" in event[1].get("preview", "") for event in events)
+
+
+def test_agent_step_times_out_one_tool_and_can_still_return_a_final_answer():
+    provider = FakeProvider([
+        json.dumps({"action": "tool", "name": "slow_tool", "arguments": {}}),
+        json.dumps({"action": "final", "answer": "The tool timed out safely."}),
+    ])
+    events = []
+
+    async def execute():
+        return await BoundedAgentStepRuntime(
+            provider,
+            ToolRegistry([SlowTool()]),
+            tool_timeout_seconds=0.01,
+        ).run(
+            task={"objective": "Use the slow tool"},
+            tool_context=ToolContext("acct_test", "workspace"),
+            event_hook=lambda name, payload: events.append((name, payload)),
+        )
+
+    result = asyncio.run(execute())
+    assert result.text == "The tool timed out safely."
+    assert result.tools_used == 0
+    assert any(event[1].get("ok") is False and "timed out" in event[1].get("preview", "") for event in events)
+
+
+def test_agent_step_enforces_a_total_wall_clock_budget():
+    class SlowProvider(FakeProvider):
+        async def complete(self, *, system: str, message: str) -> str:
+            await asyncio.sleep(0.1)
+            return '{"action":"final","answer":"late"}'
+
+    async def execute():
+        return await BoundedAgentStepRuntime(
+            SlowProvider([]),
+            default_tool_registry(),
+            max_seconds=0.05,
+        ).run(task={"objective": "Answer"}, tool_context=ToolContext("acct_test", "workspace"))
+
+    try:
+        asyncio.run(execute())
+    except AgentStepError as exc:
+        assert "bounded execution time" in str(exc)
+    else:
+        raise AssertionError("the total agent deadline must be enforced")

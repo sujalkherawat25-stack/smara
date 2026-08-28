@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import time
 import base64
 import secrets
@@ -31,6 +32,7 @@ from .tool_registry import ToolContext, ToolError, default_tool_registry
 from .provider_routing import resolve_profile
 from .plugins import manifests
 
+LOG = logging.getLogger("smara.api")
 configure_sentry(settings.sentry_dsn)
 app = FastAPI(title="Smara Control Plane", version="0.1.0")
 app.add_middleware(
@@ -477,6 +479,14 @@ async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
             if not task.done():
                 task.cancel()
             kind, message = llm_errors.describe(exc, provider=settings.llm_provider)
+            # Keep operational breadcrumbs useful without logging raw
+            # provider responses, prompts, tokens, or user content.
+            LOG.warning(
+                "chat_stream_failed kind=%s provider=%s error_type=%s",
+                kind,
+                settings.llm_provider,
+                type(exc).__name__,
+            )
             yield agent_events.error(message, kind=kind)
         finally:
             if not task.done():

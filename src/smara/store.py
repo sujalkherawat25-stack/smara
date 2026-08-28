@@ -911,18 +911,42 @@ class TaskStore:
         executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
         with self._connect() as c:
             c.execute("BEGIN IMMEDIATE")
-            expired = c.execute("SELECT id,task_id,task_run_id FROM task_steps WHERE status='running' AND executor_kind='desktop' AND lease_expires_at < ?", (now,)).fetchall()
+            expired = c.execute(
+                """SELECT s.id,s.task_id,s.task_run_id,s.required_capability,s.attempts,
+                          t.account_id,t.cancel_requested
+                     FROM task_steps s JOIN tasks t ON t.id=s.task_id
+                    WHERE s.status='running' AND s.executor_kind='desktop'
+                      AND s.lease_expires_at < ?""",
+                (now,),
+            ).fetchall()
             for item in expired:
-                cancelled = c.execute("SELECT cancel_requested FROM tasks WHERE id=?", (item["task_id"],)).fetchone()
-                if cancelled and cancelled["cancel_requested"]:
+                if item["cancel_requested"]:
                     c.execute("UPDATE task_steps SET status='cancelled',lease_owner=NULL,lease_expires_at=NULL WHERE id=?", (item["id"],))
                     c.execute("UPDATE task_runs SET status='cancelled' WHERE id=?", (item["task_run_id"],))
                     c.execute("UPDATE tasks SET status='cancelled',updated_at=? WHERE id=?", (now, item["task_id"]))
                     event_type, payload = "task.cancelled", '{"source":"executor_lease_recovery"}'
-                else:
+                elif item["required_capability"] == "local_file_read":
                     c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL WHERE id=?", (item["id"],))
                     c.execute("UPDATE tasks SET status='queued',updated_at=? WHERE id=? AND status='running'", (now, item["task_id"]))
                     event_type, payload = "executor.lease_expired", '{"recovered":true}'
+                else:
+                    # A write, terminal command, or browser launch may have
+                    # happened before the completion response was lost. Its
+                    # outcome is uncertain, so replaying it can duplicate a
+                    # side effect. Fail closed into the account-scoped DLQ;
+                    # only an explicit human retry may run it again.
+                    error = "Desktop lease expired after a potentially side-effecting action; automatic replay was blocked."
+                    c.execute(
+                        "UPDATE task_steps SET status='failed',lease_owner=NULL,lease_expires_at=NULL,last_error=? WHERE id=?",
+                        (error, item["id"]),
+                    )
+                    c.execute("UPDATE task_runs SET status='failed' WHERE id=?", (item["task_run_id"],))
+                    c.execute("UPDATE tasks SET status='failed',updated_at=? WHERE id=?", (now, item["task_id"]))
+                    c.execute(
+                        "INSERT INTO task_dead_letters(id,task_id,step_id,account_id,error,attempts,created_at,resolved_at) VALUES(?,?,?,?,?,?,?,NULL)",
+                        (f"dlq_{uuid.uuid4().hex}", item["task_id"], item["id"], item["account_id"], error, item["attempts"], now),
+                    )
+                    event_type, payload = "executor.lease_expired_uncertain", '{"recovered":false,"replay_blocked":true}'
                 c.execute("UPDATE executor_leases SET completed_at=? WHERE step_id=? AND completed_at IS NULL", (now, item["id"]))
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", item["task_id"], event_type, payload, now))
             rows = c.execute("""SELECT t.*,s.id AS step_id,s.task_run_id,s.idempotency_key,s.name,s.required_capability,s.executor_payload
@@ -1266,18 +1290,38 @@ class PostgresTaskStore(TaskStore):
         """Postgres desktop claim with the same SKIP LOCKED lease guarantee."""
         executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
         with self._connect() as c:
-            expired = c.execute("SELECT id,task_id,task_run_id FROM task_steps WHERE status='running' AND executor_kind='desktop' AND lease_expires_at < %s FOR UPDATE SKIP LOCKED", (now,)).fetchall()
+            expired = c.execute(
+                """SELECT s.id,s.task_id,s.task_run_id,s.required_capability,s.attempts,
+                          t.account_id,t.cancel_requested
+                     FROM task_steps s JOIN tasks t ON t.id=s.task_id
+                    WHERE s.status='running' AND s.executor_kind='desktop'
+                      AND s.lease_expires_at < %s
+                    FOR UPDATE OF s SKIP LOCKED""",
+                (now,),
+            ).fetchall()
             for item in expired:
-                cancelled = c.execute("SELECT cancel_requested FROM tasks WHERE id=%s", (item["task_id"],)).fetchone()
-                if cancelled and cancelled["cancel_requested"]:
+                if item["cancel_requested"]:
                     c.execute("UPDATE task_steps SET status='cancelled',lease_owner=NULL,lease_expires_at=NULL WHERE id=%s", (item["id"],))
                     c.execute("UPDATE task_runs SET status='cancelled' WHERE id=%s", (item["task_run_id"],))
                     c.execute("UPDATE tasks SET status='cancelled',updated_at=%s WHERE id=%s", (now, item["task_id"]))
                     event_type, payload = "task.cancelled", '{"source":"executor_lease_recovery"}'
-                else:
+                elif item["required_capability"] == "local_file_read":
                     c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL WHERE id=%s", (item["id"],))
                     c.execute("UPDATE tasks SET status='queued',updated_at=%s WHERE id=%s AND status='running'", (now, item["task_id"]))
                     event_type, payload = "executor.lease_expired", '{"recovered":true}'
+                else:
+                    error = "Desktop lease expired after a potentially side-effecting action; automatic replay was blocked."
+                    c.execute(
+                        "UPDATE task_steps SET status='failed',lease_owner=NULL,lease_expires_at=NULL,last_error=%s WHERE id=%s",
+                        (error, item["id"]),
+                    )
+                    c.execute("UPDATE task_runs SET status='failed' WHERE id=%s", (item["task_run_id"],))
+                    c.execute("UPDATE tasks SET status='failed',updated_at=%s WHERE id=%s", (now, item["task_id"]))
+                    c.execute(
+                        "INSERT INTO task_dead_letters(id,task_id,step_id,account_id,error,attempts,created_at,resolved_at) VALUES(%s,%s,%s,%s,%s,%s,%s,NULL)",
+                        (f"dlq_{uuid.uuid4().hex}", item["task_id"], item["id"], item["account_id"], error, item["attempts"], now),
+                    )
+                    event_type, payload = "executor.lease_expired_uncertain", '{"recovered":false,"replay_blocked":true}'
                 c.execute("UPDATE executor_leases SET completed_at=%s WHERE step_id=%s AND completed_at IS NULL", (now, item["id"]))
                 c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", item["task_id"], event_type, payload, now))
             rows = c.execute("""SELECT t.*,s.id AS step_id,s.task_run_id,s.idempotency_key,s.name,s.required_capability,s.executor_payload

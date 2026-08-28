@@ -72,6 +72,35 @@ def test_desktop_expired_lease_is_recovered_by_next_executor_poll(tmp_path: Path
     assert recovered["lease_owner"] == second["executor_id"]
 
 
+@pytest.mark.parametrize("capability", ["local_file_write", "local_terminal", "local_browser"])
+def test_uncertain_side_effecting_desktop_lease_is_never_replayed(tmp_path: Path, capability: str):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    first = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop A", [capability])["code"])
+    second = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop B", [capability])["code"])
+    task = store.create("acct_1", "work", "Risky local action", "Run once", True, [{
+        "name": "desktop.action", "executor_kind": "desktop", "required_capability": capability,
+    }])
+    store.decide(task["id"], "acct_1", True, "approved")
+    claimed = store.claim_for_executor(first["executor_id"], first["token"], lease_seconds=1)
+    assert claimed
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE task_steps SET lease_expires_at=? WHERE id=?",
+            ("2000-01-01T00:00:00+00:00", claimed["step_id"]),
+        )
+
+    # Polling from another executor performs lease recovery, but an uncertain
+    # write/terminal/browser action is failed closed instead of run twice.
+    assert store.claim_for_executor(second["executor_id"], second["token"]) is None
+    failed = store.get(task["id"], "acct_1")
+    assert failed["status"] == "failed"
+    dead_letters = store.dead_letters("acct_1")
+    assert len(dead_letters) == 1
+    assert dead_letters[0]["step_id"] == claimed["step_id"]
+    assert "automatic replay was blocked" in dead_letters[0]["error"]
+    assert any(event["type"] == "executor.lease_expired_uncertain" for event in store.events(task["id"], "acct_1"))
+
+
 def test_desktop_step_heartbeat_refreshes_only_current_lease(tmp_path: Path):
     store = TaskStore(str(tmp_path / "smara.db"))
     desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop", ["local_file_read"])["code"])

@@ -8,6 +8,7 @@ separately tested slices.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import uuid
@@ -93,6 +94,37 @@ class OpenAICompatibleProvider:
         return {"Authorization": f"Bearer {self._api_key}"}
 
     @staticmethod
+    def _retry_delay(response: httpx.Response | Any, attempt: int) -> float:
+        headers = getattr(response, "headers", {}) or {}
+        try:
+            retry_after = float(headers.get("Retry-After", ""))
+        except (TypeError, ValueError):
+            retry_after = 0.0
+        return min(2.0, max(retry_after, 0.25 * (attempt + 1)))
+
+    async def _post_completion(self, client: httpx.AsyncClient, payload: dict[str, Any]) -> httpx.Response:
+        """Retry one safe, non-stream provider call on a transient outage."""
+        for attempt in range(2):
+            try:
+                response = await client.post(
+                    f"{self._base_url}/chat/completions",
+                    headers=self._headers(),
+                    json=payload,
+                )
+            except (httpx.TimeoutException, httpx.TransportError):
+                if attempt == 1:
+                    raise
+                await asyncio.sleep(0.25)
+                continue
+            status = int(getattr(response, "status_code", 200))
+            if attempt == 0 and (status == 429 or status >= 500):
+                await asyncio.sleep(self._retry_delay(response, attempt))
+                continue
+            response.raise_for_status()
+            return response
+        raise RuntimeError("Configured provider did not return a completion response.")
+
+    @staticmethod
     def _content_from_choice(choice: Any) -> str | None:
         """Read normal text while deliberately ignoring reasoning-only fields."""
         if not isinstance(choice, dict):
@@ -118,10 +150,9 @@ class OpenAICompatibleProvider:
         if not self._base_url or not self._api_key or not self._model:
             raise RuntimeError("No Smara chat provider is configured.")
         async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-            response = await client.post(
-                f"{self._base_url}/chat/completions",
-                headers=self._headers(),
-                json={
+            response = await self._post_completion(
+                client,
+                {
                     "model": self._model,
                     "temperature": 0.2,
                     # Reasoning-capable providers (notably Sarvam) may spend
@@ -135,7 +166,6 @@ class OpenAICompatibleProvider:
                     ],
                 },
             )
-        response.raise_for_status()
         data = response.json()
         try:
             content = self._content_from_choice(data["choices"][0])
@@ -224,9 +254,11 @@ class SmaraAgentRuntime:
                 except Exception:
                     # A streaming connection can fail after partial output.
                     # Do not issue a second answer into the same UI stream.
+                    # Before the first token, however, the normal completion
+                    # endpoint is a safe fallback and avoids turning a brief
+                    # provider-stream outage into a failed chat turn.
                     if parts:
                         return "".join(parts).strip()
-                    raise
             if parts:
                 return "".join(parts).strip()
         answer = (await self._provider.complete(system=system, message=message)).strip()
