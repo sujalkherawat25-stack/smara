@@ -15,5 +15,6 @@ def test_legacy_mount_config_is_not_shipped():
     assert "@retired_smara path /smara /smara/*" in active_caddy
     assert "handle @retired_smara" in active_caddy
     assert "control-staging.syntarus.com" not in active_caddy
-    assert "handle /smara-api" in active_caddy
+    assert "@smara_api_base path /smara-api" in active_caddy
+    assert "redir @smara_api_base /smara-api/ 308" in active_caddy
     assert "handle_path /smara-api/*" in active_caddy
