@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -23,6 +24,7 @@ import webbrowser
 from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import httpx
@@ -33,7 +35,9 @@ MAX_OUTPUT_CHARS = 32_000
 MAX_COMMAND_SECONDS = 60
 DEFAULT_CAPABILITIES = ["local_file_read"]
 STATE_ENV = "SMARA_DESKTOP_STATE"
+CREDENTIALS_ENV = "SMARA_DESKTOP_CREDENTIALS"
 LOG = logging.getLogger("smara.desktop")
+_CREDENTIAL_NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 
 
 def default_state_path() -> Path:
@@ -47,6 +51,14 @@ def default_state_path() -> Path:
 def default_log_path() -> Path:
     root = Path(os.getenv("LOCALAPPDATA", Path.home() / ".local")) / "Smara" / "logs"
     return root / "desktop.log"
+
+
+def default_credentials_path() -> Path:
+    configured = os.getenv(CREDENTIALS_ENV)
+    if configured:
+        return Path(configured)
+    root = Path(os.getenv("APPDATA", Path.home() / ".config")) / "Smara"
+    return root / "credentials.json"
 
 
 def _protect_windows(value: str) -> str:
@@ -90,6 +102,81 @@ def _unprotect_windows(value: str) -> str:
         return ctypes.string_at(clear.pbData, clear.cbData).decode("utf-8")
     finally:
         ctypes.windll.kernel32.LocalFree(clear.pbData)
+
+
+def _credential_records(path: Path | None = None) -> dict[str, dict]:
+    path = path or default_credentials_path()
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("The local credential vault could not be read.") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError("The local credential vault is invalid.")
+    return {key: item for key, item in value.items() if isinstance(key, str) and isinstance(item, dict)}
+
+
+def _write_credential_records(records: dict[str, dict], path: Path | None = None) -> None:
+    path = path or default_credentials_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+        json.dump(records, handle, ensure_ascii=False, indent=2)
+    try:
+        os.replace(temporary, path)
+        if os.name != "nt":
+            path.chmod(0o600)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def save_local_credential(name: str, secret: str, provider: str = "custom", path: Path | None = None) -> None:
+    """Store a local tool secret encrypted for the current Windows account."""
+    name = name.strip().upper()
+    if not _CREDENTIAL_NAME.fullmatch(name):
+        raise RuntimeError("Credential name must be an uppercase environment name, for example TAVILY_API_KEY.")
+    if not secret or len(secret) > 16_384:
+        raise RuntimeError("Credential value must be between 1 and 16384 characters.")
+    records = _credential_records(path)
+    records[name] = {
+        "provider": (provider.strip().lower() or "custom")[:40],
+        "protected": _protect_windows(secret),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _write_credential_records(records, path)
+
+
+def delete_local_credential(name: str, path: Path | None = None) -> bool:
+    records = _credential_records(path)
+    removed = records.pop(name.strip().upper(), None) is not None
+    _write_credential_records(records, path)
+    return removed
+
+
+def local_credential_summaries(path: Path | None = None) -> list[dict[str, str]]:
+    return [
+        {"name": name, "provider": str(item.get("provider") or "custom"), "updated_at": str(item.get("updated_at") or "")}
+        for name, item in sorted(_credential_records(path).items())
+    ]
+
+
+def _resolved_credentials(names: object, path: Path | None = None) -> dict[str, str]:
+    if names is None:
+        return {}
+    if not isinstance(names, list) or len(names) > 12 or not all(isinstance(name, str) for name in names):
+        raise RuntimeError("credential_env must be a list of at most 12 local credential names.")
+    records = _credential_records(path)
+    resolved: dict[str, str] = {}
+    for raw_name in names:
+        name = raw_name.strip().upper()
+        if not _CREDENTIAL_NAME.fullmatch(name) or name not in records:
+            raise RuntimeError(f"Local credential '{name}' is not configured on this PC.")
+        protected = records[name].get("protected")
+        if not isinstance(protected, str) or not protected:
+            raise RuntimeError(f"Local credential '{name}' is invalid; save it again.")
+        resolved[name] = _unprotect_windows(protected)
+    return resolved
 
 
 def _save_state(path: Path, state: dict) -> None:
@@ -292,12 +379,19 @@ def _terminal(payload: dict, roots: list[Path], state: dict) -> str:
     if not cwd.is_dir():
         raise RuntimeError("Terminal working directory is not an approved folder.")
     safe_env = {key: value for key, value in os.environ.items() if not any(marker in key.upper() for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD"))}
+    injected = _resolved_credentials(payload.get("credential_env"))
+    safe_env.update(injected)
     try:
         completed = subprocess.run(argv, cwd=cwd, env=safe_env, shell=False, capture_output=True, text=True, timeout=MAX_COMMAND_SECONDS, check=False)
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"Terminal command exceeded {MAX_COMMAND_SECONDS} seconds.") from exc
     output = (completed.stdout or "") + ("\n" + completed.stderr if completed.stderr else "")
-    return json.dumps({"action": "local_terminal", "argv": argv, "exit_code": completed.returncode, "output": output[:MAX_OUTPUT_CHARS]}, ensure_ascii=False)
+    # A command can accidentally echo an injected token. Redact every known
+    # value before anything is returned to the hosted task ledger or log.
+    for secret in injected.values():
+        if secret:
+            output = output.replace(secret, "[REDACTED LOCAL CREDENTIAL]")
+    return json.dumps({"action": "local_terminal", "argv": argv, "credential_env": sorted(injected), "exit_code": completed.returncode, "output": output[:MAX_OUTPUT_CHARS]}, ensure_ascii=False)
 
 
 def _browser(payload: dict, state: dict) -> str:
@@ -416,6 +510,10 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resume", action="store_true", help="resume claims for the configured state")
     parser.add_argument("--revoke", action="store_true", help="revoke this paired desktop on the hosted service and remove local state")
     parser.add_argument("--status", action="store_true", help="print safe local executor status")
+    parser.add_argument("--credential-list", action="store_true", help="list local credential names without values")
+    parser.add_argument("--credential-set", help="save a local credential from stdin")
+    parser.add_argument("--credential-provider", default="custom", help="provider label for --credential-set")
+    parser.add_argument("--credential-delete", help="remove a local credential")
     parser.add_argument("--log", type=Path, default=default_log_path(), help="rotating desktop log path")
     args = parser.parse_args(argv)
     args.log.parent.mkdir(parents=True, exist_ok=True)
@@ -428,6 +526,16 @@ def _main(argv: list[str] | None = None) -> int:
         _pause_path(args.state).parent.mkdir(parents=True, exist_ok=True)
         _pause_path(args.state).write_text("paused\n", encoding="utf-8")
         print("Smara Desktop is paused. No new local work will be claimed.")
+        return 0
+    if args.credential_list:
+        print(json.dumps(local_credential_summaries(), ensure_ascii=False))
+        return 0
+    if args.credential_set:
+        save_local_credential(args.credential_set, sys.stdin.read().rstrip("\r\n"), args.credential_provider)
+        print(json.dumps({"ok": True, "name": args.credential_set.strip().upper()}))
+        return 0
+    if args.credential_delete:
+        print(json.dumps({"ok": True, "removed": delete_local_credential(args.credential_delete)}))
         return 0
     if args.resume:
         _pause_path(args.state).unlink(missing_ok=True)

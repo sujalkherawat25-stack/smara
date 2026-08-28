@@ -2,6 +2,7 @@ export type Screen = "chat" | "activity" | "settings";
 
 export interface ConnectionState {
   api_url: string;
+  web_url: string;
   workspace: string;
   model_profile: string;
   paired: boolean;
@@ -16,6 +17,12 @@ export interface ConnectionState {
   log_path: string;
   has_cli_token: boolean;
   last_error: string | null;
+}
+
+export interface LocalCredentialSummary {
+  name: string;
+  provider: string;
+  updated_at: string;
 }
 
 export interface RemoteStatus {

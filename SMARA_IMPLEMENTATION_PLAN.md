@@ -1,6 +1,6 @@
 # Smara Implementation Plan
 
-**Status date:** 2026-08-27
+**Status date:** 2026-08-28
 **Repository:** `sujalkherawat25-stack/smara`
 **Public target:** `https://ai.syntarus.com`
 **Current routing:** Smara is the public root as a reversible beta cutover;
@@ -157,12 +157,22 @@ Hologram Lab has already been removed from the Smara UI and source.
   SQLite development store and the live Postgres store; stale executors cannot
   finalize a lease recovered by another executor.
 - Reversible `/smara/` and `/smara-api/` staging mount at `ai.syntarus.com`.
-- Local suite (120 Smara backend tests), frontend type-check, VM Docker build,
+- Local suite (122 Smara backend tests), frontend type-check, VM Docker build,
   live health checks, and disposable account/task/research/approval smoke test.
 - Native desktop QA now covers the real Windows WebView shell as well as a
   browser-safe UI preview. Completed hosted tasks expose their durable final
   result in Activity, task state auto-refreshes while visible, expired tokens
   return the user to sign-in, and interrupted SSE streams terminate visibly.
+- Desktop hosted connection is split into explicit Web URL and API URL
+  settings. Sign-in opens the configured Smara Web origin with the one-time
+  device code; it no longer sends users to the API's raw fallback page.
+- Desktop model selection supports operator-configured `default`, `grok`, and
+  `sarvam` profiles. Only the profile name travels in requests; provider keys
+  stay server-side and are never put in the desktop bundle.
+- Desktop users can save personal tool credentials locally under their Windows
+  account using an encrypted vault. Approved local terminal steps may request
+  an environment-name alias; the secret is injected only into that child
+  process and is redacted from returned output.
 
 ## 6. Remaining work, in order
 
@@ -248,10 +258,10 @@ For the **focused hosted + desktop vision** (not the deferred backlog):
 | Hosted agent/task/research runtime | 80% | Memento behavior parity and edge cases |
 | CLI hosted client | 85% | parity polish and authenticated workflow tests |
 | Native Smara Web | 70% | authenticated shadow tests and final legacy cleanup |
-| Desktop local executor | 82% | restart drills, signing, and update trust |
+| Desktop local executor | 86% | restart drills, signing, and update trust |
 | Production operations/cutover | 45% | secrets, observability, shadow run, rollback |
 
-**Focused beta:** roughly 74% complete.
+**Focused beta:** roughly 77% complete.
 **Public replacement:** Smara is now live as a reversible beta root, but the
 full production-readiness gates are not yet all green.
 
@@ -278,20 +288,44 @@ Smara can replace the public Memento agent when:
 
 ## 9. Next implementation sequence
 
-1. Freeze this focused scope and hide deferred navigation/features.
-2. Port/adapt Memento agent-loop behavior into Smara and add parity tests.
-3. Finish native Smara Web panels and remove the Control iframe.
-4. Run authenticated staging workflows for chat, task, research, approval,
-   reconnect, and account isolation.
-5. Harden/package the Windows desktop executor and run failure tests.
-6. Complete production gates, shadow evaluation, beta cutover, and rollback
-   rehearsal.
+1. Run the authenticated Smara Web shadow checklist with a real beta account:
+   sign-in, refresh, chat, task result, research evidence, approval, reconnect,
+   sign-out, and account isolation.
+2. Run the Windows executor failure drill: pair, approve a harmless local step,
+   restart the PC/app, disconnect/reconnect, cancel, revoke, expire a lease,
+   and confirm no duplicate or hosted-side local execution.
+3. Add the Sarvam key when desired and run one low-cost provider smoke; keep
+   Grok as the current hosted default until that smoke passes.
+4. Close the remaining production gates: signed installer/update trust,
+   operator secret-manager rotation, encrypted off-host backup schedule,
+   edge-limit review, structured alerting, sandbox deployment, shadow metrics,
+   and rollback rehearsal.
+5. Promote Smara from reversible beta to the permanent public root only after
+   all four checks above are recorded green. Keep MemoryOS as the unchanged
+   Syntarus memory service and retain Memento only as rollback/reference.
 
 ## 10. Historical implementation log
 
 The detailed historical entries below are retained for traceability; they are
 not additional scope. New entries should record only work that advances the
 focused hosted/desktop release.
+
+### 2026-08-28 — Desktop hosted routing, provider profiles, and local secrets
+
+- Fixed desktop device sign-in to open the Smara Web origin while keeping the
+  API origin separately configurable. The same correction is applied to the
+  CLI hosted-login URL when the API is mounted at `/smara-api`.
+- Added operator profiles for Grok and Sarvam through the existing
+  OpenAI-compatible runtime. Grok uses the configured VM key; Sarvam becomes
+  selectable after the operator adds `SMARA_SARVAM_KEY` (no user key is sent
+  to the VM).
+- Added a Windows-account-encrypted local credential vault with masked list,
+  remove, process-only injection, and output redaction. Credential values are
+  not stored in Smara task payloads, logs, or API responses.
+- Verification: 122 backend tests, frontend production build, Rust checks,
+  and a fresh NSIS package passed. Hosted services and public health remain
+  healthy; the unsigned installer and Windows restart/reconnect drill are
+  still release gates.
 
 ### 2026-08-26 — Staging mount and UI cleanup
 

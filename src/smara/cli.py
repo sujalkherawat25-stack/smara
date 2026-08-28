@@ -15,6 +15,15 @@ from urllib.parse import urlparse
 import httpx
 
 
+def _default_browser_auth_url(api_url: str, device_code: str) -> str:
+    """Keep the public Web route separate from a reverse-proxied API prefix."""
+    base = api_url.rstrip("/")
+    encoded = quote(device_code, safe="")
+    if base.endswith("/smara-api"):
+        return f"{base.removesuffix('/smara-api')}/?cli_device={encoded}"
+    return f"{base}/app/?cli_device={encoded}"
+
+
 class _TerminalUI:
     """Small, dependency-free terminal shell for the hosted agent.
 
@@ -387,7 +396,7 @@ def _browser_login(client: httpx.Client, args: argparse.Namespace) -> None:
     if configured_url:
         auth_url = configured_url.replace("{device_code}", quote(device_code, safe=""))
     else:
-        auth_url = f"{args.api.rstrip('/')}/app/?cli_device={quote(device_code, safe='')}"
+        auth_url = _default_browser_auth_url(args.api, device_code)
     print("Opening Smara in your browser. Approve this CLI device to continue…", file=sys.stderr)
     if not webbrowser.open(auth_url):
         print(f"Open this URL to approve the CLI device:\n{auth_url}", file=sys.stderr)

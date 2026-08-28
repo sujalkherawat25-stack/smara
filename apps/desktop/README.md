@@ -51,14 +51,23 @@ publisher certificate and signed auto-update channel are still production
 hardening tasks; the app intentionally does not silently download code or
 dependencies.
 
-## Provider/model profiles
+## Hosted provider/model profiles
 
-The **Model profile** field is only a routing hint such as `default` or
-`sarvam`. Provider URLs and API keys stay in the Smara server configuration
-(or a future explicitly local provider profile); never commit a Sarvam key or
-put a personal credential in this repository. The app forwards the selected
-profile to Smara's hosted chat endpoint and displays connection failures
-without exposing upstream secrets.
+The model picker exposes `Automatic`, `Grok`, and `Sarvam 105B`. Provider URLs
+and API keys stay in the Smara server configuration; never commit an xAI or
+Sarvam key. The app forwards only the selected profile name to hosted Smara.
+The Web URL is configured separately from the reverse-proxied API URL so sign
+in opens `https://ai.syntarus.com/?cli_device=...`, never the API fallback UI.
+
+## Personal local tool credentials
+
+Settings can save tool keys such as `TAVILY_API_KEY` or `GITHUB_TOKEN` on this
+PC. On Windows, values are encrypted with DPAPI for the signed-in Windows
+account and the UI only lists the alias. An approved `local_terminal` payload
+may request selected aliases using `credential_env`; only that child process
+receives them, and any value echoed by the process is redacted before output
+is returned to hosted Smara. Provider secrets for hosted Grok/Sarvam are not
+stored here, and local personal tool keys are not uploaded to the VM.
 
 ## Verification
 

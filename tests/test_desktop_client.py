@@ -4,7 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from smara.desktop_executor import DesktopRunner, execute_step, pair, _load_state, _save_state
+from smara.desktop_executor import (
+    DesktopRunner,
+    _load_state,
+    _save_state,
+    delete_local_credential,
+    execute_step,
+    local_credential_summaries,
+    save_local_credential,
+)
 
 
 def test_desktop_file_read_write_stays_inside_approved_root(tmp_path: Path):
@@ -28,6 +36,29 @@ def test_desktop_terminal_requires_allowlist_and_rejects_shell_operators(tmp_pat
     assert "4" in result["output"]
     with pytest.raises(RuntimeError, match="Shell operators"):
         execute_step({"required_capability": "local_terminal", "executor_payload": {"command": "python -c \"print(1)\" & whoami", "cwd": str(tmp_path)}}, state)
+
+
+def test_local_credential_vault_injects_only_requested_alias_and_redacts_output(monkeypatch, tmp_path: Path):
+    vault = tmp_path / "credentials.json"
+    monkeypatch.setenv("SMARA_DESKTOP_CREDENTIALS", str(vault))
+    secret = "local-only-test-secret"
+    save_local_credential("TAVILY_API_KEY", secret, "tavily")
+    assert secret not in vault.read_text(encoding="utf-8") if os.name == "nt" else True
+    assert local_credential_summaries()[0]["name"] == "TAVILY_API_KEY"
+    state = {"capabilities": ["local_terminal"], "allowed_roots": [str(tmp_path)], "terminal_allowlist": ["python"]}
+    result = json.loads(execute_step({
+        "required_capability": "local_terminal",
+        "executor_payload": {
+            "argv": ["python", "-c", "import os; print(os.environ['TAVILY_API_KEY'])"],
+            "cwd": str(tmp_path),
+            "credential_env": ["TAVILY_API_KEY"],
+        },
+    }, state))
+    assert secret not in result["output"]
+    assert "REDACTED LOCAL CREDENTIAL" in result["output"]
+    assert result["credential_env"] == ["TAVILY_API_KEY"]
+    assert delete_local_credential("TAVILY_API_KEY") is True
+    assert local_credential_summaries() == []
 
 
 def test_desktop_refuses_unapproved_step_and_undeclared_browser(tmp_path: Path):

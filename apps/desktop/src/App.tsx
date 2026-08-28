@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { desktop, isNativeDesktop } from "./api";
-import type { ActivityItem, ChatEvent, ChatMessage, ConnectionState, Screen, TaskSummary } from "./types";
+import type { ActivityItem, ChatEvent, ChatMessage, ConnectionState, LocalCredentialSummary, Screen, TaskSummary } from "./types";
 
 const fallbackConnection: ConnectionState = {
   api_url: "https://ai.syntarus.com/smara-api",
+  web_url: "https://ai.syntarus.com",
   workspace: "default",
   model_profile: "default",
   paired: false,
@@ -24,6 +25,18 @@ const starterPrompts = [
   "Summarize what is waiting on my desktop",
   "Research the latest changes in Python and cite sources",
   "Help me plan a safe cleanup of this workspace",
+];
+
+const modelProfiles = [
+  { value: "default", label: "Automatic (hosted default)" },
+  { value: "grok", label: "Grok · xAI" },
+  { value: "sarvam", label: "Sarvam 105B · Indic + English" },
+];
+
+const credentialPresets = [
+  { value: "tavily", label: "Tavily Search", name: "TAVILY_API_KEY" },
+  { value: "github", label: "GitHub", name: "GITHUB_TOKEN" },
+  { value: "custom", label: "Custom local tool", name: "" },
 ];
 
 function uid(prefix: string) {
@@ -206,10 +219,10 @@ function App() {
     }
   }
 
-  async function signIn(apiUrl = connection.api_url) {
+  async function signIn(apiUrl = connection.api_url, webUrl = connection.web_url) {
     try {
       setNotice("A browser window will open. Approve Smara Desktop there, then return here.");
-      await desktop.login(apiUrl);
+      await desktop.login(apiUrl, webUrl);
       await refreshConnection();
       await refreshTasks();
       setNotice("Smara Desktop is signed in.");
@@ -239,7 +252,7 @@ function App() {
       {notice && <div className="notice" role="status"><span>i</span>{notice}<button onClick={() => setNotice(null)} aria-label="Dismiss">×</button></div>}
       {screen === "chat" && <ChatScreen messages={messages} draft={draft} setDraft={setDraft} onSend={() => void send()} onStarter={(value) => void send(value)} streaming={streaming} activity={activity} onOpenWeb={() => void desktop.openWeb()} />}
       {screen === "activity" && <ActivityScreen connection={connection} tasks={tasks} onRefresh={() => void Promise.all([refreshTasks(), refreshConnection()])} onStart={() => void runAction(desktop.start, "Desktop executor started.")} onStop={() => void runAction(desktop.stop, "Desktop executor stopped.")} onPause={() => void runAction(desktop.pause, "Desktop executor paused.")} onResume={() => void runAction(desktop.resume, "Desktop executor resumed.")} onRevoke={() => { if (window.confirm("Revoke this desktop? Approved local work will stop and you will need to pair again.")) void runAction(desktop.revoke, "Desktop executor revoked. Pair again to reconnect."); }} onOpenWeb={() => void desktop.openWeb()} onReadLog={() => desktop.log()} />}
-      {screen === "settings" && <SettingsScreen connection={connection} onSaved={(next) => { setConnection(next); setNotice("Desktop settings saved."); }} onPaired={(next) => { setConnection(next); setNotice("Desktop paired. Start the executor when you are ready."); }} onSignIn={(apiUrl) => void signIn(apiUrl)} />}
+      {screen === "settings" && <SettingsScreen connection={connection} onSaved={(next) => { setConnection(next); setNotice("Desktop settings saved."); }} onPaired={(next) => { setConnection(next); setNotice("Desktop paired. Start the executor when you are ready."); }} onSignIn={(apiUrl, webUrl) => void signIn(apiUrl, webUrl)} />}
     </main>
   </div>;
 }
@@ -263,8 +276,9 @@ function ActivityScreen({ connection, tasks, onRefresh, onStart, onStop, onPause
   return <section className="content-page"><div className="page-intro"><div><span className="eyebrow">CONTROL CENTER</span><h2>Local activity</h2><p>See what the hosted agent is asking this PC to do, and stop it at any time.</p></div><Button onClick={onRefresh}>Refresh</Button></div><div className="executor-banner"><div className="executor-main"><div className={`executor-icon ${connection.running ? "executor-online" : ""}`}>⌘</div><div><span className="eyebrow">PAIRED DEVICE</span><h3>{connection.paired ? "This desktop" : "No desktop paired"}</h3><p>{connection.paired ? `${connection.executor_id} · ${connection.capabilities.length} capabilities declared` : "Pair this device in Settings to receive approved local work."}</p></div></div><div className="executor-actions">{connection.running ? <><Button onClick={connection.paused ? onResume : onPause}>{connection.paused ? "Resume" : "Pause"}</Button><Button kind="quiet" onClick={onStop}>Stop</Button></> : <Button kind="primary" onClick={onStart} disabled={!connection.paired}>Start executor</Button>}</div></div>{waiting.length > 0 && <div className="callout callout-amber"><span>!</span><div><strong>{waiting.length} task{waiting.length === 1 ? "" : "s"} waiting for approval</strong><p>Review and approve work in Smara Web before anything can run locally.</p></div><Button kind="quiet" onClick={onOpenWeb}>Review ↗</Button></div>}<div className="section-heading"><h3>Hosted tasks</h3><span>{tasks.length} total · refreshes automatically</span></div><div className="task-list">{tasks.length === 0 ? <div className="empty-state"><span>◌</span><strong>No hosted tasks loaded</strong><p>Sign in to Smara, then return here. Activity refreshes automatically.</p></div> : tasks.slice(0, 12).map((task) => <button className={`task-row ${selectedTaskId === task.id ? "task-row-selected" : ""}`} key={task.id} onClick={() => setSelectedTaskId(task.id === selectedTaskId ? null : task.id)}><span className={`task-dot task-${task.status}`} /><span className="task-copy"><strong>{task.title}</strong><span>{task.result || task.objective}</span></span><span className={`task-status task-status-${task.status}`}>{task.status.replaceAll("_", " ")}</span><span className="task-time">{formatTime(task.updated_at || task.created_at)}</span></button>)}</div>{selectedTask && <div className="task-detail"><div><span className="eyebrow">TASK RESULT</span><h3>{selectedTask.title}</h3><p>{selectedTask.objective}</p></div><span className={`task-status task-status-${selectedTask.status}`}>{selectedTask.status.replaceAll("_", " ")}</span><div className="task-result">{selectedTask.result || (selectedTask.status === "completed" ? "The task completed without a written result." : "A final result will appear here when the task completes.")}</div><Button kind="quiet" onClick={onOpenWeb}>Open full task history ↗</Button></div>}<div className="log-card"><div><strong>Local executor log</strong><span>Only the last bounded lines are shown; secrets are never displayed.</span></div><Button kind="quiet" onClick={() => void toggleLog()}>{loadingLog ? "Loading…" : showLog ? "Hide log" : "View log"}</Button>{showLog && <pre className="log-output">{log}</pre>}</div><div className="danger-zone"><div><strong>Revoke this desktop</strong><span>Immediately invalidates its paired token. You can pair again later.</span></div><Button kind="danger" onClick={onRevoke} disabled={!connection.paired}>Revoke</Button></div></section>;
 }
 
-function SettingsScreen({ connection, onSaved, onPaired, onSignIn }: { connection: ConnectionState; onSaved: (next: ConnectionState) => void; onPaired: (next: ConnectionState) => void; onSignIn: (apiUrl: string) => void }) {
+function SettingsScreen({ connection, onSaved, onPaired, onSignIn }: { connection: ConnectionState; onSaved: (next: ConnectionState) => void; onPaired: (next: ConnectionState) => void; onSignIn: (apiUrl: string, webUrl: string) => void }) {
   const [apiUrl, setApiUrl] = useState(connection.api_url);
+  const [webUrl, setWebUrl] = useState(connection.web_url);
   const [workspace, setWorkspace] = useState(connection.workspace);
   const [modelProfile, setModelProfile] = useState(connection.model_profile);
   const [roots, setRoots] = useState(connection.allowed_roots.join("\n"));
@@ -272,17 +286,43 @@ function SettingsScreen({ connection, onSaved, onPaired, onSignIn }: { connectio
   const [domains, setDomains] = useState(connection.browser_domains.join("\n"));
   const [code, setCode] = useState("");
   const [pairing, setPairing] = useState(false);
-  useEffect(() => { setApiUrl(connection.api_url); setWorkspace(connection.workspace); setModelProfile(connection.model_profile); setRoots(connection.allowed_roots.join("\n")); setTerminal(connection.terminal_allowlist.join("\n")); setDomains(connection.browser_domains.join("\n")); }, [connection]);
+  const [credentials, setCredentials] = useState<LocalCredentialSummary[]>([]);
+  const [credentialProvider, setCredentialProvider] = useState("tavily");
+  const [credentialName, setCredentialName] = useState("TAVILY_API_KEY");
+  const [credentialSecret, setCredentialSecret] = useState("");
+  const [credentialBusy, setCredentialBusy] = useState(false);
+  useEffect(() => { setApiUrl(connection.api_url); setWebUrl(connection.web_url); setWorkspace(connection.workspace); setModelProfile(connection.model_profile); setRoots(connection.allowed_roots.join("\n")); setTerminal(connection.terminal_allowlist.join("\n")); setDomains(connection.browser_domains.join("\n")); }, [connection]);
+  useEffect(() => { if (isNativeDesktop) void desktop.credentials().then(setCredentials).catch(() => setCredentials([])); }, []);
   async function save() {
     if (!isNativeDesktop) return null;
-    try { const next = await desktop.saveSettings({ api_url: apiUrl.trim(), workspace: workspace.trim() || "default", model_profile: modelProfile.trim() || "default", allowed_roots: splitLines(roots), terminal_allowlist: splitLines(terminal), browser_domains: splitLines(domains) }); onSaved(next); return next; } catch (error) { alert(errorMessage(error, "Could not save settings")); return null; }
+    try { const next = await desktop.saveSettings({ api_url: apiUrl.trim(), web_url: webUrl.trim(), workspace: workspace.trim() || "default", model_profile: modelProfile.trim() || "default", allowed_roots: splitLines(roots), terminal_allowlist: splitLines(terminal), browser_domains: splitLines(domains) }); onSaved(next); return next; } catch (error) { alert(errorMessage(error, "Could not save settings")); return null; }
   }
   async function pair() {
     if (!code.trim()) return;
     setPairing(true);
     try { onPaired(await desktop.pair({ api_url: apiUrl.trim(), code: code.trim(), allowed_roots: splitLines(roots), terminal_allowlist: splitLines(terminal), browser_domains: splitLines(domains) })); setCode(""); } catch (error) { alert(errorMessage(error, "Pairing failed")); } finally { setPairing(false); }
   }
-  return <section className="content-page settings-page"><div className="page-intro"><div><span className="eyebrow">DESKTOP CONFIGURATION</span><h2>Settings</h2><p>Keep the local boundary clear. The hosted agent can ask; this PC decides what is allowed.</p></div><Button kind="primary" onClick={() => void save()} disabled={!isNativeDesktop}>Save changes</Button></div>{!isNativeDesktop && <div className="callout preview-callout"><span>i</span><div><strong>Desktop UI preview</strong><p>Settings and executor actions become active in the installed Windows app.</p></div></div>}<div className="settings-grid"><div className="settings-card"><div className="card-heading"><span className="card-icon">◉</span><div><h3>Connection</h3><p>Where this desktop receives approved work.</p></div></div><label>Smara API URL<input value={apiUrl} onChange={(event) => setApiUrl(event.target.value)} spellCheck={false} /></label><label>Workspace name<input value={workspace} onChange={(event) => setWorkspace(event.target.value)} /></label><label>Model profile<input value={modelProfile} onChange={(event) => setModelProfile(event.target.value)} placeholder="default" spellCheck={false} /></label><div className="connection-help"><span className={`connection-check ${connection.has_cli_token ? "check-on" : ""}`}>{connection.has_cli_token ? "✓" : "i"}</span><span>{connection.has_cli_token ? "This desktop is signed in. Chat and task history are available." : "Sign in once to use hosted chat and task history from this app."}</span>{!connection.has_cli_token && <Button kind="quiet" onClick={() => void (async () => { const saved = await save(); if (saved) onSignIn(saved.api_url); })()} disabled={!isNativeDesktop}>Sign in ↗</Button>}</div></div><div className="settings-card"><div className="card-heading"><span className="card-icon">⌁</span><div><h3>Pair this desktop</h3><p>Paste the one-time code shown in Smara Web.</p></div></div><div className="pair-status"><span className={`status-dot ${connection.paired ? "dot-green" : "dot-amber"}`} /><strong>{connection.paired ? "Paired and scoped" : "Not paired"}</strong>{connection.executor_id && <span>{connection.executor_id}</span>}</div><div className="pair-row"><input value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="8-character code" maxLength={8} spellCheck={false} /><Button kind="primary" onClick={() => void pair()} disabled={!isNativeDesktop || pairing || code.trim().length !== 8}>{pairing ? "Pairing…" : "Pair device"}</Button></div><p className="small-help">Open Smara Web → Settings → Desktop → Pair device. Codes expire quickly and can be used only once.</p></div><div className="settings-card full-card"><div className="card-heading"><span className="card-icon">⌂</span><div><h3>Local permissions</h3><p>One entry per line. Empty means the capability stays disabled.</p></div></div><div className="permission-grid"><label>Approved folders<textarea value={roots} onChange={(event) => setRoots(event.target.value)} placeholder={'C:\\Users\\you\\Documents'} /></label><label>Terminal executables<textarea value={terminal} onChange={(event) => setTerminal(event.target.value)} placeholder={'python\ngit'} /></label><label>Browser domains<textarea value={domains} onChange={(event) => setDomains(event.target.value)} placeholder={'github.com\nexample.com'} /></label></div><div className="permission-note"><span>▣</span><span>Smara rejects shell operators, path traversal, symlink escapes, unknown executables, unapproved domains, and unapproved tasks. Changing these lists never grants a task approval.</span></div></div><div className="settings-card full-card about-card"><div><span className="eyebrow">ABOUT THIS APP</span><h3>Thin client, one Smara brain</h3><p>This app does not run a second agent or memory database. It keeps the executor responsive on your PC while the hosted Smara service handles chat, planning, research, and durable task state.</p></div><div className="version">v0.1 beta<br /><span>Windows native</span></div></div></div></section>;
+  function chooseCredentialProvider(provider: string) {
+    setCredentialProvider(provider);
+    const preset = credentialPresets.find((item) => item.value === provider);
+    setCredentialName(preset?.name || "");
+  }
+  async function saveCredential() {
+    if (!credentialName.trim() || !credentialSecret) return;
+    setCredentialBusy(true);
+    try {
+      setCredentials(await desktop.saveCredential(credentialName.trim().toUpperCase(), credentialProvider, credentialSecret));
+      setCredentialSecret("");
+    } catch (error) { alert(errorMessage(error, "Could not save local credential")); }
+    finally { setCredentialBusy(false); }
+  }
+  async function removeCredential(name: string) {
+    setCredentialBusy(true);
+    try { setCredentials(await desktop.deleteCredential(name)); }
+    catch (error) { alert(errorMessage(error, "Could not remove local credential")); }
+    finally { setCredentialBusy(false); }
+  }
+  return <section className="content-page settings-page"><div className="page-intro"><div><span className="eyebrow">DESKTOP CONFIGURATION</span><h2>Settings</h2><p>Keep the local boundary clear. The hosted agent can ask; this PC decides what is allowed.</p></div><Button kind="primary" onClick={() => void save()} disabled={!isNativeDesktop}>Save changes</Button></div>{!isNativeDesktop && <div className="callout preview-callout"><span>i</span><div><strong>Desktop UI preview</strong><p>Settings and executor actions become active in the installed Windows app.</p></div></div>}<div className="settings-grid"><div className="settings-card"><div className="card-heading"><span className="card-icon">◉</span><div><h3>Hosted connection</h3><p>One hosted brain for chat, planning, memory and task control.</p></div></div><label>Smara Web URL<input value={webUrl} onChange={(event) => setWebUrl(event.target.value)} spellCheck={false} /></label><label>Smara API URL<input value={apiUrl} onChange={(event) => setApiUrl(event.target.value)} spellCheck={false} /></label><label>Workspace name<input value={workspace} onChange={(event) => setWorkspace(event.target.value)} /></label><label>Hosted model<select value={modelProfile} onChange={(event) => setModelProfile(event.target.value)}>{modelProfiles.map((profile) => <option value={profile.value} key={profile.value}>{profile.label}</option>)}</select></label><p className="small-help">Grok and Sarvam keys remain on the hosted Smara service. This app sends only the selected profile name.</p><div className="connection-help"><span className={`connection-check ${connection.has_cli_token ? "check-on" : ""}`}>{connection.has_cli_token ? "✓" : "i"}</span><span>{connection.has_cli_token ? "This desktop is signed in. Chat and task history are available." : "Sign in once to use hosted chat and task history from this app."}</span>{!connection.has_cli_token && <Button kind="quiet" onClick={() => void (async () => { const saved = await save(); if (saved) onSignIn(saved.api_url, saved.web_url); })()} disabled={!isNativeDesktop}>Sign in ↗</Button>}</div></div><div className="settings-card"><div className="card-heading"><span className="card-icon">⌁</span><div><h3>Pair this desktop</h3><p>Paste the one-time code shown in Smara Web.</p></div></div><div className="pair-status"><span className={`status-dot ${connection.paired ? "dot-green" : "dot-amber"}`} /><strong>{connection.paired ? "Paired and scoped" : "Not paired"}</strong>{connection.executor_id && <span>{connection.executor_id}</span>}</div><div className="pair-row"><input value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="8-character code" maxLength={8} spellCheck={false} /><Button kind="primary" onClick={() => void pair()} disabled={!isNativeDesktop || pairing || code.trim().length !== 8}>{pairing ? "Pairing…" : "Pair device"}</Button></div><p className="small-help">Open Smara Web → Settings → Desktop → Pair device. Codes expire quickly and can be used only once.</p></div><div className="settings-card full-card"><div className="card-heading"><span className="card-icon">◇</span><div><h3>Local tool credentials</h3><p>Encrypted for your Windows account. Values never go to the VM and are never shown again.</p></div></div><div className="credential-entry"><label>Tool<select value={credentialProvider} onChange={(event) => chooseCredentialProvider(event.target.value)}>{credentialPresets.map((preset) => <option value={preset.value} key={preset.value}>{preset.label}</option>)}</select></label><label>Environment name<input value={credentialName} onChange={(event) => setCredentialName(event.target.value.toUpperCase())} placeholder="TOOL_API_KEY" spellCheck={false} /></label><label>Secret value<input type="password" value={credentialSecret} onChange={(event) => setCredentialSecret(event.target.value)} placeholder="Paste locally" autoComplete="off" /></label><Button kind="primary" onClick={() => void saveCredential()} disabled={!isNativeDesktop || credentialBusy || !credentialName.trim() || !credentialSecret}>{credentialBusy ? "Saving…" : "Save locally"}</Button></div><div className="credential-list">{credentials.length === 0 ? <span className="credential-empty">No personal tool credentials saved on this PC.</span> : credentials.map((credential) => <div className="credential-row" key={credential.name}><span className="credential-provider">{credential.provider}</span><strong>{credential.name}</strong><span>••••••••</span><Button kind="quiet" onClick={() => void removeCredential(credential.name)} disabled={credentialBusy}>Remove</Button></div>)}</div><div className="permission-note"><span>▣</span><span>An approved local terminal step may request an alias through <code>credential_env</code>. Smara injects it only for that process and redacts the value from returned output.</span></div></div><div className="settings-card full-card"><div className="card-heading"><span className="card-icon">⌂</span><div><h3>Local permissions</h3><p>One entry per line. Empty means the capability stays disabled.</p></div></div><div className="permission-grid"><label>Approved folders<textarea value={roots} onChange={(event) => setRoots(event.target.value)} placeholder={'C:\\Users\\you\\Documents'} /></label><label>Terminal executables<textarea value={terminal} onChange={(event) => setTerminal(event.target.value)} placeholder={'python\ngit'} /></label><label>Browser domains<textarea value={domains} onChange={(event) => setDomains(event.target.value)} placeholder={'github.com\nexample.com'} /></label></div><div className="permission-note"><span>▣</span><span>Smara rejects shell operators, path traversal, symlink escapes, unknown executables, unapproved domains, and unapproved tasks. Changing these lists never grants a task approval.</span></div></div><div className="settings-card full-card about-card"><div><span className="eyebrow">ABOUT THIS APP</span><h3>Thin client, one Smara brain</h3><p>This app does not run a second agent or memory database. It keeps the executor responsive on your PC while the hosted Smara service handles chat, planning, research, and durable task state.</p></div><div className="version">v0.1 beta<br /><span>Windows native</span></div></div></div></section>;
 }
 
 export default App;

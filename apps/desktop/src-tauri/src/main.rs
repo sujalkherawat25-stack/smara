@@ -5,14 +5,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::io::Write;
 use std::process::{Command, Stdio};
 use tauri::{AppHandle, Emitter};
 
 const DEFAULT_API_URL: &str = "https://ai.syntarus.com/smara-api";
+const DEFAULT_WEB_URL: &str = "https://ai.syntarus.com";
 
 #[derive(Debug, Clone, Serialize)]
 struct ConnectionState {
     api_url: String,
+    web_url: String,
     workspace: String,
     model_profile: String,
     paired: bool,
@@ -39,6 +42,7 @@ struct RemoteStatus {
 #[derive(Debug, Deserialize)]
 struct LocalSettings {
     api_url: String,
+    web_url: String,
     workspace: String,
     model_profile: String,
     allowed_roots: Vec<String>,
@@ -62,6 +66,13 @@ struct ChatArgs {
     model_profile: String,
     message: String,
     conversation_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LocalCredentialSummary {
+    name: String,
+    provider: String,
+    updated_at: String,
 }
 
 fn app_data_dir() -> PathBuf {
@@ -187,12 +198,12 @@ fn process_alive(pid: u32) -> bool {
 
 fn cli_token() -> Result<String, String> {
     let path = cli_token_path();
-    let data = read_json(&path).ok_or_else(|| "Sign in with `smara login` before using desktop chat.".to_owned())?;
-    data.get("access_token").and_then(Value::as_str).filter(|value| !value.is_empty()).map(str::to_owned).ok_or_else(|| "Smara CLI login is missing; run `smara login` and try again.".to_owned())
+    let data = read_json(&path).ok_or_else(|| "Sign in from Settings before using hosted chat.".to_owned())?;
+    data.get("access_token").and_then(Value::as_str).filter(|value| !value.is_empty()).map(str::to_owned).ok_or_else(|| "Your Smara sign-in is missing. Open Settings and sign in again.".to_owned())
 }
 
 #[tauri::command]
-async fn login_cli(api_url: String) -> Result<String, String> {
+async fn login_cli(api_url: String, web_url: String) -> Result<String, String> {
     let api_url = api_url.trim().trim_end_matches('/').to_owned();
     if !(api_url.starts_with("http://") || api_url.starts_with("https://")) {
         return Err("Smara API URL must start with http:// or https://".to_owned());
@@ -204,8 +215,12 @@ async fn login_cli(api_url: String) -> Result<String, String> {
     }
     let device: Value = request.json().await.map_err(|error| format!("Smara sign-in returned invalid data: {error}"))?;
     let device_code = device.get("device_code").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| "Smara sign-in did not return a device code.".to_owned())?;
-    let auth_url = format!("{api_url}/app/?cli_device={device_code}");
-    if !open::that(&auth_url).is_ok() {
+    let mut auth_url = reqwest::Url::parse(web_url.trim().trim_end_matches('/')).map_err(|_| "Smara Web URL must be a valid HTTP(S) URL.".to_owned())?;
+    if !matches!(auth_url.scheme(), "http" | "https") {
+        return Err("Smara Web URL must start with http:// or https://".to_owned());
+    }
+    auth_url.query_pairs_mut().append_pair("cli_device", device_code);
+    if !open::that(auth_url.as_str()).is_ok() {
         return Err(format!("Open this URL to finish sign-in: {auth_url}"));
     }
     let interval = device.get("interval").and_then(Value::as_u64).unwrap_or(2).clamp(1, 10);
@@ -237,6 +252,7 @@ fn current_connection() -> ConnectionState {
     let state = read_json(&state_path());
     let preferences = read_json(&preferences_path());
     let api_url = preferences.as_ref().and_then(|value| value.get("api_url")).and_then(Value::as_str).or_else(|| state.as_ref().and_then(|value| value.get("smara_url")).and_then(Value::as_str)).unwrap_or(DEFAULT_API_URL).trim_end_matches('/').to_owned();
+    let web_url = preferences.as_ref().and_then(|value| value.get("web_url")).and_then(Value::as_str).unwrap_or(DEFAULT_WEB_URL).trim_end_matches('/').to_owned();
     let workspace = preferences.as_ref().and_then(|value| value.get("workspace")).and_then(Value::as_str).unwrap_or("default").to_owned();
     let model_profile = preferences.as_ref().and_then(|value| value.get("model_profile")).and_then(Value::as_str).unwrap_or("default").to_owned();
     let pid = read_json(&runtime_path()).and_then(|value| value.get("pid").and_then(Value::as_u64).map(|value| value as u32)).filter(|value| process_alive(*value));
@@ -249,7 +265,7 @@ fn current_connection() -> ConnectionState {
     let terminal_allowlist = configured_list("terminal_allowlist");
     let browser_domains = configured_list("browser_domains");
     let token_path = cli_token_path();
-    ConnectionState { api_url, workspace, model_profile, paired, executor_id: state.as_ref().and_then(|value| value.get("executor_id")).and_then(Value::as_str).map(str::to_owned), capabilities, allowed_roots, terminal_allowlist, browser_domains, paused: pause_path().exists(), running: pid.is_some(), pid, log_path: log_path().display().to_string(), has_cli_token: read_json(&token_path).map(|value| value.get("access_token").and_then(Value::as_str).map(|token| !token.is_empty()).unwrap_or(false)).unwrap_or(false), last_error: None }
+    ConnectionState { api_url, web_url, workspace, model_profile, paired, executor_id: state.as_ref().and_then(|value| value.get("executor_id")).and_then(Value::as_str).map(str::to_owned), capabilities, allowed_roots, terminal_allowlist, browser_domains, paused: pause_path().exists(), running: pid.is_some(), pid, log_path: log_path().display().to_string(), has_cli_token: read_json(&token_path).map(|value| value.get("access_token").and_then(Value::as_str).map(|token| !token.is_empty()).unwrap_or(false)).unwrap_or(false), last_error: None }
 }
 
 #[tauri::command]
@@ -259,7 +275,9 @@ fn load_connection() -> ConnectionState { current_connection() }
 fn save_settings(settings: LocalSettings) -> Result<ConnectionState, String> {
     let api_url = settings.api_url.trim().trim_end_matches('/');
     if !(api_url.starts_with("http://") || api_url.starts_with("https://")) { return Err("Smara API URL must start with http:// or https://".to_owned()); }
-    let value = json!({ "api_url": api_url, "workspace": if settings.workspace.trim().is_empty() { "default" } else { settings.workspace.trim() }, "model_profile": if settings.model_profile.trim().is_empty() { "default" } else { settings.model_profile.trim() }, "allowed_roots": settings.allowed_roots, "terminal_allowlist": settings.terminal_allowlist, "browser_domains": settings.browser_domains });
+    let web_url = settings.web_url.trim().trim_end_matches('/');
+    if !(web_url.starts_with("http://") || web_url.starts_with("https://")) { return Err("Smara Web URL must start with http:// or https://".to_owned()); }
+    let value = json!({ "api_url": api_url, "web_url": web_url, "workspace": if settings.workspace.trim().is_empty() { "default" } else { settings.workspace.trim() }, "model_profile": if settings.model_profile.trim().is_empty() { "default" } else { settings.model_profile.trim() }, "allowed_roots": settings.allowed_roots, "terminal_allowlist": settings.terminal_allowlist, "browser_domains": settings.browser_domains });
     write_json(&preferences_path(), &value)?;
     if let Some(mut state) = read_json(&state_path()) {
         if let Some(object) = state.as_object_mut() {
@@ -288,6 +306,37 @@ fn run_executor(args: Vec<String>) -> Result<String, String> {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
     if !output.status.success() { return Err(if stderr.is_empty() { stdout } else { stderr }); }
     Ok(stdout)
+}
+
+fn run_executor_with_input(args: Vec<String>, input: &str) -> Result<String, String> {
+    let mut command = executor_command(&args);
+    command.stdin(Stdio::piped());
+    let mut child = command.spawn().map_err(|error| format!("Could not start the local credential vault: {error}"))?;
+    child.stdin.take().ok_or_else(|| "Could not open the local credential vault input.".to_owned())?.write_all(input.as_bytes()).map_err(|error| format!("Could not save the local credential: {error}"))?;
+    let output = child.wait_with_output().map_err(|error| format!("Could not finish saving the local credential: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if !output.status.success() { return Err(if stderr.is_empty() { stdout } else { stderr }); }
+    Ok(stdout)
+}
+
+#[tauri::command]
+fn list_local_credentials() -> Result<Vec<LocalCredentialSummary>, String> {
+    let output = run_executor(vec!["--credential-list".to_owned()])?;
+    serde_json::from_str(&output).map_err(|_| "The local credential vault returned invalid data.".to_owned())
+}
+
+#[tauri::command]
+fn save_local_credential(name: String, provider: String, secret: String) -> Result<Vec<LocalCredentialSummary>, String> {
+    if secret.is_empty() { return Err("Enter a credential value before saving.".to_owned()); }
+    run_executor_with_input(vec!["--credential-set".to_owned(), name, "--credential-provider".to_owned(), provider], &secret)?;
+    list_local_credentials()
+}
+
+#[tauri::command]
+fn delete_local_credential(name: String) -> Result<Vec<LocalCredentialSummary>, String> {
+    run_executor(vec!["--credential-delete".to_owned(), name])?;
+    list_local_credentials()
 }
 
 #[tauri::command]
@@ -409,11 +458,11 @@ async fn stream_chat(app: AppHandle, args: ChatArgs) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_web() -> Result<(), String> { open::that("https://ai.syntarus.com").map_err(|error| format!("Could not open Smara Web: {error}")) }
+fn open_web() -> Result<(), String> { open::that(current_connection().web_url).map_err(|error| format!("Could not open Smara Web: {error}")) }
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, stream_chat, open_web])
+        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, stream_chat, open_web, list_local_credentials, save_local_credential, delete_local_credential])
         .run(tauri::generate_context!())
         .expect("error while running Smara Desktop");
 }
