@@ -70,12 +70,13 @@ It validates the existing httpOnly account session and returns a 30–300 second
 JWT containing only the account subject, Smara audience, and issuer. Configure
 the same independently generated `SMARA_CONTROL_BRIDGE_SECRET` in the auth
 service and Smara API secret managers; never put it in frontend variables.
-Set the migrated frontend to bridge mode and expose it first at the reversible
-`/smara/` path. Proxy `/smara-api/*` to the Smara API with the prefix stripped;
-the browser still obtains its token from `/v1/auth/control-token` on the
-authenticated `ai.syntarus.com` origin with `credentials: include`. Test chat,
-tasks, research, refresh, and approval from the same signed-in account before
-considering a root-path cutover. This repository must not modify the protected
+Serve the migrated frontend at the canonical `ai.syntarus.com/` root. Proxy
+`/smara-api/*` to the Smara API with the prefix stripped; the browser still
+obtains its token from `/v1/auth/control-token` on the authenticated
+`ai.syntarus.com` origin with `credentials: include`. The old `/smara/` path
+redirects to `/` and `control-staging.syntarus.com` redirects to the root while
+its DNS record is retired. Test chat, tasks, research, refresh, and approval
+from the same signed-in account. This repository must not modify the protected
 MemoryOS pipeline.
 
 ## 6. Memory isolation
