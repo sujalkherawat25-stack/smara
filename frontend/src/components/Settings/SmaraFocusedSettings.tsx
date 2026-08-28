@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, CircleAlert, Laptop, LogOut, RefreshCw, Server } from "lucide-react";
+import { CheckCircle2, CircleAlert, Cpu, Laptop, LogOut, RefreshCw, Server } from "lucide-react";
 import { apiClient, ApiError } from "@/api/client";
 import { useAuthStore } from "@/stores/authStore";
 import { useThemeStore } from "@/stores/themeStore";
+import { useChatStore } from "@/stores/chatStore";
 
 interface Executor {
   id: string;
@@ -15,6 +16,13 @@ interface Executor {
 interface ToolCatalogue {
   tools?: Array<{ name: string }>;
 }
+interface HostedModel {
+  name: string;
+  model: string;
+  capability: string;
+  configured: boolean;
+  default?: boolean;
+}
 
 /**
  * Settings for the focused Smara product. It intentionally uses only Smara
@@ -25,8 +33,11 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
   const account = useAuthStore((s) => s.account);
   const signOut = useAuthStore((s) => s.signOut);
   const { theme, toggle } = useThemeStore();
+  const modelProfile = useChatStore((s) => s.modelProfile);
+  const setModelProfile = useChatStore((s) => s.setModelProfile);
   const [executors, setExecutors] = useState<Executor[]>([]);
   const [toolCount, setToolCount] = useState<number | null>(null);
+  const [models, setModels] = useState<HostedModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [runtimeStatus, setRuntimeStatus] = useState<"checking" | "connected" | "unavailable">("checking");
   const [error, setError] = useState<string | null>(null);
@@ -36,12 +47,14 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
     setLoading(true);
     setError(null);
     try {
-      const [executorData, tools] = await Promise.all([
+      const [executorData, tools, modelData] = await Promise.all([
         apiClient.get<{ executors?: Executor[] }>("/v1/executors"),
         apiClient.get<ToolCatalogue>("/v1/tools"),
+        apiClient.get<{ models?: HostedModel[] }>("/v1/models"),
       ]);
       setExecutors(executorData.executors ?? []);
       setToolCount(tools.tools?.length ?? 0);
+      setModels(modelData.models ?? []);
       setRuntimeStatus("connected");
     } catch (cause) {
       setRuntimeStatus("unavailable");
@@ -81,6 +94,32 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
           <StatusStat label="Account" value={account?.account_id || "—"} />
           <StatusStat label="Available tools" value={toolCount == null ? "—" : String(toolCount)} />
         </div>
+      </section>
+
+      <section className="rounded-xl p-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
+        <div className="flex items-center gap-3">
+          <Cpu size={18} style={{ color: "var(--accent2)" }} />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-[14px] font-semibold" style={{ color: "var(--text-primary)" }}>Hosted model</h2>
+            <p className="text-[12px] mt-1" style={{ color: "var(--text-muted)" }}>Choose the server-side model. Your API keys never leave Smara.</p>
+          </div>
+        </div>
+        <select
+          value={modelProfile ?? ""}
+          onChange={(event) => setModelProfile(event.target.value || null)}
+          className="mt-3 w-full rounded-lg px-3 py-2 text-[12px] outline-none"
+          style={{ background: "var(--bg-surface)", border: "1px solid var(--border-default)", color: "var(--text-primary)" }}
+        >
+          <option value="">Automatic (recommended)</option>
+          {models.map((model) => (
+            <option key={model.name} value={model.name} disabled={!model.configured}>
+              {model.name} · {model.model}{model.configured ? "" : " · unavailable"}
+            </option>
+          ))}
+        </select>
+        {models.length > 0 && <p className="text-[11px] mt-2" style={{ color: "var(--text-muted)" }}>
+          {models.filter((model) => model.configured).length} model{models.filter((model) => model.configured).length === 1 ? "" : "s"} ready · Sarvam beta models appear only when your key has access.
+        </p>}
       </section>
 
       <section className="rounded-xl p-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>

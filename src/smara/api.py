@@ -8,6 +8,7 @@ import logging
 import time
 import base64
 import secrets
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -30,7 +31,9 @@ from .hardening import RedisFixedWindowLimiter
 from .observability import configure_sentry
 from .tool_registry import ToolContext, ToolError, default_tool_registry
 from .provider_routing import resolve_profile
+from .provider_routing import load_profiles
 from .plugins import manifests
+from .attachments import AttachmentStore, MAX_BATCH_BYTES, MAX_ATTACHMENTS_PER_BATCH, MAX_FILE_BYTES
 
 LOG = logging.getLogger("smara.api")
 configure_sentry(settings.sentry_dsn)
@@ -43,6 +46,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
+attachment_store = AttachmentStore(Path(settings.database_path or "./data/smara.db").parent / "attachments")
 limiter = RedisFixedWindowLimiter(settings.redis_url, settings.rate_limit_per_minute, allow_local_fallback=settings.dev_mode)
 def _agent_runtime(model_profile: str | None = None) -> SmaraAgentRuntime:
     """Construct the runtime without importing any MemoryOS implementation."""
@@ -213,6 +217,72 @@ def schedule_view(row: dict) -> ScheduleView:
 @app.get("/health")
 async def health(): return {"ok": True, "memory_boundary": "syntarus-sdk-only", "auth_mode": "development" if settings.dev_mode else "signed-gateway"}
 
+@app.get("/v1/models")
+async def list_models(user: str = Depends(account_id)):
+    """Return the operator-approved model catalogue without exposing keys."""
+    try:
+        profiles = load_profiles(
+            settings.llm_profiles,
+            fallback_base_url=settings.llm_base_url,
+            fallback_key=settings.llm_api_key,
+            fallback_model=settings.llm_model,
+            fallback_provider=settings.llm_provider,
+        )
+    except ValueError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return {
+        "models": [
+            {
+                "name": profile.name,
+                "model": profile.model,
+                "capability": profile.capability,
+                "configured": bool(profile.api_key),
+                "default": profile.name == (settings.llm_default_profile or settings.llm_provider),
+            }
+            for profile in profiles.values()
+        ]
+    }
+
+@app.post("/v1/attachments")
+async def upload_attachments(
+    files: list[UploadFile] = File(...),
+    user: str = Depends(account_id),
+):
+    """Store up to 150 MB of user-owned files for the next chat turn.
+
+    Any file type may be attached. Text and common office formats get a
+    bounded preview; other binaries remain available as metadata so the agent
+    can explain what it can and cannot inspect instead of failing silently.
+    """
+    if not files:
+        raise HTTPException(400, "Choose at least one file to attach.")
+    if len(files) > MAX_ATTACHMENTS_PER_BATCH:
+        raise HTTPException(413, "Attach at most 10 files at a time.")
+    saved: list[dict] = []
+    total = 0
+    try:
+        for upload in files:
+            record = await attachment_store.save(user, upload, size_limit=MAX_FILE_BYTES)
+            total += int(record["size"])
+            if total > MAX_BATCH_BYTES:
+                raise ValueError("Attachments exceed the 150 MB total limit per message.")
+            saved.append(record)
+    except ValueError as exc:
+        for record in saved:
+            attachment_store.delete(user, record["id"])
+        raise HTTPException(413, str(exc)) from exc
+    finally:
+        for upload in files:
+            await upload.close()
+    return {
+        "attachments": [
+            {k: record[k] for k in ("id", "filename", "content_type", "size", "sha256")}
+            for record in saved
+        ],
+        "total_bytes": total,
+        "limits": {"per_file_bytes": MAX_FILE_BYTES, "total_bytes": MAX_BATCH_BYTES},
+    }
+
 @app.get("/v1/tools")
 async def list_tools(user: str = Depends(account_id)):
     """Return the safe tools currently available to the agent runtime."""
@@ -352,6 +422,17 @@ def _conversation(body: ChatRequest, user: str) -> tuple[str, list[dict], str]:
     return conversation_id, history, store.conversation_summary(conversation_id, user, body.workspace_id)
 
 
+def _attachment_context(body: ChatRequest, user: str) -> str:
+    if not body.attachment_ids:
+        return ""
+    context, records = attachment_store.context_for(user, body.attachment_ids)
+    found = {record["id"] for record in records}
+    missing = [attachment_id for attachment_id in body.attachment_ids if attachment_id not in found]
+    if missing:
+        raise HTTPException(404, "One or more attachments expired or do not belong to this account.")
+    return context
+
+
 @app.get("/v1/conversations")
 async def list_conversations(user: str = Depends(account_id)):
     return {"conversations": store.conversations(user)}
@@ -377,6 +458,7 @@ async def delete_conversation(conversation_id: str, user: str = Depends(account_
 async def chat(body: ChatRequest, user: str = Depends(account_id)):
     """Direct chat with bounded read-only tools; writes remain durable tasks."""
     conversation_id, history, summary = _conversation(body, user)
+    attachment_context = _attachment_context(body, user)
     try:
         runtime = _agent_runtime(body.model_profile)
     except ValueError as exc:
@@ -390,6 +472,7 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
                 conversation_id=conversation_id,
                 conversation_history=history,
                 conversation_summary=summary,
+                attachment_context=attachment_context,
                 http_client=client,
                 integration_runner=(connected_integration_runner(
                     store, user, client, settings.integration_master_keys
@@ -412,6 +495,7 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
 async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
     """SSE view of direct chat and bounded read-only tool progress."""
     conversation_id, history, summary = _conversation(body, user)
+    attachment_context = _attachment_context(body, user)
     async def emit():
         started_at = time.perf_counter()
         try:
@@ -453,6 +537,7 @@ async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
                     conversation_id=conversation_id,
                     conversation_history=history,
                     conversation_summary=summary,
+                    attachment_context=attachment_context,
                     http_client=client,
                     integration_runner=(connected_integration_runner(
                         store, user, client, settings.integration_master_keys

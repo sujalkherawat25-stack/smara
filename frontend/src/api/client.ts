@@ -77,6 +77,21 @@ export const apiClient = {
     return res.json() as Promise<T>;
   },
 
+  uploadFiles: async <T>(path: string, files: File[]): Promise<T> => {
+    const form = new FormData();
+    for (const file of files) form.append("files", file);
+    const res = await smaraFetch(path, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new ApiError(res.status, err.detail ?? res.statusText);
+    }
+    return res.json() as Promise<T>;
+  },
+
   streamPost: (path: string, body: unknown): Promise<Response> => {
     // Returns raw Response so caller can consume as ReadableStream (SSE chat).
     return smaraFetch(BASE_URL + path, {

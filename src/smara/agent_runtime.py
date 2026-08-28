@@ -270,6 +270,7 @@ class SmaraAgentRuntime:
         self, *, account_id: str, workspace_id: str, message: str, conversation_id: str | None = None,
         conversation_history: list[dict[str, Any]] | None = None,
         conversation_summary: str = "",
+        attachment_context: str = "",
     ) -> ChatTurn:
         context = ""
         if self._memory is not None:
@@ -291,6 +292,8 @@ class SmaraAgentRuntime:
         recent = self._recent_conversation(conversation_history)
         if conversation_summary.strip():
             system += "\n\nBounded summary of earlier conversation:\n" + conversation_summary.strip()[-8_000:]
+        if attachment_context.strip():
+            system += "\n\nUser attachments (bounded previews):\n" + attachment_context[:120_000]
         if recent:
             system += "\n\nRecent conversation context (oldest to newest):\n" + recent
         answer = await self._provider.complete(system=system, message=message)
@@ -310,6 +313,7 @@ class SmaraAgentRuntime:
         conversation_id: str | None = None,
         conversation_history: list[dict[str, Any]] | None = None,
         conversation_summary: str = "",
+        attachment_context: str = "",
         http_client: httpx.AsyncClient | None = None,
         integration_runner: Callable[[str, str, dict[str, Any]], Any] | None = None,
         include_user_integrations: bool = True,
@@ -337,6 +341,8 @@ class SmaraAgentRuntime:
                 context = ""
         if conversation_summary.strip():
             context = (context + "\n\nBounded summary of earlier conversation:\n" + conversation_summary.strip()[-8_000:]).strip()
+        if attachment_context.strip():
+            context = (context + "\n\nUser attachments (bounded previews):\n" + attachment_context[:120_000]).strip()
         recent = self._recent_conversation(conversation_history)
         if recent:
             context = (context + "\n\nRecent conversation context (oldest to newest):\n" + recent).strip()

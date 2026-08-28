@@ -21,6 +21,8 @@ const tokenPath = String(import.meta.env.VITE_SMARA_CONTROL_TOKEN_PATH ?? "/v1/a
 // safe: enabling Smara mode cannot silently turn an old panel into a 404.
 const smaraPrefixes = [
   "/v1/chat",
+  "/v1/attachments",
+  "/v1/models",
   "/v1/conversations",
   "/v1/tasks",
   "/v1/research",

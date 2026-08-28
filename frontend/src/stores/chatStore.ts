@@ -105,9 +105,11 @@ interface ChatState {
   currentPhase: AgentPhase | null;
   activity: ActivityItem[];   // live feed of reasoning + tool events
   deepReasoning: boolean;
+  modelProfile: string | null;
   reasoningModel: "kimi";
   setReasoningModel: (model: "kimi") => void;
   setDeepReasoning: (enabled: boolean) => void;
+  setModelProfile: (profile: string | null) => void;
 
   // Abort handle for the in-flight fetch — null when not streaming
   _abortController: AbortController | null;
@@ -141,9 +143,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentPhase: null,
   activity: [],
   deepReasoning: false,
+  modelProfile: (() => {
+    try { return localStorage.getItem("smara_model_profile"); } catch { return null; }
+  })(),
   reasoningModel: "kimi",
   setReasoningModel: (model) => set({ reasoningModel: model, deepReasoning: true }),
   setDeepReasoning: (enabled) => set({ deepReasoning: enabled }),
+  setModelProfile: (profile) => {
+    try {
+      if (profile) localStorage.setItem("smara_model_profile", profile);
+      else localStorage.removeItem("smara_model_profile");
+    } catch { /* localStorage can be unavailable in private contexts */ }
+    set({ modelProfile: profile });
+  },
   _abortController: null,
 
   stop: () => {
@@ -354,6 +366,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             message: text,
             conversation_id: conversationId,
             workspace_id: useProjectsStore.getState().currentProjectId ?? "default",
+            model_profile: get().modelProfile || undefined,
+            attachment_ids: attachmentIds,
           }, abortController.signal)
         : await fetch(`${BASE_URL}/v1/memento/chat`, {
             method: "POST",

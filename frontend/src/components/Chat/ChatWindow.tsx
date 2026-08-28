@@ -18,12 +18,13 @@ interface Attachment {
   kind: "document" | "image";
 }
 
-// Document types accepted for upload (matches backend convert.SUPPORTED_EXTENSIONS).
+// Legacy Memento document types. Focused Smara accepts any file type and
+// safely provides metadata/previews to the hosted agent.
 const DOC_EXTS = [".pdf", ".docx", ".xlsx", ".pptx", ".csv", ".txt", ".html", ".htm", ".json", ".xml", ".md"];
-// J7: images go through the vision pre-pass. Free=2MB, Founder=4MB (enforced server-side).
 const IMAGE_EXTS = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
-const ACCEPTED_EXTS = [...DOC_EXTS, ...IMAGE_EXTS];
-const ACCEPT_ATTR = ACCEPTED_EXTS.join(",");
+const ACCEPT_ATTR = "*/*";
+const MAX_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_BATCH_BYTES = 150 * 1024 * 1024;
 
 export default function ChatWindow() {
   const messages = useChatStore((s) => s.messages);
@@ -76,12 +77,43 @@ export default function ChatWindow() {
   }, [input]);
 
   const uploadFiles = async (files: FileList | File[]) => {
-    if (focusedSmara) {
-      setUploadError("File attachments are not enabled in the focused hosted release yet.");
-      return;
-    }
     setUploadError(null);
     const list = Array.from(files);
+    if (focusedSmara) {
+      if (list.length > 10) {
+        setUploadError("Attach at most 10 files at a time.");
+        return;
+      }
+      const oversized = list.find((file) => file.size > MAX_FILE_BYTES);
+      if (oversized) {
+        setUploadError(`"${oversized.name}" is over the 100 MB per-file limit.`);
+        return;
+      }
+      const total = list.reduce((sum, file) => sum + file.size, 0);
+      if (total > MAX_BATCH_BYTES) {
+        setUploadError("Attachments exceed the 150 MB total limit per message.");
+        return;
+      }
+      setUploading(true);
+      try {
+        const res = await apiClient.uploadFiles<{
+          attachments: Array<{ id: string; filename: string; content_type?: string }>;
+        }>("/v1/attachments", list);
+        setAttachments((current) => [
+          ...current,
+          ...(res.attachments ?? []).map((item) => ({
+            id: item.id,
+            filename: item.filename,
+            kind: item.content_type?.startsWith("image/") ? "image" as const : "document" as const,
+          })),
+        ]);
+      } catch (e) {
+        setUploadError(e instanceof ApiError ? e.detail : "Couldn’t upload those files.");
+      } finally {
+        setUploading(false);
+      }
+      return;
+    }
     for (const file of list) {
       const lower = file.name.toLowerCase();
       const isImage = IMAGE_EXTS.some((ext) => lower.endsWith(ext));
@@ -309,34 +341,35 @@ export default function ChatWindow() {
                 : "var(--shadow-sm)",
             }}
           >
-            {!focusedSmara && <>
-              {/* Attach (browse) button */}
+            {/* Attach (browse) button */}
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isStreaming}
                 className="shrink-0 grid place-items-center w-8 h-8 rounded-xl transition-colors duration-150"
                 style={{ color: "var(--text-muted)", opacity: isStreaming ? 0.4 : 1 }}
-                title="Attach a document or image (PDF, Word, Excel, PPT, CSV, JPG, PNG)"
+                title="Attach files (up to 100 MB each, 150 MB total)"
                 onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-elevated)"; }}
                 onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
               >
                 <Paperclip size={15} />
               </button>
 
-              {/* Camera button — opens phone camera on mobile, image picker on desktop */}
+            {/* Camera button — opens phone camera on mobile, image picker on desktop */}
               <button
                 onClick={() => cameraInputRef.current?.click()}
                 disabled={isStreaming}
                 className="shrink-0 grid place-items-center w-8 h-8 rounded-xl transition-colors duration-150"
                 style={{ color: "var(--text-muted)", opacity: isStreaming ? 0.4 : 1 }}
-                title="Take a photo with the camera (mobile) or pick an image (desktop)"
+                title="Take or attach an image"
                 onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-elevated)"; }}
                 onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
               >
                 <Camera size={15} />
               </button>
 
-              {/* Real-time, interruptible speech-to-speech conversation. */}
+            {/* Real-time voice remains on the legacy Memento transport until
+                the hosted Smara voice endpoint is enabled. */}
+            {!focusedSmara && <>
               <SmaraVoice />
             </>}
 

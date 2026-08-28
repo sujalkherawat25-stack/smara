@@ -20,6 +20,10 @@ dependencies = [
   "redis>=5.0,<6",
   "PyJWT>=2.8,<3",
   "syntarus>=0.2.0",
+  "pypdf>=5,<6",
+  "python-docx>=1.1,<2",
+  "openpyxl>=3.1,<4",
+  "python-pptx>=1.0,<2",
 ]
 
 [project.optional-dependencies]
