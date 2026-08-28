@@ -12,7 +12,7 @@ ai.syntarus.com {
     # Smara owns the canonical public root. The API keeps a distinct prefix so
     # it cannot collide with the legacy MemoryOS/Memento /v1/* bridge routes.
     @legacy_smara path /smara /smara/*
-    redir @legacy_smara https://ai.syntarus.com/ 308
+    redir @legacy_smara https://ai.syntarus.com/?{http.request.uri.query} 308
     handle_path /smara-api/* {
         reverse_proxy 127.0.0.1:8090 {
             header_up X-Real-IP {remote_host}
