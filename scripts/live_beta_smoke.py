@@ -41,6 +41,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=os.getenv("SMARA_SMOKE_BASE_URL", "http://api:8080"))
     parser.add_argument("--account", default=f"acct_shadow_{secrets.token_hex(5)}")
+    parser.add_argument("--rate-limit-burst", type=int, default=0, help="send a bounded authenticated burst and report 429 responses")
     args = parser.parse_args()
     secret = os.getenv("SMARA_GATEWAY_SIGNING_SECRET")
     if not secret:
@@ -55,6 +56,13 @@ def main() -> int:
     with httpx.Client(base_url=base_url, timeout=20.0, headers=headers) as client:
         health = expect(client.get("/health"), 200, "health")
         ready = expect(client.get("/readyz"), 200, "readyz")
+        if args.rate_limit_burst:
+            if not 1 <= args.rate_limit_burst <= 150:
+                raise RuntimeError("rate-limit burst must be between 1 and 150")
+            statuses = [client.get("/v1/tools").status_code for _ in range(args.rate_limit_burst)]
+            limited = statuses.count(429)
+            print(f"PASS rate-limit review requests={len(statuses)} success={statuses.count(200)} limited={limited}")
+            return 0 if limited else 1
         tools = expect(client.get("/v1/tools"), 200, "signed tools")
         integrations = expect(client.get("/v1/integrations"), 200, "integrations")
         if integrations.get("mode") != "local-only":
