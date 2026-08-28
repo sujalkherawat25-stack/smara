@@ -72,11 +72,25 @@ def _triage(message: str) -> tuple[str, int, bool]:
 class OpenAICompatibleProvider:
     """Works with providers that implement the standard chat-completions API."""
 
-    def __init__(self, *, base_url: str, api_key: str, model: str, timeout_seconds: float = 45.0):
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        timeout_seconds: float = 45.0,
+        auth_header: str = "Authorization",
+    ):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model = model
         self._timeout_seconds = timeout_seconds
+        self._auth_header = auth_header.strip().lower()
+
+    def _headers(self) -> dict[str, str]:
+        if self._auth_header in {"api-subscription-key", "api_subscription_key"}:
+            return {"api-subscription-key": self._api_key}
+        return {"Authorization": f"Bearer {self._api_key}"}
 
     async def complete(self, *, system: str, message: str) -> str:
         if not self._base_url or not self._api_key or not self._model:
@@ -84,7 +98,7 @@ class OpenAICompatibleProvider:
         async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
             response = await client.post(
                 f"{self._base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self._api_key}"},
+                headers=self._headers(),
                 json={
                     "model": self._model,
                     "temperature": 0.2,
@@ -113,7 +127,7 @@ class OpenAICompatibleProvider:
             async with client.stream(
                 "POST",
                 f"{self._base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self._api_key}"},
+                headers=self._headers(),
                 json={
                     "model": self._model,
                     "temperature": 0.2,

@@ -65,7 +65,12 @@ def _agent_runtime(model_profile: str | None = None) -> SmaraAgentRuntime:
         fallback_provider=settings.llm_provider,
     )
     return SmaraAgentRuntime(
-        OpenAICompatibleProvider(base_url=profile.base_url, api_key=profile.api_key, model=profile.model),
+        OpenAICompatibleProvider(
+            base_url=profile.base_url,
+            api_key=profile.api_key,
+            model=profile.model,
+            auth_header=profile.auth_header,
+        ),
         memory=memory,
     )
 
@@ -661,15 +666,21 @@ async def capture_text(title: str = Form(..., max_length=200), text: str = Form(
     return store.create_capture(user, "text", title, text)
 
 @app.post("/v1/captures/media", status_code=201)
-async def capture_media(title: str = Form(..., max_length=200), file: UploadFile = File(...), user: str = Depends(account_id)):
-    allowed = {"image/jpeg", "image/png", "image/webp", "audio/webm", "audio/mpeg", "audio/mp4", "audio/wav"}
+async def capture_media(title: str = Form(..., max_length=200), file: UploadFile = File(...), analysis: str = Form("auto", max_length=16), user: str = Depends(account_id)):
+    allowed = {"image/jpeg", "image/png", "image/webp", "application/pdf", "audio/webm", "audio/mpeg", "audio/mp4", "audio/wav"}
     if file.content_type not in allowed:
-        raise HTTPException(415, "Only JPG, PNG, WebP, WebM, MP3, M4A, and WAV captures are accepted.")
-    limit = 4 * 1024 * 1024 if file.content_type.startswith("image/") else 10 * 1024 * 1024
+        raise HTTPException(415, "Only JPG, PNG, WebP, PDF, WebM, MP3, M4A, and WAV captures are accepted.")
+    analysis = analysis.strip().lower()
+    if analysis not in {"auto", "image", "ocr"}:
+        raise HTTPException(422, "analysis must be auto, image, or ocr.")
+    if analysis == "ocr" and not (file.content_type.startswith("image/") or file.content_type == "application/pdf"):
+        raise HTTPException(422, "OCR analysis is available for images and PDF documents.")
+    is_document = file.content_type == "application/pdf" or analysis == "ocr"
+    limit = 20 * 1024 * 1024 if is_document else 4 * 1024 * 1024 if file.content_type.startswith("image/") else 10 * 1024 * 1024
     content = await file.read(limit + 1)
     if len(content) > limit:
         raise HTTPException(413, "Capture exceeds its size limit.")
-    kind = "photo" if file.content_type.startswith("image/") else "voice"
+    kind = "document" if is_document else "photo" if file.content_type.startswith("image/") else "voice"
     payload = base64.b64encode(content).decode()
     return store.create_capture(user, kind, title, payload, file.content_type)
 

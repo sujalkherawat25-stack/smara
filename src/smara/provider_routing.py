@@ -18,6 +18,32 @@ class ModelProfile:
     base_url: str
     model: str
     api_key: str
+    # Most providers use Authorization: Bearer.  Sarvam also supports its
+    # native api-subscription-key header, which avoids an unnecessary auth
+    # translation at the hosted boundary.
+    auth_header: str = "Authorization"
+    capability: str = "chat"
+
+
+def _auth_header(value: object) -> str:
+    if value is None or value == "":
+        return "Authorization"
+    if not isinstance(value, str):
+        raise ValueError("Model profile auth_header must be a string.")
+    normalized = value.strip().lower()
+    if normalized in {"authorization", "bearer", "authorization: bearer"}:
+        return "Authorization"
+    if normalized in {"api-subscription-key", "api_subscription_key"}:
+        return "api-subscription-key"
+    raise ValueError("Model profile auth_header must be Authorization or api-subscription-key.")
+
+
+def _capability(value: object) -> str:
+    if value is None or value == "":
+        return "chat"
+    if not isinstance(value, str) or value.strip().lower() not in {"chat", "reasoning", "vision"}:
+        raise ValueError("Model profile capability must be chat, reasoning, or vision.")
+    return value.strip().lower()
 
 
 def _valid_base_url(value: object) -> str:
@@ -74,9 +100,19 @@ def load_profiles(raw: str, *, fallback_base_url: str, fallback_key: str, fallba
             model = value.get("model")
             if not isinstance(model, str) or not model.strip():
                 raise ValueError(f"Model profile '{name}' is missing model.")
-            profiles[name] = ModelProfile(name, _valid_base_url(value.get("base_url")), model.strip(), key)
+            profiles[name] = ModelProfile(
+                name,
+                _valid_base_url(value.get("base_url")),
+                model.strip(),
+                key,
+                _auth_header(value.get("auth_header")),
+                _capability(value.get("capability")),
+            )
     if fallback_base_url and fallback_model:
-        profiles.setdefault(fallback_provider or "default", ModelProfile(fallback_provider or "default", fallback_base_url.rstrip("/"), fallback_model, fallback_key))
+        profiles.setdefault(
+            fallback_provider or "default",
+            ModelProfile(fallback_provider or "default", fallback_base_url.rstrip("/"), fallback_model, fallback_key),
+        )
     return profiles
 
 

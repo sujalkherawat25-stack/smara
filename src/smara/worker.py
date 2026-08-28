@@ -81,6 +81,7 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
                         base_url=profile.base_url,
                         api_key=profile.api_key,
                         model=profile.model,
+                        auth_header=profile.auth_header,
                     )
             outcome = await ResearchExecutor(store, synthesizer=synthesizer).run_step(task)
             if outcome.report:
@@ -96,9 +97,16 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
                     transcription_base_url=settings.capture_transcription_base_url,
                     transcription_api_key=settings.capture_transcription_api_key,
                     transcription_model=settings.capture_transcription_model,
+                    transcription_auth_header=settings.capture_transcription_auth_header,
                     vision_base_url=settings.capture_vision_base_url,
                     vision_api_key=settings.capture_vision_api_key,
                     vision_model=settings.capture_vision_model,
+                    vision_auth_header=settings.capture_vision_auth_header,
+                    ocr_base_url=settings.capture_ocr_base_url,
+                    ocr_api_key=settings.capture_ocr_api_key,
+                    ocr_model=settings.capture_ocr_model,
+                    ocr_language=settings.capture_ocr_language,
+                    ocr_auth_header=settings.capture_ocr_auth_header,
                 )
             store.complete_step(task["step_id"], task["account_id"], result)
             return True
@@ -120,7 +128,12 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
                 fallback_model=settings.llm_model,
                 fallback_provider=settings.llm_provider,
             )
-            provider = OpenAICompatibleProvider(base_url=profile.base_url, api_key=profile.api_key, model=profile.model)
+            provider = OpenAICompatibleProvider(
+                base_url=profile.base_url,
+                api_key=profile.api_key,
+                model=profile.model,
+                auth_header=profile.auth_header,
+            )
             with_client = httpx.AsyncClient(timeout=httpx.Timeout(12.0), follow_redirects=False)
             async with with_client as client:
                 async def integration_runner(provider_name: str, action: str, payload: dict) -> str:

@@ -1,7 +1,9 @@
 from pathlib import Path
 
 import asyncio
+import io
 import httpx
+import zipfile
 
 from smara.store import TaskStore
 from smara.capture_processing import process_capture
@@ -64,3 +66,49 @@ def test_photo_capture_uses_vision_provider_without_leaking_key(tmp_path: Path):
 
     assert asyncio.run(exercise()).startswith("Photo capture described")
     assert b"vision-key" not in captured["json"]
+
+
+def test_document_capture_uses_sarvam_document_ai_and_stores_ocr(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    capture = store.create_capture("acct_1", "document", "Invoice", "cGRmLWJ5dGVz", "application/pdf")
+    requests: list[httpx.Request] = []
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
+        output.writestr("invoice.md", "# Invoice\n\nTotal due: INR 1,200")
+    archive_bytes = archive.getvalue()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/job/digitise"):
+            assert request.headers["api-subscription-key"] == "sarvam-key"
+            return httpx.Response(202, json={"job_id": "job-1", "status": "completed"})
+        if request.url.path.endswith("/job/job-1/status"):
+            return httpx.Response(200, json={"job_id": "job-1", "status": "completed"})
+        if request.url.path.endswith("/job/job-1/download-url"):
+            return httpx.Response(200, json={"download_url": "https://download.example/invoice.zip"})
+        if request.url.host == "download.example":
+            return httpx.Response(200, content=archive_bytes)
+        return httpx.Response(404)
+
+    async def exercise() -> str:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await process_capture(
+                store,
+                capture["task"],
+                client,
+                ocr_base_url="https://api.sarvam.ai/doc-ai/v1",
+                ocr_api_key="sarvam-key",
+                ocr_model="sarvam-vision-v1",
+                ocr_language="en-IN",
+                ocr_auth_header="api-subscription-key",
+            )
+
+    assert asyncio.run(exercise()).startswith("Document OCR complete")
+    artifacts = store.artifacts(capture["task"]["id"], "acct_1")
+    assert artifacts[-1]["kind"] == "capture.ocr"
+    assert "INR 1,200" in artifacts[-1]["content"]
+    assert [request.url.path for request in requests] == [
+        "/doc-ai/v1/job/digitise",
+        "/doc-ai/v1/job/job-1/download-url",
+        "/invoice.zip",
+    ]

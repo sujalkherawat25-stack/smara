@@ -147,12 +147,12 @@ h1 { font-size: 20px; letter-spacing: -.03em; }
 .inline-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .model-card .card-heading { align-items: flex-start; }
 .model-selected { margin-left: auto; padding: 5px 8px; border-radius: 999px; background: rgba(144,169,255,.08); font-size: 9px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
-.model-blue { color: var(--blue); }.model-green { color: var(--green); }.model-amber { color: var(--amber); }
+.model-blue { color: var(--blue); }.model-green { color: var(--green); }.model-amber { color: var(--amber); }.model-purple { color: #c4b5fd; }
 .provider-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
 .provider-option { min-width: 0; display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--stroke); border-radius: 10px; color: var(--muted); background: rgba(255,255,255,.018); text-align: left; transition: border-color 100ms ease, background 100ms ease, transform 100ms ease; }
 .provider-option:hover { border-color: rgba(144,169,255,.48); background: rgba(144,169,255,.055); transform: translateY(-1px); }
 .provider-selected { border-color: rgba(144,169,255,.72); background: rgba(144,169,255,.10); box-shadow: 0 0 0 1px rgba(144,169,255,.18); }
-.provider-mark { width: 27px; height: 27px; display: grid; place-items: center; flex: none; border-radius: 8px; color: #11152a; font-size: 12px; font-weight: 800; }.provider-blue { background: var(--blue); }.provider-green { color: #0c1c16; background: var(--green); }.provider-amber { color: #2d1d0d; background: var(--amber); }
+.provider-mark { width: 27px; height: 27px; display: grid; place-items: center; flex: none; border-radius: 8px; color: #11152a; font-size: 12px; font-weight: 800; }.provider-blue { background: var(--blue); }.provider-green { color: #0c1c16; background: var(--green); }.provider-amber { color: #2d1d0d; background: var(--amber); }.provider-purple { color: #211739; background: #c4b5fd; }
 .provider-copy { min-width: 0; display: grid; gap: 3px; }.provider-copy strong { color: var(--text); font-size: 12px; }.provider-copy small { color: var(--subtle); font-size: 9px; }.provider-copy > span { color: var(--muted); font-size: 10px; line-height: 1.35; }.provider-check { margin-left: auto; color: var(--green); font-size: 14px; font-weight: 800; }
 .model-help { display: block; }.model-help > span { color: var(--text); font-weight: 650; }
 .credential-status-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin-bottom: 17px; }

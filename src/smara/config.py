@@ -20,6 +20,17 @@ def _secret(name: str, default: str = "") -> str:
     return default
 
 
+def _secret_with_fallback(name: str, fallback_name: str = "") -> str:
+    """Read a dedicated secret, falling back to one shared provider secret.
+
+    Capture pipelines intentionally reuse the operator's Sarvam key by
+    default, while still allowing a deployment to override each capability
+    with a separate secret when required.
+    """
+    value = _secret(name)
+    return value or (_secret(fallback_name) if fallback_name else "")
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str = os.getenv("SMARA_DATABASE_URL", "")
@@ -72,11 +83,21 @@ class Settings:
     research_allowed_domains: str = os.getenv("SMARA_RESEARCH_ALLOWED_DOMAINS", "")
     research_blocked_domains: str = os.getenv("SMARA_RESEARCH_BLOCKED_DOMAINS", "")
     capture_transcription_base_url: str = os.getenv("SMARA_CAPTURE_TRANSCRIPTION_BASE_URL", "")
-    capture_transcription_api_key: str = _secret("SMARA_CAPTURE_TRANSCRIPTION_API_KEY")
+    capture_transcription_api_key: str = _secret_with_fallback("SMARA_CAPTURE_TRANSCRIPTION_API_KEY", "SMARA_SARVAM_KEY")
     capture_transcription_model: str = os.getenv("SMARA_CAPTURE_TRANSCRIPTION_MODEL", "")
+    capture_transcription_auth_header: str = os.getenv("SMARA_CAPTURE_TRANSCRIPTION_AUTH_HEADER", "Authorization")
     capture_vision_base_url: str = os.getenv("SMARA_CAPTURE_VISION_BASE_URL", "")
-    capture_vision_api_key: str = _secret("SMARA_CAPTURE_VISION_API_KEY")
+    capture_vision_api_key: str = _secret_with_fallback("SMARA_CAPTURE_VISION_API_KEY", "SMARA_SARVAM_KEY")
     capture_vision_model: str = os.getenv("SMARA_CAPTURE_VISION_MODEL", "")
+    capture_vision_auth_header: str = os.getenv("SMARA_CAPTURE_VISION_AUTH_HEADER", "Authorization")
+    # Sarvam Document AI is an asynchronous OCR service, not a chat model.
+    # Keep it on its own bounded capture path rather than exposing it as a
+    # selectable chat profile.
+    capture_ocr_base_url: str = os.getenv("SMARA_CAPTURE_OCR_BASE_URL", "")
+    capture_ocr_api_key: str = _secret_with_fallback("SMARA_CAPTURE_OCR_API_KEY", "SMARA_SARVAM_KEY")
+    capture_ocr_model: str = os.getenv("SMARA_CAPTURE_OCR_MODEL", "sarvam-vision-v1")
+    capture_ocr_language: str = os.getenv("SMARA_CAPTURE_OCR_LANGUAGE", "en-IN")
+    capture_ocr_auth_header: str = os.getenv("SMARA_CAPTURE_OCR_AUTH_HEADER", "api-subscription-key")
     # Disabled until a separately isolated sandbox service is deployed.
     sandbox_enabled: bool = os.getenv("SMARA_SANDBOX_ENABLED", "false").lower() == "true"
     sandbox_url: str = os.getenv("SMARA_SANDBOX_URL", "")

@@ -40,8 +40,10 @@ never sent to a provider unless the deployment explicitly configures the
 matching capture provider. With `SMARA_CAPTURE_TRANSCRIPTION_*` configured,
 voice creates a bounded transcript artifact; with
 `SMARA_CAPTURE_VISION_*` configured, photos create a bounded description
-artifact. Without those settings the task completes locally with a clear
-"not configured" result, so a missing optional provider cannot block the phone
+artifact. PDF/image document captures can use Sarvam Document AI through
+`SMARA_CAPTURE_OCR_*` and create a bounded Markdown OCR artifact. Without an
+optional provider, the capture task still completes with a clear
+"not configured" result, so a missing provider cannot block the phone
 companion.
 
 ## Memory boundary
@@ -233,15 +235,28 @@ the configured OpenAI-compatible model, but only after evidence is verified.
 Every model citation must match the ledger; invalid, unavailable, or
 unconfigured synthesis safely falls back to the deterministic cited report.
 
-Capture providers use independent credentials and endpoints so a speech or
-vision key is never reused for ordinary agent calls. Set all three variables in
-each group to enable a provider (for example, an OpenAI-compatible endpoint):
+Capture providers use independent endpoints and may reuse the operator's
+server-side `SMARA_SARVAM_KEY` through the documented secret fallback. They are
+never sent to web, CLI, or desktop clients. Set all three variables in each
+group to enable a provider (for example, an OpenAI-compatible endpoint):
 `SMARA_CAPTURE_TRANSCRIPTION_BASE_URL`,
 `SMARA_CAPTURE_TRANSCRIPTION_API_KEY`,
 `SMARA_CAPTURE_TRANSCRIPTION_MODEL`; or
 `SMARA_CAPTURE_VISION_BASE_URL`, `SMARA_CAPTURE_VISION_API_KEY`,
-`SMARA_CAPTURE_VISION_MODEL`. Upload limits remain 10 MB for voice and 4 MB for
-images, and provider errors are recorded through the normal bounded retry path.
+`SMARA_CAPTURE_VISION_MODEL`. For Sarvam, use `/v2` + `gemma4` with the
+`api-subscription-key` header for image descriptions. For OCR, use
+`SMARA_CAPTURE_OCR_BASE_URL=https://api.sarvam.ai/doc-ai/v1`,
+`SMARA_CAPTURE_OCR_MODEL=sarvam-vision-v1`, and
+`SMARA_CAPTURE_OCR_AUTH_HEADER=api-subscription-key`; the worker submits a
+bounded job, polls it, downloads the result, and stores only extracted text.
+Upload limits remain 10 MB for voice, 4 MB for photos, and 20 MB for documents;
+provider errors are recorded through the normal bounded retry path.
+
+The hosted model profile example includes Sarvam `sarvam-105b` on `/v1`,
+`glm5.2` on `/v2` for deeper reasoning, and `gemma4` on `/v2` for image input.
+Only profile names cross the client boundary. GLM-5.2 and Gemma 4 require
+Sarvam beta access; OCR is a separate Document AI workflow rather than a chat
+profile.
 
 ## Integrations and approvals
 

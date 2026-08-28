@@ -32,6 +32,8 @@ const modelProfiles = [
   { value: "default", label: "Automatic", provider: "Smara hosted", description: "Let the hosted service choose the best configured model for this workspace.", tone: "blue" },
   { value: "grok", label: "Grok", provider: "xAI · hosted", description: "Fast general-purpose reasoning and tool planning.", tone: "green" },
   { value: "sarvam", label: "Sarvam", provider: "Sarvam AI · hosted", description: "Indic + English conversations when enabled by the operator.", tone: "amber" },
+  { value: "sarvam-reasoning", label: "Sarvam Reasoning", provider: "Sarvam AI · hosted", description: "GLM-5.2 for deeper, long-context reasoning (beta access required).", tone: "purple" },
+  { value: "sarvam-vision", label: "Sarvam Vision", provider: "Sarvam AI · hosted", description: "Gemma 4 for image understanding (beta access required).", tone: "blue" },
 ];
 
 const credentialPresets = [

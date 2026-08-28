@@ -1,11 +1,47 @@
 import asyncio
 
-from smara.agent_runtime import SmaraAgentRuntime
+from smara.agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime
 from smara import agent_events, llm_errors
 import httpx
 
 from smara.cli import _request, build_parser
 from smara.syntarus_adapter import SyntarusMemory
+
+
+def test_provider_uses_sarvam_subscription_header(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update(url=url, headers=headers, json=json)
+            return FakeResponse()
+
+    monkeypatch.setattr("smara.agent_runtime.httpx.AsyncClient", lambda **_kwargs: FakeClient())
+
+    async def exercise():
+        return await OpenAICompatibleProvider(
+            base_url="https://api.sarvam.ai/v2",
+            api_key="sarvam-secret",
+            model="glm5.2",
+            auth_header="api-subscription-key",
+        ).complete(system="system", message="hello")
+
+    assert asyncio.run(exercise()) == "ok"
+    assert captured["url"] == "https://api.sarvam.ai/v2/chat/completions"
+    assert captured["headers"] == {"api-subscription-key": "sarvam-secret"}
 
 
 class FakeProvider:

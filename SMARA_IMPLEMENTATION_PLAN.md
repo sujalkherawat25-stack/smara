@@ -334,8 +334,9 @@ Smara can replace the public Memento agent when:
    restart the PC/app, disconnect/reconnect, cancel, revoke, expire a lease,
    and confirm no duplicate or hosted-side local execution.
 3. Add the Sarvam key when desired and run one low-cost provider smoke; keep
-   Grok as the current hosted default until that smoke passes.
-   (The hosted slot is currently absent, so this is intentionally skipped.)
+   Grok as the current hosted default until that smoke passes. The hosted
+   slots are now present for Sarvam 105B, GLM-5.2 reasoning, and Gemma 4
+   vision; beta entitlements remain an operator check.
 4. Keep the five owner-deferred production gates disabled and documented.
    Reopen them only when the required signing certificate, Sentry account,
    secret-manager access, off-host backup destination, or isolated sandbox
@@ -686,3 +687,20 @@ changes; the executor, hosted API, and MemoryOS pipeline are unchanged.
 - Deployed commit `e7a2c38` to staging. Live health, authenticated task loading,
   Grok profile resolution, and `/v1/chat/stream` all pass. No MemoryOS files or
   data were changed.
+
+### 2026-08-28 — Sarvam hosted profiles, vision, and OCR routing
+
+- Added provider-native authentication so profiles can use either
+  `Authorization: Bearer` or Sarvam's `api-subscription-key` without exposing
+  credentials to clients. Research synthesis and worker execution use the
+  same profile boundary.
+- Added hosted profile slots for `sarvam-105b` (`/v1`), `glm5.2` (`/v2`), and
+  `gemma4` (`/v2`). The desktop picker now labels the reasoning and vision
+  profiles; Grok remains the safe default until a Sarvam smoke passes.
+- Added bounded Sarvam Document AI OCR for PDF/image captures. It submits a
+  job, polls completion, downloads the result archive, and stores only a
+  capped text artifact. OCR is deliberately not a chat profile.
+- Added regression coverage for Sarvam headers, profile capabilities, and a
+  complete mocked OCR round trip. MemoryOS remains untouched. Live Sarvam
+  verification is pending the operator placing a fresh key in the VM and
+  confirming any GLM/Gemma beta entitlement.
