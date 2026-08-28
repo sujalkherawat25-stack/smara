@@ -97,7 +97,14 @@ async function controlToken(): Promise<string> {
 
 function withJsonHeaders(init: RequestInit, token: string): RequestInit {
   const headers = new Headers(init.headers);
-  if (!headers.has("Content-Type") && init.body !== undefined) headers.set("Content-Type", "application/json");
+  // Never set Content-Type for FormData. The browser must generate the
+  // multipart boundary itself; forcing application/json makes the upload
+  // body unparsable at the Smara API and used to surface as a failed/blank
+  // attachment flow in the hosted UI.
+  const isMultipart = typeof FormData !== "undefined" && init.body instanceof FormData;
+  if (!headers.has("Content-Type") && init.body !== undefined && !isMultipart) {
+    headers.set("Content-Type", "application/json");
+  }
   headers.set("Authorization", `Bearer ${token}`);
   return { ...init, headers, credentials: "omit" };
 }
