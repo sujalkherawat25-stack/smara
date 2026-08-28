@@ -368,8 +368,19 @@ class SmaraAgentRuntime:
             if event_hook:
                 event_hook("agent.phase", {"phase": "answer"})
             user_content: Any = message
+            # Put extracted text in the user turn as well as the system
+            # context.  Some provider gateways are conservative about system
+            # instructions; explicit user-supplied file text must never be
+            # silently ignored (especially for a simple "summarise this"
+            # request).
+            if attachment_context.strip():
+                user_content = (
+                    f"{message}\n\nAttached file contents and metadata:\n"
+                    f"{attachment_context[:120_000]}"
+                )
             if attachment_images:
-                user_content = [{"type": "text", "text": message}]
+                text_content = user_content if isinstance(user_content, str) else message
+                user_content = [{"type": "text", "text": text_content}]
                 user_content.extend({"type": "image_url", "image_url": {"url": image["data_url"]}} for image in attachment_images)
             answer = await self._direct_answer(system=system, message=user_content, token_hook=token_hook)
             if not answer:

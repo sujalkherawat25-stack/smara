@@ -246,6 +246,16 @@ def test_direct_sse_falls_back_when_stream_fails_before_first_token():
     assert emitted == ["A bounded direct response."]
 
 
+def test_runtime_puts_attachment_text_in_explicit_user_turn():
+    provider = FakeProvider()
+    runtime = SmaraAgentRuntime(provider)
+    asyncio.run(runtime.chat_with_tools(
+        account_id="acct_1", workspace_id="work", message="Repeat the file text",
+        attachment_context="Attachment: notes.txt\nUNIQUE_ATTACHMENT_PHRASE",
+    ))
+    assert "UNIQUE_ATTACHMENT_PHRASE" in provider.message
+
+
 def test_runtime_emits_memento_style_phases_for_tool_turn():
     events = []
     runtime = SmaraAgentRuntime(ToolProvider())
