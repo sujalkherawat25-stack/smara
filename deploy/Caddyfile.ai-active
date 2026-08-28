@@ -24,7 +24,6 @@ ai.syntarus.com {
     handle_path /smara-api/* {
         reverse_proxy 127.0.0.1:8090 {
             header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-Proto {scheme}
             flush_interval -1
             transport http {
                 read_timeout  1h
@@ -38,7 +37,6 @@ ai.syntarus.com {
     handle /v1/* {
         reverse_proxy 127.0.0.1:8080 {
             header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-Proto {scheme}
             flush_interval -1
             transport http {
                 read_timeout 1h
@@ -50,7 +48,6 @@ ai.syntarus.com {
     handle {
         reverse_proxy 127.0.0.1:8081 {
             header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-Proto {scheme}
             flush_interval -1
             transport http {
                 read_timeout 1h
