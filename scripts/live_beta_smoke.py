@@ -85,6 +85,50 @@ def stream_agent_workflow(
     return final, tools
 
 
+def verify_desktop_lease_safety() -> str:
+    """Exercise the production store's no-replay rule with disposable data."""
+    from smara.api import store
+
+    account = f"acct_lease_{secrets.token_hex(5)}"
+    try:
+        first = store.pair_executor(
+            store.create_executor_pairing(account, "Lease smoke A", ["local_terminal"])["code"]
+        )
+        second = store.pair_executor(
+            store.create_executor_pairing(account, "Lease smoke B", ["local_terminal"])["code"]
+        )
+        task = store.create(
+            account,
+            "shadow",
+            "Desktop lease safety smoke",
+            "Never replay an uncertain local command.",
+            True,
+            [{"name": "desktop.command", "executor_kind": "desktop", "required_capability": "local_terminal"}],
+        )
+        store.decide(task["id"], account, True, "bounded live safety smoke")
+        claimed = store.claim_for_executor(first["executor_id"], first["token"], lease_seconds=1)
+        if not claimed:
+            raise RuntimeError("desktop lease safety smoke could not claim its disposable step")
+        with store._connect() as connection:
+            connection.execute(
+                "UPDATE task_steps SET lease_expires_at=? WHERE id=?",
+                ("2000-01-01T00:00:00+00:00", claimed["step_id"]),
+            )
+        replay = store.claim_for_executor(second["executor_id"], second["token"])
+        failed = store.get(task["id"], account)
+        dead_letters = store.dead_letters(account)
+        events = store.events(task["id"], account)
+        if replay is not None or failed.get("status") != "failed":
+            raise RuntimeError("uncertain local side effect was eligible for automatic replay")
+        if not any(item.get("step_id") == claimed["step_id"] for item in dead_letters):
+            raise RuntimeError("uncertain local side effect did not reach the account dead-letter queue")
+        if not any(item.get("type") == "executor.lease_expired_uncertain" for item in events):
+            raise RuntimeError("uncertain local side effect did not emit its audit event")
+        return "blocked-and-audited"
+    finally:
+        store.delete_account(account)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=os.getenv("SMARA_SMOKE_BASE_URL", "http://api:8080"))
@@ -92,6 +136,7 @@ def main() -> int:
     parser.add_argument("--rate-limit-burst", type=int, default=0, help="send a bounded authenticated burst and report 429 responses")
     parser.add_argument("--agent-workflows", action="store_true", help="also spend a few live model/search calls on chat, calculator, and cited research")
     parser.add_argument("--model-profile", default="", help="optional hosted profile for live agent workflows")
+    parser.add_argument("--desktop-lease-safety", action="store_true", help="verify uncertain local side effects fail closed in the configured task store")
     args = parser.parse_args()
     secret = os.getenv("SMARA_GATEWAY_SIGNING_SECRET")
     if not secret:
@@ -175,6 +220,7 @@ def main() -> int:
                     if response.status_code not in {204, 404}:
                         raise RuntimeError(f"could not clean smoke conversation {conversation_id}")
 
+    lease_status = verify_desktop_lease_safety() if args.desktop_lease_safety else "skipped"
     profile_status = "configured" if os.getenv("SMARA_LLM_PROFILES") else "missing"
     sarvam_status = "configured" if os.getenv("SMARA_SARVAM_KEY") else "not-configured"
     print(
@@ -184,7 +230,7 @@ def main() -> int:
         f"task={own.get('status')} cancelled={cancelled.get('status')} "
         f"events={len(events.get('events', []))} "
         f"profiles={profile_status} sarvam={sarvam_status} "
-        f"agent_workflows={workflow_summary}"
+        f"agent_workflows={workflow_summary} desktop_lease={lease_status}"
     )
     return 0
 
