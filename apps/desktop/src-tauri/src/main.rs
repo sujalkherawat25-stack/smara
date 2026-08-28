@@ -168,10 +168,58 @@ fn model_credential_name(id: &str) -> String {
 }
 
 fn stored_local_model_profiles() -> Vec<LocalModelProfile> {
-    read_json(&preferences_path())
+    let preferences = read_json(&preferences_path());
+    let profiles = preferences
+        .as_ref()
         .and_then(|value| value.get("local_model_profiles").cloned())
-        .and_then(|value| serde_json::from_value(value).ok())
-        .unwrap_or_default()
+        .and_then(|value| serde_json::from_value::<Vec<LocalModelProfile>>(value).ok())
+        .unwrap_or_default();
+    if !profiles.is_empty() {
+        return profiles;
+    }
+
+    // Older beta builds saved the selected profile and encrypted credential,
+    // then lost the profile metadata when the general settings form was saved.
+    // Recover the two built-in profiles when their local credential still
+    // exists. Custom endpoints cannot be reconstructed safely and remain
+    // intentionally opt-in through Settings.
+    let Some(id) = preferences
+        .as_ref()
+        .and_then(|value| value.get("model_profile"))
+        .and_then(Value::as_str)
+        .and_then(|value| value.strip_prefix("local:"))
+    else {
+        return profiles;
+    };
+    let Some((label, provider, base_url, model, auth_header)) = (match id {
+        "sarvam" => Some(("Sarvam", "sarvam", "https://api.sarvam.ai/v1/chat/completions", "sarvam-105b", "api-subscription-key")),
+        "grok" => Some(("Grok", "grok", "https://api.x.ai/v1/chat/completions", "grok-3-mini", "authorization")),
+        _ => None,
+    }) else {
+        return profiles;
+    };
+    let credential_name = model_credential_name(id);
+    let credential_exists = read_json(&app_data_dir().join("credentials.json"))
+        .and_then(|value| value.get(&credential_name).cloned())
+        .is_some();
+    if !credential_exists {
+        return profiles;
+    }
+    let recovered = vec![LocalModelProfile {
+        id: id.to_owned(),
+        label: label.to_owned(),
+        provider: provider.to_owned(),
+        base_url: base_url.to_owned(),
+        model: model.to_owned(),
+        credential_name,
+        auth_header: auth_header.to_owned(),
+        updated_at: "legacy-recovered".to_owned(),
+    }];
+    // Persist the repaired metadata so a later ordinary settings save cannot
+    // lose it again. If the preferences file is temporarily read-only, keep
+    // the in-memory recovery usable and let the next save retry the migration.
+    let _ = write_local_model_profiles(&recovered);
+    recovered
 }
 
 fn write_local_model_profiles(profiles: &[LocalModelProfile]) -> Result<(), String> {
@@ -179,6 +227,13 @@ fn write_local_model_profiles(profiles: &[LocalModelProfile]) -> Result<(), Stri
     let object = preferences.as_object_mut().ok_or_else(|| "Desktop preferences are invalid.".to_owned())?;
     object.insert("local_model_profiles".to_owned(), serde_json::to_value(profiles).map_err(|error| error.to_string())?);
     write_json(&preferences_path(), &preferences)
+}
+
+fn preserve_local_model_profiles(mut value: Value, existing_profiles: Option<Value>) -> Value {
+    if let Some(profiles) = existing_profiles {
+        value["local_model_profiles"] = profiles;
+    }
+    value
 }
 
 fn string_list(value: Option<&Value>) -> Vec<String> {
@@ -347,7 +402,12 @@ fn save_settings(settings: LocalSettings) -> Result<ConnectionState, String> {
     if !(api_url.starts_with("http://") || api_url.starts_with("https://")) { return Err("Smara API URL must start with http:// or https://".to_owned()); }
     let web_url = normalized_web_url(api_url, &settings.web_url);
     if !(web_url.starts_with("http://") || web_url.starts_with("https://")) { return Err("Smara Web URL must start with http:// or https://".to_owned()); }
-    let value = json!({ "api_url": api_url, "web_url": web_url, "workspace": if settings.workspace.trim().is_empty() { "default" } else { settings.workspace.trim() }, "model_profile": if settings.model_profile.trim().is_empty() { "default" } else { settings.model_profile.trim() }, "allowed_roots": settings.allowed_roots, "terminal_allowlist": settings.terminal_allowlist, "browser_domains": settings.browser_domains });
+    // Keep provider profile metadata when the general settings form is saved.
+    // These profiles point at encrypted local credentials and must never be
+    // dropped by an unrelated connection/permissions update.
+    let existing_profiles = read_json(&preferences_path()).and_then(|value| value.get("local_model_profiles").cloned());
+    let mut value = json!({ "api_url": api_url, "web_url": web_url, "workspace": if settings.workspace.trim().is_empty() { "default" } else { settings.workspace.trim() }, "model_profile": if settings.model_profile.trim().is_empty() { "default" } else { settings.model_profile.trim() }, "allowed_roots": settings.allowed_roots, "terminal_allowlist": settings.terminal_allowlist, "browser_domains": settings.browser_domains });
+    value = preserve_local_model_profiles(value, existing_profiles);
     write_json(&preferences_path(), &value)?;
     if let Some(mut state) = read_json(&state_path()) {
         if let Some(object) = state.as_object_mut() {
@@ -665,7 +725,8 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::normalized_web_url;
+    use super::{normalized_web_url, preserve_local_model_profiles};
+    use serde_json::json;
 
     #[test]
     fn repairs_legacy_root_without_dropping_a_dev_port() {
@@ -681,5 +742,20 @@ mod tests {
             normalized_web_url("https://ai.syntarus.com/smara-api", "https://ai.syntarus.com/custom/"),
             "https://ai.syntarus.com/custom/"
         );
+    }
+
+    #[test]
+    fn general_settings_keep_private_model_metadata() {
+        let value = json!({"model_profile": "local:sarvam", "workspace": "default"});
+        let profiles = json!([{"id": "sarvam", "label": "Sarvam"}]);
+        let merged = preserve_local_model_profiles(value, Some(profiles.clone()));
+        assert_eq!(merged.get("local_model_profiles"), Some(&profiles));
+    }
+
+    #[test]
+    fn general_settings_do_not_invent_private_model_metadata() {
+        let value = json!({"model_profile": "default"});
+        let merged = preserve_local_model_profiles(value, None);
+        assert!(merged.get("local_model_profiles").is_none());
     }
 }
