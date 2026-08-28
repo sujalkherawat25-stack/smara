@@ -11,6 +11,7 @@ from smara.desktop_executor import (
     delete_local_credential,
     execute_step,
     local_credential_summaries,
+    resolve_local_credential,
     save_local_credential,
 )
 
@@ -45,6 +46,7 @@ def test_local_credential_vault_injects_only_requested_alias_and_redacts_output(
     save_local_credential("TAVILY_API_KEY", secret, "tavily")
     assert secret not in vault.read_text(encoding="utf-8") if os.name == "nt" else True
     assert local_credential_summaries()[0]["name"] == "TAVILY_API_KEY"
+    assert resolve_local_credential("TAVILY_API_KEY") == secret
     state = {"capabilities": ["local_terminal"], "allowed_roots": [str(tmp_path)], "terminal_allowlist": ["python"]}
     result = json.loads(execute_step({
         "required_capability": "local_terminal",

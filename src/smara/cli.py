@@ -20,7 +20,9 @@ def _default_browser_auth_url(api_url: str, device_code: str) -> str:
     base = api_url.rstrip("/")
     encoded = quote(device_code, safe="")
     if base.endswith("/smara-api"):
-        return f"{base.removesuffix('/smara-api')}/?cli_device={encoded}"
+        # The hosted Smara shell owns the browser approval screen. The legacy
+        # domain root is the Memento shell and does not consume cli_device.
+        return f"{base.removesuffix('/smara-api')}/smara/?cli_device={encoded}"
     return f"{base}/app/?cli_device={encoded}"
 
 

@@ -10,7 +10,7 @@ use std::process::{Command, Stdio};
 use tauri::{AppHandle, Emitter};
 
 const DEFAULT_API_URL: &str = "https://ai.syntarus.com/smara-api";
-const DEFAULT_WEB_URL: &str = "https://ai.syntarus.com";
+const DEFAULT_WEB_URL: &str = "https://ai.syntarus.com/smara/";
 
 #[derive(Debug, Clone, Serialize)]
 struct ConnectionState {
@@ -75,6 +75,29 @@ struct LocalCredentialSummary {
     updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LocalModelProfile {
+    id: String,
+    label: String,
+    provider: String,
+    base_url: String,
+    model: String,
+    credential_name: String,
+    auth_header: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LocalModelProfileInput {
+    id: String,
+    label: String,
+    provider: String,
+    base_url: String,
+    model: String,
+    api_key: String,
+    auth_header: Option<String>,
+}
+
 fn app_data_dir() -> PathBuf {
     if let Some(value) = std::env::var_os("APPDATA") {
         return PathBuf::from(value).join("Smara");
@@ -132,6 +155,30 @@ fn write_json(path: &Path, value: &Value) -> Result<(), String> {
     }
     let serialized = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
     fs::write(path, serialized).map_err(|error| format!("Could not write {}: {error}", path.display()))
+}
+
+fn model_credential_name(id: &str) -> String {
+    let mut value = String::from("SMARA_MODEL_");
+    for character in id.chars() {
+        if character.is_ascii_alphanumeric() { value.push(character.to_ascii_uppercase()); }
+        else if !value.ends_with('_') { value.push('_'); }
+    }
+    value.push_str("_API_KEY");
+    value.chars().take(64).collect()
+}
+
+fn stored_local_model_profiles() -> Vec<LocalModelProfile> {
+    read_json(&preferences_path())
+        .and_then(|value| value.get("local_model_profiles").cloned())
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default()
+}
+
+fn write_local_model_profiles(profiles: &[LocalModelProfile]) -> Result<(), String> {
+    let mut preferences = read_json(&preferences_path()).unwrap_or_else(|| json!({}));
+    let object = preferences.as_object_mut().ok_or_else(|| "Desktop preferences are invalid.".to_owned())?;
+    object.insert("local_model_profiles".to_owned(), serde_json::to_value(profiles).map_err(|error| error.to_string())?);
+    write_json(&preferences_path(), &preferences)
 }
 
 fn string_list(value: Option<&Value>) -> Vec<String> {
@@ -202,6 +249,27 @@ fn cli_token() -> Result<String, String> {
     data.get("access_token").and_then(Value::as_str).filter(|value| !value.is_empty()).map(str::to_owned).ok_or_else(|| "Your Smara sign-in is missing. Open Settings and sign in again.".to_owned())
 }
 
+/// The Smara shell lives at `/smara/` on the hosted domain. Older beta
+/// installs saved the domain root, which opened the legacy Memento shell and
+/// could never show the CLI approval dialog. Keep custom URLs intact while
+/// repairing that one known default during login/settings reads.
+fn normalized_web_url(api_url: &str, configured: &str) -> String {
+    let configured = configured.trim();
+    let fallback = DEFAULT_WEB_URL;
+    let Ok(api) = reqwest::Url::parse(api_url) else { return configured.to_owned(); };
+    let Ok(web) = reqwest::Url::parse(if configured.is_empty() { fallback } else { configured }) else { return configured.to_owned(); };
+    let api_path = api.path().trim_end_matches('/');
+    let same_host = api.scheme() == web.scheme() && api.host_str() == web.host_str() && api.port_or_known_default() == web.port_or_known_default();
+    if api_path == "/smara-api" && same_host && (web.path().is_empty() || web.path() == "/") {
+        let mut repaired = web;
+        repaired.set_path("/smara/");
+        repaired.set_query(None);
+        repaired.set_fragment(None);
+        return repaired.to_string();
+    }
+    configured.to_owned()
+}
+
 #[tauri::command]
 async fn login_cli(api_url: String, web_url: String) -> Result<String, String> {
     let api_url = api_url.trim().trim_end_matches('/').to_owned();
@@ -215,7 +283,8 @@ async fn login_cli(api_url: String, web_url: String) -> Result<String, String> {
     }
     let device: Value = request.json().await.map_err(|error| format!("Smara sign-in returned invalid data: {error}"))?;
     let device_code = device.get("device_code").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| "Smara sign-in did not return a device code.".to_owned())?;
-    let mut auth_url = reqwest::Url::parse(web_url.trim().trim_end_matches('/')).map_err(|_| "Smara Web URL must be a valid HTTP(S) URL.".to_owned())?;
+    let web_url = normalized_web_url(&api_url, &web_url);
+    let mut auth_url = reqwest::Url::parse(web_url.trim()).map_err(|_| "Smara Web URL must be a valid HTTP(S) URL.".to_owned())?;
     if !matches!(auth_url.scheme(), "http" | "https") {
         return Err("Smara Web URL must start with http:// or https://".to_owned());
     }
@@ -252,7 +321,8 @@ fn current_connection() -> ConnectionState {
     let state = read_json(&state_path());
     let preferences = read_json(&preferences_path());
     let api_url = preferences.as_ref().and_then(|value| value.get("api_url")).and_then(Value::as_str).or_else(|| state.as_ref().and_then(|value| value.get("smara_url")).and_then(Value::as_str)).unwrap_or(DEFAULT_API_URL).trim_end_matches('/').to_owned();
-    let web_url = preferences.as_ref().and_then(|value| value.get("web_url")).and_then(Value::as_str).unwrap_or(DEFAULT_WEB_URL).trim_end_matches('/').to_owned();
+    let configured_web_url = preferences.as_ref().and_then(|value| value.get("web_url")).and_then(Value::as_str).unwrap_or(DEFAULT_WEB_URL);
+    let web_url = normalized_web_url(&api_url, configured_web_url);
     let workspace = preferences.as_ref().and_then(|value| value.get("workspace")).and_then(Value::as_str).unwrap_or("default").to_owned();
     let model_profile = preferences.as_ref().and_then(|value| value.get("model_profile")).and_then(Value::as_str).unwrap_or("default").to_owned();
     let pid = read_json(&runtime_path()).and_then(|value| value.get("pid").and_then(Value::as_u64).map(|value| value as u32)).filter(|value| process_alive(*value));
@@ -275,7 +345,7 @@ fn load_connection() -> ConnectionState { current_connection() }
 fn save_settings(settings: LocalSettings) -> Result<ConnectionState, String> {
     let api_url = settings.api_url.trim().trim_end_matches('/');
     if !(api_url.starts_with("http://") || api_url.starts_with("https://")) { return Err("Smara API URL must start with http:// or https://".to_owned()); }
-    let web_url = settings.web_url.trim().trim_end_matches('/');
+    let web_url = normalized_web_url(api_url, &settings.web_url);
     if !(web_url.starts_with("http://") || web_url.starts_with("https://")) { return Err("Smara Web URL must start with http:// or https://".to_owned()); }
     let value = json!({ "api_url": api_url, "web_url": web_url, "workspace": if settings.workspace.trim().is_empty() { "default" } else { settings.workspace.trim() }, "model_profile": if settings.model_profile.trim().is_empty() { "default" } else { settings.model_profile.trim() }, "allowed_roots": settings.allowed_roots, "terminal_allowlist": settings.terminal_allowlist, "browser_domains": settings.browser_domains });
     write_json(&preferences_path(), &value)?;
@@ -337,6 +407,63 @@ fn save_local_credential(name: String, provider: String, secret: String) -> Resu
 fn delete_local_credential(name: String) -> Result<Vec<LocalCredentialSummary>, String> {
     run_executor(vec!["--credential-delete".to_owned(), name])?;
     list_local_credentials()
+}
+
+#[tauri::command]
+fn list_local_model_profiles() -> Vec<LocalModelProfile> { stored_local_model_profiles() }
+
+#[tauri::command]
+fn save_local_model_profile(profile: LocalModelProfileInput) -> Result<Vec<LocalModelProfile>, String> {
+    let id = profile.id.trim().to_ascii_lowercase();
+    if id.is_empty() || id.len() > 48 || !id.chars().all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_') {
+        return Err("Use a short provider id with letters, numbers, hyphens, or underscores.".to_owned());
+    }
+    let label = profile.label.trim();
+    if label.is_empty() || label.len() > 80 { return Err("Enter a provider name (up to 80 characters).".to_owned()); }
+    let provider = profile.provider.trim().to_ascii_lowercase();
+    if provider.is_empty() || provider.len() > 40 { return Err("Enter a provider name (up to 40 characters).".to_owned()); }
+    let base_url = profile.base_url.trim().trim_end_matches('/');
+    let parsed = reqwest::Url::parse(base_url).map_err(|_| "Endpoint must be a valid http(s) URL.".to_owned())?;
+    if !matches!(parsed.scheme(), "http" | "https") { return Err("Endpoint must start with http:// or https://".to_owned()); }
+    let model = profile.model.trim();
+    if model.is_empty() || model.len() > 160 { return Err("Enter a model name (up to 160 characters).".to_owned()); }
+    if profile.api_key.trim().is_empty() || profile.api_key.len() > 16_384 { return Err("Enter an API key before saving.".to_owned()); }
+    let auth_header = profile.auth_header.as_deref().unwrap_or("authorization").trim().to_ascii_lowercase();
+    if auth_header != "authorization" && auth_header != "api-subscription-key" { return Err("Choose Bearer authorization or api-subscription-key.".to_owned()); }
+    let credential_name = model_credential_name(&id);
+    let credential_provider = format!("model:{provider}");
+    run_executor_with_input(vec!["--credential-set".to_owned(), credential_name.clone(), "--credential-provider".to_owned(), credential_provider], profile.api_key.trim())?;
+    let mut profiles = stored_local_model_profiles();
+    profiles.retain(|item| item.id != id);
+    profiles.push(LocalModelProfile { id, label: label.to_owned(), provider, base_url: base_url.to_owned(), model: model.to_owned(), credential_name, auth_header, updated_at: chrono_like_now() });
+    profiles.sort_by(|left, right| left.label.to_lowercase().cmp(&right.label.to_lowercase()));
+    write_local_model_profiles(&profiles)?;
+    Ok(profiles)
+}
+
+#[tauri::command]
+fn delete_local_model_profile(id: String) -> Result<Vec<LocalModelProfile>, String> {
+    let normalized = id.trim().to_ascii_lowercase();
+    let mut profiles = stored_local_model_profiles();
+    if let Some(profile) = profiles.iter().find(|item| item.id == normalized) {
+        let _ = run_executor(vec!["--credential-delete".to_owned(), profile.credential_name.clone()]);
+    }
+    profiles.retain(|item| item.id != normalized);
+    write_local_model_profiles(&profiles)?;
+    Ok(profiles)
+}
+
+fn chrono_like_now() -> String {
+    // Keep the native companion dependency-light; RFC3339 precision is not
+    // needed for the UI and a monotonic-enough millisecond value is stable.
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|value| value.as_millis().to_string()).unwrap_or_else(|_| "0".to_owned())
+}
+
+fn resolve_local_secret(name: &str) -> Result<String, String> {
+    let value = run_executor(vec!["--credential-get".to_owned(), name.to_owned()])?;
+    if value.is_empty() { return Err("The local model credential is empty; save it again.".to_owned()); }
+    Ok(value)
 }
 
 #[tauri::command]
@@ -418,9 +545,78 @@ async fn load_tasks() -> Result<Vec<Value>, String> {
     Ok(value.as_array().cloned().or_else(|| value.get("tasks").and_then(Value::as_array).cloned()).unwrap_or_default())
 }
 
+fn local_chat_endpoint(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    if trimmed.ends_with("/chat/completions") { trimmed.to_owned() } else { format!("{trimmed}/chat/completions") }
+}
+
+fn local_delta_text(value: &Value) -> Option<String> {
+    value.get("choices")?.as_array()?.first()?.get("delta").and_then(|delta| delta.get("content")).and_then(Value::as_str).map(str::to_owned)
+        .or_else(|| value.get("choices")?.as_array()?.first()?.get("message").and_then(|message| message.get("content")).and_then(Value::as_str).map(str::to_owned))
+}
+
+async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModelProfile) -> Result<(), String> {
+    let secret = resolve_local_secret(&profile.credential_name)?;
+    let endpoint = local_chat_endpoint(&profile.base_url);
+    let payload = json!({
+        "model": profile.model,
+        "messages": [
+            {"role": "system", "content": "You are Smara running privately on the user's desktop. Be concise, useful, and clear about limits. Do not claim to have run tools or changed files."},
+            {"role": "user", "content": args.message},
+        ],
+        "stream": true,
+        "max_tokens": 2048,
+        "temperature": 0.2,
+    });
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(300)).build().map_err(|error| format!("Could not prepare local chat: {error}"))?;
+    let mut request = client.post(endpoint).header("Accept", "text/event-stream").json(&payload);
+    if profile.auth_header == "api-subscription-key" { request = request.header("api-subscription-key", &secret); }
+    else { request = request.bearer_auth(&secret); }
+    let response = request.send().await.map_err(|error| format!("Could not reach the local {0} provider: {error}", profile.label))?;
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED || response.status() == reqwest::StatusCode::FORBIDDEN { return Err(format!("{0} rejected the local API key. Update this provider in Settings.", profile.label)); }
+    if !response.status().is_success() { return Err(format!("Local {} provider returned HTTP {}. Check its endpoint and model.", profile.label, response.status())); }
+    app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"})).map_err(|error| error.to_string())?;
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let mut emitted = false;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| format!("Local provider stream disconnected: {error}"))?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(index) = buffer.find('\n') {
+            let line = buffer[..index].trim_end_matches('\r').to_owned();
+            buffer.drain(..=index);
+            let Some(data) = line.strip_prefix("data:").map(str::trim_start) else { continue; };
+            if data == "[DONE]" { continue; }
+            if let Ok(value) = serde_json::from_str::<Value>(data) {
+                if let Some(text) = local_delta_text(&value).filter(|text| !text.is_empty()) {
+                    emitted = true;
+                    app.emit("smara-chat-event", json!({"type": "token", "text": text})).map_err(|error| error.to_string())?;
+                }
+            }
+        }
+    }
+    // A few OpenAI-compatible gateways ignore stream=true and return one JSON
+    // object. Accept that response without making users retry their message.
+    if !emitted && !buffer.trim().is_empty() {
+        let raw = buffer.trim().strip_prefix("data:").map(str::trim_start).unwrap_or(buffer.trim());
+        if let Ok(value) = serde_json::from_str::<Value>(raw) {
+            if let Some(text) = local_delta_text(&value).filter(|text| !text.is_empty()) {
+                app.emit("smara-chat-event", json!({"type": "token", "text": text})).map_err(|error| error.to_string())?;
+            }
+        }
+    }
+    app.emit("smara-chat-event", json!({"type": "done", "tools_used": 0})).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 async fn stream_chat(app: AppHandle, args: ChatArgs) -> Result<(), String> {
     if args.message.trim().is_empty() { return Err("Message cannot be empty.".to_owned()); }
+    if let Some(profile_id) = args.model_profile.strip_prefix("local:") {
+        let profiles = stored_local_model_profiles();
+        let profile = profiles.iter().find(|profile| profile.id == profile_id).ok_or_else(|| "This local model profile no longer exists. Choose another model in Settings.".to_owned())?;
+        return stream_local_chat(app, &args, profile).await;
+    }
     let token = cli_token()?;
     let mut payload = json!({ "message": args.message, "workspace_id": if args.workspace.trim().is_empty() { "default" } else { args.workspace.trim() }, "conversation_id": args.conversation_id });
     if !args.model_profile.trim().is_empty() && args.model_profile.trim() != "default" { payload["model_profile"] = Value::String(args.model_profile.trim().to_owned()); }
@@ -462,7 +658,28 @@ fn open_web() -> Result<(), String> { open::that(current_connection().web_url).m
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, stream_chat, open_web, list_local_credentials, save_local_credential, delete_local_credential])
+        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, stream_chat, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_model_profiles, save_local_model_profile, delete_local_model_profile])
         .run(tauri::generate_context!())
         .expect("error while running Smara Desktop");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalized_web_url;
+
+    #[test]
+    fn repairs_legacy_root_without_dropping_a_dev_port() {
+        assert_eq!(
+            normalized_web_url("http://localhost:3000/smara-api", "http://localhost:3000/"),
+            "http://localhost:3000/smara/"
+        );
+    }
+
+    #[test]
+    fn leaves_custom_web_paths_untouched() {
+        assert_eq!(
+            normalized_web_url("https://ai.syntarus.com/smara-api", "https://ai.syntarus.com/custom/"),
+            "https://ai.syntarus.com/custom/"
+        );
+    }
 }

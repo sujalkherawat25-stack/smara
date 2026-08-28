@@ -30,6 +30,7 @@ export default function SignInScreen() {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
+  const cliApprovalPending = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("cli_device");
 
   // Fetch public auth configuration at runtime. This endpoint is deliberately
   // unauthenticated and contains no credentials; email OTP remains available
@@ -92,7 +93,7 @@ export default function SignInScreen() {
     <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col items-center justify-center px-6">
       <div className="flex flex-col items-center gap-6 max-w-md text-center">
         <SmaraLogo size={64} animate />
-        <div className="space-y-2"><h1 className="text-3xl font-bold font-display">Welcome to Smara</h1><p className="text-gray-400 text-sm">Sign in to keep your conversations, memories, and ideas connected across devices.</p></div>
+        <div className="space-y-2"><h1 className="text-3xl font-bold font-display">Welcome to Smara</h1><p className="text-gray-400 text-sm">Sign in to keep your conversations, memories, and ideas connected across devices.</p>{cliApprovalPending && <p className="text-emerald-300 text-xs mt-3">After sign-in, Smara will show a confirmation to connect your desktop.</p>}</div>
         {clientId && <div ref={buttonRef} className={submitting ? "opacity-50 pointer-events-none" : ""} />}
         {googleUnavailable && <p className="text-amber-400 text-xs">Google sign-in is not configured yet. You can still use email sign-in.</p>}
         <div className="w-full max-w-sm border-t border-gray-800 pt-5 mt-2">

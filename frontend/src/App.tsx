@@ -13,6 +13,7 @@ import { useThemeStore } from "@/stores/themeStore";
 import { useViewStore } from "@/stores/viewStore";
 import { useChatStore } from "@/stores/chatStore";
 import { useAuthStore } from "@/stores/authStore";
+import { smaraFetch, smaraModeEnabled } from "@/lib/smaraGateway";
 import { Sun, Moon, ArrowLeft, Clock, Plus, Settings, LogOut, ListChecks } from "lucide-react";
 
 /**
@@ -167,6 +168,12 @@ function AuthenticatedApp() {
     >
       {/* Toast/notification stack (reminders, scheduled-task results) */}
       <Notifications />
+
+      {/* A desktop/CLI login opens this same authenticated Smara shell with a
+          short-lived cli_device query parameter. Keep approval in the shell
+          so the user never has to type a token or visit the legacy Memento
+          root. */}
+      <CliDeviceApproval />
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <header
@@ -423,6 +430,66 @@ function AuthenticatedApp() {
             should be able to keep chatting with the document open). */}
         <PdfPreviewPanel />
       </div>
+    </div>
+  );
+}
+
+function CliDeviceApproval() {
+  const [deviceCode, setDeviceCode] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [finished, setFinished] = useState(false);
+
+  useEffect(() => {
+    if (!smaraModeEnabled()) return;
+    const code = new URLSearchParams(window.location.search).get("cli_device");
+    if (code) setDeviceCode(code);
+  }, []);
+
+  function close() {
+    const params = new URLSearchParams(window.location.search);
+    params.delete("cli_device");
+    const suffix = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${suffix ? `?${suffix}` : ""}${window.location.hash}`);
+    setDeviceCode(null);
+  }
+
+  async function approve() {
+    if (!deviceCode || busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await smaraFetch("/v1/cli/device/authorize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_code: deviceCode }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({})) as { detail?: string };
+        throw new Error(payload.detail || `Approval failed (${response.status})`);
+      }
+      setFinished(true);
+      setMessage("Desktop approved. Return to Smara Desktop; it will finish signing in automatically.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Approval could not be completed. Try Sign in again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!deviceCode) return null;
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(2,6,23,.72)", backdropFilter: "blur(8px)" }}>
+      <section className="w-full max-w-md rounded-2xl p-6 shadow-2xl" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }} role="dialog" aria-modal="true" aria-labelledby="cli-approval-title">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>⌁</div>
+          <div className="min-w-0 flex-1"><h2 id="cli-approval-title" className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>{finished ? "Desktop approved" : "Approve Smara Desktop"}</h2><p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>{finished ? "This window can be closed safely." : "A desktop is asking to connect to your Smara account. Approve only if you started this sign-in."}</p></div>
+          <button type="button" onClick={close} className="p-1 text-lg" style={{ color: "var(--text-muted)" }} aria-label="Close">×</button>
+        </div>
+        <div className="mt-5 rounded-xl px-4 py-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--border-dim)" }}><p className="text-[10px] uppercase tracking-[.16em]" style={{ color: "var(--text-muted)" }}>Request</p><p className="text-sm mt-1 font-medium" style={{ color: "var(--text-secondary)" }}>Smara Desktop · one-time browser approval</p></div>
+        {message && <p className={`mt-4 text-sm ${finished ? "text-emerald-400" : "text-rose-400"}`} role="status">{message}</p>}
+        <div className="flex justify-end gap-2 mt-6"><button type="button" onClick={close} className="px-4 py-2 rounded-lg text-sm" style={{ border: "1px solid var(--border-dim)", color: "var(--text-secondary)" }}>{finished ? "Close" : "Cancel"}</button>{!finished && <button type="button" onClick={() => void approve()} disabled={busy} className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60" style={{ background: "var(--accent)", color: "var(--bg-base)" }}>{busy ? "Approving…" : "Approve desktop"}</button>}</div>
+      </section>
     </div>
   );
 }

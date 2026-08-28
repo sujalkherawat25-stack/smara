@@ -25,6 +25,17 @@ export interface LocalCredentialSummary {
   updated_at: string;
 }
 
+export interface LocalModelProfile {
+  id: string;
+  label: string;
+  provider: string;
+  base_url: string;
+  model: string;
+  credential_name: string;
+  auth_header: string;
+  updated_at: string;
+}
+
 export interface RemoteStatus {
   ok: boolean;
   api_url: string;

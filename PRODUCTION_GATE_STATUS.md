@@ -133,6 +133,14 @@ remain in force and they must be reopened before a later production promotion:
 - Settings now exposes hosted Automatic/Grok/Sarvam profiles as selectable
   provider cards. Only the profile name crosses the desktop/hosted boundary;
   provider keys remain operator-managed on the hosted service.
+- Desktop sign-in now repairs legacy installs that saved the domain root and
+  opens the real Smara approval shell at `/smara/?cli_device=...`; the native
+  app polls the same request and stores the resulting device token locally.
+- Settings now includes an **Add provider** dialog for private Sarvam, Grok,
+  and custom OpenAI-compatible chat endpoints. The Sarvam preset uses the
+  documented chat endpoint/model/header. Keys are encrypted to the Windows
+  account, and selecting a private profile enables direct desktop chat without
+  requiring hosted sign-in; hosted tasks remain hosted and approval-gated.
 - Tavily, GitHub, and custom local credentials have visible configured/not
   configured status. Local secrets remain encrypted on Windows and are only
   injected into an approved process through the existing executor contract.

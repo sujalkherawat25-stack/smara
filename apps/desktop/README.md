@@ -24,8 +24,8 @@ The desktop shell finds the Python executor at
 explicit executable instead with `$env:SMARA_DESKTOP_EXECUTABLE`.
 
 Before chat/task history can load, choose **Sign in** in the app's Settings.
-The app opens the hosted Smara approval page and stores the short-lived device
-token in the local Smara profile. For headless/CLI workflows, the equivalent
+The app opens the hosted Smara approval page at `/smara/` and stores the
+short-lived device token in the local Smara profile. For headless/CLI workflows, the equivalent
 command remains:
 
 ```powershell
@@ -61,7 +61,19 @@ key. The app forwards only the selected profile name to hosted Smara. The
 settings screen also shows whether each local tool credential is configured and
 how many file, terminal, and browser allowlist entries are currently enabled.
 The Web URL is configured separately from the reverse-proxied API URL so sign
-in opens `https://ai.syntarus.com/?cli_device=...`, never the API fallback UI.
+in opens `https://ai.syntarus.com/smara/?cli_device=...`, never the API fallback UI.
+
+## Private desktop model providers
+
+Settings → Model provider → **Add provider** can store a Sarvam, Grok, or
+custom OpenAI-compatible endpoint for direct chat from this PC. Sarvam is
+pre-filled with `https://api.sarvam.ai/v1/chat/completions`, model
+`sarvam-105b`, and the `api-subscription-key` header; Grok is pre-filled with
+the xAI endpoint and Bearer authentication. The key is encrypted in the
+Windows-account credential vault and is read only by the native desktop when a
+private chat is started. It never travels to Smara's hosted API. Hosted task
+planning, research, approvals, and task history continue to use the hosted
+profile, so choosing a private model is clearly a chat-only local mode.
 
 ## Personal local tool credentials
 

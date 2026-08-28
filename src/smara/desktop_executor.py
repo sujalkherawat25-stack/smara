@@ -161,6 +161,23 @@ def local_credential_summaries(path: Path | None = None) -> list[dict[str, str]]
     ]
 
 
+def resolve_local_credential(name: str, path: Path | None = None) -> str:
+    """Resolve one protected value for the trusted desktop parent process.
+
+    This command is intentionally separate from ``--credential-list``: the
+    normal executor never prints secret values, while the native desktop may
+    need one value in memory for a direct local-model request. The value is
+    written only to the parent's pipe and is never logged or returned to the
+    hosted service.
+    """
+    normalized = name.strip().upper()
+    records = _credential_records(path)
+    protected = records.get(normalized, {}).get("protected")
+    if not _CREDENTIAL_NAME.fullmatch(normalized) or not isinstance(protected, str) or not protected:
+        raise RuntimeError(f"Local credential '{normalized}' is not configured on this PC.")
+    return _unprotect_windows(protected)
+
+
 def _resolved_credentials(names: object, path: Path | None = None) -> dict[str, str]:
     if names is None:
         return {}
@@ -513,6 +530,7 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--credential-list", action="store_true", help="list local credential names without values")
     parser.add_argument("--credential-set", help="save a local credential from stdin")
     parser.add_argument("--credential-provider", default="custom", help="provider label for --credential-set")
+    parser.add_argument("--credential-get", help=argparse.SUPPRESS)
     parser.add_argument("--credential-delete", help="remove a local credential")
     parser.add_argument("--log", type=Path, default=default_log_path(), help="rotating desktop log path")
     args = parser.parse_args(argv)
@@ -529,6 +547,10 @@ def _main(argv: list[str] | None = None) -> int:
         return 0
     if args.credential_list:
         print(json.dumps(local_credential_summaries(), ensure_ascii=False))
+        return 0
+    if args.credential_get:
+        # Parent-process IPC only; do not send this through the rotating log.
+        print(resolve_local_credential(args.credential_get), end="")
         return 0
     if args.credential_set:
         save_local_credential(args.credential_set, sys.stdin.read().rstrip("\r\n"), args.credential_provider)

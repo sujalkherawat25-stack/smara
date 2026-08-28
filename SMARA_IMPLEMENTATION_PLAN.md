@@ -182,6 +182,13 @@ production promotion, while the current beta keeps fail-closed behavior.
 - Desktop hosted connection is split into explicit Web URL and API URL
   settings. Sign-in opens the configured Smara Web origin with the one-time
   device code; it no longer sends users to the API's raw fallback page.
+- Desktop model settings now support two safe modes: hosted Automatic/Grok/
+  Sarvam profiles (only a profile name crosses to the VM), and private
+  Sarvam/Grok/custom OpenAI-compatible profiles. Private keys are encrypted
+  in the Windows-account vault, never uploaded, and can be used for direct
+  desktop chat even when hosted sign-in is unavailable. Saving a private
+  profile selects and persists it immediately; hosted task planning remains
+  clearly separate.
 - Desktop model selection supports operator-configured `default`, `grok`, and
   `sarvam` profiles. Only the profile name travels in requests; provider keys
   stay server-side and are never put in the desktop bundle.
