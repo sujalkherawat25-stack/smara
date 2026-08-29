@@ -134,7 +134,7 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
   }
 
   return (
-    <div className="flex flex-col gap-5 max-w-2xl">
+    <div className="w-full max-w-6xl mx-auto grid grid-cols-1 xl:grid-cols-2 gap-5 pb-6">
       <section className="rounded-xl p-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
         <div className="flex items-center gap-3">
           <Server size={18} style={{ color: "var(--accent)" }} />
@@ -176,7 +176,7 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
         </p>}
       </section>
 
-      <section className="rounded-xl p-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
+      <section className="rounded-xl p-4 xl:col-span-2" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Laptop size={18} style={{ color: "var(--accent2)" }} />
@@ -215,7 +215,7 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
         {onOpenWork && <button onClick={onOpenWork} className="mt-3 px-3 py-2 rounded-md text-[12px] font-medium" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>Open durable work</button>}
       </section>
 
-      <section className="rounded-xl p-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
+      <section className="rounded-xl p-4 xl:col-span-2" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
         <h2 className="text-[14px] font-semibold" style={{ color: "var(--text-primary)" }}>Account</h2>
         <p className="text-[12px] mt-1" style={{ color: "var(--text-muted)" }}>{account?.display_name || account?.email || "Signed-in Smara account"}</p>
         <div className="flex flex-wrap items-center gap-2 mt-4">
@@ -224,7 +224,7 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
         </div>
       </section>
 
-      {error && <p className="flex items-center gap-1.5 text-[12px]" style={{ color: "#f87171" }}><CircleAlert size={14} />{error}</p>}
+      {error && <p className="xl:col-span-2 flex items-center gap-1.5 text-[12px]" style={{ color: "#f87171" }}><CircleAlert size={14} />{error}</p>}
     </div>
   );
 }

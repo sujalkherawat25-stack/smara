@@ -14,7 +14,7 @@ import { useViewStore } from "@/stores/viewStore";
 import { useChatStore } from "@/stores/chatStore";
 import { useAuthStore } from "@/stores/authStore";
 import { smaraFetch, smaraModeEnabled } from "@/lib/smaraGateway";
-import { Sun, Moon, ArrowLeft, Clock, Plus, Settings, LogOut, ListChecks } from "lucide-react";
+import { Sun, Moon, ArrowLeft, Menu, Plus, Settings, LogOut, ListChecks } from "lucide-react";
 
 /**
  * App — top-level auth gate.
@@ -207,7 +207,7 @@ function AuthenticatedApp() {
             onClick={() => setSidebarOpen((o) => !o)}
             title={sidebarOpen ? "Close sidebar" : "Open sidebar"}
           >
-            <Clock size={15} />
+            <Menu size={16} />
           </IconButton>
 
           {/* Divider — desktop only */}
@@ -333,11 +333,13 @@ function AuthenticatedApp() {
                   icon={<Plus size={15} />}
                   label="New chat"
                   shortcut="⌘ N"
+                  active={view === "chat"}
                   onClick={() => { newChat(); setSidebarOpen(false); }}
                 />
                 <SidebarNavRow
                   icon={<ListChecks size={15} />}
                   label="Work"
+                  active={view === "work"}
                   onClick={() => { setView("work"); setSidebarOpen(false); }}
                 />
               </div>
@@ -615,7 +617,7 @@ function PanelView({
       <div
         className="flex flex-col w-full h-full md:rounded-2xl overflow-hidden pointer-events-auto"
         style={{
-          maxWidth: narrow ? "700px" : "1080px",
+          maxWidth: narrow ? "700px" : "1240px",
           background: "var(--bg-surface)",
           // No border on mobile (full-bleed); restore on desktop
           border: undefined,

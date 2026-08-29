@@ -285,7 +285,7 @@ function LegacySettingsPanel({ onOpenControl }: { onOpenControl?: () => void }) 
 
         {/* Scrollable section content */}
         <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-          <div className="px-5 md:px-8 py-5 md:py-7 max-w-3xl">
+          <div className="w-full max-w-6xl mx-auto px-5 md:px-8 py-5 md:py-7">
             <SectionHeader selected={selected} />
             <div className="mt-5">
               <SectionContent selected={selected} onOpenControl={onOpenControl} />

@@ -214,7 +214,7 @@ export default function ChatWindow() {
 
       {/* ── Messages ─────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto scrollbar-thin">
-        <div className="mx-auto w-full max-w-2xl px-4 py-8 space-y-6">
+        <div className="mx-auto w-full max-w-3xl px-4 py-8 space-y-6">
 
           {empty && <EmptyState onPick={(p) => { void send(p); }} />}
 
@@ -253,7 +253,7 @@ export default function ChatWindow() {
           </div>
         )}
 
-        <div className="mx-auto w-full max-w-2xl">
+        <div className="mx-auto w-full max-w-3xl">
           {/* Hidden file input (browse) */}
           <input
             ref={fileInputRef}
@@ -528,6 +528,12 @@ function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
     return <OnboardingCard onPick={onPick} />;
   }
 
+  const starterPrompts = [
+    "Catch me up on what matters today",
+    "Research the latest AI news with sources",
+    "Help me turn an idea into a clear plan",
+  ];
+
   return (
     <div className="flex flex-col items-center justify-center text-center pt-12 md:pt-20 select-none animate-fade-in">
       {/* Logo with soft halo */}
@@ -558,7 +564,36 @@ function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
         className="mt-2 text-[12px] md:text-[13px] tracking-wide"
         style={{ color: "var(--accent)" }}
       >
+        Your private copilot for memory, research, and getting things done.
       </p>
+
+      <div className="mt-7 flex flex-wrap justify-center gap-2 max-w-xl" aria-label="Starter prompts">
+        {starterPrompts.map((prompt) => (
+          <button
+            key={prompt}
+            type="button"
+            onClick={() => onPick(prompt)}
+            className="rounded-full px-3.5 py-2 text-[11px] transition-all duration-150 hover:-translate-y-0.5"
+            style={{
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-default)",
+              color: "var(--text-secondary)",
+            }}
+            onMouseEnter={(event) => {
+              event.currentTarget.style.borderColor = "var(--border-accent)";
+              event.currentTarget.style.color = "var(--accent)";
+              event.currentTarget.style.background = "var(--accent-soft)";
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.borderColor = "var(--border-default)";
+              event.currentTarget.style.color = "var(--text-secondary)";
+              event.currentTarget.style.background = "var(--bg-surface)";
+            }}
+          >
+            {prompt}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
