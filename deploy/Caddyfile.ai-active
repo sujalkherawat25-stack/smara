@@ -47,9 +47,38 @@ ai.syntarus.com {
     handle_path /smara-api/* {
         reverse_proxy 127.0.0.1:8090 {
             header_up X-Real-IP {remote_host}
+            header_down X-Syntarus-Service "smara-agent"
             flush_interval -1
             transport http {
                 read_timeout  1h
+                write_timeout 1h
+            }
+        }
+    }
+
+    # Canonical Syntarus Memory API prefix. Its edge namespace is separate
+    # from Smara and is rewritten only to the legacy MemoryOS backend.
+    @syntarus_api_base path /syntarus-api
+    handle @syntarus_api_base {
+        redir /syntarus-api/ 308
+    }
+    @syntarus_api_health path /syntarus-api/health
+    handle @syntarus_api_health {
+        uri replace /syntarus-api/health /health
+        reverse_proxy 127.0.0.1:8080 {
+            header_up X-Real-IP {remote_host}
+            header_down X-Syntarus-Service "memory-api"
+        }
+    }
+    @syntarus_api path /syntarus-api/*
+    handle @syntarus_api {
+        uri replace /syntarus-api /v1
+        reverse_proxy 127.0.0.1:8080 {
+            header_up X-Real-IP {remote_host}
+            header_down X-Syntarus-Service "memory-api"
+            flush_interval -1
+            transport http {
+                read_timeout 1h
                 write_timeout 1h
             }
         }
@@ -67,11 +96,28 @@ ai.syntarus.com {
         respond "Smara sign-in is available at https://ai.syntarus.com/" 410
     }
 
+    # Transitional alias for developer bundles cached before the explicit
+    # /syntarus-api namespace shipped. Keep it pointed only at Syntarus.
+    @developer_portal_auth_legacy path /v1/portal-auth/*
+    handle @developer_portal_auth_legacy {
+        uri replace /v1/portal-auth /v1
+        reverse_proxy 127.0.0.1:8080 {
+            header_up X-Real-IP {remote_host}
+            header_down X-Syntarus-Service "memory-api"
+            flush_interval -1
+            transport http {
+                read_timeout 1h
+                write_timeout 1h
+            }
+        }
+    }
+
     # MemoryOS remains available as the core memory/public API. This fallback
     # does not expose the retired Memento namespace above.
     handle /v1/* {
         reverse_proxy 127.0.0.1:8080 {
             header_up X-Real-IP {remote_host}
+            header_down X-Syntarus-Service "memory-api"
             flush_interval -1
             transport http {
                 read_timeout 1h
@@ -83,6 +129,7 @@ ai.syntarus.com {
     handle {
         reverse_proxy 127.0.0.1:8081 {
             header_up X-Real-IP {remote_host}
+            header_down X-Syntarus-Service "smara-agent"
             flush_interval -1
             transport http {
                 read_timeout 1h
