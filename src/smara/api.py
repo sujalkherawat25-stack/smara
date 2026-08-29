@@ -18,7 +18,7 @@ import httpx
 import jwt
 
 from .config import settings
-from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, CliDeviceAuthorize, CliPairingExchange, CliPairingStart, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, ScheduleCreate, ScheduleView, TaskCreate, TaskView, ToolInvokeRequest
+from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, CliDeviceAuthorize, CliPairingExchange, CliPairingStart, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, ExecutorProgress, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, ScheduleCreate, ScheduleView, TaskCreate, TaskView, ToolInvokeRequest
 from .store import open_task_store
 from .agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime
 from . import agent_events, llm_errors
@@ -667,6 +667,15 @@ async def heartbeat_executor_step(step_id: str, identity: tuple[str, str] = Depe
     """Refresh only the lease owned by this paired desktop executor."""
     try:
         return store.heartbeat_executor_step(*identity, step_id)
+    except KeyError:
+        raise HTTPException(409, "Step is not leased to this executor.")
+
+@app.post("/v1/executors/steps/{step_id}/progress")
+async def progress_executor_step(step_id: str, body: ExecutorProgress, identity: tuple[str, str] = Depends(executor_identity)):
+    """Record a bounded local status line without uploading command output."""
+    try:
+        store.append_executor_progress(*identity, step_id, body.message)
+        return {"ok": True}
     except KeyError:
         raise HTTPException(409, "Step is not leased to this executor.")
 

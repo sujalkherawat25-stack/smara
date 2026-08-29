@@ -1021,13 +1021,41 @@ class TaskStore:
             artifact_name=f"{step_id}.json",
         )
 
+    def append_executor_progress(self, executor_id: str, token: str, step_id: str, message: str) -> None:
+        """Append a safe status update for the executor's current lease.
+
+        The executor intentionally sends status only, never terminal output.
+        That keeps the durable hosted ledger useful without turning it into a
+        second copy of arbitrary local files or credentials.
+        """
+        self.executor(executor_id, token)
+        safe_message = " ".join(str(message).split())[:500]
+        if not safe_message:
+            raise ValueError("Executor progress must contain a message.")
+        with self._connect() as c:
+            row = c.execute(
+                "SELECT task_id FROM task_steps WHERE id=? AND lease_owner=? AND status='running'",
+                (step_id, executor_id),
+            ).fetchone()
+            if not row:
+                raise KeyError("lease")
+            payload = json.dumps({"executor_id": executor_id, "message": safe_message}, ensure_ascii=False)
+            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", row["task_id"], "executor.progress", payload, _now()))
+
     def fail_executor_step(self, executor_id: str, token: str, step_id: str, error: str) -> str:
         executor = self.executor(executor_id, token)
         with self._connect() as c:
-            row = c.execute("SELECT task_id,required_capability FROM task_steps WHERE id=? AND lease_owner=? AND status='running'", (step_id, executor_id)).fetchone()
+            row = c.execute("SELECT s.task_id,s.task_run_id,s.required_capability,t.cancel_requested FROM task_steps s JOIN tasks t ON t.id=s.task_id WHERE s.id=? AND s.lease_owner=? AND s.status='running'", (step_id, executor_id)).fetchone()
             if not row:
                 raise KeyError("lease")
             c.execute("UPDATE executor_leases SET completed_at=? WHERE step_id=? AND executor_id=?", (_now(), step_id, executor_id))
+            if row["cancel_requested"]:
+                now = _now()
+                c.execute("UPDATE task_steps SET status='cancelled',lease_owner=NULL,lease_expires_at=NULL,last_error=? WHERE id=?", (error[:2000], step_id))
+                c.execute("UPDATE task_runs SET status='cancelled' WHERE id=?", (row["task_run_id"],))
+                c.execute("UPDATE tasks SET status='cancelled',updated_at=? WHERE id=?", (now, row["task_id"]))
+                c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", row["task_id"], "task.cancelled", '{"source":"desktop_executor"}', now))
+                return "cancelled"
         # Reads can be safely retried. Terminal commands, browser opens, and
         # writes may have happened before a disconnect, so they fail closed
         # into the dead-letter queue instead of running twice.

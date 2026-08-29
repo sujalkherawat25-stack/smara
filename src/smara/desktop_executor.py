@@ -11,14 +11,17 @@ import argparse
 import base64
 import contextlib
 import hashlib
+from html.parser import HTMLParser
 import json
 import logging
 import os
+import queue
 import re
 import shlex
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import webbrowser
 from dataclasses import dataclass, field
@@ -33,11 +36,59 @@ import httpx
 MAX_FILE_BYTES = 256 * 1024
 MAX_OUTPUT_CHARS = 32_000
 MAX_COMMAND_SECONDS = 60
+MAX_BROWSER_INSPECT_BYTES = 1_000_000
+MAX_BROWSER_TEXT_CHARS = 16_000
+MAX_WORKSPACE_TREE_ENTRIES = 500
+MAX_WORKSPACE_TREE_DEPTH = 6
+MAX_WORKSPACE_SEARCH_FILES = 100
+MAX_WORKSPACE_SEARCH_MATCHES = 200
+MAX_WORKSPACE_QUERY_CHARS = 240
+MAX_WORKSPACE_FILENAME_MATCHES = 200
+MAX_GIT_LINES = 100
+MAX_GIT_COMMITS = 20
 DEFAULT_CAPABILITIES = ["local_file_read"]
 STATE_ENV = "SMARA_DESKTOP_STATE"
 CREDENTIALS_ENV = "SMARA_DESKTOP_CREDENTIALS"
 LOG = logging.getLogger("smara.desktop")
 _CREDENTIAL_NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+
+
+class ExecutionCancelled(RuntimeError):
+    """A local action stopped after its hosted task was cancelled."""
+
+
+class _PageTextExtractor(HTMLParser):
+    """Small dependency-free text extractor for the local inspection mode."""
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.title = ""
+        self._in_title = False
+        self._ignored_depth = 0
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:  # type: ignore[override]
+        lowered = tag.lower()
+        if lowered == "title":
+            self._in_title = True
+        if lowered in {"script", "style", "noscript", "svg"}:
+            self._ignored_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        lowered = tag.lower()
+        if lowered == "title":
+            self._in_title = False
+        if lowered in {"script", "style", "noscript", "svg"} and self._ignored_depth:
+            self._ignored_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._ignored_depth:
+            return
+        normalized = " ".join(data.split())
+        if not normalized:
+            return
+        if self._in_title:
+            self.title = f"{self.title} {normalized}".strip()[:500]
+        self.parts.append(normalized)
 
 
 def default_state_path() -> Path:
@@ -361,6 +412,213 @@ def _read_file(payload: dict, roots: list[Path]) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
+def _bounded_int(value: object, *, default: int, minimum: int, maximum: int, field: str) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum or value > maximum:
+        raise RuntimeError(f"{field} must be an integer between {minimum} and {maximum}.")
+    return value
+
+
+def _workspace_root(payload: dict, roots: list[Path]) -> Path:
+    requested = payload.get("path")
+    if requested is None:
+        return roots[0]
+    target = _target(requested, roots, must_exist=True)
+    if not target.is_dir():
+        raise RuntimeError("Workspace inspection path must be an approved directory.")
+    return target
+
+
+def _relative_path(path: Path, root: Path) -> str:
+    return path.relative_to(root).as_posix() or "."
+
+
+def _list_workspace(payload: dict, roots: list[Path]) -> str:
+    root = _workspace_root(payload, roots)
+    max_depth = _bounded_int(
+        payload.get("max_depth"), default=3, minimum=0, maximum=MAX_WORKSPACE_TREE_DEPTH, field="max_depth"
+    )
+    max_entries = _bounded_int(
+        payload.get("max_entries"), default=200, minimum=1, maximum=MAX_WORKSPACE_TREE_ENTRIES, field="max_entries"
+    )
+    entries: list[dict[str, object]] = []
+    truncated = False
+    try:
+        for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+            current_path = Path(current)
+            relative = current_path.relative_to(root)
+            depth = len(relative.parts)
+            directories[:] = sorted(
+                item for item in directories
+                if not (current_path / item).is_symlink()
+            )
+            if depth >= max_depth:
+                directories[:] = []
+            for directory in directories:
+                if len(entries) >= max_entries:
+                    truncated = True
+                    break
+                child = current_path / directory
+                entries.append({"path": _relative_path(child, root), "kind": "directory"})
+            if truncated:
+                break
+            for filename in sorted(files):
+                if len(entries) >= max_entries:
+                    truncated = True
+                    break
+                child = current_path / filename
+                if child.is_symlink() or not child.is_file():
+                    continue
+                try:
+                    size = child.stat().st_size
+                except OSError:
+                    continue
+                entries.append({"path": _relative_path(child, root), "kind": "file", "bytes": size})
+            if truncated:
+                break
+    except OSError as exc:
+        raise RuntimeError("Could not inspect the approved workspace.") from exc
+    return json.dumps({
+        "action": "local_workspace_inspect",
+        "operation": "list_tree",
+        "root": root.name or str(root),
+        "entries": entries,
+        "truncated": truncated,
+    }, ensure_ascii=False)
+
+
+def _search_workspace(payload: dict, roots: list[Path]) -> str:
+    root = _workspace_root(payload, roots)
+    query = payload.get("query")
+    if not isinstance(query, str) or not query.strip() or len(query.strip()) > MAX_WORKSPACE_QUERY_CHARS:
+        raise RuntimeError(f"query must be a non-empty string up to {MAX_WORKSPACE_QUERY_CHARS} characters.")
+    needle = query.casefold()
+    max_files = _bounded_int(
+        payload.get("max_files"), default=50, minimum=1, maximum=MAX_WORKSPACE_SEARCH_FILES, field="max_files"
+    )
+    max_matches = _bounded_int(
+        payload.get("max_matches"), default=50, minimum=1, maximum=MAX_WORKSPACE_SEARCH_MATCHES, field="max_matches"
+    )
+    scanned_files = 0
+    matches: list[dict[str, object]] = []
+    truncated = False
+    try:
+        for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+            current_path = Path(current)
+            directories[:] = sorted(item for item in directories if not (current_path / item).is_symlink())
+            for filename in sorted(files):
+                if scanned_files >= max_files or len(matches) >= max_matches:
+                    truncated = True
+                    break
+                child = current_path / filename
+                if child.is_symlink() or not child.is_file():
+                    continue
+                try:
+                    if child.stat().st_size > MAX_FILE_BYTES:
+                        continue
+                    raw = child.read_bytes()
+                except OSError:
+                    continue
+                scanned_files += 1
+                if b"\x00" in raw[:8_192]:
+                    continue
+                text = raw.decode("utf-8", errors="replace")
+                for number, line in enumerate(text.splitlines(), 1):
+                    if needle not in line.casefold():
+                        continue
+                    matches.append({
+                        "path": _relative_path(child, root),
+                        "line": number,
+                        "preview": line.strip()[:500],
+                    })
+                    if len(matches) >= max_matches:
+                        truncated = True
+                        break
+            if truncated:
+                break
+    except OSError as exc:
+        raise RuntimeError("Could not search the approved workspace.") from exc
+    return json.dumps({
+        "action": "local_workspace_inspect",
+        "operation": "search_text",
+        "root": root.name or str(root),
+        "query": query,
+        "scanned_files": scanned_files,
+        "matches": matches,
+        "truncated": truncated,
+    }, ensure_ascii=False)
+
+
+def _find_workspace_files(payload: dict, roots: list[Path]) -> str:
+    root = _workspace_root(payload, roots)
+    query = payload.get("query")
+    if not isinstance(query, str) or not query.strip() or len(query) > MAX_WORKSPACE_QUERY_CHARS:
+        raise RuntimeError(f"Filename query must be between 1 and {MAX_WORKSPACE_QUERY_CHARS} characters.")
+    query = query.strip().lower()
+    limit = payload.get("max_matches", MAX_WORKSPACE_FILENAME_MATCHES)
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_WORKSPACE_FILENAME_MATCHES:
+        raise RuntimeError(f"max_matches must be between 1 and {MAX_WORKSPACE_FILENAME_MATCHES}.")
+    matches: list[str] = []
+    truncated = False
+    try:
+        for candidate in root.rglob("*"):
+            if candidate.is_symlink():
+                continue
+            if query not in candidate.name.lower():
+                continue
+            if len(matches) < limit:
+                matches.append(candidate.relative_to(root).as_posix())
+            else:
+                truncated = True
+                break
+    except OSError as exc:
+        raise RuntimeError("Could not search filenames in the approved workspace.") from exc
+    return json.dumps({"action": "local_workspace_inspect", "operation": "find_files", "root": root.name or str(root), "query": query, "matches": matches, "truncated": truncated}, ensure_ascii=False)
+
+
+def _git_summary(payload: dict, roots: list[Path], state: dict) -> str:
+    root = _workspace_root(payload, roots)
+    allowlist = state.get("terminal_allowlist") or []
+    if "git" not in {Path(item).name.lower() for item in allowlist if isinstance(item, str)}:
+        raise RuntimeError("Git inspection requires 'git' in the terminal executable allowlist.")
+
+    def run_git(*arguments: str) -> str:
+        try:
+            result = subprocess.run(["git", "-C", str(root), *arguments], capture_output=True, text=True, timeout=10, check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError("Git inspection could not start git.") from exc
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "not a Git repository").strip()
+            raise RuntimeError(f"Git inspection failed: {detail[:300]}")
+        return result.stdout
+
+    branch_lines = [line for line in run_git("status", "--short", "--branch").splitlines() if line.strip()]
+    stat_lines = [line for line in run_git("diff", "--stat").splitlines() if line.strip()]
+    commits = [line for line in run_git("log", f"-n{MAX_GIT_COMMITS}", "--pretty=format:%h%x09%s").splitlines() if line.strip()]
+    return json.dumps({
+        "action": "local_workspace_inspect", "operation": "git_summary", "root": root.name or str(root),
+        "branch": branch_lines[0].removeprefix("## ") if branch_lines and branch_lines[0].startswith("## ") else None,
+        "status": branch_lines[:MAX_GIT_LINES], "diff_stat": stat_lines[:MAX_GIT_LINES], "recent_commits": commits[:MAX_GIT_COMMITS],
+        "truncated": len(branch_lines) > MAX_GIT_LINES or len(stat_lines) > MAX_GIT_LINES,
+    }, ensure_ascii=False)
+
+
+def _workspace_inspect(payload: dict, roots: list[Path]) -> str:
+    operation = payload.get("operation", "read_file")
+    if operation == "read_file":
+        return _read_file(payload, roots)
+    if operation == "list_tree":
+        return _list_workspace(payload, roots)
+    if operation == "search_text":
+        return _search_workspace(payload, roots)
+    if operation == "find_files":
+        return _find_workspace_files(payload, roots)
+    if operation == "git_summary":
+        return _git_summary(payload, roots, payload.get("_state", {}))
+    raise RuntimeError("local_file_read supports read_file, list_tree, search_text, find_files, and git_summary operations only.")
+
+
 def _write_file(payload: dict, roots: list[Path]) -> str:
     target = _target(payload.get("path"), roots, must_exist=False)
     content = payload.get("content")
@@ -389,7 +647,34 @@ def _write_file(payload: dict, roots: list[Path]) -> str:
     return json.dumps({"action": "local_file_write", "file_name": target.name, "bytes_written": len(data), "sha256": hashlib.sha256(data).hexdigest()})
 
 
-def _terminal(payload: dict, roots: list[Path], state: dict) -> str:
+def _emit_progress(progress_hook, message: str) -> None:
+    """Best-effort status only: never let telemetry change local execution."""
+    if progress_hook is None:
+        return
+    try:
+        progress_hook(message[:500])
+    except Exception:
+        LOG.debug("Could not publish desktop progress", exc_info=True)
+
+
+def _stop_process(process: subprocess.Popen) -> None:
+    """Stop a process tree when a cancellation or time limit arrives."""
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], capture_output=True, timeout=10, check=False)
+    else:
+        with contextlib.suppress(OSError):
+            process.terminate()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=5)
+    if process.poll() is None:
+        with contextlib.suppress(OSError):
+            process.kill()
+
+
+def _terminal(payload: dict, roots: list[Path], state: dict, *, checkpoint=None, progress_hook=None) -> str:
     raw = payload.get("argv")
     if isinstance(raw, list) and all(isinstance(item, str) for item in raw):
         argv = [item for item in raw if item]
@@ -415,21 +700,66 @@ def _terminal(payload: dict, roots: list[Path], state: dict) -> str:
     safe_env = {key: value for key, value in os.environ.items() if not any(marker in key.upper() for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD"))}
     injected = _resolved_credentials(payload.get("credential_env"))
     safe_env.update(injected)
+    _emit_progress(progress_hook, f"Terminal started: {executable}")
+    process = subprocess.Popen(
+        argv, cwd=cwd, env=safe_env, shell=False,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+    )
+    lines: queue.Queue[str | None] = queue.Queue()
+
+    def _read_output() -> None:
+        try:
+            if process.stdout is not None:
+                for line in iter(process.stdout.readline, ""):
+                    lines.put(line)
+        finally:
+            lines.put(None)
+
+    threading.Thread(target=_read_output, name="smara-terminal-output", daemon=True).start()
+    output_parts: list[str] = []
+    reader_finished = False
+    last_checkpoint = 0.0
+    reported_output = False
+    started = time.monotonic()
     try:
-        completed = subprocess.run(argv, cwd=cwd, env=safe_env, shell=False, capture_output=True, text=True, timeout=MAX_COMMAND_SECONDS, check=False)
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"Terminal command exceeded {MAX_COMMAND_SECONDS} seconds.") from exc
-    output = (completed.stdout or "") + ("\n" + completed.stderr if completed.stderr else "")
+        while not reader_finished or process.poll() is None:
+            try:
+                line = lines.get(timeout=0.2)
+                if line is None:
+                    reader_finished = True
+                else:
+                    output_parts.append(line)
+                    # Never stream command content to the hosted ledger. A
+                    # local command may print personal data; the final result
+                    # is still redacted for explicitly injected credentials.
+                    if not reported_output:
+                        _emit_progress(progress_hook, "Terminal output received locally")
+                        reported_output = True
+            except queue.Empty:
+                pass
+            now = time.monotonic()
+            if now - started > MAX_COMMAND_SECONDS:
+                _stop_process(process)
+                raise RuntimeError(f"Terminal command exceeded {MAX_COMMAND_SECONDS} seconds.")
+            if checkpoint is not None and now - last_checkpoint >= 1.0:
+                last_checkpoint = now
+                if checkpoint():
+                    _stop_process(process)
+                    raise ExecutionCancelled("Terminal execution was cancelled before completion.")
+    finally:
+        if process.poll() is None:
+            _stop_process(process)
+    output = "".join(output_parts)
     # A command can accidentally echo an injected token. Redact every known
     # value before anything is returned to the hosted task ledger or log.
     for secret in injected.values():
         if secret:
             output = output.replace(secret, "[REDACTED LOCAL CREDENTIAL]")
-    return json.dumps({"action": "local_terminal", "argv": argv, "credential_env": sorted(injected), "exit_code": completed.returncode, "output": output[:MAX_OUTPUT_CHARS]}, ensure_ascii=False)
+    _emit_progress(progress_hook, f"Terminal finished with exit code {process.returncode}")
+    return json.dumps({"action": "local_terminal", "argv": argv, "credential_env": sorted(injected), "exit_code": process.returncode, "output": output[:MAX_OUTPUT_CHARS]}, ensure_ascii=False)
 
 
-def _browser(payload: dict, state: dict) -> str:
-    url = payload.get("url")
+def _allowed_browser_url(url: str, state: dict) -> tuple[str, str]:
     if not isinstance(url, str) or url.startswith("javascript:"):
         raise RuntimeError("local_browser requires a safe HTTP(S) URL.")
     parsed = urlparse(url)
@@ -443,12 +773,58 @@ def _browser(payload: dict, state: dict) -> str:
     }
     if not allowed_domains or not any(hostname == item or hostname.endswith("." + item) for item in allowed_domains):
         raise RuntimeError("Browser URL is outside the configured desktop domain allowlist.")
-    if not webbrowser.open(url, new=0, autoraise=False):
-        raise RuntimeError("The operating system did not accept the browser request.")
-    return json.dumps({"action": "local_browser", "url": url, "opened": True})
+    return url, hostname
 
 
-def execute_step(step: dict, state: dict) -> str:
+def _browser(payload: dict, state: dict, *, checkpoint=None, progress_hook=None) -> str:
+    url, _hostname = _allowed_browser_url(payload.get("url"), state)
+    operation = payload.get("operation", "open")
+    if operation == "open":
+        if not webbrowser.open(url, new=0, autoraise=False):
+            raise RuntimeError("The operating system did not accept the browser request.")
+        return json.dumps({"action": "local_browser", "operation": "open", "url": url, "opened": True})
+    if operation != "inspect_text":
+        raise RuntimeError("local_browser supports open and inspect_text operations only.")
+    _emit_progress(progress_hook, "Fetching approved page without browser cookies")
+    try:
+        with httpx.Client(timeout=15, follow_redirects=False, headers={"User-Agent": "SmaraDesktop/0.1 local-inspection"}) as client:
+            with client.stream("GET", url) as response:
+                if response.is_redirect:
+                    location = response.headers.get("location", "")
+                    raise RuntimeError(f"Page redirected; approve and inspect the destination separately ({location[:300]}).")
+                response.raise_for_status()
+                content_type = response.headers.get("content-type", "").lower()
+                if not (content_type.startswith("text/") or "json" in content_type):
+                    raise RuntimeError("Page inspection accepts text and JSON responses only.")
+                chunks: list[bytes] = []
+                received = 0
+                for chunk in response.iter_bytes():
+                    received += len(chunk)
+                    if received > MAX_BROWSER_INSPECT_BYTES:
+                        raise RuntimeError("Page inspection exceeded the 1 MB local limit.")
+                    chunks.append(chunk)
+                    if checkpoint is not None and checkpoint():
+                        raise ExecutionCancelled("Page inspection was cancelled before completion.")
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Could not inspect the approved page: {str(exc)[:300]}") from exc
+    raw = b"".join(chunks).decode("utf-8", errors="replace")
+    if "html" in content_type:
+        extractor = _PageTextExtractor()
+        extractor.feed(raw)
+        text = "\n".join(extractor.parts)
+        title = extractor.title
+    else:
+        text = raw
+        title = ""
+    _emit_progress(progress_hook, "Page inspection finished locally")
+    return json.dumps({
+        "action": "local_browser", "operation": "inspect_text", "url": url,
+        "title": title, "content_type": content_type, "text": text[:MAX_BROWSER_TEXT_CHARS],
+        "truncated": len(text) > MAX_BROWSER_TEXT_CHARS,
+    }, ensure_ascii=False)
+
+
+def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None) -> str:
     """Dispatch one leased step; never dispatch an undeclared capability."""
     if step.get("requires_approval"):
         raise RuntimeError("Desktop refused a step that has not passed Smara approval.")
@@ -461,13 +837,17 @@ def execute_step(step: dict, state: dict) -> str:
         raise RuntimeError("The desktop step payload is invalid.")
     roots = _roots(state)
     if capability == "local_file_read":
-        return _read_file(payload, roots)
+        # Keep state out of the public payload schema while allowing the
+        # read-only Git summary to enforce the configured git allowlist.
+        inspect_payload = dict(payload)
+        inspect_payload["_state"] = state
+        return _workspace_inspect(inspect_payload, roots)
     if capability == "local_file_write":
         return _write_file(payload, roots)
     if capability == "local_terminal":
-        return _terminal(payload, roots, state)
+        return _terminal(payload, roots, state, checkpoint=checkpoint, progress_hook=progress_hook)
     if capability == "local_browser":
-        return _browser(payload, state)
+        return _browser(payload, state, checkpoint=checkpoint, progress_hook=progress_hook)
     raise RuntimeError(f"Desktop capability '{capability}' is not installed.")
 
 
@@ -498,16 +878,36 @@ class DesktopRunner:
         if not step:
             return False
         LOG.info("claimed step %s capability=%s", step.get("step_id"), step.get("required_capability"))
+
+        def checkpoint() -> bool:
+            """Refresh the lease while long local work runs; return cancel state."""
+            response = client.post(
+                f"{state['smara_url']}/v1/executors/steps/{step['step_id']}/heartbeat",
+                headers=_headers(state),
+            )
+            response.raise_for_status()
+            return bool(response.json().get("cancel_requested"))
+
+        def progress(message: str) -> None:
+            response = client.post(
+                f"{state['smara_url']}/v1/executors/steps/{step['step_id']}/progress",
+                headers=_headers(state), json={"message": message[:500]},
+            )
+            response.raise_for_status()
+
         try:
-            result = execute_step(step, state)
+            result = execute_step(step, state, checkpoint=checkpoint, progress_hook=progress)
             # A desktop action can use most of its lease (for example a
             # bounded terminal command). Refresh it once before completion so
             # a delayed network response cannot finalize a lease another
             # executor has already recovered.
-            client.post(
+            final_heartbeat = client.post(
                 f"{state['smara_url']}/v1/executors/steps/{step['step_id']}/heartbeat",
                 headers=_headers(state),
-            ).raise_for_status()
+            )
+            final_heartbeat.raise_for_status()
+            if final_heartbeat.json().get("cancel_requested"):
+                raise ExecutionCancelled("The task was cancelled before the local result was recorded.")
             client.post(f"{state['smara_url']}/v1/executors/steps/{step['step_id']}/complete", headers=_headers(state), json={"result": result}).raise_for_status()
             LOG.info("completed step %s", step.get("step_id"))
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:

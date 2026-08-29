@@ -141,6 +141,36 @@ def test_desktop_step_heartbeat_does_not_extend_cancelled_work(tmp_path: Path):
     assert result == {"ok": False, "cancel_requested": True, "step_id": step["step_id"]}
 
 
+def test_cancelled_desktop_step_is_terminally_cancelled_not_failed(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop", ["local_terminal"])["code"])
+    task = store.create("acct_1", "work", "Terminal", "Run a local command", True, [{
+        "name": "terminal", "executor_kind": "desktop", "required_capability": "local_terminal",
+    }])
+    store.decide(task["id"], "acct_1", True, "approved")
+    step = store.claim_for_executor(desktop["executor_id"], desktop["token"])
+    assert step
+    store.cancel(task["id"], "acct_1")
+    assert store.fail_executor_step(desktop["executor_id"], desktop["token"], step["step_id"], "cancelled locally") == "cancelled"
+    assert store.get(task["id"], "acct_1")["status"] == "cancelled"
+    assert not store.dead_letters("acct_1")
+
+
+def test_executor_progress_is_lease_scoped_and_sanitised(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop", ["local_file_read"])["code"])
+    task = store.create("acct_1", "work", "Read", "Read", True, [{
+        "name": "read", "executor_kind": "desktop", "required_capability": "local_file_read",
+    }])
+    store.decide(task["id"], "acct_1", True, "approved")
+    step = store.claim_for_executor(desktop["executor_id"], desktop["token"])
+    assert step
+    store.append_executor_progress(desktop["executor_id"], desktop["token"], step["step_id"], "  Read started\nlocally  ")
+    events = store.events(task["id"], "acct_1")
+    progress = next(event for event in events if event["type"] == "executor.progress")
+    assert "Read started locally" in progress["payload"]
+
+
 def test_stale_desktop_executor_cannot_refresh_recovered_lease(tmp_path: Path):
     store = TaskStore(str(tmp_path / "smara.db"))
     first = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop A", ["local_file_read"])["code"])

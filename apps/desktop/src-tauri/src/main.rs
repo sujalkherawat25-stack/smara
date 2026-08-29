@@ -654,6 +654,28 @@ async fn load_tasks() -> Result<Vec<Value>, String> {
     Ok(value.as_array().cloned().or_else(|| value.get("tasks").and_then(Value::as_array).cloned()).unwrap_or_default())
 }
 
+#[tauri::command]
+async fn load_task_details(task_id: String) -> Result<Value, String> {
+    if task_id.trim().is_empty() || task_id.len() > 160 || !task_id.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-')) {
+        return Err("Task id is invalid.".to_owned());
+    }
+    let token = cli_token()?;
+    let api_url = current_connection().api_url;
+    let client = reqwest::Client::new();
+    let mut values = serde_json::Map::new();
+    for (key, suffix) in [("task", ""), ("steps", "/steps"), ("events", "/events"), ("artifacts", "/artifacts")] {
+        let response = client.get(format!("{api_url}/v1/tasks/{task_id}{suffix}")).bearer_auth(&token).timeout(std::time::Duration::from_secs(12)).send().await.map_err(|error| format!("Could not load task details: {error}"))?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            let _ = fs::remove_file(cli_token_path());
+            return Err("401: Your Smara sign-in expired. Sign in again to load task details.".to_owned());
+        }
+        if !response.status().is_success() { return Err(format!("Task details returned HTTP {}", response.status())); }
+        let value: Value = response.json().await.map_err(|error| format!("Task details were invalid: {error}"))?;
+        values.insert(key.to_owned(), value);
+    }
+    Ok(Value::Object(values))
+}
+
 fn local_chat_endpoint(base_url: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
     if trimmed.ends_with("/chat/completions") { trimmed.to_owned() } else { format!("{trimmed}/chat/completions") }
@@ -785,7 +807,7 @@ fn open_web() -> Result<(), String> { open::that(current_connection().web_url).m
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, stream_chat, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_model_profiles, save_local_model_profile, delete_local_model_profile])
+        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_task_details, stream_chat, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_model_profiles, save_local_model_profile, delete_local_model_profile])
         .run(tauri::generate_context!())
         .expect("error while running Smara Desktop");
 }

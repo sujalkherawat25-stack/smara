@@ -198,6 +198,11 @@ class ExecutorFailure(BaseModel):
     error: str = Field(min_length=1, max_length=2_000)
 
 
+class ExecutorProgress(BaseModel):
+    """A bounded, non-sensitive executor status update for the task ledger."""
+    message: str = Field(min_length=1, max_length=500)
+
+
 IntegrationPolicy = Literal["observe", "draft", "assisted", "trusted", "blocked"]
 
 
