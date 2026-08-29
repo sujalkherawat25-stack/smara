@@ -479,6 +479,14 @@ class DesktopRunner:
     _last_heartbeat: float = field(default=0.0, init=False)
 
     def run_once(self, client: httpx.Client, state: dict) -> bool:
+        # Settings are written by the desktop UI while this long-lived
+        # process is running. Reload the small scoped state file before every
+        # poll so newly approved folders, terminal allowlists, and browser
+        # domains take effect without requiring a manual executor restart.
+        # Reloading is deliberately strict: if pairing state is removed or
+        # corrupted, the executor must stop rather than continue with a stale
+        # token or stale permissions.
+        state = _load_state(self.state_path)
         now = time.monotonic()
         if now - self._last_heartbeat >= self.heartbeat_seconds:
             response = client.post(f"{state['smara_url']}/v1/executors/heartbeat", headers=_headers(state), json={"capabilities": state.get("capabilities", DEFAULT_CAPABILITIES)})
