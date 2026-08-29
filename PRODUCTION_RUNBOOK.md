@@ -91,6 +91,15 @@ All Smara Compose services use `restart: unless-stopped` so the API, frontend,
 workers, Redis, and Postgres return after a container or VM restart. Confirm
 the policy with `docker compose ps`/`docker inspect` after each deployment.
 
+Before and after every deployment, run the check-only route guard from the
+Smara checkout. It validates the checked-in Caddyfile, confirms the required
+marketing/Smara routes, validates Caddy, and (when requested) probes all public
+endpoints. It never overwrites production configuration:
+
+```sh
+CADDYFILE=/etc/caddy/Caddyfile CHECK_PUBLIC=true sh scripts/check-public-config.sh
+```
+
 ## 6. Memory isolation
 
 Smara sends workspace and provenance metadata through the public Syntarus SDK,
