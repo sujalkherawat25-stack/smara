@@ -34,7 +34,14 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
-from .desktop_integrations import LocalIntegrationCancelled, execute_local_integration
+# The executor runs both as ``smara.desktop_executor`` in tests and as a
+# PyInstaller ``__main__`` entry point in the Windows bundle.  Keep the
+# package import for normal execution, with a narrow fallback for the bundled
+# process where Python does not set ``__package__``.
+try:
+    from .desktop_integrations import LocalIntegrationCancelled, execute_local_integration
+except ImportError:  # pragma: no cover - exercised by the packaged binary
+    from desktop_integrations import LocalIntegrationCancelled, execute_local_integration
 
 
 MAX_FILE_BYTES = 256 * 1024

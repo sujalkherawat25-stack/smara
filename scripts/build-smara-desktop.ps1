@@ -18,7 +18,10 @@ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
 
 Push-Location $repoRoot
 try {
-    & $python -m PyInstaller --noconfirm --clean --onefile --name smara-desktop --distpath build\desktop-executor --workpath build\pyinstaller src\smara\desktop_executor.py
+    # The executor is bundled from a file path (not ``python -m``), so the
+    # package-relative import fallback needs the sibling module directory on
+    # PyInstaller's analysis path as well.
+    & $python -m PyInstaller --noconfirm --clean --onefile --paths src\smara --name smara-desktop --distpath build\desktop-executor --workpath build\pyinstaller src\smara\desktop_executor.py
     Assert-NativeSuccess 'PyInstaller'
     $resourceDir = Join-Path $appRoot 'src-tauri\resources'
     New-Item -ItemType Directory -Force -Path $resourceDir | Out-Null
