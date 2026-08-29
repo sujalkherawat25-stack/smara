@@ -137,6 +137,11 @@ interactive sign-in, and reconnect behavior remain part of the physical drill.
 
 ### P0-B — Physical Windows restart/reconnect drill
 
+**Status: pending owner-run physical drill.** The installed executor and
+server lease/cancellation logic are ready; the real laptop network-off,
+application restart, Windows restart, reconnect, and revoke sequence still
+needs to be exercised with the owner's paired desktop.
+
 With the owner's real paired account:
 
 1. Approve a harmless file read and file write.
@@ -148,6 +153,12 @@ With the owner's real paired account:
 7. Revoke the desktop and confirm it stops polling immediately.
 
 ### P0-C — Authenticated Smara Web shadow test
+
+**Status: server-side shadow green on 2026-08-29; interactive Web portions
+pending.** The public signed smoke passed health/readiness, task creation and
+cancel, cross-account 404 isolation, local-only integration policy, and the
+no-replay desktop lease check. A real browser session still needs sign-in,
+refresh, dropped-stream reconnect, sign-out, and visual result/approval checks.
 
 Using a real beta account, verify sign-in, refresh, chat, task creation, task
 result visibility, research evidence/artifacts, approval, reconnect after a
@@ -190,9 +201,12 @@ the following skills on top of the existing capability and approval contracts.
 
 ### L3 — Test/build skill
 
-- **Implemented:** terminal execution refreshes its lease during a command,
-  publishes safe status events, and kills the process tree on cancellation or
-  timeout. Command content is not streamed to the hosted ledger.
+- **Implemented and deployed 2026-08-29:** terminal execution refreshes its
+  lease during a command, publishes safe status events, and kills the process
+  tree on cancellation or timeout. Command content is not streamed to the
+  hosted ledger. The API exposes lease-scoped executor progress, and
+  cancellation is terminally recorded instead of being misreported as a
+  generic failure.
 - Still needed: named test/lint/build recipes, richer local Activity rendering,
   changed-file collection, and test artifacts.
 - Record exit code, bounded stdout/stderr, changed files, and test artifacts.
@@ -336,11 +350,10 @@ These are deferred by owner decision and must remain disabled/documented:
 
 ## 11. Execution order
 
-1. Rebuild/install Desktop and complete the physical restart/reconnect drill.
-2. Complete authenticated Web shadowing, account-isolation, and edge-limit
-   checks.
+1. Complete the physical restart/reconnect drill with the paired Windows PC.
+2. Complete interactive authenticated Web shadowing and edge-limit checks.
 3. Implement Workspace Inspection and Reviewable Editing.
-4. Implement Test/Build execution with streaming, cancellation, and artifacts.
+4. Expand Test/Build execution with named recipes and reviewable artifacts.
 5. Implement Controlled Browser inspection, keeping browser state local.
 6. Add local credential adapters one at a time, beginning with the highest
    value personal workflow.
