@@ -3,6 +3,12 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
     restart: unless-stopped
+    # The API also joins memoryos_default for account resolution.  Give this
+    # Redis an unambiguous alias so Docker DNS cannot send Smara traffic to
+    # the legacy MemoryOS Redis service (which has different auth settings).
+    networks:
+      default:
+        aliases: [smara-redis]
     volumes: ["smara-redis:/data"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -28,7 +34,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://redis:6379/0}
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://smara-redis:6379/0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,7 +66,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://redis:6379/0}
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://smara-redis:6379/0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,7 +79,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://redis:6379/0}
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://smara-redis:6379/0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,7 +92,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://redis:6379/0}
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://smara-redis:6379/0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,7 +107,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://redis:6379/0}
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://smara-redis:6379/0}
       SMARA_TELEGRAM_CHAT_URL: ${SMARA_TELEGRAM_CHAT_URL:-http://api:8080}
     depends_on:
       api:
