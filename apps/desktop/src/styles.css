@@ -239,3 +239,13 @@ html, #root { height: 100%; }
   .chat-layout { height: 100%; overflow: visible; }
   .chat-column { height: 100%; min-height: 0; }
 }
+
+/* Settings navigation and credential cards */
+.settings-nav { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: 7px; margin: -8px 0 16px; padding: 7px; border: 1px solid var(--stroke-soft); border-radius: 10px; background: rgba(9,11,16,.90); backdrop-filter: blur(10px); }
+.settings-nav button { padding: 7px 11px; border: 1px solid transparent; border-radius: 7px; color: var(--muted); background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
+.settings-nav button:hover, .settings-nav button:focus-visible { color: var(--text); background: rgba(255,255,255,.06); border-color: var(--stroke); outline: none; }
+.settings-card[id] { scroll-margin-top: 72px; }
+.credential-status { text-align: left; color: var(--text); font: inherit; cursor: pointer; }
+.credential-status:hover, .credential-status:focus-visible { border-color: #46506b; background: rgba(255,255,255,.05); outline: none; }
+.credential-status.status-selected { border-color: var(--blue); background: rgba(144,169,255,.09); box-shadow: 0 0 0 2px rgba(144,169,255,.08); }
+.credential-status > span:last-child { min-width: 0; display: grid; gap: 3px; }
