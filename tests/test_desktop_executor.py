@@ -5,6 +5,13 @@ import pytest
 
 from smara.models import TaskCreate
 from smara.store import TaskStore
+from smara.desktop_executor import normalize_pairing_code
+
+
+def test_pairing_code_normalizes_copied_whitespace():
+    assert normalize_pairing_code(" 9aea 8e4f\r\n") == "9AEA8E4F"
+    with pytest.raises(RuntimeError, match="8 hexadecimal"):
+        normalize_pairing_code("9AEA8E4")
 
 
 def test_paired_desktop_claims_only_declared_capability(tmp_path: Path):

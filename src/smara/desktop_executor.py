@@ -272,9 +272,26 @@ def _headers(state: dict) -> dict[str, str]:
     }
 
 
+def normalize_pairing_code(code: str) -> str:
+    """Return the canonical eight-character code accepted by Smara."""
+    normalized = "".join(code.split()).upper()
+    if len(normalized) != 8 or any(character not in "0123456789ABCDEF" for character in normalized):
+        raise RuntimeError("Pairing code must contain 8 hexadecimal characters.")
+    return normalized
+
+
 def pair(api_url: str, code: str, state_path: Path, *, allowed_roots: list[str] | None = None) -> dict:
     """Consume a one-time pairing code and persist only the scoped device token."""
-    response = httpx.post(f"{api_url.rstrip('/')}/v1/executors/pair", json={"code": code.upper()}, timeout=15)
+    response = httpx.post(f"{api_url.rstrip('/')}/v1/executors/pair", json={"code": normalize_pairing_code(code)}, timeout=15)
+    if not response.is_success:
+        # Preserve the API's actionable detail (invalid/expired/used) instead
+        # of collapsing every pairing failure into a generic HTTP 400.
+        try:
+            detail = response.json().get("detail")
+        except (AttributeError, ValueError, TypeError):
+            detail = None
+        if isinstance(detail, str) and detail.strip():
+            raise RuntimeError(detail.strip())
     response.raise_for_status()
     state = {**response.json(), "smara_url": api_url.rstrip("/"), "allowed_roots": allowed_roots or []}
     _save_state(state_path, state)

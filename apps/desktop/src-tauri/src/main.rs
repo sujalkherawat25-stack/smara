@@ -326,6 +326,17 @@ fn normalized_api_url(configured: &str) -> String {
     url.to_string().trim_end_matches('/').to_owned()
 }
 
+/// Keep pairing tolerant of copied whitespace while rejecting anything that
+/// is not part of the eight-character hex code issued by Smara Web.
+fn normalized_pairing_code(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_ascii_hexdigit())
+        .take(8)
+        .map(|character| character.to_ascii_uppercase())
+        .collect()
+}
+
 /// The Smara shell owns the hosted domain root. Older beta installs saved the
 /// compatibility `/smara/` mount; repair that one known path while keeping
 /// custom URLs intact.
@@ -565,8 +576,9 @@ fn resolve_local_secret(name: &str) -> Result<String, String> {
 
 #[tauri::command]
 fn pair_desktop(args: PairArgs) -> Result<ConnectionState, String> {
-    if args.code.trim().len() != 8 { return Err("Pairing code must be 8 characters.".to_owned()); }
-    let mut command_args = vec!["--api".to_owned(), normalized_api_url(&args.api_url), "--pair".to_owned(), args.code.trim().to_uppercase(), "--pair-only".to_owned(), "--state".to_owned(), state_path().display().to_string()];
+    let code = normalized_pairing_code(&args.code);
+    if code.len() != 8 { return Err(format!("Pairing code must contain 8 hexadecimal characters ({}/8 entered).", code.len())); }
+    let mut command_args = vec!["--api".to_owned(), normalized_api_url(&args.api_url), "--pair".to_owned(), code, "--pair-only".to_owned(), "--state".to_owned(), state_path().display().to_string()];
     for root in args.allowed_roots { command_args.extend(["--allow-root".to_owned(), root]); }
     for executable in args.terminal_allowlist { command_args.extend(["--terminal-allow".to_owned(), executable]); }
     for domain in args.browser_domains { command_args.extend(["--browser-domain".to_owned(), domain]); }
@@ -780,7 +792,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{local_delta_text, local_event_payload, normalized_api_url, normalized_web_url, preserve_local_model_profiles};
+    use super::{local_delta_text, local_event_payload, normalized_api_url, normalized_pairing_code, normalized_web_url, preserve_local_model_profiles};
     use serde_json::json;
 
     #[test]
@@ -834,6 +846,13 @@ mod tests {
             normalized_api_url("https://example.test/custom-api/"),
             "https://example.test/custom-api"
         );
+    }
+
+    #[test]
+    fn pairing_code_normalizes_copied_whitespace_and_case() {
+        assert_eq!(normalized_pairing_code(" 9aea 8e4f\r\n"), "9AEA8E4F");
+        assert_eq!(normalized_pairing_code("9AEA8E4F-extra"), "9AEA8E4F");
+        assert_eq!(normalized_pairing_code("9AEA8E4"), "9AEA8E4");
     }
 
     #[test]
