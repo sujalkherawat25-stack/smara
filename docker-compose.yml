@@ -2,6 +2,7 @@ services:
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
+    restart: unless-stopped
     volumes: ["smara-redis:/data"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -10,6 +11,7 @@ services:
       retries: 20
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: smara
       POSTGRES_USER: smara
@@ -23,6 +25,7 @@ services:
   api:
     build: .
     command: ["uvicorn", "smara.api:app", "--host", "0.0.0.0", "--port", "8080"]
+    restart: unless-stopped
     env_file: .env
     environment:
       SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://redis:6379/0}
@@ -46,12 +49,14 @@ services:
         VITE_SMARA_CONTROL_TOKEN_PATH: ${VITE_SMARA_CONTROL_TOKEN_PATH:-/v1/auth/control-token}
         VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
     ports: ["${SMARA_FRONTEND_BIND_ADDRESS:-127.0.0.1}:${SMARA_FRONTEND_HOST_PORT:-8081}:80"]
+    restart: unless-stopped
     depends_on:
       api:
         condition: service_started
   worker:
     build: .
     command: ["python", "-m", "smara.worker"]
+    restart: unless-stopped
     env_file: .env
     environment:
       SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://redis:6379/0}
@@ -64,6 +69,7 @@ services:
   scheduler:
     build: .
     command: ["python", "-m", "smara.scheduler"]
+    restart: unless-stopped
     env_file: .env
     environment:
       SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://redis:6379/0}
@@ -76,6 +82,7 @@ services:
   integration-worker:
     build: .
     command: ["python", "-m", "smara.integration_worker"]
+    restart: unless-stopped
     env_file: .env
     environment:
       SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://redis:6379/0}

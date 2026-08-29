@@ -8,6 +8,29 @@
 #   3. sudo systemctl enable --now caddy
 #   4. ./scripts/deploy.sh --tls
 
+# Keep the Syntarus marketing site available while Smara owns the AI app.
+# Cloudflare terminates at this host, then Caddy presents the origin certificate
+# for both apex and www and forwards to the existing static-site container.
+syntarus.com, www.syntarus.com {
+    reverse_proxy 127.0.0.1:8082 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+    encode gzip
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options    "nosniff"
+        Referrer-Policy            "strict-origin-when-cross-origin"
+    }
+    log {
+        output file /var/log/caddy/syntarus-site.log {
+            roll_size 50mb
+            roll_keep 5
+        }
+        level INFO
+    }
+}
+
 ai.syntarus.com {
     # Smara owns the canonical public root. The API keeps a distinct prefix so
     # it cannot collide with the legacy MemoryOS/Memento /v1/* bridge routes.
