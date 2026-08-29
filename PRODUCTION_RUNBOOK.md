@@ -79,6 +79,18 @@ returns `410 Gone`, and `/smara-api/app/` is not served. The retired
 research, refresh, and approval from the same signed-in account. This
 repository must not modify the protected MemoryOS pipeline.
 
+The marketing site remains a separate Caddy host on the same VM:
+`syntarus.com` and `www.syntarus.com` proxy to the existing static-site
+container on `127.0.0.1:8082`. Keep this host block in the active Caddy file
+when promoting Smara; omitting it causes Cloudflare to return an origin TLS
+error even if the static-site container is healthy. After any Caddy change,
+validate and reload, then check both marketing hostnames, the Smara root, and
+`/smara-api/health` through the public hostname.
+
+All Smara Compose services use `restart: unless-stopped` so the API, frontend,
+workers, Redis, and Postgres return after a container or VM restart. Confirm
+the policy with `docker compose ps`/`docker inspect` after each deployment.
+
 ## 6. Memory isolation
 
 Smara sends workspace and provenance metadata through the public Syntarus SDK,
