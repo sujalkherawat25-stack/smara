@@ -280,6 +280,112 @@ def test_desktop_browser_inspection_is_text_only_and_has_no_browser_session(monk
     assert "secret" not in result["text"]
 
 
+def test_desktop_browser_dom_inspection_is_bounded_and_resolves_links(monkeypatch, tmp_path: Path):
+    class Response:
+        is_redirect = False
+        headers = {"content-type": "text/html; charset=utf-8", "content-length": "280"}
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def raise_for_status(self): return None
+        def iter_bytes(self):
+            yield (
+                b"<html><title>Controls</title><body><main id='app'>"
+                b"<h1>Welcome</h1><button class='primary' aria-label='go'>"
+                b"Go <span>now</span></button><a href='/docs'>Docs</a>"
+                b"<script><button>secret</button></script></main></body></html>"
+            )
+
+    class Client:
+        def __init__(self, **_kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def stream(self, method, url):
+            assert method == "GET" and url == "https://example.com/app"
+            return Response()
+
+    monkeypatch.setattr("smara.desktop_executor.httpx.Client", Client)
+    state = {"capabilities": ["local_browser"], "allowed_roots": [str(tmp_path)], "browser_domains": ["example.com"]}
+    result = json.loads(execute_step({
+        "required_capability": "local_browser",
+        "executor_payload": {"operation": "inspect_dom", "url": "https://example.com/app", "selector": "button.primary", "max_elements": 1},
+    }, state))
+    assert result["title"] == "Controls"
+    assert result["count"] == 1
+    assert result["elements"][0]["tag"] == "button"
+    assert result["elements"][0]["text"] == "Go now"
+    assert result["elements"][0]["attributes"]["aria-label"] == "go"
+    assert "secret" not in json.dumps(result)
+    assert len(result["proof"]["content_sha256"]) == 64
+
+
+def test_desktop_browser_download_is_atomic_bounded_and_scoped(monkeypatch, tmp_path: Path):
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir()
+
+    class Response:
+        is_redirect = False
+        headers = {"content-type": "application/octet-stream", "content-length": "11"}
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def raise_for_status(self): return None
+        def iter_bytes(self):
+            yield b"hello "
+            yield b"smara"
+
+    class Client:
+        def __init__(self, **_kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def stream(self, method, url):
+            assert method == "GET" and url == "https://example.com/file.bin"
+            return Response()
+
+    monkeypatch.setattr("smara.desktop_executor.httpx.Client", Client)
+    state = {"capabilities": ["local_browser"], "allowed_roots": [str(tmp_path)], "browser_domains": ["example.com"]}
+    step = {
+        "required_capability": "local_browser",
+        "executor_payload": {
+            "operation": "download", "url": "https://example.com/file.bin", "destination": "downloads/file.bin",
+        },
+    }
+    result = json.loads(execute_step(step, state))
+    target = download_dir / "file.bin"
+    assert target.read_bytes() == b"hello smara"
+    assert result["path"] == "downloads/file.bin"
+    assert result["bytes_downloaded"] == 11
+    assert result["overwrote"] is False
+    with pytest.raises(RuntimeError, match="already exists"):
+        execute_step(step, state)
+    step["executor_payload"]["overwrite"] = True
+    replaced = json.loads(execute_step(step, state))
+    assert replaced["overwrote"] is True
+
+
+def test_desktop_browser_download_cancellation_removes_partial_file(monkeypatch, tmp_path: Path):
+    class Response:
+        is_redirect = False
+        headers = {"content-type": "application/octet-stream"}
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def raise_for_status(self): return None
+        def iter_bytes(self): yield b"partial"
+
+    class Client:
+        def __init__(self, **_kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def stream(self, _method, _url): return Response()
+
+    monkeypatch.setattr("smara.desktop_executor.httpx.Client", Client)
+    state = {"capabilities": ["local_browser"], "allowed_roots": [str(tmp_path)], "browser_domains": ["example.com"]}
+    with pytest.raises(ExecutionCancelled, match="cancelled"):
+        execute_step({
+            "required_capability": "local_browser",
+            "executor_payload": {"operation": "download", "url": "https://example.com/file.bin", "destination": "file.bin"},
+        }, state, checkpoint=lambda: True)
+    assert not (tmp_path / "file.bin").exists()
+
+
 def test_desktop_state_round_trip_is_json(tmp_path: Path):
     path = tmp_path / "desktop.json"
     _save_state(path, {"executor_id": "desktop_1", "token": "opaque", "smara_url": "http://smara"})

@@ -242,11 +242,17 @@ adapter that can, when enabled:
 - **Implemented:** `inspect_text` fetches a page from an approved domain with
   no browser cookies/session, no redirects, a 1 MB fetch limit, and bounded
   extracted text. `open` remains an explicit system-browser action.
-- Still needed: selected DOM inspection, screenshots, bounded downloads, and
-  citation/proof presentation.
-- Capture screenshots.
-- Download bounded files.
-- Return citations and proof to the hosted task.
+- **Implemented:** `inspect_dom` returns a bounded semantic DOM summary, or a
+  simple tag/`#id`/`.class` selection, with safe attributes and resolved links.
+  It never executes page scripts or shares a browser session.
+- **Implemented:** `download` streams an approved URL to an approved local
+  folder, rejects redirects and symlink destinations, supports explicit
+  overwrite only, cleans partial files on cancellation, and caps downloads at
+  50 MB. Inspection and downloads include source URL, byte count, and a
+  SHA-256 proof hash for the hosted task ledger.
+- Screenshots remain deferred until the desktop has a separately reviewed
+  local capture adapter; the current executor deliberately has no cookie or
+  interactive-browser automation surface.
 
 Browser sessions and cookies must remain local. This is separate from hosted
 public URL fetching through Tavily/HTTP.
@@ -379,7 +385,9 @@ These are deferred by owner decision and must remain disabled/documented:
 4. Expand Test/Build execution with named recipes and reviewable artifacts.
    **Named recipes, bounded artifact metadata, changed-file collection, and
    Desktop Activity rendering are now complete.**
-5. Implement Controlled Browser inspection, keeping browser state local.
+5. **Controlled Browser inspection is now complete for text, selected DOM, and
+   bounded downloads; screenshots remain deferred pending a local capture
+   adapter.** Browser state remains local.
 6. Add local credential adapters one at a time, beginning with the highest
    value personal workflow.
 7. Improve task decomposition, local intent reconciliation, workspace locks,

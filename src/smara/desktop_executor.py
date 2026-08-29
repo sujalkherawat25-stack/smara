@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -42,6 +42,11 @@ MAX_OUTPUT_CHARS = 32_000
 MAX_COMMAND_SECONDS = 60
 MAX_BROWSER_INSPECT_BYTES = 1_000_000
 MAX_BROWSER_TEXT_CHARS = 16_000
+MAX_BROWSER_DOM_ELEMENTS = 100
+MAX_BROWSER_DOM_SCAN_ELEMENTS = 1_000
+MAX_BROWSER_ELEMENT_TEXT_CHARS = 500
+MAX_BROWSER_ATTR_CHARS = 500
+MAX_BROWSER_DOWNLOAD_BYTES = 50 * 1024 * 1024
 MAX_WORKSPACE_TREE_ENTRIES = 500
 MAX_WORKSPACE_TREE_DEPTH = 6
 MAX_WORKSPACE_SEARCH_FILES = 100
@@ -110,6 +115,105 @@ class _PageTextExtractor(HTMLParser):
         if self._in_title:
             self.title = f"{self.title} {normalized}".strip()[:500]
         self.parts.append(normalized)
+
+
+class _PageDomExtractor(HTMLParser):
+    """Extract a small, non-executable DOM summary for local inspection.
+
+    This intentionally is not a browser automation surface: scripts, styles,
+    SVGs, event handlers, and every unbounded attribute are discarded.  The
+    result is useful for locating headings, links, forms, and controls while
+    keeping browser sessions and cookies out of the hosted task entirely.
+    """
+
+    _SEMANTIC_TAGS = {
+        "a", "article", "button", "footer", "form", "h1", "h2", "h3", "h4",
+        "header", "img", "input", "main", "nav", "option", "section", "select",
+        "textarea",
+    }
+    _IGNORED_TAGS = {"script", "style", "noscript", "svg", "template"}
+    _ATTRIBUTES = {
+        "id", "class", "role", "aria-label", "title", "href", "src", "alt",
+        "name", "type", "value", "placeholder",
+    }
+
+    def __init__(self, *, semantic_only: bool, base_url: str, max_scan: int = MAX_BROWSER_DOM_SCAN_ELEMENTS) -> None:
+        super().__init__(convert_charrefs=True)
+        self.semantic_only = semantic_only
+        self.base_url = base_url
+        self.max_scan = max_scan
+        self.title = ""
+        self._in_title = False
+        self.elements: list[dict[str, object]] = []
+        self._stack: list[tuple[str, dict[str, object] | None, bool]] = []
+        self._ignored_depth = 0
+
+    def handle_starttag(self, tag: str, attrs) -> None:  # type: ignore[override]
+        lowered = tag.lower()
+        if lowered == "title":
+            self._in_title = True
+        if lowered in self._IGNORED_TAGS:
+            self._ignored_depth += 1
+            self._stack.append((lowered, None, True))
+            return
+        if self._ignored_depth:
+            self._stack.append((lowered, None, False))
+            return
+        if len(self.elements) >= self.max_scan:
+            self._stack.append((lowered, None, False))
+            return
+        if self.semantic_only and lowered not in self._SEMANTIC_TAGS:
+            self._stack.append((lowered, None, False))
+            return
+        filtered: dict[str, str] = {}
+        for name, value in attrs:
+            key = str(name).lower()
+            if key not in self._ATTRIBUTES or value is None:
+                continue
+            rendered = str(value)[:MAX_BROWSER_ATTR_CHARS]
+            if key in {"href", "src"}:
+                rendered = urljoin(self.base_url, rendered)[:MAX_BROWSER_ATTR_CHARS]
+            filtered[key] = rendered
+        element: dict[str, object] = {"tag": lowered, "attributes": filtered, "text": ""}
+        self.elements.append(element)
+        self._stack.append((lowered, element, False))
+
+    def handle_startendtag(self, tag: str, attrs) -> None:  # type: ignore[override]
+        self.handle_starttag(tag, attrs)
+        self.handle_endtag(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        lowered = tag.lower()
+        if lowered == "title":
+            self._in_title = False
+        match_index = None
+        for index in range(len(self._stack) - 1, -1, -1):
+            if self._stack[index][0] == lowered:
+                match_index = index
+                break
+        if match_index is None:
+            return
+        removed = self._stack[match_index:]
+        del self._stack[match_index:]
+        self._ignored_depth = max(0, self._ignored_depth - sum(1 for _, _, ignored in removed if ignored))
+
+    def handle_data(self, data: str) -> None:
+        if self._ignored_depth:
+            return
+        normalized = " ".join(data.split())
+        if not normalized:
+            return
+        if self._in_title:
+            self.title = f"{self.title} {normalized}".strip()[:MAX_BROWSER_ATTR_CHARS]
+        # Include descendant text in every selected ancestor.  This keeps a
+        # button or article useful even when it contains nested spans/labels,
+        # while each child still exposes its own more precise text.
+        for _, element, _ in self._stack:
+            if element is None:
+                continue
+            previous = str(element.get("text") or "")
+            joined = f"{previous} {normalized}".strip()
+            element["text"] = joined[:MAX_BROWSER_ELEMENT_TEXT_CHARS]
 
 
 def default_state_path() -> Path:
@@ -1167,52 +1271,232 @@ def _allowed_browser_url(url: str, state: dict) -> tuple[str, str]:
     return url, hostname
 
 
-def _browser(payload: dict, state: dict, *, checkpoint=None, progress_hook=None) -> str:
+_SIMPLE_DOM_SELECTOR = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*(?:[.#][A-Za-z0-9_-]+)?$")
+_DOM_IDENTIFIER = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _dom_selector_matches(element: dict[str, object], selector: object) -> bool:
+    """Match one deliberately small selector grammar, never arbitrary CSS."""
+    if selector is None or selector == "":
+        return True
+    if not isinstance(selector, str) or len(selector) > 100 or not selector.strip():
+        raise RuntimeError("selector must be a simple tag, #id, or .class selector.")
+    value = selector.strip()
+    if value.startswith("#") or value.startswith("."):
+        if not _DOM_IDENTIFIER.fullmatch(value[1:]):
+            raise RuntimeError("selector must be a simple tag, #id, or .class selector.")
+    elif not _SIMPLE_DOM_SELECTOR.fullmatch(value):
+        raise RuntimeError("selector must be a simple tag, #id, or .class selector.")
+    tag = str(element.get("tag") or "")
+    attrs = element.get("attributes")
+    attributes = attrs if isinstance(attrs, dict) else {}
+    if value.startswith("#"):
+        return str(attributes.get("id") or "") == value[1:]
+    if value.startswith("."):
+        return value[1:] in str(attributes.get("class") or "").split()
+    match = re.fullmatch(r"(?P<tag>[A-Za-z][A-Za-z0-9_-]*)(?:(?P<kind>[.#])(?P<name>[A-Za-z0-9_-]+))?", value)
+    if not match:
+        return False
+    if tag != match.group("tag").lower():
+        return False
+    kind, name = match.group("kind"), match.group("name")
+    if kind == "#":
+        return str(attributes.get("id") or "") == name
+    if kind == ".":
+        return name in str(attributes.get("class") or "").split()
+    return True
+
+
+def _browser_result_path(path: Path, roots: list[Path]) -> str:
+    for root in roots:
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            continue
+    return path.name
+
+
+def _fetch_browser_bytes(
+    url: str,
+    *,
+    max_bytes: int,
+    checkpoint=None,
+    progress_hook=None,
+) -> tuple[bytes, str]:
+    """Fetch one public page/file without cookies, redirects, or credentials."""
+    _emit_progress(progress_hook, "Fetching approved page without browser cookies")
+    chunks: list[bytes] = []
+    received = 0
+    try:
+        with httpx.Client(
+            timeout=15,
+            follow_redirects=False,
+            headers={"User-Agent": "SmaraDesktop/0.1 local-inspection"},
+        ) as client:
+            with client.stream("GET", url) as response:
+                if getattr(response, "is_redirect", False):
+                    location = response.headers.get("location", "")
+                    raise RuntimeError(
+                        f"Page redirected; approve and inspect the destination separately ({str(location)[:300]})."
+                    )
+                response.raise_for_status()
+                headers = response.headers
+                content_type = str(headers.get("content-type", "")).lower()
+                content_length = headers.get("content-length")
+                try:
+                    declared_length = int(content_length) if content_length is not None else None
+                except (TypeError, ValueError):
+                    declared_length = None
+                if declared_length is not None and declared_length > max_bytes:
+                    raise RuntimeError(f"Browser response exceeds the {max_bytes // (1024 * 1024)} MB local limit.")
+                for chunk in response.iter_bytes():
+                    if not isinstance(chunk, (bytes, bytearray)):
+                        chunk = bytes(chunk)
+                    received += len(chunk)
+                    if received > max_bytes:
+                        raise RuntimeError(f"Browser response exceeded the {max_bytes // (1024 * 1024)} MB local limit.")
+                    chunks.append(bytes(chunk))
+                    if checkpoint is not None and checkpoint():
+                        raise ExecutionCancelled("Browser operation was cancelled before completion.")
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Could not fetch the approved page: {str(exc)[:300]}") from exc
+    return b"".join(chunks), content_type
+
+
+def _browser_download(payload: dict, roots: list[Path], state: dict, *, checkpoint=None, progress_hook=None) -> str:
+    raw_destination = payload.get("destination") or payload.get("path")
+    if not isinstance(raw_destination, str) or not raw_destination.strip():
+        raise RuntimeError("Browser downloads require a destination inside an approved folder.")
+    destination = Path(raw_destination).expanduser()
+    if not destination.is_absolute():
+        destination = roots[0] / destination
+    target = _target(str(destination), roots, must_exist=False)
+    if target.exists() or target.is_symlink():
+        if target.is_symlink():
+            raise RuntimeError("Symlinked download destinations are not allowed.")
+        if target.is_dir():
+            raise RuntimeError("Browser download destination must be a file path.")
+        if payload.get("overwrite") is not True:
+            raise RuntimeError("Download destination already exists; set overwrite=true to replace it.")
+    overwrote = target.exists() and not target.is_symlink() and payload.get("overwrite") is True
+    url, _hostname = _allowed_browser_url(payload.get("url"), state)
+    temporary: Path | None = None
+    try:
+        _emit_progress(progress_hook, "Downloading approved file locally")
+        with httpx.Client(
+            timeout=30,
+            follow_redirects=False,
+            headers={"User-Agent": "SmaraDesktop/0.1 local-download"},
+        ) as client:
+            with client.stream("GET", url) as response:
+                if getattr(response, "is_redirect", False):
+                    location = response.headers.get("location", "")
+                    raise RuntimeError(
+                        f"Download redirected; approve and download the destination separately ({str(location)[:300]})."
+                    )
+                response.raise_for_status()
+                content_type = str(response.headers.get("content-type", "application/octet-stream")).lower()
+                content_length = response.headers.get("content-length")
+                try:
+                    declared_length = int(content_length) if content_length is not None else None
+                except (TypeError, ValueError):
+                    declared_length = None
+                if declared_length is not None and declared_length > MAX_BROWSER_DOWNLOAD_BYTES:
+                    raise RuntimeError("Browser download exceeds the 50 MB local limit.")
+                with tempfile.NamedTemporaryFile("wb", dir=target.parent, delete=False) as handle:
+                    temporary = Path(handle.name)
+                    digest = hashlib.sha256()
+                    received = 0
+                    for chunk in response.iter_bytes():
+                        if not isinstance(chunk, (bytes, bytearray)):
+                            chunk = bytes(chunk)
+                        received += len(chunk)
+                        if received > MAX_BROWSER_DOWNLOAD_BYTES:
+                            raise RuntimeError("Browser download exceeded the 50 MB local limit.")
+                        handle.write(chunk)
+                        digest.update(chunk)
+                        if checkpoint is not None and checkpoint():
+                            raise ExecutionCancelled("Browser download was cancelled before completion.")
+                    handle.flush()
+                    with contextlib.suppress(OSError):
+                        os.fsync(handle.fileno())
+                os.replace(temporary, target)
+                temporary = None
+        _emit_progress(progress_hook, "Browser download finished locally")
+        return json.dumps({
+            "action": "local_browser",
+            "operation": "download",
+            "url": url,
+            "path": _browser_result_path(target, roots),
+            "bytes_downloaded": received,
+            "sha256": digest.hexdigest(),
+            "content_type": content_type,
+            "overwrote": overwrote,
+            "proof": {"source_url": url, "content_sha256": digest.hexdigest(), "bytes": received},
+        }, ensure_ascii=False)
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Could not download the approved file: {str(exc)[:300]}") from exc
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _browser(payload: dict, state: dict, roots: list[Path], *, checkpoint=None, progress_hook=None) -> str:
     url, _hostname = _allowed_browser_url(payload.get("url"), state)
     operation = payload.get("operation", "open")
     if operation == "open":
         if not webbrowser.open(url, new=0, autoraise=False):
             raise RuntimeError("The operating system did not accept the browser request.")
         return json.dumps({"action": "local_browser", "operation": "open", "url": url, "opened": True})
-    if operation != "inspect_text":
-        raise RuntimeError("local_browser supports open and inspect_text operations only.")
-    _emit_progress(progress_hook, "Fetching approved page without browser cookies")
-    try:
-        with httpx.Client(timeout=15, follow_redirects=False, headers={"User-Agent": "SmaraDesktop/0.1 local-inspection"}) as client:
-            with client.stream("GET", url) as response:
-                if response.is_redirect:
-                    location = response.headers.get("location", "")
-                    raise RuntimeError(f"Page redirected; approve and inspect the destination separately ({location[:300]}).")
-                response.raise_for_status()
-                content_type = response.headers.get("content-type", "").lower()
-                if not (content_type.startswith("text/") or "json" in content_type):
-                    raise RuntimeError("Page inspection accepts text and JSON responses only.")
-                chunks: list[bytes] = []
-                received = 0
-                for chunk in response.iter_bytes():
-                    received += len(chunk)
-                    if received > MAX_BROWSER_INSPECT_BYTES:
-                        raise RuntimeError("Page inspection exceeded the 1 MB local limit.")
-                    chunks.append(chunk)
-                    if checkpoint is not None and checkpoint():
-                        raise ExecutionCancelled("Page inspection was cancelled before completion.")
-    except httpx.HTTPError as exc:
-        raise RuntimeError(f"Could not inspect the approved page: {str(exc)[:300]}") from exc
-    raw = b"".join(chunks).decode("utf-8", errors="replace")
-    if "html" in content_type:
-        extractor = _PageTextExtractor()
-        extractor.feed(raw)
-        text = "\n".join(extractor.parts)
-        title = extractor.title
+    if operation == "download":
+        return _browser_download(payload, roots, state, checkpoint=checkpoint, progress_hook=progress_hook)
+    if operation not in {"inspect_text", "inspect_dom"}:
+        raise RuntimeError("local_browser supports open, inspect_text, inspect_dom, and download operations only.")
+    max_bytes = MAX_BROWSER_INSPECT_BYTES
+    raw_bytes, content_type = _fetch_browser_bytes(url, max_bytes=max_bytes, checkpoint=checkpoint, progress_hook=progress_hook)
+    digest = hashlib.sha256(raw_bytes).hexdigest()
+    raw = raw_bytes.decode("utf-8", errors="replace")
+    if operation == "inspect_text":
+        if not (content_type.startswith("text/") or "json" in content_type):
+            raise RuntimeError("Page inspection accepts text and JSON responses only.")
+        if "html" in content_type:
+            extractor = _PageTextExtractor()
+            extractor.feed(raw)
+            text = "\n".join(extractor.parts)
+            title = extractor.title
+        else:
+            text = raw
+            title = ""
+        result = {
+            "action": "local_browser", "operation": operation, "url": url,
+            "title": title, "content_type": content_type, "text": text[:MAX_BROWSER_TEXT_CHARS],
+            "truncated": len(text) > MAX_BROWSER_TEXT_CHARS,
+            "proof": {"source_url": url, "content_sha256": digest, "bytes": len(raw_bytes)},
+        }
     else:
-        text = raw
-        title = ""
+        if "html" not in content_type:
+            raise RuntimeError("DOM inspection accepts HTML responses only.")
+        selector = payload.get("selector")
+        max_elements = _bounded_int(
+            payload.get("max_elements"), default=MAX_BROWSER_DOM_ELEMENTS,
+            minimum=1, maximum=MAX_BROWSER_DOM_ELEMENTS, field="max_elements",
+        )
+        extractor = _PageDomExtractor(
+            semantic_only=selector in (None, ""),
+            base_url=url,
+        )
+        extractor.feed(raw)
+        matches = [element for element in extractor.elements if _dom_selector_matches(element, selector)]
+        result = {
+            "action": "local_browser", "operation": operation, "url": url,
+            "title": extractor.title, "content_type": content_type,
+            "selector": selector or None, "elements": matches[:max_elements],
+            "count": len(matches),
+            "truncated": len(matches) > max_elements or len(extractor.elements) >= MAX_BROWSER_DOM_SCAN_ELEMENTS,
+            "proof": {"source_url": url, "content_sha256": digest, "bytes": len(raw_bytes)},
+        }
     _emit_progress(progress_hook, "Page inspection finished locally")
-    return json.dumps({
-        "action": "local_browser", "operation": "inspect_text", "url": url,
-        "title": title, "content_type": content_type, "text": text[:MAX_BROWSER_TEXT_CHARS],
-        "truncated": len(text) > MAX_BROWSER_TEXT_CHARS,
-    }, ensure_ascii=False)
+    return json.dumps(result, ensure_ascii=False)
 
 
 def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None) -> str:
@@ -1238,7 +1522,7 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
     if capability == "local_terminal":
         return _terminal(payload, roots, state, checkpoint=checkpoint, progress_hook=progress_hook)
     if capability == "local_browser":
-        return _browser(payload, state, checkpoint=checkpoint, progress_hook=progress_hook)
+        return _browser(payload, state, roots, checkpoint=checkpoint, progress_hook=progress_hook)
     raise RuntimeError(f"Desktop capability '{capability}' is not installed.")
 
 
