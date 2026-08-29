@@ -38,6 +38,7 @@ services:
     # Staging uses SMARA_HOST_PORT=8090 so it cannot collide with live Smara.
     ports: ["${SMARA_BIND_ADDRESS:-127.0.0.1}:${SMARA_HOST_PORT:-8080}:8080"]
     volumes: ["smara-data:/app/data"]
+    networks: [default, memoryos]
   # Canonical Smara UI. Caddy serves this container at the ai.syntarus.com root.
   frontend:
     build:
@@ -108,7 +109,12 @@ services:
       postgres:
         condition: service_healthy
     volumes: ["smara-data:/app/data"]
+    networks: [default, memoryos]
 volumes:
   smara-data:
   smara-postgres:
   smara-redis:
+networks:
+  memoryos:
+    external: true
+    name: memoryos_default
