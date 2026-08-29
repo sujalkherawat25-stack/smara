@@ -24,6 +24,11 @@ interface HostedModel {
   default?: boolean;
 }
 
+interface PairingResponse {
+  code: string;
+  expires_at?: string;
+}
+
 /**
  * Settings for the focused Smara product. It intentionally uses only Smara
  * endpoints: account, hosted tool catalogue, and paired desktop executors.
@@ -42,6 +47,11 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
   const [runtimeStatus, setRuntimeStatus] = useState<"checking" | "connected" | "unavailable">("checking");
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pairingOpen, setPairingOpen] = useState(false);
+  const [pairingName, setPairingName] = useState("My Smara Desktop");
+  const [pairingCapabilities, setPairingCapabilities] = useState<string[]>(["local_file_read"]);
+  const [pairingCode, setPairingCode] = useState<PairingResponse | null>(null);
+  const [pairingBusy, setPairingBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -77,6 +87,28 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
     } finally {
       setBusyId(null);
     }
+  }
+
+  async function createPairing() {
+    if (!pairingName.trim() || pairingCapabilities.length === 0) return;
+    setPairingBusy(true);
+    setError(null);
+    setPairingCode(null);
+    try {
+      const result = await apiClient.post<PairingResponse>("/v1/executors/pairings", {
+        name: pairingName.trim(),
+        capabilities: pairingCapabilities,
+      });
+      setPairingCode(result);
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.detail : "Could not create a desktop pairing code.");
+    } finally {
+      setPairingBusy(false);
+    }
+  }
+
+  function toggleCapability(capability: string) {
+    setPairingCapabilities((current) => current.includes(capability) ? current.filter((item) => item !== capability) : [...current, capability]);
   }
 
   return (
@@ -131,8 +163,19 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
               <p className="text-[12px] mt-1" style={{ color: "var(--text-muted)" }}>Paired PCs can act only after you approve a task.</p>
             </div>
           </div>
-          <button onClick={() => void refresh()} disabled={loading} className="p-2 rounded-md" style={{ border: "1px solid var(--border-dim)", color: "var(--text-muted)" }} title="Refresh status"><RefreshCw size={14} className={loading ? "animate-spin" : ""} /></button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setPairingOpen((current) => !current); setPairingCode(null); setError(null); }} className="px-2.5 py-1.5 rounded-md text-[11px]" style={{ background: "var(--accent-soft)", color: "var(--accent)", border: "1px solid var(--border-dim)" }}>{pairingOpen ? "Close" : "Pair new desktop"}</button>
+            <button onClick={() => void refresh()} disabled={loading} className="p-2 rounded-md" style={{ border: "1px solid var(--border-dim)", color: "var(--text-muted)" }} title="Refresh status"><RefreshCw size={14} className={loading ? "animate-spin" : ""} /></button>
+          </div>
         </div>
+        {pairingOpen && <div className="mt-3 rounded-lg p-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--border-dim)" }}>
+          <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>Pair a new desktop</p>
+          <p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>Create a short-lived code, then paste it into Smara Desktop → Settings → Connection.</p>
+          <label className="block mt-3 text-[11px]" style={{ color: "var(--text-muted)" }}>Desktop name<input value={pairingName} onChange={(event) => setPairingName(event.target.value)} className="mt-1 w-full rounded-md px-2.5 py-2 text-[12px] outline-none" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)", color: "var(--text-primary)" }} /></label>
+          <div className="mt-3 flex flex-wrap gap-2"><span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Allow:</span>{["local_file_read", "local_file_write", "local_terminal", "local_browser"].map((capability) => <button type="button" key={capability} onClick={() => toggleCapability(capability)} className="px-2 py-1 rounded-md text-[10px]" style={{ color: pairingCapabilities.includes(capability) ? "var(--accent)" : "var(--text-muted)", background: pairingCapabilities.includes(capability) ? "var(--accent-soft)" : "transparent", border: `1px solid ${pairingCapabilities.includes(capability) ? "var(--accent)" : "var(--border-dim)"}` }}>{capability.replace("local_", "").replaceAll("_", " ")}</button>)}</div>
+          <div className="flex items-center gap-2 mt-3"><button type="button" onClick={() => void createPairing()} disabled={pairingBusy || !pairingName.trim() || pairingCapabilities.length === 0} className="px-3 py-2 rounded-md text-[11px] font-medium" style={{ background: "var(--accent)", color: "var(--bg-page)", opacity: pairingBusy || !pairingName.trim() || pairingCapabilities.length === 0 ? 0.6 : 1 }}>{pairingBusy ? "Creating…" : "Generate code"}</button>{pairingCode && <code className="text-[18px] tracking-[.22em] px-3 py-1.5 rounded-md" style={{ color: "var(--accent)", background: "var(--bg-card)", border: "1px solid var(--accent)" }}>{pairingCode.code}</code>}</div>
+          {pairingCode && <p className="text-[10px] mt-2" style={{ color: "var(--text-muted)" }}>This code is single-use and expires in 10 minutes. Pair the desktop now, then start its executor.</p>}
+        </div>}
         <div className="mt-3 flex flex-col gap-2">
           {!loading && executors.length === 0 && <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>No desktop is paired yet. Pair one from the Smara Desktop app.</p>}
           {executors.map((executor) => (
