@@ -154,11 +154,12 @@ With the owner's real paired account:
 
 ### P0-C — Authenticated Smara Web shadow test
 
-**Status: server-side shadow green on 2026-08-29; interactive Web portions
-pending.** The public signed smoke passed health/readiness, task creation and
+**Status: authenticated shadow green on 2026-08-29; reconnect edge case
+pending.** The signed public smoke passed health/readiness, task creation and
 cancel, cross-account 404 isolation, local-only integration policy, and the
-no-replay desktop lease check. A real browser session still needs sign-in,
-refresh, dropped-stream reconnect, sign-out, and visual result/approval checks.
+no-replay desktop lease check. A real signed-in Web session also passed chat,
+approval, visible task result, refresh persistence, and sign-out. A deliberate
+dropped-stream reconnect still needs to be exercised.
 
 Using a real beta account, verify sign-in, refresh, chat, task creation, task
 result visibility, research evidence/artifacts, approval, reconnect after a

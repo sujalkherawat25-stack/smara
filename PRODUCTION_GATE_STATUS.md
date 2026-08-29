@@ -102,6 +102,10 @@ preserved without a second public UI.
   terminally cancelled the step without a dead-letter replay. The same public
   smoke passed cross-account task isolation and the Grok/Tavily chat,
   calculator, and cited-research workflows.
+- The authenticated Web shadow passed on 2026-08-29: Google sign-in, approval
+  gating, visible task result (`SHADOW_TASK_OK`), chat (`SHADOW_CHAT_OK`),
+  refresh persistence, and sign-out. The signed-in task and chat probes were
+  disposable and contain no user files or secrets.
 
 ## Deferred by owner for the current beta
 
@@ -139,10 +143,10 @@ remain in force and they must be reopened before a later production promotion:
   closed, relaunched, and recovered as `Executor online` with `Hosted connected`
   on 2026-08-29. Automated restart/retry/lease tests, public
   authenticated shadow/isolation, executor progress, and the live Postgres
-  no-replay check are green; a real paired task across a physical PC/app/
-  network disconnect and reconnect still needs to be run with the owner's
-  paired account. A production Sentry event and real
-  phone VAPID delivery still require their corresponding deployment
+  no-replay check are green. A deliberate dropped-stream reconnect and a real
+  paired task across a physical PC/app/network disconnect and reconnect still
+  need to be run with the owner's paired account. A production Sentry event and
+  a real phone VAPID delivery still require their corresponding deployment
   credentials/device subscription.
 - The Docker sandbox command is not yet a live hosted executor. Before enabling
   `SMARA_SANDBOX_ENABLED`, deploy a separate sandbox service with its own
