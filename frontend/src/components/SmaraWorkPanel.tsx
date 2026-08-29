@@ -178,7 +178,7 @@ export default function SmaraWorkPanel() {
   if (loading) return <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>Loading Smara work…</p>;
 
   return (
-    <div className="flex flex-col gap-3 h-full min-h-0">
+    <div className="flex flex-col gap-3 h-full min-h-0 min-w-0">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>{tasks.length ? `${tasks.length} task${tasks.length === 1 ? "" : "s"}` : "No durable work yet."}</p>
         <div className="flex items-center gap-2">
@@ -200,8 +200,8 @@ export default function SmaraWorkPanel() {
         <input value={researchSources} onChange={(event) => setResearchSources(event.target.value)} placeholder="Source URLs (optional, comma separated)" className="mt-2 w-full rounded-md px-2.5 py-2 text-[12px] outline-none" style={{ background: "var(--bg-base)", border: "1px solid var(--border-dim)", color: "var(--text-primary)" }} />
         <div className="mt-2 flex justify-end"><button disabled={creatingResearch} onClick={() => void createResearch()} className="px-3 py-1.5 rounded-md text-[11px]" style={{ background: "var(--accent)", color: "#07111f", opacity: creatingResearch ? 0.6 : 1 }}>{creatingResearch ? "Creating…" : "Create research task"}</button></div>
       </div>}
-      <div className="grid grid-cols-1 md:grid-cols-[minmax(12rem,0.7fr)_minmax(0,1.5fr)] gap-3 min-h-0 flex-1">
-        <div className="flex flex-col gap-1.5 overflow-y-auto pr-1">
+      <div className="grid grid-cols-1 md:grid-cols-[minmax(12rem,0.7fr)_minmax(0,1.5fr)] gap-3 min-h-0 min-w-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-col gap-1.5 overflow-y-auto overscroll-contain pr-1 scrollbar-thin">
           {tasks.map((task) => (
             <button key={task.id} onClick={() => setSelectedId(task.id)} className="text-left px-3 py-2.5 rounded-lg" style={{ background: selectedId === task.id ? "var(--accent-soft)" : "var(--bg-card)", border: `1px solid ${selectedId === task.id ? "var(--accent)" : "var(--border-dim)"}` }}>
               <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full" style={{ background: statusColor[task.status] || "var(--text-muted)" }} /><span className="text-[12px] truncate" style={{ color: "var(--text-primary)" }}>{task.title}</span></div>
@@ -211,7 +211,7 @@ export default function SmaraWorkPanel() {
           {!tasks.length && <p className="text-[12px] px-2 py-4" style={{ color: "var(--text-muted)" }}>Start work from chat, then track it here.</p>}
         </div>
         {!selected ? <div className="rounded-xl flex items-center justify-center" style={{ border: "1px dashed var(--border-default)", color: "var(--text-muted)" }}>Select a task to inspect its plan and evidence.</div> : (
-          <div className="rounded-xl p-4 overflow-y-auto" style={{ background: "var(--bg-card)", border: "1px solid var(--border-dim)" }}>
+           <div className="min-h-0 min-w-0 rounded-xl p-4 overflow-y-auto overscroll-contain scrollbar-thin" style={{ background: "var(--bg-card)", border: "1px solid var(--border-dim)" }}>
             <div className="flex items-start justify-between gap-3"><div><h2 className="text-[16px] font-semibold" style={{ color: "var(--text-primary)" }}>{selected.title}</h2><p className="text-[12px] mt-1" style={{ color: "var(--text-secondary)" }}>{selected.objective}</p></div><span className="text-[10px] uppercase tracking-wider" style={{ color: statusColor[selected.status] }}>{selected.status.replace("_", " ")}</span></div>
             {selected.status === "waiting_approval" && <div className="mt-4 p-3 rounded-lg flex items-center justify-between gap-2" style={{ background: "rgba(245,158,11,.08)", border: "1px solid rgba(245,158,11,.3)" }}><span className="text-[12px]" style={{ color: "#fbbf24" }}>This task is waiting for your approval.</span><div className="flex gap-2"><button disabled={busy} onClick={() => void decide(true)} className="px-2.5 py-1.5 rounded-md text-[11px]" style={{ background: "#34d399", color: "#06251a" }}><Check size={12} className="inline mr-1" />Approve</button><button disabled={busy} onClick={() => void decide(false)} className="px-2.5 py-1.5 rounded-md text-[11px]" style={{ background: "transparent", color: "#fca5a5", border: "1px solid rgba(248,113,113,.35)" }}><X size={12} className="inline mr-1" />Deny</button></div></div>}
             {!["completed", "failed", "cancelled"].includes(selected.status) && selected.status !== "waiting_approval" && <button disabled={busy} onClick={() => void cancel()} className="mt-3 px-2.5 py-1.5 rounded-md text-[11px]" style={{ color: "#fca5a5", border: "1px solid rgba(248,113,113,.35)" }}><Square size={11} className="inline mr-1" />Cancel task</button>}

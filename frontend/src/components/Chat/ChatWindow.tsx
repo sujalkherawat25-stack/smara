@@ -50,7 +50,9 @@ export default function ChatWindow() {
     }
   }, [account?.account_id, focusedSmara, hydrateFromServer, setAccountScope]);
 
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -66,8 +68,30 @@ export default function ChatWindow() {
   const [dragOver, setDragOver] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  const handleTranscriptScroll = useCallback(() => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const atBottom = distanceFromBottom < 96;
+    stickToBottomRef.current = atBottom;
+    setShowJumpToLatest(!atBottom && el.scrollHeight > el.clientHeight);
+  }, []);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // A newly-sent user message should always be visible. Assistant tokens do
+    // not take over the user's scroll position when they are reading earlier
+    // turns.
+    if (messages[messages.length - 1]?.role === "user") {
+      stickToBottomRef.current = true;
+    }
+    if (!stickToBottomRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      const el = transcriptRef.current;
+      if (!el) return;
+      el.scrollTo({ top: el.scrollHeight, behavior: isStreaming ? "auto" : "smooth" });
+      setShowJumpToLatest(false);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [messages, isStreaming]);
 
   useEffect(() => {
@@ -159,6 +183,7 @@ export default function ChatWindow() {
     const text = input.trim();
     if (isStreaming) return;
     if (!text && attachments.length === 0) return;
+    stickToBottomRef.current = true;
     const ids = attachments.map((a) => a.id);
     // If a file is attached with no typed message, give the agent a default ask.
     const allImages = attachments.length > 0 && attachments.every((a) => a.kind === "image");
@@ -211,20 +236,40 @@ export default function ChatWindow() {
   const canSend = !isStreaming && (!!input.trim() || attachments.length > 0);
 
   return (
-    <div className="flex flex-col h-full" style={{ background: "var(--bg-base)" }}>
+    <div className="flex flex-col h-full min-h-0 min-w-0 relative" style={{ background: "var(--bg-base)" }}>
 
       {/* ── Messages ─────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto scrollbar-thin">
-        <div className="mx-auto w-full max-w-3xl px-4 py-8 space-y-6">
+      <div
+        ref={transcriptRef}
+        className="flex-1 min-h-0 min-w-0 overflow-y-auto overscroll-contain scrollbar-thin"
+        onScroll={handleTranscriptScroll}
+        tabIndex={0}
+        aria-label="Conversation"
+      >
+        <div className="mx-auto min-h-full w-full max-w-3xl px-4 py-8 pb-10 space-y-6">
 
           {empty && <EmptyState onPick={(p) => { void send(p); }} />}
 
           {renderedMessages}
           {isStreaming && <AgentRunCanvas />}
           {isStreaming && <StreamingMessage />}
-          <div ref={bottomRef} />
         </div>
       </div>
+
+      {showJumpToLatest && (
+        <button
+          type="button"
+          onClick={() => {
+            stickToBottomRef.current = true;
+            transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" });
+            setShowJumpToLatest(false);
+          }}
+          className="absolute right-5 bottom-[6.5rem] z-10 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] shadow-lg"
+          style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-accent)", color: "var(--accent)" }}
+        >
+          ↓ Newest
+        </button>
+      )}
 
       {/* ── Composer ─────────────────────────────────────────────────── */}
       <div

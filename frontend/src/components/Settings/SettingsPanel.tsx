@@ -246,12 +246,12 @@ function LegacySettingsPanel({ onOpenControl }: { onOpenControl?: () => void }) 
   );
 
   return (
-    <div className="flex h-full" style={{ background: "var(--bg-base)" }}>
+    <div className="flex h-full min-h-0 min-w-0" style={{ background: "var(--bg-base)" }}>
       {/* ── Left rail — visible always on md+, hidden when in detail-view on mobile ─ */}
       <div
         className={`
           ${mobileView === "list" ? "flex" : "hidden"} md:flex
-          shrink-0 flex-col overflow-y-auto scrollbar-thin
+          min-h-0 shrink-0 flex-col overflow-y-auto overscroll-contain scrollbar-thin
           w-full md:w-[240px]
         `}
         style={{
@@ -266,7 +266,7 @@ function LegacySettingsPanel({ onOpenControl }: { onOpenControl?: () => void }) 
       <div
         className={`
           ${mobileView === "detail" ? "flex" : "hidden"} md:flex
-          flex-1 min-w-0 flex-col overflow-hidden
+          flex-1 min-h-0 min-w-0 flex-col overflow-hidden
         `}
       >
         {/* Mobile-only "back to sections" bar */}
@@ -284,7 +284,7 @@ function LegacySettingsPanel({ onOpenControl }: { onOpenControl?: () => void }) 
         </button>
 
         {/* Scrollable section content */}
-        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
+        <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overscroll-contain scrollbar-thin">
           <div className="w-full max-w-6xl mx-auto px-5 md:px-8 py-5 md:py-7">
             <SectionHeader selected={selected} />
             <div className="mt-5">

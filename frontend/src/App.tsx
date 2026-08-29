@@ -148,7 +148,7 @@ function AuthenticatedApp() {
 
   return (
     <div
-      className="flex flex-col overflow-hidden"
+      className="smara-shell flex flex-col min-h-0 min-w-0 overflow-hidden"
       style={{
         // 100dvh = dynamic viewport height; on mobile this excludes the
         // browser chrome (URL bar, bottom toolbar) reliably, so the column
@@ -283,7 +283,7 @@ function AuthenticatedApp() {
       </header>
 
       {/* ── Body ───────────────────────────────────────────────────────── */}
-      <div className="flex flex-1 min-h-0 overflow-hidden relative">
+      <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden relative">
 
         {/* Mobile sidebar backdrop (md hidden — desktop sidebar pushes content instead) */}
         {sidebarOpen && (
@@ -297,7 +297,7 @@ function AuthenticatedApp() {
         {/* Recents sidebar — pushes content on desktop, slides over on mobile */}
         <div
           className={`
-            flex flex-col overflow-hidden transition-all duration-300 ease-in-out
+            flex flex-col min-h-0 min-w-0 overflow-hidden transition-all duration-300 ease-in-out
             md:shrink-0 md:relative
             ${sidebarOpen ? "absolute md:relative inset-y-0 left-0 z-50" : ""}
           `}
@@ -378,7 +378,7 @@ function AuthenticatedApp() {
         </div>
 
         {/* Main */}
-        <div className="flex-1 min-w-0 relative overflow-hidden">
+        <div className="flex-1 min-h-0 min-w-0 relative overflow-hidden">
           {/* Chat — always mounted, dimmed behind panel */}
           <div
             className="absolute inset-0 transition-all duration-300"
@@ -615,7 +615,7 @@ function PanelView({
       className="absolute inset-0 z-30 flex items-stretch md:items-center md:justify-center pointer-events-none animate-panel-in p-0 md:p-5"
     >
       <div
-        className="flex flex-col w-full h-full md:rounded-2xl overflow-hidden pointer-events-auto"
+        className="flex flex-col w-full h-full min-h-0 min-w-0 md:rounded-2xl overflow-hidden pointer-events-auto"
         style={{
           maxWidth: narrow ? "700px" : "1240px",
           background: "var(--bg-surface)",
@@ -667,7 +667,7 @@ function PanelView({
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-hidden">
+        <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
           {children}
         </div>
       </div>

@@ -35,7 +35,7 @@ export default function RecentsPanel({ onSelect }: { onSelect?: () => void }) {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto scrollbar-thin py-1">
+    <div className="flex flex-col h-full min-h-0 min-w-0 overflow-y-auto overscroll-contain scrollbar-thin py-1">
       {conversations.map((conv) => {
         const isActive = conv.id === (activeId ?? sessionId);
         return (
