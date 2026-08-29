@@ -29,6 +29,28 @@ interface PairingResponse {
   expires_at?: string;
 }
 
+const EXECUTOR_ONLINE_WINDOW_MS = 90_000;
+
+function executorIsOnline(executor: Executor) {
+  if (executor.status !== "active" || !executor.last_seen_at) return false;
+  const lastSeen = Date.parse(executor.last_seen_at);
+  return Number.isFinite(lastSeen) && Date.now() - lastSeen <= EXECUTOR_ONLINE_WINDOW_MS;
+}
+
+function formatLastSeen(value?: string | null) {
+  if (!value) return "never seen";
+  const lastSeen = Date.parse(value);
+  if (!Number.isFinite(lastSeen)) return "last seen unavailable";
+  const seconds = Math.max(0, Math.round((Date.now() - lastSeen) / 1000));
+  if (seconds < 10) return "last seen just now";
+  if (seconds < 60) return `last seen ${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `last seen ${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `last seen ${hours}h ago`;
+  return `last seen ${Math.round(hours / 24)}d ago`;
+}
+
 /**
  * Settings for the focused Smara product. It intentionally uses only Smara
  * endpoints: account, hosted tool catalogue, and paired desktop executors.
@@ -178,13 +200,17 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
         </div>}
         <div className="mt-3 flex flex-col gap-2">
           {!loading && executors.length === 0 && <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>No desktop is paired yet. Pair one from the Smara Desktop app.</p>}
-          {executors.map((executor) => (
+          {executors.map((executor) => {
+            const online = executorIsOnline(executor);
+            const statusLabel = executor.status === "revoked" ? "Revoked" : online ? "Online now" : `Offline · ${formatLastSeen(executor.last_seen_at)}`;
+            return (
             <div key={executor.id} className="flex items-center gap-3 rounded-lg px-3 py-2.5" style={{ background: "var(--bg-surface)", border: "1px solid var(--border-dim)" }}>
-              <span className="w-2 h-2 rounded-full" style={{ background: executor.status === "active" ? "#34d399" : "var(--text-muted)" }} />
-              <div className="min-w-0 flex-1"><p className="text-[12px] truncate" style={{ color: "var(--text-primary)" }}>{executor.name}</p><p className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>{executor.capabilities.join(" · ") || "No capabilities declared"}</p></div>
+              <span className="w-2 h-2 rounded-full" title={statusLabel} style={{ background: online ? "#34d399" : executor.status === "revoked" ? "var(--text-muted)" : "#fbbf24" }} />
+              <div className="min-w-0 flex-1"><p className="text-[12px] truncate" style={{ color: "var(--text-primary)" }}>{executor.name}</p><p className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>{statusLabel} · {executor.capabilities.join(" · ") || "No capabilities declared"}</p></div>
               <button onClick={() => void revoke(executor.id)} disabled={busyId === executor.id} className="text-[11px] px-2 py-1 rounded-md" style={{ color: "#fca5a5", border: "1px solid rgba(248,113,113,.35)", opacity: busyId === executor.id ? 0.6 : 1 }}>Revoke</button>
             </div>
-          ))}
+            );
+          })}
         </div>
         {onOpenWork && <button onClick={onOpenWork} className="mt-3 px-3 py-2 rounded-md text-[12px] font-medium" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>Open durable work</button>}
       </section>
