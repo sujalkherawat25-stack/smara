@@ -208,9 +208,10 @@ memory store. See [`apps/desktop/README.md`](apps/desktop/README.md) for the
 developer run/build commands and the current packaging boundary.
 
 The native Smara Telegram worker uses the same account database and one-time
-link codes; it calls the Smara chat API on the private Docker network. The old
-Memento worker and agent routes are migration-only rollback assets and should
-be stopped after the live native Telegram check. `SMARA_HOSTED_USER_INTEGRATIONS_ENABLED=false`
+link codes; it calls the Smara chat API on the private Docker network. It is
+the only Telegram poller in the live deployment. The old Memento worker was
+removed, and its public agent/auth routes return `410 Gone`; the source remains
+only as a rollback/reference asset in MemoryOS. `SMARA_HOSTED_USER_INTEGRATIONS_ENABLED=false`
 keeps personal credential storage disabled. Never put a user's provider token
 in the hosted `.env` or Smara Postgres.
 

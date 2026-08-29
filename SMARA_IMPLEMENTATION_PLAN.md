@@ -43,9 +43,9 @@ while the hosted service remains the durable coordinator.
   visible in the task activity and result/artifact record.
 - No arbitrary code execution, unrestricted browser automation, or hosted
   sandbox is enabled in this beta.
-- The Memento agent and Telegram worker are migration-only rollback assets.
-  Native Smara auth/Telegram code now lives in this repository; the old
-  runtime must not remain public after the live shadow checks pass.
+- The Memento agent source is retained only as a rollback/reference asset in
+  the MemoryOS repository. Native Smara auth and Telegram code live here; the
+  old agent routes and worker are no longer public or running.
 
 ## 3. Architecture today
 
@@ -95,9 +95,9 @@ proof/artifacts.
   long-term memory.
 - Personal hosted integrations are fail-closed in the current deployment.
 - Native Smara session auth (Google GIS, revocable httpOnly cookie, shared
-  account ids) and a Smara-owned Telegram poller are implemented locally. The
-  live VM still needs the staged deployment and one real link/chat check before
-  the legacy Memento worker and `/v1/memento/*` routes are disabled.
+  account ids) and a Smara-owned Telegram poller are deployed. The legacy
+  Memento worker is removed and `/v1/memento/*` plus legacy `/v1/auth/*` are
+  retired with an explicit 410 response. MemoryOS core APIs remain available.
 
 ### Smara Desktop
 
@@ -120,13 +120,25 @@ proof/artifacts.
 
 ### Verification already green
 
-- 159 Python tests, frontend production/type checks, native Rust tests, and
+- 161 Python tests, frontend production/type checks, native Rust tests, and
   Windows packaging checks.
 - Live Grok/Tavily/research/task/approval/lease safety smokes.
 - Disposable local file read/write, Python codebase test, and browser-opening
   workflow passed with the paired executor.
 - Expired uncertain terminal/browser/write leases fail closed and are audited
   instead of being replayed.
+
+### Native cutover verification — 2026-08-29
+
+- `https://ai.syntarus.com/` serves the Smara Web bundle (200).
+- `/smara-api/health` reports `native-session` auth and `telegram: true`.
+- `/smara-api/v1/auth/config` returns 200; `/v1/auth/me` returns 401 when no
+  session is present (expected).
+- `/v1/memento/*`, legacy `/v1/auth/*`, and the old `/smara/` mount return 410.
+- MemoryOS core `/v1/memory` remains available behind its existing auth.
+- The Smara-owned Telegram worker polls with repeated 200 responses; the
+  legacy Telegram container was removed. Live Telegram message/link checks
+  still require the owner's signed-in account and bot interaction.
 
 ## 5. What remains now: active beta gates
 
@@ -168,9 +180,8 @@ dropped-stream reconnect still needs to be exercised.
 
 Using a real beta account, verify native Smara sign-in, refresh, chat, task creation, task
 result visibility, research evidence/artifacts, approval, reconnect after a
-dropped stream, sign-out, and account isolation. Keep the Memento rollback
-configuration until this run is green. The legacy route is a rollback only and
-is not part of the target product.
+dropped stream, sign-out, and account isolation. The legacy route is disabled;
+rollback requires restoring the saved Caddy configuration explicitly.
 
 ### P0-D — Edge and provider checks
 
