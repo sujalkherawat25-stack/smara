@@ -34,6 +34,8 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from .desktop_integrations import LocalIntegrationCancelled, execute_local_integration
+
 
 MAX_FILE_BYTES = 256 * 1024
 MAX_DIFF_CHARS = 40_000
@@ -1523,6 +1525,11 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
         return _terminal(payload, roots, state, checkpoint=checkpoint, progress_hook=progress_hook)
     if capability == "local_browser":
         return _browser(payload, state, roots, checkpoint=checkpoint, progress_hook=progress_hook)
+    if capability == "local_integration":
+        try:
+            return execute_local_integration(payload, _resolved_credentials, checkpoint=checkpoint, progress_hook=progress_hook)
+        except LocalIntegrationCancelled as exc:
+            raise ExecutionCancelled(str(exc)) from exc
     raise RuntimeError(f"Desktop capability '{capability}' is not installed.")
 
 

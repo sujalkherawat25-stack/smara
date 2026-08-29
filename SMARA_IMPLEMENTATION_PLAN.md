@@ -259,11 +259,17 @@ public URL fetching through Tavily/HTTP.
 
 ### L5 — Local credential adapters
 
-The encrypted credential vault exists, but an alias currently becomes useful
-only when an approved terminal process requests it. Add explicit local adapters
-for tools such as Tavily, GitHub, Telegram, Gmail, Calendar, and Drive only
-after each adapter has its own scope, approval, redaction, and test contract.
-No adapter may upload the user's secret to the VM.
+**Status: first slice implemented and unit-tested on 2026-08-29.** The
+encrypted credential vault now powers an explicit `local_integration`
+capability for approval-gated, read-only Tavily search and GitHub repository
+listing. Provider aliases are fixed (`TAVILY_API_KEY` and `GITHUB_TOKEN`),
+responses are bounded and secret-free, provider failures are classified without
+returning upstream bodies, and the key is sent directly from the desktop to
+the provider. No adapter uploads a user's secret to the VM.
+
+Telegram send, Gmail, Calendar, and Drive remain separate adapters: each needs
+its own local consent/token flow, scope limits, redaction contract, and tests
+before it is enabled.
 
 ### L6 — Artifact and result workspace
 
@@ -388,8 +394,9 @@ These are deferred by owner decision and must remain disabled/documented:
 5. **Controlled Browser inspection is now complete for text, selected DOM, and
    bounded downloads; screenshots remain deferred pending a local capture
    adapter.** Browser state remains local.
-6. Add local credential adapters one at a time, beginning with the highest
-   value personal workflow.
+6. **Local credential adapter slice 1 is complete (Tavily + GitHub read-only).**
+   Add Telegram/Gmail/Calendar/Drive one at a time only after their local
+   consent and scope contracts are implemented.
 7. Improve task decomposition, local intent reconciliation, workspace locks,
    and result/diff UX.
 8. Decide whether encrypted offline local memory is needed; do not create a

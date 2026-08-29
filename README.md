@@ -147,12 +147,17 @@ The desktop currently supports bounded `local_file_read` (hash/proof by
 default, content only when the approved payload explicitly requests it),
 reviewable `local_file_write` (read-only previews, write/append/patch,
 rename/move, delete-to-undo, atomic replacement, and guarded local undo),
-allowlisted `local_terminal`, and allowlisted `local_browser`. Browser work is
+allowlisted `local_terminal`, allowlisted `local_browser`, and the optional
+`local_integration` adapter. Browser work is
 explicitly local: `open` launches the system browser, `inspect_text` returns
 bounded page text, `inspect_dom` returns a small semantic or selector-based DOM
 summary, and `download` streams a file into an approved folder (50 MB cap).
 Inspection and downloads never send browser cookies, reject redirects, and
 return a source URL plus SHA-256 proof metadata.
+When `local_integration` is explicitly paired, the desktop can run approved
+read-only Tavily search and GitHub repository-list requests using
+`TAVILY_API_KEY` or `GITHUB_TOKEN` from its encrypted vault. The key is sent
+directly to that provider, never to Smara, and is never included in results.
 Terminal and browser capabilities must be
 declared during pairing and configured locally with `--terminal-allow` or
 `--browser-domain`; the executor rejects undeclared capabilities, unapproved

@@ -295,12 +295,12 @@ class DesktopActionRequestTool:
         {
             "type": "object",
             "properties": {
-                "capability": {"type": "string", "enum": ["local_file_read", "local_file_write", "local_terminal", "local_browser"]},
+                "capability": {"type": "string", "enum": ["local_file_read", "local_file_write", "local_terminal", "local_browser", "local_integration"]},
                 "preview": {"type": "string", "minLength": 1, "maxLength": 1_000},
                 "payload": {
                     "type": "object",
                     "maxProperties": 30,
-                    "description": "Capability payload. local_file_read supports read_file, list_tree, literal search_text, find_files, and git_summary. local_file_write supports preview_only, write/append/patch/rename/move/delete, and undo with a returned undo_id. local_terminal uses argv and cwd. local_browser supports open, inspect_text, inspect_dom, or download with an approved HTTP(S) url; inspect_dom accepts a simple tag/#id/.class selector and bounded max_elements, while download requires a destination inside an approved folder and is capped at 50 MB.",
+                    "description": "Capability payload. local_file_read supports read_file, list_tree, literal search_text, find_files, and git_summary. local_file_write supports preview_only, write/append/patch/rename/move/delete, and undo with a returned undo_id. local_terminal uses argv and cwd. local_browser supports open, inspect_text, inspect_dom, or download with an approved HTTP(S) url; inspect_dom accepts a simple tag/#id/.class selector and bounded max_elements, while download requires a destination inside an approved folder and is capped at 50 MB. local_integration supports only approval-gated local Tavily search ({provider:tavily, operation:search, query}) and GitHub repository listing ({provider:github, operation:list_repositories, limit}); their credentials stay in the desktop vault.",
                 },
             },
             "required": ["capability", "preview", "payload"],

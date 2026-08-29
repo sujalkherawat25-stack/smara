@@ -243,6 +243,72 @@ def test_local_credential_vault_injects_only_requested_alias_and_redacts_output(
     assert local_credential_summaries() == []
 
 
+def test_local_tavily_adapter_uses_vault_and_returns_bounded_secret_free_proof(monkeypatch, tmp_path: Path):
+    vault = tmp_path / "credentials.json"
+    monkeypatch.setenv("SMARA_DESKTOP_CREDENTIALS", str(vault))
+    secret = "tavily-local-secret"
+    save_local_credential("TAVILY_API_KEY", secret, "tavily")
+    calls: list[dict] = []
+
+    class Response:
+        status_code = 200
+        is_success = True
+
+        def json(self):
+            return {"results": [{"title": "Smara", "url": "https://example.com/smara", "content": "A bounded result."}]}
+
+    class Client:
+        def __init__(self, **_kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def post(self, url, **kwargs):
+            calls.append({"url": url, **kwargs})
+            return Response()
+
+    monkeypatch.setattr("smara.desktop_executor.httpx.Client", Client)
+    state = {"capabilities": ["local_integration"], "allowed_roots": [str(tmp_path)]}
+    result = json.loads(execute_step({
+        "required_capability": "local_integration",
+        "executor_payload": {"provider": "tavily", "operation": "search", "query": "Smara"},
+    }, state))
+    assert calls[0]["url"] == "https://api.tavily.com/search"
+    assert calls[0]["json"]["api_key"] == secret
+    assert secret not in json.dumps(result)
+    assert result["results"][0]["url"] == "https://example.com/smara"
+    assert result["citations"] == ["https://example.com/smara"]
+    assert result["proof"]["results"] == 1
+
+
+def test_local_github_adapter_is_read_only_and_classifies_bad_credentials(monkeypatch, tmp_path: Path):
+    vault = tmp_path / "credentials.json"
+    monkeypatch.setenv("SMARA_DESKTOP_CREDENTIALS", str(vault))
+    save_local_credential("GITHUB_TOKEN", "github-local-secret", "github")
+
+    class Response:
+        status_code = 200
+        is_success = True
+
+        def json(self):
+            return [{"name": "smara", "full_name": "sujal/smara", "private": True, "html_url": "https://github.com/sujal/smara", "description": "agent", "language": "Python"}]
+
+    class Client:
+        def __init__(self, **_kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def get(self, url, **_kwargs):
+            assert url == "https://api.github.com/user/repos"
+            return Response()
+
+    monkeypatch.setattr("smara.desktop_executor.httpx.Client", Client)
+    state = {"capabilities": ["local_integration"], "allowed_roots": [str(tmp_path)]}
+    result = json.loads(execute_step({
+        "required_capability": "local_integration",
+        "executor_payload": {"provider": "github", "operation": "list_repositories", "limit": 1},
+    }, state))
+    assert result["repositories"][0]["full_name"] == "sujal/smara"
+    assert "github-local-secret" not in json.dumps(result)
+
+
 def test_desktop_refuses_unapproved_step_and_undeclared_browser(tmp_path: Path):
     state = {"capabilities": ["local_browser"], "allowed_roots": [str(tmp_path)], "browser_domains": ["example.com"]}
     with pytest.raises(RuntimeError, match="approval"):
