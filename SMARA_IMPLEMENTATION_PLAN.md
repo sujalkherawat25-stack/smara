@@ -43,8 +43,9 @@ while the hosted service remains the durable coordinator.
   visible in the task activity and result/artifact record.
 - No arbitrary code execution, unrestricted browser automation, or hosted
   sandbox is enabled in this beta.
-- Memento remains only as rollback/reference until the final shadow and
-  production gates are accepted; it is not a second public product.
+- The Memento agent and Telegram worker are migration-only rollback assets.
+  Native Smara auth/Telegram code now lives in this repository; the old
+  runtime must not remain public after the live shadow checks pass.
 
 ## 3. Architecture today
 
@@ -93,6 +94,10 @@ proof/artifacts.
   configured vision model. Attachments are transient context, not automatic
   long-term memory.
 - Personal hosted integrations are fail-closed in the current deployment.
+- Native Smara session auth (Google GIS, revocable httpOnly cookie, shared
+  account ids) and a Smara-owned Telegram poller are implemented locally. The
+  live VM still needs the staged deployment and one real link/chat check before
+  the legacy Memento worker and `/v1/memento/*` routes are disabled.
 
 ### Smara Desktop
 
@@ -161,10 +166,11 @@ no-replay desktop lease check. A real signed-in Web session also passed chat,
 approval, visible task result, refresh persistence, and sign-out. A deliberate
 dropped-stream reconnect still needs to be exercised.
 
-Using a real beta account, verify sign-in, refresh, chat, task creation, task
+Using a real beta account, verify native Smara sign-in, refresh, chat, task creation, task
 result visibility, research evidence/artifacts, approval, reconnect after a
 dropped stream, sign-out, and account isolation. Keep the Memento rollback
-configuration until this run is green.
+configuration until this run is green. The legacy route is a rollback only and
+is not part of the target product.
 
 ### P0-D — Edge and provider checks
 

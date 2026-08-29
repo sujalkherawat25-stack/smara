@@ -40,6 +40,16 @@ class Settings:
     dev_mode: bool = os.getenv("SMARA_DEV_MODE", "false").lower() == "true"
     gateway_signing_secret: str = _secret("SMARA_GATEWAY_SIGNING_SECRET")
     control_bridge_secret: str = _secret("SMARA_CONTROL_BRIDGE_SECRET")
+    # Native Smara identity.  In production this points at the existing
+    # account database so account ids and memory namespaces survive the
+    # Memento -> Smara cutover.  It is deliberately separate from the task
+    # database setting so a deployment cannot accidentally create a second
+    # identity store.
+    accounts_database_url: str = os.getenv("SMARA_ACCOUNTS_DATABASE_URL", os.getenv("ACCOUNTS_DB_URL", ""))
+    session_secret: str = _secret("SMARA_SESSION_SECRET")
+    session_ttl_days: int = int(os.getenv("SMARA_SESSION_TTL_DAYS", "30"))
+    auth_cookie_name: str = os.getenv("SMARA_AUTH_COOKIE_NAME", "smara_session")
+    internal_token: str = _secret("SMARA_INTERNAL_TOKEN")
     allowed_origins: str = os.getenv(
         "SMARA_ALLOWED_ORIGINS",
         "https://ai.syntarus.com",
@@ -54,6 +64,9 @@ class Settings:
     public_base_url: str = os.getenv("SMARA_PUBLIC_BASE_URL", "http://127.0.0.1:8080")
     google_client_id: str = os.getenv("SMARA_GOOGLE_CLIENT_ID", "")
     google_client_secret: str = _secret("SMARA_GOOGLE_CLIENT_SECRET")
+    telegram_bot_token: str = _secret("SMARA_TELEGRAM_BOT_TOKEN", _secret("TELEGRAM_BOT_TOKEN"))
+    telegram_bot_url: str = os.getenv("SMARA_TELEGRAM_BOT_URL", os.getenv("TELEGRAM_BOT_URL", ""))
+    telegram_chat_url: str = os.getenv("SMARA_TELEGRAM_CHAT_URL", "http://api:8080")
     github_client_id: str = os.getenv("SMARA_GITHUB_CLIENT_ID", "")
     github_client_secret: str = _secret("SMARA_GITHUB_CLIENT_SECRET")
     vapid_public_key: str = os.getenv("SMARA_VAPID_PUBLIC_KEY", "")

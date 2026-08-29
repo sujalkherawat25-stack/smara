@@ -1,12 +1,14 @@
 /**
  * lib/auth.ts — frontend auth API helpers.
  *
- * Every call uses `credentials: "include"` so the httpOnly mem_session
- * cookie travels with the request. The cookie is set by the backend on
+ * Every call uses `credentials: "include"` so the httpOnly smara_session
+ * cookie travels with the request. The cookie is set by the Smara API on
  * /v1/auth/google and cleared by /v1/auth/logout.
  *
  * No tokens leave server. No localStorage. No bearer header.
  */
+
+import { smaraFetch } from "@/lib/smaraGateway";
 
 export interface Account {
   account_id: string;
@@ -36,7 +38,7 @@ const COMMON: RequestInit = {
 
 /** Sign in by handing a Google ID token to the backend. Backend sets cookie. */
 export async function signInWithGoogle(idToken: string): Promise<Account> {
-  const r = await fetch("/v1/auth/google", {
+  const r = await smaraFetch("/v1/auth/google", {
     ...COMMON,
     method: "POST",
     body: JSON.stringify({ id_token: idToken }),
@@ -49,7 +51,7 @@ export async function signInWithGoogle(idToken: string): Promise<Account> {
 }
 
 export async function requestEmailOtp(email: string): Promise<{ message: string; expires_in_seconds: number }> {
-  const r = await fetch("/v1/auth/email/request", {
+  const r = await smaraFetch("/v1/auth/email/request", {
     ...COMMON, method: "POST", body: JSON.stringify({ email }),
   });
   if (!r.ok) {
@@ -60,7 +62,7 @@ export async function requestEmailOtp(email: string): Promise<{ message: string;
 }
 
 export async function verifyEmailOtp(email: string, code: string): Promise<Account> {
-  const r = await fetch("/v1/auth/email/verify", {
+  const r = await smaraFetch("/v1/auth/email/verify", {
     ...COMMON, method: "POST", body: JSON.stringify({ email, code }),
   });
   if (!r.ok) {
@@ -72,7 +74,7 @@ export async function verifyEmailOtp(email: string, code: string): Promise<Accou
 
 /** Revoke server-side session and clear the cookie. Safe to call repeatedly. */
 export async function signOut(): Promise<void> {
-  await fetch("/v1/auth/logout", { ...COMMON, method: "POST" });
+  await smaraFetch("/v1/auth/logout", { ...COMMON, method: "POST" });
 }
 
 /**
@@ -80,7 +82,7 @@ export async function signOut(): Promise<void> {
  * caller can route to the sign-in screen without try/catch noise.
  */
 export async function fetchMe(): Promise<Account | null> {
-  const r = await fetch("/v1/auth/me", { ...COMMON, method: "GET" });
+  const r = await smaraFetch("/v1/auth/me", { ...COMMON, method: "GET" });
   if (r.status === 401) return null;
   if (!r.ok) throw new Error(`/auth/me failed (${r.status})`);
   return (await r.json()) as Account;
@@ -88,7 +90,7 @@ export async function fetchMe(): Promise<Account | null> {
 
 /** Generate a 6-digit Telegram linking code. Requires an active session. */
 export async function generateTelegramLinkCode(): Promise<LinkCode> {
-  const r = await fetch("/v1/auth/link/telegram", { ...COMMON, method: "GET" });
+  const r = await smaraFetch("/v1/auth/link/telegram", { ...COMMON, method: "GET" });
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));
     throw new Error(err.detail ?? `link-code generation failed (${r.status})`);
@@ -106,7 +108,7 @@ export interface TelegramLinkStatus {
 export async function fetchTelegramLinkStatus(): Promise<TelegramLinkStatus> {
   let r: Response;
   try {
-    r = await fetch("/v1/auth/link/telegram/status", { ...COMMON, method: "GET" });
+    r = await smaraFetch("/v1/auth/link/telegram/status", { ...COMMON, method: "GET" });
   } catch (e) {
     console.error("[telegram] status fetch network error:", e);
     return { linked: false, linked_at: null, channel_user_preview: null };
@@ -142,7 +144,7 @@ export async function completeOnboarding(
   preferred_name: string | null,
   options?: { birthday?: string },
 ): Promise<OnboardingResult> {
-  const r = await fetch("/v1/auth/me/onboarding", {
+  const r = await smaraFetch("/v1/auth/me/onboarding", {
     ...COMMON,
     method: "POST",
     body: JSON.stringify({ preferred_name, ...options }),
@@ -156,7 +158,7 @@ export async function completeOnboarding(
 
 /** Disconnect Telegram from the current account. Idempotent. */
 export async function unlinkTelegram(): Promise<void> {
-  const r = await fetch("/v1/auth/link/telegram", { ...COMMON, method: "DELETE" });
+  const r = await smaraFetch("/v1/auth/link/telegram", { ...COMMON, method: "DELETE" });
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));
     throw new Error(err.detail ?? `unlink failed (${r.status})`);

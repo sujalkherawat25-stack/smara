@@ -134,15 +134,16 @@ export default function ChatWindow() {
       }
       setUploading(true);
       try {
-        const res = await apiClient.uploadFile<{ attachment_id: string; filename: string; kind?: string }>(
-          "/v1/memento/upload",
-          file,
-        );
+        const res = await apiClient.uploadFiles<{
+          attachments: Array<{ id: string; filename: string; content_type?: string; size?: number }>;
+        }>("/v1/attachments", [file]);
+        const item = res.attachments?.[0];
+        if (!item) throw new Error("Smara did not return an attachment id.");
         setAttachments((a) => [...a, {
-          id: res.attachment_id,
-          filename: res.filename,
-          kind: res.kind === "image" ? "image" : "document",
-          size: file.size,
+          id: item.id,
+          filename: item.filename,
+          kind: item.content_type?.startsWith("image/") ? "image" : "document",
+          size: item.size ?? file.size,
         }]);
       } catch (e) {
         setUploadError(e instanceof ApiError ? e.detail : `Couldn't upload "${file.name}".`);

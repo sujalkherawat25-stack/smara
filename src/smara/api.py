@@ -10,7 +10,7 @@ import base64
 import secrets
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,6 +34,7 @@ from .provider_routing import resolve_profile
 from .provider_routing import load_profiles
 from .plugins import manifests
 from .attachments import AttachmentStore, MAX_BATCH_BYTES, MAX_ATTACHMENTS_PER_BATCH, MAX_FILE_BYTES
+from .auth import router as auth_router, verify_session_cookie
 
 LOG = logging.getLogger("smara.api")
 configure_sentry(settings.sentry_dsn)
@@ -41,10 +42,11 @@ app = FastAPI(title="Smara Control Plane", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()],
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+app.include_router(auth_router)
 store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
 attachment_store = AttachmentStore(Path(settings.database_path or "./data/smara.db").parent / "attachments")
 limiter = RedisFixedWindowLimiter(settings.redis_url, settings.rate_limit_per_minute, allow_local_fallback=settings.dev_mode)
@@ -101,6 +103,8 @@ def account_id(
     x_smara_gateway_timestamp: str | None = Header(default=None),
     x_smara_gateway_signature: str | None = Header(default=None),
     authorization: str | None = Header(default=None),
+    smara_session: str | None = Cookie(default=None, alias=settings.auth_cookie_name),
+    x_smara_internal_token: str | None = Header(default=None),
 ) -> str:
     """Resolve an account from a development header or trusted production bridge.
 
@@ -108,6 +112,18 @@ def account_id(
     web-session check, or a signed server-to-server gateway assertion.  Neither
     signing secret is ever exposed to a browser.
     """
+    # Native Smara session cookie is the primary browser identity after the
+    # cutover.  The DB-backed jti check makes logout/revocation immediate.
+    native_subject = verify_session_cookie(smara_session)
+    if native_subject:
+        return native_subject
+    # Telegram/worker traffic is server-to-server and has no browser cookie.
+    # Require both values; possession of the internal token alone never grants
+    # access to an arbitrary account.
+    if settings.internal_token and x_smara_internal_token and hmac.compare_digest(settings.internal_token, x_smara_internal_token):
+        if isinstance(x_smara_account_id, str) and x_smara_account_id.startswith("acct_"):
+            return x_smara_account_id
+        raise HTTPException(401, "A valid Smara account id is required.")
     if settings.dev_mode:
         if not x_smara_account_id:
             raise HTTPException(401, "X-Smara-Account-Id is required in development.")
@@ -217,7 +233,13 @@ def schedule_view(row: dict) -> ScheduleView:
     })
 
 @app.get("/health")
-async def health(): return {"ok": True, "memory_boundary": "syntarus-sdk-only", "auth_mode": "development" if settings.dev_mode else "signed-gateway"}
+async def health():
+    return {
+        "ok": True,
+        "memory_boundary": "syntarus-sdk-only",
+        "auth_mode": "native-session" if settings.session_secret and settings.accounts_database_url else ("development" if settings.dev_mode else "signed-gateway"),
+        "telegram": bool(settings.telegram_bot_token),
+    }
 
 @app.get("/v1/models")
 async def list_models(user: str = Depends(account_id)):

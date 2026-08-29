@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, X } from "lucide-react";
+import { smaraModeEnabled } from "@/lib/smaraGateway";
 
 interface WebNotification {
   id: string;
@@ -32,23 +33,24 @@ const POLL_INTERVAL_MS = 30_000;
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) || "";
 
 async function fetchNotifications(): Promise<WebNotification[]> {
-  const r = await fetch(`${API_BASE}/v1/memento/notifications`, {
-    credentials: "include",
-  });
+  // Native Smara task updates are rendered in Work/Activity and local toast
+  // state. Never probe the retired Memento notification queue.
+  if (smaraModeEnabled()) return [];
+  const r = await fetch(`${API_BASE}/v1/notifications`, { credentials: "include" });
   if (!r.ok) return [];
   const data = (await r.json()) as { notifications?: WebNotification[] };
   return data.notifications ?? [];
 }
 
 async function ackNotification(id: string): Promise<void> {
-  await fetch(`${API_BASE}/v1/memento/notifications/ack/${id}`, {
+  await fetch(`${API_BASE}/v1/notifications/ack/${id}`, {
     method: "POST",
     credentials: "include",
   });
 }
 
 async function ackAll(): Promise<void> {
-  await fetch(`${API_BASE}/v1/memento/notifications/ack-all`, {
+  await fetch(`${API_BASE}/v1/notifications/ack-all`, {
     method: "POST",
     credentials: "include",
   });

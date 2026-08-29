@@ -19,4 +19,6 @@ def test_active_caddy_keeps_marketing_and_smara_routes():
 
 def test_smara_services_restart_after_host_reboot():
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    assert compose.count("restart: unless-stopped") == 7
+    # Native Smara now includes its own Telegram edge as an eighth durable
+    # service; all services must come back after a host reboot.
+    assert compose.count("restart: unless-stopped") == 8

@@ -175,19 +175,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ),
     }));
     try {
-      if (smaraModeEnabled()) {
-        // Smara's durable task approvals are rendered by the Tasks surface;
-        // chat confirmations are a Memento-only event until that surface is
-        // migrated. Do not guess a task id from a chat confirmation id.
-        throw new Error("Chat confirmations are not available in Smara bridge mode yet.");
-      }
-      const res = await smaraFetch(`${BASE_URL}/v1/memento/confirm/${confirmId}`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approved }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Smara approvals are durable task decisions. A chat confirmation id
+      // from an older cached transcript has no safe task mapping; leave it
+      // visibly resolved without ever dispatching a legacy Memento request.
+      if (smaraModeEnabled()) return;
     } catch (err) {
       console.error("Confirmation response failed:", err);
       useNotificationsStore.getState().push({
@@ -225,10 +216,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       );
     }
     try {
+      if (smaraModeEnabled()) return;
       const action = approved ? "approve" : "disable";
       const res = await smaraFetch(`${BASE_URL}/v1/memento/skills/${skillId}/${action}`, {
-        method: "POST",
-        credentials: "include",
+        method: "POST", credentials: "include",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (err) {
@@ -297,7 +288,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         replyContent = "Could you give me a few more words? Hard to act on something that short.";
       } else {
         try {
-          await apiClient.post("/v1/memento/feedback", {
+          await apiClient.post("/v1/feedback", {
             message: note,
             channel: "web",
           });
@@ -360,30 +351,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const smara = smaraModeEnabled();
-      const res = smara
-        ? await smaraStream("/v1/chat/stream", {
+      const res = await smaraStream("/v1/chat/stream", {
             message: text,
             conversation_id: conversationId,
             workspace_id: useProjectsStore.getState().currentProjectId ?? "default",
             model_profile: get().modelProfile || undefined,
             attachment_ids: attachmentIds,
-          }, abortController.signal)
-        : await fetch(`${BASE_URL}/v1/memento/chat`, {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              message: text,
-              conversation_id: conversationId,
-              attachment_ids: attachmentIds,
-              deep_reasoning: get().deepReasoning,
-              reasoning_model: get().deepReasoning ? get().reasoningModel : undefined,
-              // F8: scope search_documents to the open Project, if any.
-              project_id: useProjectsStore.getState().currentProjectId ?? undefined,
-            }),
-            signal: abortController.signal,
-          });
+          }, abortController.signal);
 
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "@/stores/authStore";
 import SmaraLogo from "@/components/SmaraLogo";
 import { Mail } from "lucide-react";
+import { smaraFetch } from "@/lib/smaraGateway";
 
 declare global {
   interface Window {
@@ -38,7 +39,7 @@ export default function SignInScreen() {
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
-    fetch("/v1/auth/config", {
+    smaraFetch("/v1/auth/config", {
       method: "GET",
       credentials: "include",
       headers: { Accept: "application/json" },

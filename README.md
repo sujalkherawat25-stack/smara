@@ -108,8 +108,8 @@ integrations). Work that takes time, creates an artifact, or needs approval
 must use `smara run` so it survives a closed terminal or browser. Direct chat
 can never send, edit, delete, execute local commands, or bypass an approval.
 
-The pairing flow is deliberately two-part: an already authenticated Web or
-Memento session starts the code, and the terminal exchanges it once. Smara
+The pairing flow is deliberately two-part: an authenticated Smara Web session
+starts the code, and the terminal exchanges it once. Smara
 stores only hashes of pairing codes and issued device IDs; the CLI bearer uses
 a separate signing secret and is accepted only for the `smara-cli` audience.
 Issued devices can be listed and revoked without exposing their bearer or raw
@@ -207,10 +207,12 @@ executor and the same hosted API; it does not create a second agent brain or
 memory store. See [`apps/desktop/README.md`](apps/desktop/README.md) for the
 developer run/build commands and the current packaging boundary.
 
-The older hosted integration worker and encrypted credential tables remain as a
-rollback/migration path, but `SMARA_HOSTED_USER_INTEGRATIONS_ENABLED=false`
-keeps them inactive. Never put a user's provider token in the hosted `.env` or
-Smara Postgres.
+The native Smara Telegram worker uses the same account database and one-time
+link codes; it calls the Smara chat API on the private Docker network. The old
+Memento worker and agent routes are migration-only rollback assets and should
+be stopped after the live native Telegram check. `SMARA_HOSTED_USER_INTEGRATIONS_ENABLED=false`
+keeps personal credential storage disabled. Never put a user's provider token
+in the hosted `.env` or Smara Postgres.
 
 ## First research workflow
 

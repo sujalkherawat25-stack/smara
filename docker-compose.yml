@@ -92,6 +92,22 @@ services:
       redis:
         condition: service_healthy
     volumes: ["smara-data:/app/data"]
+  # Smara-owned Telegram edge. This replaces the legacy Memento poller after
+  # the native auth/link flow has been verified in production.
+  telegram-worker:
+    build: .
+    command: ["python", "-m", "smara.telegram_worker"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://redis:6379/0}
+      SMARA_TELEGRAM_CHAT_URL: ${SMARA_TELEGRAM_CHAT_URL:-http://api:8080}
+    depends_on:
+      api:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    volumes: ["smara-data:/app/data"]
 volumes:
   smara-data:
   smara-postgres:

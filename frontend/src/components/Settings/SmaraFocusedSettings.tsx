@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, CircleAlert, Cpu, Laptop, LogOut, RefreshCw, Server } from "lucide-react";
+import { CheckCircle2, CircleAlert, Cpu, Laptop, LogOut, RefreshCw, Server, Send } from "lucide-react";
 import { apiClient, ApiError } from "@/api/client";
 import { useAuthStore } from "@/stores/authStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { useChatStore } from "@/stores/chatStore";
+import { fetchTelegramLinkStatus, generateTelegramLinkCode, unlinkTelegram, type LinkCode, type TelegramLinkStatus } from "@/lib/auth";
 
 interface Executor {
   id: string;
@@ -54,7 +55,8 @@ function formatLastSeen(value?: string | null) {
 /**
  * Settings for the focused Smara product. It intentionally uses only Smara
  * endpoints: account, hosted tool catalogue, and paired desktop executors.
- * Deferred Telegram/Google/legacy Memento panels are not mounted here.
+ * Telegram linking is native to Smara; Google app integrations remain local
+ * until their dedicated adapters are enabled.
  */
 export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () => void }) {
   const account = useAuthStore((s) => s.account);
@@ -74,19 +76,24 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
   const [pairingCapabilities, setPairingCapabilities] = useState<string[]>(["local_file_read"]);
   const [pairingCode, setPairingCode] = useState<PairingResponse | null>(null);
   const [pairingBusy, setPairingBusy] = useState(false);
+  const [telegram, setTelegram] = useState<TelegramLinkStatus | null>(null);
+  const [telegramCode, setTelegramCode] = useState<LinkCode | null>(null);
+  const [telegramBusy, setTelegramBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [executorData, tools, modelData] = await Promise.all([
+      const [executorData, tools, modelData, telegramStatus] = await Promise.all([
         apiClient.get<{ executors?: Executor[] }>("/v1/executors"),
         apiClient.get<ToolCatalogue>("/v1/tools"),
         apiClient.get<{ models?: HostedModel[] }>("/v1/models"),
+        fetchTelegramLinkStatus(),
       ]);
       setExecutors(executorData.executors ?? []);
       setToolCount(tools.tools?.length ?? 0);
       setModels(modelData.models ?? []);
+      setTelegram(telegramStatus);
       setRuntimeStatus("connected");
     } catch (cause) {
       setRuntimeStatus("unavailable");
@@ -133,6 +140,20 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
     setPairingCapabilities((current) => current.includes(capability) ? current.filter((item) => item !== capability) : [...current, capability]);
   }
 
+  async function connectTelegram() {
+    setTelegramBusy(true); setError(null);
+    try { setTelegramCode(await generateTelegramLinkCode()); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create a Telegram link code."); }
+    finally { setTelegramBusy(false); }
+  }
+
+  async function disconnectTelegram() {
+    setTelegramBusy(true); setError(null);
+    try { await unlinkTelegram(); setTelegram({ linked: false, linked_at: null, channel_user_preview: null }); setTelegramCode(null); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not disconnect Telegram."); }
+    finally { setTelegramBusy(false); }
+  }
+
   return (
     <div className="w-full max-w-6xl mx-auto grid grid-cols-1 xl:grid-cols-2 gap-5 pb-6">
       <section className="rounded-xl p-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
@@ -174,6 +195,23 @@ export default function SmaraFocusedSettings({ onOpenWork }: { onOpenWork?: () =
         {models.length > 0 && <p className="text-[11px] mt-2" style={{ color: "var(--text-muted)" }}>
           {models.filter((model) => model.configured).length} model{models.filter((model) => model.configured).length === 1 ? "" : "s"} ready · Sarvam beta models appear only when your key has access.
         </p>}
+      </section>
+
+      <section className="rounded-xl p-4 xl:col-span-2" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
+        <div className="flex items-center gap-3">
+          <Send size={18} style={{ color: "#60a5fa" }} />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-[14px] font-semibold" style={{ color: "var(--text-primary)" }}>Telegram</h2>
+            <p className="text-[12px] mt-1" style={{ color: "var(--text-muted)" }}>Use the same Smara account from Telegram. The bot never receives your web session.</p>
+          </div>
+          <span className="text-[11px]" style={{ color: telegram?.linked ? "#34d399" : "var(--text-muted)" }}>{telegram?.linked ? "Connected" : "Not connected"}</span>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {!telegram?.linked && <button type="button" onClick={() => void connectTelegram()} disabled={telegramBusy} className="px-3 py-2 rounded-md text-[11px] font-medium" style={{ background: "var(--accent)", color: "var(--bg-page)", opacity: telegramBusy ? 0.6 : 1 }}>{telegramBusy ? "Creating…" : "Connect Telegram"}</button>}
+          {telegram?.linked && <button type="button" onClick={() => void disconnectTelegram()} disabled={telegramBusy} className="px-3 py-2 rounded-md text-[11px]" style={{ color: "#fca5a5", border: "1px solid rgba(248,113,113,.35)" }}>{telegramBusy ? "Disconnecting…" : "Disconnect"}</button>}
+          {telegramCode && <code className="text-[18px] tracking-[.22em] px-3 py-1.5 rounded-md" style={{ color: "var(--accent)", background: "var(--bg-surface)", border: "1px solid var(--accent)" }}>{telegramCode.code}</code>}
+        </div>
+        {telegramCode && <p className="text-[10px] mt-2" style={{ color: "var(--text-muted)" }}>Open the Smara Telegram bot and send <strong>/link {telegramCode.code}</strong>. This code expires in ten minutes and works once.</p>}
       </section>
 
       <section className="rounded-xl p-4 xl:col-span-2" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
