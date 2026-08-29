@@ -241,11 +241,25 @@ html, #root { height: 100%; }
 }
 
 /* Settings navigation and credential cards */
-.settings-nav { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: 7px; margin: -8px 0 16px; padding: 7px; border: 1px solid var(--stroke-soft); border-radius: 10px; background: rgba(9,11,16,.90); backdrop-filter: blur(10px); }
-.settings-nav button { padding: 7px 11px; border: 1px solid transparent; border-radius: 7px; color: var(--muted); background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
-.settings-nav button:hover, .settings-nav button:focus-visible { color: var(--text); background: rgba(255,255,255,.06); border-color: var(--stroke); outline: none; }
-.settings-card[id] { scroll-margin-top: 72px; }
 .credential-status { text-align: left; color: var(--text); font: inherit; cursor: pointer; }
 .credential-status:hover, .credential-status:focus-visible { border-color: #46506b; background: rgba(255,255,255,.05); outline: none; }
 .credential-status.status-selected { border-color: var(--blue); background: rgba(144,169,255,.09); box-shadow: 0 0 0 2px rgba(144,169,255,.08); }
 .credential-status > span:last-child { min-width: 0; display: grid; gap: 3px; }
+
+/* Settings are deliberate, full-page sections rather than one long form. */
+.settings-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 2px 0 16px; padding: 5px; border: 1px solid var(--stroke); border-radius: 12px; background: rgba(255,255,255,.025); }
+.settings-tab { display: grid; gap: 3px; min-height: 54px; padding: 10px 12px; border: 1px solid transparent; border-radius: 8px; color: var(--muted); background: transparent; font: inherit; text-align: left; cursor: pointer; transition: border-color .15s ease, background .15s ease, color .15s ease; }
+.settings-tab strong { color: inherit; font-size: 12px; }
+.settings-tab small { color: var(--subtle); font-size: 9px; line-height: 1.25; }
+.settings-tab:hover, .settings-tab:focus-visible { color: var(--text); background: rgba(255,255,255,.045); border-color: var(--stroke); outline: none; }
+.settings-tab-active { color: var(--text); background: rgba(144,169,255,.10); border-color: rgba(144,169,255,.55); box-shadow: 0 0 0 2px rgba(144,169,255,.08); }
+.settings-tab-active strong { color: var(--blue); }
+.settings-grid[data-active-section="connection"] > .settings-card:not(:nth-child(1)):not(:nth-child(2)):not(.about-card), .settings-grid[data-active-section="models"] > .settings-card:not(.model-card), .settings-grid[data-active-section="tools"] > .settings-card:not(.credential-card), .settings-grid[data-active-section="permissions"] > .settings-card:not(.permissions-card) { display: none; }
+.settings-grid[data-active-section="connection"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.settings-grid[data-active-section="models"], .settings-grid[data-active-section="tools"], .settings-grid[data-active-section="permissions"] { grid-template-columns: minmax(0, 1fr); }
+
+@media (max-width: 720px) {
+  .settings-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .settings-tab { min-height: 48px; }
+  .settings-grid[data-active-section="connection"] { grid-template-columns: 1fr; }
+}

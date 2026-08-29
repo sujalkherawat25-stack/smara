@@ -392,6 +392,8 @@ function SettingsPanel({ connection, apiUrl, webUrl, workspace, modelProfile, ro
     { icon: "⌘", label: "Terminal", value: splitLines(terminal).length, detail: "allowed executable" },
     { icon: "◌", label: "Browser", value: splitLines(domains).length, detail: "approved domain" },
   ];
+  type SettingsSection = "connection" | "models" | "tools" | "permissions";
+  const [activeSection, setActiveSection] = useState<SettingsSection>("connection");
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [modelProvider, setModelProvider] = useState("sarvam");
   const [modelId, setModelId] = useState("sarvam");
@@ -430,18 +432,14 @@ function SettingsPanel({ connection, apiUrl, webUrl, workspace, modelProfile, ro
     catch (error) { setFormError(errorMessage(error, "Could not remove local model profile")); }
     finally { setModelBusy(false); }
   }
-  useEffect(() => {
-    const sections: Array<[string, string]> = [[".hosted-card", "settings-connection"], [".model-card", "settings-models"], [".credential-card", "settings-tools"], [".permissions-card", "settings-permissions"]];
-    sections.forEach(([selector, id]) => document.querySelector(selector)?.setAttribute("id", id));
-  }, []);
   return <section className="content-page settings-page">
     <div className="page-intro"><div><span className="eyebrow">DESKTOP CONFIGURATION</span><h2>Settings</h2><p>Choose the hosted brain, then decide exactly what this PC may do. Nothing runs locally until you pair and start the executor.</p></div><Button kind="primary" onClick={() => void save()} disabled={!isNativeDesktop}>Save changes</Button></div>
     {formError && <div className="form-error" role="alert"><span>!</span><span>{formError}</span><button onClick={() => setFormError(null)} aria-label="Dismiss error">×</button></div>}
     {!isNativeDesktop && <div className="callout preview-callout"><span>i</span><div><strong>Desktop UI preview</strong><p>Settings and executor actions become active in the installed Windows app.</p></div></div>}
-    <nav className="settings-nav" aria-label="Settings sections">
-      {([['settings-connection', 'Connection'], ['settings-models', 'Models'], ['settings-tools', 'Tools & credentials'], ['settings-permissions', 'Permissions']] as const).map(([id, label]) => <button type="button" key={id} onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{label}</button>)}
+    <nav className="settings-tabs" aria-label="Settings sections">
+      {([['connection', 'Connection', 'Hosted access & pairing'], ['models', 'Models', 'Hosted and private providers'], ['tools', 'Tools & credentials', 'Local keys and skills'], ['permissions', 'Permissions', 'Local execution boundaries']] as const).map(([value, label, description]) => <button type="button" key={value} className={`settings-tab ${activeSection === value ? 'settings-tab-active' : ''}`} onClick={() => setActiveSection(value)} aria-pressed={activeSection === value}><strong>{label}</strong><small>{description}</small></button>)}
     </nav>
-    <div className="settings-grid">
+    <div className="settings-grid" data-active-section={activeSection}>
       <div className="settings-card hosted-card"><div className="card-heading"><span className="card-icon">◉</span><div><h3>Hosted connection</h3><p>One Smara brain for chat, planning, memory and task control.</p></div><span className="card-badge">Hosted</span></div>
         <label>Smara Web URL<input value={webUrl} onChange={(event) => { setFormError(null); setWebUrl(event.target.value); }} spellCheck={false} /></label>
         <label>Smara API URL<input value={apiUrl} onChange={(event) => { setFormError(null); setApiUrl(event.target.value); }} spellCheck={false} /></label>
