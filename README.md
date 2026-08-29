@@ -147,7 +147,12 @@ The desktop currently supports bounded `local_file_read` (hash/proof by
 default, content only when the approved payload explicitly requests it),
 reviewable `local_file_write` (read-only previews, write/append/patch,
 rename/move, delete-to-undo, atomic replacement, and guarded local undo),
-allowlisted `local_terminal`, and allowlisted `local_browser` URL opening.
+allowlisted `local_terminal`, and allowlisted `local_browser`. Browser work is
+explicitly local: `open` launches the system browser, `inspect_text` returns
+bounded page text, `inspect_dom` returns a small semantic or selector-based DOM
+summary, and `download` streams a file into an approved folder (50 MB cap).
+Inspection and downloads never send browser cookies, reject redirects, and
+return a source URL plus SHA-256 proof metadata.
 Terminal and browser capabilities must be
 declared during pairing and configured locally with `--terminal-allow` or
 `--browser-domain`; the executor rejects undeclared capabilities, unapproved
