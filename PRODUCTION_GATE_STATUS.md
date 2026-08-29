@@ -135,11 +135,13 @@ remain in force and they must be reopened before a later production promotion:
   continues to label workspace/status filters advisory; it must not be called
   secure cross-project isolation.
 - A Windows paired-desktop smoke task already passed, and the installed native
-  WebView completed a real hosted chat. Automated restart/retry/lease tests,
-  public authenticated shadow/isolation, executor progress, and the live
-  Postgres no-replay check are green; a real paired task across a physical
-  PC/app/network disconnect and reconnect still needs to be run with the
-  owner's paired account. A production Sentry event and real
+  WebView completed a real hosted chat. The paired executor was started,
+  closed, relaunched, and recovered as `Executor online` with `Hosted connected`
+  on 2026-08-29. Automated restart/retry/lease tests, public
+  authenticated shadow/isolation, executor progress, and the live Postgres
+  no-replay check are green; a real paired task across a physical PC/app/
+  network disconnect and reconnect still needs to be run with the owner's
+  paired account. A production Sentry event and real
   phone VAPID delivery still require their corresponding deployment
   credentials/device subscription.
 - The Docker sandbox command is not yet a live hosted executor. Before enabling
