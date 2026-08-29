@@ -115,7 +115,7 @@ proof/artifacts.
 
 ### Verification already green
 
-- 151 Python tests, frontend production/type checks, native Rust tests, and
+- 157 Python tests, frontend production/type checks, native Rust tests, and
   Windows packaging checks.
 - Live Grok/Tavily/research/task/approval/lease safety smokes.
 - Disposable local file read/write, Python codebase test, and browser-opening
@@ -192,13 +192,17 @@ the following skills on top of the existing capability and approval contracts.
 
 ### L2 — Reviewable workspace editing
 
-- Create, patch, replace, rename, and move files inside approved roots.
-- Always produce a diff/preview before an external write.
-- Use atomic writes, backups or trash for deletion, and an undo path.
-- Reject traversal, symlink escapes, unapproved roots, oversized content, and
-  ambiguous paths.
-- Keep the current 256 KB desktop file-operation limit until a larger bounded
-  streaming design is tested; do not confuse it with hosted attachment limits.
+**Status: implemented and unit-tested on 2026-08-29.** The paired executor now
+supports bounded `preview_only` planning plus write/append/patch/replace,
+rename/move, delete, and guarded undo operations inside approved roots.
+Mutations compute a bounded unified diff/preview before applying an atomic
+replacement, and return the preview, resulting hash, and a local-only undo id.
+Delete snapshots and prior file contents stay in the desktop app-data undo
+ledger; undo refuses to overwrite a file that changed after the original edit.
+Traversal, symlink escapes, unapproved roots, oversized content, destination
+collisions, non-UTF-8 patches, and ambiguous replacements are rejected. The
+256 KB desktop file-operation limit remains unchanged pending a larger bounded
+streaming design.
 
 ### L3 — Test/build skill
 
@@ -353,7 +357,8 @@ These are deferred by owner decision and must remain disabled/documented:
 
 1. Complete the physical restart/reconnect drill with the paired Windows PC.
 2. Complete interactive authenticated Web shadowing and edge-limit checks.
-3. Implement Workspace Inspection and Reviewable Editing.
+3. Implement Workspace Inspection and Reviewable Editing. **Workspace
+   inspection and L2 editing are now complete; proceed to test/build recipes.**
 4. Expand Test/Build execution with named recipes and reviewable artifacts.
 5. Implement Controlled Browser inspection, keeping browser state local.
 6. Add local credential adapters one at a time, beginning with the highest
@@ -372,8 +377,8 @@ These are deferred by owner decision and must remain disabled/documented:
 
 Current honest estimate:
 
-- Focused hosted + desktop beta: **~82%**.
-- Desktop executor foundation: **~89%**; physical restart/reconnect,
+- Focused hosted + desktop beta: **~84%**.
+- Desktop executor foundation: **~91%**; physical restart/reconnect,
   capability depth, signing, and update trust remain.
 - Full local-agent experience: **not complete** until Sections 6–8 are
   implemented and tested.

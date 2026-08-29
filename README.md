@@ -145,16 +145,21 @@ smara-desktop --pair ABCD1234 --api https://smara.example.com --allow-root C:\Us
 
 The desktop currently supports bounded `local_file_read` (hash/proof by
 default, content only when the approved payload explicitly requests it),
-atomic `local_file_write`, allowlisted `local_terminal`, and allowlisted
-`local_browser` URL opening. Terminal and browser capabilities must be
+reviewable `local_file_write` (read-only previews, write/append/patch,
+rename/move, delete-to-undo, atomic replacement, and guarded local undo),
+allowlisted `local_terminal`, and allowlisted `local_browser` URL opening.
+Terminal and browser capabilities must be
 declared during pairing and configured locally with `--terminal-allow` or
 `--browser-domain`; the executor rejects undeclared capabilities, unapproved
 tasks, shell operators, path traversal, symlink escapes, oversized files, and
-unbounded commands. Each completed local step creates a visible task-result
-artifact. On Windows the scoped executor bearer is protected with the current
-user's DPAPI key instead of being stored as readable JSON. A single-instance
-lock prevents duplicate runners, and bounded rotating logs are stored under
-the user's local Smara directory.
+unbounded commands, and ambiguous patches. Every write mutation computes and
+returns a bounded diff before applying it, while local undo snapshots stay in
+the user's app-data directory and never cross the hosted boundary. Each
+completed local step creates a visible task-result artifact. On Windows the
+scoped executor bearer is protected with the current user's DPAPI key instead
+of being stored as readable JSON. A single-instance lock prevents duplicate
+runners, and bounded rotating logs are stored under the user's local Smara
+directory.
 
 `--once` is available for a single-step smoke test. Operational controls are:
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
+import difflib
 import hashlib
 from html.parser import HTMLParser
 import json
@@ -23,6 +24,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 import webbrowser
 from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
@@ -34,6 +36,8 @@ import httpx
 
 
 MAX_FILE_BYTES = 256 * 1024
+MAX_DIFF_CHARS = 40_000
+MAX_UNDO_ENTRIES = 50
 MAX_OUTPUT_CHARS = 32_000
 MAX_COMMAND_SECONDS = 60
 MAX_BROWSER_INSPECT_BYTES = 1_000_000
@@ -49,6 +53,7 @@ MAX_GIT_COMMITS = 20
 DEFAULT_CAPABILITIES = ["local_file_read"]
 STATE_ENV = "SMARA_DESKTOP_STATE"
 CREDENTIALS_ENV = "SMARA_DESKTOP_CREDENTIALS"
+UNDO_DIR_NAME = "undo"
 LOG = logging.getLogger("smara.desktop")
 _CREDENTIAL_NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 
@@ -619,32 +624,315 @@ def _workspace_inspect(payload: dict, roots: list[Path]) -> str:
     raise RuntimeError("local_file_read supports read_file, list_tree, search_text, find_files, and git_summary operations only.")
 
 
-def _write_file(payload: dict, roots: list[Path]) -> str:
-    target = _target(payload.get("path"), roots, must_exist=False)
-    content = payload.get("content")
-    if not isinstance(content, str):
-        raise RuntimeError("local_file_write requires text content.")
-    data = content.encode("utf-8")
-    if len(data) > MAX_FILE_BYTES:
-        raise RuntimeError(f"Written content exceeds the {MAX_FILE_BYTES} byte limit.")
-    if target.exists() and target.is_symlink():
+def _atomic_bytes(path: Path, data: bytes) -> None:
+    """Replace one validated file without ever exposing a partial write."""
+    with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+        handle.write(data)
+        handle.flush()
+        with contextlib.suppress(OSError):
+            os.fsync(handle.fileno())
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _existing_file_bytes(path: Path, *, label: str = "local file") -> bytes:
+    if not path.exists():
+        return b""
+    if path.is_symlink():
         raise RuntimeError("Symlinked files are not allowed.")
-    mode = "a" if payload.get("append") is True else "w"
-    if mode == "a":
-        with target.open("ab") as handle:
-            if handle.tell() + len(data) > MAX_FILE_BYTES:
-                raise RuntimeError("Appended content exceeds the file size limit.")
-            handle.write(data)
+    if not path.is_file():
+        raise RuntimeError(f"{label.capitalize()} must be a regular file.")
+    try:
+        size = path.stat().st_size
+        if size > MAX_FILE_BYTES:
+            raise RuntimeError(f"{label.capitalize()} exceeds the {MAX_FILE_BYTES} byte limit.")
+        return path.read_bytes()
+    except OSError as exc:
+        raise RuntimeError(f"Could not read the existing {label}.") from exc
+
+
+def _text_diff(name: str, before: bytes, after: bytes) -> tuple[str, bool]:
+    """Create a bounded, human-readable diff without leaking absolute paths."""
+    try:
+        before_text = before.decode("utf-8")
+        after_text = after.decode("utf-8")
+    except UnicodeDecodeError:
+        message = f"Binary or non-UTF-8 content: {len(before)} bytes -> {len(after)} bytes"
+        return message, False
+    diff = "".join(difflib.unified_diff(
+        before_text.splitlines(keepends=True),
+        after_text.splitlines(keepends=True),
+        fromfile=f"{name} (before)",
+        tofile=f"{name} (after)",
+        lineterm="",
+    ))
+    truncated = len(diff) > MAX_DIFF_CHARS
+    return diff[:MAX_DIFF_CHARS], truncated
+
+
+def _metadata_diff(operation: str, source: Path, destination: Path) -> str:
+    return (
+        f"--- {source.name} (before)\n"
+        f"+++ {destination.name} (after)\n"
+        f"{operation}: {source.name} -> {destination.name}"
+    )
+
+
+def _undo_dir(state: dict | None, roots: list[Path]) -> Path:
+    """Keep undo snapshots in Smara's local app data, never in hosted state."""
+    configured = (state or {}).get("_state_path")
+    if isinstance(configured, str) and configured.strip():
+        directory = Path(configured).expanduser().resolve().parent / UNDO_DIR_NAME
     else:
-        # Atomic replacement keeps a crash from leaving a partial file.
-        with tempfile.NamedTemporaryFile("wb", dir=target.parent, delete=False) as handle:
-            temporary = Path(handle.name)
-            handle.write(data)
+        # Direct unit-test calls have no state file. Keep this fallback inside
+        # the approved root so it remains bounded by the caller's sandbox.
+        directory = roots[0] / ".smara-undo"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _undo_ledger_path(directory: Path) -> Path:
+    return directory / "ledger.json"
+
+
+def _load_undo_entries(directory: Path) -> list[dict]:
+    try:
+        value = json.loads(_undo_ledger_path(directory).read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError):
+        return []
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)][:MAX_UNDO_ENTRIES]
+
+
+def _save_undo_entries(directory: Path, entries: list[dict]) -> None:
+    ledger = _undo_ledger_path(directory)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=False) as handle:
+        temporary = Path(handle.name)
+        json.dump(entries[:MAX_UNDO_ENTRIES], handle, ensure_ascii=False, indent=2)
+        handle.flush()
+        with contextlib.suppress(OSError):
+            os.fsync(handle.fileno())
+    try:
+        os.replace(temporary, ledger)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _remember_undo(directory: Path, record: dict, snapshot: bytes | None) -> str:
+    undo_id = f"undo_{uuid.uuid4().hex}"
+    if snapshot is not None:
+        snapshot_path = directory / f"{undo_id}.bin"
+        _atomic_bytes(snapshot_path, snapshot)
+        record["snapshot"] = snapshot_path.name
+    record["undo_id"] = undo_id
+    record["created_at"] = datetime.now(timezone.utc).isoformat()
+    entries = _load_undo_entries(directory)
+    entries.insert(0, record)
+    stale = entries[MAX_UNDO_ENTRIES:]
+    _save_undo_entries(directory, entries)
+    for item in stale:
+        snapshot_name = item.get("snapshot")
+        if isinstance(snapshot_name, str) and re.fullmatch(r"undo_[0-9a-f]{32}\.bin", snapshot_name):
+            (directory / snapshot_name).unlink(missing_ok=True)
+    return undo_id
+
+
+def _preview_payload(operation: str, target: Path, before: bytes, after: bytes, *, changed: bool, diff: str, truncated: bool) -> dict:
+    return {
+        "operation": operation,
+        "file_name": target.name,
+        "changed": changed,
+        "bytes_before": len(before),
+        "bytes_after": len(after),
+        "diff": diff,
+        "diff_truncated": truncated,
+    }
+
+
+def _write_file(payload: dict, roots: list[Path], state: dict | None = None) -> str:
+    """Preview and safely apply bounded workspace edits.
+
+    ``preview_only`` is a read-only planning operation. Mutations always
+    compute and return the same preview before the atomic write/rename/delete,
+    and successful mutations receive a local-only ``undo_id``.
+    """
+    operation = payload.get("operation")
+    if operation is None:
+        operation = "append" if payload.get("append") is True else "write"
+    if operation == "replace":
+        operation = "write"
+    if not isinstance(operation, str) or operation not in {"write", "append", "patch", "rename", "move", "delete", "undo"}:
+        raise RuntimeError("local_file_write supports write, append, patch, rename, move, delete, and undo operations.")
+
+    directory = _undo_dir(state, roots)
+    if operation == "undo":
+        return _undo_file(payload, roots, directory)
+
+    if operation in {"rename", "move"}:
+        source = _target(payload.get("path"), roots, must_exist=True)
+        destination = _target(payload.get("new_path"), roots, must_exist=False)
+        if source == destination:
+            raise RuntimeError("Source and destination paths must be different.")
+        if destination.exists() or destination.is_symlink():
+            raise RuntimeError("The destination already exists; refusing to overwrite it.")
+        before = _existing_file_bytes(source, label="source file")
+        diff = _metadata_diff(operation, source, destination)
+        preview = {"operation": operation, "from": source.name, "to": destination.name, "changed": True, "diff": diff, "diff_truncated": False}
+        if payload.get("preview_only") is True:
+            return json.dumps({"action": "local_file_preview", "preview_only": True, "preview": preview}, ensure_ascii=False)
+        undo_id = _remember_undo(directory, {"kind": "rename", "source": str(source), "destination": str(destination), "after_sha256": hashlib.sha256(before).hexdigest()}, None)
         try:
-            os.replace(temporary, target)
-        finally:
-            temporary.unlink(missing_ok=True)
-    return json.dumps({"action": "local_file_write", "file_name": target.name, "bytes_written": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+            os.replace(source, destination)
+        except OSError:
+            # Do not leave an undo record for an operation that never applied.
+            _remove_undo_entry(directory, undo_id)
+            raise RuntimeError("Could not move the approved file atomically.")
+        return json.dumps({"action": "local_file_write", "operation": operation, "file_name": destination.name, "bytes_written": len(before), "sha256": hashlib.sha256(before).hexdigest(), "preview": preview, "undo_id": undo_id, "undo_available": True}, ensure_ascii=False)
+
+    target = _target(payload.get("path"), roots, must_exist=False)
+    before = _existing_file_bytes(target)
+    if operation == "delete":
+        if not target.exists():
+            raise RuntimeError("The file to delete does not exist.")
+        after = b""
+        diff, truncated = _text_diff(target, before, after)
+        preview = _preview_payload(operation, target, before, after, changed=True, diff=diff, truncated=truncated)
+        if payload.get("preview_only") is True:
+            return json.dumps({"action": "local_file_preview", "preview_only": True, "preview": preview}, ensure_ascii=False)
+        undo_id = _remember_undo(directory, {"kind": "delete", "target": str(target), "before_sha256": hashlib.sha256(before).hexdigest()}, before)
+        try:
+            target.unlink()
+        except OSError:
+            _remove_undo_entry(directory, undo_id)
+            raise RuntimeError("Could not delete the approved file.")
+        return json.dumps({"action": "local_file_write", "operation": operation, "file_name": target.name, "bytes_written": 0, "preview": preview, "undo_id": undo_id, "undo_available": True}, ensure_ascii=False)
+
+    if operation in {"write", "append"}:
+        content = payload.get("content")
+        if not isinstance(content, str):
+            raise RuntimeError("local_file_write requires text content.")
+        data = content.encode("utf-8")
+        if operation == "append":
+            after = before + data
+            if len(after) > MAX_FILE_BYTES:
+                raise RuntimeError("Appended content exceeds the file size limit.")
+        else:
+            after = data
+        changed = before != after
+        diff, truncated = _text_diff(target, before, after)
+        preview = _preview_payload(operation, target, before, after, changed=changed, diff=diff, truncated=truncated)
+        if payload.get("preview_only") is True:
+            return json.dumps({"action": "local_file_preview", "preview_only": True, "preview": preview}, ensure_ascii=False)
+    else:  # patch
+        if not target.exists():
+            raise RuntimeError("Patch target does not exist.")
+        try:
+            source_text = before.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError("Patch target must be UTF-8 text.") from exc
+        find = payload.get("find")
+        replace = payload.get("replace")
+        if not isinstance(find, str) or not find:
+            raise RuntimeError("Patch requires a non-empty 'find' string.")
+        if not isinstance(replace, str):
+            raise RuntimeError("Patch requires a string 'replace' value.")
+        if len(find.encode("utf-8")) > MAX_FILE_BYTES or len(replace.encode("utf-8")) > MAX_FILE_BYTES:
+            raise RuntimeError(f"Patch content exceeds the {MAX_FILE_BYTES} byte limit.")
+        occurrences = source_text.count(find)
+        count = payload.get("count")
+        if count is None:
+            if occurrences != 1:
+                raise RuntimeError("Patch is ambiguous; provide count matching every intended occurrence.")
+            count = 1
+        else:
+            count = _bounded_int(count, default=1, minimum=1, maximum=100, field="count")
+            if occurrences != count:
+                raise RuntimeError(f"Patch count {count} does not match the {occurrences} occurrences found.")
+        after = source_text.replace(find, replace, count).encode("utf-8")
+        if len(after) > MAX_FILE_BYTES:
+            raise RuntimeError(f"Patched content exceeds the {MAX_FILE_BYTES} byte limit.")
+        diff, truncated = _text_diff(target, before, after)
+        preview = _preview_payload(operation, target, before, after, changed=before != after, diff=diff, truncated=truncated)
+        if payload.get("preview_only") is True:
+            return json.dumps({"action": "local_file_preview", "preview_only": True, "preview": preview}, ensure_ascii=False)
+
+    if not preview["changed"]:
+        return json.dumps({"action": "local_file_write", "operation": operation, "file_name": target.name, "bytes_written": 0, "sha256": hashlib.sha256(after).hexdigest(), "preview": preview, "undo_available": False}, ensure_ascii=False)
+    undo_id = _remember_undo(directory, {"kind": "content", "target": str(target), "before_exists": target.exists(), "after_sha256": hashlib.sha256(after).hexdigest()}, before if target.exists() else None)
+    try:
+        _atomic_bytes(target, after)
+    except OSError:
+        _remove_undo_entry(directory, undo_id)
+        raise RuntimeError("Could not atomically write the approved file.")
+    return json.dumps({"action": "local_file_write", "operation": operation, "file_name": target.name, "bytes_written": len(data) if operation in {"write", "append"} else len(after), "sha256": hashlib.sha256(after).hexdigest(), "preview": preview, "undo_id": undo_id, "undo_available": True}, ensure_ascii=False)
+
+
+def _remove_undo_entry(directory: Path, undo_id: str) -> None:
+    entries = _load_undo_entries(directory)
+    remaining = [item for item in entries if item.get("undo_id") != undo_id]
+    _save_undo_entries(directory, remaining)
+    (directory / f"{undo_id}.bin").unlink(missing_ok=True)
+
+
+def _undo_file(payload: dict, roots: list[Path], directory: Path) -> str:
+    undo_id = payload.get("undo_id")
+    if not isinstance(undo_id, str) or not re.fullmatch(r"undo_[0-9a-f]{32}", undo_id):
+        raise RuntimeError("A valid local undo_id is required.")
+    entries = _load_undo_entries(directory)
+    record = next((item for item in entries if item.get("undo_id") == undo_id), None)
+    if record is None:
+        raise RuntimeError("That undo entry is unavailable or has expired.")
+    if record.get("undone_at"):
+        raise RuntimeError("That local change has already been undone.")
+    kind = record.get("kind")
+    try:
+        if kind == "content":
+            target = _target(record.get("target"), roots, must_exist=False)
+            current = _existing_file_bytes(target)
+            if hashlib.sha256(current).hexdigest() != record.get("after_sha256"):
+                raise RuntimeError("The file changed after this edit; refusing to overwrite newer work.")
+            if record.get("before_exists"):
+                snapshot_name = record.get("snapshot")
+                if not isinstance(snapshot_name, str) or not re.fullmatch(r"undo_[0-9a-f]{32}\.bin", snapshot_name):
+                    raise RuntimeError("The undo snapshot is invalid.")
+                snapshot = (directory / snapshot_name).read_bytes()
+                if len(snapshot) > MAX_FILE_BYTES:
+                    raise RuntimeError("The undo snapshot exceeds the local file limit.")
+                _atomic_bytes(target, snapshot)
+            else:
+                if target.exists():
+                    target.unlink()
+        elif kind == "delete":
+            target = _target(record.get("target"), roots, must_exist=False)
+            if target.exists():
+                raise RuntimeError("A file now exists at the deleted path; refusing to overwrite it.")
+            snapshot_name = record.get("snapshot")
+            if not isinstance(snapshot_name, str) or not re.fullmatch(r"undo_[0-9a-f]{32}\.bin", snapshot_name):
+                raise RuntimeError("The undo snapshot is invalid.")
+            snapshot = (directory / snapshot_name).read_bytes()
+            if len(snapshot) > MAX_FILE_BYTES:
+                raise RuntimeError("The undo snapshot exceeds the local file limit.")
+            _atomic_bytes(target, snapshot)
+        elif kind == "rename":
+            source = _target(record.get("source"), roots, must_exist=False)
+            destination = _target(record.get("destination"), roots, must_exist=True)
+            current = _existing_file_bytes(destination, label="destination file")
+            if source.exists() or hashlib.sha256(current).hexdigest() != record.get("after_sha256"):
+                raise RuntimeError("The moved file changed; refusing to overwrite newer work.")
+            os.replace(destination, source)
+        else:
+            raise RuntimeError("That undo entry has an unsupported operation.")
+    except FileNotFoundError as exc:
+        raise RuntimeError("The undo snapshot is unavailable.") from exc
+    except OSError as exc:
+        raise RuntimeError("Could not restore the local change.") from exc
+    record["undone_at"] = datetime.now(timezone.utc).isoformat()
+    _save_undo_entries(directory, entries)
+    return json.dumps({"action": "local_file_undo", "undo_id": undo_id, "restored": True}, ensure_ascii=False)
 
 
 def _emit_progress(progress_hook, message: str) -> None:
@@ -843,7 +1131,7 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
         inspect_payload["_state"] = state
         return _workspace_inspect(inspect_payload, roots)
     if capability == "local_file_write":
-        return _write_file(payload, roots)
+        return _write_file(payload, roots, state)
     if capability == "local_terminal":
         return _terminal(payload, roots, state, checkpoint=checkpoint, progress_hook=progress_hook)
     if capability == "local_browser":
@@ -867,6 +1155,8 @@ class DesktopRunner:
         # corrupted, the executor must stop rather than continue with a stale
         # token or stale permissions.
         state = _load_state(self.state_path)
+        # Used only for local undo snapshots; never persisted or sent to Smara.
+        state["_state_path"] = str(self.state_path)
         now = time.monotonic()
         if now - self._last_heartbeat >= self.heartbeat_seconds:
             response = client.post(f"{state['smara_url']}/v1/executors/heartbeat", headers=_headers(state), json={"capabilities": state.get("capabilities", DEFAULT_CAPABILITIES)})

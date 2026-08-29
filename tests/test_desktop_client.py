@@ -31,6 +31,90 @@ def test_desktop_file_read_write_stays_inside_approved_root(tmp_path: Path):
         execute_step({"required_capability": "local_file_read", "executor_payload": {"path": str(tmp_path.parent / "note.txt")}}, state)
 
 
+def test_desktop_file_preview_is_read_only_and_write_returns_diff_and_undo(tmp_path: Path):
+    target = tmp_path / "note.txt"
+    target.write_text("before\n", encoding="utf-8")
+    state = {
+        "capabilities": ["local_file_write"],
+        "allowed_roots": [str(tmp_path)],
+        "_state_path": str(tmp_path / "desktop.json"),
+    }
+    preview = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "write", "path": str(target), "content": "after\n", "preview_only": True},
+    }, state))
+    assert preview["action"] == "local_file_preview"
+    assert preview["preview_only"] is True
+    assert "before" in preview["preview"]["diff"] and "after" in preview["preview"]["diff"]
+    assert target.read_text(encoding="utf-8") == "before\n"
+
+    written = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "write", "path": str(target), "content": "after\n"},
+    }, state))
+    assert written["undo_available"] is True and written["undo_id"].startswith("undo_")
+    assert written["preview"]["changed"] is True
+    assert target.read_text(encoding="utf-8") == "after\n"
+    undone = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "undo", "undo_id": written["undo_id"]},
+    }, state))
+    assert undone["restored"] is True
+    assert target.read_text(encoding="utf-8") == "before\n"
+
+
+def test_desktop_patch_rejects_ambiguous_text_and_applies_exact_patch(tmp_path: Path):
+    target = tmp_path / "code.py"
+    target.write_text("value = 1\nvalue = 1\n", encoding="utf-8")
+    state = {"capabilities": ["local_file_write"], "allowed_roots": [str(tmp_path)]}
+    with pytest.raises(RuntimeError, match="ambiguous"):
+        execute_step({
+            "required_capability": "local_file_write",
+            "executor_payload": {"operation": "patch", "path": str(target), "find": "value = 1", "replace": "value = 2"},
+        }, state)
+    result = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "patch", "path": str(target), "find": "value = 1", "replace": "value = 2", "count": 2},
+    }, state))
+    assert result["operation"] == "patch"
+    assert target.read_text(encoding="utf-8") == "value = 2\nvalue = 2\n"
+
+
+def test_desktop_rename_delete_and_undo_are_bounded_to_approved_root(tmp_path: Path):
+    source = tmp_path / "source.txt"
+    destination = tmp_path / "renamed.txt"
+    source.write_text("keep me", encoding="utf-8")
+    state = {"capabilities": ["local_file_write"], "allowed_roots": [str(tmp_path)]}
+    moved = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "rename", "path": str(source), "new_path": str(destination)},
+    }, state))
+    assert not source.exists() and destination.read_text(encoding="utf-8") == "keep me"
+    execute_step({"required_capability": "local_file_write", "executor_payload": {"operation": "undo", "undo_id": moved["undo_id"]}}, state)
+    assert source.read_text(encoding="utf-8") == "keep me" and not destination.exists()
+
+    deleted = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "delete", "path": str(source)},
+    }, state))
+    assert not source.exists() and deleted["preview"]["changed"] is True
+    execute_step({"required_capability": "local_file_write", "executor_payload": {"operation": "undo", "undo_id": deleted["undo_id"]}}, state)
+    assert source.read_text(encoding="utf-8") == "keep me"
+
+
+def test_desktop_edit_refuses_changed_file_before_undo(tmp_path: Path):
+    target = tmp_path / "note.txt"
+    target.write_text("one", encoding="utf-8")
+    state = {"capabilities": ["local_file_write"], "allowed_roots": [str(tmp_path)]}
+    result = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"path": str(target), "content": "two"},
+    }, state))
+    target.write_text("newer", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="changed"):
+        execute_step({"required_capability": "local_file_write", "executor_payload": {"operation": "undo", "undo_id": result["undo_id"]}}, state)
+
+
 def test_desktop_workspace_inspection_lists_only_bounded_approved_files(tmp_path: Path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("print('smara')\n", encoding="utf-8")

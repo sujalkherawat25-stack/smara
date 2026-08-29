@@ -291,7 +291,7 @@ class DesktopActionRequestTool:
 
     spec = ToolSpec(
         "desktop.request_action",
-        "Create a durable approval-gated task for a paired desktop capability. The local action is not run by this chat step. For local_file_read, payload.operation may be read_file (path), list_tree (path, optional max_depth/max_entries), search_text (path, query, optional max_files/max_matches), find_files (path, query), or git_summary (path).",
+        "Create a durable approval-gated task for a paired desktop capability. The local action is not run by this chat step. local_file_read supports read_file, list_tree, search_text, find_files, and git_summary. local_file_write supports preview_only planning plus bounded write, append, patch, rename, move, delete, and undo operations; every mutation returns a diff and local undo id.",
         {
             "type": "object",
             "properties": {
@@ -300,7 +300,7 @@ class DesktopActionRequestTool:
                 "payload": {
                     "type": "object",
                     "maxProperties": 30,
-                    "description": "Capability payload. local_file_read supports read_file, list_tree, literal search_text, find_files, and git_summary. local_terminal uses argv and cwd. local_browser supports open or inspect_text and url.",
+                    "description": "Capability payload. local_file_read supports read_file, list_tree, literal search_text, find_files, and git_summary. local_file_write supports preview_only, write/append/patch/rename/move/delete, and undo with a returned undo_id. local_terminal uses argv and cwd. local_browser supports open or inspect_text and url.",
                 },
             },
             "required": ["capability", "preview", "payload"],
