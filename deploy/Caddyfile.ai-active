@@ -55,8 +55,20 @@ ai.syntarus.com {
         }
     }
 
-    # Keep only the legacy auth/session bridge on /v1/* while the frontend is
-    # served by the independent Smara container at the root.
+    # The old Memento agent runtime is retired. Native Smara auth/chat/task
+    # routes live under /smara-api; return a clear, deterministic response for
+    # stale Memento bookmarks instead of forwarding them to the old process.
+    @retired_memento path /v1/memento /v1/memento/*
+    handle @retired_memento {
+        respond "The Memento agent runtime has moved to Smara." 410
+    }
+    @retired_memento_auth path /v1/auth /v1/auth/*
+    handle @retired_memento_auth {
+        respond "Smara sign-in is available at https://ai.syntarus.com/" 410
+    }
+
+    # MemoryOS remains available as the core memory/public API. This fallback
+    # does not expose the retired Memento namespace above.
     handle /v1/* {
         reverse_proxy 127.0.0.1:8080 {
             header_up X-Real-IP {remote_host}
