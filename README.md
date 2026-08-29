@@ -181,6 +181,16 @@ The executor claims a three-minute desktop step lease by default and calls
 The refresh is account- and executor-scoped; a cancelled step is not extended,
 and a stale executor cannot finalize work recovered by another paired device.
 
+For repeatable workspace checks, an approved `local_terminal` step may use one
+of the fixed recipes `python.test`, `python.compile`, `node.test`,
+`node.build`, `rust.test`, `rust.check`, or `git.diff-check` instead of an
+`argv` list. Recipes remain subject to the local executable allowlist and do
+not accept shell operators or extra flags. A recipe can name up to 20 explicit
+workspace artifact paths; the result returns only bounded path/size/hash
+metadata. When Git is allowlisted, the result also reports files whose status
+changed during the run. Desktop Activity renders these results, output, and
+edit diffs in expandable sections.
+
 The hosted control plane intentionally does not advertise Gmail, Calendar,
 Drive, GitHub, Telegram, or other personal-account tools. Their credentials and
 browser sessions remain on the paired desktop, where a future local adapter

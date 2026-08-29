@@ -48,6 +48,9 @@ MAX_WORKSPACE_SEARCH_FILES = 100
 MAX_WORKSPACE_SEARCH_MATCHES = 200
 MAX_WORKSPACE_QUERY_CHARS = 240
 MAX_WORKSPACE_FILENAME_MATCHES = 200
+MAX_CHANGED_FILES = 100
+MAX_ARTIFACT_FILES = 20
+MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
 MAX_GIT_LINES = 100
 MAX_GIT_COMMITS = 20
 DEFAULT_CAPABILITIES = ["local_file_read"]
@@ -56,6 +59,19 @@ CREDENTIALS_ENV = "SMARA_DESKTOP_CREDENTIALS"
 UNDO_DIR_NAME = "undo"
 LOG = logging.getLogger("smara.desktop")
 _CREDENTIAL_NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+
+# Recipes are deterministic convenience names, not a second command
+# language. They do not accept extra flags, so a hosted task cannot turn a
+# recipe into arbitrary code by smuggling arguments through the payload.
+LOCAL_RECIPES: dict[str, tuple[str, ...]] = {
+    "python.test": ("python", "-m", "pytest", "-q"),
+    "python.compile": ("python", "-m", "compileall", "-q", "."),
+    "node.test": ("npm", "test"),
+    "node.build": ("npm", "run", "build"),
+    "rust.test": ("cargo", "test"),
+    "rust.check": ("cargo", "check"),
+    "git.diff-check": ("git", "diff", "--check"),
+}
 
 
 class ExecutionCancelled(RuntimeError):
@@ -962,17 +978,87 @@ def _stop_process(process: subprocess.Popen) -> None:
             process.kill()
 
 
-def _terminal(payload: dict, roots: list[Path], state: dict, *, checkpoint=None, progress_hook=None) -> str:
+def _recipe_argv(payload: dict) -> tuple[list[str], str | None]:
+    recipe = payload.get("recipe")
+    if recipe is not None:
+        if not isinstance(recipe, str) or recipe not in LOCAL_RECIPES:
+            available = ", ".join(sorted(LOCAL_RECIPES))
+            raise RuntimeError(f"Unknown local recipe. Choose one of: {available}.")
+        if payload.get("argv") is not None or payload.get("command") is not None:
+            raise RuntimeError("Provide either a named recipe or an argv command, not both.")
+        return list(LOCAL_RECIPES[recipe]), recipe
     raw = payload.get("argv")
     if isinstance(raw, list) and all(isinstance(item, str) for item in raw):
-        argv = [item for item in raw if item]
-    elif isinstance(payload.get("command"), str):
+        return [item for item in raw if item], None
+    if isinstance(payload.get("command"), str):
         command = payload["command"]
         if any(char in command for char in "|&;><`\n\r"):
             raise RuntimeError("Shell operators are not allowed; provide an argv list instead.")
-        argv = shlex.split(command, posix=os.name != "nt")
-    else:
-        raise RuntimeError("local_terminal requires an argv list or bounded command.")
+        return shlex.split(command, posix=os.name != "nt"), None
+    raise RuntimeError("local_terminal requires a named recipe, argv list, or bounded command.")
+
+
+def _git_status_files(cwd: Path, state: dict) -> dict[str, str] | None:
+    """Return bounded Git paths when Git is explicitly allowed locally."""
+    allowlist = state.get("terminal_allowlist") or []
+    if "git" not in {Path(item).name.lower() for item in allowlist if isinstance(item, str)}:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(cwd), "status", "--short"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    paths: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        if len(paths) >= MAX_CHANGED_FILES:
+            break
+        line = line.strip()
+        if len(line) < 4:
+            continue
+        status = line[:2]
+        path = line[3:].strip()
+        # Git represents a rename as "old -> new"; the new path is what a
+        # user needs to inspect after a recipe completes.
+        if " -> " in path:
+            path = path.rsplit(" -> ", 1)[-1]
+        if path:
+            paths[path] = status
+    return paths
+
+
+def _collect_artifacts(payload: dict, cwd: Path, roots: list[Path]) -> list[dict[str, object]]:
+    raw = payload.get("artifact_paths")
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > MAX_ARTIFACT_FILES or not all(isinstance(item, str) for item in raw):
+        raise RuntimeError(f"artifact_paths must contain at most {MAX_ARTIFACT_FILES} local paths.")
+    artifacts: list[dict[str, object]] = []
+    for value in raw:
+        artifact = _target(value, roots, must_exist=True)
+        if cwd != artifact and cwd not in artifact.parents:
+            raise RuntimeError("Artifact paths must stay inside the recipe working directory.")
+        if not artifact.is_file() or artifact.is_symlink():
+            raise RuntimeError("Each artifact path must be a regular local file.")
+        size = artifact.stat().st_size
+        if size > MAX_ARTIFACT_BYTES:
+            raise RuntimeError(f"Artifact exceeds the {MAX_ARTIFACT_BYTES} byte limit.")
+        artifacts.append({
+            "path": artifact.relative_to(cwd).as_posix(),
+            "bytes": size,
+            "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+        })
+    return artifacts
+
+
+def _terminal(payload: dict, roots: list[Path], state: dict, *, checkpoint=None, progress_hook=None) -> str:
+    argv, recipe = _recipe_argv(payload)
     if not argv:
         raise RuntimeError("local_terminal received an empty command.")
     allowlist = state.get("terminal_allowlist") or []
@@ -985,10 +1071,11 @@ def _terminal(payload: dict, roots: list[Path], state: dict, *, checkpoint=None,
     cwd = _target(cwd_value, roots, must_exist=True)
     if not cwd.is_dir():
         raise RuntimeError("Terminal working directory is not an approved folder.")
+    before_files = _git_status_files(cwd, state)
     safe_env = {key: value for key, value in os.environ.items() if not any(marker in key.upper() for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD"))}
     injected = _resolved_credentials(payload.get("credential_env"))
     safe_env.update(injected)
-    _emit_progress(progress_hook, f"Terminal started: {executable}")
+    _emit_progress(progress_hook, f"{recipe or 'Terminal'} started: {executable}")
     process = subprocess.Popen(
         argv, cwd=cwd, env=safe_env, shell=False,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
@@ -1043,8 +1130,24 @@ def _terminal(payload: dict, roots: list[Path], state: dict, *, checkpoint=None,
     for secret in injected.values():
         if secret:
             output = output.replace(secret, "[REDACTED LOCAL CREDENTIAL]")
-    _emit_progress(progress_hook, f"Terminal finished with exit code {process.returncode}")
-    return json.dumps({"action": "local_terminal", "argv": argv, "credential_env": sorted(injected), "exit_code": process.returncode, "output": output[:MAX_OUTPUT_CHARS]}, ensure_ascii=False)
+    changed_files = _git_status_files(cwd, state)
+    artifacts = _collect_artifacts(payload, cwd, roots)
+    _emit_progress(progress_hook, f"{recipe or 'Terminal'} finished with exit code {process.returncode}")
+    result: dict[str, object] = {
+        "action": "local_terminal", "argv": argv, "credential_env": sorted(injected),
+        "exit_code": process.returncode, "output": output[:MAX_OUTPUT_CHARS],
+        "recipe": recipe, "artifacts": artifacts,
+    }
+    if before_files is not None and changed_files is not None:
+        result["changed_files"] = sorted(
+            path for path, status in changed_files.items() if before_files.get(path) != status
+        )
+        result["changed_files_available"] = True
+        result["workspace_changes_after"] = sorted(changed_files)
+    else:
+        result["changed_files"] = []
+        result["changed_files_available"] = False
+    return json.dumps(result, ensure_ascii=False)
 
 
 def _allowed_browser_url(url: str, state: dict) -> tuple[str, str]:

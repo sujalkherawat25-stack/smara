@@ -115,7 +115,7 @@ proof/artifacts.
 
 ### Verification already green
 
-- 157 Python tests, frontend production/type checks, native Rust tests, and
+- 159 Python tests, frontend production/type checks, native Rust tests, and
   Windows packaging checks.
 - Live Grok/Tavily/research/task/approval/lease safety smokes.
 - Disposable local file read/write, Python codebase test, and browser-opening
@@ -206,16 +206,16 @@ streaming design.
 
 ### L3 — Test/build skill
 
-- **Implemented and deployed 2026-08-29:** terminal execution refreshes its
-  lease during a command, publishes safe status events, and kills the process
-  tree on cancellation or timeout. Command content is not streamed to the
-  hosted ledger. The API exposes lease-scoped executor progress, and
-  cancellation is terminally recorded instead of being misreported as a
-  generic failure.
-- Still needed: named test/lint/build recipes, richer local Activity rendering,
-  changed-file collection, and test artifacts.
-- Record exit code, bounded stdout/stderr, changed files, and test artifacts.
-- Prevent command injection and require an explicit executable allowlist.
+**Status: implemented and unit-tested on 2026-08-29.** In addition to the
+lease-scoped progress/cancellation path, the executor now exposes deterministic
+named recipes (`python.test`, `python.compile`, `node.test`, `node.build`,
+`rust.test`, `rust.check`, and `git.diff-check`). Recipes still require the
+same explicit executable allowlist and never accept shell text or extra flags.
+Each run returns a bounded exit code/output record, before/after Git changed
+files when Git is allowlisted, and optional explicitly requested artifact
+metadata (relative path, byte count, SHA-256; artifact contents stay local).
+Desktop Activity now renders these structured results, previews/diffs, output,
+and artifact hashes instead of only showing a generic completion row.
 
 ### L4 — Controlled browser skill
 
@@ -360,6 +360,8 @@ These are deferred by owner decision and must remain disabled/documented:
 3. Implement Workspace Inspection and Reviewable Editing. **Workspace
    inspection and L2 editing are now complete; proceed to test/build recipes.**
 4. Expand Test/Build execution with named recipes and reviewable artifacts.
+   **Named recipes, bounded artifact metadata, changed-file collection, and
+   Desktop Activity rendering are now complete.**
 5. Implement Controlled Browser inspection, keeping browser state local.
 6. Add local credential adapters one at a time, beginning with the highest
    value personal workflow.

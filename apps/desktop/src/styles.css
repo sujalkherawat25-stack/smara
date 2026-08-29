@@ -144,6 +144,25 @@ h1 { font-size: 20px; letter-spacing: -.03em; }
 .detail-line > span:last-child { color: var(--subtle); font-size: 10px; }
 .detail-muted { color: var(--subtle); font-size: 11px; }
 .task-detail > .button { justify-self: start; }
+.artifact-list { display: grid; gap: 8px; }
+.artifact-result { overflow: hidden; border: 1px solid var(--stroke-soft); border-radius: 9px; background: rgba(255,255,255,.02); }
+.artifact-result summary { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; cursor: pointer; color: var(--text); font-size: 11px; list-style: none; }
+.artifact-result summary::-webkit-details-marker { display: none; }
+.artifact-result summary::before { content: "›"; color: var(--subtle); font-size: 16px; transition: transform 120ms ease; }
+.artifact-result[open] summary::before { transform: rotate(90deg); }
+.artifact-status { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--green); }
+.artifact-failed { background: var(--red); }
+.artifact-kind { margin-left: auto; overflow: hidden; color: var(--subtle); text-overflow: ellipsis; font: 10px ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap; }
+.artifact-body { display: grid; gap: 12px; padding: 0 10px 12px 28px; }
+.artifact-metrics { display: flex; flex-wrap: wrap; gap: 8px; color: var(--subtle); font-size: 10px; }
+.artifact-metrics span { padding: 4px 7px; border: 1px solid var(--stroke-soft); border-radius: 6px; background: rgba(255,255,255,.025); }
+.artifact-metrics strong { color: var(--text); font-weight: 600; }
+.metric-failed { color: var(--red) !important; }
+.artifact-subsection { display: grid; gap: 6px; }
+.artifact-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.artifact-chips code { max-width: 100%; padding: 4px 6px; overflow-wrap: anywhere; border: 1px solid var(--stroke-soft); border-radius: 5px; color: #bdcaff; background: #0b0e15; font: 10px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.artifact-diff, .artifact-output { max-height: 240px; margin: 0; overflow: auto; padding: 9px; border: 1px solid var(--stroke-soft); border-radius: 7px; color: #c7d3e9; background: #080a0f; font: 10px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.artifact-diff { color: #b9caff; }
 .preview-callout { margin: -9px 0 18px; border-color: rgba(144,169,255,.3); background: rgba(144,169,255,.07); }
 .settings-card select { width: 100%; height: 38px; padding: 0 11px; border: 1px solid var(--stroke); border-radius: 8px; color: var(--text); background: #0c0f15; outline: none; font-size: 12px; }
 .settings-card select:focus { border-color: rgba(144,169,255,.7); }

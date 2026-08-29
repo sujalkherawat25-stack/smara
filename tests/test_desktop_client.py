@@ -1,5 +1,6 @@
 import os
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -173,6 +174,38 @@ def test_desktop_terminal_requires_allowlist_and_rejects_shell_operators(tmp_pat
     assert "4" in result["output"]
     with pytest.raises(RuntimeError, match="Shell operators"):
         execute_step({"required_capability": "local_terminal", "executor_payload": {"command": "python -c \"print(1)\" & whoami", "cwd": str(tmp_path)}}, state)
+
+
+def test_desktop_named_recipe_reports_artifact_metadata_and_rejects_unknown_recipe(tmp_path: Path):
+    (tmp_path / "sample.py").write_text("value = 2\n", encoding="utf-8")
+    report = tmp_path / "report.txt"
+    report.write_text("local report\n", encoding="utf-8")
+    state = {"capabilities": ["local_terminal"], "allowed_roots": [str(tmp_path)], "terminal_allowlist": ["python"]}
+    result = json.loads(execute_step({
+        "required_capability": "local_terminal",
+        "executor_payload": {"recipe": "python.compile", "cwd": str(tmp_path), "artifact_paths": [str(report)]},
+    }, state))
+    assert result["recipe"] == "python.compile"
+    assert result["exit_code"] == 0
+    assert result["artifacts"] == [{"path": "report.txt", "bytes": report.stat().st_size, "sha256": result["artifacts"][0]["sha256"]}]
+    assert result["changed_files_available"] is False
+    with pytest.raises(RuntimeError, match="Unknown local recipe"):
+        execute_step({
+            "required_capability": "local_terminal",
+            "executor_payload": {"recipe": "python.deploy", "cwd": str(tmp_path)},
+        }, state)
+
+
+def test_desktop_recipe_collects_changed_files_when_git_is_allowlisted(tmp_path: Path):
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "sample.py").write_text("print('recipe')\n", encoding="utf-8")
+    state = {"capabilities": ["local_terminal"], "allowed_roots": [str(tmp_path)], "terminal_allowlist": ["python", "git"]}
+    result = json.loads(execute_step({
+        "required_capability": "local_terminal",
+        "executor_payload": {"recipe": "python.compile", "cwd": str(tmp_path)},
+    }, state))
+    assert result["changed_files_available"] is True
+    assert any(path.startswith("__pycache__/") for path in result["changed_files"])
 
 
 def test_desktop_terminal_observes_cancellation_before_completion(tmp_path: Path):
