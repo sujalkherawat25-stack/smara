@@ -109,7 +109,11 @@ proof/artifacts.
 - `local_terminal` with executable allowlist, no shell operators, timeout,
   bounded output, credential aliases, and output redaction.
 - `local_browser` with HTTP(S) validation and domain allowlist; it can open a
-  URL or inspect bounded text without sharing browser cookies.
+  URL, inspect bounded text/DOM, or download a bounded file without sharing
+  browser cookies.
+- `local_integration` (opt-in at pairing) with local, approval-gated,
+  read-only Tavily search and GitHub repository listing. Provider credentials
+  stay in the desktop vault and never enter hosted task state.
 - Windows-account DPAPI protection for the desktop bearer and local secrets.
 - Hosted Automatic/Grok/Sarvam profiles plus private Sarvam/Grok/custom
   OpenAI-compatible direct-chat profiles. Private model keys remain local.
@@ -120,13 +124,16 @@ proof/artifacts.
 
 ### Verification already green
 
-- 161 Python tests, frontend production/type checks, native Rust tests, and
+- 168 Python tests, frontend production/type checks, native Rust tests, and
   Windows packaging checks.
 - Live Grok/Tavily/research/task/approval/lease safety smokes.
 - Disposable local file read/write, Python codebase test, and browser-opening
   workflow passed with the paired executor.
 - Expired uncertain terminal/browser/write leases fail closed and are audited
   instead of being replayed.
+- Local browser DOM/download and Tavily/GitHub adapter contracts are covered by
+  desktop tests; live provider calls still require a user's local credential
+  and paired, approved task.
 
 ### Native cutover verification — 2026-08-29
 
