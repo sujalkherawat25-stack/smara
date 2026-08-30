@@ -198,7 +198,10 @@ def main() -> int:
                     raise RuntimeError("direct agent workflow did not follow the bounded response check")
                 calculation, calculation_tools = stream_agent_workflow(
                     client,
-                    message="Calculate 144 / 12 and state the result.",
+                    # Keep this in the exact deterministic routing grammar so
+                    # the smoke verifies the calculator tool, not a model's
+                    # ability to do arithmetic unaided.
+                    message="Calculate 144 / 12.",
                     conversation_id=workflow_ids[1],
                     expected_tools={"calculate"},
                     model_profile=args.model_profile or None,

@@ -430,6 +430,8 @@ class SmaraAgentRuntime:
                 event_hook("agent.phase", {"phase": "retrieve"})
                 event_hook("agent.phase", {"phase": "reason_act"})
             name, arguments = decision.deterministic_tool
+            if event_hook:
+                event_hook("agent.tool_requested", {"tool": name, "args": arguments})
             try:
                 result = await registry.invoke(
                     name,
@@ -437,7 +439,11 @@ class SmaraAgentRuntime:
                     ToolContext(account_id, workspace_id, http_client, integration_runner=integration_runner),
                 )
             except ToolError as exc:
+                if event_hook:
+                    event_hook("agent.tool_completed", {"tool": name, "ok": False, "preview": str(exc)[:500]})
                 raise RuntimeError(str(exc)) from exc
+            if event_hook:
+                event_hook("agent.tool_completed", {"tool": name, "ok": result.ok, "preview": result.content[:500]})
             answer = result.content
             if name == "calculate":
                 answer = f"The result is {answer}."

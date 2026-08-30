@@ -43,6 +43,27 @@ def test_deterministic_lane_uses_registered_tool_without_provider_call():
     assert provider.calls == 0
 
 
+def test_deterministic_lane_emits_tool_lifecycle_events():
+    class Provider:
+        _model = "unused"
+
+        async def complete(self, *, system, message):
+            raise AssertionError("deterministic tools should not call the provider")
+
+    events = []
+    turn = asyncio.run(SmaraAgentRuntime(Provider()).chat_with_tools(
+        account_id="acct_1",
+        workspace_id="default",
+        message="calculate 6 * 7",
+        event_hook=lambda name, payload: events.append((name, payload)),
+    ))
+    assert turn.tools_used == 1
+    assert [name for name, _ in events if name.startswith("agent.tool_")] == [
+        "agent.tool_requested", "agent.tool_completed"
+    ]
+    assert events[-1][1]["ok"] is True
+
+
 def test_self_contained_lane_skips_shared_memory():
     class Provider:
         _model = "model"
