@@ -104,6 +104,11 @@ preserved without a second public UI.
   Desktop task detail accepts the same artifact hashes. The full Smara suite
   passes **221 tests**. Reconnects also reconcile uncertain local entries
   through the executor-scoped step-status endpoint before claiming work.
+- The hosted planner now exposes a bounded `desktop.request_workflow` first
+  slice for explicit sequential inspect/plan/edit/run/verify/report graphs.
+  Every stage remains inside the existing approval gate, local capability
+  allowlist, workspace lock, and reconnect reconciliation contract; workflow
+  payloads reject nested graphs and credential fields.
 - The deployed live workflow passed direct Grok chat, calculator execution,
   Tavily discovery, official-page retrieval, and a cited research answer using
   the Web/CLI/Desktop SSE contract. The disposable production Postgres check
