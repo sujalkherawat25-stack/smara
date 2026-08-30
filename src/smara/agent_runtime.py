@@ -20,6 +20,7 @@ from typing import Any, Callable, Protocol
 import httpx
 
 from .agent_step import BoundedAgentStepRuntime
+from .agent_routing import route_request
 from .tool_registry import ToolContext, default_tool_registry
 
 
@@ -63,12 +64,18 @@ def _triage(message: str) -> tuple[str, int, bool]:
     the bounded tool loop. The model still decides which registered tool to
     call once the request is classified as tool-worthy.
     """
-    text = message.strip()
-    if _CHITCHAT_RE.fullmatch(text):
-        return "chitchat", 1, False
-    hinted = bool(_TOOL_HINT_RE.search(text))
-    complexity = 3 if len(text) > 1_000 or text.count(" and ") >= 2 else 2 if hinted else 1
-    return ("tool_request" if hinted else "conversation"), complexity, hinted
+    decision = route_request(message)
+    if decision.lane == "A":
+        return "deterministic", decision.complexity, True
+    if decision.lane == "E":
+        return "durable", decision.complexity, False
+    if decision.lane == "D":
+        return "tool_request", decision.complexity, True
+    if decision.lane == "C":
+        return "memory", decision.complexity, False
+    if _CHITCHAT_RE.fullmatch(message.strip()):
+        return "chitchat", decision.complexity, False
+    return "conversation", decision.complexity, False
 
 
 class OpenAICompatibleProvider:
@@ -344,12 +351,52 @@ class SmaraAgentRuntime:
         in; side effects remain unavailable here and must be represented by an
         approved durable task.
         """
+        decision = route_request(
+            message,
+            has_attachments=bool(attachment_context.strip() or attachment_images),
+        )
         intent, complexity, use_tools = _triage(message)
         if event_hook:
             event_hook("agent.phase", {"phase": "triage", "intent": intent, "complexity": complexity})
 
+        registry = default_tool_registry(
+            http_client,
+            integration_runner=integration_runner,
+            include_user_integrations=include_user_integrations,
+        ).restrict(set(decision.tools_allowed))
+
+        if decision.deterministic_tool is not None:
+            # Preserve the visible phase contract for existing clients while
+            # dispatching the safe registered tool without an LLM round trip.
+            if event_hook:
+                event_hook("agent.phase", {"phase": "retrieve"})
+                event_hook("agent.phase", {"phase": "reason_act"})
+            name, arguments = decision.deterministic_tool
+            try:
+                result = await registry.invoke(
+                    name,
+                    arguments,
+                    ToolContext(account_id, workspace_id, http_client, integration_runner=integration_runner),
+                )
+            except ToolError as exc:
+                raise RuntimeError(str(exc)) from exc
+            answer = result.content
+            if name == "calculate":
+                answer = f"The result is {answer}."
+            if event_hook and token_hook:
+                event_hook("agent.phase", {"phase": "answer"})
+            if token_hook:
+                token_hook(answer)
+            return ChatTurn(
+                conversation_id=conversation_id or f"chat_{uuid.uuid4().hex}",
+                message=answer,
+                memory_used=False,
+                model=getattr(self._provider, "_model", None),
+                tools_used=1,
+            )
+
         context = ""
-        if self._memory is not None:
+        if decision.memory_needed and self._memory is not None:
             try:
                 context = await self._memory.context_for_conversation(
                     message, account_id=account_id, workspace_id=workspace_id
@@ -406,11 +453,7 @@ class SmaraAgentRuntime:
             event_hook("agent.phase", {"phase": "reason_act"})
         result = await BoundedAgentStepRuntime(
             self._provider,
-            default_tool_registry(
-                http_client,
-                integration_runner=integration_runner,
-                include_user_integrations=include_user_integrations,
-            ),
+            registry,
         ).run(
             task={
                 "id": conversation,

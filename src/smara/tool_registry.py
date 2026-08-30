@@ -341,6 +341,16 @@ class ToolRegistry:
             for tool in sorted(self._tools.values(), key=lambda item: item.spec.name)
         ]
 
+    def restrict(self, names: set[str] | None) -> "ToolRegistry":
+        """Return a registry view containing only the requested read tools."""
+        if names is None:
+            return self
+        selected = ToolRegistry()
+        for name, tool in self._tools.items():
+            if name in names:
+                selected.register(tool)
+        return selected
+
     async def invoke(self, name: str, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         tool = self._tools.get(name)
         if tool is None:
