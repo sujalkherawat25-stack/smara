@@ -124,8 +124,8 @@ proof/artifacts.
   OpenAI-compatible direct-chat profiles. Private model keys remain local.
 - Unsigned NSIS package, installer shortcut, auto-start option, and a working
   browser-based sign-in/pairing flow.
-- Latest source includes strict permission reload during executor polling;
-  the installed app must be rebuilt to receive source changes.
+- Strict permission reload during executor polling is included in the latest
+  installed Desktop build; the owner PC has been refreshed and verified.
 
 ### Verification already green
 
@@ -212,12 +212,13 @@ rollback requires restoring the saved Caddy configuration explicitly.
 
 ### P0-E — Operator console and product separation
 
-**Status: implemented locally; deployment pending.** The retired Memento
-dashboard now has a Smara-owned replacement at `/admin`. It uses a separate
+**Status: deployed and configured on 2026-08-30.** The retired Memento
+dashboard now redirects to the Smara-owned `/admin` console. It uses a separate
 operator session, read-only aggregate endpoints under `/v1/admin/*`, clear
 Smara/Syntarus data-plane boundaries, bounded account/task metadata, graceful
-empty/error states, refresh, and responsive tables. Deploy the Smara API,
-frontend bundle, and Caddy redirect together before using it on the live host.
+empty/error states, refresh, and responsive tables. The live session endpoint
+reports `configured: true`; the operator secret remains VM-only and is never
+shown in this repository or browser URL.
 
 ## 6. Performance and architecture upgrade plan (active next phase)
 
@@ -754,52 +755,33 @@ These are deferred by owner decision and must remain disabled/documented:
 
 ## 12. Execution order
 
-1. Complete the physical restart/reconnect drill with the paired Windows PC.
-2. Complete interactive authenticated Web shadowing and edge-limit checks.
-3. Deploy and verify the separate `/admin` operator console and the legacy
-   dashboard redirect; confirm Syntarus API health is independent of Smara.
-4. Implement PERF-0 and capture a redacted baseline before changing behavior.
-5. Implement PERF-1 and PERF-2 to remove connection churn and event-loop
-   blocking without changing agent decisions.
-6. Implement PERF-3 and PERF-4 behind shadow/feature flags; promote only after
-   the quality, call-count, memory, and isolation corpus is green.
-7. Implement PERF-5 and PERF-6 for immediate hosted/desktop task delivery,
-   then repeat the physical reconnect/no-duplicate drill.
-8. Implement PERF-7 and PERF-8; record live VM p50/p95 results and rollback
-   evidence before enabling the fast path for the full beta.
-9. Implement Workspace Inspection and Reviewable Editing. **Workspace
-   inspection and L2 editing are now complete; proceed to test/build recipes.**
-10. Expand Test/Build execution with named recipes and reviewable artifacts.
-   **Named recipes, bounded artifact metadata, changed-file collection, and
-   Desktop Activity rendering are now complete.**
-11. **Controlled Browser inspection is now complete for text, selected DOM, and
-   bounded downloads; screenshots remain deferred pending a local capture
-   adapter.** Browser state remains local.
-12. **Local credential adapter slice 1 is complete (Tavily + GitHub read-only).**
-   Add Telegram/Gmail/Calendar/Drive one at a time only after their local
-   consent and scope contracts are implemented.
-13. **Implemented in this change:** local intent reconciliation, workspace locks,
-   local skill protocol, retry controls, result/diff UX, and a bounded
-   inspect → plan → edit → run → verify → report workflow graph. Adaptive
-   decomposition remains a later planner enhancement, not a second local agent
-   brain.
-14. Decide whether encrypted offline local memory is needed; do not create a
-   second memory system by default.
-15. Run the broader agent evaluation corpus: chat, research, codebase changes,
+1. Complete the physical restart/reconnect/cancel/revoke drill with the paired
+   Windows PC (P0-B).
+2. Deliberately drop a real signed-in Web stream and confirm cursor-based
+   reconnect without duplicated output or work (P0-C).
+3. Complete the authenticated Cloudflare edge-limit review, one low-cost
+   Sarvam chat/reasoning smoke, and a provider-failure UX check (P0-D).
+4. Capture live redacted p50/p95 timing evidence for the enabled fast-path
+   flags and retain the documented rollback values.
+5. Run the broader agent evaluation corpus: chat, research, codebase changes,
    approvals, failures, attachments, reconnects, cancellations, and duplicate
    prevention.
-16. Reopen production hardening gates and promote only after all required
-    evidence is recorded green.
+6. Decide whether the later offline local-memory enhancement is needed; do not
+   create a second memory system by default.
+7. Only after the beta gates are green, reopen the deferred production
+   hardening gates in Section 11.
 
 ## 13. Readiness and definition of done
 
 Current honest estimate (updated 2026-08-30):
 
-- Focused hosted + desktop beta: **~91%**.
-- Desktop executor foundation: **~94%**; physical restart/reconnect,
-  capability depth, signing, and update trust remain.
-- Full local-agent experience: **not complete** until Sections 7–9 are
-  implemented and tested.
+- Focused hosted + desktop beta code: **implemented**. The release gate remains
+  open only for P0-B through P0-D and live timing evidence.
+- Desktop executor foundation: **~94%**; the physical restart/reconnect drill,
+  richer adaptive planning, signing, and update trust remain.
+- Full local-agent experience: **not complete** until adaptive verification,
+  additional consented adapters, optional offline memory, and the deliberately
+  deferred browser capture surface are implemented and tested.
 - Full production promotion: **not complete** while Section 11 gates are
   deferred.
 

@@ -74,11 +74,12 @@ preserved without a second public UI.
   and unchanged root route return 200, signed `/v1/tools` and `/v1/plugins`
   omit personal integrations, `/v1/integrations` reports `mode: local-only`,
   and a credential-write probe returns HTTP 409 without storing the test value.
-- Smara serves `https://ai.syntarus.com/` as the public root. `/v1/*` continues
-  to proxy to the existing Memento auth/legacy backend for the session bridge,
-  while `/smara-api/*` proxies to Smara. The old `/smara/` route now returns
-  `410 Gone`, `/smara-api/app/` is absent, and the `control-staging.syntarus.com`
-  DNS record/service is retired. A dated Caddy rollback copy remains available.
+- Smara serves `https://ai.syntarus.com/` as the public root. Native Smara
+  authentication, chat, tasks, research, and approvals use `/smara-api/*`;
+  `/v1/*` remains the separate Syntarus Memory API namespace. The old `/smara/`
+  route returns `410 Gone`, `/smara-api/app/` is absent, and the
+  `control-staging.syntarus.com` DNS record/service is retired. A dated Caddy
+  rollback copy remains available.
 - The repeatable signed beta smoke passed on staging: public health/readiness,
   signed tool access, disposable task create/cancel, cross-account task
   isolation (404), and local-only integration policy. No secret values were
@@ -98,7 +99,7 @@ preserved without a second public UI.
   and total tool-call limit. Duplicate identical tool invocations are rejected;
   transient non-stream calls retry once, and a stream that fails before its
   first token safely falls back to a normal completion.
-- The current release passed eight native Rust tests, both frontend production
+- The current release passed nine native Rust tests, both frontend production
   builds, a fresh PyInstaller executor build, and a fresh unsigned NSIS package.
   A real native Windows WebView hosted-chat turn returned `DESKTOP_OK`.
 - The local reliability release adds an explicit skill catalogue (`--skills`),
@@ -129,11 +130,11 @@ preserved without a second public UI.
   gating, visible task result (`SHADOW_TASK_OK`), chat (`SHADOW_CHAT_OK`),
   refresh persistence, and sign-out. The signed-in task and chat probes were
   disposable and contain no user files or secrets.
-- The replacement operator console is implemented in the Smara repository:
-  `/admin` has a separate operator session, bounded Smara control-plane
-  aggregates, and an independent Syntarus health/boundary view. The historical
-  Memento dashboard bookmark redirects to it in the checked-in Caddy config.
-  This remains pending live API/frontend/Caddy deployment and public verification.
+- The replacement operator console is deployed at `/admin` with a separate
+  operator session, bounded Smara control-plane aggregates, and an independent
+  Syntarus health/boundary view. On 2026-08-30 its VM-only operator secret was
+  configured and the live session endpoint returned `configured: true`; the
+  historical Memento dashboard bookmark now returns a `308` redirect to it.
 
 ## Deferred by owner for the current beta
 

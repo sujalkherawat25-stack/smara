@@ -53,6 +53,7 @@ per-request resources; it does not delete or rewrite durable work.
 - Frontend type-check: passed.
 - Frontend production build: passed (4218 modules transformed).
 - Desktop production build: passed.
+- Native Rust Desktop tests: **9 passed**.
 - Offline fixed corpus: 9 cases, including greeting, memory recall, exact
   tools, search, multi-step research, durable desktop work, and cancellation.
 
@@ -61,9 +62,11 @@ per-request resources; it does not delete or rewrite durable work.
 The code packages are complete. Promotion still requires deployment evidence,
 not more feature code:
 
-1. Run the authenticated owner Web shadow/account-isolation suite on the live
-   VM and capture p50/p95 from the timing fields.
+1. The authenticated owner Web shadow/account-isolation suite is green. Capture
+   live p50/p95 timing evidence and exercise the deliberate dropped-stream
+   reconnect case.
 2. Run the physical Windows offline → restart → reconnect → cancel/revoke drill
    against the installed Desktop package and confirm one execution per task.
-3. Review the live health payload's `rollout` object and keep the rollback
-   switches documented with the deployment record before opening the beta gate.
+3. The live health payload exposes all enabled rollout switches. Keep the
+   rollback values documented with the deployment record before opening the
+   beta gate.
