@@ -8,6 +8,7 @@ import logging
 import time
 import base64
 import secrets
+from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
@@ -37,10 +38,23 @@ from .attachments import AttachmentStore, MAX_BATCH_BYTES, MAX_ATTACHMENTS_PER_B
 from .auth import account_store, router as auth_router, verify_session_cookie
 from .admin import configure as configure_admin, router as admin_router
 from .performance import TimingTrace, request_id
+from .runtime_resources import RuntimeResources
 
 LOG = logging.getLogger("smara.api")
 configure_sentry(settings.sentry_dsn)
-app = FastAPI(title="Smara Control Plane", version="0.1.0")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    resources = await RuntimeResources.create(settings)
+    app.state.runtime_resources = resources
+    try:
+        yield
+    finally:
+        await resources.aclose()
+
+
+app = FastAPI(title="Smara Control Plane", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()],
@@ -56,6 +70,9 @@ attachment_store = AttachmentStore(Path(settings.database_path or "./data/smara.
 limiter = RedisFixedWindowLimiter(settings.redis_url, settings.rate_limit_per_minute, allow_local_fallback=settings.dev_mode)
 def _agent_runtime(model_profile: str | None = None) -> SmaraAgentRuntime:
     """Construct the runtime without importing any MemoryOS implementation."""
+    resources = getattr(app.state, "runtime_resources", None)
+    if resources is not None:
+        return resources.runtime(settings, model_profile)
     memory = None
     if settings.syntarus_api_key:
         from syntarus import AsyncMemoryClient
@@ -79,6 +96,25 @@ def _agent_runtime(model_profile: str | None = None) -> SmaraAgentRuntime:
     # profiles receive only the safe attachment metadata/preview.
     provider.capability = profile.capability
     return SmaraAgentRuntime(provider, memory=memory)
+
+
+@asynccontextmanager
+async def _request_http_client():
+    """Use the lifespan pool, with an isolated fallback for direct tests."""
+    resources = getattr(app.state, "runtime_resources", None)
+    if resources is not None:
+        yield resources.http_client
+        return
+    async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=False) as client:
+        yield client
+
+
+async def _close_request_memory(runtime: SmaraAgentRuntime) -> None:
+    if getattr(runtime, "_shared_resources", False):
+        return
+    memory = getattr(runtime, "_memory", None)
+    if memory is not None:
+        await memory.aclose()
 
 @app.get("/", include_in_schema=False)
 async def web_root():
@@ -508,7 +544,7 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
         raise HTTPException(503, str(exc)) from exc
     try:
         attachment_images = _attachment_images(body, user, runtime)
-        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=False) as client:
+        async with _request_http_client() as client:
             turn = await runtime.chat_with_tools(
                 account_id=user,
                 workspace_id=body.workspace_id,
@@ -538,9 +574,7 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     finally:
-        memory = getattr(runtime, "_memory", None)
-        if memory is not None:
-            await memory.aclose()
+        await _close_request_memory(runtime)
 
 
 @app.post("/v1/chat/stream")
@@ -584,7 +618,7 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
 
         async def run_chat():
             attachment_images = _attachment_images(body, user, runtime)
-            async with httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=False) as client:
+            async with _request_http_client() as client:
                 return await runtime.chat_with_tools(
                     account_id=user,
                     workspace_id=body.workspace_id,
@@ -641,9 +675,7 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
             if not task.done():
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
-            memory = getattr(runtime, "_memory", None)
-            if memory is not None:
-                await memory.aclose()
+            await _close_request_memory(runtime)
 
     return StreamingResponse(
         emit(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}

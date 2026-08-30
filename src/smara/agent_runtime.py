@@ -12,6 +12,7 @@ import asyncio
 import json
 import re
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from collections.abc import AsyncIterator
 from typing import Any, Callable, Protocol
@@ -81,13 +82,23 @@ class OpenAICompatibleProvider:
         model: str,
         timeout_seconds: float = 45.0,
         auth_header: str = "Authorization",
+        http_client: httpx.AsyncClient | None = None,
     ):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model = model
         self._timeout_seconds = timeout_seconds
         self._auth_header = auth_header.strip().lower()
+        self._http_client = http_client
         self.capability = "chat"
+
+    @asynccontextmanager
+    async def _client(self):
+        if self._http_client is not None:
+            yield self._http_client
+            return
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            yield client
 
     def _headers(self) -> dict[str, str]:
         if self._auth_header in {"api-subscription-key", "api_subscription_key"}:
@@ -154,7 +165,7 @@ class OpenAICompatibleProvider:
     async def complete(self, *, system: str, message: Any) -> str:
         if not self._base_url or not self._api_key or not self._model:
             raise RuntimeError("No Smara chat provider is configured.")
-        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+        async with self._client() as client:
             response = await self._post_completion(
                 client,
                 {
@@ -184,7 +195,7 @@ class OpenAICompatibleProvider:
         """Yield normalized OpenAI-compatible content deltas."""
         if not self._base_url or not self._api_key or not self._model:
             raise RuntimeError("No Smara chat provider is configured.")
-        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+        async with self._client() as client:
             async with client.stream(
                 "POST",
                 f"{self._base_url}/chat/completions",
