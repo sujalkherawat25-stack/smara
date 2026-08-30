@@ -44,8 +44,25 @@ def error(message: str, *, kind: str) -> str:
     return frame({"type": "error", "message": message, "kind": kind, "recoverable": False})
 
 
-def done(*, memory_used: bool, total_ms: int, tools_used: int = 0) -> str:
-    return frame({"type": "done", "memories_used": int(memory_used), "tools_used": max(0, tools_used), "total_ms": max(0, total_ms)})
+def done(
+    *,
+    memory_used: bool,
+    total_ms: int,
+    tools_used: int = 0,
+    request_id: str | None = None,
+    timings: dict[str, object] | None = None,
+) -> str:
+    payload: dict[str, object] = {
+        "type": "done",
+        "memories_used": int(memory_used),
+        "tools_used": max(0, tools_used),
+        "total_ms": max(0, total_ms),
+    }
+    if request_id:
+        payload["request_id"] = request_id
+    if timings:
+        payload["timings"] = timings
+    return frame(payload)
 
 
 def elapsed_ms(started_at: float) -> int:

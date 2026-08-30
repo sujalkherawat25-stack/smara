@@ -34,7 +34,9 @@ from .provider_routing import resolve_profile
 from .provider_routing import load_profiles
 from .plugins import manifests
 from .attachments import AttachmentStore, MAX_BATCH_BYTES, MAX_ATTACHMENTS_PER_BATCH, MAX_FILE_BYTES
-from .auth import router as auth_router, verify_session_cookie
+from .auth import account_store, router as auth_router, verify_session_cookie
+from .admin import configure as configure_admin, router as admin_router
+from .performance import TimingTrace, request_id
 
 LOG = logging.getLogger("smara.api")
 configure_sentry(settings.sentry_dsn)
@@ -48,6 +50,8 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
+configure_admin(store, account_store)
+app.include_router(admin_router)
 attachment_store = AttachmentStore(Path(settings.database_path or "./data/smara.db").parent / "attachments")
 limiter = RedisFixedWindowLimiter(settings.redis_url, settings.rate_limit_per_minute, allow_local_fallback=settings.dev_mode)
 def _agent_runtime(model_profile: str | None = None) -> SmaraAgentRuntime:
@@ -85,6 +89,8 @@ async def web_root():
 
 @app.middleware("http")
 async def harden_http(request: Request, call_next):
+    trace = TimingTrace(request_id(request.headers.get("X-Request-ID")))
+    request.state.smara_timing = trace
     if request.url.path.startswith("/v1/"):
         client = request.client.host if request.client else "unknown"
         try:
@@ -94,6 +100,7 @@ async def harden_http(request: Request, call_next):
         if not allowed:
             return JSONResponse({"detail": "Rate limit exceeded. Try again shortly."}, status_code=429, headers={"Retry-After": "60"})
     response = await call_next(request)
+    response.headers["X-Request-ID"] = trace.trace_id
     response.headers.update({"X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin", "Permissions-Policy": "camera=(self), microphone=(self), geolocation=()"})
     response.headers["X-Frame-Options"] = "DENY"
     return response
@@ -537,12 +544,14 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
 
 
 @app.post("/v1/chat/stream")
-async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
+async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(account_id)):
     """SSE view of direct chat and bounded read-only tool progress."""
     conversation_id, history, summary = _conversation(body, user)
     attachment_context = _attachment_context(body, user)
     async def emit():
         started_at = time.perf_counter()
+        trace = getattr(request.state, "smara_timing", TimingTrace())
+        trace.mark("route_started")
         try:
             runtime = _agent_runtime(body.model_profile)
         except ValueError as exc:
@@ -597,6 +606,7 @@ async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
         task = asyncio.create_task(run_chat())
         try:
             yield agent_events.status("Preparing a bounded Smara response")
+            trace.mark("first_status")
             while not task.done():
                 try:
                     yield await asyncio.wait_for(queue.get(), timeout=0.1)
@@ -606,7 +616,14 @@ async def chat_stream(body: ChatRequest, user: str = Depends(account_id)):
                 yield queue.get_nowait()
             turn = await task
             store.append_conversation_exchange(conversation_id, user, body.workspace_id, body.message, turn.message, turn.model)
-            yield agent_events.done(memory_used=turn.memory_used, tools_used=turn.tools_used, total_ms=agent_events.elapsed_ms(started_at))
+            trace.mark("persisted")
+            yield agent_events.done(
+                memory_used=turn.memory_used,
+                tools_used=turn.tools_used,
+                total_ms=agent_events.elapsed_ms(started_at),
+                request_id=trace.trace_id,
+                timings=trace.as_dict(),
+            )
         except Exception as exc:
             if not task.done():
                 task.cancel()
@@ -949,3 +966,10 @@ async def approve(task_id: str, body: ApprovalDecision, user: str = Depends(acco
 async def cancel_task(task_id: str, user: str = Depends(account_id)):
     try: return view(store.cancel(task_id, user))
     except KeyError: raise HTTPException(404, "Task not found")
+
+@app.post("/v1/tasks/{task_id}/retry", response_model=TaskView)
+async def retry_task(task_id: str, user: str = Depends(account_id)):
+    """Retry a failed task with a fresh local approval when needed."""
+    try: return view(store.retry_task(task_id, user))
+    except KeyError: raise HTTPException(404, "Task not found")
+    except ValueError as exc: raise HTTPException(409, str(exc)) from exc
