@@ -16,7 +16,7 @@ present() {
   eval "file=\${$file_key:-}"
   [ -n "$file" ] && [ -s "$file" ]
 }
-required="SMARA_DATABASE_URL SMARA_POSTGRES_PASSWORD SMARA_REDIS_URL SMARA_GATEWAY_SIGNING_SECRET SMARA_CONTROL_BRIDGE_SECRET SYNTARUS_API_KEY SMARA_PUBLIC_BASE_URL"
+required="SMARA_DATABASE_URL SMARA_POSTGRES_PASSWORD SMARA_REDIS_URL SMARA_GATEWAY_SIGNING_SECRET SYNTARUS_API_KEY SMARA_PUBLIC_BASE_URL"
 for key in $required; do
   if ! present "$key"; then
     printf '%s=missing\n' "$key"
@@ -25,6 +25,12 @@ for key in $required; do
     printf '%s=configured\n' "$key"
   fi
 done
+
+if present "SMARA_CONTROL_BRIDGE_SECRET"; then
+  printf '%s=configured (compatibility only)\n' "SMARA_CONTROL_BRIDGE_SECRET"
+else
+  printf '%s=not set (native session auth)\n' "SMARA_CONTROL_BRIDGE_SECRET"
+fi
 
 # User-account integrations are deliberately local-only on the hosted control
 # plane. Their vault key is required only for the explicitly opt-in legacy

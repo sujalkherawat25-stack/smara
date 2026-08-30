@@ -53,7 +53,6 @@ services:
       args:
         VITE_SMARA_MODE: ${VITE_SMARA_MODE:-true}
         VITE_SMARA_API_URL: ${VITE_SMARA_API_URL:-/smara-api}
-        VITE_SMARA_CONTROL_TOKEN_PATH: ${VITE_SMARA_CONTROL_TOKEN_PATH:-/v1/auth/control-token}
         VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
     ports: ["${SMARA_FRONTEND_BIND_ADDRESS:-127.0.0.1}:${SMARA_FRONTEND_HOST_PORT:-8081}:80"]
     restart: unless-stopped

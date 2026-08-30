@@ -87,6 +87,10 @@ ai.syntarus.com {
     # The old Memento agent runtime is retired. Native Smara auth/chat/task
     # routes live under /smara-api; return a clear, deterministic response for
     # stale Memento bookmarks instead of forwarding them to the old process.
+    # Preserve the old dashboard bookmark as a redirect to Smara's new
+    # operator console. Other retired Memento endpoints remain gone.
+    @legacy_operator_dashboard path /v1/memento/admin/dashboard /v1/memento/admin/dashboard/*
+    redir @legacy_operator_dashboard /admin 308
     @retired_memento path /v1/memento /v1/memento/*
     handle @retired_memento {
         respond "The Memento agent runtime has moved to Smara." 410

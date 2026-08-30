@@ -1,36 +1,30 @@
 # Smara Web UI
 
-This directory contains the reused Memento frontend shell. It is intentionally
-UI-only: the MemoryOS backend, Memento agent loop, and storage clients are not
-copied here.
+This directory contains the Smara Web shell. It is intentionally UI-only:
+Smara's API, task graph, and storage clients stay in the service container.
+MemoryOS remains a separate Syntarus product and is never imported here.
 
-## Hosted bridge mode
+## Canonical Smara mode
 
 Set these values when testing the migrated shell against a Smara deployment:
 
 ```text
 VITE_SMARA_MODE=true
 VITE_SMARA_API_URL=/smara-api
-VITE_SMARA_CONTROL_TOKEN_PATH=/v1/auth/control-token
 ```
 
 Serve this bundle from the canonical `https://ai.syntarus.com/` origin. The
 Smara API remains available at the same-origin `/smara-api` prefix; this is an
-API route, not a second UI. The existing auth service
-must have `POST /v1/auth/control-token` enabled and share
-`SMARA_CONTROL_BRIDGE_SECRET` with the Smara API. The endpoint returns a
-short-lived JWT (`expires_in_seconds`, bounded to 30–300 seconds); the browser
-never receives the signing secret.
+API route, not a second UI. Native Smara auth uses an HttpOnly session cookie
+from `/smara-api/v1/auth/*`; no control-token bridge or provider secret is
+shipped to the browser. With `VITE_SMARA_MODE` unset, local development can
+still proxy `/v1` to a local API, but production should keep it enabled.
 
-The browser first uses the existing authenticated web session to obtain a
-short-lived Smara control token, then sends it as a bearer token to Smara. No
-gateway or provider secret is shipped to the browser. With `VITE_SMARA_MODE`
-unset, the shell keeps its existing Memento routes, so the public site remains
-unchanged during migration and rollback.
-
-The first migrated slices are chat streaming and task listing/cancellation.
-Research evidence, approvals, schedules, integrations, desktop, and memory
-screens remain on their existing routes until each slice is adapted and tested.
+The shell covers chat, task graph, research, approvals, schedules,
+integrations, desktop status, and the independent operator console at
+`/admin`. The console uses its own operator-secret cookie and presents Smara
+control metadata beside a bounded Syntarus health view; it does not join the
+two data stores.
 
 The build uses `vite.config.mjs` explicitly. This avoids a Windows/esbuild
 configuration-loader failure seen when resolving the copied TypeScript config

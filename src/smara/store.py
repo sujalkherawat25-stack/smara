@@ -646,6 +646,51 @@ class TaskStore:
         self.signals.publish("task.cancel_requested", task_id=task_id)
         return result
 
+    def retry_task(self, task_id: str, account_id: str) -> dict:
+        """Reopen a terminally failed task without replaying an old lease.
+
+        Local steps always return to the approval gate.  This gives the user a
+        fresh review after an uncertain/disconnected attempt and clears the
+        old dead-letter resolution marker while retaining the original events.
+        """
+        task = self.get(task_id, account_id)
+        if task["status"] != "failed":
+            raise ValueError("Only failed tasks can be retried.")
+        steps = self.steps(task_id, account_id)
+        if not steps or not any(step.get("status") == "failed" for step in steps):
+            raise ValueError("The task has no failed step to retry.")
+        local = any(step.get("executor_kind") in {"desktop", "sandbox"} for step in steps)
+        requires_approval = bool(task.get("requires_approval")) or local
+        next_status = "waiting_approval" if requires_approval else "queued"
+        now = _now()
+        with self._connect() as c:
+            c.execute(
+                "UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL,retry_at=NULL,last_error=NULL,attempts=0 WHERE task_id=? AND status IN ('failed','cancelled')",
+                (task_id,),
+            )
+            c.execute("UPDATE task_runs SET status='queued' WHERE task_id=? AND status!='completed'", (task_id,))
+            c.execute("UPDATE task_dead_letters SET resolved_at=? WHERE task_id=? AND resolved_at IS NULL", (now, task_id))
+            c.execute(
+                "DELETE FROM approvals WHERE task_id=?",
+                (task_id,),
+            )
+            c.execute(
+                "UPDATE tasks SET status=?,requires_approval=?,cancel_requested=0,result_summary=NULL,updated_at=? WHERE id=? AND account_id=?",
+                (next_status, requires_approval, now, task_id, account_id),
+            )
+            c.execute(
+                "INSERT INTO task_events VALUES(?,?,?,?,?)",
+                (f"evt_{uuid.uuid4().hex}", task_id, "task.retry_requested", json.dumps({"source": "user", "requires_approval": requires_approval}), now),
+            )
+            if requires_approval:
+                c.execute(
+                    "INSERT INTO task_events VALUES(?,?,?,?,?)",
+                    (f"evt_{uuid.uuid4().hex}", task_id, "approval.requested", json.dumps({"source": "retry"}), now),
+                )
+        result = self.get(task_id, account_id)
+        self.signals.publish("task.retry_requested", task_id=task_id)
+        return result
+
     def claim_one(self, worker_id: str = "worker", lease_seconds: int = 60,
                   executor_kinds: tuple[str, ...] = ("hosted", "sandbox")) -> dict | None:
         with self._connect() as c:

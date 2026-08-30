@@ -40,8 +40,10 @@ import httpx
 # process where Python does not set ``__package__``.
 try:
     from .desktop_integrations import LocalIntegrationCancelled, execute_local_integration
+    from .local_agent import LocalTaskJournal, decorate_local_result, journal_path, local_skill_catalog, skill_spec, validate_local_step, workspace_lock
 except ImportError:  # pragma: no cover - exercised by the packaged binary
     from desktop_integrations import LocalIntegrationCancelled, execute_local_integration
+    from local_agent import LocalTaskJournal, decorate_local_result, journal_path, local_skill_catalog, skill_spec, validate_local_step, workspace_lock
 
 
 MAX_FILE_BYTES = 256 * 1024
@@ -905,7 +907,7 @@ def _preview_payload(operation: str, target: Path, before: bytes, after: bytes, 
     }
 
 
-def _write_file(payload: dict, roots: list[Path], state: dict | None = None) -> str:
+def _write_file_unlocked(payload: dict, roots: list[Path], state: dict | None = None) -> str:
     """Preview and safely apply bounded workspace edits.
 
     ``preview_only`` is a read-only planning operation. Mutations always
@@ -1021,6 +1023,38 @@ def _write_file(payload: dict, roots: list[Path], state: dict | None = None) -> 
         _remove_undo_entry(directory, undo_id)
         raise RuntimeError("Could not atomically write the approved file.")
     return json.dumps({"action": "local_file_write", "operation": operation, "file_name": target.name, "bytes_written": len(data) if operation in {"write", "append"} else len(after), "sha256": hashlib.sha256(after).hexdigest(), "preview": preview, "undo_id": undo_id, "undo_available": True}, ensure_ascii=False)
+
+
+def _workspace_for_target(target: Path, roots: list[Path]) -> Path:
+    """Return the approved workspace containing *target* for lock scoping."""
+    resolved = target.expanduser().resolve(strict=False)
+    candidates = [root.expanduser().resolve(strict=False) for root in roots]
+    containing = [root for root in candidates if resolved == root or root in resolved.parents]
+    if not containing:
+        raise RuntimeError("The local operation is outside every approved workspace.")
+    return max(containing, key=lambda item: len(item.parts))
+
+
+def _state_path_from_state(state: dict | None) -> Path | None:
+    value = state.get("_state_path") if isinstance(state, dict) else None
+    return Path(value) if isinstance(value, str) and value.strip() else None
+
+
+def _write_file(payload: dict, roots: list[Path], state: dict | None = None) -> str:
+    """Serialize all local mutations in one approved workspace."""
+    raw_path = payload.get("path") or payload.get("new_path")
+    if payload.get("operation") == "undo" and not raw_path:
+        # Undo payloads identify the prior mutation, not a new path. Resolve
+        # the recorded target solely to choose the same workspace lock.
+        undo_id = payload.get("undo_id")
+        directory = _undo_dir(state, roots)
+        record = next((item for item in _load_undo_entries(directory) if item.get("undo_id") == undo_id), None)
+        if record:
+            raw_path = record.get("target") or record.get("destination") or record.get("source")
+    target = _target(raw_path, roots, must_exist=False)
+    root = _workspace_for_target(target, roots)
+    with workspace_lock(root, state_path=_state_path_from_state(state)):
+        return _write_file_unlocked(payload, roots, state)
 
 
 def _remove_undo_entry(directory: Path, undo_id: str) -> None:
@@ -1193,7 +1227,7 @@ def _collect_artifacts(payload: dict, cwd: Path, roots: list[Path]) -> list[dict
     return artifacts
 
 
-def _terminal(payload: dict, roots: list[Path], state: dict, *, checkpoint=None, progress_hook=None) -> str:
+def _terminal_unlocked(payload: dict, roots: list[Path], state: dict, *, checkpoint=None, progress_hook=None) -> str:
     argv, recipe = _recipe_argv(payload)
     if not argv:
         raise RuntimeError("local_terminal received an empty command.")
@@ -1284,6 +1318,14 @@ def _terminal(payload: dict, roots: list[Path], state: dict, *, checkpoint=None,
         result["changed_files"] = []
         result["changed_files_available"] = False
     return json.dumps(result, ensure_ascii=False)
+
+
+def _terminal(payload: dict, roots: list[Path], state: dict, *, checkpoint=None, progress_hook=None) -> str:
+    cwd_value = payload.get("cwd") or str(roots[0])
+    cwd = _target(cwd_value, roots, must_exist=True)
+    root = _workspace_for_target(cwd, roots)
+    with workspace_lock(root, state_path=_state_path_from_state(state)):
+        return _terminal_unlocked(payload, roots, state, checkpoint=checkpoint, progress_hook=progress_hook)
 
 
 def _allowed_browser_url(url: str, state: dict) -> tuple[str, str]:
@@ -1395,7 +1437,7 @@ def _fetch_browser_bytes(
     return b"".join(chunks), content_type
 
 
-def _browser_download(payload: dict, roots: list[Path], state: dict, *, checkpoint=None, progress_hook=None) -> str:
+def _browser_download_unlocked(payload: dict, roots: list[Path], state: dict, *, checkpoint=None, progress_hook=None) -> str:
     raw_destination = payload.get("destination") or payload.get("path")
     if not isinstance(raw_destination, str) or not raw_destination.strip():
         raise RuntimeError("Browser downloads require a destination inside an approved folder.")
@@ -1473,6 +1515,19 @@ def _browser_download(payload: dict, roots: list[Path], state: dict, *, checkpoi
             temporary.unlink(missing_ok=True)
 
 
+def _browser_download(payload: dict, roots: list[Path], state: dict, *, checkpoint=None, progress_hook=None) -> str:
+    raw_destination = payload.get("destination") or payload.get("path")
+    if not isinstance(raw_destination, str) or not raw_destination.strip():
+        raise RuntimeError("Browser downloads require a destination inside an approved folder.")
+    destination = Path(raw_destination).expanduser()
+    if not destination.is_absolute():
+        destination = roots[0] / destination
+    target = _target(str(destination), roots, must_exist=False)
+    root = _workspace_for_target(target, roots)
+    with workspace_lock(root, state_path=_state_path_from_state(state)):
+        return _browser_download_unlocked(payload, roots, state, checkpoint=checkpoint, progress_hook=progress_hook)
+
+
 def _browser(payload: dict, state: dict, roots: list[Path], *, checkpoint=None, progress_hook=None) -> str:
     url, _hostname = _allowed_browser_url(payload.get("url"), state)
     operation = payload.get("operation", "open")
@@ -1539,6 +1594,7 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
     declared = set(state.get("capabilities") or DEFAULT_CAPABILITIES)
     if capability not in declared:
         raise RuntimeError("This desktop capability was not declared during pairing.")
+    spec, idempotency_key = validate_local_step(step)
     payload = step.get("executor_payload")
     if not isinstance(payload, dict):
         raise RuntimeError("The desktop step payload is invalid.")
@@ -1548,25 +1604,36 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
         # read-only Git summary to enforce the configured git allowlist.
         inspect_payload = dict(payload)
         inspect_payload["_state"] = state
-        return _workspace_inspect(inspect_payload, roots)
-    if capability == "local_file_write":
-        return _write_file(payload, roots, state)
-    if capability == "local_terminal":
-        return _terminal(payload, roots, state, checkpoint=checkpoint, progress_hook=progress_hook)
-    if capability == "local_browser":
-        return _browser(payload, state, roots, checkpoint=checkpoint, progress_hook=progress_hook)
-    if capability == "local_integration":
+        result = _workspace_inspect(inspect_payload, roots)
+    elif capability == "local_file_write":
+        result = _write_file(payload, roots, state)
+    elif capability == "local_terminal":
+        result = _terminal(payload, roots, state, checkpoint=checkpoint, progress_hook=progress_hook)
+    elif capability == "local_browser":
+        result = _browser(payload, state, roots, checkpoint=checkpoint, progress_hook=progress_hook)
+    elif capability == "local_integration":
         try:
-            return execute_local_integration(payload, _resolved_credentials, checkpoint=checkpoint, progress_hook=progress_hook)
+            result = execute_local_integration(payload, _resolved_credentials, checkpoint=checkpoint, progress_hook=progress_hook)
         except LocalIntegrationCancelled as exc:
             raise ExecutionCancelled(str(exc)) from exc
-    raise RuntimeError(f"Desktop capability '{capability}' is not installed.")
+    else:
+        raise RuntimeError(f"Desktop capability '{capability}' is not installed.")
+    return decorate_local_result(result, spec, idempotency_key)
+
+
+def _record_local_journal(journal: LocalTaskJournal, step_id: str, status: str, **fields: object) -> None:
+    """Journal failures must never turn a successful local action into one."""
+    try:
+        journal.record(step_id, status, **fields)
+    except (OSError, TypeError, ValueError) as exc:
+        LOG.warning("could not update local journal for %s: %s", step_id, str(exc)[:200])
 
 
 @dataclass
 class DesktopRunner:
     state_path: Path
     poll_seconds: float = 2.0
+    claim_wait_seconds: float = 20.0
     heartbeat_seconds: float = 20.0
     _last_heartbeat: float = field(default=0.0, init=False)
 
@@ -1586,12 +1653,34 @@ class DesktopRunner:
             response = client.post(f"{state['smara_url']}/v1/executors/heartbeat", headers=_headers(state), json={"capabilities": state.get("capabilities", DEFAULT_CAPABILITIES)})
             response.raise_for_status()
             self._last_heartbeat = now
-        response = client.post(f"{state['smara_url']}/v1/executors/claim", headers=_headers(state))
+        wait_seconds = max(0.0, min(25.0, float(self.claim_wait_seconds)))
+        response = client.post(
+            f"{state['smara_url']}/v1/executors/claim",
+            headers=_headers(state),
+            params={"wait_seconds": str(wait_seconds)},
+        )
         response.raise_for_status()
         step = response.json().get("step")
         if not step:
             return False
-        LOG.info("claimed step %s capability=%s", step.get("step_id"), step.get("required_capability"))
+        step_id = str(step.get("step_id") or "")
+        task_id = step.get("task_id") if isinstance(step.get("task_id"), str) else None
+        capability = step.get("required_capability") if isinstance(step.get("required_capability"), str) else None
+        journal = LocalTaskJournal(journal_path(self.state_path))
+        try:
+            spec, idempotency_key = validate_local_step(step)
+        except (RuntimeError, TypeError, ValueError):
+            spec, idempotency_key = None, None
+        if step_id and journal.uncertain(step_id, idempotency_key):
+            # A lost response after a side effect is deliberately not replayed
+            # on reconnect.  The hosted task must be reconciled by its state.
+            raise RuntimeError("A previous local attempt is uncertain; replay is blocked until the hosted task is reconciled.")
+        if step_id:
+            _record_local_journal(
+                journal, step_id, "claimed", task_id=task_id, capability=capability,
+                idempotency_key=idempotency_key,
+            )
+        LOG.info("claimed step %s capability=%s", step_id, capability)
 
         def checkpoint() -> bool:
             """Refresh the lease while long local work runs; return cancel state."""
@@ -1609,8 +1698,16 @@ class DesktopRunner:
             )
             response.raise_for_status()
 
+        prepared = False
         try:
             result = execute_step(step, state, checkpoint=checkpoint, progress_hook=progress)
+            prepared = True
+            if step_id:
+                _record_local_journal(
+                    journal, step_id, "prepared", task_id=task_id, capability=capability,
+                    idempotency_key=idempotency_key,
+                    result_sha256=hashlib.sha256(result.encode("utf-8")).hexdigest(),
+                )
             # A desktop action can use most of its lease (for example a
             # bounded terminal command). Refresh it once before completion so
             # a delayed network response cannot finalize a lease another
@@ -1623,15 +1720,42 @@ class DesktopRunner:
             if final_heartbeat.json().get("cancel_requested"):
                 raise ExecutionCancelled("The task was cancelled before the local result was recorded.")
             client.post(f"{state['smara_url']}/v1/executors/steps/{step['step_id']}/complete", headers=_headers(state), json={"result": result}).raise_for_status()
+            if step_id:
+                _record_local_journal(
+                    journal, step_id, "completed", task_id=task_id, capability=capability,
+                    idempotency_key=idempotency_key,
+                    result_sha256=hashlib.sha256(result.encode("utf-8")).hexdigest(),
+                    remote_status="completed",
+                )
             LOG.info("completed step %s", step.get("step_id"))
+        except ExecutionCancelled as exc:
+            if step_id:
+                _record_local_journal(journal, step_id, "cancelled", task_id=task_id, capability=capability, idempotency_key=idempotency_key, error=str(exc), remote_status="cancelled")
+            try:
+                client.post(f"{state['smara_url']}/v1/executors/steps/{step['step_id']}/fail", headers=_headers(state), json={"error": str(exc)[:2_000]}).raise_for_status()
+            except httpx.HTTPError:
+                # The action is still marked cancelled locally; the hosted
+                # lease recovery path will close the remote step later.
+                raise
+            LOG.info("cancelled step %s: %s", step_id, str(exc)[:300])
+        except httpx.HTTPError:
+            if step_id:
+                _record_local_journal(
+                    journal, step_id, "uncertain" if prepared and (spec is None or spec.side_effecting) else "failed",
+                    task_id=task_id, capability=capability, idempotency_key=idempotency_key,
+                    error="Hosted service became unavailable while recording local work.",
+                )
+            raise
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+            if step_id:
+                _record_local_journal(journal, step_id, "failed", task_id=task_id, capability=capability, idempotency_key=idempotency_key, error=str(exc), remote_status="failed")
             client.post(f"{state['smara_url']}/v1/executors/steps/{step['step_id']}/fail", headers=_headers(state), json={"error": str(exc)[:2_000]}).raise_for_status()
             LOG.warning("failed step %s: %s", step.get("step_id"), str(exc)[:300])
         return True
 
     def run_forever(self) -> None:
         state = _load_state(self.state_path)
-        with httpx.Client(timeout=20, follow_redirects=False) as client:
+        with httpx.Client(timeout=max(35.0, self.claim_wait_seconds + 15.0), follow_redirects=False) as client:
             delay = self.poll_seconds
             while True:
                 if _pause_path(self.state_path).exists():
@@ -1666,6 +1790,8 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resume", action="store_true", help="resume claims for the configured state")
     parser.add_argument("--revoke", action="store_true", help="revoke this paired desktop on the hosted service and remove local state")
     parser.add_argument("--status", action="store_true", help="print safe local executor status")
+    parser.add_argument("--journal-status", action="store_true", help="print bounded local task reconciliation status")
+    parser.add_argument("--skills", action="store_true", help="print the installed local skill protocol")
     parser.add_argument("--credential-list", action="store_true", help="list local credential names without values")
     parser.add_argument("--credential-set", help="save a local credential from stdin")
     parser.add_argument("--credential-provider", default="custom", help="provider label for --credential-set")
@@ -1673,8 +1799,25 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--credential-delete", help="remove a local credential")
     parser.add_argument("--log", type=Path, default=default_log_path(), help="rotating desktop log path")
     args = parser.parse_args(argv)
-    args.log.parent.mkdir(parents=True, exist_ok=True)
-    handler = RotatingFileHandler(args.log, maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8")
+    # Read-only diagnostics must not depend on a writable log directory. This
+    # also keeps their stdout machine-readable for support bundles.
+    if args.journal_status:
+        print(json.dumps(LocalTaskJournal(journal_path(args.state)).summary(), ensure_ascii=False, indent=2))
+        return 0
+    if args.skills:
+        print(json.dumps(local_skill_catalog(), ensure_ascii=False, indent=2))
+        return 0
+    try:
+        args.log.parent.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(args.log, maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8")
+    except OSError as exc:
+        # Diagnostics and recovery commands must still work when an older
+        # install left an app-data log directory with restrictive ACLs.
+        fallback_log = Path(tempfile.gettempdir()) / "Smara" / "logs" / "desktop.log"
+        fallback_log.parent.mkdir(parents=True, exist_ok=True)
+        LOG.warning("using temporary desktop log after %s: %s", args.log, str(exc)[:200])
+        args.log = fallback_log
+        handler = RotatingFileHandler(args.log, maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     LOG.setLevel(logging.INFO)
     if not LOG.handlers:

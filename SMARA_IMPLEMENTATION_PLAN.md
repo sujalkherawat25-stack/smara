@@ -129,7 +129,7 @@ proof/artifacts.
 
 ### Verification already green
 
-- 178 Python tests, frontend production/type checks, native Rust tests, and
+- 209 Python tests, frontend production/type checks, native Rust tests, and
   Windows packaging checks.
 - Live Grok/Tavily/research/task/approval/lease safety smokes.
 - Disposable local file read/write, Python codebase test, and browser-opening
@@ -774,9 +774,9 @@ These are deferred by owner decision and must remain disabled/documented:
 
 ## 13. Readiness and definition of done
 
-Current honest estimate:
+Current honest estimate (updated 2026-08-30):
 
-- Focused hosted + desktop beta: **~88%**.
+- Focused hosted + desktop beta: **~90%**.
 - Desktop executor foundation: **~94%**; physical restart/reconnect,
   capability depth, signing, and update trust remain.
 - Full local-agent experience: **not complete** until Sections 7–9 are

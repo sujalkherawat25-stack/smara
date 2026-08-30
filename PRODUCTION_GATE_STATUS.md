@@ -1,6 +1,6 @@
 # Smara production-gate status
 
-Updated 2026-08-28 after the agent/executor reliability deployment. This is an
+Updated 2026-08-30 after the local-executor reliability release. This is an
 operational checklist: Smara is live at the root as a beta deployment, the
 same-origin `/smara-api` route is retained for clients, and Memento rollback is
 preserved without a second public UI.
@@ -34,7 +34,7 @@ preserved without a second public UI.
   2026-08-25 restore contained all 17 recorded Smara schema versions and 17
   staging tasks. The live database was not modified; backup files are now
   forced to owner-only mode by the script.
-- Repository tests pass locally (**139 tests**) with Python compilation,
+- Repository tests pass locally (**209 tests**) with Python compilation,
   frontend type-check, and production frontend build. The lease-heartbeat
   change is now deployed and the live Postgres desktop claim/heartbeat/
   completion smoke passed. The Work panel also now maps the deployed
@@ -84,6 +84,11 @@ preserved without a second public UI.
 - The native desktop release was stopped and restarted successfully after the
   UX build. The focused desktop/auth/provider suite passed (**26 tests**), and
   the supported unsigned NSIS package rebuilt successfully.
+- The refreshed unsigned NSIS package was installed on the owner PC. The
+  `Smara Desktop.lnk` shortcut was verified from the real Windows environment
+  and now targets `C:\Users\sujal\AppData\Local\Smara Desktop\smara-desktop.exe`.
+  The embedded executor diagnostics report an empty bounded journal and the
+  complete five-skill catalogue.
 - Hosted agent work is now bounded by a wall-clock deadline, per-tool timeout,
   and total tool-call limit. Duplicate identical tool invocations are rejected;
   transient non-stream calls retry once, and a stream that fails before its
@@ -91,6 +96,13 @@ preserved without a second public UI.
 - The current release passed eight native Rust tests, both frontend production
   builds, a fresh PyInstaller executor build, and a fresh unsigned NSIS package.
   A real native Windows WebView hosted-chat turn returned `DESKTOP_OK`.
+- The local reliability release adds an explicit skill catalogue (`--skills`),
+  a bounded local task journal (`--journal-status`), per-workspace
+  cross-process locks, fail-closed uncertain-side-effect reconciliation, and a
+  hosted `POST /v1/tasks/{task_id}/retry` action. Web task artifacts now show
+  structured previews/diffs, changed files, output, and SHA-256 values; the
+  Desktop task detail accepts the same artifact hashes. The full Smara suite
+  passes **209 tests**.
 - The deployed live workflow passed direct Grok chat, calculator execution,
   Tavily discovery, official-page retrieval, and a cited research answer using
   the Web/CLI/Desktop SSE contract. The disposable production Postgres check
@@ -106,6 +118,11 @@ preserved without a second public UI.
   gating, visible task result (`SHADOW_TASK_OK`), chat (`SHADOW_CHAT_OK`),
   refresh persistence, and sign-out. The signed-in task and chat probes were
   disposable and contain no user files or secrets.
+- The replacement operator console is implemented in the Smara repository:
+  `/admin` has a separate operator session, bounded Smara control-plane
+  aggregates, and an independent Syntarus health/boundary view. The historical
+  Memento dashboard bookmark redirects to it in the checked-in Caddy config.
+  This remains pending live API/frontend/Caddy deployment and public verification.
 
 ## Deferred by owner for the current beta
 
@@ -141,7 +158,8 @@ remain in force and they must be reopened before a later production promotion:
 - A Windows paired-desktop smoke task already passed, and the installed native
   WebView completed a real hosted chat. The paired executor was started,
   closed, relaunched, and recovered as `Executor online` with `Hosted connected`
-  on 2026-08-29. Automated restart/retry/lease tests, public
+  on 2026-08-29. The refreshed package is installed and its shortcut resolves
+  correctly. Automated restart/retry/lease tests, public
   authenticated shadow/isolation, executor progress, and the live Postgres
   no-replay check are green. A deliberate dropped-stream reconnect and a real
   paired task across a physical PC/app/network disconnect and reconnect still
@@ -174,7 +192,7 @@ remain in force and they must be reopened before a later production promotion:
   state. The UI explains that an allowlist is eligibility, not approval.
 - A failed connection check now clears stale remote-online state, and a native
   chat event subscription failure is surfaced instead of being silently lost.
-- `npm run build`, 139 backend tests, eight native Rust tests, and the full
+- `npm run build`, 209 backend tests, eight native Rust tests, and the full
   package build passed. The NSIS beta
   installer was rebuilt and the release app restarted successfully.
 - The installer includes a Windows Desktop shortcut hook (`Smara Desktop.lnk`)
@@ -187,6 +205,19 @@ remain in force and they must be reopened before a later production promotion:
   catalogue, and approval-gated desktop action requests are covered by the
   current repository tests. They do not by themselves configure provider keys,
   a real MCP server, or a Windows desktop.
+- Installed Desktop verification on 2026-08-30: the release app was relaunched,
+  remained paired and signed in, completed a real hosted chat round-trip
+  (`DESKTOP_OK` in 5.3s), and showed the executor online. Activity confirmed
+  the paired device and prior local file/browser smoke results. Pause/resume
+  and restart continuity were verified; no duplicate execution was observed.
+- The package was rebuilt and the installed resource was refreshed after a
+  stale-bundle check. The installed executor now matches the release build
+  SHA-256 `1C39A88BBB93199F86E83C715CCE2205653937145F022CAECBF2CB83EA2D35AE`;
+  the rebuilt NSIS installer is under `apps/desktop/src-tauri/target/release/bundle/nsis`.
+- The rebuilt installation passed a second live chat probe
+  (`DESKTOP_REBUILT_OK` in 6.1s) and a pause/resume lifecycle check. The
+  visible app remains running with one GUI process and the expected
+  PyInstaller runner pair.
 
 ## Cutover rule
 

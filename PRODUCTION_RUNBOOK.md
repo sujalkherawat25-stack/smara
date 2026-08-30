@@ -16,7 +16,14 @@ variable, for example:
 SMARA_SENTRY_DSN_FILE=/run/secrets/smara_sentry_dsn
 SMARA_VAPID_PUBLIC_KEY_FILE=/run/secrets/smara_vapid_public
 SMARA_VAPID_PRIVATE_KEY_FILE=/run/secrets/smara_vapid_private
+SMARA_OPERATOR_SECRET_FILE=/run/secrets/smara_operator_secret
 ```
+
+`SMARA_OPERATOR_SECRET` is only for the private `/admin` console. Generate a
+long random value on the VM, inject it through the deployment secret store,
+and never paste it into chat, a task, or a browser URL. Rotate it by replacing
+the secret and restarting the Smara API; existing operator cookies then expire
+and operators sign in again.
 
 The default hosted posture is:
 
@@ -63,20 +70,26 @@ read, approval-gated write, allowlisted terminal command, browser allowlist,
 disconnect/reconnect, and token revocation. Do not grant terminal or browser
 capabilities in the first pairing unless explicitly needed.
 
-## 5. Existing Smara shell
+## 5. Canonical Smara shell and operator console
 
-The Memento/MemoryOS auth service now exposes `POST /v1/auth/control-token`.
-It validates the existing httpOnly account session and returns a 30–300 second
-JWT containing only the account subject, Smara audience, and issuer. Configure
-the same independently generated `SMARA_CONTROL_BRIDGE_SECRET` in the auth
-service and Smara API secret managers; never put it in frontend variables.
-Serve the migrated frontend at the canonical `ai.syntarus.com/` root. Proxy
-`/smara-api/*` to the Smara API with the prefix stripped; the browser still
-obtains its token from `/v1/auth/control-token` on the authenticated
-`ai.syntarus.com` origin with `credentials: include`. The old `/smara/` path
-returns `410 Gone`, and `/smara-api/app/` is not served. The retired
+Serve the Smara frontend at the canonical `ai.syntarus.com/` root. Proxy
+`/smara-api/*` to the Smara API with the prefix stripped; native user auth,
+chat, tasks, research, and approvals are all under that explicit API prefix.
+The browser uses the Smara httpOnly session cookie; there is no legacy
+Memento control-token bridge in the public path. The private operator console
+is `/admin` and uses its separate `SMARA_OPERATOR_SECRET` cookie session. It
+shows bounded Smara control-plane aggregates and an independent Syntarus
+health/boundary view without joining the stores or exposing memory text,
+provider keys, OAuth grants, task objectives, or final answers.
+
+The historical `/v1/memento/admin/dashboard` bookmark redirects to `/admin`
+after the active Caddy file is updated. Other `/v1/memento/*` and root
+`/v1/auth/*` bookmarks return `410 Gone`; the native routes remain reachable
+as `/smara-api/v1/auth/*`. The old `/smara/` path returns `410 Gone`, and
+`/smara-api/app/` is not served. The retired
 `control-staging.syntarus.com` hostname has no DNS record. Test chat, tasks,
-research, refresh, and approval from the same signed-in account. This
+research, refresh, approval, `/admin`, and the separation between
+`/syntarus-api/health` and `/smara-api/health` from the public hostname. This
 repository must not modify the protected MemoryOS pipeline.
 
 The marketing site remains a separate Caddy host on the same VM:

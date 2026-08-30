@@ -56,7 +56,7 @@ export interface TaskDetail {
   task: TaskSummary;
   steps: Array<Record<string, unknown>>;
   events: Array<{ id?: string; type?: string; payload?: string; created_at?: string }>;
-  artifacts: Array<{ id?: string; kind?: string; name?: string; uri?: string; content?: string | null; created_at?: string }>;
+  artifacts: Array<{ id?: string; kind?: string; name?: string; uri?: string; sha256?: string | null; content?: string | null; created_at?: string }>;
 }
 
 export interface ChatEvent {

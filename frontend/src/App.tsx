@@ -8,6 +8,7 @@ import SmaraWorkPanel from "@/components/SmaraWorkPanel";
 import SmaraLogo from "@/components/SmaraLogo";
 import SignInScreen from "@/components/Auth/SignInScreen";
 import MaintenanceScreen from "@/components/Auth/MaintenanceScreen";
+import AdminDashboard from "@/components/Admin/AdminDashboard";
 import { useSSE } from "@/hooks/useSSE";
 import { useThemeStore } from "@/stores/themeStore";
 import { useViewStore } from "@/stores/viewStore";
@@ -29,11 +30,19 @@ import { Sun, Moon, ArrowLeft, Menu, Plus, Settings, LogOut, ListChecks } from "
  * AuthenticatedApp so they don't fire before the user is authenticated.
  */
 export default function App() {
+  const isAdminPath = window.location.pathname === "/admin" || window.location.pathname.startsWith("/admin/");
   const status = useAuthStore((s) => s.status);
   const loadAccount = useAuthStore((s) => s.loadAccount);
   useEffect(() => {
-    loadAccount();
-  }, [loadAccount]);
+    // The operator console has its own short-lived operator session. Do not
+    // block it on the normal user account session (or accidentally create a
+    // user /me request for an operator-only visit).
+    if (!isAdminPath) loadAccount();
+  }, [isAdminPath, loadAccount]);
+
+  if (isAdminPath) {
+    return <AdminDashboard />;
+  }
 
   if (status === "loading") {
     return (

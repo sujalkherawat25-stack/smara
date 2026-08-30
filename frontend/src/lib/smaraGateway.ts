@@ -13,6 +13,7 @@ const smaraPrefixes = [
   "/v1/tasks", "/v1/research", "/v1/schedules", "/v1/executors", "/v1/integrations",
   "/v1/integration-actions", "/v1/push", "/v1/captures", "/v1/tools", "/v1/plugins",
   "/v1/cli", "/v1/account",
+  "/v1/admin",
 ];
 
 export function smaraModeEnabled(): boolean { return enabled; }

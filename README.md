@@ -49,6 +49,25 @@ optional provider, the capture task still completes with a clear
 "not configured" result, so a missing provider cannot block the phone
 companion.
 
+## Operator console and product boundaries
+
+The private operator console is available at `/admin` with a separately
+provisioned `SMARA_OPERATOR_SECRET`. It has its own short-lived HttpOnly
+operator session, independent of normal Smara user sign-in. It is a Smara-owned
+dashboard for task health, executors, account metadata, artifacts, events, and
+connection status. It does not expose provider keys, OAuth grants, task
+objectives, final answers, or raw memory by default.
+
+The console keeps the products visibly separate: **Smara control plane** shows
+durable tasks, approvals, executors, integrations, events, and account access
+metadata from Smara's store; **Syntarus context plane** shows only an
+independent SDK/API health probe and boundary status. Syntarus memory remains
+in Syntarus and is never copied into Smara's task database.
+
+The historical `/v1/memento/admin/dashboard` bookmark redirects to `/admin`
+when the updated Caddy configuration is deployed. Other retired Memento routes
+remain `410 Gone`.
+
 ## Memory boundary
 
 `src/smara/syntarus_adapter.py` is the only memory integration point. Give the
