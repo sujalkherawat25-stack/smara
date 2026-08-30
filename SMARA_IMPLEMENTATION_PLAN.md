@@ -659,8 +659,9 @@ before it is enabled.
 3. Add durable local intent/queue state for disconnected desktops; never replay
    uncertain side effects automatically.
 4. **Implemented in this change:** local skill contracts, a bounded task
-   journal, fail-closed uncertain-side-effect handling, and per-workspace
-   cross-process locks prevent duplicate replay and concurrent edits.
+   journal, fail-closed uncertain-side-effect handling, per-workspace
+   cross-process locks, and an authenticated step-status reconciliation pass
+   prevent duplicate replay and stale uncertain entries after reconnect.
 5. Keep the hosted planner as the default. Add a local fallback planner only
    after the skill protocol, task reconciliation, and local memory policy are
    stable; otherwise two independent agent brains will diverge.

@@ -790,6 +790,14 @@ async def heartbeat_executor_step(step_id: str, identity: tuple[str, str] = Depe
     except KeyError:
         raise HTTPException(409, "Step is not leased to this executor.")
 
+@app.get("/v1/executors/steps/{step_id}")
+async def executor_step_status(step_id: str, identity: tuple[str, str] = Depends(executor_identity)):
+    """Reconcile a local journal entry without exposing another account's task."""
+    try:
+        return store.executor_step_status(*identity, step_id)
+    except KeyError:
+        raise HTTPException(404, "Step was not found for this executor.")
+
 @app.post("/v1/executors/steps/{step_id}/progress")
 async def progress_executor_step(step_id: str, body: ExecutorProgress, identity: tuple[str, str] = Depends(executor_identity)):
     """Record a bounded local status line without uploading command output."""

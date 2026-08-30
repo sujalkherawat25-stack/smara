@@ -102,7 +102,8 @@ preserved without a second public UI.
   hosted `POST /v1/tasks/{task_id}/retry` action. Web task artifacts now show
   structured previews/diffs, changed files, output, and SHA-256 values; the
   Desktop task detail accepts the same artifact hashes. The full Smara suite
-  passes **211 tests**.
+  passes **211 tests**. Reconnects also reconcile uncertain local entries
+  through the executor-scoped step-status endpoint before claiming work.
 - The deployed live workflow passed direct Grok chat, calculator execution,
   Tavily discovery, official-page retrieval, and a cited research answer using
   the Web/CLI/Desktop SSE contract. The disposable production Postgres check

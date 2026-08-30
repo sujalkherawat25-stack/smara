@@ -1690,6 +1690,32 @@ class DesktopRunner:
     heartbeat_seconds: float = 20.0
     _last_heartbeat: float = field(default=0.0, init=False)
 
+    def _reconcile_journal(self, client: httpx.Client, state: dict, journal: LocalTaskJournal) -> None:
+        """Resolve uncertain local attempts from the hosted source of truth."""
+        pending = [entry for entry in journal.entries() if entry.get("status") == "uncertain"]
+        for entry in pending[:20]:
+            step_id = entry.get("step_id")
+            if not isinstance(step_id, str) or not step_id:
+                continue
+            try:
+                response = client.get(
+                    f"{state['smara_url']}/v1/executors/steps/{step_id}",
+                    headers=_headers(state),
+                )
+                if response.status_code == 404:
+                    # A purged or already-revoked step is left visible in the
+                    # journal instead of being silently treated as completed.
+                    continue
+                response.raise_for_status()
+                body = response.json()
+                remote_status = body.get("status") if isinstance(body, dict) else None
+            except (httpx.HTTPError, TypeError, ValueError):
+                LOG.warning("could not reconcile local journal step %s", step_id)
+                break
+            if remote_status in {"completed", "failed", "cancelled"}:
+                journal.reconcile(step_id, str(remote_status))
+                LOG.info("reconciled local journal step %s as %s", step_id, remote_status)
+
     def run_once(self, client: httpx.Client, state: dict) -> bool:
         # Settings are written by the desktop UI while this long-lived
         # process is running. Reload the small scoped state file before every
@@ -1701,6 +1727,8 @@ class DesktopRunner:
         state = _load_state(self.state_path)
         # Used only for local undo snapshots; never persisted or sent to Smara.
         state["_state_path"] = str(self.state_path)
+        journal = LocalTaskJournal(journal_path(self.state_path))
+        self._reconcile_journal(client, state, journal)
         now = time.monotonic()
         if now - self._last_heartbeat >= self.heartbeat_seconds:
             response = client.post(f"{state['smara_url']}/v1/executors/heartbeat", headers=_headers(state), json={"capabilities": state.get("capabilities", DEFAULT_CAPABILITIES)})
@@ -1719,7 +1747,6 @@ class DesktopRunner:
         step_id = str(step.get("step_id") or "")
         task_id = step.get("task_id") if isinstance(step.get("task_id"), str) else None
         capability = step.get("required_capability") if isinstance(step.get("required_capability"), str) else None
-        journal = LocalTaskJournal(journal_path(self.state_path))
         try:
             spec, idempotency_key = validate_local_step(step)
         except (RuntimeError, TypeError, ValueError):

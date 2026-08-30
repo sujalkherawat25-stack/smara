@@ -1132,6 +1132,24 @@ class TaskStore:
             )
         return {"ok": True, "cancel_requested": False, "step_id": step_id, "lease_expires_at": until}
 
+    def executor_step_status(self, executor_id: str, token: str, step_id: str) -> dict:
+        """Return terminal state for one step owned by this executor's account."""
+        executor = self.executor(executor_id, token)
+        with self._connect() as c:
+            row = c.execute(
+                """SELECT s.id AS step_id,s.status,s.last_error,s.idempotency_key,
+                          s.lease_owner,t.id AS task_id,t.status AS task_status
+                     FROM task_steps s JOIN tasks t ON t.id=s.task_id
+                    WHERE s.id=? AND t.account_id=?""",
+                (step_id, executor["account_id"]),
+            ).fetchone()
+        if not row:
+            raise KeyError("step")
+        result = dict(row)
+        result["ok"] = True
+        result["terminal"] = result["status"] in {"completed", "failed", "cancelled"}
+        return result
+
     def complete_executor_step(self, executor_id: str, token: str, step_id: str, result: str) -> None:
         executor = self.executor(executor_id, token)
         with self._connect() as c:
@@ -1545,6 +1563,24 @@ class PostgresTaskStore(TaskStore):
                 (until, step_id, executor_id),
             )
         return {"ok": True, "cancel_requested": False, "step_id": step_id, "lease_expires_at": until}
+
+    def executor_step_status(self, executor_id: str, token: str, step_id: str) -> dict:
+        """Return terminal state for one step owned by this executor's account."""
+        executor = self.executor(executor_id, token)
+        with self._connect() as c:
+            row = c.execute(
+                """SELECT s.id AS step_id,s.status,s.last_error,s.idempotency_key,
+                          s.lease_owner,t.id AS task_id,t.status AS task_status
+                     FROM task_steps s JOIN tasks t ON t.id=s.task_id
+                    WHERE s.id=%s AND t.account_id=%s""",
+                (step_id, executor["account_id"]),
+            ).fetchone()
+        if not row:
+            raise KeyError("step")
+        result = dict(row)
+        result["ok"] = True
+        result["terminal"] = result["status"] in {"completed", "failed", "cancelled"}
+        return result
 
     def claim_integration_action(self, worker_id: str = "integration-worker", lease_seconds: int = 60) -> dict | None:
         now = _now()

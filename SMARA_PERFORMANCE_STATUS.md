@@ -21,7 +21,9 @@ account data intact.
 
 The local-agent inspection follow-up is also complete: bounded file
 classification and changed-file hash proofs are emitted locally and covered
-by Desktop executor tests; file contents remain opt-in and bounded.
+by Desktop executor tests; file contents remain opt-in and bounded. Uncertain
+local journal entries now reconcile against the hosted step-status endpoint
+before a reconnect can claim new work.
 
 ## Rollout switches
 

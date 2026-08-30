@@ -1,12 +1,14 @@
 from pathlib import Path
 import json
 from datetime import datetime, timezone
+import httpx
 
 import pytest
 
 from smara.models import TaskCreate
 from smara.store import TaskStore
-from smara.desktop_executor import _changed_file_hashes, _read_file, normalize_pairing_code
+from smara.desktop_executor import DesktopRunner, _changed_file_hashes, _read_file, journal_path, normalize_pairing_code
+from smara.local_agent import LocalTaskJournal
 
 
 def test_pairing_code_normalizes_copied_whitespace():
@@ -34,6 +36,37 @@ def test_changed_file_hashes_are_bounded_and_do_not_return_contents(tmp_path: Pa
     assert result["changed.txt"]["bytes"] == 7
     assert result["changed.txt"]["sha256"]
     assert "content" not in result["changed.txt"]
+
+
+def test_executor_step_status_is_account_scoped_and_terminal(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop", ["local_file_read"])["code"])
+    task = store.create("acct_1", "work", "Read", "Read", True, [{"name": "read", "executor_kind": "desktop", "required_capability": "local_file_read"}])
+    store.decide(task["id"], "acct_1", True, "approved")
+    step = store.claim_for_executor(desktop["executor_id"], desktop["token"])
+    assert step
+    status = store.executor_step_status(desktop["executor_id"], desktop["token"], step["step_id"])
+    assert status["status"] == "running" and status["terminal"] is False
+    with pytest.raises(KeyError):
+        store.executor_step_status(desktop["executor_id"], desktop["token"], "missing-step")
+    store.complete_executor_step(desktop["executor_id"], desktop["token"], step["step_id"], "done")
+    final = store.executor_step_status(desktop["executor_id"], desktop["token"], step["step_id"])
+    assert final["status"] == "completed" and final["terminal"] is True
+
+
+def test_desktop_reconciles_uncertain_journal_from_hosted_status(tmp_path: Path):
+    state = {"smara_url": "https://smara.test", "token": "token", "executor_id": "desktop-1"}
+    journal = LocalTaskJournal(journal_path(tmp_path / "desktop.json"))
+    journal.record("step-1", "uncertain", task_id="task-1", capability="local_file_write", idempotency_key="k1")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/executors/steps/step-1"
+        return httpx.Response(200, json={"step_id": "step-1", "status": "completed", "terminal": True})
+
+    runner = DesktopRunner(tmp_path / "desktop.json")
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        runner._reconcile_journal(client, state, journal)
+    assert journal.get("step-1")["status"] == "completed"
 
 
 def test_paired_desktop_claims_only_declared_capability(tmp_path: Path):

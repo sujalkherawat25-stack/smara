@@ -73,3 +73,4 @@ def test_operator_routes_are_mounted_on_native_smara_api():
     assert "/v1/admin/session" in paths
     assert "/v1/admin/overview" in paths
     assert "/v1/admin/syntarus" in paths
+    assert "/v1/executors/steps/{step_id}" in paths
