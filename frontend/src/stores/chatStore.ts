@@ -340,6 +340,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       timedOut = true;
       abortController.abort();
     }, STREAM_WATCHDOG_MS);
+    // Token events can arrive much faster than React can paint. Keep the
+    // latest text in a tiny 60fps buffer so long answers stay smooth while
+    // still preserving every token in the final persisted message.
+    let pendingTokenText: string | null = null;
+    let tokenTimer: ReturnType<typeof setTimeout> | undefined;
+    const flushTokenText = () => {
+      if (tokenTimer !== undefined) {
+        clearTimeout(tokenTimer);
+        tokenTimer = undefined;
+      }
+      if (pendingTokenText !== null) {
+        set({ streamingText: pendingTokenText });
+        pendingTokenText = null;
+      }
+    };
 
     set((s) => ({
       messages: [...s.messages, userMsg],
@@ -375,6 +390,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let birthdaySaved = false;
       let buffer = "";
       let finished = false;
+      const queueTokenText = (value: string) => {
+        pendingTokenText = value;
+        if (tokenTimer === undefined) {
+          tokenTimer = setTimeout(() => {
+            tokenTimer = undefined;
+            if (pendingTokenText !== null) {
+              set({ streamingText: pendingTokenText });
+              pendingTokenText = null;
+            }
+          }, 16);
+        }
+      };
 
       while (!finished) {
         const { done, value } = await reader.read();
@@ -539,7 +566,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
               case "token":
                 accumulated += evt.text;
-                set({ streamingText: accumulated });
+                queueTokenText(accumulated);
                 break;
 
               case "stream_reset":
@@ -551,7 +578,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 // (visible as the reply appearing to restart/duplicate
                 // mid-stream).
                 accumulated = "";
-                set({ streamingText: "" });
+                pendingTokenText = "";
+                flushTokenText();
                 break;
 
               case "error":
@@ -588,6 +616,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 break;
 
               case "done": {
+                flushTokenText();
                 // Empty-bubble safety net: if no tokens arrived (backend
                 // failed at every fallback layer AND the new always-say-
                 // something layer didn't kick in for some reason), render a
@@ -663,6 +692,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // still commit whatever we accumulated so the user sees a partial reply
       // rather than silently losing it.
       if (!finished && accumulated) {
+        flushTokenText();
         const assistantMsg: ConversationMessage = {
           id: assistantId,
           role: "assistant",
@@ -715,6 +745,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ isStreaming: false, streamingText: "", currentPhase: null, activity: [], _abortController: null });
       }
     } catch (err: any) {
+      // A queued token must be made visible before we snapshot partial output
+      // for stop/retry/error handling.
+      if (typeof flushTokenText === "function") flushTokenText();
       // AbortError = user clicked stop. Commit whatever tokens arrived so the
       // bubble isn't silently empty; don't log or show an error toast.
       if (err?.name === "AbortError") {

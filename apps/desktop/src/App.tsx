@@ -100,6 +100,8 @@ function App() {
   const [signingIn, setSigningIn] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const assistantId = useRef<string | null>(null);
+  const pendingAssistantText = useRef("");
+  const assistantFrame = useRef<number | null>(null);
   const conversationId = useRef(`desktop-${Date.now()}`);
   const transcriptEndRef = useRef<HTMLDivElement>(null!);
 
@@ -159,12 +161,35 @@ function App() {
     return () => window.clearInterval(timer);
   }, [screen, connection.has_cli_token, refreshConnection, refreshTasks]);
 
+  const flushAssistantText = useCallback(() => {
+    if (assistantFrame.current !== null) {
+      window.cancelAnimationFrame(assistantFrame.current);
+      assistantFrame.current = null;
+    }
+    const target = assistantId.current;
+    if (!target) return;
+    const text = pendingAssistantText.current;
+    setMessages((items) => items.map((item) => item.id === target ? { ...item, text, pending: true } : item));
+  }, []);
+
+  const queueAssistantText = useCallback((text: string) => {
+    pendingAssistantText.current = text;
+    if (assistantFrame.current !== null) return;
+    assistantFrame.current = window.requestAnimationFrame(() => {
+      assistantFrame.current = null;
+      const target = assistantId.current;
+      if (!target) return;
+      setMessages((items) => items.map((item) => item.id === target ? { ...item, text: pendingAssistantText.current, pending: true } : item));
+    });
+  }, []);
+
   const handleChatEvent = useCallback((event: ChatEvent) => {
     const target = assistantId.current;
     if (!target) return;
     const type = event.type || "status";
     if (type === "token" && event.text) {
-      setMessages((items) => items.map((item) => item.id === target ? { ...item, text: item.text + event.text, pending: true } : item));
+      pendingAssistantText.current += event.text;
+      queueAssistantText(pendingAssistantText.current);
     } else if (type === "phase") {
       setActivity((items) => [{ id: uid("phase"), tone: "blue" as const, label: `Agent ${event.phase || "working"}` }, ...items].slice(0, 8));
     } else if (type === "status") {
@@ -175,11 +200,13 @@ function App() {
       const tone: ActivityItem["tone"] = event.ok ? "green" : "red";
       setActivity((items) => [{ id: uid("result"), tone, label: `${event.name || "Tool"} ${event.ok ? "completed" : "failed"}`, detail: event.preview }, ...items].slice(0, 8));
     } else if (type === "done") {
+      flushAssistantText();
       setStreaming(false);
       setMessages((items) => items.map((item) => item.id === target ? { ...item, pending: false } : item));
       setActivity((items) => [{ id: uid("done"), tone: "green" as const, label: "Response ready", detail: event.total_ms ? `${event.total_ms} ms` : undefined }, ...items].slice(0, 8));
       assistantId.current = null;
     } else if (type === "error") {
+      flushAssistantText();
       setStreaming(false);
       const detail = event.message || "Smara could not complete this turn.";
       setMessages((items) => items.map((item) => item.id === target ? {
@@ -194,7 +221,7 @@ function App() {
       setActivity((items) => [{ id: uid("error"), tone: "red" as const, label: "Hosted response failed", detail }, ...items].slice(0, 8));
       assistantId.current = null;
     }
-  }, []);
+  }, [flushAssistantText, queueAssistantText]);
 
   useEffect(() => {
     if (!isNativeDesktop) return;
@@ -219,6 +246,7 @@ function App() {
     setDraft("");
     const answerId = uid("assistant");
     assistantId.current = answerId;
+    pendingAssistantText.current = "";
     setMessages((items) => [...items, { id: uid("user"), role: "user", text }, { id: answerId, role: "assistant", text: "", pending: true }]);
     setActivity((items) => [{ id: uid("send"), tone: "blue" as const, label: localModelSelected ? "Starting private desktop model" : "Starting hosted Smara" }, ...items].slice(0, 8));
     setStreaming(true);

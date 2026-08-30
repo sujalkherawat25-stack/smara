@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, CircleAlert, FileText, RefreshCw, Square, X } from "lucide-react";
 import {
   cancelSmaraTask,
@@ -11,6 +11,7 @@ import {
   getSmaraTask,
   getSmaraSteps,
   listSmaraTasks,
+  retrySmaraTask,
   streamSmaraEvents,
   type SmaraArtifact,
   type SmaraEvidence,
@@ -59,6 +60,24 @@ function latestResult(events: SmaraEvent[]): string | null {
   return null;
 }
 
+function activityEvents(events: SmaraEvent[]): { visible: SmaraEvent[]; collapsed: number } {
+  // Heartbeats/progress are useful for liveness, but rendering every one makes
+  // a long-running task look noisy and causes unnecessary layout work.
+  const noisy = new Set(["executor.heartbeat", "executor.progress", "worker.heartbeat"]);
+  const visible = events.filter((event) => !noisy.has(eventType(event))).slice(-12);
+  return { visible, collapsed: Math.max(0, events.length - visible.length) };
+}
+
+function parseArtifact(content: string | null): Record<string, unknown> | null {
+  if (!content) return null;
+  try {
+    const parsed: unknown = JSON.parse(content);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch { return null; }
+}
+
 export default function SmaraWorkPanel() {
   const [tasks, setTasks] = useState<SmaraTask[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -79,6 +98,7 @@ export default function SmaraWorkPanel() {
   const [researchQuestion, setResearchQuestion] = useState("");
   const [researchSources, setResearchSources] = useState("");
   const [creatingResearch, setCreatingResearch] = useState(false);
+  const streamCursors = useRef<Record<string, string>>({});
 
   const selected = useMemo(() => tasks.find((task) => task.id === selectedId) ?? null, [tasks, selectedId]);
 
@@ -115,12 +135,35 @@ export default function SmaraWorkPanel() {
     const active = selected?.status === "queued" || selected?.status === "running" || selected?.status === "waiting_approval";
     if (!active) return;
     const controller = new AbortController();
-    // The stream carries durable events without polling. A low-frequency
-    // refresh repairs any missed event after a proxy reconnect.
-    void streamSmaraEvents(selectedId, controller.signal, () => { void loadDetails(selectedId); void refresh(); })
-      .catch(() => { if (!controller.signal.aborted) void loadDetails(selectedId); });
+    let repairTimer: number | undefined;
+    const scheduleRepair = () => {
+      if (repairTimer != null) return;
+      repairTimer = window.setTimeout(() => {
+        repairTimer = undefined;
+        void loadDetails(selectedId);
+        void refresh();
+      }, 150);
+    };
+    // Render each durable event immediately, but coalesce the repair fetches so
+    // a burst of worker events never produces a burst of API requests.
+    void streamSmaraEvents(selectedId, controller.signal, (event) => {
+      if (event.id) streamCursors.current[selectedId] = event.id;
+      setEvents((current) => current.some((item) => item.id === event.id)
+        ? current
+        : [...current, event].sort((left, right) => left.created_at.localeCompare(right.created_at)).slice(-200));
+      const eventResult = latestResult([event]);
+      if (eventResult) setResult(eventResult);
+      scheduleRepair();
+    }, {
+      lastEventId: streamCursors.current[selectedId],
+      onReconnect: (lastEventId) => {
+        if (lastEventId) streamCursors.current[selectedId] = lastEventId;
+        scheduleRepair();
+      },
+    }).then(() => { if (!controller.signal.aborted) void loadDetails(selectedId); })
+      .catch(() => { if (!controller.signal.aborted) { setError("Live task updates paused. Refresh to reconnect."); void loadDetails(selectedId); } });
     const timer = window.setInterval(() => { void refresh(); }, 15_000);
-    return () => { controller.abort(); window.clearInterval(timer); };
+    return () => { controller.abort(); window.clearInterval(timer); if (repairTimer != null) window.clearTimeout(repairTimer); };
   }, [selectedId, selected?.status, loadDetails, refresh]);
 
   async function decide(approved: boolean) {
@@ -136,6 +179,17 @@ export default function SmaraWorkPanel() {
     setBusy(true); setError(null);
     try { const updated = await cancelSmaraTask(selected.id); setTasks((current) => current.map((task) => task.id === updated.id ? updated : task)); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not cancel this task."); }
+    finally { setBusy(false); }
+  }
+
+  async function retry() {
+    if (!selected) return;
+    setBusy(true); setError(null);
+    try {
+      const updated = await retrySmaraTask(selected.id);
+      setTasks((current) => current.map((task) => task.id === updated.id ? updated : task));
+      await loadDetails(updated.id);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not retry this task."); }
     finally { setBusy(false); }
   }
 
@@ -215,12 +269,13 @@ export default function SmaraWorkPanel() {
             <div className="flex items-start justify-between gap-3"><div><h2 className="text-[16px] font-semibold" style={{ color: "var(--text-primary)" }}>{selected.title}</h2><p className="text-[12px] mt-1" style={{ color: "var(--text-secondary)" }}>{selected.objective}</p></div><span className="text-[10px] uppercase tracking-wider" style={{ color: statusColor[selected.status] }}>{selected.status.replace("_", " ")}</span></div>
             {selected.status === "waiting_approval" && <div className="mt-4 p-3 rounded-lg flex items-center justify-between gap-2" style={{ background: "rgba(245,158,11,.08)", border: "1px solid rgba(245,158,11,.3)" }}><span className="text-[12px]" style={{ color: "#fbbf24" }}>This task is waiting for your approval.</span><div className="flex gap-2"><button disabled={busy} onClick={() => void decide(true)} className="px-2.5 py-1.5 rounded-md text-[11px]" style={{ background: "#34d399", color: "#06251a" }}><Check size={12} className="inline mr-1" />Approve</button><button disabled={busy} onClick={() => void decide(false)} className="px-2.5 py-1.5 rounded-md text-[11px]" style={{ background: "transparent", color: "#fca5a5", border: "1px solid rgba(248,113,113,.35)" }}><X size={12} className="inline mr-1" />Deny</button></div></div>}
             {!["completed", "failed", "cancelled"].includes(selected.status) && selected.status !== "waiting_approval" && <button disabled={busy} onClick={() => void cancel()} className="mt-3 px-2.5 py-1.5 rounded-md text-[11px]" style={{ color: "#fca5a5", border: "1px solid rgba(248,113,113,.35)" }}><Square size={11} className="inline mr-1" />Cancel task</button>}
+            {selected.status === "failed" && <button disabled={busy} onClick={() => void retry()} className="mt-3 px-2.5 py-1.5 rounded-md text-[11px]" style={{ color: "var(--accent)", border: "1px solid var(--accent)" }}><RefreshCw size={11} className="inline mr-1" />Retry task</button>}
             <Section title="Plan"><div className="flex flex-col gap-1.5">{steps.map((step) => <div key={step.id} className="flex items-center gap-2 text-[11px]"><span style={{ color: statusColor[step.status] || "var(--text-muted)" }}>●</span><span style={{ color: "var(--text-secondary)" }}>{step.name}</span><span className="ml-auto" style={{ color: "var(--text-muted)" }}>{step.status}</span></div>)}</div></Section>
             {result && <Section title="Result"><div className="rounded-lg p-3 text-[12px] leading-6 whitespace-pre-wrap break-words" style={{ background: "var(--bg-base)", border: "1px solid var(--border-dim)", color: "var(--text-primary)" }}>{result}</div></Section>}
             {selected.status === "completed" && !result && <Section title="Result"><span className="text-[11px]" style={{ color: "var(--text-muted)" }}>The task completed without a textual result.</span></Section>}
-            <Section title="Activity"><div className="flex flex-col gap-1.5">{events.slice(-12).map((event) => <div key={event.id} className="text-[11px]" style={{ color: "var(--text-secondary)" }}><span style={{ color: "var(--text-muted)" }}>{new Date(event.created_at).toLocaleTimeString()}</span> · {eventLabel(event)}</div>)}{!events.length && <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>No events yet.</span>}</div></Section>
+            <Section title="Activity"><div className="flex flex-col gap-1.5">{(() => { const activity = activityEvents(events); return <>{activity.visible.map((event) => <div key={event.id} className="text-[11px]" style={{ color: "var(--text-secondary)" }}><span style={{ color: "var(--text-muted)" }}>{new Date(event.created_at).toLocaleTimeString()}</span> · {eventLabel(event)}</div>)}{activity.collapsed > 0 && <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>{activity.collapsed} progress update{activity.collapsed === 1 ? "" : "s"} collapsed</span>}{!events.length && <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>No events yet.</span>}</>; })()}</div></Section>
             {evidence.length > 0 && <Section title={`Evidence (${evidence.length})`}><div className="flex flex-col gap-2">{evidence.map((item) => <details key={item.id} className="rounded-lg p-2" style={{ background: "var(--bg-base)", border: "1px solid var(--border-dim)" }}><summary className="cursor-pointer text-[11px]" style={{ color: "var(--accent)" }}><FileText size={12} className="inline mr-1" />{item.citation_label || item.title || item.url}<span className="ml-2" style={{ color: "var(--text-muted)" }}>{item.status}{item.confidence != null ? ` · ${Math.round(item.confidence * 100)}% confidence` : ""}</span></summary><a href={item.url} target="_blank" rel="noreferrer" className="block mt-2 text-[10px] break-all" style={{ color: "var(--accent)" }}>{item.url}</a>{item.excerpt && <p className="mt-2 text-[11px] leading-5" style={{ color: "var(--text-secondary)" }}>{item.excerpt}</p>}{item.verification_notes && <p className="mt-1 text-[10px]" style={{ color: "var(--text-muted)" }}>{item.verification_notes}</p>}</details>)}</div></Section>}
-            {artifacts.length > 0 && <Section title={`Artifacts (${artifacts.length})`}><div className="flex flex-col gap-2">{artifacts.map((artifact) => <details key={artifact.id} className="rounded-lg p-2" style={{ background: "var(--bg-base)", border: "1px solid var(--border-dim)" }}><summary className="cursor-pointer text-[11px]" style={{ color: "var(--text-secondary)" }}><FileText size={12} className="inline mr-1" />{artifact.name} <span style={{ color: "var(--text-muted)" }}>({artifact.kind})</span></summary>{artifact.content ? <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-5" style={{ color: "var(--text-secondary)" }}>{artifact.content}</pre> : <p className="mt-2 text-[10px]" style={{ color: "var(--text-muted)" }}>Artifact content is stored by Smara but is not available inline.</p>}</details>)}</div></Section>}
+            {artifacts.length > 0 && <Section title={`Artifacts (${artifacts.length})`}><div className="flex flex-col gap-2">{artifacts.map((artifact) => { const structured = parseArtifact(artifact.content); const preview = structured?.preview && typeof structured.preview === "object" ? structured.preview as Record<string, unknown> : null; const changed = Array.isArray(structured?.changed_files) ? structured.changed_files : []; const diff = typeof structured?.diff === "string" ? structured.diff : (typeof preview?.diff === "string" ? preview.diff : null); return <details key={artifact.id} className="rounded-lg p-2" style={{ background: "var(--bg-base)", border: "1px solid var(--border-dim)" }}><summary className="cursor-pointer text-[11px]" style={{ color: "var(--text-secondary)" }}><FileText size={12} className="inline mr-1" />{artifact.name} <span style={{ color: "var(--text-muted)" }}>({artifact.kind})</span></summary>{artifact.sha256 && <p className="mt-2 text-[10px] break-all" style={{ color: "var(--text-muted)" }}>SHA-256: {artifact.sha256}</p>}{structured ? <div className="mt-2 flex flex-col gap-2 text-[11px]" style={{ color: "var(--text-secondary)" }}>{typeof structured.operation === "string" && <p><span style={{ color: "var(--text-muted)" }}>Operation:</span> {structured.operation}</p>}{typeof structured.path === "string" && <p><span style={{ color: "var(--text-muted)" }}>Path:</span> {structured.path}</p>}{changed.length > 0 && <p><span style={{ color: "var(--text-muted)" }}>Changed files:</span> {changed.map(String).join(", ")}</p>}{diff && <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md p-2" style={{ background: "var(--bg-card)", color: "var(--text-secondary)" }}>{diff}</pre>}{typeof structured.output === "string" && <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md p-2" style={{ background: "var(--bg-card)", color: "var(--text-secondary)" }}>{structured.output}</pre>}</div> : artifact.content ? <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-5" style={{ color: "var(--text-secondary)" }}>{artifact.content}</pre> : <p className="mt-2 text-[10px]" style={{ color: "var(--text-muted)" }}>Artifact content is stored by Smara but is not available inline.</p>}</details>; })}</div></Section>}
             {error && <p className="mt-3 text-[11px] flex items-center gap-1" style={{ color: "#f87171" }}><CircleAlert size={12} />{error}</p>}
           </div>
         )}
