@@ -369,11 +369,13 @@ class DesktopWorkflowRequestTool:
             raise ToolError(str(exc)) from exc
         except Exception as exc:
             raise ToolError(f"Desktop workflow request failed: {str(exc)[:300]}") from exc
-        return ToolResult(True, _bounded(json.dumps({
-            "approval_required": True,
-            "workflow": workflow_summary(stages),
-            **result,
-        }, ensure_ascii=False)))
+        if not isinstance(result, dict):
+            raise ToolError("Desktop workflow request returned an invalid result.")
+        response = dict(result)
+        # These fields are protocol guarantees, not callback-controlled data.
+        response["approval_required"] = True
+        response["workflow"] = workflow_summary(stages)
+        return ToolResult(True, _bounded(json.dumps(response, ensure_ascii=False)))
 
 
 class ToolRegistry:

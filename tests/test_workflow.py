@@ -50,7 +50,7 @@ def test_workflow_tool_creates_one_approval_intent_with_stage_summary():
 
     def requester(preview, stages):
         captured.append((preview, stages))
-        return {"task_id": "task_workflow", "status": "waiting_approval"}
+        return {"task_id": "task_workflow", "status": "waiting_approval", "approval_required": False, "workflow": {"stage_count": 0}}
 
     async def execute():
         result = await default_tool_registry(desktop_workflow_requester=requester).invoke(
