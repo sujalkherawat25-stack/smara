@@ -3,7 +3,7 @@ import json
 
 import httpx
 
-from smara.tool_registry import ToolContext, ToolError, default_tool_registry
+from smara.tool_registry import ToolContext, ToolError, ToolRegistry, ToolResult, ToolSpec, default_tool_registry
 
 
 def test_default_registry_is_read_only_and_catalogued():
@@ -103,6 +103,20 @@ def test_deep_research_searches_distinct_angles_fetches_pages_and_labels_citatio
             assert "[1]" in result.content and "SOURCE TYPE: fetched page" in result.content
 
     asyncio.run(execute())
+
+
+def test_registry_preserves_the_bounded_multi_source_research_bundle():
+    class LongResearchTool:
+        spec = ToolSpec(
+            "research.deep", "research", {"type": "object", "properties": {}, "additionalProperties": False},
+            side_effecting=False,
+        )
+
+        async def run(self, arguments, context):
+            return ToolResult(True, "[1] first\n" + ("evidence " * 900) + "\n[2] second\n[3] third\n[4] fourth\n[5] fifth")
+
+    result = asyncio.run(ToolRegistry([LongResearchTool()]).invoke("research.deep", {}, ToolContext("acct", "default")))
+    assert "[5] fifth" in result.content
 
 
 def test_integration_reads_use_runner_but_never_bypass_approval():

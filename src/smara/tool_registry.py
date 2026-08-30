@@ -475,7 +475,12 @@ class ToolRegistry:
             if unknown:
                 raise ToolError("Tool arguments contain unsupported fields.")
         result = await tool.run(arguments, context)
-        return ToolResult(result.ok, _bounded(result.content), list(result.citations)[:20], dict(result.meta))
+        # `research.deep` already applies a source-balanced, 16k evidence
+        # budget. Re-applying the generic 4k tool cap here discarded later
+        # source labels before the citation writer received them. Other
+        # direct-chat tools retain the smaller defensive boundary.
+        limit = 16_000 if name == "research.deep" else MAX_TOOL_RESULT_CHARS
+        return ToolResult(result.ok, _bounded(result.content, limit), list(result.citations)[:20], dict(result.meta))
 
 
 def default_tool_registry(http_client: httpx.AsyncClient | None = None, *, integration_runner: Callable[[str, str, dict[str, Any]], Awaitable[str]] | None = None, integration_requester: Callable[[str, str, str, str, dict[str, Any]], dict[str, Any]] | None = None, desktop_requester: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None, desktop_workflow_requester: Callable[[str, list[dict[str, Any]]], dict[str, Any]] | None = None, include_user_integrations: bool = True) -> ToolRegistry:
