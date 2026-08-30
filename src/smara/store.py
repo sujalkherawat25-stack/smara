@@ -140,6 +140,16 @@ class TaskStore:
               last_run_at TEXT, last_task_id TEXT, lease_owner TEXT, lease_expires_at TEXT,
               created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS schedules_due_idx ON schedules(enabled,next_run_at);
+            CREATE INDEX IF NOT EXISTS task_steps_ready_idx
+              ON task_steps(status,retry_at,executor_kind,task_id,ordinal);
+            CREATE INDEX IF NOT EXISTS task_events_task_created_idx
+              ON task_events(task_id,created_at,id);
+            CREATE INDEX IF NOT EXISTS tasks_account_updated_idx
+              ON tasks(account_id,updated_at);
+            CREATE INDEX IF NOT EXISTS executor_leases_active_idx
+              ON executor_leases(step_id,executor_id,completed_at,expires_at);
+            CREATE INDEX IF NOT EXISTS integration_action_ready_idx
+              ON integration_action_log(status,retry_at,created_at);
             """)
             # Backward-compatible local development upgrades for databases
             # created before retry state existed.
@@ -423,6 +433,45 @@ class TaskStore:
                 (conversation_id, account_id, workspace_id),
             ).fetchone()
         return str(row["summary"] or "") if row else ""
+
+    def conversation_context(
+        self,
+        conversation_id: str,
+        account_id: str,
+        workspace_id: str,
+        *,
+        limit: int = 16,
+        max_chars: int = 12_000,
+    ) -> tuple[list[dict], str]:
+        """Read summary and recent turns in one connection.
+
+        Chat requests used to open two independent connections for this pair
+        of reads. Keeping the ownership check and snapshot together both
+        reduces pool pressure and prevents a reply from mixing state across
+        concurrent writes.
+        """
+        limit = max(1, min(40, limit)); max_chars = max(1_000, min(30_000, max_chars))
+        with self._connect() as c:
+            owner = c.execute(
+                "SELECT account_id,workspace_id,summary FROM conversations WHERE id=?",
+                (conversation_id,),
+            ).fetchone()
+            if owner and (owner["account_id"] != account_id or owner["workspace_id"] != workspace_id):
+                raise KeyError(conversation_id)
+            rows = c.execute(
+                "SELECT role,content,model,sequence,created_at FROM conversation_turns WHERE conversation_id=? AND account_id=? ORDER BY sequence DESC LIMIT ?",
+                (conversation_id, account_id, limit),
+            ).fetchall()
+        selected, used = [], 0
+        for row in rows:
+            item = dict(row); content = str(item.get("content") or "")
+            remaining = max_chars - used
+            if remaining <= 0:
+                break
+            item["content"] = content[:remaining]
+            used += len(item["content"])
+            selected.append(item)
+        return list(reversed(selected)), str(owner["summary"] or "") if owner else ""
 
     def append_conversation_exchange(self, conversation_id: str, account_id: str, workspace_id: str, user_message: str, assistant_message: str, model: str | None = None) -> None:
         now = _now()
@@ -1228,6 +1277,7 @@ class PostgresTaskStore(TaskStore):
     """
     def __init__(self, database_url: str):
         self.database_url = database_url
+        self._pool = None
         self._init()
 
     def _init(self):
@@ -1236,11 +1286,27 @@ class PostgresTaskStore(TaskStore):
 
     def _connect(self):
         try:
-            import psycopg
+            from psycopg_pool import ConnectionPool
             from psycopg.rows import dict_row
         except ImportError as exc:
-            raise RuntimeError("Postgres runtime requires `psycopg[binary]`; install Smara dependencies.") from exc
-        return _PostgresConnection(psycopg.connect(self.database_url, row_factory=dict_row))
+            raise RuntimeError("Postgres runtime requires `psycopg[binary]` and `psycopg_pool`; install Smara dependencies.") from exc
+        if self._pool is None:
+            self._pool = ConnectionPool(
+                conninfo=self.database_url,
+                min_size=1,
+                max_size=10,
+                timeout=5,
+                max_waiting=64,
+                kwargs={"row_factory": dict_row},
+                open=True,
+            )
+        return _PooledPostgresConnection(self._pool)
+
+    def close(self) -> None:
+        """Close the process-lifetime pool during API shutdown."""
+        if self._pool is not None:
+            self._pool.close()
+            self._pool = None
 
     def fire_due_schedules(self, scheduler_id: str = "scheduler", limit: int = 10) -> list[dict]:
         """Create due task runs under Postgres row locks so replicas cannot duplicate them."""
@@ -1421,8 +1487,25 @@ def open_task_store(*, database_url: str, database_path: str):
 class _PostgresConnection:
     """Translate the small common SQL subset used by the shared state machine."""
     def __init__(self, connection): self._connection = connection
-    def __enter__(self): self._connection.__enter__(); return self
+    def __enter__(self): return self
     def __exit__(self, *args): return self._connection.__exit__(*args)
     def execute(self, sql: str, params=None):
         normalized = "BEGIN" if sql == "BEGIN IMMEDIATE" else sql.replace("?", "%s")
         return self._connection.execute(normalized, params)
+
+
+class _PooledPostgresConnection:
+    """Lease one connection from psycopg_pool for a store operation."""
+    def __init__(self, pool):
+        self._pool = pool
+        self._lease = None
+
+    def __enter__(self):
+        self._lease = self._pool.connection()
+        raw = self._lease.__enter__()
+        return _PostgresConnection(raw)
+
+    def __exit__(self, *args):
+        if self._lease is None:
+            return False
+        return self._lease.__exit__(*args)

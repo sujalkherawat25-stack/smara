@@ -39,6 +39,7 @@ from .auth import account_store, router as auth_router, verify_session_cookie
 from .admin import configure as configure_admin, router as admin_router
 from .performance import TimingTrace, request_id
 from .runtime_resources import RuntimeResources
+from .store_async import AsyncStoreFacade
 
 LOG = logging.getLogger("smara.api")
 configure_sentry(settings.sentry_dsn)
@@ -47,10 +48,16 @@ configure_sentry(settings.sentry_dsn)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     resources = await RuntimeResources.create(settings)
+    store_facade = AsyncStoreFacade(store)
     app.state.runtime_resources = resources
+    app.state.async_store = store_facade
     try:
         yield
     finally:
+        await store_facade.close()
+        close_store = getattr(store, "close", None)
+        if close_store is not None:
+            close_store()
         await resources.aclose()
 
 
@@ -64,6 +71,7 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
+async_store = AsyncStoreFacade(store)  # fallback for direct/unit callers outside lifespan
 configure_admin(store, account_store)
 app.include_router(admin_router)
 attachment_store = AttachmentStore(Path(settings.database_path or "./data/smara.db").parent / "attachments")
@@ -480,13 +488,19 @@ async def revoke_cli_device(device_id: str, user: str = Depends(account_id)):
         raise HTTPException(404, "CLI device was not found or is already revoked.") from exc
 
 
-def _conversation(body: ChatRequest, user: str) -> tuple[str, list[dict], str]:
+def _async_store() -> AsyncStoreFacade:
+    return getattr(app.state, "async_store", async_store)
+
+
+async def _conversation(body: ChatRequest, user: str) -> tuple[str, list[dict], str]:
     conversation_id = body.conversation_id or f"chat_{secrets.token_hex(16)}"
     try:
-        history = store.conversation_history(conversation_id, user, body.workspace_id)
+        history, summary = await _async_store().conversation_context(
+            conversation_id, user, body.workspace_id
+        )
     except KeyError as exc:
         raise HTTPException(404, "Conversation was not found in this account and workspace.") from exc
-    return conversation_id, history, store.conversation_summary(conversation_id, user, body.workspace_id)
+    return conversation_id, history, summary
 
 
 def _attachment_context(body: ChatRequest, user: str) -> str:
@@ -520,7 +534,10 @@ async def list_conversations(user: str = Depends(account_id)):
 @app.get("/v1/conversations/{conversation_id}/turns")
 async def conversation_turns(conversation_id: str, workspace_id: str = Query(default="default", min_length=1, max_length=128), user: str = Depends(account_id)):
     try:
-        return {"conversation_id": conversation_id, "turns": store.conversation_history(conversation_id, user, workspace_id, limit=40, max_chars=30_000)}
+        turns, _ = await _async_store().conversation_context(
+            conversation_id, user, workspace_id, limit=40, max_chars=30_000
+        )
+        return {"conversation_id": conversation_id, "turns": turns}
     except KeyError as exc:
         raise HTTPException(404, "Conversation was not found in this account and workspace.") from exc
 
@@ -536,7 +553,7 @@ async def delete_conversation(conversation_id: str, user: str = Depends(account_
 @app.post("/v1/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, user: str = Depends(account_id)):
     """Direct chat with bounded read-only tools; writes remain durable tasks."""
-    conversation_id, history, summary = _conversation(body, user)
+    conversation_id, history, summary = await _conversation(body, user)
     attachment_context = _attachment_context(body, user)
     try:
         runtime = _agent_runtime(body.model_profile)
@@ -560,7 +577,10 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
                 ) if settings.hosted_user_integrations_enabled else None),
                 include_user_integrations=settings.hosted_user_integrations_enabled,
             )
-        store.append_conversation_exchange(conversation_id, user, body.workspace_id, body.message, turn.message, turn.model)
+        await _async_store().call(
+            "append_conversation_exchange",
+            conversation_id, user, body.workspace_id, body.message, turn.message, turn.model,
+        )
         return ChatResponse(**turn.__dict__)
     except httpx.HTTPStatusError as exc:
         # Keep non-streaming clients (CLI, integrations, API consumers) on
@@ -580,7 +600,7 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
 @app.post("/v1/chat/stream")
 async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(account_id)):
     """SSE view of direct chat and bounded read-only tool progress."""
-    conversation_id, history, summary = _conversation(body, user)
+    conversation_id, history, summary = await _conversation(body, user)
     attachment_context = _attachment_context(body, user)
     async def emit():
         started_at = time.perf_counter()
@@ -649,7 +669,10 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
             while not queue.empty():
                 yield queue.get_nowait()
             turn = await task
-            store.append_conversation_exchange(conversation_id, user, body.workspace_id, body.message, turn.message, turn.model)
+            await _async_store().call(
+                "append_conversation_exchange",
+                conversation_id, user, body.workspace_id, body.message, turn.message, turn.model,
+            )
             trace.mark("persisted")
             yield agent_events.done(
                 memory_used=turn.memory_used,
