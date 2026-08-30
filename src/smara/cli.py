@@ -134,7 +134,14 @@ def _client(args: argparse.Namespace) -> httpx.Client:
         headers["Authorization"] = f"Bearer {token}"
     if args.dev_account:
         headers["X-Smara-Account-Id"] = args.dev_account
-    return httpx.Client(base_url=args.api.rstrip("/"), headers=headers, timeout=30)
+    # Multi-source research and long streaming answers legitimately take longer
+    # than a tiny health or task-list request.  A single 30-second timeout made
+    # the CLI abandon a healthy turn while the hosted agent was still working.
+    # Keep connection failures quick, but give the response stream a bounded,
+    # configurable budget.
+    request_timeout = max(15, min(600, int(getattr(args, "request_timeout", 180))))
+    timeout = httpx.Timeout(connect=10.0, read=float(request_timeout), write=30.0, pool=10.0)
+    return httpx.Client(base_url=args.api.rstrip("/"), headers=headers, timeout=timeout)
 
 
 def _request(client: httpx.Client, method: str, path: str, **kwargs: Any) -> Any:
@@ -456,6 +463,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--api", default=os.getenv("SMARA_API_URL", "http://127.0.0.1:8080"))
     parser.add_argument("--token", default=os.getenv("SMARA_TOKEN", ""), help="Smara bearer token")
     parser.add_argument("--dev-account", default=os.getenv("SMARA_DEV_ACCOUNT", ""), help="development only")
+    parser.add_argument(
+        "--request-timeout",
+        type=int,
+        default=int(os.getenv("SMARA_REQUEST_TIMEOUT_SECONDS", "180")),
+        help="maximum seconds to wait for a hosted response (15-600; default: 180)",
+    )
     parser.add_argument("--plain", action="store_true", help="disable terminal colors and symbols")
     commands = parser.add_subparsers(dest="command", required=True)
     ask = commands.add_parser("ask", help="short direct conversation")

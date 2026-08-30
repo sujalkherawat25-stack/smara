@@ -59,14 +59,14 @@ _TOOL_HINT_RE = re.compile(
 MEMORY_LOOKUP_TIMEOUT_SECONDS = 1.5
 CONTEXT_MAX_CHARS = 12_000
 _TARGET_WORDS_RE = re.compile(
-    r"\b(?:at\s+least\s+|minimum(?:\s+of)?\s+|around\s+|about\s+|approximately\s+)?(\d{3,5})\s+words?\b",
+    r"\b(?:at\s+least\s+|minimum(?:\s+of)?\s+|around\s+|about\s+|approximately\s+)?([\d][\d,]{2,6})(?:\s*[-–]\s*|\s+)words?\b",
     re.IGNORECASE,
 )
 
 
 def _requested_word_target(message: str) -> int | None:
     """Read an explicit, bounded word target from a user request."""
-    matches = [int(value) for value in _TARGET_WORDS_RE.findall(str(message or ""))]
+    matches = [int(value.replace(",", "")) for value in _TARGET_WORDS_RE.findall(str(message or ""))]
     if not matches:
         return None
     return max(300, min(5_000, max(matches)))

@@ -73,6 +73,58 @@ function formatTime(value?: string) {
   return Number.isNaN(date.getTime()) ? "recently" : date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+function firstJsonObject(value: string): Record<string, unknown> | null {
+  const start = value.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') quoted = false;
+      continue;
+    }
+    if (character === '"') quoted = true;
+    else if (character === "{") depth += 1;
+    else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          const parsed: unknown = JSON.parse(value.slice(start, index + 1));
+          return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+        } catch { return null; }
+      }
+    }
+  }
+  return null;
+}
+
+function taskActivitySummary(task: TaskSummary) {
+  const raw = task.result?.trim();
+  if (!raw) return task.objective;
+  const result = firstJsonObject(raw);
+  if (!result || typeof result.action !== "string") return raw;
+  const action = result.action.replace(/^local_/, "").replaceAll("_", " ");
+  if (result.action === "local_file_read") {
+    const file = typeof result.file_name === "string" ? result.file_name : "approved file";
+    const bytes = typeof result.bytes_read === "number" ? ` · ${result.bytes_read} B` : "";
+    return `Read ${file} locally${bytes}.`;
+  }
+  if (result.action === "local_browser") {
+    const url = typeof result.url === "string" ? result.url : "approved site";
+    return `Opened ${url} in the local browser.`;
+  }
+  if (result.action === "local_terminal") {
+    const recipe = typeof result.recipe === "string" ? ` (${result.recipe})` : "";
+    const exit = typeof result.exit_code === "number" ? ` · exit ${result.exit_code}` : "";
+    return `Ran local terminal${recipe}${exit}.`;
+  }
+  return `Completed local ${action}.`;
+}
+
 function Icon({ children }: { children: string }) {
   return <span className="icon" aria-hidden="true">{children}</span>;
 }
@@ -416,7 +468,7 @@ function ActivityScreen({ connection, tasks, onLoadTaskDetails, onRefresh, onSta
     catch (error) { setLog(errorMessage(error, "The local executor log could not be read.")); }
     finally { setLoadingLog(false); setShowLog(true); }
   }
-  return <section className="content-page"><div className="page-intro"><div><span className="eyebrow">CONTROL CENTER</span><h2>Local activity</h2><p>See what the hosted agent is asking this PC to do, and stop it at any time.</p></div><Button onClick={onRefresh}>Refresh</Button></div><div className="executor-banner"><div className="executor-main"><div className={`executor-icon ${connection.running ? "executor-online" : ""}`}>⌘</div><div><span className="eyebrow">PAIRED DEVICE</span><h3>{connection.paired ? "This desktop" : "No desktop paired"}</h3><p>{connection.paired ? `${connection.executor_id} · ${connection.capabilities.length} capabilities declared` : "Pair this device in Settings to receive approved local work."}</p></div></div><div className="executor-actions">{connection.running ? <><Button onClick={connection.paused ? onResume : onPause}>{connection.paused ? "Resume" : "Pause"}</Button><Button kind="quiet" onClick={onStop}>Stop</Button></> : <Button kind="primary" onClick={onStart} disabled={!connection.paired}>Start executor</Button>}</div></div>{waiting.length > 0 && <div className="callout callout-amber"><span>!</span><div><strong>{waiting.length} task{waiting.length === 1 ? "" : "s"} waiting for approval</strong><p>Review and approve work in Smara Web before anything can run locally.</p></div><Button kind="quiet" onClick={onOpenWeb}>Review ↗</Button></div>}<div className="section-heading"><h3>Hosted tasks</h3><span>{tasks.length} total · refreshes automatically</span></div><div className="task-list">{tasks.length === 0 ? <div className="empty-state"><span>◌</span><strong>No hosted tasks loaded</strong><p>Sign in to Smara, then return here. Activity refreshes automatically.</p></div> : tasks.slice(0, 12).map((task) => <button className={`task-row ${selectedTaskId === task.id ? "task-row-selected" : ""}`} key={task.id} onClick={() => setSelectedTaskId(task.id === selectedTaskId ? null : task.id)}><span className={`task-dot task-${task.status}`} /><span className="task-copy"><strong>{task.title}</strong><span>{task.result || task.objective}</span></span><span className={`task-status task-status-${task.status}`}>{task.status.replaceAll("_", " ")}</span><span className="task-time">{formatTime(task.updated_at || task.created_at)}</span></button>)}</div>{selectedTask && <div className="task-detail"><div><span className="eyebrow">TASK RESULT</span><h3>{selectedTask.title}</h3><p>{selectedTask.objective}</p></div><span className={`task-status task-status-${selectedTask.status}`}>{selectedTask.status.replaceAll("_", " ")}</span><div className="task-result">{loadingTaskDetail ? "Loading full task record…" : taskDetail?.task?.result || selectedTask.result || (selectedTask.status === "completed" ? "The task completed without a written result." : "A final result will appear here when the task completes.")}</div>{taskDetail && <><div className="task-detail-section"><span className="eyebrow">STEPS</span>{taskDetail.steps.length === 0 ? <span className="detail-muted">No steps recorded.</span> : taskDetail.steps.map((step, index) => <div className="detail-line" key={`${String(step.id || index)}`}><span className={`task-dot task-${String(step.status || "queued")}`} /><span>{String(step.name || `Step ${index + 1}`)}</span><span>{String(step.status || "queued")}</span></div>)}</div><div className="task-detail-section"><span className="eyebrow">ACTIVITY</span>{taskDetail.events.slice(-12).map((event, index) => <div className="detail-line" key={`${event.id || index}`}><span>{event.type || "task update"}</span><span>{event.created_at ? formatTime(event.created_at) : ""}</span></div>)}</div><div className="task-detail-section"><span className="eyebrow">ARTIFACTS</span>{taskDetail.artifacts.length === 0 ? <span className="detail-muted">No artifacts produced.</span> : <div className="artifact-list">{taskDetail.artifacts.map((artifact, index) => <ArtifactResult artifact={artifact} key={`${artifact.id || index}`} />)}</div>}</div></>}<Button kind="quiet" onClick={onOpenWeb}>Open full task history ↗</Button></div>}<div className="log-card"><div><strong>Local executor log</strong><span>Only the last bounded lines are shown; secrets are never displayed.</span></div><Button kind="quiet" onClick={() => void toggleLog()}>{loadingLog ? "Loading…" : showLog ? "Hide log" : "View log"}</Button>{showLog && <pre className="log-output">{log}</pre>}</div><div className="danger-zone"><div><strong>Revoke this desktop</strong><span>Immediately invalidates its paired token. You can pair again later.</span></div><Button kind="danger" onClick={onRevoke} disabled={!connection.paired}>Revoke</Button></div></section>;
+  return <section className="content-page"><div className="page-intro"><div><span className="eyebrow">CONTROL CENTER</span><h2>Local activity</h2><p>See what the hosted agent is asking this PC to do, and stop it at any time.</p></div><Button onClick={onRefresh}>Refresh</Button></div><div className="executor-banner"><div className="executor-main"><div className={`executor-icon ${connection.running ? "executor-online" : ""}`}>⌘</div><div><span className="eyebrow">PAIRED DEVICE</span><h3>{connection.paired ? "This desktop" : "No desktop paired"}</h3><p>{connection.paired ? `${connection.executor_id} · ${connection.capabilities.length} capabilities declared` : "Pair this device in Settings to receive approved local work."}</p></div></div><div className="executor-actions">{connection.running ? <><Button onClick={connection.paused ? onResume : onPause}>{connection.paused ? "Resume" : "Pause"}</Button><Button kind="quiet" onClick={onStop}>Stop</Button></> : <Button kind="primary" onClick={onStart} disabled={!connection.paired}>Start executor</Button>}</div></div>{waiting.length > 0 && <div className="callout callout-amber"><span>!</span><div><strong>{waiting.length} task{waiting.length === 1 ? "" : "s"} waiting for approval</strong><p>Review and approve work in Smara Web before anything can run locally.</p></div><Button kind="quiet" onClick={onOpenWeb}>Review ↗</Button></div>}<div className="section-heading"><h3>Hosted tasks</h3><span>{tasks.length} total · refreshes automatically</span></div><div className="task-list">{tasks.length === 0 ? <div className="empty-state"><span>◌</span><strong>No hosted tasks loaded</strong><p>Sign in to Smara, then return here. Activity refreshes automatically.</p></div> : tasks.slice(0, 12).map((task) => <button className={`task-row ${selectedTaskId === task.id ? "task-row-selected" : ""}`} key={task.id} onClick={() => setSelectedTaskId(task.id === selectedTaskId ? null : task.id)}><span className={`task-dot task-${task.status}`} /><span className="task-copy"><strong>{task.title}</strong><span>{taskActivitySummary(task)}</span></span><span className={`task-status task-status-${task.status}`}>{task.status.replaceAll("_", " ")}</span><span className="task-time">{formatTime(task.updated_at || task.created_at)}</span></button>)}</div>{selectedTask && <div className="task-detail"><div><span className="eyebrow">TASK RESULT</span><h3>{selectedTask.title}</h3><p>{selectedTask.objective}</p></div><span className={`task-status task-status-${selectedTask.status}`}>{selectedTask.status.replaceAll("_", " ")}</span><div className="task-result">{loadingTaskDetail ? "Loading full task record…" : taskDetail?.task?.result || taskActivitySummary(selectedTask) || (selectedTask.status === "completed" ? "The task completed without a written result." : "A final result will appear here when the task completes.")}</div>{taskDetail && <><div className="task-detail-section"><span className="eyebrow">STEPS</span>{taskDetail.steps.length === 0 ? <span className="detail-muted">No steps recorded.</span> : taskDetail.steps.map((step, index) => <div className="detail-line" key={`${String(step.id || index)}`}><span className={`task-dot task-${String(step.status || "queued")}`} /><span>{String(step.name || `Step ${index + 1}`)}</span><span>{String(step.status || "queued")}</span></div>)}</div><div className="task-detail-section"><span className="eyebrow">ACTIVITY</span>{taskDetail.events.slice(-12).map((event, index) => <div className="detail-line" key={`${event.id || index}`}><span>{event.type || "task update"}</span><span>{event.created_at ? formatTime(event.created_at) : ""}</span></div>)}</div><div className="task-detail-section"><span className="eyebrow">ARTIFACTS</span>{taskDetail.artifacts.length === 0 ? <span className="detail-muted">No artifacts produced.</span> : <div className="artifact-list">{taskDetail.artifacts.map((artifact, index) => <ArtifactResult artifact={artifact} key={`${artifact.id || index}`} />)}</div>}</div></>}<Button kind="quiet" onClick={onOpenWeb}>Open full task history ↗</Button></div>}<div className="log-card"><div><strong>Local executor log</strong><span>Only the last bounded lines are shown; secrets are never displayed.</span></div><Button kind="quiet" onClick={() => void toggleLog()}>{loadingLog ? "Loading…" : showLog ? "Hide log" : "View log"}</Button>{showLog && <pre className="log-output">{log}</pre>}</div><div className="danger-zone"><div><strong>Revoke this desktop</strong><span>Immediately invalidates its paired token. You can pair again later.</span></div><Button kind="danger" onClick={onRevoke} disabled={!connection.paired}>Revoke</Button></div></section>;
 }
 
 function SettingsScreen({ connection, onSaved, onPaired, onSignIn }: { connection: ConnectionState; onSaved: (next: ConnectionState) => void; onPaired: (next: ConnectionState) => void; onSignIn: (apiUrl: string, webUrl: string) => void }) {

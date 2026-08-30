@@ -218,6 +218,11 @@ class BoundedAgentStepRuntime:
             "Return only the final answer."
         )[:MAX_AGENT_PROMPT_CHARS]
         parts: list[str] = []
+        # Some OpenAI-compatible models keep the planner's JSON discipline
+        # when asked for the final prose answer.  Hold that envelope until it
+        # is complete so the UI never receives raw {"action":"final"...}
+        # tokens, then stream only its answer field.
+        buffering_envelope = False
         stream = getattr(self._provider, "stream_complete", None)
         if callable(stream):
             try:
@@ -230,7 +235,10 @@ class BoundedAgentStepRuntime:
                             break
                         bounded = chunk[:remaining]
                         parts.append(bounded)
-                        token_hook(bounded)
+                        if len(parts) == 1 and bounded.lstrip().startswith("{"):
+                            buffering_envelope = True
+                        if not buffering_envelope:
+                            token_hook(bounded)
             except Exception:
                 # A stream can fail before any content (safe to retry through
                 # the non-stream endpoint) or after partial content (do not
@@ -245,4 +253,9 @@ class BoundedAgentStepRuntime:
         answer = "".join(parts).strip()
         if not answer:
             raise AgentStepError("Smara agent provider returned an empty final answer.")
+        decision = _decode_decision(answer)
+        if decision and decision.get("action") == "final" and isinstance(decision.get("answer"), str):
+            answer = decision["answer"].strip()
+            if buffering_envelope:
+                token_hook(answer)
         return answer

@@ -42,6 +42,14 @@ class PartialStreamProvider(FakeProvider):
         raise RuntimeError("connection dropped")
 
 
+class EnvelopeStreamingProvider(FakeProvider):
+    async def stream_complete(self, *, system: str, message: str):
+        self.calls.append((system, message))
+        for token in ('{"action":"final",', '"answer":"Clean final answer."}'):
+            await asyncio.sleep(0)
+            yield token
+
+
 class CountingTool:
     spec = ToolSpec(
         "count_once",
@@ -144,6 +152,24 @@ def test_agent_step_does_not_duplicate_partial_output_after_stream_drop():
     result = asyncio.run(execute())
     assert result.text == "Partial answer"
     assert tokens == ["Partial answer"]
+
+
+def test_agent_step_never_streams_a_planner_json_envelope_as_the_final_answer():
+    provider = EnvelopeStreamingProvider([
+        json.dumps({"action": "final", "answer": "Draft"}),
+    ])
+    tokens = []
+
+    async def execute():
+        return await BoundedAgentStepRuntime(provider, default_tool_registry()).run(
+            task={"objective": "Answer"},
+            tool_context=ToolContext("acct_test", "workspace"),
+            token_hook=tokens.append,
+        )
+
+    result = asyncio.run(execute())
+    assert result.text == "Clean final answer."
+    assert tokens == ["Clean final answer."]
 
 
 def test_agent_step_never_grants_unregistered_tool_access():

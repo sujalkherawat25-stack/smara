@@ -52,7 +52,10 @@ _TOOL_RE = re.compile(
 )
 _DEEP_RESEARCH_RE = re.compile(
     r"\b(?:detailed\s+(?:analysis|breakdown|report)|comprehensive\s+(?:analysis|research|review)|deep\s+dive|"
-    r"with\s+citations?|at\s+least\s+\d+\s+words?|compare|comparison|"
+    # Accept natural hyphenated targets too ("1,200-word analysis" and
+    # "at least 1200-words"), otherwise a demanding research request falls
+    # into the generic planner and can never use the evidence-first writer.
+    r"with\s+citations?|(?:at\s+least\s+|minimum(?:\s+of)?\s+)?[\d,]+(?:\s*[-–]\s*|\s+)words?|compare|comparison|"
     r"current\s+(?:state|landscape|architecture|developments?)|latest\s+(?:news|developments?|release))\b",
     re.IGNORECASE,
 )

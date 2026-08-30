@@ -300,6 +300,13 @@ def test_targeted_research_expands_short_draft_before_streaming(monkeypatch):
     assert streamed and "Short sourced draft" not in "".join(streamed)
 
 
+def test_requested_word_target_accepts_hyphenated_and_comma_separated_forms():
+    from smara.agent_runtime import _requested_word_target
+
+    assert _requested_word_target("Write a 1,200-word research report") == 1200
+    assert _requested_word_target("Give at least 1500 words") == 1500
+
+
 def test_runtime_passes_connected_integration_runner_to_tool_selection():
     calls = []
 
@@ -394,6 +401,16 @@ def test_cli_has_only_api_control_commands():
     assert build_parser().parse_args(["approvals"]).command == "approvals"
     assert build_parser().parse_args(["devices"]).device_command is None
     assert build_parser().parse_args(["devices", "revoke", "cli_1234567890abcdef"]).device_id == "cli_1234567890abcdef"
+
+
+def test_cli_keeps_long_research_streams_alive_with_a_bounded_read_timeout():
+    from smara.cli import _client
+
+    args = build_parser().parse_args(["--request-timeout", "240", "ask", "research this"])
+    with _client(args) as client:
+        assert client.timeout.connect == 10.0
+        assert client.timeout.read == 240.0
+        assert client.timeout.write == 30.0
 
 
 def test_cli_request_is_a_thin_http_client():
