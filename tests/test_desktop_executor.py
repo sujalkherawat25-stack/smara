@@ -160,6 +160,23 @@ def test_desktop_claim_replaces_orphaned_lease_row(tmp_path: Path):
     assert lease["executor_id"] == desktop["executor_id"] and lease["completed_at"] is None
 
 
+def test_hosted_worker_does_not_recover_running_desktop_lease(tmp_path: Path):
+    """Hosted polling must leave local work for the paired desktop owner."""
+    store = TaskStore(str(tmp_path / "smara.db"))
+    desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop", ["local_terminal"])["code"])
+    task = store.create("acct_1", "work", "Terminal", "Run once", True, [{
+        "name": "terminal", "executor_kind": "desktop", "required_capability": "local_terminal",
+    }])
+    store.decide(task["id"], "acct_1", True, "approved")
+    claimed = store.claim_for_executor(desktop["executor_id"], desktop["token"], lease_seconds=1)
+    assert claimed
+    with store._connect() as connection:
+        connection.execute("UPDATE task_steps SET lease_expires_at=? WHERE id=?", ("2000-01-01T00:00:00+00:00", claimed["step_id"]))
+
+    assert store.claim_one("hosted-worker") is None
+    assert store.steps(task["id"], "acct_1")[0]["status"] == "running"
+
+
 @pytest.mark.parametrize("capability", ["local_file_write", "local_terminal", "local_browser"])
 def test_uncertain_side_effecting_desktop_lease_is_never_replayed(tmp_path: Path, capability: str):
     store = TaskStore(str(tmp_path / "smara.db"))

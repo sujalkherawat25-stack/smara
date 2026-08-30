@@ -698,7 +698,14 @@ class TaskStore:
             now = _now()
             # A dead worker never owns work forever. Recovery requeues only the
             # step; idempotency remains attached to the external action.
-            expired = c.execute("SELECT id,task_id FROM task_steps WHERE status='running' AND lease_expires_at < ?", (now,)).fetchall()
+            # Hosted workers may surface queued desktop work for the approval
+            # gate, but they must never recover a running desktop lease. Local
+            # side effects are owned by the paired executor; recovering them
+            # here would make a disconnected desktop action replayable.
+            expired = c.execute(
+                "SELECT id,task_id FROM task_steps WHERE status='running' AND executor_kind IN ('hosted','sandbox') AND lease_expires_at < ?",
+                (now,),
+            ).fetchall()
             for item in expired:
                 cancelled = c.execute("SELECT cancel_requested FROM tasks WHERE id=?", (item["task_id"],)).fetchone()
                 if cancelled and cancelled["cancel_requested"]:
@@ -1440,8 +1447,11 @@ class PostgresTaskStore(TaskStore):
         """
         with self._connect() as c:
             now = _now()
+            # Keep desktop lease recovery exclusively in claim_for_executor;
+            # a hosted worker must not replay a potentially side-effecting
+            # local action after a desktop disconnect.
             expired = c.execute(
-                "SELECT id,task_id,task_run_id FROM task_steps WHERE status='running' AND lease_expires_at < %s FOR UPDATE SKIP LOCKED",
+                "SELECT id,task_id,task_run_id FROM task_steps WHERE status='running' AND executor_kind IN ('hosted','sandbox') AND lease_expires_at < %s FOR UPDATE SKIP LOCKED",
                 (now,),
             ).fetchall()
             for item in expired:
