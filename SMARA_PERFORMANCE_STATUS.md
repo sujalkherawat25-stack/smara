@@ -48,7 +48,8 @@ per-request resources; it does not delete or rewrite durable work.
 
 ## Verification performed
 
-- Python: **224 passed**, two existing JWT key-length warnings only.
+- Python: **230 passed**, two existing JWT key-length warnings only. This run
+  includes the requested-length research regression and provider-failure path.
 - Python bytecode compilation: passed.
 - Frontend type-check: passed.
 - Frontend production build: passed (4218 modules transformed).
@@ -56,6 +57,9 @@ per-request resources; it does not delete or rewrite durable work.
 - Native Rust Desktop tests: **9 passed**.
 - Offline fixed corpus: 9 cases, including greeting, memory recall, exact
   tools, search, multi-step research, durable desktop work, and cancellation.
+  The benchmark uses a deterministic in-process research fixture, so it never
+  needs a search key or network access while still exercising the production
+  Tavily adapter and source-fetch path.
 
 ## Remaining promotion evidence
 
