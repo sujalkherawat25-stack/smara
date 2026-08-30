@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 from smara.agent_routing import route_request
 from smara.agent_runtime import SmaraAgentRuntime
@@ -66,3 +67,47 @@ def test_self_contained_lane_skips_shared_memory():
     assert turn.message == "A direct answer."
     assert turn.memory_used is False
     assert memory.calls == 0
+
+
+def test_memory_timeout_is_non_fatal_and_reported_as_unavailable():
+    class Provider:
+        _model = "model"
+
+        async def complete(self, *, system, message):
+            return "A direct answer while memory is unavailable."
+
+    class SlowMemory:
+        async def context_for_conversation(self, query, *, account_id, workspace_id):
+            await asyncio.sleep(2)
+            return "late memory"
+
+    started = time.perf_counter()
+    turn = asyncio.run(SmaraAgentRuntime(Provider(), SlowMemory()).chat_with_tools(
+        account_id="acct_1",
+        workspace_id="default",
+        message="What do you remember about my project?",
+    ))
+    assert turn.memory_used is False
+    assert "memory is unavailable" in turn.message
+    assert time.perf_counter() - started < 1.9
+
+
+def test_attachment_text_is_sent_once_for_direct_chat():
+    class Provider:
+        _model = "model"
+        system = ""
+        message = ""
+
+        async def complete(self, *, system, message):
+            self.system, self.message = system, message
+            return "Summarized."
+
+    provider = Provider()
+    asyncio.run(SmaraAgentRuntime(provider).chat_with_tools(
+        account_id="acct_1",
+        workspace_id="default",
+        message="Summarize this file",
+        attachment_context="Attachment: notes.txt\nUNIQUE_ATTACHMENT_PHRASE",
+    ))
+    assert "UNIQUE_ATTACHMENT_PHRASE" not in provider.system
+    assert str(provider.message).count("UNIQUE_ATTACHMENT_PHRASE") == 1

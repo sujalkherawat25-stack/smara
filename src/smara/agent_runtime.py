@@ -55,6 +55,36 @@ _TOOL_HINT_RE = re.compile(
     re.IGNORECASE,
 )
 
+MEMORY_LOOKUP_TIMEOUT_SECONDS = 1.5
+CONTEXT_MAX_CHARS = 12_000
+
+
+def _bounded_context(
+    memory: str = "",
+    summary: str = "",
+    recent: str = "",
+    *,
+    max_chars: int = CONTEXT_MAX_CHARS,
+) -> str:
+    """Pack context in priority order without losing recent user turns."""
+    sections: list[tuple[str, str, int]] = [
+        ("Relevant shared Syntarus memory", memory, 4_000),
+        ("Bounded summary of earlier conversation", summary, 2_500),
+        ("Recent conversation context (oldest to newest)", recent, 5_000),
+    ]
+    chunks: list[str] = []
+    used = 0
+    for label, value, preferred in sections:
+        text = str(value or "").strip()
+        if not text or used >= max_chars:
+            continue
+        remaining = min(preferred, max_chars - used)
+        if remaining <= 0:
+            continue
+        chunks.append(f"{label}:\n{text[-remaining:]}")
+        used += min(len(text), remaining) + 2
+    return "\n\n".join(chunks)
+
 
 def _triage(message: str) -> tuple[str, int, bool]:
     """Cheap local triage so greetings do not pay for a tool-planning loop.
@@ -257,6 +287,34 @@ class SmaraAgentRuntime:
                 lines.append(f"{role}: {content[:4_000]}")
         return "\n".join(lines)[-12_000:]
 
+    async def _memory_context(
+        self,
+        message: str,
+        *,
+        account_id: str,
+        workspace_id: str,
+        enabled: bool,
+        event_hook: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> str:
+        if not enabled or self._memory is None:
+            return ""
+        try:
+            value = await asyncio.wait_for(
+                self._memory.context_for_conversation(
+                    message, account_id=account_id, workspace_id=workspace_id
+                ),
+                timeout=MEMORY_LOOKUP_TIMEOUT_SECONDS,
+            )
+            return str(value or "")[:8_000]
+        except TimeoutError:
+            if event_hook:
+                event_hook("agent.memory_unavailable", {"reason": "timeout"})
+            return ""
+        except Exception:
+            if event_hook:
+                event_hook("agent.memory_unavailable", {"reason": "unavailable"})
+            return ""
+
     async def _direct_answer(
         self,
         *,
@@ -295,35 +353,34 @@ class SmaraAgentRuntime:
         conversation_summary: str = "",
         attachment_context: str = "",
     ) -> ChatTurn:
-        context = ""
-        if self._memory is not None:
-            try:
-                context = await self._memory.context_for_conversation(
-                    message, account_id=account_id, workspace_id=workspace_id
-                )
-            except Exception:
-                # Memory is useful context, never a reason to make ordinary chat unavailable.
-                context = ""
+        decision = route_request(message)
+        memory_context = await self._memory_context(
+            message,
+            account_id=account_id,
+            workspace_id=workspace_id,
+            enabled=decision.memory_needed,
+        )
+        recent = self._recent_conversation(conversation_history)
+        local_context = _bounded_context(
+            memory_context, conversation_summary, recent
+        )
         system = (
             "You are Smara, a helpful personal/work agent. Be concise and honest. "
             "A direct chat response cannot claim that it performed an external action. "
             "For work that needs tools, time, approval, or an artifact, explain that it "
             "should be created as a durable Smara task."
         )
-        if context:
-            system += "\n\nRelevant shared Syntarus memory (may be incomplete):\n" + context[:12_000]
-        recent = self._recent_conversation(conversation_history)
-        if conversation_summary.strip():
-            system += "\n\nBounded summary of earlier conversation:\n" + conversation_summary.strip()[-8_000:]
+        if memory_context:
+            system += "\n\nRelevant shared Syntarus memory (may be incomplete):\n" + memory_context
+        if conversation_summary.strip() or recent:
+            system += "\n\nConversation context (bounded):\n" + local_context
         if attachment_context.strip():
             system += "\n\nUser attachments (bounded previews):\n" + attachment_context[:120_000]
-        if recent:
-            system += "\n\nRecent conversation context (oldest to newest):\n" + recent
         answer = await self._provider.complete(system=system, message=message)
         return ChatTurn(
             conversation_id=conversation_id or f"chat_{uuid.uuid4().hex}",
             message=answer,
-            memory_used=bool(context),
+            memory_used=bool(memory_context),
             model=getattr(self._provider, "_model", None),
         )
 
@@ -395,23 +452,19 @@ class SmaraAgentRuntime:
                 tools_used=1,
             )
 
-        context = ""
-        if decision.memory_needed and self._memory is not None:
-            try:
-                context = await self._memory.context_for_conversation(
-                    message, account_id=account_id, workspace_id=workspace_id
-                )
-            except Exception:
-                context = ""
-        if conversation_summary.strip():
-            context = (context + "\n\nBounded summary of earlier conversation:\n" + conversation_summary.strip()[-8_000:]).strip()
-        if attachment_context.strip():
-            # Attachments are explicit user input; put them first so the
-            # bounded 12k prompt slice cannot trim them behind old memory.
-            context = ("User attachments (bounded previews):\n" + attachment_context[:120_000] + "\n\n" + context).strip()
         recent = self._recent_conversation(conversation_history)
-        if recent:
-            context = (context + "\n\nRecent conversation context (oldest to newest):\n" + recent).strip()
+        memory_context = await self._memory_context(
+            message,
+            account_id=account_id,
+            workspace_id=workspace_id,
+            enabled=decision.memory_needed,
+            event_hook=event_hook,
+        )
+        context = _bounded_context(memory_context, conversation_summary, recent)
+        if attachment_context.strip() and use_tools:
+            # Tool planning receives explicit attachment text once. Direct
+            # chat puts it in the user content below, avoiding duplication.
+            context = ("User attachments (bounded previews):\n" + attachment_context[:120_000] + "\n\n" + context).strip()
         if event_hook:
             event_hook("agent.phase", {"phase": "retrieve"})
         conversation = conversation_id or f"chat_{uuid.uuid4().hex}"
@@ -421,8 +474,10 @@ class SmaraAgentRuntime:
                 "Do not claim that you performed an external action. If the user asks for "
                 "real work, explain that it can be started as a durable Smara task."
             )
-            if context:
-                system += "\n\nRelevant shared Syntarus memory (may be incomplete):\n" + context[:12_000]
+            if memory_context:
+                system += "\n\nRelevant shared Syntarus memory (may be incomplete):\n" + memory_context
+            if conversation_summary.strip() or recent:
+                system += "\n\nConversation context (bounded):\n" + _bounded_context("", conversation_summary, recent)
             if event_hook:
                 event_hook("agent.phase", {"phase": "answer"})
             user_content: Any = message
@@ -446,7 +501,7 @@ class SmaraAgentRuntime:
             return ChatTurn(
                 conversation_id=conversation,
                 message=answer,
-                memory_used=bool(context),
+                memory_used=bool(memory_context),
                 model=getattr(self._provider, "_model", None),
             )
         if event_hook:
@@ -470,7 +525,7 @@ class SmaraAgentRuntime:
         return ChatTurn(
             conversation_id=conversation,
             message=result.text,
-            memory_used=bool(context),
+            memory_used=bool(memory_context),
             model=getattr(self._provider, "_model", None),
             tools_used=result.tools_used,
         )

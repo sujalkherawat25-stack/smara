@@ -42,7 +42,7 @@ _DURABLE_RE = re.compile(
 )
 _MEMORY_RE = re.compile(
     r"\b(?:remember|recall|memory|history|earlier|before|previous|last\s+time|"
-    r"you\s+said|we\s+discussed|my\s+(?:plan|preference|project|context|name|work))\b",
+    r"you\s+said|we\s+discussed|my\s+(?:plan|preference|project|context|name|work)|my)\b",
     re.IGNORECASE,
 )
 _TOOL_RE = re.compile(
@@ -88,8 +88,9 @@ def route_request(
     if _CHITCHAT_RE.fullmatch(text) or (has_attachments and not _MEMORY_RE.search(text) and not _TOOL_RE.search(text)):
         return RouteDecision("B", "self-contained conversational turn", 0.98, 1, bool(explicit_memory), _READ_TOOLS, False)
     if explicit_memory or _MEMORY_RE.search(text):
-        return RouteDecision("C", "personal or prior-context question", 0.94, 2, True, _READ_TOOLS, False)
+        if not _TOOL_RE.search(text):
+            return RouteDecision("C", "personal or prior-context question", 0.94, 2, True, _READ_TOOLS, False)
     if _TOOL_RE.search(text):
         complexity = 3 if len(text) > 1_000 or text.lower().count(" and ") >= 2 else 2
-        return RouteDecision("D", "read-only tool request", 0.91, complexity, True, _READ_TOOLS, False)
+        return RouteDecision("D", "read-only tool request", 0.91, complexity, bool(explicit_memory or _MEMORY_RE.search(text)), _READ_TOOLS, False)
     return RouteDecision("B", "self-contained answer", 0.84, 1, bool(explicit_memory), _READ_TOOLS, False)
