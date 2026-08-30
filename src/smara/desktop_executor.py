@@ -15,6 +15,7 @@ import hashlib
 from html.parser import HTMLParser
 import json
 import logging
+import mimetypes
 import os
 import queue
 import re
@@ -65,6 +66,7 @@ MAX_WORKSPACE_SEARCH_MATCHES = 200
 MAX_WORKSPACE_QUERY_CHARS = 240
 MAX_WORKSPACE_FILENAME_MATCHES = 200
 MAX_CHANGED_FILES = 100
+MAX_CHANGED_HASH_BYTES = 8 * 1024 * 1024
 MAX_ARTIFACT_FILES = 20
 MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
 MAX_GIT_LINES = 100
@@ -556,12 +558,14 @@ def _read_file(payload: dict, roots: list[Path]) -> str:
     if size > MAX_FILE_BYTES:
         raise RuntimeError(f"Requested local file exceeds the {MAX_FILE_BYTES} byte limit.")
     content = target.read_bytes()
+    classification = _classify_file_content(content, target)
     result: dict[str, object] = {
         "action": "local_file_read",
         "file_name": target.name,
         "bytes_read": len(content),
         "sha256": hashlib.sha256(content).hexdigest(),
         "content_shared": False,
+        **classification,
     }
     # Sharing content must be explicit in the task payload.  It is bounded and
     # only reachable after the hosted approval gate has released the step.
@@ -569,6 +573,21 @@ def _read_file(payload: dict, roots: list[Path]) -> str:
         result["content_shared"] = True
         result["content"] = content.decode("utf-8", errors="replace")[:MAX_FILE_BYTES]
     return json.dumps(result, ensure_ascii=False)
+
+
+def _classify_file_content(content: bytes, path: Path) -> dict[str, object]:
+    """Return safe type/encoding metadata without sharing file contents."""
+    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    sample = content[:8192]
+    if b"\x00" in sample:
+        return {"kind": "binary", "media_type": media_type, "encoding": None}
+    for encoding in ("utf-8", "utf-16", "utf-16-le", "utf-16-be"):
+        try:
+            content.decode(encoding)
+            return {"kind": "text", "media_type": media_type if media_type != "application/octet-stream" else "text/plain", "encoding": encoding}
+        except UnicodeDecodeError:
+            continue
+    return {"kind": "binary", "media_type": media_type, "encoding": None}
 
 
 def _bounded_int(value: object, *, default: int, minimum: int, maximum: int, field: str) -> int:
@@ -633,7 +652,8 @@ def _list_workspace(payload: dict, roots: list[Path]) -> str:
                     size = child.stat().st_size
                 except OSError:
                     continue
-                entries.append({"path": _relative_path(child, root), "kind": "file", "bytes": size})
+                media_type = mimetypes.guess_type(child.name)[0] or "application/octet-stream"
+                entries.append({"path": _relative_path(child, root), "kind": "file", "bytes": size, "media_type": media_type})
             if truncated:
                 break
     except OSError as exc:
@@ -755,10 +775,12 @@ def _git_summary(payload: dict, roots: list[Path], state: dict) -> str:
     branch_lines = [line for line in run_git("status", "--short", "--branch").splitlines() if line.strip()]
     stat_lines = [line for line in run_git("diff", "--stat").splitlines() if line.strip()]
     commits = [line for line in run_git("log", f"-n{MAX_GIT_COMMITS}", "--pretty=format:%h%x09%s").splitlines() if line.strip()]
+    changed_files = _git_status_files(root, state) or {}
     return json.dumps({
         "action": "local_workspace_inspect", "operation": "git_summary", "root": root.name or str(root),
         "branch": branch_lines[0].removeprefix("## ") if branch_lines and branch_lines[0].startswith("## ") else None,
         "status": branch_lines[:MAX_GIT_LINES], "diff_stat": stat_lines[:MAX_GIT_LINES], "recent_commits": commits[:MAX_GIT_COMMITS],
+        "changed_file_hashes": _changed_file_hashes(root, changed_files, roots),
         "truncated": len(branch_lines) > MAX_GIT_LINES or len(stat_lines) > MAX_GIT_LINES,
     }, ensure_ascii=False)
 
@@ -1203,6 +1225,34 @@ def _git_status_files(cwd: Path, state: dict) -> dict[str, str] | None:
     return paths
 
 
+def _changed_file_hashes(cwd: Path, changed_files: dict[str, str] | None, roots: list[Path]) -> dict[str, dict[str, object]]:
+    """Hash bounded changed files without returning their contents."""
+    if not changed_files:
+        return {}
+    result: dict[str, dict[str, object]] = {}
+    for relative, status in list(changed_files.items())[:MAX_CHANGED_FILES]:
+        entry: dict[str, object] = {"status": status, "sha256": None, "bytes": 0, "available": False}
+        try:
+            candidate = _target(str(cwd / relative), roots, must_exist=True)
+            if not candidate.is_file() or candidate.is_symlink():
+                entry["reason"] = "missing_or_not_file"
+            else:
+                size = candidate.stat().st_size
+                entry["bytes"] = size
+                if size > MAX_CHANGED_HASH_BYTES:
+                    entry["reason"] = "too_large"
+                else:
+                    digest = hashlib.sha256()
+                    with candidate.open("rb") as handle:
+                        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                            digest.update(chunk)
+                    entry.update({"sha256": digest.hexdigest(), "available": True})
+        except (OSError, RuntimeError):
+            entry["reason"] = "unavailable"
+        result[relative] = entry
+    return result
+
+
 def _collect_artifacts(payload: dict, cwd: Path, roots: list[Path]) -> list[dict[str, object]]:
     raw = payload.get("artifact_paths")
     if raw is None:
@@ -1309,9 +1359,12 @@ def _terminal_unlocked(payload: dict, roots: list[Path], state: dict, *, checkpo
         "recipe": recipe, "artifacts": artifacts,
     }
     if before_files is not None and changed_files is not None:
-        result["changed_files"] = sorted(
-            path for path, status in changed_files.items() if before_files.get(path) != status
-        )
+        changed_delta = {
+            path: status for path, status in changed_files.items()
+            if before_files.get(path) != status
+        }
+        result["changed_files"] = sorted(changed_delta)
+        result["changed_file_hashes"] = _changed_file_hashes(cwd, changed_delta, roots)
         result["changed_files_available"] = True
         result["workspace_changes_after"] = sorted(changed_files)
     else:

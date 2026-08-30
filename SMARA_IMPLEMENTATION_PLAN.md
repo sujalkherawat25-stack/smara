@@ -552,7 +552,11 @@ the following skills on top of the existing capability and approval contracts.
 - **Implemented:** bounded filename search and Git branch/status/diff-stat/
   recent-commit summaries (Git inspection requires `git` in the local
   executable allowlist).
-- Still needed: encoding/type classification and richer changed-file hashes.
+- **Implemented in this change (2026-08-30):** file reads and tree listings
+  expose bounded media type/kind/encoding metadata without sharing content;
+  Git-backed terminal results and workspace summaries include bounded
+  SHA-256/size proofs for changed files (large or missing files are marked
+  unavailable rather than read into memory).
 
 ### L2 — Reviewable workspace editing
 

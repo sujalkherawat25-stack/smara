@@ -1,17 +1,39 @@
 from pathlib import Path
+import json
 from datetime import datetime, timezone
 
 import pytest
 
 from smara.models import TaskCreate
 from smara.store import TaskStore
-from smara.desktop_executor import normalize_pairing_code
+from smara.desktop_executor import _changed_file_hashes, _read_file, normalize_pairing_code
 
 
 def test_pairing_code_normalizes_copied_whitespace():
     assert normalize_pairing_code(" 9aea 8e4f\r\n") == "9AEA8E4F"
     with pytest.raises(RuntimeError, match="8 hexadecimal"):
         normalize_pairing_code("9AEA8E4")
+
+
+def test_local_file_read_returns_type_and_encoding_without_content(tmp_path: Path):
+    path = tmp_path / "notes.md"
+    path.write_text("hello Smara\n", encoding="utf-8")
+    result = json.loads(_read_file({"path": str(path)}, [tmp_path]))
+    assert result["kind"] == "text"
+    assert result["encoding"] == "utf-8"
+    assert result["media_type"] == "text/markdown"
+    assert result["content_shared"] is False
+    assert "content" not in result
+
+
+def test_changed_file_hashes_are_bounded_and_do_not_return_contents(tmp_path: Path):
+    path = tmp_path / "changed.txt"
+    path.write_text("changed", encoding="utf-8")
+    result = _changed_file_hashes(tmp_path, {"changed.txt": " M"}, [tmp_path])
+    assert result["changed.txt"]["available"] is True
+    assert result["changed.txt"]["bytes"] == 7
+    assert result["changed.txt"]["sha256"]
+    assert "content" not in result["changed.txt"]
 
 
 def test_paired_desktop_claims_only_declared_capability(tmp_path: Path):

@@ -19,6 +19,10 @@ account data intact.
 | PERF-7 | Durable SSE cursor reconnect, event dedupe, progressive result repair, token render coalescing, collapsed noise, Desktop token coalescing | Frontend type-check/build + Python suite |
 | PERF-8 | Environment rollback switches, health exposure, fixed owner routing corpus, redacted benchmark artifact output | `tests/evals`, Python suite, offline benchmark |
 
+The local-agent inspection follow-up is also complete: bounded file
+classification and changed-file hash proofs are emitted locally and covered
+by Desktop executor tests; file contents remain opt-in and bounded.
+
 ## Rollout switches
 
 Set these in the Smara API/worker environment. They are read at process start;
