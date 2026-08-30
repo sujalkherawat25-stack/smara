@@ -176,6 +176,34 @@ def test_deep_research_searches_the_subject_not_output_requirements(monkeypatch)
     assert all("1,200-word" not in item for item in requested)
 
 
+def test_deep_research_preserves_evidence_for_each_selected_source(monkeypatch):
+    monkeypatch.setattr(
+        research_tools,
+        "settings",
+        SimpleNamespace(
+            search_provider="brave", search_api_key="test-key", search_url="https://search.test/web",
+            search_timeout_seconds=2, search_max_concurrency=1,
+            search_fallback_provider="", search_fallback_api_key="", search_fallback_url="",
+        ),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "search.test":
+            suffix = request.url.params["q"][-1]
+            return httpx.Response(200, json={"web": {"results": [
+                {"url": f"https://source{suffix}.example/report", "title": f"Source {suffix}", "description": "Evidence"},
+            ]}})
+        return httpx.Response(200, headers={"content-type": "text/html"}, text="<title>Source</title><p>" + ("Evidence. " * 2_000) + "</p>")
+
+    async def execute():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await research_tools.DeepResearchTool(client).run("agent source 1", subqueries=["agent source 2", "agent source 3"], max_sources=3)
+            assert result.sources == 3
+            assert all(f"[{index}]" in result.content for index in range(1, 4))
+
+    asyncio.run(execute())
+
+
 def test_page_reader_ignores_javascript_and_stylesheet_noise():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

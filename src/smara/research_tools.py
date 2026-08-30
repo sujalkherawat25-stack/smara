@@ -309,7 +309,13 @@ class DeepResearchTool:
                 if isinstance(result, RetrievedSource):
                     fetched_count += 1
                     title = result.title or hit.title or url
-                    excerpt = result.excerpt
+                    # Allocate the evidence budget across every selected
+                    # source.  A sequential global truncation previously
+                    # let the first large page consume the whole context,
+                    # leaving the writer with only one or two labels even
+                    # though search had successfully found five sources.
+                    per_source_budget = max(1_200, (self.total_chars - 2_000) // max(1, len(selected)))
+                    excerpt = result.excerpt[:per_source_budget]
                     blocks.append(
                         f"[{index}] {title}\nURL: {url}\nSOURCE TYPE: fetched page\n"
                         f"EVIDENCE:\n{excerpt}"

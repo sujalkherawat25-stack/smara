@@ -301,10 +301,12 @@ def test_targeted_research_expands_short_draft_before_streaming(monkeypatch):
 
 
 def test_requested_word_target_accepts_hyphenated_and_comma_separated_forms():
-    from smara.agent_runtime import _requested_word_target
+    from smara.agent_runtime import _requested_citation_target, _requested_word_target
 
     assert _requested_word_target("Write a 1,200-word research report") == 1200
     assert _requested_word_target("Give at least 1500 words") == 1500
+    assert _requested_citation_target("Include at least four inline citations") == 4
+    assert _requested_citation_target("Use 5 citations") == 5
 
 
 def test_runtime_passes_connected_integration_runner_to_tool_selection():

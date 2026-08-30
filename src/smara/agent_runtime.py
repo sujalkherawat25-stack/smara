@@ -62,6 +62,15 @@ _TARGET_WORDS_RE = re.compile(
     r"\b(?:at\s+least\s+|minimum(?:\s+of)?\s+|around\s+|about\s+|approximately\s+)?([\d][\d,]{2,6})(?:\s*[-–]\s*|\s+)words?\b",
     re.IGNORECASE,
 )
+_CITATION_TARGET_RE = re.compile(
+    r"\b(?:at\s+least\s+|minimum(?:\s+of)?\s+)?(one|two|three|four|five|six|seven|eight|nine|ten|[\d]+)"
+    r"\s+(?:inline\s+|numbered\s+)?citations?\b",
+    re.IGNORECASE,
+)
+_NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+}
 
 
 def _requested_word_target(message: str) -> int | None:
@@ -74,6 +83,19 @@ def _requested_word_target(message: str) -> int | None:
 
 def _word_count(text: str) -> int:
     return len(re.findall(r"\b[\w][\w'-]*\b", str(text or "")))
+
+
+def _requested_citation_target(message: str) -> int | None:
+    """Return a bounded explicit source/citation requirement when present."""
+    matches = _CITATION_TARGET_RE.findall(str(message or ""))
+    if not matches:
+        return None
+    values = [int(value) if value.isdigit() else _NUMBER_WORDS[value.lower()] for value in matches]
+    return max(1, min(10, max(values)))
+
+
+def _citation_label_count(text: str) -> int:
+    return len(set(re.findall(r"\[(\d+)\](?:\([^)]*https?://[^)]*\))?", str(text or ""))))
 
 
 def _bounded_context(
@@ -486,6 +508,9 @@ class SmaraAgentRuntime:
                 # and prevents the UI from displaying raw snippets as if
                 # they were a complete report.
                 target_words = _requested_word_target(message)
+                available_sources = len(result.citations)
+                requested_citations = _requested_citation_target(message)
+                citation_target = min(requested_citations or 0, available_sources)
                 writer_system = (
                     "You are Smara's research writer. Answer the user's request using only the labelled "
                     "research evidence supplied below. Cite every factual claim with one or more matching "
@@ -497,13 +522,20 @@ class SmaraAgentRuntime:
                 )
                 writer_message = (
                     f"User request:\n{message[:4_000]}\n\n"
-                    f"Labelled research evidence:\n{result.content[:16_000]}"
+                    f"Labelled research evidence ({available_sources} supplied source labels):\n{result.content[:16_000]}"
                 )
                 if target_words:
                     writer_message += (
                         f"\n\nLength requirement: produce at least {target_words} words. "
                         "Use a structured report with an introduction, several evidence-backed sections, "
                         "a comparison or implications section when relevant, and a limitations/conclusion section."
+                    )
+                if requested_citations:
+                    writer_message += (
+                        f"\n\nCitation requirement: the user asked for at least {requested_citations} distinct inline citations. "
+                        f"{citation_target} distinct labelled sources are available in this evidence bundle. "
+                        "Use every available label needed to meet that target, attach its URL to the label, "
+                        "and never claim that fewer sources were supplied when the labelled evidence shows otherwise."
                     )
                 if event_hook:
                     event_hook("agent.phase", {"phase": "answer"})
@@ -518,12 +550,16 @@ class SmaraAgentRuntime:
                         token_hook=draft_chunks.append,
                     )
                     expansion_attempts = 0
-                    while _word_count(answer) < target_words and expansion_attempts < 2:
+                    while (
+                        _word_count(answer) < target_words
+                        or _citation_label_count(answer) < citation_target
+                    ) and expansion_attempts < 2:
                         expansion_attempts += 1
                         expansion_message = (
-                            f"{writer_message}\n\nYour first draft was {_word_count(answer)} words. "
-                            f"Rewrite and expand it to at least {target_words} words now. Preserve every valid "
-                            "citation label, add no uncited factual claims, and do not discuss this instruction. "
+                            f"{writer_message}\n\nYour first draft was {_word_count(answer)} words and used "
+                            f"{_citation_label_count(answer)} distinct citation labels. Rewrite it to at least "
+                            f"{target_words} words and use at least {citation_target} distinct available labels. "
+                            "Preserve every valid citation label, add no uncited factual claims, and do not discuss this instruction. "
                             f"FIRST DRAFT:\n{answer[:12_000]}"
                         )
                         answer = await self._direct_answer(
