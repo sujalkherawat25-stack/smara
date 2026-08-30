@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from smara.agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime
 from smara import agent_events, llm_errors
 import httpx
@@ -235,6 +237,25 @@ def test_deterministic_deep_research_runs_writer_pass_and_preserves_citations(mo
         for name, payload in events
     )
     assert any(name == "agent.phase" and payload.get("phase") == "answer" for name, payload in events)
+
+
+def test_deterministic_tool_failure_is_reported_without_runtime_name_error(monkeypatch):
+    from smara.tool_registry import ToolError
+
+    class Registry:
+        async def invoke(self, name, arguments, context):
+            raise ToolError("Smara web-search provider is not configured.")
+
+    class RegistryFactory:
+        def restrict(self, _names):
+            return Registry()
+
+    monkeypatch.setattr("smara.agent_runtime.default_tool_registry", lambda *_args, **_kwargs: RegistryFactory())
+    with pytest.raises(RuntimeError, match="web-search provider is not configured"):
+        asyncio.run(SmaraAgentRuntime(FakeProvider()).chat_with_tools(
+            account_id="acct_1", workspace_id="default",
+            message="Give me a detailed analysis of the latest Python release with citations"
+        ))
 
 
 def test_targeted_research_expands_short_draft_before_streaming(monkeypatch):

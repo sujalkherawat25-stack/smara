@@ -22,7 +22,7 @@ import httpx
 from .agent_step import BoundedAgentStepRuntime
 from .agent_routing import route_request
 from .config import settings
-from .tool_registry import ToolContext, default_tool_registry
+from .tool_registry import ToolContext, ToolError, default_tool_registry
 
 
 class ConversationMemory(Protocol):
