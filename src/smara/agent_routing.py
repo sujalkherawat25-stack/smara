@@ -37,7 +37,7 @@ _CALC_EXPRESSION_RE = re.compile(r"^[0-9+\-*/%().\s]+$")
 _DURABLE_RE = re.compile(
     r"\b(?:write|append|patch|edit|rename|move|delete|create|send|email|message|"
     r"remind|schedule|terminal|command|run\s+(?:a\s+)?script|browser|open\s+website|"
-    r"desktop|local\s+(?:file|folder|app)|upload|download)\b",
+    r"desktop|local\s+(?:file|folder|app)|upload|download|cancel|stop|pause|resume)\b",
     re.IGNORECASE,
 )
 _MEMORY_RE = re.compile(

@@ -31,12 +31,28 @@ def _secret_with_fallback(name: str, fallback_name: str = "") -> str:
     return value or (_secret(fallback_name) if fallback_name else "")
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str = os.getenv("SMARA_DATABASE_URL", "")
     database_path: str = os.getenv("SMARA_DATABASE_PATH", "./data/smara.db")
     syntarus_api_key: str = _secret("SYNTARUS_API_KEY")
     syntarus_base_url: str = os.getenv("SYNTARUS_BASE_URL", "https://ai.syntarus.com/v1")
+    syntarus_health_url: str = os.getenv("SMARA_SYNTARUS_HEALTH_URL", "")
     dev_mode: bool = os.getenv("SMARA_DEV_MODE", "false").lower() == "true"
     gateway_signing_secret: str = _secret("SMARA_GATEWAY_SIGNING_SECRET")
     control_bridge_secret: str = _secret("SMARA_CONTROL_BRIDGE_SECRET")
@@ -49,6 +65,12 @@ class Settings:
     session_secret: str = _secret("SMARA_SESSION_SECRET")
     session_ttl_days: int = int(os.getenv("SMARA_SESSION_TTL_DAYS", "30"))
     auth_cookie_name: str = os.getenv("SMARA_AUTH_COOKIE_NAME", "smara_session")
+    # The operator console is deliberately separate from ordinary account
+    # sessions. A normal signed-in user can use Smara, but cannot enumerate
+    # other accounts or operational data unless this secret is provisioned.
+    operator_secret: str = _secret("SMARA_OPERATOR_SECRET")
+    operator_cookie_name: str = os.getenv("SMARA_OPERATOR_COOKIE_NAME", "smara_operator")
+    operator_session_hours: int = int(os.getenv("SMARA_OPERATOR_SESSION_HOURS", "12"))
     internal_token: str = _secret("SMARA_INTERNAL_TOKEN")
     allowed_origins: str = os.getenv(
         "SMARA_ALLOWED_ORIGINS",
@@ -115,6 +137,14 @@ class Settings:
     sandbox_enabled: bool = os.getenv("SMARA_SANDBOX_ENABLED", "false").lower() == "true"
     sandbox_url: str = os.getenv("SMARA_SANDBOX_URL", "")
     sandbox_token: str = _secret("SMARA_SANDBOX_TOKEN")
+    # Performance rollout switches. They are intentionally environment-only
+    # so an operator can roll back one optimization without a code deploy.
+    fast_routing_enabled: bool = _env_bool("SMARA_FAST_ROUTING_ENABLED", True)
+    pooled_resources_enabled: bool = _env_bool("SMARA_POOLED_RESOURCES_ENABLED", True)
+    work_signals_enabled: bool = _env_bool("SMARA_WORK_SIGNALS_ENABLED", True)
+    desktop_long_poll_enabled: bool = _env_bool("SMARA_DESKTOP_LONG_POLL_ENABLED", True)
+    shadow_routing_enabled: bool = _env_bool("SMARA_SHADOW_ROUTING_ENABLED", False)
+    worker_concurrency: int = _env_int("SMARA_WORKER_CONCURRENCY", 4, minimum=1, maximum=8)
 
 
 settings = Settings()

@@ -15,7 +15,7 @@ from . import push
 log = logging.getLogger("smara.scheduler")
 
 async def main() -> None:
-    store = open_task_store(database_url=settings.database_url, database_path=settings.database_path, redis_url=settings.redis_url)
+    store = open_task_store(database_url=settings.database_url, database_path=settings.database_path, redis_url=settings.redis_url if settings.work_signals_enabled else "")
     while True:
         try:
             fired = store.fire_due_schedules(limit=20)

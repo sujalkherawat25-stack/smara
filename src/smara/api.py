@@ -48,7 +48,7 @@ configure_sentry(settings.sentry_dsn)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    resources = await RuntimeResources.create(settings)
+    resources = await RuntimeResources.create(settings) if settings.pooled_resources_enabled else None
     store_facade = AsyncStoreFacade(store)
     app.state.runtime_resources = resources
     app.state.async_store = store_facade
@@ -59,7 +59,8 @@ async def lifespan(app: FastAPI):
         close_store = getattr(store, "close", None)
         if close_store is not None:
             close_store()
-        await resources.aclose()
+        if resources is not None:
+            await resources.aclose()
 
 
 app = FastAPI(title="Smara Control Plane", version="0.1.0", lifespan=lifespan)
@@ -68,10 +69,10 @@ app.add_middleware(
     allow_origins=[origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "Last-Event-ID"],
 )
 app.include_router(auth_router)
-store = open_task_store(database_url=settings.database_url, database_path=settings.database_path, redis_url=settings.redis_url)
+store = open_task_store(database_url=settings.database_url, database_path=settings.database_path, redis_url=settings.redis_url if settings.work_signals_enabled else "")
 async_store = AsyncStoreFacade(store)  # fallback for direct/unit callers outside lifespan
 configure_admin(store, account_store)
 app.include_router(admin_router)
@@ -291,6 +292,14 @@ async def health():
         "memory_boundary": "syntarus-sdk-only",
         "auth_mode": "native-session" if settings.session_secret and settings.accounts_database_url else ("development" if settings.dev_mode else "signed-gateway"),
         "telegram": bool(settings.telegram_bot_token),
+        "rollout": {
+            "fast_routing": settings.fast_routing_enabled,
+            "pooled_resources": settings.pooled_resources_enabled,
+            "work_signals": settings.work_signals_enabled,
+            "desktop_long_poll": settings.desktop_long_poll_enabled,
+            "shadow_routing": settings.shadow_routing_enabled,
+            "worker_concurrency": settings.worker_concurrency,
+        },
     }
 
 @app.get("/v1/models")
@@ -765,8 +774,9 @@ async def claim_executor(
     """
     try:
         step = await _async_store().call("claim_for_executor", *identity)
-        if step is None and wait_seconds:
-            await wait_for_signal(settings.redis_url, wait_seconds)
+        effective_wait = wait_seconds if settings.desktop_long_poll_enabled else 0.0
+        if step is None and effective_wait:
+            await wait_for_signal(settings.redis_url if settings.work_signals_enabled else "", effective_wait)
             step = await _async_store().call("claim_for_executor", *identity)
         return {"step": step}
     except KeyError:
@@ -1001,7 +1011,7 @@ async def task_events_stream(task_id: str, last_event_id: str | None = Header(de
                 yield f"event: done\ndata: {json.dumps({'status': task['status']})}\n\n"
                 return
             yield ": keepalive\n\n"
-            await wait_for_signal(settings.redis_url, 5)
+            await wait_for_signal(settings.redis_url, 5, enabled=settings.work_signals_enabled)
         yield "event: done\ndata: {\"status\":\"timeout\"}\n\n"
 
     return StreamingResponse(emit(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

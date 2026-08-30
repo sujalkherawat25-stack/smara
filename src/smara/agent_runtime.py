@@ -21,6 +21,7 @@ import httpx
 
 from .agent_step import BoundedAgentStepRuntime
 from .agent_routing import route_request
+from .config import settings
 from .tool_registry import ToolContext, default_tool_registry
 
 
@@ -422,7 +423,7 @@ class SmaraAgentRuntime:
             include_user_integrations=include_user_integrations,
         ).restrict(set(decision.tools_allowed))
 
-        if decision.deterministic_tool is not None:
+        if decision.deterministic_tool is not None and settings.fast_routing_enabled:
             # Preserve the visible phase contract for existing clients while
             # dispatching the safe registered tool without an LLM round trip.
             if event_hook:

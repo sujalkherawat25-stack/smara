@@ -48,7 +48,7 @@ async def run_once(store: TaskStore, vault: SecretVault, worker_id: str = "integ
 
 async def main() -> None:
     configure_sentry(settings.sentry_dsn)
-    store = open_task_store(database_url=settings.database_url, database_path=settings.database_path, redis_url=settings.redis_url)
+    store = open_task_store(database_url=settings.database_url, database_path=settings.database_path, redis_url=settings.redis_url if settings.work_signals_enabled else "")
     if not settings.hosted_user_integrations_enabled:
         while True:
             await asyncio.sleep(60)
@@ -63,7 +63,7 @@ async def main() -> None:
         if worked:
             await asyncio.sleep(0)
         else:
-            await wait_for_signal(settings.redis_url, 5)
+            await wait_for_signal(settings.redis_url, 5, enabled=settings.work_signals_enabled)
 
 
 if __name__ == "__main__":

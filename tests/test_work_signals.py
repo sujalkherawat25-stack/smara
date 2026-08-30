@@ -51,3 +51,7 @@ def test_task_mutations_emit_advisory_signals(tmp_path: Path):
     store.append_event(task["id"], "step.completed")
     assert recorder.items[0] == ("task.created", task["id"])
     assert recorder.items[-1] == ("step.completed", task["id"])
+
+
+def test_disabled_signal_path_never_opens_redis():
+    assert asyncio.run(wait_for_signal("redis://unused", timeout=0.05, enabled=False)) is False

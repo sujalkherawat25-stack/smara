@@ -1,7 +1,7 @@
 # Smara Implementation Plan
 
-**Status:** focused beta plan<br>
-**Updated:** 2026-08-29<br>
+**Status:** focused beta + latency architecture plan<br>
+**Updated:** 2026-08-30<br>
 **Repository:** `sujalkherawat25-stack/smara`<br>
 **Public product:** `https://ai.syntarus.com`<br>
 **API:** same-origin `https://ai.syntarus.com/smara-api`
@@ -98,6 +98,11 @@ proof/artifacts.
   account ids) and a Smara-owned Telegram poller are deployed. The legacy
   Memento worker is removed and `/v1/memento/*` plus legacy `/v1/auth/*` are
   retired with an explicit 410 response. MemoryOS core APIs remain available.
+- **New operator console:** `/admin` is served by the Smara Web bundle and
+  protected by a separate `SMARA_OPERATOR_SECRET` session. It presents Smara
+  control-plane data and Syntarus context-plane health in separate sections;
+  it never joins the databases or exposes keys, OAuth grants, task content, or
+  raw memory by default. The old Memento dashboard bookmark redirects here.
 
 ### Smara Desktop
 
@@ -124,7 +129,7 @@ proof/artifacts.
 
 ### Verification already green
 
-- 168 Python tests, frontend production/type checks, native Rust tests, and
+- 178 Python tests, frontend production/type checks, native Rust tests, and
   Windows packaging checks.
 - Live Grok/Tavily/research/task/approval/lease safety smokes.
 - Disposable local file read/write, Python codebase test, and browser-opening
@@ -139,8 +144,8 @@ proof/artifacts.
 
 - `https://ai.syntarus.com/` serves the Smara Web bundle (200).
 - `/smara-api/health` reports `native-session` auth and `telegram: true`.
-- `/smara-api/v1/auth/config` returns 200; `/v1/auth/me` returns 401 when no
-  session is present (expected).
+- `/smara-api/v1/auth/config` returns 200; `/smara-api/v1/auth/me` returns 401
+  when no session is present (expected).
 - `/v1/memento/*`, legacy `/v1/auth/*`, and the old `/smara/` mount return 410.
 - MemoryOS core `/v1/memory` remains available behind its existing auth.
 - The Smara-owned Telegram worker polls with repeated 200 responses; the
@@ -154,10 +159,11 @@ stable.
 
 ### P0-A — Refresh the installed Desktop build
 
-**Status: completed on 2026-08-29.** The installed Windows package was rebuilt
-from a clean native bundle, reinstalled without removing the paired state, and
-its executor status confirms the expected local permissions. Shortcut,
-interactive sign-in, and reconnect behavior remain part of the physical drill.
+**Status: installed and verified on the owner PC.** The latest NSIS bundle
+includes local task journaling, workspace locks, and the explicit skill
+protocol. The Desktop shortcut now targets the installed release executable.
+The physical drill below must use this installed build and keep the paired
+state when restarting.
 
 ### P0-B — Physical Windows restart/reconnect drill
 
@@ -198,7 +204,341 @@ rollback requires restoring the saved Caddy configuration explicitly.
 - Record provider failures as actionable user-facing errors without exposing
   upstream secrets or raw error bodies.
 
-## 6. Local agent capability work (next implementation phase)
+### P0-E — Operator console and product separation
+
+**Status: implemented locally; deployment pending.** The retired Memento
+dashboard now has a Smara-owned replacement at `/admin`. It uses a separate
+operator session, read-only aggregate endpoints under `/v1/admin/*`, clear
+Smara/Syntarus data-plane boundaries, bounded account/task metadata, graceful
+empty/error states, refresh, and responsive tables. Deploy the Smara API,
+frontend bundle, and Caddy redirect together before using it on the live host.
+
+## 6. Performance and architecture upgrade plan (active next phase)
+
+The goal is not to make Smara "fast" by removing memory, tools, verification,
+or approvals. The goal is to stop paying the full agent-loop cost for work that
+does not need it, reuse warm resources, and wake workers/executors immediately
+instead of repeatedly polling.
+
+### 6.1 Current hot-path findings
+
+These findings are from the current Smara source, not assumptions:
+
+| Path | Current avoidable cost | Consequence |
+|---|---|---|
+| Hosted chat | `_agent_runtime()` creates a provider and Syntarus client for every turn, and closes the memory client afterward. | No warm memory/provider connection across turns. |
+| Provider calls | `OpenAICompatibleProvider.complete()` and `stream_complete()` each create a new `httpx.AsyncClient`. The chat route creates a second client for tools. | Repeated DNS/TCP/TLS setup and duplicate pools. |
+| Simple chat | Deterministic triage skips the tool planner, but memory retrieval still runs for greetings and self-contained questions. | A trivial turn waits for an unnecessary remote lookup. |
+| Tool chat | The JSON planner can call the model once per iteration and then call the model again to stream the final answer. | A one-tool request can use two or three model round trips. |
+| API state | `PostgresTaskStore._connect()` opens a new synchronous Psycopg connection for every store operation, including calls made directly inside async FastAPI handlers. Conversation history and summary are separate reads. | Connection overhead and event-loop blocking grow under concurrent chat. |
+| Hosted tasks | One worker processes one claimed step at a time and sleeps for up to two seconds when idle. | Small tasks can wait before starting; unrelated tasks cannot use spare capacity. |
+| Task SSE | The event stream rereads the full event list and task row every second. | Up to one-second UI lag and unnecessary database work. |
+| Desktop execution | The executor keeps one HTTP client, but claims every two seconds and rereads its complete state file on every poll. | Approved local work can wait about two seconds before the PC notices it. |
+| Desktop UI | Tauri creates fresh `reqwest::Client` objects for connection checks, task reads, and chat streams; Activity refreshes on an interval. | Avoidable connection setup and delayed state visibility. |
+
+### 6.2 Performance budgets
+
+Measure warm-system performance separately from provider latency. A regression
+test must never pretend an external provider is deterministic.
+
+| Measurement | Beta target |
+|---|---|
+| SSE connection to first Smara status frame | p95 under 200 ms |
+| Internal dispatch overhead before the provider request | p95 under 250 ms |
+| Exact deterministic tools (`current_time`, safe arithmetic) | p95 under 500 ms end to end, no LLM call when a model adds no value |
+| Warm simple chat time to first visible token | p50 under 2.5 s, p95 under 5 s with a healthy configured provider |
+| Simple chat model calls | exactly 1 |
+| One read-only tool request | at most 2 model calls: choose tool, then answer |
+| Task creation to hosted-worker claim | p95 under 500 ms |
+| Approved online desktop task to claim | p95 under 750 ms |
+| Task event commit to visible Web/Desktop update | p95 under 500 ms |
+| Dropped client stream | provider work cancelled or durably detached within 2 s; never duplicated |
+
+Every final SSE `done` frame must include safe timing fields for `auth`,
+`conversation_load`, `memory`, `provider_ttft`, `tools`, `persist`, and `total`.
+Do not put prompts, tokens, credentials, raw memory, or attachment contents in
+logs/metrics.
+
+### 6.3 Target request lanes
+
+Add one deterministic router in `src/smara/agent_routing.py`. It returns a
+typed `RouteDecision`; it does not call an LLM and it never grants authority.
+
+1. **Lane A — deterministic:** exact time and arithmetic requests. Execute the
+   existing safe registered tool directly. Render its bounded result without a
+   model unless the user also asks for explanation/comparison.
+2. **Lane B — direct answer:** greetings and self-contained conversational
+   questions. One streamed provider call. Skip Syntarus only when the route
+   explicitly marks `memory_needed=False`.
+3. **Lane C — memory answer:** personal/history/reference questions. One
+   bounded Syntarus retrieval followed by one streamed provider call.
+4. **Lane D — read-only tool:** search/fetch/connected read operations. Use the
+   bounded planner and registered tools, then one final streamed answer.
+5. **Lane E — durable task:** long, multi-step, side-effecting, local, scheduled,
+   or approval-required work. Create/continue the task graph; do not execute it
+   inside chat.
+
+Escalation is one-way within a turn: A/B/C may escalate to D or E when the
+request is ambiguous, but a fast lane may never bypass tool registration,
+approval, account/workspace scope, local permissions, or task durability.
+If routing confidence is low, choose the more capable lane. Attachments,
+explicit citations, current information, and action verbs are never treated as
+plain chitchat.
+
+### 6.4 Luna-ready implementation packages
+
+The packages below are intentionally small enough for GPT-5.6 Luna to implement
+one at a time. Each package ends with tests and one clean commit. Luna must read
+this file and `AGENTS.md` first, preserve unrelated working-tree changes, and
+must not push or deploy without explicit authorization.
+
+#### PERF-0 — Baseline and safe timing contract
+
+**Files:** `src/smara/agent_events.py`, `src/smara/api.py`,
+`src/smara/observability.py`, new `src/smara/performance.py`, new
+`scripts/benchmark_smara.py`, new `tests/test_performance_contract.py`.
+
+- Add a request-scoped monotonic `TimingTrace` with named spans and a generated
+  request id. Accept a valid incoming `X-Request-ID`, otherwise generate one;
+  return it on HTTP/SSE responses and propagate it to task events.
+- Extend `done` with the safe timing map while preserving all existing fields.
+- Add an offline benchmark mode using fake memory/provider/tool adapters and an
+  opt-in live mode that never prints keys or response bodies.
+- Record provider call count, memory call count, tool call count, time to first
+  status, and time to first token.
+- Add a fixed corpus: greeting, self-contained answer, memory recall,
+  calculator, current time, one search, multi-tool research, durable desktop
+  request, and cancellation.
+
+**Done when:** existing clients still parse the stream; fake benchmarks are
+stable in CI; live results can be saved as a redacted JSON artifact; no user
+content appears in logs.
+
+#### PERF-1 — Warm resource lifecycle
+
+**Files:** new `src/smara/runtime_resources.py`, `src/smara/api.py`,
+`src/smara/agent_runtime.py`, `src/smara/tool_registry.py`,
+`src/smara/syntarus_adapter.py`, `src/smara/worker.py`,
+`src/smara/research.py`, tests in `tests/test_agent_runtime.py` and new
+`tests/test_runtime_resources.py`.
+
+- Create FastAPI lifespan-owned resources: one bounded shared `httpx.AsyncClient`
+  for providers/tools, one long-lived Syntarus SDK client, and an immutable
+  parsed model-profile catalogue.
+- Inject the shared client into `OpenAICompatibleProvider`; provider methods
+  must not create or close their own client. Keep a separately owned client
+  only for isolated tests/CLI processes.
+- Give the worker one shared provider/tool HTTP client and one Syntarus client
+  for its process lifetime.
+- Configure explicit connect/read/write/pool timeouts, keep-alive limits, and a
+  small connection cap. Retry only before the first streamed token.
+- Close resources exactly once on shutdown and cancel in-flight work cleanly.
+
+**Done when:** two sequential warm chats reuse the same HTTP/Syntarus clients;
+no request closes a shared client; stream fallback and partial-stream
+no-duplicate tests remain green.
+
+#### PERF-2 — Pooled, non-blocking state access
+
+**Files:** `pyproject.toml`, `src/smara/store.py`, new
+`src/smara/store_async.py`, `src/smara/api.py`, `src/smara/auth.py`,
+`src/smara/admin.py`, `migrations/`, and store/API tests.
+
+- Add `psycopg_pool.ConnectionPool` to `PostgresTaskStore` and reuse it instead
+  of opening a TCP connection for each method. SQLite remains test/dev only.
+- Add a bounded async facade that runs the existing synchronous state machine
+  off the FastAPI event loop. Do not rewrite the proven lease state machine in
+  the same package.
+- Combine conversation owner/history/summary loading into one store call and
+  one pooled connection. Persist the user/assistant exchange in one transaction.
+- Add/verify indexes for ready task steps, account task lists, task events,
+  conversation turns, active executor leases, and approved integration work.
+- Expose pool saturation and query-duration aggregates only in the operator
+  console; never expose SQL or parameter values.
+
+**Done when:** an artificial slow database call does not stall an unrelated
+health/chat coroutine; concurrent claims still use `SKIP LOCKED`; account
+isolation and lease tests stay green.
+
+#### PERF-3 — Capability-preserving fast lanes
+
+**Files:** new `src/smara/agent_routing.py`, `src/smara/agent_runtime.py`,
+`src/smara/agent_step.py`, `src/smara/tool_registry.py`,
+`src/smara/agent_events.py`, tests in `tests/test_agent_runtime.py`,
+`tests/test_agent_step.py`, and new `tests/test_agent_routing.py`.
+
+- Implement the five lanes in Section 6.3 with an explicit reason, confidence,
+  `memory_needed`, `tools_allowed`, and `durable_required` result.
+- Add direct dispatch only for exact registered, side-effect-free deterministic
+  tools. Never match arbitrary natural-language expressions to terminal or
+  integration actions.
+- For Lane B, issue one streaming call. For Lane C, retrieve then issue one
+  streaming call. For Lane D, cap a one-tool request at planner + final.
+- Remove the extra final model pass when the planner already returned a final
+  answer and no tool observation needs synthesis. Stream that answer as a
+  single safe token/frame or use a provider-native stream on the deciding pass.
+- Keep the existing full bounded loop for multi-tool/ambiguous requests and
+  emit `route.escalated` when a fast lane promotes itself.
+- Keep tool schemas stable and grouped by route so the model sees only relevant
+  tools, not the entire registry.
+
+**Done when:** call-count tests prove A=0, B=1, C=1, one-tool D<=2; attempts to
+route writes/local work through A-D become a durable task; quality/evaluation
+cases match the existing answers or improve them.
+
+#### PERF-4 — Selective memory and bounded context
+
+**Files:** `src/smara/agent_routing.py`, `src/smara/agent_runtime.py`,
+`src/smara/syntarus_adapter.py`, `src/smara/store.py`, tests in
+`tests/test_conversations.py` and `tests/test_agent_runtime.py`.
+
+- Skip memory only for confidently self-contained Lane A/B turns. Always use
+  memory for recall language, named prior facts, pronouns referring to history,
+  and explicit Knowledge/Memory mode.
+- Apply a short hard timeout to memory lookup; on timeout, answer honestly and
+  emit `memory.unavailable` without failing ordinary chat.
+- Build one context-budget allocator for attachments, current user message,
+  conversation summary, recent turns, memory, and tool observations. Never let
+  old history truncate the current message or explicit attachment content.
+- Stop copying the same attachment text into both system and user prompts.
+- Cache only immutable configuration and parsed summaries. Do not cache raw
+  per-user memory across accounts; any optional result cache must be
+  account/workspace/query keyed, very short lived, and invalidated on memory
+  write.
+
+**Done when:** greetings make zero Syntarus calls, recall cases still make one,
+attachments appear once in the provider payload, and workspace/account
+isolation tests cover every cache key.
+
+#### PERF-5 — Event-driven hosted tasks
+
+**Files:** new `src/smara/work_signals.py`, `src/smara/store.py`,
+`src/smara/worker.py`, `src/smara/scheduler.py`,
+`src/smara/integration_worker.py`, `src/smara/api.py`, `docker-compose.yml`,
+`migrations/`, and task/schedule/integration tests.
+
+- Keep PostgreSQL as the only task source of truth. Use Redis pub/sub only as
+  an advisory wake-up channel; a lost signal must be repaired by a low-frequency
+  database poll.
+- Publish a work signal after create, approve, retry, schedule fire, lease
+  recovery, and integration approval. Workers subscribe and claim immediately;
+  retain a 5-second fallback poll.
+- Add bounded hosted-worker concurrency (`SMARA_WORKER_CONCURRENCY`, default 4)
+  with one task per coroutine and existing database leases/idempotency intact.
+  Reserve separate semaphores for LLM, research fetch, and integration calls so
+  one slow class cannot starve all work.
+- Add `events_after(task_id, event_id)` and wake task SSE from the signal rather
+  than rereading the full event list every second.
+- Add admission/backpressure: when all provider slots are full, work remains
+  queued visibly; it is not accepted into unbounded in-process tasks.
+
+**Done when:** create-to-claim and event-to-UI budgets pass locally; killing a
+worker requeues by lease; lost Redis signals recover through polling; four
+independent read-only tasks run concurrently without duplicate claims.
+
+#### PERF-6 — Low-latency Desktop channel
+
+**Files:** `src/smara/api.py`, `src/smara/store.py`,
+`src/smara/desktop_executor.py`, `src/smara/local_agent.py`,
+`apps/desktop/src-tauri/src/main.rs`, `apps/desktop/src/api.ts`,
+`apps/desktop/src/App.tsx`, and Desktop/API tests.
+
+- Add bounded long polling to executor claim (`wait_seconds` max 25). Perform
+  an immediate database claim, wait on the advisory account/executor signal,
+  then claim again. Heartbeats and lease ownership remain unchanged.
+- Replace unconditional two-second desktop claim polling with long polling plus
+  jittered reconnect backoff. Cancellation must interrupt terminal/browser/
+  integration work through the existing checkpoint contract.
+- Cache parsed desktop settings by file modification time; reload and revalidate
+  atomically when the file changes. Missing/corrupt/revoked state still stops
+  the executor immediately.
+- Store one application-wide `reqwest::Client` in Tauri managed state for
+  health, task, chat, and sign-in traffic. Add an abort handle per active chat.
+- Replace Activity's interval-only refresh with a hosted task/event subscription
+  plus a low-frequency repair refresh.
+- Preserve one-writer-per-workspace locking; allow bounded parallel read-only
+  local inspections only after distinct lease/idempotency tests exist.
+
+**Done when:** an already-online desktop normally claims approved work in under
+750 ms; network loss/reconnect does not duplicate a write; revocation ends the
+long poll; app close cancels chat without leaving a hidden duplicate response.
+
+#### PERF-7 — UX latency and progressive results
+
+**Files:** `frontend/src/stores/chatStore.ts`,
+`frontend/src/components/SmaraWorkPanel.tsx`, `frontend/src/lib/smaraWork.ts`,
+Desktop chat/activity components, and frontend tests.
+
+- Render the user message and a route-specific status immediately; do not show
+  fake reasoning text.
+- Coalesce token rendering to animation frames so long streams do not trigger a
+  React render per token.
+- Keep partial output visibly marked if a stream drops; provide one explicit
+  Retry action with the same conversation id and a new request id.
+- Show queue, claim, provider, tool, local execution, verification, and final
+  result as stable activity states. Collapse noisy heartbeat/progress events.
+- Subscribe only while the relevant chat/task panel is visible; reconnect with
+  the last durable event id and run one repair fetch after reconnect.
+
+**Done when:** long answers remain scrollable/responsive, no duplicate tokens
+appear after reconnect, and task/result visibility reaches Web and Desktop
+within the Section 6.2 budget.
+
+#### PERF-8 — Evaluation, shadow rollout, and rollback
+
+**Files:** new `tests/evals/`, `scripts/benchmark_smara.py`,
+`PRODUCTION_GATE_STATUS.md`, `PRODUCTION_RUNBOOK.md`, `.env.example`.
+
+- Add feature flags for fast routing, pooled resources, work signals, worker
+  concurrency, and desktop long polling. Defaults stay conservative until each
+  package passes.
+- Run the fixed corpus against old and new routing. Compare answer quality,
+  citations, tool correctness, provider-call counts, TTFT, total latency, and
+  cost. Fast routing fails promotion if safety or task success regresses.
+- Shadow only the route decision first; log the lane and timing without changing
+  behavior. Then enable owner account, beta cohort, and finally all beta users.
+- Record exact rollback toggles. A rollback disables the optimization but keeps
+  tasks, approvals, events, and account data intact.
+
+**Done when:** the owner corpus and authenticated account-isolation suite are
+green, p95 targets are met on the live VM, and every optimization has a tested
+configuration rollback.
+
+**Implementation status (2026-08-30): PERF-0 through PERF-8 are implemented
+and locally verified.** The package ledger, exact rollback switches, and the
+remaining live promotion evidence are tracked in
+[`SMARA_PERFORMANCE_STATUS.md`](./SMARA_PERFORMANCE_STATUS.md).
+
+### 6.5 Architecture after the performance phase
+
+```text
+Web / CLI / Desktop chat
+        |
+        v
+Auth + request id + timing trace
+        |
+        v
+Deterministic lane router
+   |       |        |             |
+   A       B/C      D             E
+ exact   one-pass  bounded      durable task graph
+ tool    answer    read tools   + approval
+   |       |        |             |
+   +-------+--------+-------------+
+                   |
+          shared warm resource layer
+       HTTP pools / Syntarus / DB pool
+                   |
+     PostgreSQL source of truth + Redis wakeups
+                   |
+       hosted workers / paired local executor
+```
+
+The hosted planner remains the single coordinator. Desktop is still an
+outbound-only executor, not a second cloud controller. Syntarus remains a
+separate memory product accessed only through its SDK/API.
+
+## 7. Local agent capability work (next implementation phase)
 
 The desktop currently exposes safe primitives, not a complete local agent. Build
 the following skills on top of the existing capability and approval contracts.
@@ -283,14 +623,17 @@ before it is enabled.
 - **Implemented:** Desktop Activity task selection now fetches the durable task
   record and displays the result, steps, recent activity/progress, and artifact
   names. The existing Web artifact endpoint remains the source of truth.
-- Still needed: inline file previews, diffs, hashes/downloads, and retention
-  state in both Web and Desktop.
+- **Implemented in this change:** Web now shows structured local operation
+  previews/diffs, changed files, output, and SHA-256 values inline; failed
+  tasks expose a safe Retry action. Desktop already renders the same structured
+  artifact fields and now receives the artifact hash in its typed task detail.
+  Retention remains server-controlled and is not a download surface yet.
 - The task result is now read from the durable `result_summary` record, so
   “completed” is distinct from “result produced” when no answer was generated.
 - Provide safe retry/reopen/reconcile controls for failed or dead-lettered
   local steps.
 
-## 7. Local agent and task architecture
+## 8. Local agent and task architecture
 
 ### Current state
 
@@ -311,13 +654,14 @@ before it is enabled.
    inspect → plan → edit → run → verify → report.
 3. Add durable local intent/queue state for disconnected desktops; never replay
    uncertain side effects automatically.
-4. Add workspace locking/concurrency rules so two tasks cannot edit the same
-   files unexpectedly.
+4. **Implemented in this change:** local skill contracts, a bounded task
+   journal, fail-closed uncertain-side-effect handling, and per-workspace
+   cross-process locks prevent duplicate replay and concurrent edits.
 5. Keep the hosted planner as the default. Add a local fallback planner only
    after the skill protocol, task reconciliation, and local memory policy are
    stable; otherwise two independent agent brains will diverge.
 
-## 8. Memory plan
+## 9. Memory plan
 
 ### Working today
 
@@ -336,10 +680,11 @@ privacy boundary, not an accidental second implementation.
 
 ### Decision required before offline-agent work
 
-Choose one policy:
+**Decision for the beta:**
 
-- **Recommended for beta:** hosted memory only; local execution keeps only
-  bounded logs and task artifacts.
+- **Adopted:** hosted memory only; local execution keeps only a bounded,
+  redacted journal, logs, undo snapshots, and task artifacts. No local
+  long-term memory is uploaded or silently synchronized.
 - **Later offline enhancement:** add an encrypted local cache for local
   conversation summaries, workspace facts, pending intents, and explicit
   remember/recall/forget controls. Sync must be opt-in and conflict-aware.
@@ -348,7 +693,7 @@ Also require server-enforced workspace/account filters before claiming secure
 cross-project isolation; current metadata filters are not sufficient for that
 claim.
 
-## 9. Tools, skills, and plugins
+## 10. Tools, skills, and plugins
 
 ### Available hosted tools
 
@@ -372,7 +717,7 @@ executable runtime.
 - Durable activity event and structured result/artifact.
 - Unit, failure, concurrency, restart, and account-isolation tests.
 
-## 10. Production hardening (after the beta)
+## 11. Production hardening (after the beta)
 
 These are deferred by owner decision and must remain disabled/documented:
 
@@ -389,41 +734,54 @@ These are deferred by owner decision and must remain disabled/documented:
    requires remote code execution. `SMARA_SANDBOX_ENABLED` stays false for the
    current privacy model.
 
-## 11. Execution order
+## 12. Execution order
 
 1. Complete the physical restart/reconnect drill with the paired Windows PC.
 2. Complete interactive authenticated Web shadowing and edge-limit checks.
-3. Implement Workspace Inspection and Reviewable Editing. **Workspace
+3. Deploy and verify the separate `/admin` operator console and the legacy
+   dashboard redirect; confirm Syntarus API health is independent of Smara.
+4. Implement PERF-0 and capture a redacted baseline before changing behavior.
+5. Implement PERF-1 and PERF-2 to remove connection churn and event-loop
+   blocking without changing agent decisions.
+6. Implement PERF-3 and PERF-4 behind shadow/feature flags; promote only after
+   the quality, call-count, memory, and isolation corpus is green.
+7. Implement PERF-5 and PERF-6 for immediate hosted/desktop task delivery,
+   then repeat the physical reconnect/no-duplicate drill.
+8. Implement PERF-7 and PERF-8; record live VM p50/p95 results and rollback
+   evidence before enabling the fast path for the full beta.
+9. Implement Workspace Inspection and Reviewable Editing. **Workspace
    inspection and L2 editing are now complete; proceed to test/build recipes.**
-4. Expand Test/Build execution with named recipes and reviewable artifacts.
+10. Expand Test/Build execution with named recipes and reviewable artifacts.
    **Named recipes, bounded artifact metadata, changed-file collection, and
    Desktop Activity rendering are now complete.**
-5. **Controlled Browser inspection is now complete for text, selected DOM, and
+11. **Controlled Browser inspection is now complete for text, selected DOM, and
    bounded downloads; screenshots remain deferred pending a local capture
    adapter.** Browser state remains local.
-6. **Local credential adapter slice 1 is complete (Tavily + GitHub read-only).**
+12. **Local credential adapter slice 1 is complete (Tavily + GitHub read-only).**
    Add Telegram/Gmail/Calendar/Drive one at a time only after their local
    consent and scope contracts are implemented.
-7. Improve task decomposition, local intent reconciliation, workspace locks,
-   and result/diff UX.
-8. Decide whether encrypted offline local memory is needed; do not create a
+13. **Implemented in this change:** local intent reconciliation, workspace locks,
+   local skill protocol, retry controls, and result/diff UX. Richer
+   inspect → plan → edit → verify decomposition remains a later planner
+   enhancement, not a second local agent brain.
+14. Decide whether encrypted offline local memory is needed; do not create a
    second memory system by default.
-9. Run the broader agent evaluation corpus: chat, research, codebase changes,
+15. Run the broader agent evaluation corpus: chat, research, codebase changes,
    approvals, failures, attachments, reconnects, cancellations, and duplicate
    prevention.
-10. Reopen production hardening gates and promote only after all required
+16. Reopen production hardening gates and promote only after all required
     evidence is recorded green.
 
-## 12. Readiness and definition of done
+## 13. Readiness and definition of done
 
 Current honest estimate:
 
-- Focused hosted + desktop beta: **~84%**.
-- Desktop executor foundation: **~91%**; physical restart/reconnect,
+- Focused hosted + desktop beta: **~88%**.
+- Desktop executor foundation: **~94%**; physical restart/reconnect,
   capability depth, signing, and update trust remain.
-- Full local-agent experience: **not complete** until Sections 6–8 are
+- Full local-agent experience: **not complete** until Sections 7–9 are
   implemented and tested.
-- Full production promotion: **not complete** while Section 10 gates are
+- Full production promotion: **not complete** while Section 11 gates are
   deferred.
 
 Smara is ready to replace Memento as the primary product when:

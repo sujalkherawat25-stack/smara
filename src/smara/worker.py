@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import time
 import httpx
 
@@ -239,19 +238,19 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
 
 
 async def main() -> None:
-    store = open_task_store(database_url=settings.database_url, database_path=settings.database_path, redis_url=settings.redis_url)
+    store = open_task_store(database_url=settings.database_url, database_path=settings.database_path, redis_url=settings.redis_url if settings.work_signals_enabled else "")
     memory = None
     if settings.syntarus_api_key:
         memory = SyntarusMemory(AsyncMemoryClient(settings.syntarus_api_key, base_url=settings.syntarus_base_url))
     try:
-        concurrency = max(1, min(8, int(os.getenv("SMARA_WORKER_CONCURRENCY", "4"))))
+        concurrency = settings.worker_concurrency
         while True:
             worked = await asyncio.gather(*(
                 run_once(store, memory, sandbox_enabled=settings.sandbox_enabled and bool(settings.sandbox_url and settings.sandbox_token))
                 for _ in range(concurrency)
             ))
             if not any(worked):
-                await wait_for_signal(settings.redis_url, 5)
+                await wait_for_signal(settings.redis_url, 5, enabled=settings.work_signals_enabled)
             else:
                 await asyncio.sleep(0)
     finally:

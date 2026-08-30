@@ -41,10 +41,10 @@ class WorkSignalBus:
             LOG.debug("work signal unavailable: %s", type(exc).__name__)
 
 
-async def wait_for_signal(redis_url: str, timeout: float = 5.0) -> bool:
+async def wait_for_signal(redis_url: str, timeout: float = 5.0, *, enabled: bool = True) -> bool:
     """Wait for a Redis hint, or sleep for the repair-poll interval."""
     timeout = max(0.05, min(25.0, float(timeout)))
-    if not redis_url:
+    if not enabled or not redis_url:
         await asyncio.sleep(timeout)
         return False
     client = None
