@@ -5,6 +5,31 @@ operational checklist: Smara is live at the root as a beta deployment, the
 same-origin `/smara-api` route is retained for clients, and Memento rollback is
 preserved without a second public UI.
 
+## Audit update — 2026-08-30
+
+- Latest deployed application commit: **`af8b18d`**. It preserves the bounded
+  deep-research evidence bundle through the tool registry, so the writer sees
+  the complete selected-source set rather than a truncated prefix.
+- Fresh verification passed: **237 Python tests**, frontend type-check and
+  production build, Desktop production build, and **9 native Rust tests**.
+  The two Python warnings are existing deliberately short JWT test fixtures;
+  no production secret is involved.
+- The deterministic nine-case routing benchmark passed at **0.16 ms p50** and
+  **0.34 ms p95**. It is explicitly offline and is not presented as external
+  provider latency.
+- A new signed live smoke passed health/readiness, cross-account task
+  isolation, task cancellation, direct chat, calculator, cited research,
+  local-only integration policy, and desktop uncertain-lease no-replay. The
+  live backend limiter again produced 120 HTTP 200 responses followed by 5
+  HTTP 429 responses. The public Syntarus, Smara Web, and Smara API routes
+  passed the Caddy/public route checker.
+- Still owner-controlled before a later production promotion: the physical
+  Windows/network restart-reconnect-cancel-revoke drill, a deliberately
+  interrupted authenticated Web stream, and the Cloudflare dashboard's global
+  rate-limit review. Deferred hardening (Sentry, signing, external secret
+  rotation, encrypted off-host backup scheduling, and hosted sandbox) remains
+  intentionally disabled for this reversible beta.
+
 ## Passed
 
 - Staging API, worker, scheduler, integration worker, Postgres, and Redis are

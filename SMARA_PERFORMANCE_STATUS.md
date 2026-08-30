@@ -48,7 +48,7 @@ per-request resources; it does not delete or rewrite durable work.
 
 ## Verification performed
 
-- Python: **230 passed**, two existing JWT key-length warnings only. This run
+- Python: **237 passed**, two existing JWT key-length warnings only. This run
   includes the requested-length research regression and provider-failure path.
 - Python bytecode compilation: passed.
 - Frontend type-check: passed.
@@ -60,6 +60,14 @@ per-request resources; it does not delete or rewrite durable work.
   The benchmark uses a deterministic in-process research fixture, so it never
   needs a search key or network access while still exercising the production
   Tavily adapter and source-fetch path.
+- Audit refresh on 2026-08-30: the fixed corpus measured **0.16 ms p50** and
+  **0.34 ms p95**. These numbers cover only deterministic in-process routing
+  and tool orchestration; public-model and search latency must be measured
+  separately in an authenticated browser session.
+- A fresh deployed signed smoke also passed direct chat, calculator, cited
+  research, cancellation, account isolation, local-only integration policy,
+  and the fail-closed desktop lease case. The live health payload exposed all
+  documented rollout switches with the rollback values intact.
 
 ## Remaining promotion evidence
 

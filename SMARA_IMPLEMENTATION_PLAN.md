@@ -129,8 +129,17 @@ proof/artifacts.
 
 ### Verification already green
 
-- 224 Python tests, frontend production/type checks, native Rust tests, and
-  Windows packaging checks.
+- **Audit refresh — 2026-08-30 (commit `af8b18d`, deployed):** 237 Python
+  tests passed (only two existing short JWT test-fixture warnings), frontend
+  type-check and production build passed, Desktop production build passed, and
+  all nine native Rust tests passed.
+- The fixed offline routing corpus passed all nine lanes with a measured
+  p50 of **0.16 ms** and p95 of **0.34 ms**. This is a deterministic
+  in-process benchmark, not a claim about public-provider latency.
+- A fresh signed live beta smoke passed health/readiness, task creation and
+  cancellation, account isolation, local-only integration policy, direct chat,
+  calculator, cited research, and desktop no-replay lease safety. The live
+  Redis limiter also returned 120 successes followed by 5 bounded 429s.
 - Live Grok/Tavily/research/task/approval/lease safety smokes.
 - Disposable local file read/write, Python codebase test, and browser-opening
   workflow passed with the paired executor.
@@ -223,6 +232,17 @@ Smara/Syntarus data-plane boundaries, bounded account/task metadata, graceful
 empty/error states, refresh, and responsive tables. The live session endpoint
 reports `configured: true`; the operator secret remains VM-only and is never
 shown in this repository or browser URL.
+
+### Audit boundary — 2026-08-30
+
+All repeatable repository, package, route, configuration, and signed live
+checks are green at `af8b18d`. The following cannot be honestly automated by
+the repository or VM because they require an owner-controlled session or
+device state: P0-B's actual Windows/network restart sequence, P0-C's
+deliberately interrupted signed-in browser stream, and P0-D's authenticated
+Cloudflare dashboard review. GLM-5.2 and Gemma 4 also remain beta-gated by
+Sarvam until the operator key is whitelisted; this is an upstream entitlement,
+not an implementation failure.
 
 ## 6. Performance and architecture upgrade plan (active next phase)
 
