@@ -189,6 +189,54 @@ def test_runtime_chat_promotes_the_bounded_read_only_tool_loop():
     assert turn.tools_used == 1
 
 
+def test_deterministic_deep_research_runs_writer_pass_and_preserves_citations(monkeypatch):
+    from smara.tool_registry import ToolResult
+
+    class Provider:
+        _model = "writer"
+        calls = []
+
+        async def complete(self, *, system, message):
+            self.calls.append((system, message))
+            assert "Labelled research evidence" in message
+            return "A sourced answer [1]."
+
+    class Registry:
+        async def invoke(self, name, arguments, context):
+            assert name == "research.deep"
+            return ToolResult(
+                True,
+                "[RESEARCH_CONTEXT]\n[1] Official source\nURL: https://example.com\nEVIDENCE: verified fact",
+                citations=["https://example.com"],
+                meta={"queries": ["primary", "independent"], "sources": 1, "fetched": 1, "failed": 0},
+            )
+
+    registry = Registry()
+
+    class RegistryFactory:
+        def restrict(self, _names):
+            return registry
+
+    monkeypatch.setattr("smara.agent_runtime.default_tool_registry", lambda *_args, **_kwargs: RegistryFactory())
+    events = []
+    provider = Provider()
+    turn = asyncio.run(SmaraAgentRuntime(provider).chat_with_tools(
+        account_id="acct_1",
+        workspace_id="default",
+        message="Give me a detailed analysis with citations",
+        event_hook=lambda name, payload: events.append((name, payload)),
+    ))
+    assert turn.message == "A sourced answer [1]."
+    assert turn.tools_used == 1
+    completed = [payload for name, payload in events if name == "agent.tool_completed"]
+    assert completed and completed[0]["citations"] == ["https://example.com"]
+    assert any(
+        name == "agent.status" and payload.get("label") == "Researching multiple sources"
+        for name, payload in events
+    )
+    assert any(name == "agent.phase" and payload.get("phase") == "answer" for name, payload in events)
+
+
 def test_runtime_passes_connected_integration_runner_to_tool_selection():
     calls = []
 

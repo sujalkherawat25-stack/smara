@@ -50,10 +50,17 @@ _TOOL_RE = re.compile(
     r"news|source|cite|citation|gmail|calendar|drive|github)\b",
     re.IGNORECASE,
 )
+_DEEP_RESEARCH_RE = re.compile(
+    r"\b(?:detailed\s+(?:analysis|breakdown|report)|comprehensive\s+(?:analysis|research|review)|deep\s+dive|"
+    r"with\s+citations?|at\s+least\s+\d+\s+words?|compare|comparison|"
+    r"current\s+(?:state|landscape|architecture|developments?)|latest\s+(?:news|developments?|release))\b",
+    re.IGNORECASE,
+)
 
 _READ_TOOLS = (
     "current_time",
     "calculate",
+    "research.deep",
     "research.web_search",
     "research.fetch_url",
     "integration.gmail.search",
@@ -90,7 +97,16 @@ def route_request(
     if explicit_memory or _MEMORY_RE.search(text):
         if not _TOOL_RE.search(text):
             return RouteDecision("C", "personal or prior-context question", 0.94, 2, True, _READ_TOOLS, False)
-    if _TOOL_RE.search(text):
+    if _TOOL_RE.search(text) or _DEEP_RESEARCH_RE.search(text):
         complexity = 3 if len(text) > 1_000 or text.lower().count(" and ") >= 2 else 2
+        if _DEEP_RESEARCH_RE.search(text):
+            # Deep research is deterministic orchestration, not a model
+            # suggestion. This prevents the planner from stopping after one
+            # shallow search result and producing an evidence-starved answer.
+            return RouteDecision(
+                "D", "multi-source research request", max(0.91, 0.94), max(3, complexity),
+                bool(explicit_memory or _MEMORY_RE.search(text)), _READ_TOOLS, False,
+                ("research.deep", {"query": text, "max_sources": 5}),
+            )
         return RouteDecision("D", "read-only tool request", 0.91, complexity, bool(explicit_memory or _MEMORY_RE.search(text)), _READ_TOOLS, False)
     return RouteDecision("B", "self-contained answer", 0.84, 1, bool(explicit_memory), _READ_TOOLS, False)

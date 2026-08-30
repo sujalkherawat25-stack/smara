@@ -36,6 +36,7 @@ const PHASE_LABEL: Record<AgentPhase, string> = {
 // Human-readable tool names for the activity feed.
 const TOOL_LABEL: Record<string, string> = {
   web_search: "Web search",
+  "research.deep": "Deep research",
   news_search: "News search",
   fetch_url: "Read page",
   url_summarize: "Summarise page",
@@ -186,7 +187,7 @@ type ToolRow = {
   kind: "tool";
   name: string;
   args: Record<string, unknown>;
-  result?: { ok: boolean };   // status-only, see ACTIVITY-FEED POLICY
+  result?: { ok: boolean; summary?: string };   // status-only, except safe research progress
 };
 type ErrorRow = { kind: "error"; message: string; recoverable: boolean };
 type ConfirmRow = { kind: "confirm"; item: Extract<ActivityItem, { kind: "confirm_request" }> };
@@ -234,7 +235,15 @@ function buildRows(activity: ActivityItem[]): FeedRowType[] {
         // or citations. Citations land on the assistant message as the
         // Sources card (see MessageBubble). Raw preview text is suppressed
         // entirely to avoid streaming/final mismatch leaks.
-        result: result ? { ok: result.ok } : undefined,
+        // A deep research pass has no sensitive raw output in its preview;
+        // retain only the bounded source-count summary so the user can see
+        // that Smara actually tried multiple angles and pages.
+        result: result
+          ? {
+              ok: result.ok,
+              summary: item.name === "research.deep" ? result.preview : undefined,
+            }
+          : undefined,
       });
       continue;
     }
@@ -326,6 +335,11 @@ function FeedRow({ row }: { row: FeedRowType }) {
           </>
         )}
       </div>
+      {result?.summary && (
+        <div className="pl-5 pt-0.5 text-[10px]" style={{ color: "var(--text-dim)" }}>
+          {result.summary}
+        </div>
+      )}
     </div>
   );
 }

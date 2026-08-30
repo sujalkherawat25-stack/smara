@@ -251,9 +251,16 @@ supplied public HTTP(S) source URLs. If no URLs are supplied, the first task
 step uses the configured provider-neutral search adapter to discover public
 sources before retrieval. Configure `SMARA_SEARCH_PROVIDER`,
 `SMARA_SEARCH_API_KEY`, and (optionally) `SMARA_SEARCH_URL` on the server. The
-provider can be `brave`, `serper`, or `tavily`; when the URL is omitted Smara
-selects the provider's official endpoint. The provider key never leaves the
-API process. The worker retrieves only safe public text/HTML
+provider can be `brave`, `serper`, `tavily`, or `exa`; when the URL is omitted
+Smara selects the provider's official endpoint. For resilient deep research,
+set `SMARA_SEARCH_FALLBACK_PROVIDER` and `SMARA_SEARCH_FALLBACK_API_KEY` to a
+second provider. The keys never leave the API process. Chat requests that ask
+for detailed analysis, current developments, comparisons, or citations use a
+deterministic research pass: several distinct search angles run in parallel,
+results are deduplicated and diversified by domain, and the strongest pages
+are fetched concurrently. Each answer is written from labelled evidence; a
+blocked page remains visible as an explicitly unverified search snippet. The
+worker retrieves only safe public text/HTML
 sources, records failures rather than inventing content, hashes each retrieved
 source, verifies the usable evidence, and writes a cited Markdown artifact.
 

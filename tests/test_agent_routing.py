@@ -16,6 +16,13 @@ def test_route_exact_safe_requests_to_deterministic_lane():
     assert calc_route.deterministic_tool == ("calculate", {"expression": "6 * 7"})
 
 
+def test_route_detailed_citation_requests_to_deterministic_deep_research():
+    route = route_request("Give me a detailed analysis of current AI agent architecture with citations")
+    assert route.deterministic_tool is not None
+    assert route.deterministic_tool[0] == "research.deep"
+    assert "research.deep" in route.tools_allowed
+
+
 def test_route_keeps_local_and_external_writes_as_durable_work():
     route = route_request("write a report to my Documents folder")
     assert route.lane == "E"

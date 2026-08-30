@@ -15,6 +15,7 @@ def test_default_registry_is_read_only_and_catalogued():
         "integration.drive.search",
         "integration.github.list",
         "integration.gmail.search",
+        "research.deep",
         "research.fetch_url",
         "research.web_search",
     ]
@@ -24,7 +25,7 @@ def test_default_registry_is_read_only_and_catalogued():
 
 def test_local_only_catalogue_excludes_user_integrations():
     names = {tool["name"] for tool in default_tool_registry(include_user_integrations=False).describe()}
-    assert names == {"calculate", "current_time", "research.fetch_url", "research.web_search"}
+    assert names == {"calculate", "current_time", "research.deep", "research.fetch_url", "research.web_search"}
 
 
 def test_calculator_rejects_code_and_bounds_results():
@@ -58,6 +59,48 @@ def test_fetch_tool_returns_bounded_safe_source():
             assert data["title"] == "Source"
             assert len(data["excerpt"]) <= 1_800
             assert result.citations == ["https://example.com/source"]
+
+    asyncio.run(execute())
+
+
+def test_deep_research_searches_distinct_angles_fetches_pages_and_labels_citations(monkeypatch):
+    from smara import research_tools
+
+    monkeypatch.setattr(
+        research_tools,
+        "settings",
+        type("Settings", (), {
+            "search_provider": "brave",
+            "search_api_key": "test-key",
+            "search_url": "https://search.test/web",
+            "search_timeout_seconds": 2,
+            "search_fallback_provider": "",
+            "search_fallback_api_key": "",
+            "search_fallback_url": "",
+        })(),
+    )
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "search.test":
+            query = request.url.params["q"]
+            requested.append(query)
+            suffix = len(requested)
+            return httpx.Response(200, json={"web": {"results": [
+                {"url": f"https://example.com/source{suffix}", "title": f"Source {suffix}", "description": f"Evidence about {query}."},
+            ]}})
+        page = request.url.host.split(".")[0]
+        return httpx.Response(200, headers={"content-type": "text/html"}, text=f"<html><title>{page}</title><body>Readable evidence for {page}. " + ("Detailed context. " * 12) + "</body></html>")
+
+    async def execute():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=False) as client:
+            result = await research_tools.DeepResearchTool(client).run("AI agent architecture", max_sources=3)
+            assert result.sources == 3
+            assert result.fetched == 3
+            assert result.failed == 0
+            assert len(requested) == 4
+            assert len(result.citations) == 3
+            assert "[1]" in result.content and "SOURCE TYPE: fetched page" in result.content
 
     asyncio.run(execute())
 

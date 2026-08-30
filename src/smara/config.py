@@ -110,6 +110,13 @@ class Settings:
     search_provider: str = os.getenv("SMARA_SEARCH_PROVIDER", "brave")
     search_api_key: str = _secret("SMARA_SEARCH_API_KEY")
     search_url: str = os.getenv("SMARA_SEARCH_URL", "")
+    # Optional second provider used only when the primary provider is
+    # unavailable or returns too few usable leads.  Keeping this separate
+    # from the primary key lets operators run a real fallback without ever
+    # sending credentials to the browser.
+    search_fallback_provider: str = os.getenv("SMARA_SEARCH_FALLBACK_PROVIDER", "")
+    search_fallback_api_key: str = _secret("SMARA_SEARCH_FALLBACK_API_KEY")
+    search_fallback_url: str = os.getenv("SMARA_SEARCH_FALLBACK_URL", "")
     # Advanced Tavily retrieval returns stronger page-level leads for research
     # while remaining provider-neutral. Operators may choose "basic" when
     # latency/cost matters more than recall.

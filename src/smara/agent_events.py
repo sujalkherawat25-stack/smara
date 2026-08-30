@@ -33,10 +33,18 @@ def tool_call(name: str) -> str:
     return frame({"type": "tool_call", "name": name})
 
 
-def tool_result(name: str, *, ok: bool, preview: str = "") -> str:
+def tool_result(
+    name: str,
+    *,
+    ok: bool,
+    preview: str = "",
+    citations: list[str] | None = None,
+) -> str:
     payload: dict[str, Any] = {"type": "tool_result", "name": name, "ok": ok}
     if preview:
         payload["preview"] = preview[:500]
+    if citations:
+        payload["citations"] = [str(value)[:2_000] for value in citations[:20] if str(value).strip()]
     return frame(payload)
 
 

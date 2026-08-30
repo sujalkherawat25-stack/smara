@@ -630,13 +630,31 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
                 phase_name = payload.get("phase")
                 if phase_name in {"triage", "retrieve", "reason_act", "answer"}:
                     queue.put_nowait(agent_events.phase(str(phase_name)))
+            elif event_type == "agent.status":
+                queue.put_nowait(
+                    agent_events.status(
+                        str(payload.get("label") or "Working on it"),
+                        detail=str(payload.get("detail")) if payload.get("detail") else None,
+                    )
+                )
             elif event_type == "agent.tool_requested":
                 queue.put_nowait(agent_events.tool_call(str(payload.get("tool", "unknown"))))
             elif event_type == "agent.tool_completed":
+                meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+                preview = str(payload.get("preview", ""))
+                # Keep the activity row useful without exposing raw search
+                # snippets.  The full evidence stays in the writer prompt;
+                # users only need to know how much was actually checked.
+                if payload.get("tool") == "research.deep" and meta:
+                    preview = (
+                        f"Checked {int(meta.get('queries', 0) if isinstance(meta.get('queries'), int) else len(meta.get('queries', [])))} search angles; "
+                        f"read {int(meta.get('fetched', 0) or 0)} of {int(meta.get('sources', 0) or 0)} selected sources."
+                    )
                 queue.put_nowait(agent_events.tool_result(
                     str(payload.get("tool", "unknown")),
                     ok=bool(payload.get("ok")),
-                    preview=str(payload.get("preview", "")),
+                    preview=preview,
+                    citations=payload.get("citations") if isinstance(payload.get("citations"), list) else None,
                 ))
 
         def token_hook(text: str) -> None:

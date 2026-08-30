@@ -721,6 +721,9 @@ claim.
 
 - `current_time`
 - `calculate`
+- `research.deep` (deterministic multi-angle search, fetch, deduplication,
+  source diversity, and citation-labelled evidence for explicit research
+  requests)
 - `research.web_search`
 - `research.fetch_url`
 - `desktop.request_action` through an approved durable task
@@ -764,7 +767,10 @@ These are deferred by owner decision and must remain disabled/documented:
 2. Deliberately drop a real signed-in Web stream and confirm cursor-based
    reconnect without duplicated output or work (P0-C).
 3. Complete the authenticated Cloudflare edge-limit review, one low-cost
-   Sarvam chat/reasoning smoke, and a provider-failure UX check (P0-D).
+   Sarvam chat/reasoning smoke, and a provider-failure UX check (P0-D). The
+   hosted research path now uses `research.deep` for detailed/citation-led
+   prompts; configure a primary search key and optional independent fallback
+   before judging research quality.
 4. Capture live redacted p50/p95 timing evidence for the enabled fast-path
    flags and retain the documented rollback values.
 5. Run the broader agent evaluation corpus: chat, research, codebase changes,

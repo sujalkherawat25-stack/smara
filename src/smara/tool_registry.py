@@ -17,6 +17,7 @@ from typing import Any, Awaitable, Callable, Protocol
 import httpx
 
 from .research import source_quality
+from .research_tools import DeepResearchTool as DeepResearchEngine
 from .research_tools import FetchUrlTool as ResearchFetchUrlTool
 from .research_tools import ResearchToolError, WebSearchTool as ResearchWebSearchTool
 from .workflow import validate_workflow, workflow_summary
@@ -220,6 +221,60 @@ class ResearchFetchTool:
             "quality_flags": flags,
         }
         return ToolResult(True, _bounded(json.dumps(data, ensure_ascii=False)), citations=[url.strip()])
+
+
+class ResearchDeepTool:
+    """Deterministic multi-source research for explicit research questions."""
+
+    spec = ToolSpec(
+        "research.deep",
+        "Run a bounded research pass: search several distinct angles, deduplicate and diversify sources, fetch readable pages concurrently, and return labelled evidence with citations. Use this for detailed analysis, current events, comparisons, or requests for sources/citations.",
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "minLength": 1, "maxLength": 2_000},
+                "subqueries": {"type": "array", "items": {"type": "string", "maxLength": 500}, "maxItems": 3},
+                "max_sources": {"type": "integer", "minimum": 2, "maximum": 6},
+                "include_domains": {"type": "array", "items": {"type": "string", "maxLength": 120}, "maxItems": 10},
+                "exclude_domains": {"type": "array", "items": {"type": "string", "maxLength": 120}, "maxItems": 10},
+                "focus": {"type": "string", "maxLength": 500},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    )
+
+    def __init__(self, http_client: httpx.AsyncClient | None = None):
+        self._tool = DeepResearchEngine(http_client)
+
+    async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        query = arguments.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise ToolError("Research needs a non-empty question.")
+        try:
+            result = await self._tool.run(
+                query,
+                subqueries=arguments.get("subqueries"),
+                max_sources=arguments.get("max_sources", 5),
+                include_domains=arguments.get("include_domains"),
+                exclude_domains=arguments.get("exclude_domains"),
+                focus=arguments.get("focus", ""),
+            )
+        except ResearchToolError as exc:
+            raise ToolError(str(exc)) from exc
+        return ToolResult(
+            True,
+            _bounded(result.content, 16_000),
+            citations=result.citations,
+            meta={
+                "provider": ", ".join(result.providers),
+                "providers": result.providers,
+                "queries": result.queries,
+                "sources": result.sources,
+                "fetched": result.fetched,
+                "failed": result.failed,
+            },
+        )
 
 
 class IntegrationReadTool:
@@ -427,6 +482,7 @@ def default_tool_registry(http_client: httpx.AsyncClient | None = None, *, integ
     registry = ToolRegistry([
         CurrentTimeTool(),
         CalculateTool(),
+        ResearchDeepTool(http_client),
         ResearchSearchTool(http_client),
         ResearchFetchTool(http_client),
     ])

@@ -430,6 +430,17 @@ class SmaraAgentRuntime:
                 event_hook("agent.phase", {"phase": "retrieve"})
                 event_hook("agent.phase", {"phase": "reason_act"})
             name, arguments = decision.deterministic_tool
+            if event_hook and name == "research.deep":
+                # Give the client an immediate, safe progress signal before
+                # concurrent provider calls begin. The final tool result
+                # replaces this with exact counts once the pass completes.
+                event_hook(
+                    "agent.status",
+                    {
+                        "label": "Researching multiple sources",
+                        "detail": "Searching several angles, removing duplicates, and reading independent pages.",
+                    },
+                )
             if event_hook:
                 event_hook("agent.tool_requested", {"tool": name, "args": arguments})
             try:
@@ -443,13 +454,51 @@ class SmaraAgentRuntime:
                     event_hook("agent.tool_completed", {"tool": name, "ok": False, "preview": str(exc)[:500]})
                 raise RuntimeError(str(exc)) from exc
             if event_hook:
-                event_hook("agent.tool_completed", {"tool": name, "ok": result.ok, "preview": result.content[:500]})
-            answer = result.content
-            if name == "calculate":
-                answer = f"The result is {answer}."
+                event_hook(
+                    "agent.tool_completed",
+                    {
+                        "tool": name,
+                        "ok": result.ok,
+                        "preview": result.content[:500],
+                        "citations": result.citations,
+                        "meta": result.meta,
+                    },
+                )
+            if name == "research.deep":
+                # The research adapter returns evidence, not an answer.  A
+                # dedicated writer pass keeps citations attached to claims
+                # and prevents the UI from displaying raw snippets as if
+                # they were a complete report.
+                writer_system = (
+                    "You are Smara's research writer. Answer the user's request using only the labelled "
+                    "research evidence supplied below. Cite every factual claim with one or more matching "
+                    "labels such as [1] or [2]. Clearly separate verified facts, interpretation, disagreements, "
+                    "and limitations. If the user requests a target length, meet it when the evidence supports "
+                    "that length; never pad with unsupported facts. Do not mention internal tools or chain of thought. "
+                    "Return polished Markdown and no JSON envelope."
+                )
+                writer_message = (
+                    f"User request:\n{message[:4_000]}\n\n"
+                    f"Labelled research evidence:\n{result.content[:16_000]}"
+                )
+                if event_hook:
+                    event_hook("agent.phase", {"phase": "answer"})
+                answer = await self._direct_answer(
+                    system=writer_system,
+                    message=writer_message,
+                    token_hook=token_hook,
+                )
+            else:
+                answer = result.content
+                if name == "calculate":
+                    answer = f"The result is {answer}."
             if event_hook and token_hook:
-                event_hook("agent.phase", {"phase": "answer"})
-            if token_hook:
+                # The research writer emits its answer phase before entering
+                # the stream; the conditional keeps legacy deterministic
+                # tools on their original event order.
+                if name != "research.deep":
+                    event_hook("agent.phase", {"phase": "answer"})
+            if token_hook and name != "research.deep":
                 token_hook(answer)
             return ChatTurn(
                 conversation_id=conversation_id or f"chat_{uuid.uuid4().hex}",
