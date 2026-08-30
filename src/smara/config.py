@@ -122,6 +122,10 @@ class Settings:
     # latency/cost matters more than recall.
     search_depth: str = os.getenv("SMARA_SEARCH_DEPTH", "advanced").lower()
     search_timeout_seconds: float = float(os.getenv("SMARA_SEARCH_TIMEOUT_SECONDS", "12"))
+    # Keep provider calls bounded.  Several search services throttle bursts;
+    # deep research should trade a little latency for a complete, diverse
+    # evidence set instead of silently losing most concurrent searches.
+    search_max_concurrency: int = int(os.getenv("SMARA_SEARCH_MAX_CONCURRENCY", "2"))
     research_allowed_domains: str = os.getenv("SMARA_RESEARCH_ALLOWED_DOMAINS", "")
     research_blocked_domains: str = os.getenv("SMARA_RESEARCH_BLOCKED_DOMAINS", "")
     capture_transcription_base_url: str = os.getenv("SMARA_CAPTURE_TRANSCRIPTION_BASE_URL", "")

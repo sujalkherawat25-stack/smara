@@ -8,6 +8,7 @@ changed without changing tasks, workers, or the Web/CLI clients.
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -202,6 +203,36 @@ class DeepResearchTool:
     def __init__(self, http_client: httpx.AsyncClient | None = None):
         self._http = http_client
 
+    @staticmethod
+    def _search_topic(query: str) -> str:
+        """Keep search requests about the subject, not output instructions.
+
+        People naturally ask for a report and then append requirements such as
+        word count, citations, or a conclusion.  Passing that entire request
+        to a web-search provider harms recall and can make every research
+        angle return the same weak result.  The original request remains in
+        the evidence bundle for the writer; this only prepares search terms.
+        """
+        topic = re.split(
+            r"\s+(?:search|include|cite|citation|identify|distinguish|finish|end|do not)\b",
+            query.strip(),
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        topic = re.sub(
+            r"^(?:please\s+)?(?:give|write|provide|produce|create)\s+(?:me\s+)?(?:a\s+)?"
+            r"(?:detailed\s+|comprehensive\s+)?(?:[\d,]+\s*[-–]?\s*word\s+)?"
+            r"(?:minimum\s+)?(?:analysis|research|report|brief|breakdown)"
+            r"(?:\s+(?:analysis|research|report|brief|breakdown))?\s+(?:of|on|about)\s+",
+            "",
+            topic,
+            flags=re.IGNORECASE,
+        )
+        topic = re.sub(r"\b(?:at least|minimum of|minimum)\s+[\d,]+\s*[-–]?\s*words?\b", "", topic, flags=re.IGNORECASE)
+        topic = re.sub(r"\s+", " ", topic).strip(" .,:;-\u2013")
+        # A bounded fallback keeps arbitrary short queries usable.
+        return topic[:500] or query[:500]
+
     async def run(
         self,
         query: str,
@@ -216,7 +247,8 @@ class DeepResearchTool:
         if not query:
             raise ResearchToolError("Research needs a non-empty question.")
         max_sources = max(2, min(self.max_sources, int(max_sources)))
-        queries: list[str] = [query]
+        search_topic = self._search_topic(query)
+        queries: list[str] = [search_topic]
         for candidate in subqueries or []:
             value = str(candidate).strip()
             if value and value.lower() not in {item.lower() for item in queries}:
@@ -224,9 +256,9 @@ class DeepResearchTool:
         # Distinct angles are essential for a useful answer.  They are only
         # added when the caller did not supply enough of them explicitly.
         defaults = (
-            f"{query} official documentation primary sources",
-            f"{query} independent analysis evidence limitations",
-            f"{query} recent developments benchmarks comparison",
+            f"{search_topic} official documentation primary sources",
+            f"{search_topic} peer reviewed survey research evidence",
+            f"{search_topic} safety governance evaluation benchmarks",
         )
         for candidate in defaults:
             if len(queries) >= self.max_queries:
@@ -243,7 +275,10 @@ class DeepResearchTool:
             # of leads, the fallback fills the missing diversity as well.
             fallback_provider = str(getattr(settings, "search_fallback_provider", "") or "").strip().lower()
             fallback_key = str(getattr(settings, "search_fallback_api_key", "") or "")
-            if fallback_provider and fallback_key and (not hits or len({urlparse(hit.url).netloc for hit in hits}) < 2):
+            minimum_diverse_sources = min(max_sources, 3)
+            if fallback_provider and fallback_key and (
+                not hits or len({urlparse(hit.url).netloc for hit in hits}) < minimum_diverse_sources
+            ):
                 fallback_hits, fallback_used, fallback_errors = await self._search_all(
                     client, queries, include_domains,
                     provider=fallback_provider,
@@ -294,6 +329,7 @@ class DeepResearchTool:
                 content=(
                     "[RESEARCH_CONTEXT]\n"
                     f"Research question: {query}\n"
+                    f"Search topic: {search_topic}\n"
                     f"PASS COMPLETE: checked {len(queries)} distinct search angles and selected {len(selected)} diverse sources. "
                     f"Fetched {fetched_count} page(s); {failed_count} remain snippet-only.\n"
                     "Use only the labelled evidence below. Cite factual claims with the matching labels [1], [2], etc. "
@@ -322,20 +358,36 @@ class DeepResearchTool:
         url: str | None = None,
     ) -> tuple[list[SearchHit], list[str], list[str]]:
         tool = WebSearchTool(client)
-        results = await asyncio.gather(
-            *[
-                tool.search(
-                    item,
-                    max_results=5,
-                    include_domains=include_domains,
-                    provider_override=provider,
-                    api_key_override=api_key,
-                    url_override=url,
-                )
-                for item in queries
-            ],
-            return_exceptions=True,
-        )
+        # The provider is external and may reject a burst of four searches.
+        # Bound the fan-out and retry only empty/failed angles once.  This
+        # preserves responsiveness while making a multi-source pass actually
+        # use its multiple independent angles.
+        max_concurrency = max(1, min(4, int(getattr(settings, "search_max_concurrency", 2))))
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async def search_one(item: str) -> list[SearchHit] | Exception:
+            last_error: Exception | None = None
+            for attempt in range(2):
+                try:
+                    async with semaphore:
+                        found = await tool.search(
+                            item,
+                            max_results=5,
+                            include_domains=include_domains,
+                            provider_override=provider,
+                            api_key_override=api_key,
+                            url_override=url,
+                        )
+                    if found:
+                        return found
+                    last_error = ResearchToolError("search returned no usable sources")
+                except Exception as exc:  # converted into a bounded report below
+                    last_error = exc
+                if attempt == 0:
+                    await asyncio.sleep(0.35)
+            return last_error or ResearchToolError("search returned no usable sources")
+
+        results = await asyncio.gather(*(search_one(item) for item in queries))
         hits: list[SearchHit] = []
         providers: list[str] = []
         errors: list[str] = []

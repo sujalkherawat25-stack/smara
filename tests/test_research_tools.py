@@ -138,6 +138,44 @@ def test_tavily_uses_advanced_depth_by_default(monkeypatch):
     assert asyncio.run(execute()) == []
 
 
+def test_deep_research_searches_the_subject_not_output_requirements(monkeypatch):
+    monkeypatch.setattr(
+        research_tools,
+        "settings",
+        SimpleNamespace(
+            search_provider="brave",
+            search_api_key="test-key",
+            search_url="https://search.test/web",
+            search_timeout_seconds=2,
+            search_max_concurrency=1,
+            search_fallback_provider="",
+            search_fallback_api_key="",
+            search_fallback_url="",
+        ),
+    )
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "search.test":
+            requested.append(request.url.params["q"])
+            return httpx.Response(200, json={"web": {"results": [
+                {"url": f"https://source{len(requested)}.example/report", "title": "Source", "description": "Evidence"},
+            ]}})
+        return httpx.Response(200, headers={"content-type": "text/html"}, text="<title>Source</title><p>Readable evidence.</p>")
+
+    async def execute():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await research_tools.DeepResearchTool(client).run(
+                "Produce a 1,200-word research brief on current AI-agent architecture. Include five citations and end with limitations.",
+                max_sources=3,
+            )
+            assert result.sources == 3
+
+    asyncio.run(execute())
+    assert requested[0] == "current AI-agent architecture"
+    assert all("1,200-word" not in item for item in requested)
+
+
 def test_page_reader_ignores_javascript_and_stylesheet_noise():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
