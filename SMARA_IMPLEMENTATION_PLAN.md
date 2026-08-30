@@ -129,7 +129,7 @@ proof/artifacts.
 
 ### Verification already green
 
-- 209 Python tests, frontend production/type checks, native Rust tests, and
+- 211 Python tests, frontend production/type checks, native Rust tests, and
   Windows packaging checks.
 - Live Grok/Tavily/research/task/approval/lease safety smokes.
 - Disposable local file read/write, Python codebase test, and browser-opening
