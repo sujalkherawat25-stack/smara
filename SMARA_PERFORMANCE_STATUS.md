@@ -48,7 +48,7 @@ per-request resources; it does not delete or rewrite durable work.
 
 ## Verification performed
 
-- Python: **221 passed**, two existing JWT key-length warnings only.
+- Python: **224 passed**, two existing JWT key-length warnings only.
 - Python bytecode compilation: passed.
 - Frontend type-check: passed.
 - Frontend production build: passed (4218 modules transformed).

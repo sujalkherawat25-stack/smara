@@ -129,13 +129,16 @@ proof/artifacts.
 
 ### Verification already green
 
-- 221 Python tests, frontend production/type checks, native Rust tests, and
+- 224 Python tests, frontend production/type checks, native Rust tests, and
   Windows packaging checks.
 - Live Grok/Tavily/research/task/approval/lease safety smokes.
 - Disposable local file read/write, Python codebase test, and browser-opening
   workflow passed with the paired executor.
 - Expired uncertain terminal/browser/write leases fail closed and are audited
   instead of being replayed.
+- Hosted workers no longer recover desktop leases; stale/orphaned desktop lease
+  rows are replaced atomically, and deterministic calculator requests emit the
+  same visible tool lifecycle events as model-selected tools.
 - The hosted planner can now create one bounded, sequential local workflow
   graph (inspect → plan → edit → run → verify → report); each stage remains
   approval-gated and capability-scoped on the paired desktop.

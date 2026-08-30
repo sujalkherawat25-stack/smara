@@ -34,7 +34,7 @@ preserved without a second public UI.
   2026-08-25 restore contained all 17 recorded Smara schema versions and 17
   staging tasks. The live database was not modified; backup files are now
   forced to owner-only mode by the script.
-- Repository tests pass locally (**221 tests**) with Python compilation,
+- Repository tests pass locally (**224 tests**) with Python compilation,
   frontend type-check, and production frontend build. The lease-heartbeat
   change is now deployed and the live Postgres desktop claim/heartbeat/
   completion smoke passed. The Work panel also now maps the deployed
@@ -47,6 +47,11 @@ preserved without a second public UI.
   `GET /v1/tasks/{id}` (rather than the bookkeeping value `recorded`), and
   migration `018_task_result_summary.sql` is applied with **18 applied / 0
   pending**. Legacy rows are backfilled when a meaningful step result exists.
+- Latest deployment commit `b1541d9` is live on the VM. Postgres reports **19
+  applied / 0 pending** migrations; all eight Smara services are running with
+  Postgres and Redis healthy. The authenticated live smoke passed direct chat,
+  calculator, Tavily discovery, official-page retrieval, task cancellation,
+  account isolation, and desktop no-replay lease safety.
 - A fresh live backup was checksum-verified and restored into a disposable
   Postgres 16 container. The restore contained both task tables and all **18**
   recorded Smara migrations; the temporary container and archive were removed
@@ -102,7 +107,7 @@ preserved without a second public UI.
   hosted `POST /v1/tasks/{task_id}/retry` action. Web task artifacts now show
   structured previews/diffs, changed files, output, and SHA-256 values; the
   Desktop task detail accepts the same artifact hashes. The full Smara suite
-  passes **221 tests**. Reconnects also reconcile uncertain local entries
+  passes **224 tests**. Reconnects also reconcile uncertain local entries
   through the executor-scoped step-status endpoint before claiming work.
 - The hosted planner now exposes a bounded `desktop.request_workflow` first
   slice for explicit sequential inspect/plan/edit/run/verify/report graphs.
