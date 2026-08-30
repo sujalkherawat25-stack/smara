@@ -134,6 +134,32 @@ def test_desktop_expired_lease_is_recovered_by_next_executor_poll(tmp_path: Path
     assert recovered["lease_owner"] == second["executor_id"]
 
 
+def test_desktop_claim_replaces_orphaned_lease_row(tmp_path: Path):
+    """A stale lease row must not make a ready step fail with a UNIQUE error."""
+    store = TaskStore(str(tmp_path / "smara.db"))
+    desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop", ["local_file_read"])["code"])
+    task = store.create("acct_1", "work", "Read", "Read", True, [{
+        "name": "read", "executor_kind": "desktop", "required_capability": "local_file_read",
+    }])
+    store.decide(task["id"], "acct_1", True, "approved")
+    step = store.steps(task["id"], "acct_1")[0]
+    with store._connect() as connection:
+        connection.execute(
+            "INSERT INTO executor_leases(id,step_id,executor_id,expires_at,created_at) VALUES(?,?,?,?,?)",
+            ("lease_orphaned", step["id"], desktop["executor_id"], "2000-01-01T00:00:00+00:00", "2000-01-01T00:00:00+00:00"),
+        )
+
+    claimed = store.claim_for_executor(desktop["executor_id"], desktop["token"])
+    assert claimed and claimed["step_id"] == step["id"]
+    with store._connect() as connection:
+        lease = connection.execute(
+            "SELECT id,executor_id,completed_at FROM executor_leases WHERE step_id=?",
+            (step["id"],),
+        ).fetchone()
+    assert lease and lease["id"] != "lease_orphaned"
+    assert lease["executor_id"] == desktop["executor_id"] and lease["completed_at"] is None
+
+
 @pytest.mark.parametrize("capability", ["local_file_write", "local_terminal", "local_browser"])
 def test_uncertain_side_effecting_desktop_lease_is_never_replayed(tmp_path: Path, capability: str):
     store = TaskStore(str(tmp_path / "smara.db"))

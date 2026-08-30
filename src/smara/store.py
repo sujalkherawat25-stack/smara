@@ -1089,10 +1089,18 @@ class TaskStore:
             c.execute("UPDATE task_runs SET status='running' WHERE id=?", (row["task_run_id"],))
             c.execute("UPDATE task_steps SET status='running',lease_owner=?,lease_expires_at=?,attempts=attempts+1,retry_at=NULL WHERE id=?", (executor_id, until, row["step_id"]))
             # executor_leases keeps only the current lease for a step. A
-            # retry or recovered lease may have a completed historical row;
-            # remove that row before installing the new current lease.
-            c.execute("DELETE FROM executor_leases WHERE step_id=? AND completed_at IS NOT NULL", (row["step_id"],))
-            c.execute("INSERT INTO executor_leases(id,step_id,executor_id,expires_at,created_at) VALUES(?,?,?,?,?)", (f"lease_{uuid.uuid4().hex}", row["step_id"], executor_id, until, now))
+            # retry/recovery can find an orphaned row (including one whose
+            # completion marker was lost), so replace it atomically instead
+            # of relying on a completed_at cleanup to satisfy the UNIQUE key.
+            c.execute(
+                """INSERT INTO executor_leases(id,step_id,executor_id,expires_at,created_at)
+                   VALUES(?,?,?,?,?)
+                   ON CONFLICT(step_id) DO UPDATE SET
+                     id=excluded.id, executor_id=excluded.executor_id,
+                     expires_at=excluded.expires_at, completed_at=NULL,
+                     created_at=excluded.created_at""",
+                (f"lease_{uuid.uuid4().hex}", row["step_id"], executor_id, until, now),
+            )
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", row["id"], "executor.step_claimed", f'{{"executor_id":"{executor_id}"}}', now))
             row["executor_payload"] = json.loads(row["executor_payload"]) if isinstance(row["executor_payload"], str) else row["executor_payload"]
             row["lease_owner"] = executor_id; row["lease_expires_at"] = until; row["status"] = "running"
@@ -1529,8 +1537,19 @@ class PostgresTaskStore(TaskStore):
             c.execute("UPDATE tasks SET status='running',updated_at=%s WHERE id=%s", (now, row["id"]))
             c.execute("UPDATE task_runs SET status='running' WHERE id=%s", (row["task_run_id"],))
             c.execute("UPDATE task_steps SET status='running',lease_owner=%s,lease_expires_at=%s,attempts=attempts+1,retry_at=NULL WHERE id=%s", (executor_id, until, row["step_id"]))
-            c.execute("DELETE FROM executor_leases WHERE step_id=%s AND completed_at IS NOT NULL", (row["step_id"],))
-            c.execute("INSERT INTO executor_leases(id,step_id,executor_id,expires_at,created_at) VALUES(%s,%s,%s,%s,%s)", (f"lease_{uuid.uuid4().hex}", row["step_id"], executor_id, until, now))
+            # Keep the current lease row unique while tolerating a stale or
+            # orphaned row left by a lost completion response. The task-step
+            # row is locked above, so replacing this row cannot steal active
+            # work from a competing claim.
+            c.execute(
+                """INSERT INTO executor_leases(id,step_id,executor_id,expires_at,created_at)
+                   VALUES(%s,%s,%s,%s,%s)
+                   ON CONFLICT (step_id) DO UPDATE SET
+                     id=EXCLUDED.id, executor_id=EXCLUDED.executor_id,
+                     expires_at=EXCLUDED.expires_at, completed_at=NULL,
+                     created_at=EXCLUDED.created_at""",
+                (f"lease_{uuid.uuid4().hex}", row["step_id"], executor_id, until, now),
+            )
             c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", row["id"], "executor.step_claimed", f'{{"executor_id":"{executor_id}"}}', now))
             row["executor_payload"] = json.loads(row["executor_payload"]) if isinstance(row["executor_payload"], str) else row["executor_payload"]
             row.update({"lease_owner": executor_id, "lease_expires_at": until, "status": "running"})
