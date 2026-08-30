@@ -6,6 +6,8 @@ from smara.plugins import manifests
 def test_builtin_plugin_catalog_is_declarative():
     values = manifests()
     assert any(item["name"] == "smara-desktop" and item["approval_required"] for item in values)
+    research = next(item for item in values if item["name"] == "smara-research")
+    assert "research.deep" in research["tools"]
 
 
 def test_local_only_plugin_catalog_hides_user_integrations():
