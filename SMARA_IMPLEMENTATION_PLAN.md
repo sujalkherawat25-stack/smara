@@ -206,7 +206,11 @@ rollback requires restoring the saved Caddy configuration explicitly.
 
 - Review distributed Cloudflare/edge rate limits using an authenticated browser
   session; the backend Redis limiter is already verified.
-- Run one low-cost Sarvam chat/reasoning smoke if the operator key is enabled.
+- **Sarvam standard chat smoke passed on 2026-08-30.** The configured GLM-5.2
+  reasoning profile correctly targets Sarvam `/v2`, but returned HTTP 400: its
+  API key has not been granted Sarvam beta access. Keep GLM-5.2 and Gemma 4
+  visibly beta-gated until Sarvam whitelists the operator key; this is not a
+  fallback-to-Grok condition.
 - Record provider failures as actionable user-facing errors without exposing
   upstream secrets or raw error bodies.
 

@@ -130,6 +130,10 @@ preserved without a second public UI.
   gating, visible task result (`SHADOW_TASK_OK`), chat (`SHADOW_CHAT_OK`),
   refresh persistence, and sign-out. The signed-in task and chat probes were
   disposable and contain no user files or secrets.
+- A 2026-08-30 live Sarvam smoke passed for the standard `sarvam-105b` chat
+  profile. The GLM-5.2 reasoning profile targets the correct `/v2` endpoint
+  but returned HTTP 400 because this operator key is not beta-whitelisted;
+  GLM-5.2/Gemma 4 remain optional beta profiles until Sarvam enables access.
 - The replacement operator console is deployed at `/admin` with a separate
   operator session, bounded Smara control-plane aggregates, and an independent
   Syntarus health/boundary view. On 2026-08-30 its VM-only operator secret was
