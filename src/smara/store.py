@@ -7,6 +7,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from .work_signals import WorkSignalBus
 
 
 def _now() -> str:
@@ -15,9 +16,10 @@ def _now() -> str:
 
 class TaskStore:
     """Small durable store. One database owns tasks, events and approvals."""
-    def __init__(self, path: str):
+    def __init__(self, path: str, *, signal_bus: WorkSignalBus | None = None):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.path = path
+        self.signals = signal_bus or WorkSignalBus()
         self._init()
 
     def _connect(self):
@@ -227,13 +229,17 @@ class TaskStore:
     def create(self, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None) -> dict:
         with self._connect() as c:
             task_id = self._insert_task(c, account_id, workspace_id, title, objective, requires_approval, steps)
-        return self.get(task_id, account_id)
+        result = self.get(task_id, account_id)
+        self.signals.publish("task.created", task_id=task_id)
+        return result
 
     def create_schedule(self, account_id: str, workspace_id: str, title: str, objective: str, interval_seconds: int, next_run_at: str, requires_approval: bool, steps: list[dict]) -> dict:
         now = _now(); schedule_id = f"schedule_{uuid.uuid4().hex}"
         with self._connect() as c:
             c.execute("INSERT INTO schedules(id,account_id,workspace_id,title,objective,interval_seconds,steps_json,requires_approval,next_run_at,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (schedule_id, account_id, workspace_id, title, objective, interval_seconds, json.dumps(steps), requires_approval, next_run_at, True, now, now))
-        return self.schedule(schedule_id, account_id)
+        result = self.schedule(schedule_id, account_id)
+        self.signals.publish("schedule.created")
+        return result
 
     def schedule(self, schedule_id: str, account_id: str) -> dict:
         with self._connect() as c:
@@ -269,6 +275,8 @@ class TaskStore:
                 c.execute("UPDATE schedules SET next_run_at=?,last_run_at=?,last_task_id=?,lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE id=?", (next_run.isoformat(), now, task_id, now, schedule["id"]))
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "schedule.fired", json.dumps({"schedule_id": schedule["id"]}), now))
                 due.append({"schedule_id": schedule["id"], "task_id": task_id, "account_id": schedule["account_id"]})
+        for item in due:
+            self.signals.publish("schedule.fired", task_id=item["task_id"])
         return due
 
     def create_cli_pairing(self, account_id: str, name: str, ttl_seconds: int = 600) -> dict:
@@ -551,7 +559,26 @@ class TaskStore:
     def events(self, task_id: str, account_id: str) -> list[dict]:
         self.get(task_id, account_id)
         with self._connect() as c:
-            return [dict(r) for r in c.execute("SELECT * FROM task_events WHERE task_id=? ORDER BY created_at", (task_id,))]
+            return [dict(r) for r in c.execute("SELECT * FROM task_events WHERE task_id=? ORDER BY created_at,id", (task_id,))]
+
+    def events_after(self, task_id: str, account_id: str, event_id: str | None = None) -> list[dict]:
+        """Return only durable events after a cursor, without full-list rereads."""
+        self.get(task_id, account_id)
+        with self._connect() as c:
+            if event_id:
+                row = c.execute(
+                    "SELECT created_at,id FROM task_events WHERE id=? AND task_id=?",
+                    (event_id, task_id),
+                ).fetchone()
+                if row:
+                    return [dict(item) for item in c.execute(
+                        "SELECT * FROM task_events WHERE task_id=? AND (created_at>? OR (created_at=? AND id>?)) ORDER BY created_at,id",
+                        (task_id, row["created_at"], row["created_at"], row["id"]),
+                    ).fetchall()]
+            return [dict(item) for item in c.execute(
+                "SELECT * FROM task_events WHERE task_id=? ORDER BY created_at,id",
+                (task_id,),
+            ).fetchall()]
 
     def steps(self, task_id: str, account_id: str) -> list[dict]:
         self.get(task_id, account_id)
@@ -582,6 +609,7 @@ class TaskStore:
                 c.execute("UPDATE tasks SET status='waiting_approval',updated_at=? WHERE id=? AND account_id=? AND status='queued'", (now, task_id, account_id))
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "approval.requested", '{"source":"agent"}', now))
             task["status"] = "waiting_approval"
+            self.signals.publish("approval.requested", task_id=task_id)
         return task
 
     def decide(self, task_id: str, account_id: str, approved: bool, note: str) -> dict:
@@ -597,7 +625,9 @@ class TaskStore:
                 c.execute("UPDATE task_steps SET status='cancelled' WHERE task_id=? AND status='queued'", (task_id,))
                 c.execute("UPDATE task_runs SET status='cancelled' WHERE task_id=? AND status!='completed'", (task_id,))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, f"approval.{status}", '{"source":"user"}', now))
-        return self.get(task_id, account_id)
+        result = self.get(task_id, account_id)
+        self.signals.publish("approval.resolved", task_id=task_id)
+        return result
 
     def cancel(self, task_id: str, account_id: str) -> dict:
         task = self.get(task_id, account_id)
@@ -612,7 +642,9 @@ class TaskStore:
                 c.execute("UPDATE tasks SET status='cancelled',updated_at=? WHERE id=?", (now, task_id))
                 c.execute("UPDATE task_runs SET status='cancelled' WHERE task_id=? AND status!='completed'", (task_id,))
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.cancel_requested", '{"source":"user"}', now))
-        return self.get(task_id, account_id)
+        result = self.get(task_id, account_id)
+        self.signals.publish("task.cancel_requested", task_id=task_id)
+        return result
 
     def claim_one(self, worker_id: str = "worker", lease_seconds: int = 60,
                   executor_kinds: tuple[str, ...] = ("hosted", "sandbox")) -> dict | None:
@@ -867,6 +899,7 @@ class TaskStore:
     def append_event(self, task_id: str, event_type: str, payload: str = "{}") -> None:
         with self._connect() as c:
             c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, event_type, payload, _now()))
+        self.signals.publish(event_type, task_id=task_id)
 
     def create_artifact(self, task_id: str, account_id: str, *, kind: str, name: str, content: str) -> dict:
         self.get(task_id, account_id)
@@ -1275,8 +1308,9 @@ class PostgresTaskStore(TaskStore):
     Migrations own schema evolution; this class deliberately inherits the task
     graph state-machine methods so SQLite tests and the live worker cannot drift.
     """
-    def __init__(self, database_url: str):
+    def __init__(self, database_url: str, *, signal_bus: WorkSignalBus | None = None):
         self.database_url = database_url
+        self.signals = signal_bus or WorkSignalBus()
         self._pool = None
         self._init()
 
@@ -1321,6 +1355,8 @@ class PostgresTaskStore(TaskStore):
                 c.execute("UPDATE schedules SET next_run_at=%s,last_run_at=%s,last_task_id=%s,lease_owner=NULL,lease_expires_at=NULL,updated_at=%s WHERE id=%s", (next_run.isoformat(), now, task_id, now, schedule["id"]))
                 c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", task_id, "schedule.fired", json.dumps({"schedule_id": schedule["id"]}), now))
                 due.append({"schedule_id": schedule["id"], "task_id": task_id, "account_id": schedule["account_id"]})
+        for item in due:
+            self.signals.publish("schedule.fired", task_id=item["task_id"])
         return due
 
     def claim_one(self, worker_id: str = "worker", lease_seconds: int = 60,
@@ -1479,9 +1515,15 @@ class PostgresTaskStore(TaskStore):
             return result
 
 
-def open_task_store(*, database_url: str, database_path: str):
+def open_task_store(*, database_url: str, database_path: str, redis_url: str = ""):
     """Select Postgres in every configured live deployment; SQLite is dev/test only."""
-    return PostgresTaskStore(database_url) if database_url else TaskStore(database_path)
+    signal_bus = WorkSignalBus(redis_url)
+    if database_url:
+        # Keep the zero-argument factory shape usable by lightweight callers
+        # that replace PostgresTaskStore in tests; the store itself still
+        # picks up SMARA_REDIS_URL when no explicit URL is supplied.
+        return PostgresTaskStore(database_url, signal_bus=signal_bus) if redis_url else PostgresTaskStore(database_url)
+    return TaskStore(database_path, signal_bus=signal_bus)
 
 
 class _PostgresConnection:

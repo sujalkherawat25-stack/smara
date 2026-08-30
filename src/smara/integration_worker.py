@@ -12,6 +12,7 @@ from .integration_oauth import refresh_google
 from .store import TaskStore, open_task_store
 from .vault import SecretVault
 from .observability import configure_sentry
+from .work_signals import wait_for_signal
 
 
 async def run_once(store: TaskStore, vault: SecretVault, worker_id: str = "integration-worker") -> bool:
@@ -47,7 +48,7 @@ async def run_once(store: TaskStore, vault: SecretVault, worker_id: str = "integ
 
 async def main() -> None:
     configure_sentry(settings.sentry_dsn)
-    store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
+    store = open_task_store(database_url=settings.database_url, database_path=settings.database_path, redis_url=settings.redis_url)
     if not settings.hosted_user_integrations_enabled:
         while True:
             await asyncio.sleep(60)
@@ -59,7 +60,10 @@ async def main() -> None:
     vault = SecretVault(settings.integration_master_keys)
     while True:
         worked = await run_once(store, vault)
-        await asyncio.sleep(0.2 if worked else 2)
+        if worked:
+            await asyncio.sleep(0)
+        else:
+            await wait_for_signal(settings.redis_url, 5)
 
 
 if __name__ == "__main__":

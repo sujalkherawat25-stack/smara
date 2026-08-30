@@ -40,6 +40,7 @@ from .admin import configure as configure_admin, router as admin_router
 from .performance import TimingTrace, request_id
 from .runtime_resources import RuntimeResources
 from .store_async import AsyncStoreFacade
+from .work_signals import wait_for_signal, WorkSignalBus
 
 LOG = logging.getLogger("smara.api")
 configure_sentry(settings.sentry_dsn)
@@ -70,7 +71,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 app.include_router(auth_router)
-store = open_task_store(database_url=settings.database_url, database_path=settings.database_path)
+store = open_task_store(database_url=settings.database_url, database_path=settings.database_path, redis_url=settings.redis_url)
 async_store = AsyncStoreFacade(store)  # fallback for direct/unit callers outside lifespan
 configure_admin(store, account_store)
 app.include_router(admin_router)
@@ -968,30 +969,24 @@ async def task_events(task_id: str, user: str = Depends(account_id)):
 async def task_events_stream(task_id: str, last_event_id: str | None = Header(default=None, alias="Last-Event-ID"), user: str = Depends(account_id)):
     """Stream durable task events without exposing reasoning or secrets."""
     try:
-        store.get(task_id, user)
+        await _async_store().call("get", task_id, user)
     except KeyError:
         raise HTTPException(404, "Task not found")
 
     async def emit():
-        sent = 0
-        if last_event_id:
-            existing = store.events(task_id, user)
-            for index, event in enumerate(existing):
-                if event["id"] == last_event_id:
-                    sent = index + 1
-                    break
+        cursor = last_event_id
         started = time.monotonic()
         while time.monotonic() - started < 900:
-            events = store.events(task_id, user)
-            for event in events[sent:]:
+            events = await _async_store().call("events_after", task_id, user, cursor)
+            for event in events:
                 yield f"id: {event['id']}\nevent: task_update\ndata: {json.dumps(event, default=str)}\n\n"
-            sent = len(events)
-            task = store.get(task_id, user)
+                cursor = event["id"]
+            task = await _async_store().call("get", task_id, user)
             if task["status"] in {"completed", "failed", "cancelled"}:
                 yield f"event: done\ndata: {json.dumps({'status': task['status']})}\n\n"
                 return
             yield ": keepalive\n\n"
-            await asyncio.sleep(1)
+            await wait_for_signal(settings.redis_url, 5)
         yield "event: done\ndata: {\"status\":\"timeout\"}\n\n"
 
     return StreamingResponse(emit(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
