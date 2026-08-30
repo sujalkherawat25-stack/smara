@@ -73,6 +73,7 @@ CREDENTIALS_ENV = "SMARA_DESKTOP_CREDENTIALS"
 UNDO_DIR_NAME = "undo"
 LOG = logging.getLogger("smara.desktop")
 _CREDENTIAL_NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+_STATE_CACHE: dict[str, tuple[int, int, dict]] = {}
 
 # Recipes are deterministic convenience names, not a second command
 # language. They do not accept extra flags, so a hosted task cannot turn a
@@ -390,12 +391,29 @@ def _save_state(path: Path, state: dict) -> None:
             serialized["token_dpapi"] = _protect_windows(token)
         else:
             serialized["token"] = token
-    path.write_text(json.dumps(serialized, ensure_ascii=False), encoding="utf-8")
-    if os.name != "nt":
-        path.chmod(0o600)
+    # Replace the state atomically so a long-polling executor observes either
+    # the previous valid permissions or the complete new file, never a partial
+    # JSON write from the settings UI.
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(json.dumps(serialized, ensure_ascii=False), encoding="utf-8")
+        if os.name != "nt":
+            temporary.chmod(0o600)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    _STATE_CACHE.pop(str(path), None)
 
 
 def _load_state(path: Path) -> dict:
+    try:
+        stat = path.stat()
+        cache_key = str(path)
+        cached = _STATE_CACHE.get(cache_key)
+        if cached and cached[:2] == (stat.st_mtime_ns, stat.st_size):
+            return dict(cached[2])
+    except OSError:
+        stat = None
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, ValueError) as exc:
@@ -409,7 +427,12 @@ def _load_state(path: Path) -> dict:
         raise RuntimeError("Desktop pairing state is invalid; pair this device again.")
     if os.name == "nt" and "token_dpapi" not in value:
         _save_state(path, value)  # one-time migration away from legacy plaintext state
-    return value
+    try:
+        stat = path.stat()
+        _STATE_CACHE[str(path)] = (stat.st_mtime_ns, stat.st_size, dict(value))
+    except OSError:
+        pass
+    return dict(value)
 
 
 def _pause_path(state_path: Path) -> Path:

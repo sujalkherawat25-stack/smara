@@ -753,9 +753,24 @@ async def self_revoke_executor(executor_id: str, identity: tuple[str, str] = Dep
         raise HTTPException(404, "Desktop executor was not found or is already revoked.") from exc
 
 @app.post("/v1/executors/claim")
-async def claim_executor(identity: tuple[str, str] = Depends(executor_identity)):
-    try: return {"step": store.claim_for_executor(*identity)}
-    except KeyError: raise HTTPException(401, "Executor credentials are invalid or revoked.")
+async def claim_executor(
+    wait_seconds: float = Query(default=5.0, ge=0.0, le=25.0),
+    identity: tuple[str, str] = Depends(executor_identity),
+):
+    """Claim immediately, then wait on an advisory signal before repairing.
+
+    The database claim is always authoritative. Redis only wakes an idle
+    desktop sooner; a missing signal simply falls back to the bounded wait and
+    second claim, so work cannot be lost.
+    """
+    try:
+        step = await _async_store().call("claim_for_executor", *identity)
+        if step is None and wait_seconds:
+            await wait_for_signal(settings.redis_url, wait_seconds)
+            step = await _async_store().call("claim_for_executor", *identity)
+        return {"step": step}
+    except KeyError:
+        raise HTTPException(401, "Executor credentials are invalid or revoked.")
 
 @app.post("/v1/executors/steps/{step_id}/heartbeat")
 async def heartbeat_executor_step(step_id: str, identity: tuple[str, str] = Depends(executor_identity)):

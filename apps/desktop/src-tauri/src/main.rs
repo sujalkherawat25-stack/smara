@@ -7,10 +7,22 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter};
 
 const DEFAULT_API_URL: &str = "https://ai.syntarus.com/smara-api";
 const DEFAULT_WEB_URL: &str = "https://ai.syntarus.com/";
+
+fn shared_http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(3600))
+            .build()
+            .expect("shared Smara HTTP client must build")
+    })
+}
 
 #[derive(Debug, Clone, Serialize)]
 struct ConnectionState {
@@ -363,8 +375,8 @@ async fn login_cli(api_url: String, web_url: String) -> Result<String, String> {
     if !(api_url.starts_with("http://") || api_url.starts_with("https://")) {
         return Err("Smara API URL must start with http:// or https://".to_owned());
     }
-    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build().map_err(|error| error.to_string())?;
-    let request = client.get(format!("{api_url}/v1/cli/device/request")).query(&[("name", "Smara Desktop")]).send().await.map_err(|error| format!("Could not start sign-in: {error}"))?;
+    let client = shared_http_client();
+    let request = client.get(format!("{api_url}/v1/cli/device/request")).query(&[("name", "Smara Desktop")]).timeout(std::time::Duration::from_secs(15)).send().await.map_err(|error| format!("Could not start sign-in: {error}"))?;
     if !request.status().is_success() {
         let status = request.status();
         let detail = request.json::<Value>().await.ok().and_then(|value| value.get("detail").and_then(Value::as_str).map(str::to_owned));
@@ -388,7 +400,7 @@ async fn login_cli(api_url: String, web_url: String) -> Result<String, String> {
             return Err("Sign-in timed out. Choose Sign in again to create a fresh request.".to_owned());
         }
         tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
-        let response = client.get(format!("{api_url}/v1/cli/device/poll")).query(&[("device_code", device_code)]).send().await.map_err(|error| format!("Sign-in polling failed: {error}"))?;
+        let response = client.get(format!("{api_url}/v1/cli/device/poll")).query(&[("device_code", device_code)]).timeout(std::time::Duration::from_secs(15)).send().await.map_err(|error| format!("Sign-in polling failed: {error}"))?;
         if !response.status().is_success() {
             let status = response.status();
             let detail = response.json::<Value>().await.ok().and_then(|value| value.get("detail").and_then(Value::as_str).map(str::to_owned));
@@ -464,7 +476,7 @@ fn save_settings(settings: LocalSettings) -> Result<ConnectionState, String> {
 #[tauri::command]
 async fn check_connection(api_url: String) -> Result<RemoteStatus, String> {
     let api_url = normalized_api_url(&api_url);
-    let response = reqwest::Client::new().get(format!("{api_url}/health")).timeout(std::time::Duration::from_secs(8)).send().await.map_err(|error| format!("Hosted Smara is unreachable: {error}"))?;
+    let response = shared_http_client().get(format!("{api_url}/health")).timeout(std::time::Duration::from_secs(8)).send().await.map_err(|error| format!("Hosted Smara is unreachable: {error}"))?;
     let status = response.status();
     if !status.is_success() { return Ok(RemoteStatus { ok: false, api_url, detail: format!("Hosted Smara returned HTTP {status}") }); }
     let payload = response.json::<Value>().await.map_err(|_| RemoteStatus { ok: false, api_url: api_url.clone(), detail: "This URL returned a web page, not the Smara API. Use an API URL ending in /smara-api.".to_owned() });
@@ -644,7 +656,7 @@ fn read_log() -> Result<String, String> {
 async fn load_tasks() -> Result<Vec<Value>, String> {
     let token = cli_token()?;
     let api_url = current_connection().api_url;
-    let response = reqwest::Client::new().get(format!("{api_url}/v1/tasks")).bearer_auth(token).timeout(std::time::Duration::from_secs(12)).send().await.map_err(|error| format!("Could not load hosted tasks: {error}"))?;
+    let response = shared_http_client().get(format!("{api_url}/v1/tasks")).bearer_auth(token).timeout(std::time::Duration::from_secs(12)).send().await.map_err(|error| format!("Could not load hosted tasks: {error}"))?;
     if response.status() == reqwest::StatusCode::UNAUTHORIZED {
         let _ = fs::remove_file(cli_token_path());
         return Err("401: Your Smara sign-in expired. Sign in again to load tasks.".to_owned());
@@ -661,7 +673,7 @@ async fn load_task_details(task_id: String) -> Result<Value, String> {
     }
     let token = cli_token()?;
     let api_url = current_connection().api_url;
-    let client = reqwest::Client::new();
+    let client = shared_http_client();
     let mut values = serde_json::Map::new();
     for (key, suffix) in [("task", ""), ("steps", "/steps"), ("events", "/events"), ("artifacts", "/artifacts")] {
         let response = client.get(format!("{api_url}/v1/tasks/{task_id}{suffix}")).bearer_auth(&token).timeout(std::time::Duration::from_secs(12)).send().await.map_err(|error| format!("Could not load task details: {error}"))?;
@@ -722,8 +734,8 @@ async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModel
         "max_tokens": 2048,
         "temperature": 0.2,
     });
-    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(300)).build().map_err(|error| format!("Could not prepare local chat: {error}"))?;
-    let mut request = client.post(endpoint).header("Accept", "text/event-stream").json(&payload);
+    let client = shared_http_client();
+    let mut request = client.post(endpoint).timeout(std::time::Duration::from_secs(300)).header("Accept", "text/event-stream").json(&payload);
     if profile.auth_header == "api-subscription-key" { request = request.header("api-subscription-key", &secret); }
     else { request = request.bearer_auth(&secret); }
     let response = request.send().await.map_err(|error| format!("Could not reach the local {0} provider: {error}", profile.label))?;
@@ -769,7 +781,7 @@ async fn stream_chat(app: AppHandle, args: ChatArgs) -> Result<(), String> {
     let token = cli_token()?;
     let mut payload = json!({ "message": args.message, "workspace_id": if args.workspace.trim().is_empty() { "default" } else { args.workspace.trim() }, "conversation_id": args.conversation_id });
     if !args.model_profile.trim().is_empty() && args.model_profile.trim() != "default" { payload["model_profile"] = Value::String(args.model_profile.trim().to_owned()); }
-    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(3600)).build().map_err(|error| format!("Could not prepare chat: {error}"))?;
+    let client = shared_http_client();
     let response = client.post(format!("{}/v1/chat/stream", args.api_url.trim_end_matches('/'))).bearer_auth(token).header("Accept", "text/event-stream").json(&payload).send().await.map_err(|error| format!("Could not start chat: {error}"))?;
     if response.status() == reqwest::StatusCode::UNAUTHORIZED {
         let _ = fs::remove_file(cli_token_path());
