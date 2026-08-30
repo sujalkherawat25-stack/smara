@@ -58,6 +58,22 @@ _TOOL_HINT_RE = re.compile(
 
 MEMORY_LOOKUP_TIMEOUT_SECONDS = 1.5
 CONTEXT_MAX_CHARS = 12_000
+_TARGET_WORDS_RE = re.compile(
+    r"\b(?:at\s+least\s+|minimum(?:\s+of)?\s+|around\s+|about\s+|approximately\s+)?(\d{3,5})\s+words?\b",
+    re.IGNORECASE,
+)
+
+
+def _requested_word_target(message: str) -> int | None:
+    """Read an explicit, bounded word target from a user request."""
+    matches = [int(value) for value in _TARGET_WORDS_RE.findall(str(message or ""))]
+    if not matches:
+        return None
+    return max(300, min(5_000, max(matches)))
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\b[\w][\w'-]*\b", str(text or "")))
 
 
 def _bounded_context(
@@ -469,25 +485,63 @@ class SmaraAgentRuntime:
                 # dedicated writer pass keeps citations attached to claims
                 # and prevents the UI from displaying raw snippets as if
                 # they were a complete report.
+                target_words = _requested_word_target(message)
                 writer_system = (
                     "You are Smara's research writer. Answer the user's request using only the labelled "
                     "research evidence supplied below. Cite every factual claim with one or more matching "
                     "labels such as [1] or [2]. Clearly separate verified facts, interpretation, disagreements, "
-                    "and limitations. If the user requests a target length, meet it when the evidence supports "
-                    "that length; never pad with unsupported facts. Do not mention internal tools or chain of thought. "
+                    "and limitations. If the user gives a word target, you MUST meet or exceed it by expanding "
+                    "the supported analysis across the evidence; never pad with unsupported facts. Do not mention "
+                    "internal tools or chain of thought. "
                     "Return polished Markdown and no JSON envelope."
                 )
                 writer_message = (
                     f"User request:\n{message[:4_000]}\n\n"
                     f"Labelled research evidence:\n{result.content[:16_000]}"
                 )
+                if target_words:
+                    writer_message += (
+                        f"\n\nLength requirement: produce at least {target_words} words. "
+                        "Use a structured report with an introduction, several evidence-backed sections, "
+                        "a comparison or implications section when relevant, and a limitations/conclusion section."
+                    )
                 if event_hook:
                     event_hook("agent.phase", {"phase": "answer"})
-                answer = await self._direct_answer(
-                    system=writer_system,
-                    message=writer_message,
-                    token_hook=token_hook,
-                )
+                if target_words:
+                    # Buffer a targeted draft so an under-length response is
+                    # never streamed and then duplicated by the expansion
+                    # pass. The final accepted draft is emitted once.
+                    draft_chunks: list[str] = []
+                    answer = await self._direct_answer(
+                        system=writer_system,
+                        message=writer_message,
+                        token_hook=draft_chunks.append,
+                    )
+                    expansion_attempts = 0
+                    while _word_count(answer) < target_words and expansion_attempts < 2:
+                        expansion_attempts += 1
+                        expansion_message = (
+                            f"{writer_message}\n\nYour first draft was {_word_count(answer)} words. "
+                            f"Rewrite and expand it to at least {target_words} words now. Preserve every valid "
+                            "citation label, add no uncited factual claims, and do not discuss this instruction. "
+                            f"FIRST DRAFT:\n{answer[:12_000]}"
+                        )
+                        answer = await self._direct_answer(
+                            system=writer_system,
+                            message=expansion_message,
+                            # Buffer every retry; only the final accepted
+                            # answer is emitted below, preventing duplicate
+                            # text when a provider under-delivers again.
+                            token_hook=None,
+                        )
+                    if token_hook:
+                        token_hook(answer)
+                else:
+                    answer = await self._direct_answer(
+                        system=writer_system,
+                        message=writer_message,
+                        token_hook=token_hook,
+                    )
             else:
                 answer = result.content
                 if name == "calculate":

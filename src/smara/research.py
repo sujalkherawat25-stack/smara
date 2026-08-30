@@ -95,11 +95,20 @@ class _TextExtractor(HTMLParser):
         super().__init__()
         self.title = ""
         self._in_title = False
+        # Modern pages ship a large amount of JavaScript/CSS around a small
+        # article. Treat those blocks as non-content so a framework bootstrap
+        # cannot be mistaken for evidence.
+        self._ignored_depth = 0
         self.parts: list[str] = []
         self.published_at: str | None = None
 
     def handle_starttag(self, tag: str, attrs) -> None:
         tag = tag.lower()
+        if tag in {"script", "style", "noscript", "template", "svg"}:
+            self._ignored_depth += 1
+            return
+        if self._ignored_depth:
+            return
         self._in_title = tag == "title"
         values = {str(key).lower(): str(value).strip() for key, value in attrs if value}
         if tag == "time" and values.get("datetime") and not self.published_at:
@@ -110,9 +119,16 @@ class _TextExtractor(HTMLParser):
                 self.published_at = values["content"][:100]
 
     def handle_endtag(self, tag: str) -> None:
-        if tag.lower() == "title": self._in_title = False
+        tag = tag.lower()
+        if tag in {"script", "style", "noscript", "template", "svg"}:
+            self._ignored_depth = max(0, self._ignored_depth - 1)
+            return
+        if not self._ignored_depth and tag == "title":
+            self._in_title = False
 
     def handle_data(self, data: str) -> None:
+        if self._ignored_depth:
+            return
         cleaned = " ".join(data.split())
         if cleaned:
             self.parts.append(cleaned)

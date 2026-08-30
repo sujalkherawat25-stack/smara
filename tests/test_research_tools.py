@@ -136,3 +136,29 @@ def test_tavily_uses_advanced_depth_by_default(monkeypatch):
             return await research_tools.WebSearchTool(client).search("quality")
 
     assert asyncio.run(execute()) == []
+
+
+def test_page_reader_ignores_javascript_and_stylesheet_noise():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html"},
+            text=(
+                "<html><head><title>Readable report</title>"
+                "<style>body{font-family:fake} .noise{display:none}</style>"
+                "<script>window.__BOOTSTRAP__='not evidence';</script></head>"
+                "<body><main>"
+                "This is the substantive report text that should be extracted and cited. "
+                + ("It contains a documented finding. " * 8)
+                + "</main><script>console.log('ignore me')</script></body></html>"
+            ),
+        )
+
+    async def execute():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await research_tools.FetchUrlTool(client).fetch("https://example.com/report")
+
+    source = asyncio.run(execute())
+    assert "substantive report text" in source.excerpt
+    assert "__BOOTSTRAP__" not in source.excerpt
+    assert "font-family" not in source.excerpt

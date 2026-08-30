@@ -237,6 +237,48 @@ def test_deterministic_deep_research_runs_writer_pass_and_preserves_citations(mo
     assert any(name == "agent.phase" and payload.get("phase") == "answer" for name, payload in events)
 
 
+def test_targeted_research_expands_short_draft_before_streaming(monkeypatch):
+    from smara.tool_registry import ToolResult
+
+    class Provider:
+        _model = "writer"
+
+        def __init__(self):
+            self.calls = []
+
+        async def complete(self, *, system, message):
+            self.calls.append(message)
+            if len(self.calls) == 1:
+                return "Short sourced draft [1]."
+            return "The evidence confirms this documented finding [1]. " * 180
+
+    class Registry:
+        async def invoke(self, name, arguments, context):
+            return ToolResult(
+                True,
+                "[RESEARCH_CONTEXT]\n[1] Official source\nURL: https://example.com\nEVIDENCE: verified fact",
+                citations=["https://example.com"],
+                meta={"queries": ["primary"], "sources": 1, "fetched": 1, "failed": 0},
+            )
+
+    class RegistryFactory:
+        def restrict(self, _names):
+            return Registry()
+
+    monkeypatch.setattr("smara.agent_runtime.default_tool_registry", lambda *_args, **_kwargs: RegistryFactory())
+    streamed: list[str] = []
+    provider = Provider()
+    turn = asyncio.run(SmaraAgentRuntime(provider).chat_with_tools(
+        account_id="acct_1",
+        workspace_id="default",
+        message="Give me a detailed analysis with at least 1200 words and citations",
+        token_hook=streamed.append,
+    ))
+    assert len(provider.calls) == 2
+    assert len(turn.message.split()) >= 1200
+    assert streamed and "Short sourced draft" not in "".join(streamed)
+
+
 def test_runtime_passes_connected_integration_runner_to_tool_selection():
     calls = []
 
