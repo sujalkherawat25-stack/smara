@@ -129,13 +129,16 @@ proof/artifacts.
 
 ### Verification already green
 
-- 213 Python tests, frontend production/type checks, native Rust tests, and
+- 221 Python tests, frontend production/type checks, native Rust tests, and
   Windows packaging checks.
 - Live Grok/Tavily/research/task/approval/lease safety smokes.
 - Disposable local file read/write, Python codebase test, and browser-opening
   workflow passed with the paired executor.
 - Expired uncertain terminal/browser/write leases fail closed and are audited
   instead of being replayed.
+- The hosted planner can now create one bounded, sequential local workflow
+  graph (inspect → plan → edit → run → verify → report); each stage remains
+  approval-gated and capability-scoped on the paired desktop.
 - Local browser DOM/download and Tavily/GitHub adapter contracts are covered by
   desktop tests; live provider calls still require a user's local credential
   and paired, approved task.
@@ -634,8 +637,10 @@ before it is enabled.
   Retention remains server-controlled and is not a download surface yet.
 - The task result is now read from the durable `result_summary` record, so
   “completed” is distinct from “result produced” when no answer was generated.
-- Provide safe retry/reopen/reconcile controls for failed or dead-lettered
-  local steps.
+- **Implemented:** failed tasks can be retried through the durable task API;
+  uncertain local steps reconcile against the authenticated hosted step-status
+  endpoint before reconnect claiming, while failed/dead-lettered work remains
+  visible for explicit operator action.
 
 ## 8. Local agent and task architecture
 
@@ -655,7 +660,11 @@ before it is enabled.
    time/output/byte limits, idempotency key, result schema, artifact list,
    redaction rules, and failure state.
 2. Add richer task decomposition and verification so a request can become
-   inspect → plan → edit → run → verify → report.
+   inspect → plan → edit → run → verify → report. **Implemented as a bounded
+   first slice (2026-08-30):** the hosted planner can request one explicit,
+   sequential local workflow graph with these stage labels; the paired desktop
+   executes only after the normal approval gate and per-capability allowlists.
+   Adaptive verification/planning remains a later enhancement.
 3. Add durable local intent/queue state for disconnected desktops; never replay
    uncertain side effects automatically.
 4. **Implemented in this change:** local skill contracts, a bounded task
@@ -707,6 +716,7 @@ claim.
 - `research.web_search`
 - `research.fetch_url`
 - `desktop.request_action` through an approved durable task
+- `desktop.request_workflow` through one approved, sequential durable task graph
 
 Personal integration tools are intentionally disabled in the hosted release.
 The plugin catalogue is declarative; external MCP/plugin code is not yet an
@@ -766,9 +776,10 @@ These are deferred by owner decision and must remain disabled/documented:
    Add Telegram/Gmail/Calendar/Drive one at a time only after their local
    consent and scope contracts are implemented.
 13. **Implemented in this change:** local intent reconciliation, workspace locks,
-   local skill protocol, retry controls, and result/diff UX. Richer
-   inspect → plan → edit → verify decomposition remains a later planner
-   enhancement, not a second local agent brain.
+   local skill protocol, retry controls, result/diff UX, and a bounded
+   inspect → plan → edit → run → verify → report workflow graph. Adaptive
+   decomposition remains a later planner enhancement, not a second local agent
+   brain.
 14. Decide whether encrypted offline local memory is needed; do not create a
    second memory system by default.
 15. Run the broader agent evaluation corpus: chat, research, codebase changes,
@@ -781,7 +792,7 @@ These are deferred by owner decision and must remain disabled/documented:
 
 Current honest estimate (updated 2026-08-30):
 
-- Focused hosted + desktop beta: **~90%**.
+- Focused hosted + desktop beta: **~91%**.
 - Desktop executor foundation: **~94%**; physical restart/reconnect,
   capability depth, signing, and update trust remain.
 - Full local-agent experience: **not complete** until Sections 7–9 are

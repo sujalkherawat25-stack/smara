@@ -21,6 +21,7 @@ from .capture_processing import process_capture
 from .provider_routing import resolve_profile
 from . import llm_errors
 from .work_signals import wait_for_signal
+from .workflow import validate_workflow, workflow_summary
 
 
 async def _memory_context(memory: SyntarusMemory | None, task: dict, store: TaskStore) -> str:
@@ -171,6 +172,32 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
                     record("agent.desktop_task_requested", {"task_id": child["id"], "capability": capability})
                     return {"task_id": child["id"], "status": child["status"], "capability": capability}
 
+                def desktop_workflow_requester(preview: str, raw_stages: list[dict]) -> dict:
+                    # Re-validate at the task boundary.  The tool validates its
+                    # input too, but this callback is also a direct integration
+                    # seam and must never trust a caller that bypasses the
+                    # registry.
+                    stages = validate_workflow(raw_stages)
+                    steps = [
+                        {
+                            "name": f"desktop.{item['stage']}",
+                            "depends_on": item["depends_on"],
+                            "executor_kind": "desktop",
+                            "required_capability": item["capability"],
+                            "executor_payload": item["payload"],
+                        }
+                        for item in stages
+                    ]
+                    child = store.create(
+                        task["account_id"], task["workspace_id"], f"Desktop workflow: {preview[:64]}", preview,
+                        True,
+                        steps,
+                    )
+                    child = store.request_approval(child["id"], task["account_id"])
+                    summary = workflow_summary(stages)
+                    record("agent.desktop_workflow_requested", {"task_id": child["id"], **summary})
+                    return {"task_id": child["id"], "status": child["status"], **summary}
+
                 # In the default local-only security posture, the hosted VM
                 # never receives or decrypts a user's Gmail/Calendar/Drive/
                 # GitHub/Telegram credential. Personal integrations will be
@@ -182,11 +209,16 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
                     integration_runner=hosted_runner,
                     integration_requester=hosted_requester,
                     desktop_requester=desktop_requester,
+                    desktop_workflow_requester=desktop_workflow_requester,
                     include_user_integrations=settings.hosted_user_integrations_enabled,
                 )).run(
                     task=task,
                     memory_context=context,
-                    tool_context=ToolContext(task["account_id"], task["workspace_id"], client, hosted_runner, hosted_requester, desktop_requester),
+                    tool_context=ToolContext(
+                        task["account_id"], task["workspace_id"], client,
+                        hosted_runner, hosted_requester, desktop_requester,
+                        desktop_workflow_requester,
+                    ),
                     event_hook=record,
                 )
             await _memory_write(memory, task, store, "completion", result=result.text)

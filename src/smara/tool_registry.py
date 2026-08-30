@@ -19,6 +19,7 @@ import httpx
 from .research import source_quality
 from .research_tools import FetchUrlTool as ResearchFetchUrlTool
 from .research_tools import ResearchToolError, WebSearchTool as ResearchWebSearchTool
+from .workflow import validate_workflow, workflow_summary
 
 MAX_TOOL_RESULT_CHARS = 4_000
 
@@ -44,6 +45,7 @@ class ToolContext:
     integration_runner: Callable[[str, str, dict[str, Any]], Awaitable[str]] | None = None
     integration_requester: Callable[[str, str, str, str, dict[str, Any]], dict[str, Any]] | None = None
     desktop_requester: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None
+    desktop_workflow_requester: Callable[[str, list[dict[str, Any]]], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -323,6 +325,57 @@ class DesktopActionRequestTool:
         return ToolResult(True, _bounded(json.dumps({"approval_required": True, **result}, ensure_ascii=False)))
 
 
+class DesktopWorkflowRequestTool:
+    """Create one approval-gated, sequential local task graph."""
+
+    spec = ToolSpec(
+        "desktop.request_workflow",
+        "Create one durable approval-gated local workflow. The hosted planner supplies explicit inspect, plan, edit, run, verify, and report stages; the paired desktop executes them in order and never runs a stage without approval.",
+        {
+            "type": "object",
+            "properties": {
+                "preview": {"type": "string", "minLength": 1, "maxLength": 1_000},
+                "stages": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 6,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "stage": {"type": "string", "enum": ["inspect", "plan", "edit", "run", "verify", "report"]},
+                            "capability": {"type": "string", "enum": ["local_file_read", "local_file_write", "local_terminal", "local_browser", "local_integration"]},
+                            "payload": {"type": "object", "maxProperties": 30},
+                        },
+                        "required": ["stage", "capability", "payload"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["preview", "stages"],
+            "additionalProperties": False,
+        },
+    )
+
+    async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        if context.desktop_workflow_requester is None:
+            raise ToolError("Desktop workflows are available only inside an approved hosted task.")
+        preview, raw_stages = arguments.get("preview"), arguments.get("stages")
+        if not isinstance(preview, str) or not preview.strip():
+            raise ToolError("Desktop workflow needs a preview.")
+        try:
+            stages = validate_workflow(raw_stages)
+            result = context.desktop_workflow_requester(preview[:1_000], stages)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+        except Exception as exc:
+            raise ToolError(f"Desktop workflow request failed: {str(exc)[:300]}") from exc
+        return ToolResult(True, _bounded(json.dumps({
+            "approval_required": True,
+            "workflow": workflow_summary(stages),
+            **result,
+        }, ensure_ascii=False)))
+
+
 class ToolRegistry:
     def __init__(self, tools: list[Tool] | None = None):
         self._tools: dict[str, Tool] = {}
@@ -368,7 +421,7 @@ class ToolRegistry:
         return ToolResult(result.ok, _bounded(result.content), list(result.citations)[:20], dict(result.meta))
 
 
-def default_tool_registry(http_client: httpx.AsyncClient | None = None, *, integration_runner: Callable[[str, str, dict[str, Any]], Awaitable[str]] | None = None, integration_requester: Callable[[str, str, str, str, dict[str, Any]], dict[str, Any]] | None = None, desktop_requester: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None, include_user_integrations: bool = True) -> ToolRegistry:
+def default_tool_registry(http_client: httpx.AsyncClient | None = None, *, integration_runner: Callable[[str, str, dict[str, Any]], Awaitable[str]] | None = None, integration_requester: Callable[[str, str, str, str, dict[str, Any]], dict[str, Any]] | None = None, desktop_requester: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None, desktop_workflow_requester: Callable[[str, list[dict[str, Any]]], dict[str, Any]] | None = None, include_user_integrations: bool = True) -> ToolRegistry:
     registry = ToolRegistry([
         CurrentTimeTool(),
         CalculateTool(),
@@ -384,4 +437,6 @@ def default_tool_registry(http_client: httpx.AsyncClient | None = None, *, integ
         registry.register(IntegrationApprovalRequestTool())
     if desktop_requester is not None:
         registry.register(DesktopActionRequestTool())
+    if desktop_workflow_requester is not None:
+        registry.register(DesktopWorkflowRequestTool())
     return registry

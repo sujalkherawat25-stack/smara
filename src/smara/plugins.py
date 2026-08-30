@@ -18,7 +18,7 @@ def manifests(raw: str = "", *, include_user_integrations: bool = True) -> list[
         {"name": "smara-core", "version": "1", "kind": "builtin", "enabled": True, "tools": ["current_time", "calculate"]},
         {"name": "smara-research", "version": "1", "kind": "builtin", "enabled": True, "tools": ["research.web_search", "research.fetch_url"]},
         {"name": "smara-integrations", "version": "1", "kind": "builtin", "enabled": True, "tools": ["integration.*"], "approval_required": True},
-        {"name": "smara-desktop", "version": "1", "kind": "builtin", "enabled": True, "tools": ["desktop.request_action"], "approval_required": True},
+        {"name": "smara-desktop", "version": "1", "kind": "builtin", "enabled": True, "tools": ["desktop.request_action", "desktop.request_workflow"], "approval_required": True},
     ]
     if not include_user_integrations:
         builtins = [item for item in builtins if item["name"] != "smara-integrations"]

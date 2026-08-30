@@ -79,6 +79,39 @@ def test_agent_worker_receives_desktop_requester_port(tmp_path: Path, monkeypatc
     assert len(children) == 1 and children[0]["requires_approval"] == 1
 
 
+def test_agent_worker_expands_desktop_workflow_into_ordered_approval_steps(tmp_path: Path, monkeypatch):
+    class FakeStepRuntime:
+        def __init__(self, provider, registry):
+            self.registry = registry
+
+        async def run(self, *, task, memory_context, tool_context, event_hook=None, token_hook=None):
+            child = tool_context.desktop_workflow_requester("Inspect and verify", [
+                {"stage": "inspect", "capability": "local_file_read", "payload": {"operation": "list_tree", "path": "workspace"}},
+                {"stage": "verify", "capability": "local_terminal", "payload": {"recipe": "python.compile", "cwd": "workspace"}},
+            ])
+            assert child["status"] == "waiting_approval"
+            return agent_step.AgentStepResult("Workflow is awaiting approval.", tools_used=1)
+
+    monkeypatch.setattr(worker, "BoundedAgentStepRuntime", FakeStepRuntime)
+    monkeypatch.setattr(worker, "settings", replace(
+        worker.settings,
+        llm_base_url="https://llm.example/v1",
+        llm_api_key="test-key",
+        llm_model="test-model",
+        llm_provider="default",
+        llm_profiles="",
+    ))
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Agent", "Inspect and verify locally", False, [{"name": "agent.execute"}])
+    assert asyncio.run(run_once(store, None))
+    children = [row for row in store.list("acct_1") if row["id"] != task["id"]]
+    assert len(children) == 1 and children[0]["requires_approval"] == 1
+    child_steps = store.steps(children[0]["id"], "acct_1")
+    assert [step["name"] for step in child_steps] == ["desktop.inspect", "desktop.verify"]
+    assert child_steps[1]["required_capability"] == "local_terminal"
+    assert store.events(children[0]["id"], "acct_1")[-1]["type"] == "approval.requested"
+
+
 def test_step_lease_prevents_double_claim_and_recovers(tmp_path: Path):
     store = TaskStore(str(tmp_path / "smara.db"))
     task = store.create("acct_1", "work", "Run", "Perform one safe step", False)

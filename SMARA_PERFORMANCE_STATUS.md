@@ -23,7 +23,10 @@ The local-agent inspection follow-up is also complete: bounded file
 classification and changed-file hash proofs are emitted locally and covered
 by Desktop executor tests; file contents remain opt-in and bounded. Uncertain
 local journal entries now reconcile against the hosted step-status endpoint
-before a reconnect can claim new work.
+before a reconnect can claim new work. A bounded `desktop.request_workflow`
+first slice now lets the hosted planner submit an explicit sequential
+inspect/plan/edit/run/verify/report graph; every stage retains the existing
+approval and capability boundaries.
 
 ## Rollout switches
 
@@ -45,7 +48,7 @@ per-request resources; it does not delete or rewrite durable work.
 
 ## Verification performed
 
-- Python: **213 passed**, two existing JWT key-length warnings only.
+- Python: **221 passed**, two existing JWT key-length warnings only.
 - Python bytecode compilation: passed.
 - Frontend type-check: passed.
 - Frontend production build: passed (4218 modules transformed).

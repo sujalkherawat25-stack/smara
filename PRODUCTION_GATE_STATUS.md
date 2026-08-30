@@ -34,7 +34,7 @@ preserved without a second public UI.
   2026-08-25 restore contained all 17 recorded Smara schema versions and 17
   staging tasks. The live database was not modified; backup files are now
   forced to owner-only mode by the script.
-- Repository tests pass locally (**213 tests**) with Python compilation,
+- Repository tests pass locally (**221 tests**) with Python compilation,
   frontend type-check, and production frontend build. The lease-heartbeat
   change is now deployed and the live Postgres desktop claim/heartbeat/
   completion smoke passed. The Work panel also now maps the deployed
@@ -102,7 +102,7 @@ preserved without a second public UI.
   hosted `POST /v1/tasks/{task_id}/retry` action. Web task artifacts now show
   structured previews/diffs, changed files, output, and SHA-256 values; the
   Desktop task detail accepts the same artifact hashes. The full Smara suite
-  passes **213 tests**. Reconnects also reconcile uncertain local entries
+  passes **221 tests**. Reconnects also reconcile uncertain local entries
   through the executor-scoped step-status endpoint before claiming work.
 - The deployed live workflow passed direct Grok chat, calculator execution,
   Tavily discovery, official-page retrieval, and a cited research answer using
@@ -193,7 +193,7 @@ remain in force and they must be reopened before a later production promotion:
   state. The UI explains that an allowlist is eligibility, not approval.
 - A failed connection check now clears stale remote-online state, and a native
   chat event subscription failure is surfaced instead of being silently lost.
-- `npm run build`, 213 backend tests, eight native Rust tests, and the full
+- `npm run build`, 221 backend tests, eight native Rust tests, and the full
   package build passed. The NSIS beta
   installer was rebuilt and the release app restarted successfully.
 - The installer includes a Windows Desktop shortcut hook (`Smara Desktop.lnk`)
