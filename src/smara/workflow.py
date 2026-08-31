@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 from .local_agent import LOCAL_SKILLS
+from .workspace_contract import validate_workspace_job
 
 
 MAX_WORKFLOW_STAGES = 6
@@ -67,6 +68,13 @@ def validate_workflow(stages: Any) -> list[dict[str, Any]]:
             raise ValueError("Nested local workflows are not allowed.")
         if _contains_secret_field(payload):
             raise ValueError("Local workflow payloads cannot carry credentials; use a local credential alias.")
+        if "workspace_job" in payload:
+            try:
+                job = validate_workspace_job(payload["workspace_job"])
+            except RuntimeError as exc:
+                raise ValueError(str(exc)) from exc
+            if capability not in job.allowed_capabilities:
+                raise ValueError("workspace_job does not allow the workflow stage capability.")
         try:
             encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         except (TypeError, ValueError) as exc:

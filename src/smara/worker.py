@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import time
 import httpx
@@ -22,6 +23,7 @@ from .provider_routing import resolve_profile
 from . import llm_errors
 from .work_signals import wait_for_signal
 from .workflow import validate_workflow, workflow_summary
+from .workspace_contract import build_workspace_job
 
 
 async def _memory_context(memory: SyntarusMemory | None, task: dict, store: TaskStore) -> str:
@@ -159,11 +161,63 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
 
                 def record(event_type: str, payload: dict) -> None:
                     store.append_event(task["id"], event_type, json.dumps(payload, ensure_ascii=False)[:2_000])
+
+                def _workspace_payload(capability: str, payload: dict, *, stage: str | None = None,
+                                      ordinal: int = 0, objective: str | None = None) -> dict:
+                    """Attach a deterministic, secret-free job envelope to a local step."""
+                    normalized = dict(payload)
+                    if "workspace_job" in normalized:
+                        # The model may provide a richer contract; the desktop
+                        # validates it before execution. Do not overwrite it.
+                        return normalized
+                    root = normalized.get("workspace_root")
+                    if not root:
+                        if capability == "local_terminal":
+                            root = normalized.get("cwd") or "workspace"
+                        elif capability == "local_file_read" and normalized.get("operation") in {"list_tree", "search_text", "find_files", "git_summary"}:
+                            root = normalized.get("path") or "workspace"
+                        else:
+                            # A file path identifies the target, not the job
+                            # root. The desktop resolves it under its first
+                            # approved workspace.
+                            root = "workspace"
+                    if not isinstance(root, str) or not root.strip():
+                        root = "workspace"
+                    fingerprint = hashlib.sha256(
+                        json.dumps(normalized, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+                    ).hexdigest()[:16]
+                    key = f"workspace:{task['id']}:{ordinal}:{fingerprint}"
+                    normalized["workspace_job"] = build_workspace_job(
+                        workspace_root=root,
+                        objective=(objective or task.get("objective") or "Local workspace stage")[:20_000],
+                        capabilities=[capability],
+                        idempotency_key=key,
+                        acceptance_checks=[
+                            f"The {stage or capability} stage completes within the approved workspace.",
+                            "The local result includes bounded proof for review.",
+                        ],
+                    )
+                    if stage:
+                        normalized["stage"] = stage
+                    return normalized
+
                 def desktop_requester(capability: str, preview: str, payload: dict) -> dict:
+                    step_payload = _workspace_payload(
+                        capability,
+                        payload,
+                        stage={
+                            "local_file_read": "inspect",
+                            "local_file_write": "edit",
+                            "local_terminal": "run",
+                            "local_browser": "inspect",
+                            "local_integration": "inspect",
+                        }.get(capability),
+                        objective=preview,
+                    )
                     child = store.create(
                         task["account_id"], task["workspace_id"], f"Desktop: {preview[:80]}", preview,
                         True,
-                        [{"name": f"desktop.{capability}", "executor_kind": "desktop", "required_capability": capability, "executor_payload": payload}],
+                        [{"name": f"desktop.{capability}", "executor_kind": "desktop", "required_capability": capability, "executor_payload": step_payload}],
                     )
                     # Surface the approval immediately. The parent agent is
                     # already leased, so the normal worker claim transition
@@ -184,9 +238,12 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
                             "depends_on": item["depends_on"],
                             "executor_kind": "desktop",
                             "required_capability": item["capability"],
-                            "executor_payload": item["payload"],
+                            "executor_payload": _workspace_payload(
+                                item["capability"], item["payload"],
+                                stage=item["stage"], ordinal=index, objective=preview,
+                            ),
                         }
-                        for item in stages
+                        for index, item in enumerate(stages)
                     ]
                     child = store.create(
                         task["account_id"], task["workspace_id"], f"Desktop workflow: {preview[:64]}", preview,

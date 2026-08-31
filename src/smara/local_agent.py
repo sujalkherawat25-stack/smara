@@ -17,6 +17,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
+try:
+    from .workspace_contract import validate_workspace_job
+except ImportError:  # pragma: no cover - exercised by the bundled executable
+    from workspace_contract import validate_workspace_job
+
 
 JOURNAL_MAX_ENTRIES = 200
 JOURNAL_STATUSES = {"claimed", "prepared", "completed", "failed", "cancelled", "uncertain"}
@@ -140,6 +145,14 @@ def validate_local_step(step: dict[str, Any]) -> tuple[LocalSkillSpec, str]:
     declared = payload.get("skill")
     if declared is not None and declared != capability:
         raise RuntimeError("Local skill input names a different capability.")
+    # A workspace job is optional for backwards-compatible single actions,
+    # but when present it is the versioned source of truth for scope, budgets,
+    # capabilities, approval policy, and idempotency. Validate it before any
+    # capability-specific code can inspect or mutate the workspace.
+    if "workspace_job" in payload:
+        job = validate_workspace_job(payload.get("workspace_job"))
+        if capability not in job.allowed_capabilities:
+            raise RuntimeError("The local capability is not allowed by workspace_job.")
     return spec, key.strip()
 
 

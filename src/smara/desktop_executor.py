@@ -43,10 +43,12 @@ try:
     from .desktop_integrations import LocalIntegrationCancelled, execute_local_integration
     from .local_agent import LocalTaskJournal, decorate_local_result, journal_path, local_skill_catalog, skill_spec, validate_local_step, workspace_lock
     from .local_documents import build_document, is_document_operation
+    from .workspace_contract import WorkspaceJobSpec, validate_workspace_job, workspace_job_summary
 except ImportError:  # pragma: no cover - exercised by the packaged binary
     from desktop_integrations import LocalIntegrationCancelled, execute_local_integration
     from local_agent import LocalTaskJournal, decorate_local_result, journal_path, local_skill_catalog, skill_spec, validate_local_step, workspace_lock
     from local_documents import build_document, is_document_operation
+    from workspace_contract import WorkspaceJobSpec, validate_workspace_job, workspace_job_summary
 
 
 MAX_FILE_BYTES = 256 * 1024
@@ -1754,6 +1756,10 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
     payload = step.get("executor_payload")
     if not isinstance(payload, dict):
         raise RuntimeError("The desktop step payload is invalid.")
+    workspace_job: WorkspaceJobSpec | None = None
+    if "workspace_job" in payload:
+        workspace_job = validate_workspace_job(payload.get("workspace_job"))
+        _emit_progress(progress_hook, "Validated workspace job contract")
     roots = _roots(state)
     if capability == "local_file_read":
         # Keep state out of the public payload schema while allowing the
@@ -1774,6 +1780,21 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
             raise ExecutionCancelled(str(exc)) from exc
     else:
         raise RuntimeError(f"Desktop capability '{capability}' is not installed.")
+    if workspace_job is not None:
+        # Attach only bounded, secret-free contract metadata. The actual
+        # operation result remains capability-specific and is still redacted
+        # by the normal local-skill decorator.
+        try:
+            value = json.loads(result)
+        except (TypeError, ValueError):
+            value = {"result": result[:MAX_OUTPUT_CHARS]}
+        if not isinstance(value, dict):
+            value = {"result": str(value)[:MAX_OUTPUT_CHARS]}
+        value["workspace_job"] = workspace_job_summary(workspace_job)
+        stage = payload.get("stage")
+        if isinstance(stage, str) and stage:
+            value["stage"] = stage[:32]
+        result = json.dumps(value, ensure_ascii=False)
     return decorate_local_result(result, spec, idempotency_key)
 
 

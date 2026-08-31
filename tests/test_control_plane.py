@@ -1,4 +1,5 @@
 import asyncio
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -77,6 +78,10 @@ def test_agent_worker_receives_desktop_requester_port(tmp_path: Path, monkeypatc
     assert store.get(task["id"], "acct_1")["status"] == "completed"
     children = [row for row in store.list("acct_1") if row["id"] != task["id"]]
     assert len(children) == 1 and children[0]["requires_approval"] == 1
+    child_step = store.steps(children[0]["id"], "acct_1")[0]
+    child_payload = json.loads(child_step["executor_payload"])
+    assert child_payload["workspace_job"]["schema_version"] == "smara.workspace.v1"
+    assert child_payload["workspace_job"]["allowed_capabilities"] == ["local_file_read"]
 
 
 def test_agent_worker_expands_desktop_workflow_into_ordered_approval_steps(tmp_path: Path, monkeypatch):
@@ -109,6 +114,8 @@ def test_agent_worker_expands_desktop_workflow_into_ordered_approval_steps(tmp_p
     child_steps = store.steps(children[0]["id"], "acct_1")
     assert [step["name"] for step in child_steps] == ["desktop.inspect", "desktop.verify"]
     assert child_steps[1]["required_capability"] == "local_terminal"
+    assert json.loads(child_steps[0]["executor_payload"])["stage"] == "inspect"
+    assert json.loads(child_steps[1]["executor_payload"])["workspace_job"]["allowed_capabilities"] == ["local_terminal"]
     assert store.events(children[0]["id"], "acct_1")[-1]["type"] == "approval.requested"
 
 

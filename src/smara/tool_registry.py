@@ -21,6 +21,7 @@ from .research_tools import DeepResearchTool as DeepResearchEngine
 from .research_tools import FetchUrlTool as ResearchFetchUrlTool
 from .research_tools import ResearchToolError, WebSearchTool as ResearchWebSearchTool
 from .workflow import validate_workflow, workflow_summary
+from .workspace_contract import validate_workspace_job
 
 MAX_TOOL_RESULT_CHARS = 4_000
 
@@ -373,6 +374,13 @@ class DesktopActionRequestTool:
             raise ToolError("Desktop capability is not supported.")
         if not isinstance(preview, str) or not preview.strip() or not isinstance(payload, dict):
             raise ToolError("Desktop action needs a preview and object payload.")
+        if "workspace_job" in payload:
+            try:
+                job = validate_workspace_job(payload["workspace_job"])
+            except RuntimeError as exc:
+                raise ToolError(str(exc)) from exc
+            if capability not in job.allowed_capabilities:
+                raise ToolError("workspace_job does not allow the requested desktop capability.")
         try:
             result = context.desktop_requester(capability, preview[:1_000], payload)
         except Exception as exc:
