@@ -252,10 +252,15 @@ function App() {
       const tone: ActivityItem["tone"] = event.ok ? "green" : "red";
       setActivity((items) => [{ id: uid("result"), tone, label: `${event.name || "Tool"} ${event.ok ? "completed" : "failed"}`, detail: event.preview }, ...items].slice(0, 8));
     } else if (type === "done") {
+      const approvalRequired = /created\s+Smara\s+task|approval-gated/i.test(pendingAssistantText.current);
       flushAssistantText();
       setStreaming(false);
       setMessages((items) => items.map((item) => item.id === target ? { ...item, pending: false } : item));
-      setActivity((items) => [{ id: uid("done"), tone: "green" as const, label: "Response ready", detail: event.total_ms ? `${event.total_ms} ms` : undefined }, ...items].slice(0, 8));
+      setActivity((items) => [
+        ...(approvalRequired ? [{ id: uid("approval"), tone: "amber" as const, label: "Approval required", detail: "Open Smara Web → Activity to approve the local task." }] : []),
+        { id: uid("done"), tone: "green" as const, label: "Response ready", detail: event.total_ms ? `${event.total_ms} ms` : undefined },
+        ...items,
+      ].slice(0, 8));
       assistantId.current = null;
     } else if (type === "error") {
       flushAssistantText();
