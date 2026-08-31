@@ -493,6 +493,41 @@ def test_desktop_refuses_unapproved_step_and_undeclared_browser(tmp_path: Path):
         execute_step({"required_capability": "local_file_read", "executor_payload": {"path": str(tmp_path / "x")}}, state)
 
 
+def test_desktop_browser_handoff_uses_isolated_provider_profile(monkeypatch, tmp_path: Path):
+    calls: list[list[str]] = []
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setattr("smara.desktop_executor._handoff_browser_executable", lambda: Path("C:/Browser/msedge.exe"))
+
+    def launched(args, **kwargs):
+        calls.append(args)
+        assert kwargs["close_fds"] is True
+
+    monkeypatch.setattr("smara.desktop_executor.subprocess.Popen", launched)
+    state = {"capabilities": ["local_browser"], "allowed_roots": [str(tmp_path)], "browser_domains": ["github.com"]}
+    result = json.loads(execute_step({
+        "required_capability": "local_browser",
+        "executor_payload": {"operation": "handoff", "provider": "github", "url": "https://github.com/login"},
+    }, state))
+    assert result["action"] == "local_browser"
+    assert result["operation"] == "handoff"
+    assert result["provider"] == "github"
+    assert result["opened"] is True and result["isolated_profile"] is True
+    assert result["proof"] == {"provider": "github", "handoff": "local_browser_profile"}
+    assert calls and calls[0][0].endswith("msedge.exe")
+    assert any("connector-browser" in value and value.endswith("github") for value in calls[0])
+    assert "https://github.com/login" in calls[0]
+
+
+def test_desktop_browser_handoff_rejects_wrong_provider_domain(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr("smara.desktop_executor._handoff_browser_executable", lambda: (_ for _ in ()).throw(AssertionError("must not launch")))
+    state = {"capabilities": ["local_browser"], "allowed_roots": [str(tmp_path)], "browser_domains": ["example.com"]}
+    with pytest.raises(RuntimeError, match="Github handoff"):
+        execute_step({
+            "required_capability": "local_browser",
+            "executor_payload": {"operation": "handoff", "provider": "github", "url": "https://example.com/login"},
+        }, state)
+
+
 def test_desktop_browser_inspection_is_text_only_and_has_no_browser_session(monkeypatch, tmp_path: Path):
     class Response:
         is_redirect = False

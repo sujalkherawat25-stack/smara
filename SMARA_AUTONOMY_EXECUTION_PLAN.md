@@ -179,10 +179,16 @@ never silently repeat a possibly completed mutation.
   excludes credentials, query text, response text, source URLs, and repository
   names. Every connector operation remains behind the normal hosted approval
   gate before the desktop can contact a provider.
+- **A2 browser handoff shipped:** approved GitHub and Google sign-in URLs can
+  open in a dedicated per-provider Chromium profile on the PC. The handoff
+  requires the normal local-browser capability and an explicit domain
+  allowlist; its result confirms only that a local takeover window opened.
+  Cookie jars, passkeys, OTPs, authorization codes, and even the profile path
+  remain outside Smara's hosted control plane.
 - **A2 remaining work:** local OAuth/device authorization for Google Workspace
-  and GitHub, approval-gated writes, isolated browser handoff, and the
-  outbound-only MCP adapter. These require owner-controlled provider consent
-  and will ship as separately testable connector slices.
+  and GitHub, approval-gated writes, and the outbound-only MCP adapter. These
+  require owner-controlled provider consent and will ship as separately
+  testable connector slices.
 
 ### Goal
 

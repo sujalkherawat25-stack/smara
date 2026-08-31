@@ -65,6 +65,10 @@ MAX_BROWSER_DOM_SCAN_ELEMENTS = 1_000
 MAX_BROWSER_ELEMENT_TEXT_CHARS = 500
 MAX_BROWSER_ATTR_CHARS = 500
 MAX_BROWSER_DOWNLOAD_BYTES = 50 * 1024 * 1024
+HANDOFF_PROVIDERS = {
+    "github": ("github.com",),
+    "google": ("accounts.google.com", "google.com"),
+}
 MAX_WORKSPACE_TREE_ENTRIES = 500
 MAX_WORKSPACE_TREE_DEPTH = 6
 MAX_WORKSPACE_SEARCH_FILES = 100
@@ -252,6 +256,11 @@ def default_state_path() -> Path:
 def default_log_path() -> Path:
     root = Path(os.getenv("LOCALAPPDATA", Path.home() / ".local")) / "Smara" / "logs"
     return root / "desktop.log"
+
+
+def default_browser_handoff_root() -> Path:
+    """Local-only Chromium profile root for explicit connector handoffs."""
+    return Path(os.getenv("LOCALAPPDATA", Path.home() / ".local")) / "Smara" / "connector-browser"
 
 
 def default_credentials_path() -> Path:
@@ -1902,8 +1911,58 @@ def _browser_download(payload: dict, roots: list[Path], state: dict, *, checkpoi
         return _browser_download_unlocked(payload, roots, state, checkpoint=checkpoint, progress_hook=progress_hook)
 
 
+def _handoff_browser_executable() -> Path:
+    """Find a user-installed Chromium browser without downloading software."""
+    configured = os.getenv("SMARA_DESKTOP_BROWSER_EXECUTABLE", "").strip()
+    candidates = [Path(configured)] if configured else []
+    for variable in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
+        root = os.getenv(variable)
+        if root:
+            candidates.extend((
+                Path(root) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+                Path(root) / "Google" / "Chrome" / "Application" / "chrome.exe",
+            ))
+    for candidate in candidates:
+        if candidate.is_file() and candidate.suffix.lower() == ".exe":
+            return candidate
+    for executable in ("msedge", "chrome", "chromium"):
+        resolved = shutil.which(executable)
+        if resolved:
+            return Path(resolved)
+    raise RuntimeError("No supported Chromium browser was found for the isolated connector handoff.")
+
+
+def _browser_handoff(payload: dict, url: str, hostname: str, *, progress_hook=None) -> str:
+    provider = payload.get("provider")
+    if not isinstance(provider, str) or provider.strip().lower() not in HANDOFF_PROVIDERS:
+        raise RuntimeError("Browser handoff supports only the github and google connector providers.")
+    provider = provider.strip().lower()
+    if not any(hostname == domain or hostname.endswith("." + domain) for domain in HANDOFF_PROVIDERS[provider]):
+        raise RuntimeError(f"The {provider.title()} handoff must open that provider's approved sign-in domain.")
+    profile = default_browser_handoff_root() / provider
+    profile.mkdir(parents=True, exist_ok=True)
+    executable = _handoff_browser_executable()
+    _emit_progress(progress_hook, f"Opening isolated {provider} browser handoff")
+    try:
+        subprocess.Popen(
+            [str(executable), f"--user-data-dir={profile}", "--no-first-run", "--new-window", url],
+            close_fds=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except OSError as exc:
+        raise RuntimeError("The isolated connector browser could not be started.") from exc
+    # The hosted control plane receives only confirmation that an explicit,
+    # local takeover window was opened. Cookies, passkeys, OAuth codes, and
+    # the profile location never leave the device.
+    return json.dumps({
+        "action": "local_browser", "operation": "handoff", "provider": provider,
+        "opened": True, "isolated_profile": True,
+        "proof": {"provider": provider, "handoff": "local_browser_profile"},
+    }, ensure_ascii=False)
+
+
 def _browser(payload: dict, state: dict, roots: list[Path], *, checkpoint=None, progress_hook=None) -> str:
-    url, _hostname = _allowed_browser_url(payload.get("url"), state)
+    url, hostname = _allowed_browser_url(payload.get("url"), state)
     operation = payload.get("operation", "open")
     if operation == "open":
         if not webbrowser.open(url, new=0, autoraise=False):
@@ -1911,8 +1970,10 @@ def _browser(payload: dict, state: dict, roots: list[Path], *, checkpoint=None, 
         return json.dumps({"action": "local_browser", "operation": "open", "url": url, "opened": True})
     if operation == "download":
         return _browser_download(payload, roots, state, checkpoint=checkpoint, progress_hook=progress_hook)
+    if operation == "handoff":
+        return _browser_handoff(payload, url, hostname, progress_hook=progress_hook)
     if operation not in {"inspect_text", "inspect_dom"}:
-        raise RuntimeError("local_browser supports open, inspect_text, inspect_dom, and download operations only.")
+        raise RuntimeError("local_browser supports open, handoff, inspect_text, inspect_dom, and download operations only.")
     max_bytes = MAX_BROWSER_INSPECT_BYTES
     raw_bytes, content_type = _fetch_browser_bytes(url, max_bytes=max_bytes, checkpoint=checkpoint, progress_hook=progress_hook)
     digest = hashlib.sha256(raw_bytes).hexdigest()
