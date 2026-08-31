@@ -726,6 +726,16 @@ async fn load_task_details(task_id: String) -> Result<Value, String> {
     Ok(Value::Object(values))
 }
 
+#[tauri::command]
+fn decide_local_task(task_id: String, approved: bool) -> Result<(), String> {
+    if task_id.trim().is_empty() || task_id.len() > 160 || !task_id.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-')) {
+        return Err("Task id is invalid.".to_owned());
+    }
+    let flag = if approved { "--approve-task" } else { "--deny-task" };
+    run_executor(vec!["--state".to_owned(), state_path().display().to_string(), flag.to_owned(), task_id])?;
+    Ok(())
+}
+
 fn local_chat_endpoint(base_url: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
     if trimmed.ends_with("/chat/completions") { trimmed.to_owned() } else { format!("{trimmed}/chat/completions") }
@@ -857,7 +867,7 @@ fn open_web() -> Result<(), String> { open::that(current_connection().web_url).m
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_task_details, stream_chat, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile])
+        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_task_details, decide_local_task, stream_chat, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile])
         .run(tauri::generate_context!())
         .expect("error while running Smara Desktop");
 }

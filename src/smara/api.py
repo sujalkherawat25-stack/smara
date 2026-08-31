@@ -284,6 +284,7 @@ def view(row: dict) -> TaskView:
     return TaskView(**{
         **row,
         "requires_approval": bool(row["requires_approval"]),
+        "approval_mode": row.get("approval_mode") or "hosted",
         # `result_summary` is the durable final answer. Keep the wire name
         # short and provider-neutral for Web, CLI, and future clients.
         "result": row.get("result_summary") or None,
@@ -912,6 +913,16 @@ async def claim_executor(
     except KeyError:
         raise HTTPException(401, "Executor credentials are invalid or revoked.")
 
+@app.post("/v1/executors/tasks/{task_id}/approval", response_model=TaskView)
+async def decide_executor_task(task_id: str, body: ApprovalDecision, identity: tuple[str, str] = Depends(executor_identity)):
+    """The sole approval endpoint for paired-Desktop work."""
+    try:
+        return view(store.decide_for_executor(*identity, task_id, body.approved, body.note))
+    except KeyError:
+        raise HTTPException(401, "Executor credentials are invalid, revoked, or cannot access this task.")
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
 @app.post("/v1/executors/steps/{step_id}/heartbeat")
 async def heartbeat_executor_step(step_id: str, identity: tuple[str, str] = Depends(executor_identity)):
     """Refresh only the lease owned by this paired desktop executor."""
@@ -1171,7 +1182,11 @@ async def task_artifacts(task_id: str, user: str = Depends(account_id)):
 
 @app.post("/v1/tasks/{task_id}/approval", response_model=TaskView)
 async def approve(task_id: str, body: ApprovalDecision, user: str = Depends(account_id)):
-    try: return view(store.decide(task_id, user, body.approved, body.note))
+    try:
+        task = store.get(task_id, user)
+        if task.get("approval_mode", "hosted") == "desktop":
+            raise HTTPException(409, "This task must be approved or rejected on its paired Desktop.")
+        return view(store.decide(task_id, user, body.approved, body.note))
     except KeyError: raise HTTPException(404, "Task not found")
     except ValueError as exc: raise HTTPException(409, str(exc)) from exc
 

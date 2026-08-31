@@ -50,7 +50,7 @@ class TaskStore:
             CREATE TABLE IF NOT EXISTS tasks (
               id TEXT PRIMARY KEY, account_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
               title TEXT NOT NULL, objective TEXT NOT NULL, status TEXT NOT NULL,
-              requires_approval INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+              requires_approval INTEGER NOT NULL, approval_mode TEXT NOT NULL DEFAULT 'hosted', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
               cancel_requested INTEGER NOT NULL DEFAULT 0, result_summary TEXT);
             CREATE TABLE IF NOT EXISTS task_events (
               id TEXT PRIMARY KEY, task_id TEXT NOT NULL, type TEXT NOT NULL,
@@ -225,11 +225,18 @@ class TaskStore:
             conversation_columns = {row[1] for row in c.execute("PRAGMA table_info(conversations)")}
             if "summarized_through" not in conversation_columns:
                 c.execute("ALTER TABLE conversations ADD COLUMN summarized_through INTEGER NOT NULL DEFAULT 0")
+            task_columns = {row[1] for row in c.execute("PRAGMA table_info(tasks)")}
+            if "approval_mode" not in task_columns:
+                c.execute("ALTER TABLE tasks ADD COLUMN approval_mode TEXT NOT NULL DEFAULT 'hosted'")
 
-    def _insert_task(self, c, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None, *, now: str | None = None) -> str:
+    def _insert_task(self, c, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None, *, approval_mode: str = "hosted", now: str | None = None) -> str:
         task_id, now = f"task_{uuid.uuid4().hex}", now or _now()
         steps = steps or [{"name": "agent.execute", "depends_on": []}]
-        c.execute("INSERT INTO tasks(id,account_id,workspace_id,title,objective,status,requires_approval,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", (task_id, account_id, workspace_id, title, objective, "queued", requires_approval, now, now))
+        if any(step.get("executor_kind") == "desktop" for step in steps):
+            approval_mode = "desktop"
+        if approval_mode not in {"hosted", "desktop"}:
+            raise ValueError("Unknown approval mode.")
+        c.execute("INSERT INTO tasks(id,account_id,workspace_id,title,objective,status,requires_approval,approval_mode,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", (task_id, account_id, workspace_id, title, objective, "queued", requires_approval, approval_mode, now, now))
         run_id = f"run_{uuid.uuid4().hex}"
         c.execute("INSERT INTO task_runs(id,task_id,attempt,status,created_at) VALUES(?,?,?,?,?)", (run_id, task_id, 1, "queued", now))
         step_ids: list[str] = []
@@ -243,9 +250,9 @@ class TaskStore:
         c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "task.created", '{"source":"api"}', now))
         return task_id
 
-    def create(self, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None) -> dict:
+    def create(self, account_id: str, workspace_id: str, title: str, objective: str, requires_approval: bool, steps: list[dict] | None = None, *, approval_mode: str = "hosted") -> dict:
         with self._connect() as c:
-            task_id = self._insert_task(c, account_id, workspace_id, title, objective, requires_approval, steps)
+            task_id = self._insert_task(c, account_id, workspace_id, title, objective, requires_approval, steps, approval_mode=approval_mode)
         result = self.get(task_id, account_id)
         self.signals.publish("task.created", task_id=task_id)
         return result
@@ -624,12 +631,13 @@ class TaskStore:
             now = _now()
             with self._connect() as c:
                 c.execute("UPDATE tasks SET status='waiting_approval',updated_at=? WHERE id=? AND account_id=? AND status='queued'", (now, task_id, account_id))
-                c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "approval.requested", '{"source":"agent"}', now))
+                source = "desktop" if task.get("approval_mode") == "desktop" else "agent"
+                c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, "approval.requested", json.dumps({"source": source}), now))
             task["status"] = "waiting_approval"
             self.signals.publish("approval.requested", task_id=task_id)
         return task
 
-    def decide(self, task_id: str, account_id: str, approved: bool, note: str) -> dict:
+    def decide(self, task_id: str, account_id: str, approved: bool, note: str, *, source: str = "user") -> dict:
         task = self.get(task_id, account_id)
         if not task["requires_approval"] or task["status"] not in {"queued", "waiting_approval"}:
             raise ValueError("Task is not awaiting approval.")
@@ -641,10 +649,31 @@ class TaskStore:
             if not approved:
                 c.execute("UPDATE task_steps SET status='cancelled' WHERE task_id=? AND status='queued'", (task_id,))
                 c.execute("UPDATE task_runs SET status='cancelled' WHERE task_id=? AND status!='completed'", (task_id,))
-            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, f"approval.{status}", '{"source":"user"}', now))
+            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", task_id, f"approval.{status}", json.dumps({"source": source}), now))
         result = self.get(task_id, account_id)
         self.signals.publish("approval.resolved", task_id=task_id)
         return result
+
+    def decide_for_executor(self, executor_id: str, token: str, task_id: str, approved: bool, note: str = "") -> dict:
+        """Approve a desktop-owned task at its physical execution boundary.
+
+        The executor token proves both the paired device and the account.  A
+        hosted browser session cannot call this method, so it cannot release
+        local file, terminal, browser, or connector work.
+        """
+        executor = self.executor(executor_id, token)
+        task = self.get(task_id, executor["account_id"])
+        if task.get("approval_mode", "hosted") != "desktop":
+            raise ValueError("Only Desktop-owned tasks can be decided on this device.")
+        steps = self.steps(task_id, executor["account_id"])
+        if not steps or any(step.get("executor_kind") != "desktop" for step in steps):
+            raise ValueError("This task is not exclusively assigned to the paired Desktop.")
+        capabilities = set(executor.get("capabilities") or [])
+        missing = {step.get("required_capability") for step in steps if step.get("required_capability")} - capabilities
+        if missing:
+            raise ValueError("This Desktop does not have the capability required for the task.")
+        bounded_note = (note or "Decided on paired Desktop")[:500]
+        return self.decide(task_id, executor["account_id"], approved, bounded_note, source="desktop_user")
 
     def cancel(self, task_id: str, account_id: str) -> dict:
         task = self.get(task_id, account_id)

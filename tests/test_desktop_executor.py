@@ -453,3 +453,27 @@ def test_desktop_self_revoke_requires_its_own_token(tmp_path: Path):
     store.revoke_executor_with_token(desktop["executor_id"], desktop["token"])
     with pytest.raises(KeyError):
         store.executor(desktop["executor_id"], desktop["token"])
+
+
+def test_desktop_owned_task_can_only_be_released_by_paired_desktop(tmp_path: Path):
+    store = TaskStore(tmp_path / "smara.db")
+    desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop", ["local_integration"])["code"])
+    task = store.create(
+        "acct_1", "work", "List local repositories", "Use local GitHub credential", True,
+        [{"name": "desktop.local_integration", "executor_kind": "desktop", "required_capability": "local_integration"}],
+    )
+    task = store.request_approval(task["id"], "acct_1")
+    assert task["approval_mode"] == "desktop"
+    assert store.claim_for_executor(desktop["executor_id"], desktop["token"]) is None
+    approved = store.decide_for_executor(desktop["executor_id"], desktop["token"], task["id"], True)
+    assert not approved["requires_approval"]
+    assert store.claim_for_executor(desktop["executor_id"], desktop["token"])
+
+
+def test_desktop_cannot_release_hosted_owned_task(tmp_path: Path):
+    store = TaskStore(tmp_path / "smara.db")
+    desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop", ["local_file_read"])["code"])
+    task = store.create("acct_1", "work", "Hosted work", "Hosted", True)
+    store.request_approval(task["id"], "acct_1")
+    with pytest.raises(ValueError, match="Desktop-owned"):
+        store.decide_for_executor(desktop["executor_id"], desktop["token"], task["id"], True)

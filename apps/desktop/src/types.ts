@@ -60,6 +60,7 @@ export interface TaskSummary {
   title: string;
   objective: string;
   status: string;
+  approval_mode?: "hosted" | "desktop";
   updated_at?: string;
   created_at?: string;
   result?: string | null;

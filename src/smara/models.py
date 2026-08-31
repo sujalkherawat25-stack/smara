@@ -50,6 +50,9 @@ class TaskView(BaseModel):
     objective: str
     status: TaskStatus
     requires_approval: bool
+    # Hosted tasks are authorised in Smara Web.  Desktop tasks are authorised
+    # by the paired device only; the hosted service merely plans and audits.
+    approval_mode: Literal["hosted", "desktop"] = "hosted"
     result: str | None = Field(default=None, max_length=20_000)
     created_at: datetime
     updated_at: datetime

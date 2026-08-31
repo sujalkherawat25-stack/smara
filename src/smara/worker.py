@@ -226,6 +226,7 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
                         task["account_id"], task["workspace_id"], f"Desktop: {preview[:80]}", preview,
                         True,
                         [{"name": f"desktop.{capability}", "executor_kind": "desktop", "required_capability": capability, "executor_payload": step_payload}],
+                        approval_mode="desktop",
                     )
                     # Surface the approval immediately. The parent agent is
                     # already leased, so the normal worker claim transition
@@ -257,6 +258,7 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
                         task["account_id"], task["workspace_id"], f"Desktop workflow: {preview[:64]}", preview,
                         True,
                         steps,
+                        approval_mode="desktop",
                     )
                     child = store.request_approval(child["id"], task["account_id"])
                     summary = workflow_summary(stages)

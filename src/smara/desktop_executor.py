@@ -2309,6 +2309,8 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resume", action="store_true", help="resume claims for the configured state")
     parser.add_argument("--revoke", action="store_true", help="revoke this paired desktop on the hosted service and remove local state")
     parser.add_argument("--status", action="store_true", help="print safe local executor status")
+    parser.add_argument("--approve-task", help="approve one Desktop-owned task on this PC")
+    parser.add_argument("--deny-task", help="reject one Desktop-owned task on this PC")
     parser.add_argument("--journal-status", action="store_true", help="print bounded local task reconciliation status")
     parser.add_argument("--skills", action="store_true", help="print the installed local skill protocol")
     parser.add_argument("--credential-list", action="store_true", help="list local credential names without values")
@@ -2375,6 +2377,20 @@ def _main(argv: list[str] | None = None) -> int:
     if args.resume:
         _pause_path(args.state).unlink(missing_ok=True)
         print("Smara Desktop is active.")
+        return 0
+    if args.approve_task or args.deny_task:
+        task_id = args.approve_task or args.deny_task
+        if not task_id or len(task_id) > 160 or not all(char.isalnum() or char in "_-" for char in task_id):
+            raise SystemExit("Task id is invalid.")
+        state = _load_state(args.state)
+        with httpx.Client(timeout=20, follow_redirects=False) as client:
+            response = client.post(
+                f"{state['smara_url']}/v1/executors/tasks/{task_id}/approval",
+                headers=_headers(state),
+                json={"approved": bool(args.approve_task), "note": "Decided on paired Desktop"},
+            )
+            response.raise_for_status()
+        print(response.text)
         return 0
     if args.revoke:
         state = _load_state(args.state)

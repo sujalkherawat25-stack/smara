@@ -34,6 +34,7 @@ export const desktop = {
   log: () => invoke<string>("read_log"),
   tasks: () => invoke<TaskSummary[]>("load_tasks"),
   taskDetails: (taskId: string) => invoke<TaskDetail>("load_task_details", { taskId }),
+  decideLocalTask: (taskId: string, approved: boolean) => invoke<void>("decide_local_task", { taskId, approved }),
   openWeb: () => invoke<void>("open_web"),
   credentials: () => invoke<LocalCredentialSummary[]>("list_local_credentials"),
   saveCredential: (name: string, provider: string, secret: string) => invoke<LocalCredentialSummary[]>("save_local_credential", { name, provider, secret }),
