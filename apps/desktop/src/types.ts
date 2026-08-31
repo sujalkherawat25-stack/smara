@@ -25,6 +25,18 @@ export interface LocalCredentialSummary {
   updated_at: string;
 }
 
+export interface LocalConnectorSummary {
+  provider: string;
+  operation: string;
+  credential_alias: string;
+  auth_mode: string;
+  risk: string;
+  scopes: string[];
+  max_results: number;
+  max_requests_per_run: number;
+  credential_configured: boolean;
+}
+
 export interface LocalModelProfile {
   id: string;
   label: string;

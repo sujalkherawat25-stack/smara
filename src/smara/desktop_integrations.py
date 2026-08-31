@@ -53,13 +53,19 @@ def _bounded_text(value: object, limit: int = MAX_LOCAL_INTEGRATION_TEXT) -> str
     return " ".join(str(value or "").split())[:limit]
 
 
-def local_connector_catalog() -> list[dict[str, object]]:
-    """Return installed connector metadata without a credential value."""
+def local_connector_catalog(configured_aliases: set[str] | None = None) -> list[dict[str, object]]:
+    """Return installed connector metadata without a credential value.
+
+    ``configured_aliases`` comes from the desktop vault caller.  Keeping the
+    vault outside this module makes the public contract usable without ever
+    passing a secret into it.
+    """
+    configured_aliases = configured_aliases or set()
     return [
         {
             **asdict(spec),
             "scopes": list(spec.scopes),
-            "credential_configured": False,
+            "credential_configured": spec.credential_alias in configured_aliases,
         }
         for spec in LOCAL_CONNECTORS.values()
     ]

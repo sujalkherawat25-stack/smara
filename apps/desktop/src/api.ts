@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { ChatEvent, ConnectionState, LocalCredentialSummary, LocalModelProfile, RemoteStatus, TaskDetail, TaskSummary } from "./types";
+import type { ChatEvent, ConnectionState, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, RemoteStatus, TaskDetail, TaskSummary } from "./types";
 
 export const isNativeDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -36,6 +36,8 @@ export const desktop = {
   credentials: () => invoke<LocalCredentialSummary[]>("list_local_credentials"),
   saveCredential: (name: string, provider: string, secret: string) => invoke<LocalCredentialSummary[]>("save_local_credential", { name, provider, secret }),
   deleteCredential: (name: string) => invoke<LocalCredentialSummary[]>("delete_local_credential", { name }),
+  connectors: () => invoke<LocalConnectorSummary[]>("list_local_connectors"),
+  revokeConnector: (provider: string) => invoke<LocalConnectorSummary[]>("revoke_local_connector", { provider }),
   modelProfiles: () => invoke<LocalModelProfile[]>("list_local_model_profiles"),
   saveModelProfile: (profile: { id: string; label: string; provider: string; base_url: string; model: string; api_key: string; auth_header?: string }) => invoke<LocalModelProfile[]>("save_local_model_profile", { profile }),
   deleteModelProfile: (id: string) => invoke<LocalModelProfile[]>("delete_local_model_profile", { id }),

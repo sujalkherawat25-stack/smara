@@ -41,12 +41,12 @@ import httpx
 # package import for normal execution, with a narrow fallback for the bundled
 # process where Python does not set ``__package__``.
 try:
-    from .desktop_integrations import LocalIntegrationCancelled, execute_local_integration
+    from .desktop_integrations import LocalIntegrationCancelled, execute_local_integration, local_connector_catalog
     from .local_agent import LocalTaskJournal, decorate_local_result, journal_path, local_skill_catalog, skill_spec, validate_local_step, workspace_lock
     from .local_documents import build_document, is_document_operation
     from .workspace_contract import WorkspaceJobSpec, build_stage_result, validate_workspace_job, workspace_job_summary
 except ImportError:  # pragma: no cover - exercised by the packaged binary
-    from desktop_integrations import LocalIntegrationCancelled, execute_local_integration
+    from desktop_integrations import LocalIntegrationCancelled, execute_local_integration, local_connector_catalog
     from local_agent import LocalTaskJournal, decorate_local_result, journal_path, local_skill_catalog, skill_spec, validate_local_step, workspace_lock
     from local_documents import build_document, is_document_operation
     from workspace_contract import WorkspaceJobSpec, build_stage_result, validate_workspace_job, workspace_job_summary
@@ -83,6 +83,8 @@ MAX_WORKSPACE_COPY_BYTES = 256 * 1024 * 1024
 DEFAULT_CAPABILITIES = ["local_file_read"]
 STATE_ENV = "SMARA_DESKTOP_STATE"
 CREDENTIALS_ENV = "SMARA_DESKTOP_CREDENTIALS"
+CONNECTOR_AUDIT_ENV = "SMARA_DESKTOP_CONNECTOR_AUDIT"
+MAX_CONNECTOR_AUDIT_EVENTS = 100
 UNDO_DIR_NAME = "undo"
 LOG = logging.getLogger("smara.desktop")
 _CREDENTIAL_NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
@@ -260,6 +262,14 @@ def default_credentials_path() -> Path:
     return root / "credentials.json"
 
 
+def default_connector_audit_path() -> Path:
+    configured = os.getenv(CONNECTOR_AUDIT_ENV)
+    if configured:
+        return Path(configured)
+    root = Path(os.getenv("APPDATA", Path.home() / ".config")) / "Smara"
+    return root / "connector-audit.json"
+
+
 def _protect_windows(value: str) -> str:
     """Protect an executor bearer with the current Windows user's DPAPI key."""
     if os.name != "nt":
@@ -358,6 +368,69 @@ def local_credential_summaries(path: Path | None = None) -> list[dict[str, str]]
         {"name": name, "provider": str(item.get("provider") or "custom"), "updated_at": str(item.get("updated_at") or "")}
         for name, item in sorted(_credential_records(path).items())
     ]
+
+
+def _read_connector_audit(path: Path | None = None) -> list[dict[str, object]]:
+    path = path or default_connector_audit_path()
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("The local connector audit could not be read.") from exc
+    if not isinstance(value, list):
+        raise RuntimeError("The local connector audit is invalid.")
+    return [item for item in value if isinstance(item, dict)][-MAX_CONNECTOR_AUDIT_EVENTS:]
+
+
+def _write_connector_audit(events: list[dict[str, object]], path: Path | None = None) -> None:
+    path = path or default_connector_audit_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+        json.dump(events[-MAX_CONNECTOR_AUDIT_EVENTS:], handle, ensure_ascii=False, indent=2)
+    try:
+        os.replace(temporary, path)
+        if os.name != "nt":
+            path.chmod(0o600)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _append_connector_audit(provider: str, operation: str, status: str, proof: object | None = None, *, path: Path | None = None) -> None:
+    """Record a bounded proof-only event; queries, results, and secrets stay local."""
+    event: dict[str, object] = {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "provider": provider[:40],
+        "operation": operation[:80],
+        "status": status[:24],
+    }
+    if isinstance(proof, dict):
+        event["proof"] = {key: value for key, value in proof.items() if key in {"provider", "result_sha256", "results", "repositories"}}
+    events = _read_connector_audit(path)
+    events.append(event)
+    _write_connector_audit(events, path)
+
+
+def local_connector_summaries(credentials_path: Path | None = None) -> list[dict[str, object]]:
+    """Describe local connector readiness without exposing a vault value."""
+    aliases = set(_credential_records(credentials_path))
+    return local_connector_catalog(aliases)
+
+
+def local_connector_audit(path: Path | None = None) -> list[dict[str, object]]:
+    return _read_connector_audit(path)
+
+
+def revoke_local_connector(provider: str, credentials_path: Path | None = None, audit_path: Path | None = None) -> bool:
+    normalized = provider.strip().lower()
+    connectors = {item["provider"]: item for item in local_connector_catalog()}
+    connector = connectors.get(normalized)
+    if connector is None:
+        raise RuntimeError("Unknown local connector.")
+    removed = delete_local_credential(str(connector["credential_alias"]), credentials_path)
+    _append_connector_audit(normalized, str(connector["operation"]), "revoked", path=audit_path)
+    return removed
 
 
 def resolve_local_credential(name: str, path: Path | None = None) -> str:
@@ -1919,8 +1992,25 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
     elif capability == "local_integration":
         try:
             result = execute_local_integration(payload, _resolved_credentials, checkpoint=checkpoint, progress_hook=progress_hook)
+            try:
+                integration_result = json.loads(result)
+                _append_connector_audit(
+                    str(integration_result.get("provider") or payload.get("provider") or "unknown"),
+                    str(integration_result.get("operation") or payload.get("operation") or "unknown"),
+                    "completed",
+                    integration_result.get("proof"),
+                )
+            except (OSError, RuntimeError, TypeError, ValueError):
+                # An audit write must never turn a successful, approved local
+                # read into a failed task. The integration result itself is
+                # still fully covered by the executor journal.
+                LOG.warning("could not append local connector audit event")
         except LocalIntegrationCancelled as exc:
+            _append_connector_audit(str(payload.get("provider") or "unknown"), str(payload.get("operation") or "unknown"), "cancelled")
             raise ExecutionCancelled(str(exc)) from exc
+        except Exception:
+            _append_connector_audit(str(payload.get("provider") or "unknown"), str(payload.get("operation") or "unknown"), "failed")
+            raise
     else:
         raise RuntimeError(f"Desktop capability '{capability}' is not installed.")
     if workspace_job is not None:
@@ -2160,6 +2250,9 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--credential-provider", default="custom", help="provider label for --credential-set")
     parser.add_argument("--credential-get", help=argparse.SUPPRESS)
     parser.add_argument("--credential-delete", help="remove a local credential")
+    parser.add_argument("--connector-list", action="store_true", help="list local connector readiness without secrets")
+    parser.add_argument("--connector-audit", action="store_true", help="list bounded local connector audit events")
+    parser.add_argument("--connector-revoke", help="disconnect one local connector and remove its local credential")
     parser.add_argument("--log", type=Path, default=default_log_path(), help="rotating desktop log path")
     args = parser.parse_args(argv)
     # Read-only diagnostics must not depend on a writable log directory. This
@@ -2169,6 +2262,12 @@ def _main(argv: list[str] | None = None) -> int:
         return 0
     if args.skills:
         print(json.dumps(local_skill_catalog(), ensure_ascii=False, indent=2))
+        return 0
+    if args.connector_list:
+        print(json.dumps(local_connector_summaries(), ensure_ascii=False))
+        return 0
+    if args.connector_audit:
+        print(json.dumps(local_connector_audit(), ensure_ascii=False))
         return 0
     try:
         args.log.parent.mkdir(parents=True, exist_ok=True)
@@ -2203,6 +2302,9 @@ def _main(argv: list[str] | None = None) -> int:
         return 0
     if args.credential_delete:
         print(json.dumps({"ok": True, "removed": delete_local_credential(args.credential_delete)}))
+        return 0
+    if args.connector_revoke:
+        print(json.dumps({"ok": True, "removed": revoke_local_connector(args.connector_revoke)}))
         return 0
     if args.resume:
         _pause_path(args.state).unlink(missing_ok=True)

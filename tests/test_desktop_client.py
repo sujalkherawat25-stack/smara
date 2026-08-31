@@ -12,7 +12,10 @@ from smara.desktop_executor import (
     _save_state,
     delete_local_credential,
     execute_step,
+    local_connector_audit,
+    local_connector_summaries,
     local_credential_summaries,
+    revoke_local_connector,
     resolve_local_credential,
     save_local_credential,
 )
@@ -424,6 +427,62 @@ def test_local_connector_catalogue_is_explicit_and_secret_free():
     assert connectors["tavily"]["credential_alias"] == "TAVILY_API_KEY"
     assert connectors["github"]["operation"] == "list_repositories"
     assert all(item["credential_configured"] is False for item in connectors.values())
+
+
+def test_local_connector_lifecycle_records_only_proof_and_can_revoke(monkeypatch, tmp_path: Path):
+    vault = tmp_path / "credentials.json"
+    audit = tmp_path / "connector-audit.json"
+    monkeypatch.setenv("SMARA_DESKTOP_CREDENTIALS", str(vault))
+    monkeypatch.setenv("SMARA_DESKTOP_CONNECTOR_AUDIT", str(audit))
+    secret = "never-write-this-to-the-audit"
+    save_local_credential("TAVILY_API_KEY", secret, "tavily")
+
+    class Response:
+        status_code = 200
+        is_success = True
+        def json(self): return {"results": [{"title": "Source", "url": "https://example.com", "content": "private query output"}]}
+
+    class Client:
+        def __init__(self, **_kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def post(self, *_args, **_kwargs): return Response()
+
+    monkeypatch.setattr("smara.desktop_executor.httpx.Client", Client)
+    summaries = {item["provider"]: item for item in local_connector_summaries()}
+    assert summaries["tavily"]["credential_configured"] is True
+    result = execute_step({
+        "required_capability": "local_integration",
+        "executor_payload": {"provider": "tavily", "operation": "search", "query": "private search phrase"},
+    }, {"capabilities": ["local_integration"], "allowed_roots": [str(tmp_path)]})
+    events = local_connector_audit()
+    assert events[-1]["provider"] == "tavily"
+    assert events[-1]["status"] == "completed"
+    assert events[-1]["proof"]["results"] == 1
+    serialized = json.dumps(events)
+    assert secret not in serialized and "private search phrase" not in serialized and "private query output" not in serialized
+    assert "result_sha256" in serialized and result
+    assert revoke_local_connector("tavily") is True
+    assert local_connector_audit()[-1]["status"] == "revoked"
+    assert {item["provider"]: item for item in local_connector_summaries()}["tavily"]["credential_configured"] is False
+
+
+def test_unapproved_local_connector_step_never_calls_provider(monkeypatch, tmp_path: Path):
+    called = False
+
+    def unexpected(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("provider must not run before approval")
+
+    monkeypatch.setattr("smara.desktop_executor.execute_local_integration", unexpected)
+    with pytest.raises(RuntimeError, match="approval"):
+        execute_step({
+            "requires_approval": True,
+            "required_capability": "local_integration",
+            "executor_payload": {"provider": "tavily", "operation": "search", "query": "safe"},
+        }, {"capabilities": ["local_integration"], "allowed_roots": [str(tmp_path)]})
+    assert called is False
 
 
 def test_desktop_refuses_unapproved_step_and_undeclared_browser(tmp_path: Path):

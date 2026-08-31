@@ -196,6 +196,12 @@ h1 { font-size: 20px; letter-spacing: -.03em; }
 .credential-entry label { margin: 0; }
 .credential-entry .button { height: 38px; }
 .credential-list { display: grid; gap: 7px; margin-top: 15px; }
+.connector-list { display: grid; gap: 10px; margin-top: 15px; }
+.connector-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-soft); }
+.connector-row > div { min-width: 0; display: grid; gap: 3px; }
+.connector-row strong { color: var(--text); }
+.connector-row span, .connector-row small { color: var(--muted); font-size: 13px; }
+.connector-ready { border-color: color-mix(in srgb, var(--green) 44%, var(--line)); }
 .credential-empty { padding: 13px; border: 1px dashed var(--stroke); border-radius: 8px; color: var(--subtle); font-size: 10px; text-align: center; }
 .credential-row { display: grid; grid-template-columns: 100px minmax(180px, 1fr) 80px auto; align-items: center; gap: 10px; min-height: 43px; padding: 0 9px; border: 1px solid var(--stroke-soft); border-radius: 8px; color: var(--subtle); font-size: 10px; }
 .credential-row strong { color: var(--text); font-family: ui-monospace, monospace; font-size: 11px; }

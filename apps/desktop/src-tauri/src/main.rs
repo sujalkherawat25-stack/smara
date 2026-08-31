@@ -88,6 +88,19 @@ struct LocalCredentialSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct LocalConnectorSummary {
+    provider: String,
+    operation: String,
+    credential_alias: String,
+    auth_mode: String,
+    risk: String,
+    scopes: Vec<String>,
+    max_results: u32,
+    max_requests_per_run: u32,
+    credential_configured: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct LocalModelProfile {
     id: String,
     label: String,
@@ -530,6 +543,18 @@ fn delete_local_credential(name: String) -> Result<Vec<LocalCredentialSummary>, 
 }
 
 #[tauri::command]
+fn list_local_connectors() -> Result<Vec<LocalConnectorSummary>, String> {
+    let output = run_executor(vec!["--connector-list".to_owned()])?;
+    serde_json::from_str(&output).map_err(|_| "The local connector service returned invalid data.".to_owned())
+}
+
+#[tauri::command]
+fn revoke_local_connector(provider: String) -> Result<Vec<LocalConnectorSummary>, String> {
+    run_executor(vec!["--connector-revoke".to_owned(), provider])?;
+    list_local_connectors()
+}
+
+#[tauri::command]
 fn list_local_model_profiles() -> Vec<LocalModelProfile> { stored_local_model_profiles() }
 
 #[tauri::command]
@@ -819,7 +844,7 @@ fn open_web() -> Result<(), String> { open::that(current_connection().web_url).m
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_task_details, stream_chat, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_model_profiles, save_local_model_profile, delete_local_model_profile])
+        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_task_details, stream_chat, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile])
         .run(tauri::generate_context!())
         .expect("error while running Smara Desktop");
 }
