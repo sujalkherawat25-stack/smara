@@ -29,6 +29,16 @@ def test_route_hyphenated_word_target_to_deterministic_deep_research():
     assert route.deterministic_tool[0] == "research.deep"
 
 
+def test_route_conversational_deep_search_to_deterministic_research():
+    route = route_request(
+        "okay so do the deep search on ai agent and graph engineering. "
+        "i want the complete guide of how make such system"
+    )
+    assert route.lane == "D"
+    assert route.deterministic_tool is not None
+    assert route.deterministic_tool[0] == "research.deep"
+
+
 def test_route_keeps_local_and_external_writes_as_durable_work():
     route = route_request("write a report to my Documents folder")
     assert route.lane == "E"

@@ -213,12 +213,20 @@ class DeepResearchTool:
         angle return the same weak result.  The original request remains in
         the evidence bundle for the writer; this only prepares search terms.
         """
-        topic = re.split(
-            r"\s+(?:search|include|cite|citation|identify|distinguish|finish|end|do not)\b",
-            query.strip(),
-            maxsplit=1,
+        topic = re.sub(r"\s+", " ", query.strip())
+        # Do not split on the word "search" itself.  Natural requests often
+        # begin with exactly that phrase ("do the deep search on …").  The
+        # old splitter consequently searched for "okay so do the deep",
+        # which starved the evidence pass of relevant sources.
+        topic = re.sub(
+            r"^(?:(?:okay|ok|so|please|hey)[,!\s]*)*"
+            r"(?:(?:i\s+(?:want|need|would\s+like)\s+(?:you\s+)?to|can\s+you|could\s+you)\s+)?"
+            r"(?:(?:do|conduct|perform|run)\s+)?"
+            r"(?:(?:a|the)\s+)?(?:deep\s+)?(?:web\s+)?(?:research|search)\s+(?:on|for|about)\s+",
+            "",
+            topic,
             flags=re.IGNORECASE,
-        )[0]
+        )
         topic = re.sub(
             r"^(?:please\s+)?(?:give|write|provide|produce|create)\s+(?:me\s+)?(?:a\s+)?"
             r"(?:detailed\s+|comprehensive\s+)?(?:[\d,]+\s*[-–]?\s*word\s+)?"
@@ -228,7 +236,32 @@ class DeepResearchTool:
             topic,
             flags=re.IGNORECASE,
         )
-        topic = re.sub(r"\b(?:at least|minimum of|minimum)\s+[\d,]+\s*[-–]?\s*words?\b", "", topic, flags=re.IGNORECASE)
+        # Remove output instructions only after the subject has been
+        # extracted.  This keeps "search" in a subject phrase intact while
+        # discarding citation/length/report boilerplate that degrades recall.
+        topic = re.split(
+            r"(?:[.;:]\s*|,\s*)(?:i\s+(?:want|need|would\s+like)|"
+            r"(?:please\s+)?(?:include|cite|citation|citations|sources?|references?|end|finish|do\s+not)\b|"
+            r"(?:please\s+)?(?:give|write|provide|produce|create)\s+(?:me\s+)?(?:a\s+)?"
+            r"(?:complete|comprehensive|detailed)\s+(?:guide|report|analysis|breakdown)\b)",
+            topic,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        topic = re.sub(
+            r"\s+(?:with|including|and)\s+(?:inline\s+)?(?:citations?|sources?|references?)\b.*$",
+            "",
+            topic,
+            flags=re.IGNORECASE,
+        )
+        topic = re.sub(
+            r"\s+(?:and|with)?\s*(?:at\s+least|minimum(?:\s+of)?)\s+[\d,]+\s*[-–]?\s*words?\b.*$",
+            "",
+            topic,
+            flags=re.IGNORECASE,
+        )
+        topic = re.sub(r"\betc\.?\b", "", topic, flags=re.IGNORECASE)
+        topic = re.sub(r"\s*,\s*", " ", topic)
         topic = re.sub(r"\s+", " ", topic).strip(" .,:;-\u2013")
         # A bounded fallback keeps arbitrary short queries usable.
         return topic[:500] or query[:500]
@@ -294,7 +327,9 @@ class DeepResearchTool:
                     "No usable sources were returned by the configured research providers."
                     + (f" ({detail})" if detail else "")
                 )
-            selected = self._select_sources(hits, max_sources, exclude_domains or [], focus)
+            # ``focus`` is optional UI intent.  The actual search topic is a
+            # dependable relevance signal when no UI-specific focus exists.
+            selected = self._select_sources(hits, max_sources, exclude_domains or [], focus or search_topic)
             fetched = await asyncio.gather(
                 *[self._fetch_one(client, hit) for hit in selected],
                 return_exceptions=True,
@@ -415,12 +450,15 @@ class DeepResearchTool:
             if not canonical or any(host == item or host.endswith(f".{item}") for item in excluded_hosts):
                 continue
             unique.setdefault(canonical, hit)
-        terms = {item.lower() for item in str(focus or "").split() if len(item) >= 3}
+        terms = {
+            item.lower()
+            for item in re.findall(r"[a-z0-9][a-z0-9-]{2,}", str(focus or "").lower())
+        }
         ranked = sorted(
             unique.values(),
             key=lambda hit: (
                 1 if hit.quality == "primary" else 0,
-                len(terms & set(hit.snippet.lower().split())) if terms else 0,
+                len(terms & set(re.findall(r"[a-z0-9][a-z0-9-]{2,}", hit.snippet.lower()))) if terms else 0,
                 min(len(hit.snippet), 1200),
             ),
             reverse=True,

@@ -81,6 +81,27 @@ def _requested_word_target(message: str) -> int | None:
     return max(300, min(5_000, max(matches)))
 
 
+def _research_word_target(message: str) -> int | None:
+    """Honor explicit length requirements and make a requested guide substantive.
+
+    A user who asks for a "complete guide" has made a depth request even when
+    they do not know to specify a word count.  Keeping that expectation here
+    makes the deterministic research path reliable without inflating ordinary
+    lookups or news questions.
+    """
+    explicit = _requested_word_target(message)
+    if explicit:
+        return explicit
+    if re.search(
+        r"\b(?:complete|comprehensive|detailed)\s+(?:guide|analysis|report|breakdown)\b|"
+        r"\bhow\s+(?:to|do\s+(?:we|you))\s+(?:build|make|design)\b",
+        str(message or ""),
+        re.IGNORECASE,
+    ):
+        return 900
+    return None
+
+
 def _word_count(text: str) -> int:
     return len(re.findall(r"\b[\w][\w'-]*\b", str(text or "")))
 
@@ -507,7 +528,7 @@ class SmaraAgentRuntime:
                 # dedicated writer pass keeps citations attached to claims
                 # and prevents the UI from displaying raw snippets as if
                 # they were a complete report.
-                target_words = _requested_word_target(message)
+                target_words = _research_word_target(message)
                 available_sources = len(result.citations)
                 requested_citations = _requested_citation_target(message)
                 citation_target = min(requested_citations or 0, available_sources)
@@ -516,8 +537,12 @@ class SmaraAgentRuntime:
                     "research evidence supplied below. Cite every factual claim with one or more matching "
                     "labels such as [1] or [2]. Clearly separate verified facts, interpretation, disagreements, "
                     "and limitations. If the user gives a word target, you MUST meet or exceed it by expanding "
-                    "the supported analysis across the evidence; never pad with unsupported facts. Do not mention "
-                    "internal tools or chain of thought. "
+                    "the supported analysis across the evidence; never pad with unsupported facts. For a guide, cover "
+                    "the architecture, state and data flow, tool boundaries, safety controls, implementation steps, and "
+                    "verification where the supplied evidence supports those sections. Do not mention "
+                    "internal tools or chain of thought. Do not replace the requested answer with a limitations-only "
+                    "memo when the supplied evidence supports any useful explanation or implementation guidance; "
+                    "answer that supported portion first and keep limitations concise at the end. "
                     "Return polished Markdown and no JSON envelope."
                 )
                 writer_message = (

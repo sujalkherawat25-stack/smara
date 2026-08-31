@@ -176,6 +176,30 @@ def test_deep_research_searches_the_subject_not_output_requirements(monkeypatch)
     assert all("1,200-word" not in item for item in requested)
 
 
+def test_deep_research_searches_the_subject_after_conversational_wrapper():
+    topic = research_tools.DeepResearchTool._search_topic(
+        "okay so do the deep search on ai agent, and graph engineering etc. "
+        "i want the complete guide of how make such system"
+    )
+    assert topic == "ai agent and graph engineering"
+
+
+def test_deep_research_keeps_the_subject_when_request_mentions_search():
+    topic = research_tools.DeepResearchTool._search_topic(
+        "Please do a deep search on graph-based AI agent architecture with citations and at least 1200 words."
+    )
+    assert topic == "graph-based AI agent architecture"
+
+
+def test_deep_research_ranks_sources_against_the_search_topic():
+    hits = [
+        research_tools.SearchHit("https://irrelevant.example", "Other", "Weather forecast and sports scores", "brave"),
+        research_tools.SearchHit("https://relevant.example", "Graph agents", "Graph engineering for AI agent workflows", "brave"),
+    ]
+    selected = research_tools.DeepResearchTool._select_sources(hits, 1, [], "AI-agent graph engineering")
+    assert selected[0].url == "https://relevant.example"
+
+
 def test_deep_research_preserves_evidence_for_each_selected_source(monkeypatch):
     monkeypatch.setattr(
         research_tools,

@@ -302,7 +302,7 @@ class IntegrationReadTool:
         try:
             result = await context.integration_runner(self._provider, self._action, arguments)
         except Exception as exc:
-            raise ToolError(f"Integration read failed: {str(exc)[:300]}") from exc
+            raise ToolError(f"Integration read failed safely ({type(exc).__name__}). Please retry shortly.") from exc
         return ToolResult(True, _bounded(result))
 
 
@@ -340,7 +340,7 @@ class IntegrationApprovalRequestTool:
         try:
             result = context.integration_requester(provider, action, preview, key, arguments.get("payload", {}))
         except Exception as exc:
-            raise ToolError(f"Approval request failed: {str(exc)[:300]}") from exc
+            raise ToolError(f"Approval request failed safely ({type(exc).__name__}). Please retry shortly.") from exc
         return ToolResult(True, _bounded(json.dumps({"approval_required": result.get("status") == "awaiting_approval", "status": result.get("status"), "action_id": result.get("id")}, ensure_ascii=False)))
 
 
@@ -384,7 +384,10 @@ class DesktopActionRequestTool:
         try:
             result = context.desktop_requester(capability, preview[:1_000], payload)
         except Exception as exc:
-            raise ToolError(f"Desktop task request failed: {str(exc)[:300]}") from exc
+            raise ToolError(
+                f"Desktop task request failed safely ({type(exc).__name__}). "
+                "Check that the paired Desktop is online, then retry."
+            ) from exc
         return ToolResult(True, _bounded(json.dumps({"approval_required": True, **result}, ensure_ascii=False)))
 
 
@@ -431,7 +434,10 @@ class DesktopWorkflowRequestTool:
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
         except Exception as exc:
-            raise ToolError(f"Desktop workflow request failed: {str(exc)[:300]}") from exc
+            raise ToolError(
+                f"Desktop workflow request failed safely ({type(exc).__name__}). "
+                "Check that the paired Desktop is online, then retry."
+            ) from exc
         if not isinstance(result, dict):
             raise ToolError("Desktop workflow request returned an invalid result.")
         response = dict(result)

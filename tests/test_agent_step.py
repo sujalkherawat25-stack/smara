@@ -77,6 +77,17 @@ class SlowTool:
         return ToolResult(True, "late result")
 
 
+class CrashingTool:
+    spec = ToolSpec(
+        "crashing_tool",
+        "A test adapter that raises an unexpected upstream error.",
+        {"type": "object", "properties": {}, "additionalProperties": False},
+    )
+
+    async def run(self, arguments, context):
+        raise RuntimeError("upstream contained a secret")
+
+
 def test_agent_step_selects_only_registry_tool_and_returns_final_answer():
     provider = FakeProvider([
         json.dumps({"action": "tool", "name": "calculate", "arguments": {"expression": "6 * 7"}}),
@@ -302,6 +313,25 @@ def test_agent_step_times_out_one_tool_and_can_still_return_a_final_answer():
     assert result.text == "The tool timed out safely."
     assert result.tools_used == 0
     assert any(event[1].get("ok") is False and "timed out" in event[1].get("preview", "") for event in events)
+
+
+def test_agent_step_contains_unexpected_adapter_failure_and_finishes_turn():
+    provider = FakeProvider([
+        json.dumps({"action": "tool", "name": "crashing_tool", "arguments": {}}),
+        json.dumps({"action": "final", "answer": "The tool could not complete, so I stopped safely."}),
+    ])
+    events = []
+
+    result = asyncio.run(BoundedAgentStepRuntime(provider, ToolRegistry([CrashingTool()])).run(
+        task={"objective": "Use the crashing tool"},
+        tool_context=ToolContext("acct_test", "workspace"),
+        event_hook=lambda name, payload: events.append((name, payload)),
+    ))
+    assert result.text == "The tool could not complete, so I stopped safely."
+    assert result.tools_used == 0
+    preview = next(payload["preview"] for name, payload in events if name == "agent.tool_completed")
+    assert preview == "Tool failed safely: RuntimeError."
+    assert "secret" not in preview
 
 
 def test_agent_step_enforces_a_total_wall_clock_budget():

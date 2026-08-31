@@ -139,6 +139,26 @@ def test_integration_reads_use_runner_but_never_bypass_approval():
     asyncio.run(execute())
 
 
+def test_external_adapter_errors_do_not_echo_sensitive_upstream_text():
+    async def runner(*_args):
+        raise RuntimeError("provider rejected key=super-secret")
+
+    async def execute():
+        registry = default_tool_registry(integration_runner=runner)
+        try:
+            await registry.invoke(
+                "integration.gmail.search", {"query": "from:alice@example.com", "limit": 3},
+                ToolContext("acct_test", "workspace", integration_runner=runner),
+            )
+        except Exception as exc:
+            assert "failed safely (RuntimeError)" in str(exc)
+            assert "super-secret" not in str(exc)
+        else:
+            raise AssertionError("external adapter failures must remain visible but redacted")
+
+    asyncio.run(execute())
+
+
 def test_agent_can_create_only_an_approval_intent_for_external_work():
     captured = []
 

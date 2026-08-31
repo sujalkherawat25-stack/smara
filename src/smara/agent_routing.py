@@ -51,7 +51,9 @@ _TOOL_RE = re.compile(
     re.IGNORECASE,
 )
 _DEEP_RESEARCH_RE = re.compile(
-    r"\b(?:detailed\s+(?:analysis|breakdown|report)|comprehensive\s+(?:analysis|research|review)|deep\s+dive|"
+    r"\b(?:detailed\s+(?:analysis|breakdown|report)|comprehensive\s+(?:analysis|research|review|guide)|"
+    r"complete\s+(?:guide|analysis|report|breakdown)|deep\s+(?:dive|research|search)|"
+    r"how\s+(?:to|do\s+(?:we|you))\s+(?:build|make|design)|"
     # Accept natural hyphenated targets too ("1,200-word analysis" and
     # "at least 1200-words"), otherwise a demanding research request falls
     # into the generic planner and can never use the evidence-first writer.

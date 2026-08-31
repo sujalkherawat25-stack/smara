@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from smara.agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime
+from smara.agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime, _research_word_target
 from smara import agent_events, llm_errors
 import httpx
 
@@ -237,6 +237,11 @@ def test_deterministic_deep_research_runs_writer_pass_and_preserves_citations(mo
         for name, payload in events
     )
     assert any(name == "agent.phase" and payload.get("phase") == "answer" for name, payload in events)
+
+
+def test_complete_research_guide_gets_a_bounded_substantive_default():
+    assert _research_word_target("Give me the complete guide for how to build an agent system") == 900
+    assert _research_word_target("Give me a 1,200-word complete guide") == 1200
 
 
 def test_deterministic_tool_failure_is_reported_without_runtime_name_error(monkeypatch):

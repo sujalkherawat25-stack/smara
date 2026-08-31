@@ -177,6 +177,12 @@ class BoundedAgentStepRuntime:
                 except ToolError as exc:
                     observation = f"Tool unavailable: {exc}"
                     ok = False
+                except Exception as exc:
+                    # Registered adapters are external boundaries.  A bug or
+                    # transient provider failure must not abort the entire
+                    # agent turn or leak an upstream detail into chat.
+                    observation = f"Tool failed safely: {type(exc).__name__}."
+                    ok = False
             if event_hook:
                 event_hook("agent.tool_completed", {"tool": name, "ok": ok, "preview": observation[:500]})
             observations.append(f"{name}: {observation[:4_000]}")
