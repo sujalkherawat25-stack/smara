@@ -202,6 +202,9 @@ h1 { font-size: 20px; letter-spacing: -.03em; }
 .connector-row strong { color: var(--text); }
 .connector-row span, .connector-row small { color: var(--muted); font-size: 13px; }
 .connector-ready { border-color: color-mix(in srgb, var(--green) 44%, var(--line)); }
+.connector-warning { display: grid; gap: 5px; margin-top: 12px; padding: 12px 14px; border: 1px solid rgba(251,191,36,.38); border-radius: 10px; color: var(--muted); background: rgba(251,191,36,.07); font-size: 11px; line-height: 1.45; }
+.connector-warning strong { color: var(--amber); font-size: 12px; }
+.connector-warning b { color: var(--text); font-weight: 650; }
 .credential-empty { padding: 13px; border: 1px dashed var(--stroke); border-radius: 8px; color: var(--subtle); font-size: 10px; text-align: center; }
 .credential-row { display: grid; grid-template-columns: 100px minmax(180px, 1fr) 80px auto; align-items: center; gap: 10px; min-height: 43px; padding: 0 9px; border: 1px solid var(--stroke-soft); border-radius: 8px; color: var(--subtle); font-size: 10px; }
 .credential-row strong { color: var(--text); font-family: ui-monospace, monospace; font-size: 11px; }
