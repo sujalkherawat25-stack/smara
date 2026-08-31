@@ -164,6 +164,20 @@ never silently repeat a possibly completed mutation.
 
 ## A2. Local Connector Runtime
 
+### Implementation status (2026-08-31)
+
+- **A2 foundation shipped:** installed local connectors now publish an
+  explicit, secret-free contract alongside every approved result: provider,
+  operation, local authentication mode, read-only risk tier, declared scope,
+  result limit, and per-run request bound. Tavily search and GitHub repository
+  discovery use that contract; credential aliases remain resolved only in the
+  Windows vault and are never included in hosted results.
+- **A2 remaining work:** local OAuth/device authorization for Google Workspace
+  and GitHub, visible local connect/revoke controls and audit history,
+  approval-gated writes, isolated browser handoff, and the outbound-only MCP
+  adapter. These require owner-controlled provider consent and will ship as
+  separately testable connector slices.
+
 ### Goal
 
 Let Smara use the user's authorized services while keeping OAuth tokens and
