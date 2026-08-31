@@ -97,8 +97,17 @@ class BoundedAgentStepRuntime:
         if not objective:
             raise AgentStepError("Agent task has no objective.")
         system = (
-            "You are Smara's bounded task-step planner. Use only the registered read-only tools. "
-            "Never claim an external side effect. Return exactly one JSON object: "
+            "You are Smara's bounded task-step planner. Use only the registered tools. "
+            "Never claim an external side effect. desktop.request_action and desktop.request_workflow "
+            "do not execute an action: they create a separate durable task that waits for the owner\'s approval. "
+            "When the objective asks to create, edit, save, inspect, run, or download something on the paired "
+            "desktop, use one of those desktop request tools rather than saying the capability is unavailable. "
+            "For a report, spreadsheet, presentation, or PDF, request local_file_write with the matching "
+            "create_docx/create_xlsx/create_pptx/create_pdf operation. If the owner says to save it in the local "
+            "workspace but gives no filename, use a relative destination such as 'report.pdf'; the "
+            "desktop resolves that safely inside its first approved folder. "
+            "For multi-step local work, request a workflow with explicit inspect, edit, and verify stages. "
+            "Return exactly one JSON object: "
             '{"action":"tool","name":"...","arguments":{...}} or '
             '{"action":"final","answer":"..."}. Do not include markdown fences. '
             f"Registered tools: {specs}"

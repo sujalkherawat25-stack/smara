@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 import base64
 import secrets
@@ -22,6 +23,7 @@ from .config import settings
 from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, CliDeviceAuthorize, CliPairingExchange, CliPairingStart, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, ExecutorProgress, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, ScheduleCreate, ScheduleView, TaskCreate, TaskView, ToolInvokeRequest
 from .store import open_task_store
 from .agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime
+from .agent_routing import route_request
 from . import agent_events, llm_errors
 from .syntarus_adapter import SyntarusMemory
 from .vault import SecretVault
@@ -125,6 +127,32 @@ async def _close_request_memory(runtime: SmaraAgentRuntime) -> None:
     memory = getattr(runtime, "_memory", None)
     if memory is not None:
         await memory.aclose()
+
+
+def _queue_durable_chat_task(body: ChatRequest, user: str) -> tuple[dict, str]:
+    """Turn a chat request with side effects into safe planning work.
+
+    The initial hosted planning step is read-only and therefore starts
+    immediately.  If it needs this PC, the planner creates a second desktop
+    task which is always approval-gated before the executor can claim it.
+    This gives ordinary chat the expected handoff without weakening the local
+    boundary.
+    """
+    compact = re.sub(r"\s+", " ", body.message).strip()
+    title = f"Smara task: {compact[:72]}".rstrip(" .,:;-") or "Smara task"
+    task = store.create(
+        user,
+        body.workspace_id,
+        title,
+        body.message,
+        False,
+        [{"name": "agent.execute", "executor_kind": "hosted"}],
+    )
+    message = (
+        f"I created {title} and started the safe planning pass. "
+        "If it needs your local files, apps, or document creation, Smara will create a separate task for you to review and approve before this PC does anything."
+    )
+    return task, message
 
 @app.get("/", include_in_schema=False)
 async def web_root():
@@ -564,6 +592,19 @@ async def delete_conversation(conversation_id: str, user: str = Depends(account_
 async def chat(body: ChatRequest, user: str = Depends(account_id)):
     """Direct chat with bounded read-only tools; writes remain durable tasks."""
     conversation_id, history, summary = await _conversation(body, user)
+    decision = route_request(body.message, has_attachments=bool(body.attachment_ids))
+    if decision.durable_required:
+        task, message = _queue_durable_chat_task(body, user)
+        await _async_store().call(
+            "append_conversation_exchange",
+            conversation_id, user, body.workspace_id, body.message, message, None,
+        )
+        return ChatResponse(
+            conversation_id=conversation_id,
+            message=message,
+            memory_used=False,
+            tools_used=0,
+        )
     attachment_context = _attachment_context(body, user)
     try:
         runtime = _agent_runtime(body.model_profile)
@@ -616,6 +657,26 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
         started_at = time.perf_counter()
         trace = getattr(request.state, "smara_timing", TimingTrace())
         trace.mark("route_started")
+        decision = route_request(body.message, has_attachments=bool(body.attachment_ids))
+        if decision.durable_required:
+            task, message = _queue_durable_chat_task(body, user)
+            yield agent_events.phase("triage")
+            yield agent_events.status("Creating an approval-gated Smara task", detail="Planning can start now; local execution will wait for your approval.")
+            yield agent_events.phase("answer")
+            yield agent_events.token(message)
+            await _async_store().call(
+                "append_conversation_exchange",
+                conversation_id, user, body.workspace_id, body.message, message, None,
+            )
+            trace.mark("persisted")
+            yield agent_events.done(
+                memory_used=False,
+                tools_used=0,
+                total_ms=agent_events.elapsed_ms(started_at),
+                request_id=trace.trace_id,
+                timings=trace.as_dict(),
+            )
+            return
         try:
             runtime = _agent_runtime(body.model_profile)
         except ValueError as exc:

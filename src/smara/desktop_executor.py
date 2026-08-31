@@ -42,12 +42,15 @@ import httpx
 try:
     from .desktop_integrations import LocalIntegrationCancelled, execute_local_integration
     from .local_agent import LocalTaskJournal, decorate_local_result, journal_path, local_skill_catalog, skill_spec, validate_local_step, workspace_lock
+    from .local_documents import build_document, is_document_operation
 except ImportError:  # pragma: no cover - exercised by the packaged binary
     from desktop_integrations import LocalIntegrationCancelled, execute_local_integration
     from local_agent import LocalTaskJournal, decorate_local_result, journal_path, local_skill_catalog, skill_spec, validate_local_step, workspace_lock
+    from local_documents import build_document, is_document_operation
 
 
 MAX_FILE_BYTES = 256 * 1024
+MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
 MAX_DIFF_CHARS = 40_000
 MAX_UNDO_ENTRIES = 50
 MAX_OUTPUT_CHARS = 32_000
@@ -528,6 +531,12 @@ def _target(raw: object, roots: list[Path], *, must_exist: bool) -> Path:
     if not isinstance(raw, str) or not raw.strip():
         raise RuntimeError("A local path is required.")
     candidate = Path(raw).expanduser()
+    # Hosted planning never receives the owner's absolute folder names.  A
+    # relative artifact name is therefore resolved inside the first approved
+    # root, not the process working directory.  Traversal still resolves
+    # below and is rejected by the same root check.
+    if not candidate.is_absolute():
+        candidate = roots[0] / candidate
     # Resolve the parent even when creating a new file; this rejects traversal
     # and symlink escapes without following an attacker-controlled target.
     try:
@@ -830,6 +839,23 @@ def _existing_file_bytes(path: Path, *, label: str = "local file") -> bytes:
         raise RuntimeError(f"Could not read the existing {label}.") from exc
 
 
+def _existing_document_bytes(path: Path, *, label: str = "local document") -> bytes:
+    """Read one bounded office document without treating it as UTF-8 text."""
+    if not path.exists():
+        return b""
+    if path.is_symlink():
+        raise RuntimeError("Symlinked files are not allowed.")
+    if not path.is_file():
+        raise RuntimeError(f"{label.capitalize()} must be a regular file.")
+    try:
+        size = path.stat().st_size
+        if size > MAX_DOCUMENT_BYTES:
+            raise RuntimeError(f"{label.capitalize()} exceeds the {MAX_DOCUMENT_BYTES // (1024 * 1024)} MB local document limit.")
+        return path.read_bytes()
+    except OSError as exc:
+        raise RuntimeError(f"Could not read the existing {label}.") from exc
+
+
 def _text_diff(name: str, before: bytes, after: bytes) -> tuple[str, bool]:
     """Create a bounded, human-readable diff without leaking absolute paths."""
     try:
@@ -929,6 +955,78 @@ def _preview_payload(operation: str, target: Path, before: bytes, after: bytes, 
     }
 
 
+def _document_preview(operation: str, target: Path, before: bytes, after: bytes, summary: dict) -> dict:
+    """Return a readable approval preview for a binary office-file change."""
+    mode = str(summary.get("mode") or operation).replace("_", " ")
+    format_name = str(summary.get("format") or target.suffix.removeprefix(".") or "document").upper()
+    details = ", ".join(
+        f"{key.replace('_', ' ')}: {value}"
+        for key, value in summary.items()
+        if key not in {"format", "mode"}
+    )
+    return {
+        "operation": operation,
+        "file_name": target.name,
+        "changed": before != after,
+        "bytes_before": len(before),
+        "bytes_after": len(after),
+        "document": {"format": format_name, "mode": mode, **summary},
+        "diff": f"Structured {format_name} document: {mode}" + (f" ({details})" if details else ""),
+        "diff_truncated": False,
+    }
+
+
+def _write_document_unlocked(payload: dict, roots: list[Path], state: dict | None = None) -> str:
+    """Generate or edit a local office file under the normal file-write gate."""
+    operation = payload.get("operation")
+    if not isinstance(operation, str) or not is_document_operation(operation):
+        raise RuntimeError("Unsupported local document operation.")
+    target = _target(payload.get("path"), roots, must_exist=False)
+    before = _existing_document_bytes(target)
+    destination_root = _workspace_for_target(target, roots)
+
+    def read_source(raw_path: object, label: str) -> bytes:
+        source = _target(raw_path, roots, must_exist=True)
+        if _workspace_for_target(source, roots) != destination_root:
+            raise RuntimeError("PDF source files must be in the same approved workspace as the destination.")
+        if source.suffix.lower() != ".pdf":
+            raise RuntimeError(f"{label.capitalize()} must be a PDF file.")
+        return _existing_document_bytes(source, label=label)
+
+    built = build_document(operation, payload, before, read_source=read_source)
+    after = built.data
+    if len(after) > MAX_DOCUMENT_BYTES:
+        raise RuntimeError(f"Generated document exceeds the {MAX_DOCUMENT_BYTES // (1024 * 1024)} MB local document limit.")
+    preview = _document_preview(operation, target, before, after, built.summary)
+    if payload.get("preview_only") is True:
+        return json.dumps({"action": "local_file_preview", "preview_only": True, "preview": preview}, ensure_ascii=False)
+    if not preview["changed"]:
+        return json.dumps({"action": "local_file_write", "operation": operation, "file_name": target.name, "bytes_written": 0, "sha256": hashlib.sha256(after).hexdigest(), "preview": preview, "undo_available": False}, ensure_ascii=False)
+    directory = _undo_dir(state, roots)
+    undo_id = _remember_undo(
+        directory,
+        {
+            "kind": "content",
+            "target": str(target),
+            "before_exists": target.exists(),
+            "after_sha256": hashlib.sha256(after).hexdigest(),
+            "max_bytes": MAX_DOCUMENT_BYTES,
+        },
+        before if target.exists() else None,
+    )
+    try:
+        _atomic_bytes(target, after)
+    except OSError:
+        _remove_undo_entry(directory, undo_id)
+        raise RuntimeError("Could not atomically write the local document.")
+    return json.dumps({
+        "action": "local_file_write", "operation": operation,
+        "file_name": target.name, "bytes_written": len(after),
+        "sha256": hashlib.sha256(after).hexdigest(), "preview": preview,
+        "document": built.summary, "undo_id": undo_id, "undo_available": True,
+    }, ensure_ascii=False)
+
+
 def _write_file_unlocked(payload: dict, roots: list[Path], state: dict | None = None) -> str:
     """Preview and safely apply bounded workspace edits.
 
@@ -941,8 +1039,10 @@ def _write_file_unlocked(payload: dict, roots: list[Path], state: dict | None = 
         operation = "append" if payload.get("append") is True else "write"
     if operation == "replace":
         operation = "write"
+    if is_document_operation(operation):
+        return _write_document_unlocked(payload, roots, state)
     if not isinstance(operation, str) or operation not in {"write", "append", "patch", "rename", "move", "delete", "undo"}:
-        raise RuntimeError("local_file_write supports write, append, patch, rename, move, delete, and undo operations.")
+        raise RuntimeError("local_file_write supports text edits plus create/edit DOCX, XLSX, PPTX, and PDF operations.")
 
     directory = _undo_dir(state, roots)
     if operation == "undo":
@@ -1100,7 +1200,10 @@ def _undo_file(payload: dict, roots: list[Path], directory: Path) -> str:
     try:
         if kind == "content":
             target = _target(record.get("target"), roots, must_exist=False)
-            current = _existing_file_bytes(target)
+            max_bytes = record.get("max_bytes", MAX_FILE_BYTES)
+            if not isinstance(max_bytes, int) or max_bytes < 1 or max_bytes > MAX_DOCUMENT_BYTES:
+                raise RuntimeError("The undo snapshot limit is invalid.")
+            current = _existing_document_bytes(target) if max_bytes > MAX_FILE_BYTES else _existing_file_bytes(target)
             if hashlib.sha256(current).hexdigest() != record.get("after_sha256"):
                 raise RuntimeError("The file changed after this edit; refusing to overwrite newer work.")
             if record.get("before_exists"):
@@ -1108,8 +1211,8 @@ def _undo_file(payload: dict, roots: list[Path], directory: Path) -> str:
                 if not isinstance(snapshot_name, str) or not re.fullmatch(r"undo_[0-9a-f]{32}\.bin", snapshot_name):
                     raise RuntimeError("The undo snapshot is invalid.")
                 snapshot = (directory / snapshot_name).read_bytes()
-                if len(snapshot) > MAX_FILE_BYTES:
-                    raise RuntimeError("The undo snapshot exceeds the local file limit.")
+                if len(snapshot) > max_bytes:
+                    raise RuntimeError("The undo snapshot exceeds its local file limit.")
                 _atomic_bytes(target, snapshot)
             else:
                 if target.exists():

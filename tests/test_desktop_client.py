@@ -116,6 +116,109 @@ def test_desktop_edit_refuses_changed_file_before_undo(tmp_path: Path):
         execute_step({"required_capability": "local_file_write", "executor_payload": {"operation": "undo", "undo_id": result["undo_id"]}}, state)
 
 
+def test_desktop_document_toolkit_creates_edits_previews_and_undoes_local_artifacts(tmp_path: Path):
+    """Office documents stay inside the existing approved file-write scope."""
+    from docx import Document
+    from openpyxl import load_workbook
+    from pptx import Presentation
+    from pypdf import PdfReader
+
+    state = {
+        "capabilities": ["local_file_write"],
+        "allowed_roots": [str(tmp_path)],
+        "_state_path": str(tmp_path / "desktop.json"),
+    }
+    docx_path = tmp_path / "agent-report.docx"
+    preview = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {
+            "operation": "create_docx", "path": str(docx_path), "title": "Agent report",
+            "sections": [{"heading": "Finding", "body": "Local artifacts are approval-gated.", "bullets": ["No cloud file upload"]}],
+            "preview_only": True,
+        },
+    }, state))
+    assert preview["action"] == "local_file_preview" and not docx_path.exists()
+    created_docx = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {
+            "operation": "create_docx", "path": str(docx_path), "title": "Agent report",
+            "sections": [{"heading": "Finding", "body": "Local artifacts are approval-gated."}],
+        },
+    }, state))
+    assert created_docx["document"]["format"] == "docx"
+    assert "Agent report" in "\n".join(item.text for item in Document(docx_path).paragraphs)
+    edited_docx = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "edit_docx", "path": str(docx_path), "edit": "replace_text", "find": "approval-gated", "replace": "reviewed"},
+    }, state))
+    assert edited_docx["undo_available"] is True
+    assert "reviewed" in "\n".join(item.text for item in Document(docx_path).paragraphs)
+    execute_step({"required_capability": "local_file_write", "executor_payload": {"operation": "undo", "undo_id": edited_docx["undo_id"]}}, state)
+    assert "approval-gated" in "\n".join(item.text for item in Document(docx_path).paragraphs)
+
+    xlsx_path = tmp_path / "metrics.xlsx"
+    created_xlsx = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "create_xlsx", "path": str(xlsx_path), "sheets": [{"name": "Metrics", "freeze_header": True, "rows": [["Metric", "Value"], ["Tasks", 3]]}]},
+    }, state))
+    assert created_xlsx["document"]["cells"] == 4
+    edited_xlsx = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "edit_xlsx", "path": str(xlsx_path), "cells": [{"sheet": "Metrics", "cell": "B3", "formula": "=SUM(B2:B2)"}]},
+    }, state))
+    assert edited_xlsx["document"]["cells_updated"] == 1
+    assert load_workbook(xlsx_path, data_only=False)["Metrics"]["B3"].value == "=SUM(B2:B2)"
+
+    pptx_path = tmp_path / "briefing.pptx"
+    created_pptx = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "create_pptx", "path": str(pptx_path), "title": "Smara briefing", "slides": [{"title": "Status", "bullets": ["Local only", "Approval-gated"]}]},
+    }, state))
+    assert created_pptx["document"]["slides"] == 2
+    assert len(Presentation(pptx_path).slides) == 2
+
+    pdf_path = tmp_path / "report.pdf"
+    created_pdf = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "create_pdf", "path": str(pdf_path), "title": "Local report", "sections": [{"heading": "Summary", "body": "This PDF stays in the approved workspace."}]},
+    }, state))
+    assert created_pdf["document"]["format"] == "pdf"
+    assert "Local report" in (PdfReader(pdf_path).pages[0].extract_text() or "")
+    relative_pdf = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "create_pdf", "path": "relative-report.pdf", "title": "Relative local report"},
+    }, state))
+    assert relative_pdf["file_name"] == "relative-report.pdf" and (tmp_path / "relative-report.pdf").exists()
+    second_pdf = tmp_path / "second.pdf"
+    execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "create_pdf", "path": str(second_pdf), "title": "Second local report"},
+    }, state)
+    merged_pdf = tmp_path / "merged.pdf"
+    merged = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "merge_pdf", "path": str(merged_pdf), "source_paths": [str(pdf_path), str(second_pdf)]},
+    }, state))
+    assert merged["document"]["pages"] == 2 and len(PdfReader(merged_pdf).pages) == 2
+    extracted_pdf = tmp_path / "first-page.pdf"
+    extracted = json.loads(execute_step({
+        "required_capability": "local_file_write",
+        "executor_payload": {"operation": "extract_pdf_pages", "path": str(extracted_pdf), "source_path": str(merged_pdf), "pages": [1]},
+    }, state))
+    assert extracted["document"]["pages"] == [1] and len(PdfReader(extracted_pdf).pages) == 1
+
+
+def test_desktop_document_toolkit_rejects_wrong_formats_and_unsafe_formulas(tmp_path: Path):
+    state = {"capabilities": ["local_file_write"], "allowed_roots": [str(tmp_path)]}
+    with pytest.raises(RuntimeError, match="destination path"):
+        execute_step({"required_capability": "local_file_write", "executor_payload": {"operation": "create_pdf", "path": str(tmp_path / "wrong.txt"), "title": "No"}}, state)
+    with pytest.raises(RuntimeError, match="formulas require"):
+        execute_step({
+            "required_capability": "local_file_write",
+            "executor_payload": {"operation": "create_xlsx", "path": str(tmp_path / "unsafe.xlsx"), "sheets": [{"name": "Sheet1", "rows": [["=WEBSERVICE(\"https://example.com\")"]]}]},
+        }, state)
+
+
 def test_desktop_workspace_inspection_lists_only_bounded_approved_files(tmp_path: Path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("print('smara')\n", encoding="utf-8")

@@ -166,6 +166,13 @@ The desktop currently supports bounded `local_file_read` (hash/proof by
 default, content only when the approved payload explicitly requests it),
 reviewable `local_file_write` (read-only previews, write/append/patch,
 rename/move, delete-to-undo, atomic replacement, and guarded local undo),
+plus bounded local document work inside the same approved folder: create and
+edit DOCX reports, XLSX workbooks, PPTX briefings, and PDF reports; merge PDFs
+or extract selected PDF pages. Document operations are capped at 8 MB, reject
+macros/scripts/external links, show a structured preview, and receive the
+same local-only undo protection as ordinary file writes. DOCX, XLSX, and PPTX
+retain Unicode text; the current PDF generator rejects non-Latin text instead
+of silently producing broken glyphs until the packaged Indic font slice lands.
 allowlisted `local_terminal`, allowlisted `local_browser`, and the optional
 `local_integration` adapter. Browser work is
 explicitly local: `open` launches the system browser, `inspect_text` returns

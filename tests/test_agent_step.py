@@ -98,6 +98,34 @@ def test_agent_step_selects_only_registry_tool_and_returns_final_answer():
     assert events[1][1]["ok"] is True
 
 
+def test_agent_step_can_request_a_previewable_local_pdf_task_without_executing_it():
+    requested = []
+
+    def desktop_requester(capability, preview, payload):
+        requested.append((capability, preview, payload))
+        return {"task_id": "task_pdf", "status": "waiting_approval", "capability": capability}
+
+    provider = FakeProvider([
+        json.dumps({"action": "tool", "name": "desktop.request_action", "arguments": {
+            "capability": "local_file_write",
+            "preview": "Create a local PDF report named report.pdf",
+            "payload": {"operation": "create_pdf", "path": "report.pdf", "title": "Local report"},
+        }}),
+        json.dumps({"action": "final", "answer": "The local PDF task is ready for approval."}),
+    ])
+
+    async def execute():
+        registry = default_tool_registry(desktop_requester=desktop_requester)
+        return await BoundedAgentStepRuntime(provider, registry).run(
+            task={"objective": "Create a PDF in my local workspace"},
+            tool_context=ToolContext("acct_test", "workspace", desktop_requester=desktop_requester),
+        )
+
+    result = asyncio.run(execute())
+    assert result.tools_used == 1
+    assert requested == [("local_file_write", "Create a local PDF report named report.pdf", {"operation": "create_pdf", "path": "report.pdf", "title": "Local report"})]
+
+
 def test_agent_step_streams_final_provider_tokens_after_bounded_planning():
     provider = StreamingProvider([
         json.dumps({"action": "final", "answer": "The result is 42."}),

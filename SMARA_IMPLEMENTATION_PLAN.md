@@ -111,6 +111,13 @@ proof/artifacts.
   rotating logs, refresh, and visible task activity.
 - `local_file_read` and atomic `local_file_write` inside approved roots;
   read-only tree, text, filename, and Git summary inspection are bounded.
+- Local document production is part of the existing `local_file_write`
+  approval scope: DOCX reports, XLSX workbooks, PPTX briefings, PDF reports,
+  PDF merge, and selected-page extraction. Outputs stay under approved roots,
+  are capped at 8 MB, return a structured preview and local undo id, and
+  reject scripts/macros/external links. Unicode remains supported for DOCX,
+  XLSX, and PPTX; PDF safely rejects unsupported non-Latin text until the
+  packaged Indic-font slice is added.
 - `local_terminal` with executable allowlist, no shell operators, timeout,
   bounded output, credential aliases, and output redaction.
 - `local_browser` with HTTP(S) validation and domain allowlist; it can open a
@@ -151,6 +158,10 @@ proof/artifacts.
 - The hosted planner can now create one bounded, sequential local workflow
   graph (inspect → plan → edit → run → verify → report); each stage remains
   approval-gated and capability-scoped on the paired desktop.
+- Ordinary chat now turns a local create/edit/run request into a safe hosted
+  planning task instead of claiming the local capability is unavailable. Any
+  eventual desktop action is still represented by a separately visible,
+  approval-gated child task.
 - Local browser DOM/download and Tavily/GitHub adapter contracts are covered by
   desktop tests; live provider calls still require a user's local credential
   and paired, approved task.
