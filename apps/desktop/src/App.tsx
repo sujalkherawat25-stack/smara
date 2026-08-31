@@ -14,6 +14,7 @@ const fallbackConnection: ConnectionState = {
   allowed_roots: [],
   terminal_allowlist: [],
   browser_domains: [],
+  auto_approve_safe: false,
   paused: false,
   running: false,
   pid: null,
@@ -153,6 +154,7 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const assistantId = useRef<string | null>(null);
   const pendingAssistantText = useRef("");
+  const durableWatchIds = useRef(new Set<string>());
   const assistantFrame = useRef<number | null>(null);
   const conversationId = useRef(`desktop-${Date.now()}`);
   const transcriptEndRef = useRef<HTMLDivElement>(null!);
@@ -235,6 +237,61 @@ function App() {
     });
   }, []);
 
+  const appendDurableResult = useCallback((taskId: string, result: string) => {
+    const parsed = firstJsonObject(result);
+    const text = parsed ? JSON.stringify(parsed, null, 2) : result.trim();
+    if (!text) return;
+    setMessages((items) => {
+      if (items.some((item) => item.id === `task-result-${taskId}`)) return items;
+      return [...items, { id: `task-result-${taskId}`, role: "assistant", text }];
+    });
+    setActivity((items) => [{ id: uid("task-result"), tone: "green" as const, label: "Local task result received", detail: "The paired desktop returned the completed result." }, ...items].slice(0, 8));
+  }, []);
+
+  const watchDurableTask = useCallback(async (parentTaskId: string) => {
+    if (!isNativeDesktop || durableWatchIds.current.has(parentTaskId)) return;
+    durableWatchIds.current.add(parentTaskId);
+    let childTaskId: string | null = null;
+      const deadline = Date.now() + 10 * 60 * 1000;
+    try {
+      while (Date.now() < deadline) {
+        const requestedTaskId: string = childTaskId || parentTaskId;
+        const detail = await desktop.taskDetails(requestedTaskId);
+        const task = detail.task;
+        if (!childTaskId) {
+          for (const event of detail.events || []) {
+            if (event.type !== "agent.desktop_task_requested" && event.type !== "agent.desktop_workflow_requested") continue;
+            try {
+              const payload = JSON.parse(event.payload || "{}");
+              if (typeof payload.task_id === "string" && payload.task_id) { childTaskId = payload.task_id; break; }
+            } catch { /* malformed event is ignored; parent remains visible */ }
+          }
+        }
+        // The parent event that reveals the desktop child arrives in the
+        // parent response. Start the next poll against that child rather than
+        // accidentally treating the parent's planning result as local output.
+        if (childTaskId && requestedTaskId !== childTaskId) {
+          await new Promise((resolve) => window.setTimeout(resolve, 200));
+          continue;
+        }
+        if (childTaskId && task.status === "completed" && typeof task.result === "string" && task.result.trim()) {
+          appendDurableResult(childTaskId, task.result);
+          return;
+        }
+        if (childTaskId && ["failed", "cancelled"].includes(task.status)) {
+          setActivity((items) => [{ id: uid("task-result-error"), tone: "red" as const, label: `Local task ${task.status}`, detail: task.result || "The desktop task did not complete." }, ...items].slice(0, 8));
+          return;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      }
+      setActivity((items) => [{ id: uid("task-result-timeout"), tone: "amber" as const, label: "Local task still running", detail: "Open Activity to see the latest status." }, ...items].slice(0, 8));
+    } catch (error) {
+      setActivity((items) => [{ id: uid("task-result-error"), tone: "red" as const, label: "Could not load local result", detail: errorMessage(error, "Open Activity to retry.") }, ...items].slice(0, 8));
+    } finally {
+      durableWatchIds.current.delete(parentTaskId);
+    }
+  }, [appendDurableResult]);
+
   const handleChatEvent = useCallback((event: ChatEvent) => {
     const target = assistantId.current;
     if (!target) return;
@@ -257,10 +314,11 @@ function App() {
       setStreaming(false);
       setMessages((items) => items.map((item) => item.id === target ? { ...item, pending: false } : item));
       setActivity((items) => [
-        ...(approvalRequired ? [{ id: uid("approval"), tone: "amber" as const, label: "Approval required", detail: "Open Smara Web → Activity to approve the local task." }] : []),
+        ...(approvalRequired ? [{ id: uid("approval"), tone: "amber" as const, label: "Desktop task queued", detail: "Safe reads follow the Desktop policy; writes and terminal work still require approval." }] : []),
         { id: uid("done"), tone: "green" as const, label: "Response ready", detail: event.total_ms ? `${event.total_ms} ms` : undefined },
         ...items,
       ].slice(0, 8));
+      if (event.task_id) void watchDurableTask(event.task_id);
       assistantId.current = null;
     } else if (type === "error") {
       flushAssistantText();
@@ -278,7 +336,7 @@ function App() {
       setActivity((items) => [{ id: uid("error"), tone: "red" as const, label: "Hosted response failed", detail }, ...items].slice(0, 8));
       assistantId.current = null;
     }
-  }, [flushAssistantText, queueAssistantText]);
+  }, [flushAssistantText, queueAssistantText, watchDurableTask]);
 
   useEffect(() => {
     if (!isNativeDesktop) return;
@@ -495,6 +553,7 @@ function SettingsScreen({ connection, onSaved, onPaired, onSignIn }: { connectio
   const [roots, setRoots] = useState(connection.allowed_roots.join("\n"));
   const [terminal, setTerminal] = useState(connection.terminal_allowlist.join("\n"));
   const [domains, setDomains] = useState(connection.browser_domains.join("\n"));
+  const [autoApproveSafe, setAutoApproveSafe] = useState(connection.auto_approve_safe);
   const [code, setCode] = useState("");
   const [pairing, setPairing] = useState(false);
   const [credentials, setCredentials] = useState<LocalCredentialSummary[]>([]);
@@ -505,7 +564,7 @@ function SettingsScreen({ connection, onSaved, onPaired, onSignIn }: { connectio
   const [credentialSecret, setCredentialSecret] = useState("");
   const [credentialBusy, setCredentialBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  useEffect(() => { setApiUrl(connection.api_url); setWebUrl(connection.web_url); setWorkspace(connection.workspace); setModelProfile(connection.model_profile); setRoots(connection.allowed_roots.join("\n")); setTerminal(connection.terminal_allowlist.join("\n")); setDomains(connection.browser_domains.join("\n")); }, [connection]);
+  useEffect(() => { setApiUrl(connection.api_url); setWebUrl(connection.web_url); setWorkspace(connection.workspace); setModelProfile(connection.model_profile); setRoots(connection.allowed_roots.join("\n")); setTerminal(connection.terminal_allowlist.join("\n")); setDomains(connection.browser_domains.join("\n")); setAutoApproveSafe(connection.auto_approve_safe); }, [connection]);
   useEffect(() => {
     if (!isNativeDesktop) return;
     void desktop.credentials().then(setCredentials).catch(() => setCredentials([]));
@@ -515,7 +574,7 @@ function SettingsScreen({ connection, onSaved, onPaired, onSignIn }: { connectio
   async function save(selectedModel = modelProfile) {
     if (!isNativeDesktop) return null;
     setFormError(null);
-    try { const next = await desktop.saveSettings({ api_url: apiUrl.trim(), web_url: webUrl.trim(), workspace: workspace.trim() || "default", model_profile: selectedModel.trim() || "default", allowed_roots: splitLines(roots), terminal_allowlist: splitLines(terminal), browser_domains: splitLines(domains) }); onSaved(next); return next; } catch (error) { setFormError(errorMessage(error, "Could not save settings")); return null; }
+    try { const next = await desktop.saveSettings({ api_url: apiUrl.trim(), web_url: webUrl.trim(), workspace: workspace.trim() || "default", model_profile: selectedModel.trim() || "default", allowed_roots: splitLines(roots), terminal_allowlist: splitLines(terminal), browser_domains: splitLines(domains), auto_approve_safe: autoApproveSafe }); onSaved(next); return next; } catch (error) { setFormError(errorMessage(error, "Could not save settings")); return null; }
   }
   async function pair() {
     const normalizedCode = normalizePairingCode(code);
@@ -525,7 +584,7 @@ function SettingsScreen({ connection, onSaved, onPaired, onSignIn }: { connectio
     }
     setPairing(true);
     setFormError(null);
-    try { onPaired(await desktop.pair({ api_url: apiUrl.trim(), code: normalizedCode, allowed_roots: splitLines(roots), terminal_allowlist: splitLines(terminal), browser_domains: splitLines(domains) })); setCode(""); } catch (error) { setFormError(errorMessage(error, "Pairing failed. Check that the code is fresh and try again.")); } finally { setPairing(false); }
+    try { onPaired(await desktop.pair({ api_url: apiUrl.trim(), code: normalizedCode, allowed_roots: splitLines(roots), terminal_allowlist: splitLines(terminal), browser_domains: splitLines(domains), auto_approve_safe: autoApproveSafe })); setCode(""); } catch (error) { setFormError(errorMessage(error, "Pairing failed. Check that the code is fresh and try again.")); } finally { setPairing(false); }
   }
   function chooseCredentialProvider(provider: string) {
     setCredentialProvider(provider);
@@ -555,22 +614,22 @@ function SettingsScreen({ connection, onSaved, onPaired, onSignIn }: { connectio
     catch (error) { setFormError(errorMessage(error, "Could not disconnect local connector")); }
     finally { setCredentialBusy(false); }
   }
-  return <SettingsPanel connection={connection} apiUrl={apiUrl} webUrl={webUrl} workspace={workspace} modelProfile={modelProfile} roots={roots} terminal={terminal} domains={domains} code={code} pairing={pairing} credentials={credentials} connectors={connectors} localModelProfiles={localModelProfiles} credentialProvider={credentialProvider} credentialName={credentialName} credentialSecret={credentialSecret} credentialBusy={credentialBusy} formError={formError} setApiUrl={setApiUrl} setWebUrl={setWebUrl} setWorkspace={setWorkspace} setModelProfile={setModelProfile} setRoots={setRoots} setTerminal={setTerminal} setDomains={setDomains} setCode={setCode} setFormError={setFormError} setCredentialName={setCredentialName} setCredentialSecret={setCredentialSecret} save={save} pair={pair} chooseCredentialProvider={chooseCredentialProvider} saveCredential={saveCredential} removeCredential={removeCredential} revokeConnector={revokeConnector} onSignIn={onSignIn} onLocalModelsChanged={setLocalModelProfiles} />;
+  return <SettingsPanel connection={connection} apiUrl={apiUrl} webUrl={webUrl} workspace={workspace} modelProfile={modelProfile} roots={roots} terminal={terminal} domains={domains} autoApproveSafe={autoApproveSafe} code={code} pairing={pairing} credentials={credentials} connectors={connectors} localModelProfiles={localModelProfiles} credentialProvider={credentialProvider} credentialName={credentialName} credentialSecret={credentialSecret} credentialBusy={credentialBusy} formError={formError} setApiUrl={setApiUrl} setWebUrl={setWebUrl} setWorkspace={setWorkspace} setModelProfile={setModelProfile} setRoots={setRoots} setTerminal={setTerminal} setDomains={setDomains} setAutoApproveSafe={setAutoApproveSafe} setCode={setCode} setFormError={setFormError} setCredentialName={setCredentialName} setCredentialSecret={setCredentialSecret} save={save} pair={pair} chooseCredentialProvider={chooseCredentialProvider} saveCredential={saveCredential} removeCredential={removeCredential} revokeConnector={revokeConnector} onSignIn={onSignIn} onLocalModelsChanged={setLocalModelProfiles} />;
   return <section className="content-page settings-page"><div className="page-intro"><div><span className="eyebrow">DESKTOP CONFIGURATION</span><h2>Settings</h2><p>Keep the local boundary clear. The hosted agent can ask; this PC decides what is allowed.</p></div><Button kind="primary" onClick={() => void save()} disabled={!isNativeDesktop}>Save changes</Button></div>{formError && <div className="form-error" role="alert"><span>!</span><span>{formError}</span><button onClick={() => setFormError(null)} aria-label="Dismiss error">×</button></div>}{!isNativeDesktop && <div className="callout preview-callout"><span>i</span><div><strong>Desktop UI preview</strong><p>Settings and executor actions become active in the installed Windows app.</p></div></div>}<div className="settings-grid"><div className="settings-card"><div className="card-heading"><span className="card-icon">◉</span><div><h3>Hosted connection</h3><p>One hosted brain for chat, planning, memory and task control.</p></div></div><label>Smara Web URL<input value={webUrl} onChange={(event) => { setFormError(null); setWebUrl(event.target.value); }} spellCheck={false} /></label><label>Smara API URL<input value={apiUrl} onChange={(event) => { setFormError(null); setApiUrl(event.target.value); }} spellCheck={false} /></label><label>Workspace name<input value={workspace} onChange={(event) => setWorkspace(event.target.value)} /></label><label>Hosted model<select value={modelProfile} onChange={(event) => setModelProfile(event.target.value)}>{modelProfiles.map((profile) => <option value={profile.value} key={profile.value}>{profile.label}</option>)}</select></label><p className="small-help">Grok and Sarvam keys remain on the hosted Smara service. This app sends only the selected profile name.</p><div className="connection-help"><span className={`connection-check ${connection.has_cli_token ? "check-on" : ""}`}>{connection.has_cli_token ? "✓" : "i"}</span><span>{connection.has_cli_token ? "This desktop is signed in. Chat and task history are available." : "Sign in once to use hosted chat and task history from this app."}</span>{!connection.has_cli_token && <Button kind="quiet" onClick={() => void (async () => { const saved = await save(); if (saved) onSignIn(saved.api_url, saved.web_url); })()} disabled={!isNativeDesktop}>Sign in ↗</Button>}</div></div><div className="settings-card"><div className="card-heading"><span className="card-icon">⌁</span><div><h3>Pair this desktop</h3><p>Paste the one-time code shown in Smara Web.</p></div></div><div className="pair-status"><span className={`status-dot ${connection.paired ? "dot-green" : "dot-amber"}`} /><strong>{connection.paired ? "Paired and scoped" : "Not paired"}</strong>{connection.executor_id && <span>{connection.executor_id}</span>}</div><div className="pair-row"><input value={code} onChange={(event) => { setFormError(null); setCode(event.target.value.toUpperCase()); }} placeholder="8-character code" maxLength={8} spellCheck={false} /><Button kind="primary" onClick={() => void pair()} disabled={!isNativeDesktop || pairing || code.trim().length !== 8}>{pairing ? "Pairing…" : "Pair device"}</Button></div><p className="small-help">Open Smara Web → Settings → Desktop → Pair device. Codes expire quickly and can be used only once.</p></div><div className="settings-card full-card"><div className="card-heading"><span className="card-icon">◇</span><div><h3>Local tool credentials</h3><p>Encrypted for your Windows account. Values never go to the VM and are never shown again.</p></div></div><div className="credential-entry"><label>Tool<select value={credentialProvider} onChange={(event) => chooseCredentialProvider(event.target.value)}>{credentialPresets.map((preset) => <option value={preset.value} key={preset.value}>{preset.label}</option>)}</select></label><label>Environment name<input value={credentialName} onChange={(event) => setCredentialName(event.target.value.toUpperCase())} placeholder="TOOL_API_KEY" spellCheck={false} /></label><label>Secret value<input type="password" value={credentialSecret} onChange={(event) => setCredentialSecret(event.target.value)} placeholder="Paste locally" autoComplete="off" /></label><Button kind="primary" onClick={() => void saveCredential()} disabled={!isNativeDesktop || credentialBusy || !credentialName.trim() || !credentialSecret}>{credentialBusy ? "Saving…" : "Save locally"}</Button></div><div className="credential-list">{credentials.length === 0 ? <span className="credential-empty">No personal tool credentials saved on this PC.</span> : credentials.map((credential) => <div className="credential-row" key={credential.name}><span className="credential-provider">{credential.provider}</span><strong>{credential.name}</strong><span>••••••••</span><Button kind="quiet" onClick={() => void removeCredential(credential.name)} disabled={credentialBusy}>Remove</Button></div>)}</div><div className="permission-note"><span>▣</span><span>An approved local terminal step may request an alias through <code>credential_env</code>. Smara injects it only for that process and redacts the value from returned output.</span></div></div><div className="settings-card full-card"><div className="card-heading"><span className="card-icon">⌂</span><div><h3>Local permissions</h3><p>Approved folders enable bounded text edits and local DOCX, XLSX, PPTX, and PDF creation. One entry per line; empty means file work stays disabled.</p></div></div><div className="permission-grid"><label>Approved folders<textarea value={roots} onChange={(event) => setRoots(event.target.value)} placeholder={'C:\\Users\\you\\Documents'} /></label><label>Terminal executables<textarea value={terminal} onChange={(event) => setTerminal(event.target.value)} placeholder={'python\ngit'} /></label><label>Browser domains<textarea value={domains} onChange={(event) => setDomains(event.target.value)} placeholder={'github.com\nexample.com'} /></label></div><div className="permission-note"><span>▣</span><span>Smara rejects shell operators, path traversal, symlink escapes, unknown executables, unapproved domains, and unapproved tasks. Document macros, scripts, and external links are not generated. Changing these lists never grants a task approval.</span></div></div><div className="settings-card full-card about-card"><div><span className="eyebrow">ABOUT THIS APP</span><h3>Thin client, one Smara brain</h3><p>This app does not run a second agent or memory database. It keeps the executor responsive on your PC while the hosted Smara service handles chat, planning, research, and durable task state.</p></div><div className="version">v0.1 beta<br /><span>Windows native</span></div></div></div></section>;
 }
 
 type SettingsPanelProps = {
   connection: ConnectionState;
   apiUrl: string; webUrl: string; workspace: string; modelProfile: string;
-  roots: string; terminal: string; domains: string; code: string; pairing: boolean;
+  roots: string; terminal: string; domains: string; autoApproveSafe: boolean; code: string; pairing: boolean;
   credentials: LocalCredentialSummary[]; connectors: LocalConnectorSummary[]; localModelProfiles: LocalModelProfile[]; credentialProvider: string; credentialName: string; credentialSecret: string; credentialBusy: boolean; formError: string | null;
   setApiUrl: (value: string) => void; setWebUrl: (value: string) => void; setWorkspace: (value: string) => void; setModelProfile: (value: string) => void;
-  setRoots: (value: string) => void; setTerminal: (value: string) => void; setDomains: (value: string) => void; setCode: (value: string) => void; setFormError: (value: string | null) => void;
+  setRoots: (value: string) => void; setTerminal: (value: string) => void; setDomains: (value: string) => void; setAutoApproveSafe: (value: boolean) => void; setCode: (value: string) => void; setFormError: (value: string | null) => void;
   setCredentialName: (value: string) => void; setCredentialSecret: (value: string) => void;
   save: (selectedModel?: string) => Promise<ConnectionState | null>; pair: () => Promise<void>; chooseCredentialProvider: (provider: string) => void; saveCredential: () => Promise<void>; removeCredential: (name: string) => Promise<void>; revokeConnector: (provider: string) => Promise<void>; onSignIn: (apiUrl: string, webUrl: string) => void; onLocalModelsChanged: (profiles: LocalModelProfile[]) => void;
 };
 
-function SettingsPanel({ connection, apiUrl, webUrl, workspace, modelProfile, roots, terminal, domains, code, pairing, credentials, connectors, localModelProfiles, credentialProvider, credentialName, credentialSecret, credentialBusy, formError, setApiUrl, setWebUrl, setWorkspace, setModelProfile, setRoots, setTerminal, setDomains, setCode, setFormError, setCredentialName, setCredentialSecret, save, pair, chooseCredentialProvider, saveCredential, removeCredential, revokeConnector, onSignIn, onLocalModelsChanged }: SettingsPanelProps) {
+function SettingsPanel({ connection, apiUrl, webUrl, workspace, modelProfile, roots, terminal, domains, autoApproveSafe, code, pairing, credentials, connectors, localModelProfiles, credentialProvider, credentialName, credentialSecret, credentialBusy, formError, setApiUrl, setWebUrl, setWorkspace, setModelProfile, setRoots, setTerminal, setDomains, setAutoApproveSafe, setCode, setFormError, setCredentialName, setCredentialSecret, save, pair, chooseCredentialProvider, saveCredential, removeCredential, revokeConnector, onSignIn, onLocalModelsChanged }: SettingsPanelProps) {
   const localSelected = modelProfile.startsWith("local:") ? localModelProfiles.find((profile) => `local:${profile.id}` === modelProfile) : undefined;
   const selectedProfile = localSelected ? { label: localSelected.label, provider: `${localSelected.provider} · local`, description: `Private desktop chat via ${localSelected.model}.`, tone: "amber" } : modelProfiles.find((profile) => profile.value === modelProfile) || modelProfiles[0];
   const selectedCredential = credentialPresets.find((preset) => preset.value === credentialProvider) || credentialPresets[0];
@@ -641,7 +700,7 @@ function SettingsPanel({ connection, apiUrl, webUrl, workspace, modelProfile, ro
       </div>
       <div className="settings-card full-card credential-card"><div className="card-heading"><span className="card-icon">◇</span><div><h3>Tools &amp; credentials</h3><p>Choose a local tool and add only the credential it needs. Secrets stay encrypted on this Windows account and never upload.</p></div><span className="card-badge badge-private">Local only</span></div><div className="credential-status-grid"><button type="button" className={`credential-status ${hasCredential("tavily", "TAVILY_API_KEY") ? "status-configured" : ""} ${credentialProvider === "tavily" ? "status-selected" : ""}`} onClick={() => chooseCredentialProvider("tavily")} aria-pressed={credentialProvider === "tavily"}><span className="credential-status-icon">⌕</span><span><strong>Tavily Search</strong><small>{hasCredential("tavily", "TAVILY_API_KEY") ? "Configured on this PC" : "Not configured"}</small></span></button><button type="button" className={`credential-status ${hasCredential("github", "GITHUB_TOKEN") ? "status-configured" : ""} ${credentialProvider === "github" ? "status-selected" : ""}`} onClick={() => chooseCredentialProvider("github")} aria-pressed={credentialProvider === "github"}><span className="credential-status-icon">◈</span><span><strong>GitHub</strong><small>{hasCredential("github", "GITHUB_TOKEN") ? "Configured on this PC" : "Not configured"}</small></span></button><button type="button" className={`credential-status ${credentialProvider === "custom" ? "status-selected" : ""}`} onClick={() => chooseCredentialProvider("custom")} aria-pressed={credentialProvider === "custom"}><span className="credential-status-icon">＋</span><span><strong>Custom tool</strong><small>{credentials.filter((credential) => credential.provider === "custom").length ? `${credentials.filter((credential) => credential.provider === "custom").length} saved locally` : "Optional"}</small></span></button></div><div className="credential-selected"><span className="eyebrow">ADDING A CREDENTIAL FOR {selectedCredential.label.toUpperCase()}</span><span>{selectedCredential.description} Use the exact environment variable expected by this tool.</span></div><div className="credential-entry"><label>Tool<select value={credentialProvider} onChange={(event) => chooseCredentialProvider(event.target.value)}>{credentialPresets.map((preset) => <option value={preset.value} key={preset.value}>{preset.label}</option>)}</select></label><label>Environment variable<input aria-label="Environment variable name" value={credentialName} onChange={(event) => setCredentialName(event.target.value.toUpperCase())} placeholder="TOOL_API_KEY" spellCheck={false} /></label><label>Secret value<input aria-label={`Secret value for ${selectedCredential.label}`} type="password" value={credentialSecret} onChange={(event) => setCredentialSecret(event.target.value)} placeholder="Paste locally — never uploaded" autoComplete="off" /></label><Button kind="primary" onClick={() => void saveCredential()} disabled={!isNativeDesktop || credentialBusy || !credentialName.trim() || !credentialSecret}>{credentialBusy ? "Saving…" : "Save locally"}</Button></div><div className="credential-list">{credentials.length === 0 ? <span className="credential-empty">No local credentials saved. Hosted provider keys are managed separately.</span> : credentials.map((credential) => <div className="credential-row" key={credential.name}><span className="credential-provider">{credential.provider}</span><strong>{credential.name}</strong><span>••••••••</span><Button kind="quiet" onClick={() => void removeCredential(credential.name)} disabled={credentialBusy}>Remove</Button></div>)}</div><div className="permission-note"><span>▣</span><span>Smara injects a selected alias only into the approved process and redacts it from output. It never sends this value to the hosted service.</span></div></div>
       <div className="settings-card full-card connector-card"><div className="card-heading"><span className="card-icon">⌁</span><div><h3>Local connector access</h3><p>Each connector runs from this PC only. Reads are still sent as approval-gated local work.</p></div><span className="card-badge badge-private">Proof-only audit</span></div><div className="connector-list">{connectors.map((connector) => <div className={`connector-row ${connector.credential_configured ? "connector-ready" : ""}`} key={connector.provider}><div><strong>{connector.provider === "tavily" ? "Tavily Search" : "GitHub repositories"}</strong><span>{connector.credential_configured ? "Connected locally" : `Needs ${connector.credential_alias}`}</span><small>{connector.scopes.join(", ")} · {connector.risk.replaceAll("_", " ")} · max {connector.max_requests_per_run} request per approved run</small></div>{connector.credential_configured && <Button kind="quiet" onClick={() => void revokeConnector(connector.provider)} disabled={credentialBusy}>Disconnect</Button>}</div>)}</div>{connectors.some((connector) => connector.provider === "github" && connector.credential_configured) && !localIntegrationPaired && <div className="connector-warning" role="status"><strong>GitHub is saved, but this pairing cannot use local connectors yet.</strong><span>Generate a fresh desktop pairing code in Smara Web and include <b>local integration</b>, then pair this desktop again. Existing permissions stay unchanged.</span></div>}<div className="permission-note"><span>▣</span><span>Connection status and the local audit contain no keys, queries, response text, or repository names—only time, connector, operation, result count, and proof hash.</span></div></div>
-      <div className="settings-card full-card permissions-card"><div className="card-heading"><span className="card-icon">⌂</span><div><h3>Local permissions</h3><p>These are the hard boundaries for files, terminal, and browser work. Empty means disabled.</p></div><span className="card-badge">Approval still required</span></div><div className="permission-summary">{permissionSummary.map((item) => <div className={`permission-summary-item ${item.value ? "summary-enabled" : ""}`} key={item.label}><span className="permission-summary-icon">{item.icon}</span><div><strong>{item.label}</strong><span>{item.value ? `${item.value} ${item.detail}${item.value === 1 ? "" : "s"}` : "Disabled"}</span></div><span className="permission-state">{item.value ? "On" : "Off"}</span></div>)}</div><div className="permission-grid"><label><span>Approved folders <em>{splitLines(roots).length} entries</em></span><textarea value={roots} onChange={(event) => setRoots(event.target.value)} placeholder={'C:\\Users\\you\\Documents'} /></label><label><span>Terminal executables <em>{splitLines(terminal).length} entries</em></span><textarea value={terminal} onChange={(event) => setTerminal(event.target.value)} placeholder={'python\ngit'} /></label><label><span>Browser domains <em>{splitLines(domains).length} entries</em></span><textarea value={domains} onChange={(event) => setDomains(event.target.value)} placeholder={'github.com\nexample.com'} /></label></div><div className="permission-note"><span>▣</span><span>Shell operators, path traversal, symlink escapes, unknown executables, unapproved domains, and unapproved tasks are rejected. Lists define eligibility; they never approve a task.</span></div></div>
+      <div className="settings-card full-card permissions-card"><div className="card-heading"><span className="card-icon">⌂</span><div><h3>Local permissions</h3><p>These are the hard boundaries for files, terminal, and browser work. Empty means disabled.</p></div><span className="card-badge">Approval still required</span></div><div className="permission-summary">{permissionSummary.map((item) => <div className={`permission-summary-item ${item.value ? "summary-enabled" : ""}`} key={item.label}><span className="permission-summary-icon">{item.icon}</span><div><strong>{item.label}</strong><span>{item.value ? `${item.value} ${item.detail}${item.value === 1 ? "" : "s"}` : "Disabled"}</span></div><span className="permission-state">{item.value ? "On" : "Off"}</span></div>)}</div><div className="approval-policy"><div><strong>Desktop approval policy</strong><span>Let this paired PC automatically run safe, read-only work. Writes, terminal commands, and unknown capabilities always stay approval-gated.</span></div><label className="policy-toggle"><input type="checkbox" checked={autoApproveSafe} onChange={(event) => setAutoApproveSafe(event.target.checked)} /><span className="toggle-track" aria-hidden="true"><span /></span><b>{autoApproveSafe ? "Safe reads auto-approved" : "Hosted approval required"}</b></label></div><div className="permission-grid"><label><span>Approved folders <em>{splitLines(roots).length} entries</em></span><textarea value={roots} onChange={(event) => setRoots(event.target.value)} placeholder={'C:\\Users\\you\\Documents'} /></label><label><span>Terminal executables <em>{splitLines(terminal).length} entries</em></span><textarea value={terminal} onChange={(event) => setTerminal(event.target.value)} placeholder={'python\ngit'} /></label><label><span>Browser domains <em>{splitLines(domains).length} entries</em></span><textarea value={domains} onChange={(event) => setDomains(event.target.value)} placeholder={'github.com\nexample.com'} /></label></div><div className="permission-note"><span>▣</span><span>Shell operators, path traversal, symlink escapes, unknown executables, and unapproved domains are rejected. Safe-read auto-approval is audited; it never grants write or terminal access.</span></div></div>
       <div className="settings-card full-card about-card"><div><span className="eyebrow">ABOUT THIS APP</span><h3>Thin client, one Smara brain</h3><p>This app keeps files, browser sessions, credentials, and terminal work on your PC. The hosted Smara service handles chat, planning, research, and durable task state.</p></div><div className="version">v0.1 beta<br /><span>Windows native</span></div></div>
     </div>
   </section>;

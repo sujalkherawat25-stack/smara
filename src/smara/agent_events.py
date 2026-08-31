@@ -59,6 +59,8 @@ def done(
     tools_used: int = 0,
     request_id: str | None = None,
     timings: dict[str, object] | None = None,
+    task_id: str | None = None,
+    task_ids: list[str] | None = None,
 ) -> str:
     payload: dict[str, object] = {
         "type": "done",
@@ -70,6 +72,10 @@ def done(
         payload["request_id"] = request_id
     if timings:
         payload["timings"] = timings
+    if task_id:
+        payload["task_id"] = task_id
+    if task_ids:
+        payload["task_ids"] = [str(value)[:160] for value in task_ids[:20] if str(value).strip()]
     return frame(payload)
 
 

@@ -724,6 +724,7 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
                 total_ms=agent_events.elapsed_ms(started_at),
                 request_id=trace.trace_id,
                 timings=trace.as_dict(),
+                task_id=task["id"],
             )
             return
         try:
@@ -892,6 +893,7 @@ async def self_revoke_executor(executor_id: str, identity: tuple[str, str] = Dep
 @app.post("/v1/executors/claim")
 async def claim_executor(
     wait_seconds: float = Query(default=5.0, ge=0.0, le=25.0),
+    auto_approve_safe: bool = Query(default=False),
     identity: tuple[str, str] = Depends(executor_identity),
 ):
     """Claim immediately, then wait on an advisory signal before repairing.
@@ -901,11 +903,11 @@ async def claim_executor(
     second claim, so work cannot be lost.
     """
     try:
-        step = await _async_store().call("claim_for_executor", *identity)
+        step = await _async_store().call("claim_for_executor", *identity, auto_approve_safe=auto_approve_safe)
         effective_wait = wait_seconds if settings.desktop_long_poll_enabled else 0.0
         if step is None and effective_wait:
             await wait_for_signal(settings.redis_url if settings.work_signals_enabled else "", effective_wait)
-            step = await _async_store().call("claim_for_executor", *identity)
+            step = await _async_store().call("claim_for_executor", *identity, auto_approve_safe=auto_approve_safe)
         return {"step": step}
     except KeyError:
         raise HTTPException(401, "Executor credentials are invalid or revoked.")

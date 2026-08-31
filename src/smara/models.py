@@ -190,6 +190,16 @@ class ExecutorHeartbeat(BaseModel):
     capabilities: list[str] = Field(default_factory=list, max_length=20)
 
 
+class ExecutorClaim(BaseModel):
+    """Polling policy for a paired desktop executor.
+
+    ``auto_approve_safe`` is deliberately narrow: it may release only
+    read-only local work. Writes, terminal commands, and any unknown
+    capability still require the account owner approval recorded in Smara.
+    """
+    auto_approve_safe: bool = False
+
+
 class ExecutorComplete(BaseModel):
     result: str = Field(min_length=1, max_length=20_000)
 

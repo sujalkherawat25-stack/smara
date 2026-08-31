@@ -14,6 +14,7 @@ export const desktop = {
     allowed_roots: string[];
     terminal_allowlist: string[];
     browser_domains: string[];
+    auto_approve_safe: boolean;
   }) => invoke<ConnectionState>("save_settings", { settings }),
   checkConnection: (apiUrl: string) => invoke<RemoteStatus>("check_connection", { apiUrl }),
   login: (apiUrl: string, webUrl: string) => invoke<string>("login_cli", { apiUrl, webUrl }),
@@ -23,6 +24,7 @@ export const desktop = {
     allowed_roots: string[];
     terminal_allowlist: string[];
     browser_domains: string[];
+    auto_approve_safe: boolean;
   }) => invoke<ConnectionState>("pair_desktop", { args }),
   start: () => invoke<ConnectionState>("start_executor"),
   stop: () => invoke<ConnectionState>("stop_executor"),

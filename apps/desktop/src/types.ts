@@ -11,6 +11,7 @@ export interface ConnectionState {
   allowed_roots: string[];
   terminal_allowlist: string[];
   browser_domains: string[];
+  auto_approve_safe: boolean;
   paused: boolean;
   running: boolean;
   pid: number | null;
@@ -84,6 +85,8 @@ export interface ChatEvent {
   recoverable?: boolean;
   total_ms?: number;
   tools_used?: number;
+  task_id?: string;
+  task_ids?: string[];
 }
 
 export interface ChatMessage {

@@ -122,6 +122,40 @@ def test_paired_desktop_claims_only_declared_capability(tmp_path: Path):
     assert artifacts[0]["content"] == "Read-only action completed."
 
 
+def test_desktop_safe_read_policy_auto_approves_only_declared_read_work(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    pairing = store.create_executor_pairing("acct_1", "Safe desktop", ["local_integration", "local_file_write"])
+    desktop = store.pair_executor(pairing["code"])
+    read_task = store.create("acct_1", "work", "List repositories", "List my GitHub repositories", True, [{
+        "name": "desktop.local_integration", "executor_kind": "desktop", "required_capability": "local_integration",
+    }])
+    write_task = store.create("acct_1", "work", "Write file", "Write a local file", True, [{
+        "name": "desktop.local_file_write", "executor_kind": "desktop", "required_capability": "local_file_write",
+    }])
+    store.request_approval(read_task["id"], "acct_1")
+    store.request_approval(write_task["id"], "acct_1")
+
+    claimed = store.claim_for_executor(desktop["executor_id"], desktop["token"], auto_approve_safe=True)
+    assert claimed and claimed["required_capability"] == "local_integration"
+    assert store.get(read_task["id"], "acct_1")["requires_approval"] == 0
+    assert store.get(write_task["id"], "acct_1")["requires_approval"] == 1
+    assert store.get(write_task["id"], "acct_1")["status"] == "waiting_approval"
+    events = store.events(read_task["id"], "acct_1")
+    assert any(event["type"] == "approval.approved" and json.loads(event["payload"])["source"] == "desktop_policy" for event in events)
+
+
+def test_desktop_safe_read_policy_does_not_bypass_multi_step_write_work(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Safe desktop", ["local_file_read"]).get("code"))
+    task = store.create("acct_1", "work", "Mixed local work", "Read then write", True, [
+        {"name": "read", "executor_kind": "desktop", "required_capability": "local_file_read"},
+        {"name": "write", "executor_kind": "desktop", "required_capability": "local_file_write", "depends_on": []},
+    ])
+    store.request_approval(task["id"], "acct_1")
+    assert store.claim_for_executor(desktop["executor_id"], desktop["token"], auto_approve_safe=True) is None
+    assert store.get(task["id"], "acct_1")["requires_approval"] == 1
+
+
 def test_pairing_is_single_use_and_capability_is_enforced(tmp_path: Path):
     store = TaskStore(str(tmp_path / "smara.db"))
     pairing = store.create_executor_pairing("acct_1", "Limited desktop", ["local_file_read"])

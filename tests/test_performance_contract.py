@@ -29,9 +29,11 @@ def test_done_keeps_legacy_fields_and_adds_optional_timing_contract():
         total_ms=4,
         request_id="req_test",
         timings={"trace_id": "req_test", "timings": {"total_ms": 4}, "counters": {}},
+        task_id="task_123",
     )
     payload = json.loads(raw.removeprefix("data: ").strip())
     assert payload["type"] == "done"
     assert payload["total_ms"] == 4
     assert payload["request_id"] == "req_test"
     assert payload["timings"]["trace_id"] == "req_test"
+    assert payload["task_id"] == "task_123"

@@ -2172,7 +2172,12 @@ class DesktopRunner:
         response = client.post(
             f"{state['smara_url']}/v1/executors/claim",
             headers=_headers(state),
-            params={"wait_seconds": str(wait_seconds)},
+            params={
+                "wait_seconds": str(wait_seconds),
+                # This local policy is explicit and persisted by the Desktop
+                # UI. The server still limits it to safe read-only steps.
+                "auto_approve_safe": "true" if state.get("auto_approve_safe") is True else "false",
+            },
         )
         response.raise_for_status()
         step = response.json().get("step")
@@ -2389,6 +2394,7 @@ def _main(argv: list[str] | None = None) -> int:
             "executor_id": state["executor_id"],
             "smara_url": state["smara_url"],
             "capabilities": state.get("capabilities", DEFAULT_CAPABILITIES),
+            "auto_approve_safe": state.get("auto_approve_safe") is True,
             "allowed_roots": state.get("allowed_roots", []),
             "log": str(args.log),
         }, indent=2))
