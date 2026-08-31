@@ -629,7 +629,15 @@ async def delete_conversation(conversation_id: str, user: str = Depends(account_
 async def chat(body: ChatRequest, user: str = Depends(account_id)):
     """Direct chat with bounded read-only tools; writes remain durable tasks."""
     conversation_id, history, summary = await _conversation(body, user)
-    decision = route_request(body.message, has_attachments=bool(body.attachment_ids))
+    # In the default local-only posture personal connectors (for example the
+    # GitHub token stored in Desktop) cannot be invoked by the hosted direct
+    # chat registry. Route those requests into the durable approval path so
+    # the paired executor can run them with its local vault credential.
+    decision = route_request(
+        body.message,
+        has_attachments=bool(body.attachment_ids),
+        local_only=not settings.hosted_user_integrations_enabled,
+    )
     if decision.durable_required:
         task, message = _queue_durable_chat_task(body, user)
         await _async_store().call(
@@ -694,7 +702,11 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
         started_at = time.perf_counter()
         trace = getattr(request.state, "smara_timing", TimingTrace())
         trace.mark("route_started")
-        decision = route_request(body.message, has_attachments=bool(body.attachment_ids))
+        decision = route_request(
+            body.message,
+            has_attachments=bool(body.attachment_ids),
+            local_only=not settings.hosted_user_integrations_enabled,
+        )
         if decision.durable_required:
             task, message = _queue_durable_chat_task(body, user)
             yield agent_events.phase("triage")

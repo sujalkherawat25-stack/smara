@@ -45,6 +45,20 @@ def test_route_keeps_local_and_external_writes_as_durable_work():
     assert route.durable_required is True
 
 
+def test_local_github_request_enters_approval_lane_when_hosted_integrations_are_off():
+    route = route_request("List my GitHub repositories", local_only=True)
+    assert route.lane == "E"
+    assert route.durable_required is True
+    assert "paired desktop" in route.reason
+
+
+def test_github_request_remains_read_only_when_hosted_integrations_are_enabled():
+    route = route_request("List my GitHub repositories")
+    assert route.lane == "D"
+    assert route.durable_required is False
+    assert "integration.github.list" in route.tools_allowed
+
+
 def test_deterministic_lane_uses_registered_tool_without_provider_call():
     class Provider:
         _model = "unused"

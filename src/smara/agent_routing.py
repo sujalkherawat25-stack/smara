@@ -50,6 +50,17 @@ _TOOL_RE = re.compile(
     r"news|source|cite|citation|gmail|calendar|drive|github)\b",
     re.IGNORECASE,
 )
+# Personal connectors are intentionally kept out of the hosted direct-chat
+# lane when the deployment is in its local-only posture.  A request such as
+# "List my GitHub repositories" needs the paired desktop (and its vault
+# token); sending it through the hosted tool registry produces an empty
+# registry and an unhelpful model apology instead of a durable approval task.
+_LOCAL_INTEGRATION_RE = re.compile(
+    r"\b(?:list|show|check|find|search|read|inspect|access|open|use)\b[^\n]{0,160}\b"
+    r"(?:github|git\s+hub)\b(?:[^\n]{0,120}\b(?:repo(?:sitory|s)?|pull\s+requests?|issues?)\b)?|"
+    r"\b(?:github|git\s+hub)\b[^\n]{0,120}\b(?:repo(?:sitory|s)?|pull\s+requests?|issues?)\b",
+    re.IGNORECASE,
+)
 _DEEP_RESEARCH_RE = re.compile(
     r"\b(?:detailed\s+(?:analysis|breakdown|report)|comprehensive\s+(?:analysis|research|review|guide)|"
     r"complete\s+(?:guide|analysis|report|breakdown)|deep\s+(?:dive|research|search)|"
@@ -80,8 +91,13 @@ def route_request(
     *,
     has_attachments: bool = False,
     explicit_memory: bool = False,
+    local_only: bool = False,
 ) -> RouteDecision:
     text = message.strip()
+    if local_only and _LOCAL_INTEGRATION_RE.search(text):
+        return RouteDecision(
+            "E", "personal connector requires the paired desktop", 0.99, 3, True, (), True
+        )
     if _DURABLE_RE.search(text):
         return RouteDecision(
             "E", "durable or approval-gated work", 0.98, 3, True, (), True
