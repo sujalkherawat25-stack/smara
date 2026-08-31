@@ -16,6 +16,7 @@ from smara.desktop_executor import (
     resolve_local_credential,
     save_local_credential,
 )
+from smara.desktop_integrations import local_connector_catalog
 
 
 def test_desktop_file_read_write_stays_inside_approved_root(tmp_path: Path):
@@ -380,6 +381,10 @@ def test_local_tavily_adapter_uses_vault_and_returns_bounded_secret_free_proof(m
     assert result["results"][0]["url"] == "https://example.com/smara"
     assert result["citations"] == ["https://example.com/smara"]
     assert result["proof"]["results"] == 1
+    assert result["connector"] == {
+        "provider": "tavily", "operation": "search", "auth_mode": "local_api_key", "risk": "read_only",
+        "scopes": ["web.search"], "max_results": 5, "max_requests_per_run": 1,
+    }
 
 
 def test_local_github_adapter_is_read_only_and_classifies_bad_credentials(monkeypatch, tmp_path: Path):
@@ -410,6 +415,15 @@ def test_local_github_adapter_is_read_only_and_classifies_bad_credentials(monkey
     }, state))
     assert result["repositories"][0]["full_name"] == "sujal/smara"
     assert "github-local-secret" not in json.dumps(result)
+    assert result["connector"]["scopes"] == ["repositories:read"]
+
+
+def test_local_connector_catalogue_is_explicit_and_secret_free():
+    connectors = {item["provider"]: item for item in local_connector_catalog()}
+    assert set(connectors) == {"tavily", "github"}
+    assert connectors["tavily"]["credential_alias"] == "TAVILY_API_KEY"
+    assert connectors["github"]["operation"] == "list_repositories"
+    assert all(item["credential_configured"] is False for item in connectors.values())
 
 
 def test_desktop_refuses_unapproved_step_and_undeclared_browser(tmp_path: Path):

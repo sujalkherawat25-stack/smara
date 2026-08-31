@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import httpx
@@ -18,9 +19,29 @@ import httpx
 MAX_LOCAL_INTEGRATION_RESULTS = 20
 MAX_LOCAL_INTEGRATION_TEXT = 2_000
 MAX_LOCAL_INTEGRATION_OUTPUT = 32_000
-LOCAL_INTEGRATION_CREDENTIALS = {
-    "tavily": "TAVILY_API_KEY",
-    "github": "GITHUB_TOKEN",
+@dataclass(frozen=True)
+class LocalConnectorSpec:
+    """Public, secret-free contract for one installed desktop connector."""
+
+    provider: str
+    operation: str
+    credential_alias: str
+    auth_mode: str
+    risk: str
+    scopes: tuple[str, ...]
+    max_results: int
+    max_requests_per_run: int = 1
+
+
+LOCAL_CONNECTORS: dict[str, LocalConnectorSpec] = {
+    "tavily": LocalConnectorSpec(
+        "tavily", "search", "TAVILY_API_KEY", "local_api_key", "read_only",
+        ("web.search",), 5,
+    ),
+    "github": LocalConnectorSpec(
+        "github", "list_repositories", "GITHUB_TOKEN", "local_api_key", "read_only",
+        ("repositories:read",), MAX_LOCAL_INTEGRATION_RESULTS,
+    ),
 }
 
 
@@ -30,6 +51,30 @@ class LocalIntegrationCancelled(RuntimeError):
 
 def _bounded_text(value: object, limit: int = MAX_LOCAL_INTEGRATION_TEXT) -> str:
     return " ".join(str(value or "").split())[:limit]
+
+
+def local_connector_catalog() -> list[dict[str, object]]:
+    """Return installed connector metadata without a credential value."""
+    return [
+        {
+            **asdict(spec),
+            "scopes": list(spec.scopes),
+            "credential_configured": False,
+        }
+        for spec in LOCAL_CONNECTORS.values()
+    ]
+
+
+def _connector_metadata(spec: LocalConnectorSpec) -> dict[str, object]:
+    return {
+        "provider": spec.provider,
+        "operation": spec.operation,
+        "auth_mode": spec.auth_mode,
+        "risk": spec.risk,
+        "scopes": list(spec.scopes),
+        "max_results": spec.max_results,
+        "max_requests_per_run": spec.max_requests_per_run,
+    }
 
 
 def _provider_error(provider: str, response: httpx.Response) -> RuntimeError:
@@ -49,16 +94,16 @@ def _json_response(provider: str, response: httpx.Response) -> Any:
         raise RuntimeError(f"{provider.title()} returned invalid JSON.") from exc
 
 
-def _credential(provider: str, payload: dict[str, Any], credentials_resolver) -> tuple[str, str]:
-    expected = LOCAL_INTEGRATION_CREDENTIALS[provider]
+def _credential(spec: LocalConnectorSpec, payload: dict[str, Any], credentials_resolver) -> tuple[str, str]:
+    expected = spec.credential_alias
     supplied = payload.get("credential_env", expected)
     if not isinstance(supplied, str) or supplied.strip().upper() != expected:
-        raise RuntimeError(f"{provider.title()} uses the local {expected} credential alias.")
+        raise RuntimeError(f"{spec.provider.title()} uses the local {expected} credential alias.")
     values = credentials_resolver([expected])
     return expected, values[expected]
 
 
-def _tavily_search(client: httpx.Client, payload: dict[str, Any], secret: str) -> str:
+def _tavily_search(client: httpx.Client, payload: dict[str, Any], secret: str, spec: LocalConnectorSpec) -> str:
     query = payload.get("query")
     if not isinstance(query, str) or not query.strip() or len(query.strip()) > 500:
         raise RuntimeError("Tavily search needs a query up to 500 characters.")
@@ -102,11 +147,12 @@ def _tavily_search(client: httpx.Client, payload: dict[str, Any], secret: str) -
     return json.dumps({
         "action": "local_integration", "provider": "tavily", "operation": "search",
         "query": query.strip(), "results": results, "citations": citations,
+        "connector": _connector_metadata(spec),
         "proof": {"provider": "tavily", "result_sha256": proof, "results": len(results)},
     }, ensure_ascii=False)[:MAX_LOCAL_INTEGRATION_OUTPUT]
 
 
-def _github_repositories(client: httpx.Client, payload: dict[str, Any], secret: str) -> str:
+def _github_repositories(client: httpx.Client, payload: dict[str, Any], secret: str, spec: LocalConnectorSpec) -> str:
     limit = payload.get("limit", 10)
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_LOCAL_INTEGRATION_RESULTS:
         raise RuntimeError(f"GitHub limit must be between 1 and {MAX_LOCAL_INTEGRATION_RESULTS}.")
@@ -137,6 +183,7 @@ def _github_repositories(client: httpx.Client, payload: dict[str, Any], secret: 
     return json.dumps({
         "action": "local_integration", "provider": "github", "operation": "list_repositories",
         "repositories": repositories,
+        "connector": _connector_metadata(spec),
         "proof": {"provider": "github", "result_sha256": proof, "repositories": len(repositories)},
     }, ensure_ascii=False)[:MAX_LOCAL_INTEGRATION_OUTPUT]
 
@@ -144,19 +191,19 @@ def _github_repositories(client: httpx.Client, payload: dict[str, Any], secret: 
 def execute_local_integration(payload: dict[str, Any], credentials_resolver, *, checkpoint=None, progress_hook=None) -> str:
     """Run one explicitly approved, local-only integration read."""
     provider = payload.get("provider")
-    if not isinstance(provider, str) or provider.strip().lower() not in LOCAL_INTEGRATION_CREDENTIALS:
+    if not isinstance(provider, str) or provider.strip().lower() not in LOCAL_CONNECTORS:
         raise RuntimeError("Supported local integrations are Tavily search and GitHub repositories.")
     provider = provider.strip().lower()
+    spec = LOCAL_CONNECTORS[provider]
     operation = payload.get("operation")
-    expected_operation = "search" if provider == "tavily" else "list_repositories"
-    if operation != expected_operation:
-        raise RuntimeError(f"{provider.title()} supports only {expected_operation} locally.")
+    if operation != spec.operation:
+        raise RuntimeError(f"{provider.title()} supports only {spec.operation} locally.")
     if checkpoint is not None and checkpoint():
         raise LocalIntegrationCancelled("Local integration was cancelled before it started.")
     _emit = progress_hook
     if _emit is not None:
         _emit(f"Starting local {provider} adapter")
-    _alias, secret = _credential(provider, payload, credentials_resolver)
+    _alias, secret = _credential(spec, payload, credentials_resolver)
     try:
         with httpx.Client(
             timeout=20,
@@ -164,9 +211,9 @@ def execute_local_integration(payload: dict[str, Any], credentials_resolver, *, 
             headers={"User-Agent": "SmaraDesktop/0.1 local-integration"},
         ) as client:
             if provider == "tavily":
-                result = _tavily_search(client, payload, secret)
+                result = _tavily_search(client, payload, secret, spec)
             else:
-                result = _github_repositories(client, payload, secret)
+                result = _github_repositories(client, payload, secret, spec)
     except httpx.HTTPError as exc:
         raise RuntimeError(f"Could not reach {provider.title()} from this PC.") from exc
     finally:

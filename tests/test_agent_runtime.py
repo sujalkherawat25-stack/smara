@@ -2,7 +2,12 @@ import asyncio
 
 import pytest
 
-from smara.agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime, _research_word_target
+from smara.agent_runtime import (
+    OpenAICompatibleProvider,
+    SmaraAgentRuntime,
+    _research_evidence_links,
+    _research_word_target,
+)
 from smara import agent_events, llm_errors
 import httpx
 
@@ -228,7 +233,8 @@ def test_deterministic_deep_research_runs_writer_pass_and_preserves_citations(mo
         message="Give me a detailed analysis with citations",
         event_hook=lambda name, payload: events.append((name, payload)),
     ))
-    assert turn.message == "A sourced answer [1]."
+    assert turn.message.startswith("A sourced answer [1].")
+    assert "[Official source](https://example.com)" in turn.message
     assert turn.tools_used == 1
     completed = [payload for name, payload in events if name == "agent.tool_completed"]
     assert completed and completed[0]["citations"] == ["https://example.com"]
@@ -242,6 +248,17 @@ def test_deterministic_deep_research_runs_writer_pass_and_preserves_citations(mo
 def test_complete_research_guide_gets_a_bounded_substantive_default():
     assert _research_word_target("Give me the complete guide for how to build an agent system") == 900
     assert _research_word_target("Give me a 1,200-word complete guide") == 1200
+
+
+def test_research_evidence_links_follow_only_cited_labels():
+    evidence = (
+        "[1] First source\nURL: https://first.example/source\nEVIDENCE: one\n\n"
+        "[2] Second source\nURL: https://second.example/source\nEVIDENCE: two"
+    )
+    links = _research_evidence_links(evidence, "A supported statement [2].")
+    assert "### Evidence links" in links
+    assert "[2] [Second source](https://second.example/source)" in links
+    assert "first.example" not in links
 
 
 def test_deterministic_tool_failure_is_reported_without_runtime_name_error(monkeypatch):

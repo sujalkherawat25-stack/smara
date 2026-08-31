@@ -119,6 +119,35 @@ def _citation_label_count(text: str) -> int:
     return len(set(re.findall(r"\[(\d+)\](?:\([^)]*https?://[^)]*\))?", str(text or ""))))
 
 
+def _research_evidence_links(evidence: str, answer: str) -> str:
+    """Expose the exact public links behind research labels.
+
+    The writer may use `[2]` accurately while omitting the bibliography.
+    That makes a cited answer impossible for a person to verify.  The bundle
+    already contains labelled, public URLs, so attach a bounded deterministic
+    list after the final prose instead of trusting every provider to format a
+    reference section correctly.
+    """
+    records = re.findall(
+        r"^\[(\d+)\]\s+([^\n]+)\nURL:\s*(https?://\S+)",
+        str(evidence or ""),
+        flags=re.MULTILINE,
+    )
+    if not records:
+        return ""
+    used_labels = set(re.findall(r"\[(\d+)\]", str(answer or "")))
+    selected = [record for record in records if record[0] in used_labels] or records
+    lines = ["### Evidence links"]
+    seen: set[str] = set()
+    for label, title, url in selected[:10]:
+        if label in seen:
+            continue
+        seen.add(label)
+        safe_title = title.strip().replace("[", "").replace("]", "")[:200]
+        lines.append(f"- [{label}] [{safe_title}]({url})")
+    return "\n\n".join(lines) if len(lines) > 1 else ""
+
+
 def _bounded_context(
     memory: str = "",
     summary: str = "",
@@ -595,14 +624,27 @@ class SmaraAgentRuntime:
                             # text when a provider under-delivers again.
                             token_hook=None,
                         )
-                    if token_hook:
-                        token_hook(answer)
                 else:
                     answer = await self._direct_answer(
                         system=writer_system,
                         message=writer_message,
                         token_hook=token_hook,
                     )
+                links = _research_evidence_links(result.content, answer)
+                if links:
+                    answer = f"{answer.rstrip()}\n\n{links}"
+                if token_hook:
+                    if target_words:
+                        # The substantive-guide path buffers its draft so it
+                        # can enforce length. Emit the complete accepted
+                        # answer, including its deterministic evidence links,
+                        # exactly once.
+                        token_hook(answer)
+                    elif links:
+                        # The short path has already streamed the prose; add
+                        # only the deterministic link appendix rather than
+                        # duplicating the answer.
+                        token_hook(f"\n\n{links}")
             else:
                 answer = result.content
                 if name == "calculate":
