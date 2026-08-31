@@ -8,10 +8,27 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from .work_signals import WorkSignalBus
+from .workspace_contract import validate_workspace_job
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _workspace_retry_limit(raw_payload: object, default_max_attempts: int) -> tuple[int, int | None]:
+    """Return (allowed total attempts, configured repair retries).
+
+    A workspace job's repair budget is stricter than the generic task retry
+    limit. Invalid or legacy payloads retain the existing store behaviour.
+    """
+    try:
+        payload = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+        if not isinstance(payload, dict) or not isinstance(payload.get("workspace_job"), dict):
+            return default_max_attempts, None
+        job = validate_workspace_job(payload["workspace_job"])
+        return min(default_max_attempts, 1 + job.max_repair_attempts), job.max_repair_attempts
+    except (RuntimeError, TypeError, ValueError, json.JSONDecodeError):
+        return default_max_attempts, None
 
 
 class TaskStore:
@@ -806,21 +823,33 @@ class TaskStore:
         """Record a bounded failure. Returns `retrying` or terminal `failed`."""
         now = _now()
         with self._connect() as c:
-            row = c.execute("SELECT task_id,task_run_id,attempts,max_attempts FROM task_steps WHERE id=? AND task_id IN (SELECT id FROM tasks WHERE account_id=?)", (step_id, account_id)).fetchone()
+            row = c.execute("SELECT task_id,task_run_id,attempts,max_attempts,executor_payload FROM task_steps WHERE id=? AND task_id IN (SELECT id FROM tasks WHERE account_id=?)", (step_id, account_id)).fetchone()
             if not row: raise KeyError(step_id)
-            retry = retryable and row["attempts"] < row["max_attempts"]
+            max_attempts, repair_retries = _workspace_retry_limit(row["executor_payload"], row["max_attempts"])
+            retry = retryable and row["attempts"] < max_attempts
             if retry:
                 retry_at = (datetime.now(timezone.utc) + timedelta(seconds=retry_delay_seconds)).isoformat()
                 c.execute("UPDATE task_steps SET status='queued',lease_owner=NULL,lease_expires_at=NULL,retry_at=?,last_error=? WHERE id=?", (retry_at, error[:2000], step_id))
                 c.execute("UPDATE tasks SET status='queued',updated_at=? WHERE id=?", (now, row["task_id"]))
                 event_type, outcome = "step.retry_scheduled", "retrying"
+                event_payload = json.dumps({
+                    "source": "worker",
+                    "repair_attempt": max(0, int(row["attempts"]) - 1),
+                    "repair_budget": repair_retries,
+                })
             else:
                 c.execute("UPDATE task_steps SET status='failed',lease_owner=NULL,lease_expires_at=NULL,last_error=? WHERE id=?", (error[:2000], step_id))
                 c.execute("UPDATE task_runs SET status='failed' WHERE id=?", (row["task_run_id"],))
                 c.execute("UPDATE tasks SET status='failed',updated_at=? WHERE id=?", (now, row["task_id"]))
                 c.execute("INSERT INTO task_dead_letters(id,task_id,step_id,account_id,error,attempts,created_at,resolved_at) VALUES(?,?,?,?,?,?,?,NULL)", (f"dlq_{uuid.uuid4().hex}", row["task_id"], step_id, account_id, error[:2000], row["attempts"], now))
                 event_type, outcome = "step.failed", "failed"
-            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", row["task_id"], event_type, '{"source":"worker"}', now))
+                event_payload = json.dumps({
+                    "source": "worker",
+                    "repair_attempt": max(0, int(row["attempts"]) - 1),
+                    "repair_budget": repair_retries,
+                    "repair_budget_exhausted": repair_retries is not None and int(row["attempts"]) >= max_attempts,
+                })
+            c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", row["task_id"], event_type, event_payload, now))
             return outcome
 
     def dead_letters(self, account_id: str) -> list[dict]:

@@ -22,6 +22,18 @@ export interface SmaraStep {
   required_capability: string | null;
   attempt: number;
   error: string | null;
+  stage?: string;
+  operation?: string;
+  workspace_job?: {
+    schema_version?: string;
+    workspace_root?: string;
+    objective?: string;
+    acceptance_checks?: string[];
+    allowed_capabilities?: string[];
+    approval_policy?: string;
+    isolation?: string;
+    budgets?: { time_budget_seconds?: number; cost_budget_inr?: number; max_repair_attempts?: number };
+  };
 }
 
 export interface SmaraEvent {

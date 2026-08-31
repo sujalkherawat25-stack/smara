@@ -130,6 +130,16 @@ class WorkspaceTestResult(BaseModel):
     output_preview: str = Field(default="", max_length=4_000)
 
 
+class WorkspaceAcceptanceCheck(BaseModel):
+    """Status of one user-visible acceptance check for a workspace run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    check: str = Field(min_length=1, max_length=2_000)
+    status: Literal["passed", "failed", "pending", "blocked"] = "pending"
+    detail: str = Field(default="", max_length=1_000)
+
+
 class WorkspaceStageResult(BaseModel):
     """Stable, bounded output shown by both run consoles."""
 
@@ -144,6 +154,7 @@ class WorkspaceStageResult(BaseModel):
     commands_run: list[WorkspaceCommandResult] = Field(default_factory=list, max_length=20)
     tests: list[WorkspaceTestResult] = Field(default_factory=list, max_length=20)
     artifacts: list[WorkspaceArtifact] = Field(default_factory=list, max_length=20)
+    acceptance: list[WorkspaceAcceptanceCheck] = Field(default_factory=list, max_length=12)
     warnings: list[str] = Field(default_factory=list, max_length=20)
     next_action: str | None = Field(default=None, max_length=1_000)
 
@@ -170,6 +181,7 @@ class WorkspaceJobSpec(BaseModel):
     approval_policy: Literal["always", "on_mutation", "read_only"] = "on_mutation"
     credential_aliases: list[str] = Field(default_factory=list, max_length=12)
     repository: bool = False
+    isolation: Literal["none", "copy", "git_worktree"] = "none"
     base_revision: str | None = Field(default=None, max_length=160)
 
     @field_validator("workspace_root")
@@ -212,6 +224,8 @@ class WorkspaceJobSpec(BaseModel):
             raise ValueError("read_only approval_policy cannot include a mutating capability")
         if self.repository and self.workspace_root in {".", ""}:
             raise ValueError("repository jobs need an explicit workspace_root")
+        if self.isolation == "git_worktree" and not self.repository:
+            raise ValueError("git_worktree isolation requires repository=true")
         return self
 
 
@@ -243,8 +257,95 @@ def workspace_job_summary(job: WorkspaceJobSpec) -> dict[str, Any]:
         "approval_policy": job.approval_policy,
         "credential_aliases": job.credential_aliases,
         "repository": job.repository,
+        "isolation": job.isolation,
         "base_revision": job.base_revision,
     }
+
+
+def build_stage_result(job: WorkspaceJobSpec, *, stage: str, result: dict[str, Any],
+                       status: str = "completed") -> dict[str, Any]:
+    """Normalize a capability result into the stable stage-result contract.
+
+    Capability implementations intentionally remain free to evolve their
+    result shape.  This adapter keeps the run console stable and only copies
+    bounded, non-secret proof fields into the durable task artifact.
+    """
+    allowed_stages = {"inspect", "plan", "edit", "run", "verify", "report"}
+    stage_name = stage if stage in allowed_stages else "report"
+    summary = result.get("summary") if isinstance(result.get("summary"), str) else None
+    if not summary:
+        operation = result.get("operation") or result.get("action") or stage_name
+        summary = f"{stage_name.title()} stage completed ({str(operation)[:120]})."
+    inspected: list[str] = []
+    entries = result.get("entries")
+    if isinstance(entries, list):
+        for item in entries[:100]:
+            if isinstance(item, dict) and isinstance(item.get("path"), str):
+                inspected.append(item["path"][:500])
+    changed: list[dict[str, Any]] = []
+    hashes = result.get("changed_file_hashes")
+    if isinstance(hashes, dict):
+        for path, item in list(hashes.items())[:100]:
+            if not isinstance(path, str) or not isinstance(item, dict):
+                continue
+            changed.append({
+                "path": path[:500],
+                "after_sha256": item.get("sha256") if isinstance(item.get("sha256"), str) else None,
+                "change": "modified",
+                "diff_summary": str(item.get("status") or "")[:2_000] or None,
+            })
+    elif isinstance(result.get("file_name"), str) and result.get("changed") is True:
+        changed.append({"path": result["file_name"][:500], "change": "modified"})
+    commands: list[dict[str, Any]] = []
+    if isinstance(result.get("command"), str):
+        commands.append({
+            "command": result["command"][:1_000],
+            "exit_code": int(result.get("exit_code", 0)) if isinstance(result.get("exit_code"), int) else 0,
+            "duration_ms": int(result.get("duration_ms", 0)) if isinstance(result.get("duration_ms"), int) else 0,
+            "output_preview": str(result.get("output") or result.get("output_preview") or "")[:4_000],
+        })
+    tests: list[dict[str, Any]] = []
+    raw_tests = result.get("tests")
+    if isinstance(raw_tests, list):
+        for item in raw_tests[:20]:
+            if isinstance(item, dict) and isinstance(item.get("name"), str):
+                tests.append({
+                    "name": item["name"][:200],
+                    "status": item.get("status") if item.get("status") in {"passed", "failed", "skipped", "blocked"} else "passed",
+                    "output_preview": str(item.get("output_preview") or item.get("output") or "")[:4_000],
+                })
+    artifacts: list[dict[str, Any]] = []
+    raw_artifacts = result.get("artifacts")
+    if isinstance(raw_artifacts, list):
+        for item in raw_artifacts[:20]:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name") or item.get("path")
+            if isinstance(name, str):
+                artifacts.append({
+                    "name": name[:240], "kind": "file", "path": item.get("path") if isinstance(item.get("path"), str) else None,
+                    "sha256": item.get("sha256") if isinstance(item.get("sha256"), str) else None,
+                    "bytes": int(item.get("bytes", 0)) if isinstance(item.get("bytes"), int) else 0,
+                })
+    has_verification = bool(commands or tests)
+    verification_ok = all(item.get("exit_code", 0) == 0 for item in commands) and all(item.get("status") == "passed" for item in tests)
+    acceptance_status = "passed" if stage_name == "verify" and has_verification and verification_ok else "pending"
+    acceptance = [
+        {"check": check, "status": acceptance_status, "detail": "Verified by the local stage." if acceptance_status == "passed" else "Awaiting the verify stage."}
+        for check in job.acceptance_checks
+    ]
+    stage_value = WorkspaceStageResult(
+        stage=stage_name,
+        status=status if status in {"completed", "failed", "cancelled", "blocked"} else "completed",
+        summary=summary[:4_000],
+        files_inspected=inspected,
+        files_changed=changed,
+        commands_run=commands,
+        tests=tests,
+        artifacts=artifacts,
+        acceptance=acceptance,
+    )
+    return stage_value.model_dump(mode="json")
 
 
 def build_workspace_job(*, workspace_root: str, objective: str, capabilities: list[str],

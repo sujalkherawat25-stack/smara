@@ -53,12 +53,12 @@ _ANY_OBJECT = {"type": "object", "additionalProperties": False}
 
 LOCAL_SKILLS: dict[str, LocalSkillSpec] = {
     "local_file_read": LocalSkillSpec(
-        "local_file_read", "Inspect an approved local file or workspace.", _ANY_OBJECT,
+        "local_file_read", "Inspect an approved local file or workspace, including metadata-only snapshots and Git proof.", _ANY_OBJECT,
         timeout_seconds=15, max_output_bytes=256 * 1024, side_effecting=False,
         result_schema={"type": "object", "required": ["action"]},
     ),
     "local_file_write": LocalSkillSpec(
-        "local_file_write", "Preview and apply an approved workspace edit or bounded DOCX, XLSX, PPTX, or PDF operation.", _ANY_OBJECT,
+        "local_file_write", "Preview and apply an approved workspace edit or bounded DOCX, XLSX, PPTX, PDF, or isolated-workspace operation.", _ANY_OBJECT,
         timeout_seconds=60, max_output_bytes=40_000, max_artifact_bytes=8 * 1024 * 1024,
         result_schema={"type": "object", "required": ["action", "operation"]},
         artifact_schema={"type": "object", "properties": {"undo_id": {"type": "string"}}},

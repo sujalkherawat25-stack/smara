@@ -21,6 +21,7 @@ import queue
 import re
 import shlex
 import subprocess
+import shutil
 import sys
 import tempfile
 import threading
@@ -43,12 +44,12 @@ try:
     from .desktop_integrations import LocalIntegrationCancelled, execute_local_integration
     from .local_agent import LocalTaskJournal, decorate_local_result, journal_path, local_skill_catalog, skill_spec, validate_local_step, workspace_lock
     from .local_documents import build_document, is_document_operation
-    from .workspace_contract import WorkspaceJobSpec, validate_workspace_job, workspace_job_summary
+    from .workspace_contract import WorkspaceJobSpec, build_stage_result, validate_workspace_job, workspace_job_summary
 except ImportError:  # pragma: no cover - exercised by the packaged binary
     from desktop_integrations import LocalIntegrationCancelled, execute_local_integration
     from local_agent import LocalTaskJournal, decorate_local_result, journal_path, local_skill_catalog, skill_spec, validate_local_step, workspace_lock
     from local_documents import build_document, is_document_operation
-    from workspace_contract import WorkspaceJobSpec, validate_workspace_job, workspace_job_summary
+    from workspace_contract import WorkspaceJobSpec, build_stage_result, validate_workspace_job, workspace_job_summary
 
 
 MAX_FILE_BYTES = 256 * 1024
@@ -76,6 +77,9 @@ MAX_ARTIFACT_FILES = 20
 MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
 MAX_GIT_LINES = 100
 MAX_GIT_COMMITS = 20
+MAX_WORKSPACE_SNAPSHOT_FILES = 200
+MAX_WORKSPACE_COPY_FILES = 5_000
+MAX_WORKSPACE_COPY_BYTES = 256 * 1024 * 1024
 DEFAULT_CAPABILITIES = ["local_file_read"]
 STATE_ENV = "SMARA_DESKTOP_STATE"
 CREDENTIALS_ENV = "SMARA_DESKTOP_CREDENTIALS"
@@ -796,6 +800,141 @@ def _git_summary(payload: dict, roots: list[Path], state: dict) -> str:
     }, ensure_ascii=False)
 
 
+def _git_revision(root: Path, state: dict) -> str | None:
+    """Return the current commit without failing non-Git workspaces."""
+    allowlist = state.get("terminal_allowlist") or []
+    if "git" not in {Path(item).name.lower() for item in allowlist if isinstance(item, str)}:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    revision = result.stdout.strip()
+    return revision[:160] if re.fullmatch(r"[0-9a-fA-F]{7,160}", revision) else None
+
+
+def _workspace_snapshot(payload: dict, roots: list[Path]) -> str:
+    """Capture bounded, secret-free proof for a workspace before a mutation."""
+    root = _workspace_root(payload, roots)
+    state = payload.get("_state", {})
+    entries: list[dict[str, object]] = []
+    total_bytes = 0
+    truncated = False
+    digest = hashlib.sha256()
+    try:
+        for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+            current_path = Path(current)
+            directories[:] = sorted(item for item in directories if not (current_path / item).is_symlink())
+            files[:] = sorted(files)
+            for filename in files:
+                child = current_path / filename
+                if child.is_symlink() or not child.is_file():
+                    continue
+                relative = child.relative_to(root).as_posix()
+                if relative.startswith(".smara-workspaces/"):
+                    continue
+                try:
+                    size = child.stat().st_size
+                except OSError:
+                    continue
+                digest.update(f"{relative}\0{size}\0".encode("utf-8"))
+                total_bytes += size
+                if len(entries) >= MAX_WORKSPACE_SNAPSHOT_FILES:
+                    truncated = True
+                    continue
+                entries.append({
+                    "path": relative[:500],
+                    "bytes": size,
+                    "sha256": None,
+                    "media_type": mimetypes.guess_type(filename)[0] or "application/octet-stream",
+                })
+    except OSError as exc:
+        raise RuntimeError("Could not snapshot the approved workspace.") from exc
+    revision = _git_revision(root, state)
+    return json.dumps({
+        "action": "local_workspace_inspect",
+        "operation": "workspace_snapshot",
+        "root": root.name or str(root),
+        "base_revision": revision,
+        "file_count": len(entries),
+        "total_bytes": total_bytes,
+        "snapshot_sha256": digest.hexdigest(),
+        "entries": entries,
+        "truncated": truncated,
+        "proof": "Metadata-only snapshot; file contents and credential values are never returned.",
+    }, ensure_ascii=False)
+
+
+def _prepare_workspace(payload: dict, roots: list[Path], state: dict) -> str:
+    """Create an idempotent, bounded copy/worktree for an approved repo."""
+    source = _target(payload.get("path"), roots, must_exist=True)
+    if not source.is_dir() or source.is_symlink():
+        raise RuntimeError("Workspace source must be a regular approved directory.")
+    job = validate_workspace_job(payload.get("workspace_job")) if payload.get("workspace_job") else None
+    mode = payload.get("mode") or (job.isolation if job and job.isolation != "none" else "copy")
+    if mode not in {"copy", "git_worktree"}:
+        raise RuntimeError("Workspace preparation mode must be copy or git_worktree.")
+    if mode == "git_worktree" and not (source / ".git").exists():
+        raise RuntimeError("git_worktree preparation requires a Git repository.")
+    allowlist = state.get("terminal_allowlist") or []
+    if mode == "git_worktree" and "git" not in {Path(item).name.lower() for item in allowlist if isinstance(item, str)}:
+        raise RuntimeError("Git worktree preparation requires 'git' in the terminal executable allowlist.")
+    raw_key = str((job.idempotency_key if job else payload.get("workspace_id")) or "workspace")
+    key = re.sub(r"[^A-Za-z0-9_.-]+", "-", raw_key)[:80].strip("-.") or "workspace"
+    approved_root = _workspace_for_target(source, roots)
+    parent = approved_root / ".smara-workspaces"
+    parent.mkdir(parents=True, exist_ok=True)
+    destination = parent / key
+    if destination.exists():
+        if not destination.is_dir() or destination.is_symlink():
+            raise RuntimeError("The isolated workspace path is not a regular directory.")
+    elif mode == "git_worktree":
+        result = subprocess.run(
+            ["git", "-C", str(source), "worktree", "add", "--detach", str(destination), "HEAD"],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "git worktree failed").strip()
+            raise RuntimeError(f"Could not create the isolated Git worktree: {detail[:300]}")
+    else:
+        count = 0
+        total = 0
+        for current, directories, files in os.walk(source, topdown=True, followlinks=False):
+            current_path = Path(current)
+            directories[:] = [item for item in directories if item not in {".git", ".smara-workspaces"} and not (current_path / item).is_symlink()]
+            for filename in files:
+                child = current_path / filename
+                if child.is_symlink() or not child.is_file():
+                    continue
+                count += 1
+                try:
+                    total += child.stat().st_size
+                except OSError:
+                    continue
+                if count > MAX_WORKSPACE_COPY_FILES or total > MAX_WORKSPACE_COPY_BYTES:
+                    raise RuntimeError("Workspace copy exceeds the bounded file or size limit.")
+        try:
+            shutil.copytree(
+                source, destination, symlinks=False,
+                ignore=shutil.ignore_patterns(".git", ".smara-workspaces"),
+            )
+        except OSError as exc:
+            shutil.rmtree(destination, ignore_errors=True)
+            raise RuntimeError("Could not create the isolated workspace copy.") from exc
+    relative = destination.relative_to(approved_root).as_posix()
+    return json.dumps({
+        "action": "local_workspace_prepare", "operation": "prepare_workspace", "mode": mode,
+        "source": source.relative_to(approved_root).as_posix(), "workspace_path": relative,
+        "base_revision": _git_revision(source, state), "idempotent": True,
+        "warning": "The isolated workspace is local-only; merge, push, deploy, and deletion still require explicit user review.",
+    }, ensure_ascii=False)
+
+
 def _workspace_inspect(payload: dict, roots: list[Path]) -> str:
     operation = payload.get("operation", "read_file")
     if operation == "read_file":
@@ -808,7 +947,9 @@ def _workspace_inspect(payload: dict, roots: list[Path]) -> str:
         return _find_workspace_files(payload, roots)
     if operation == "git_summary":
         return _git_summary(payload, roots, payload.get("_state", {}))
-    raise RuntimeError("local_file_read supports read_file, list_tree, search_text, find_files, and git_summary operations only.")
+    if operation == "workspace_snapshot":
+        return _workspace_snapshot(payload, roots)
+    raise RuntimeError("local_file_read supports read_file, list_tree, search_text, find_files, git_summary, and workspace_snapshot operations only.")
 
 
 def _atomic_bytes(path: Path, data: bytes) -> None:
@@ -1043,6 +1184,8 @@ def _write_file_unlocked(payload: dict, roots: list[Path], state: dict | None = 
         operation = "write"
     if is_document_operation(operation):
         return _write_document_unlocked(payload, roots, state)
+    if operation == "prepare_workspace":
+        return _prepare_workspace(payload, roots, state or {})
     if not isinstance(operation, str) or operation not in {"write", "append", "patch", "rename", "move", "delete", "undo"}:
         raise RuntimeError("local_file_write supports text edits plus create/edit DOCX, XLSX, PPTX, and PDF operations.")
 
@@ -1794,6 +1937,22 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
         stage = payload.get("stage")
         if isinstance(stage, str) and stage:
             value["stage"] = stage[:32]
+        stage_name = stage if isinstance(stage, str) else {
+            "local_file_read": "inspect", "local_file_write": "edit", "local_terminal": "run",
+            "local_browser": "inspect", "local_integration": "inspect",
+        }.get(capability, "report")
+        try:
+            value["stage_result"] = build_stage_result(workspace_job, stage=stage_name, result=value)
+        except (TypeError, ValueError, RuntimeError):
+            # A capability result may contain an implementation-specific field
+            # that cannot be represented by the bounded stage schema. Keep the
+            # validated job metadata and operation result rather than failing a
+            # successful local action solely for observability.
+            value["stage_result"] = {
+                "schema_version": "smara.workspace.stage.v1", "stage": stage_name,
+                "status": "completed", "summary": "Local stage completed; detailed proof unavailable.",
+                "acceptance": [{"check": check, "status": "pending", "detail": "Awaiting bounded proof."} for check in workspace_job.acceptance_checks],
+            }
         result = json.dumps(value, ensure_ascii=False)
     return decorate_local_result(result, spec, idempotency_key)
 

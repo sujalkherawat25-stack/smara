@@ -89,9 +89,18 @@ regulated integration must stop at an explicit design decision.
 - Hosted-created desktop actions and workflows receive a deterministic,
   secret-free envelope automatically. Custom envelopes are revalidated at the
   tool boundary and again by the desktop before any local operation.
-- **Still required for A1:** isolated Git worktrees/copies, adaptive repair
-  loops, richer Web/Desktop run-console rendering, and physical restart,
-  conflict, and adversarial acceptance drills.
+- **A1.2–A1.4 implemented in the control plane:** the desktop can prepare an
+  idempotent bounded copy or detached Git worktree, records a metadata-only
+  workspace snapshot/base revision, and returns the versioned stage-proof
+  contract. Workspace jobs enforce their own repair budget (instead of
+  inheriting an unbounded generic retry limit), while hosted APIs redact raw
+  executor payloads. Web and Desktop run consoles now show scope, isolation,
+  repair budget, stage proof, artifacts, and acceptance-check status.
+- **A1 remaining gates:** exercise a disposable multi-stage repository through
+  inspect → plan → edit → run → verify → report; complete the physical
+  network/application/Windows restart and conflict drills; and run the final
+  owner-controlled adversarial acceptance checks before reopening production
+  gates. These are release-validation activities, not new protocol work.
 
 ### Goal
 
@@ -110,7 +119,7 @@ never silently repeat a possibly completed mutation.
    - Require structured stage output: summary, files inspected, files changed,
      commands run, tests, artifacts, warnings, and next action.
 
-2. **Isolated coding workspaces**
+2. **Isolated coding workspaces** ✅
    - Use a Git worktree or copied workspace for code-change jobs when the
      repository supports it.
    - Capture a base revision, changed-file hashes, diff summary, and test
@@ -118,14 +127,14 @@ never silently repeat a possibly completed mutation.
    - Require explicit user confirmation before merging, pushing, deploying,
      deleting, or overwriting work outside the task workspace.
 
-3. **Adaptive but bounded replanning**
+3. **Adaptive but bounded replanning** ✅
    - Permit a limited number of repair loops after a failed check.
    - Every repair loop must explain the failure, proposed change, and new
      verification command.
    - Stop and ask the user when the budget, permission, confidence threshold,
      or original scope is exceeded.
 
-4. **Run console and review surface**
+4. **Run console and review surface** ✅
    - Show the current plan, stage state, live command progress, diff, artifacts,
      test results, retry/cancel controls, and final acceptance status in both
      Web and Desktop.

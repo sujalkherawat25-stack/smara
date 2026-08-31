@@ -142,6 +142,12 @@ h1 { font-size: 20px; letter-spacing: -.03em; }
 .detail-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 28px; padding: 5px 9px; border-radius: 7px; background: rgba(255,255,255,.025); color: var(--subtle); font-size: 11px; }
 .detail-line > span:first-child { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail-line > span:last-child { color: var(--subtle); font-size: 10px; }
+.detail-stage { color: var(--accent) !important; text-transform: uppercase; letter-spacing: .08em; font-size: 9px !important; }
+.workspace-run { gap: 10px; }
+.workspace-run-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 18px; padding: 10px 12px; border: 1px solid var(--stroke-soft); border-radius: 9px; background: rgba(255,255,255,.025); font-size: 11px; }
+.workspace-run-grid span { color: var(--subtle); }
+.workspace-run-grid strong { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-checks { display: grid; gap: 5px; color: var(--subtle); font-size: 10px; }
 .detail-muted { color: var(--subtle); font-size: 11px; }
 .task-detail > .button { justify-self: start; }
 .artifact-list { display: grid; gap: 8px; }

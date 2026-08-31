@@ -23,7 +23,7 @@ from .provider_routing import resolve_profile
 from . import llm_errors
 from .work_signals import wait_for_signal
 from .workflow import validate_workflow, workflow_summary
-from .workspace_contract import build_workspace_job
+from .workspace_contract import build_workspace_job, validate_relative_path
 
 
 async def _memory_context(memory: SyntarusMemory | None, task: dict, store: TaskStore) -> str:
@@ -183,6 +183,14 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
                             root = "workspace"
                     if not isinstance(root, str) or not root.strip():
                         root = "workspace"
+                    else:
+                        try:
+                            root = validate_relative_path(root, field="workspace_root")
+                        except ValueError:
+                            # Hosted planning cannot know the owner's absolute
+                            # path. Fall back to the first approved workspace
+                            # rather than emitting an invalid job envelope.
+                            root = "workspace"
                     fingerprint = hashlib.sha256(
                         json.dumps(normalized, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
                     ).hexdigest()[:16]

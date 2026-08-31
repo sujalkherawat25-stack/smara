@@ -43,6 +43,7 @@ from .performance import TimingTrace, request_id
 from .runtime_resources import RuntimeResources
 from .store_async import AsyncStoreFacade
 from .work_signals import wait_for_signal, WorkSignalBus
+from .workspace_contract import validate_workspace_job, workspace_job_summary
 
 LOG = logging.getLogger("smara.api")
 configure_sentry(settings.sentry_dsn)
@@ -301,6 +302,42 @@ def evidence_view(row: dict) -> EvidenceView:
 
 def artifact_view(row: dict) -> ArtifactView:
     return ArtifactView(**{**row, "created_at": _as_datetime(row["created_at"])})
+
+
+def public_step_view(row: dict) -> dict:
+    """Expose step progress without echoing arbitrary local payloads.
+
+    Desktop payloads can contain local paths and credential aliases. The run
+    consoles only need the contract metadata and operation label, never the
+    original command, content, or secret-shaped fields.
+    """
+    value = dict(row)
+    raw_payload = value.pop("executor_payload", None)
+    payload: dict = {}
+    if isinstance(raw_payload, str):
+        try:
+            parsed = json.loads(raw_payload)
+            if isinstance(parsed, dict):
+                payload = parsed
+        except (TypeError, ValueError):
+            payload = {}
+    elif isinstance(raw_payload, dict):
+        payload = raw_payload
+    value["attempt"] = int(value.get("attempts") or 0)
+    value["error"] = value.get("last_error")
+    if isinstance(payload.get("operation"), str):
+        value["operation"] = payload["operation"][:80]
+    if isinstance(payload.get("stage"), str):
+        value["stage"] = payload["stage"][:32]
+    if isinstance(payload.get("workspace_job"), dict):
+        try:
+            value["workspace_job"] = workspace_job_summary(validate_workspace_job(payload["workspace_job"]))
+        except RuntimeError:
+            value["workspace_job"] = {"schema_version": "invalid"}
+    # Internal lease and payload columns are not part of the public step view.
+    for key in ("lease_owner", "lease_expires_at", "idempotency_key"):
+        value.pop(key, None)
+    return value
 
 def schedule_view(row: dict) -> ScheduleView:
     return ScheduleView(**{
@@ -1105,7 +1142,7 @@ async def task_events_stream(task_id: str, last_event_id: str | None = Header(de
 
 @app.get("/v1/tasks/{task_id}/steps")
 async def task_steps(task_id: str, user: str = Depends(account_id)):
-    try: return {"steps": store.steps(task_id, user)}
+    try: return {"steps": [public_step_view(step) for step in store.steps(task_id, user)]}
     except KeyError: raise HTTPException(404, "Task not found")
 
 @app.get("/v1/research/{task_id}/evidence", response_model=list[EvidenceView])

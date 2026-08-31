@@ -8,6 +8,7 @@ from smara.workspace_contract import (
     WorkspaceArtifact,
     WorkspaceJobSpec,
     WorkspaceStageResult,
+    WorkspaceAcceptanceCheck,
     build_workspace_job,
     validate_workspace_job,
     workspace_job_summary,
@@ -62,9 +63,16 @@ def test_workspace_artifact_and_stage_result_are_bounded():
         files_inspected=["src/main.py"],
         artifacts=[artifact],
         tests=[{"name": "pytest", "status": "passed"}],
+        acceptance=[WorkspaceAcceptanceCheck(check="Report is present", status="pending")],
     )
     assert stage.schema_version == "smara.workspace.stage.v1"
     assert stage.artifacts[0].path == "reports/report.txt"
+    assert stage.acceptance[0].status == "pending"
+
+
+def test_git_worktree_isolation_requires_repository_flag():
+    with pytest.raises(RuntimeError, match="repository=true"):
+        validate_workspace_job(_job(isolation="git_worktree", repository=False))
 
 
 def test_desktop_executor_enforces_job_capability_before_action(tmp_path: Path):
@@ -92,5 +100,6 @@ def test_desktop_executor_attaches_job_metadata_to_safe_result(tmp_path: Path):
     result = json.loads(execute_step(step, state))
     assert result["workspace_job"]["schema_version"] == "smara.workspace.v1"
     assert result["workspace_job"]["workspace_root"] == "repo"
+    assert result["stage_result"]["schema_version"] == "smara.workspace.stage.v1"
+    assert result["stage_result"]["acceptance"][0]["status"] == "pending"
     assert result["skill"] == "local_file_read"
-
