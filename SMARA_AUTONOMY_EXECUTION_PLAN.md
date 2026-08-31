@@ -172,11 +172,17 @@ never silently repeat a possibly completed mutation.
   result limit, and per-run request bound. Tavily search and GitHub repository
   discovery use that contract; credential aliases remain resolved only in the
   Windows vault and are never included in hosted results.
+- **A2 lifecycle shipped:** Desktop Settings now shows each connector's local
+  readiness, declared read-only scope, request bound, and a connector-specific
+  disconnect control. The executor keeps a bounded, proof-only local audit of
+  completed, cancelled, failed, and revoked connector runs. It deliberately
+  excludes credentials, query text, response text, source URLs, and repository
+  names. Every connector operation remains behind the normal hosted approval
+  gate before the desktop can contact a provider.
 - **A2 remaining work:** local OAuth/device authorization for Google Workspace
-  and GitHub, visible local connect/revoke controls and audit history,
-  approval-gated writes, isolated browser handoff, and the outbound-only MCP
-  adapter. These require owner-controlled provider consent and will ship as
-  separately testable connector slices.
+  and GitHub, approval-gated writes, isolated browser handoff, and the
+  outbound-only MCP adapter. These require owner-controlled provider consent
+  and will ship as separately testable connector slices.
 
 ### Goal
 
