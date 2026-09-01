@@ -1,3 +1,11 @@
+# PRODUCTION STACK NOTICE
+# This compose file currently runs the canonical Smara production service even
+# though the live Compose project keeps the legacy name `smara-staging`.
+# Do not deploy a second stack with that name. A future planned migration may
+# rename the Compose project after a controlled cutover.
+#
+# Cross-stack bridge: only `api` and `telegram-worker` join `memoryos_default`.
+# Every other Smara service remains on this stack's private default network.
 services:
   redis:
     image: redis:7-alpine
@@ -45,6 +53,12 @@ services:
     ports: ["${SMARA_BIND_ADDRESS:-127.0.0.1}:${SMARA_HOST_PORT:-8080}:8080"]
     volumes: ["smara-data:/app/data"]
     networks: [default, memoryos]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
   # Canonical Smara UI. Caddy serves this container at the ai.syntarus.com root.
   frontend:
     build:
@@ -59,6 +73,12 @@ services:
     depends_on:
       api:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
   worker:
     build: .
     command: ["python", "-m", "smara.worker"]
@@ -72,6 +92,12 @@ services:
       redis:
         condition: service_healthy
     volumes: ["smara-data:/app/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os; from redis import Redis; assert Redis.from_url(os.environ['SMARA_REDIS_URL'], socket_connect_timeout=3).ping()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
   scheduler:
     build: .
     command: ["python", "-m", "smara.scheduler"]
@@ -85,6 +111,12 @@ services:
       redis:
         condition: service_healthy
     volumes: ["smara-data:/app/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os; from redis import Redis; assert Redis.from_url(os.environ['SMARA_REDIS_URL'], socket_connect_timeout=3).ping()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
   integration-worker:
     build: .
     command: ["python", "-m", "smara.integration_worker"]
@@ -98,6 +130,12 @@ services:
       redis:
         condition: service_healthy
     volumes: ["smara-data:/app/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os; from redis import Redis; assert Redis.from_url(os.environ['SMARA_REDIS_URL'], socket_connect_timeout=3).ping()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
   # Smara-owned Telegram edge. This replaces the legacy Memento poller after
   # the native auth/link flow has been verified in production.
   telegram-worker:
@@ -115,6 +153,12 @@ services:
         condition: service_healthy
     volumes: ["smara-data:/app/data"]
     networks: [default, memoryos]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://api:8080/health', timeout=5)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 volumes:
   smara-data:
   smara-postgres:
