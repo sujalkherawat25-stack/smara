@@ -255,7 +255,7 @@ class BoundedAgentStepRuntime:
                         streamed = previous + bounded
                         if not previous and streamed.lstrip().startswith("{"):
                             buffering_envelope = True
-                        if not buffering_envelope:
+                        if bounded and not buffering_envelope:
                             token_hook(bounded)
             except Exception:
                 # A stream can fail before any content (safe to retry through
