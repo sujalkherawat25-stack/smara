@@ -1,9 +1,11 @@
-"""Shared contracts for safe local Smara skills and task reconciliation.
+"""Shared contracts for safe local Smara skills and task state.
 
-The hosted service remains the source of truth for task state.  This module
-only keeps a bounded, local journal of what the desktop has claimed and adds a
-cross-process workspace lock so a reconnect cannot silently replay uncertain
-side effects.
+The Desktop supports a local-first runtime as well as the hosted coordinator.
+This module keeps bounded, private task/session state on the user's machine
+and a separate claim journal for hosted lease reconciliation.  Local state is
+never uploaded implicitly; the hosted bridge may receive only the explicitly
+approved, bounded result of a local action.  A cross-process workspace lock
+prevents competing writes and replay of uncertain side effects.
 """
 from __future__ import annotations
 
@@ -13,6 +15,7 @@ import json
 import os
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
@@ -25,6 +28,8 @@ except ImportError:  # pragma: no cover - exercised by the bundled executable
 
 JOURNAL_MAX_ENTRIES = 200
 JOURNAL_STATUSES = {"claimed", "prepared", "completed", "failed", "cancelled", "uncertain"}
+LOCAL_TASK_MAX_ENTRIES = 200
+LOCAL_TASK_STATUSES = {"draft", "queued", "waiting_approval", "running", "completed", "failed", "cancelled"}
 LOCK_TIMEOUT_SECONDS = 0.0
 
 
@@ -313,5 +318,169 @@ class LocalTaskJournal:
         return {"path": str(self.path), "entries": len(entries), "counts": counts, "uncertain": [item for item in entries if item.get("status") == "uncertain"]}
 
 
+def _timestamp() -> str:
+    """Return a compact UTC timestamp that sorts lexicographically."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+class LocalTaskStore:
+    """Bounded private task/session store for the local-first Desktop mode.
+
+    This intentionally uses the same atomic JSON primitive as the recovery
+    journal so the packaged executor has no database dependency.  The schema
+    is versioned and deliberately small; a future SQLite migration can import
+    these records without changing the local skill protocol.
+    """
+
+    def __init__(self, path: Path, *, max_entries: int = LOCAL_TASK_MAX_ENTRIES):
+        self.path = path
+        self.max_entries = max(10, min(max_entries, LOCAL_TASK_MAX_ENTRIES))
+
+    def _read(self) -> dict[str, Any]:
+        try:
+            value = json.loads(self.path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError):
+            return {"version": 1, "tasks": []}
+        if not isinstance(value, dict):
+            return {"version": 1, "tasks": []}
+        tasks = value.get("tasks")
+        if not isinstance(tasks, list):
+            tasks = []
+        return {"version": 1, "tasks": [item for item in tasks if isinstance(item, dict)][: self.max_entries]}
+
+    def _write(self, value: dict[str, Any]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tasks = value.get("tasks") if isinstance(value.get("tasks"), list) else []
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=self.path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            json.dump({"version": 1, "tasks": tasks[: self.max_entries]}, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            with contextlib.suppress(OSError):
+                os.fsync(handle.fileno())
+        try:
+            os.replace(temporary, self.path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    @staticmethod
+    def _clean_text(value: object, *, field: str, limit: int) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{field} is required")
+        value = value.strip()
+        if len(value) > limit:
+            raise ValueError(f"{field} exceeds the {limit} character limit")
+        return value
+
+    def create(
+        self,
+        *,
+        title: str,
+        objective: str,
+        session_id: str | None = None,
+        requires_approval: bool = True,
+        approval_mode: str = "ask",
+        required_capability: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        title = self._clean_text(title, field="title", limit=160)
+        objective = self._clean_text(objective, field="objective", limit=8_000)
+        if approval_mode not in {"ask", "auto"}:
+            raise ValueError("approval_mode must be 'ask' or 'auto'")
+        if required_capability is not None:
+            required_capability = self._clean_text(required_capability, field="required_capability", limit=80)
+            skill_spec(required_capability)
+        if payload is not None:
+            if not isinstance(payload, dict):
+                raise ValueError("payload must be an object")
+            encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            if len(encoded) > 64 * 1024:
+                raise ValueError("payload exceeds the 64 KB limit")
+        now = _timestamp()
+        task_id = f"local_{uuid.uuid4().hex[:20]}"
+        task = {
+            "id": task_id,
+            "session_id": (session_id or f"local-session-{uuid.uuid4().hex[:12]}")[:160],
+            "title": title,
+            "objective": objective,
+            "status": "waiting_approval" if requires_approval and approval_mode == "ask" else "queued",
+            "requires_approval": bool(requires_approval),
+            "approval_mode": approval_mode,
+            "required_capability": required_capability,
+            "payload": payload,
+            "result": None,
+            "error": None,
+            "created_at": now,
+            "updated_at": now,
+            "events": [{"type": "local.task.created", "at": now}],
+        }
+        value = self._read()
+        value["tasks"] = [task] + [item for item in value["tasks"] if item.get("id") != task_id]
+        self._write(value)
+        return self.summary(task)
+
+    def get(self, task_id: str) -> dict[str, Any] | None:
+        return next((item for item in self._read()["tasks"] if item.get("id") == task_id), None)
+
+    def summaries(self) -> list[dict[str, Any]]:
+        return [self.summary(item) for item in self._read()["tasks"]]
+
+    @staticmethod
+    def summary(task: dict[str, Any]) -> dict[str, Any]:
+        """Return the UI-safe view; payloads never appear in task lists."""
+        value = {key: task.get(key) for key in (
+            "id", "session_id", "title", "objective", "status", "requires_approval",
+            "required_capability", "result", "error", "created_at", "updated_at",
+        )}
+        # Match the shared Desktop task contract while retaining the private
+        # policy in a separate, local-only field for future runner decisions.
+        value["approval_mode"] = "desktop"
+        value["local_approval_mode"] = task.get("approval_mode", "ask")
+        return value
+
+    def detail(self, task_id: str) -> dict[str, Any] | None:
+        task = self.get(task_id)
+        if task is None:
+            return None
+        value = self.summary(task)
+        value["steps"] = []
+        value["events"] = list(task.get("events") or [])[-64:]
+        value["artifacts"] = []
+        return value
+
+    def update(self, task_id: str, status: str, *, result: str | None = None, error: str | None = None, event: str | None = None) -> dict[str, Any]:
+        if status not in LOCAL_TASK_STATUSES:
+            raise ValueError(f"unknown local task status: {status}")
+        value = self._read()
+        task = next((item for item in value["tasks"] if item.get("id") == task_id), None)
+        if task is None:
+            raise KeyError(task_id)
+        task["status"] = status
+        task["updated_at"] = _timestamp()
+        if result is not None:
+            task["result"] = str(result)[:40_000]
+        if error is not None:
+            task["error"] = str(error)[:2_000]
+        if event:
+            events = task.setdefault("events", [])
+            if isinstance(events, list):
+                events.append({"type": event[:120], "at": task["updated_at"]})
+                task["events"] = events[-64:]
+        self._write(value)
+        return self.summary(task)
+
+    def cancel(self, task_id: str) -> dict[str, Any]:
+        task = self.get(task_id)
+        if task is None:
+            raise KeyError(task_id)
+        if task.get("status") in {"completed", "failed", "cancelled"}:
+            return self.summary(task)
+        return self.update(task_id, "cancelled", error="Cancelled on this Desktop.", event="local.task.cancelled")
+
+
 def journal_path(state_path: Path) -> Path:
     return state_path.with_suffix(state_path.suffix + ".journal.json")
+
+
+def local_tasks_path(state_path: Path) -> Path:
+    """Path for private local tasks, kept beside the Desktop state file."""
+    return state_path.with_suffix(state_path.suffix + ".tasks.json")

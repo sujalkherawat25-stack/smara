@@ -4,9 +4,11 @@ from pathlib import Path
 import pytest
 
 from smara.local_agent import (
+    LocalTaskStore,
     LocalTaskJournal,
     decorate_local_result,
     journal_path,
+    local_tasks_path,
     local_skill_catalog,
     validate_local_step,
     workspace_lock,
@@ -53,6 +55,34 @@ def test_journal_reconcile_and_bounded_summary(tmp_path: Path):
     assert resolved and resolved["status"] == "completed"
     assert not journal.uncertain("step-1", "k1")
     assert journal.summary()["uncertain"] == []
+
+
+def test_local_task_store_is_atomic_bounded_and_hides_payload(tmp_path: Path):
+    store = LocalTaskStore(local_tasks_path(tmp_path / "desktop.json"), max_entries=10)
+    task = store.create(
+        title="Inspect workspace", objective="Read the project metadata", required_capability="local_file_read",
+        payload={"path": "private.txt", "credential": "alias-only"},
+    )
+    assert task["id"].startswith("local_")
+    assert task["status"] == "waiting_approval"
+    assert task["approval_mode"] == "desktop"
+    assert "payload" not in task
+    detail = store.detail(task["id"])
+    assert detail and detail["events"]
+    assert detail.get("payload") is None
+    queued = store.update(task["id"], "queued", event="local.task.approved")
+    assert queued["status"] == "queued"
+    cancelled = store.cancel(task["id"])
+    assert cancelled["status"] == "cancelled"
+    assert store.cancel(task["id"])["status"] == "cancelled"
+
+
+def test_local_task_store_rejects_unknown_capability_and_oversized_payload(tmp_path: Path):
+    store = LocalTaskStore(local_tasks_path(tmp_path / "desktop.json"))
+    with pytest.raises(RuntimeError, match="no installed skill"):
+        store.create(title="bad", objective="bad", required_capability="local_exec")
+    with pytest.raises(ValueError, match="64 KB"):
+        store.create(title="large", objective="large", payload={"data": "x" * (64 * 1024)})
 
 
 def test_failed_task_retry_returns_local_work_to_approval(tmp_path: Path):

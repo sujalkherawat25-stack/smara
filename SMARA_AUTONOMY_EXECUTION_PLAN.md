@@ -74,6 +74,32 @@ Build each initiative fully through its acceptance tests before opening the
 next one. A feature that needs a new external authority, provider agreement, or
 regulated integration must stop at an explicit design decision.
 
+### Local-first implementation slice (2026-09-01)
+
+The first local-first slice is now implemented in the Desktop build:
+
+- Runtime mode is explicit and persisted as `local` or `cloud`. New installs
+  default to `local`; existing paired installs retain the legacy cloud mode
+  until the owner changes it in Settings.
+- Local mode does not require a hosted sign-in, hosted task history, or a
+  running executor. Private model profiles continue to stream directly from
+  the PC, and the UI reports the hosted bridge as optional rather than failed.
+- Local task/session records have a bounded, atomic, private store beside the
+  Desktop state file. Lists and details omit payloads; approval transitions and
+  cancellation are recorded as local events. The shared Desktop task contract
+  marks these records as Desktop-owned, so approval is never silently routed
+  to Smara Web.
+- Cloud mode remains available for durable hosted planning, research,
+  scheduling, and paired Desktop leases. Switching modes is an explicit user
+  action and does not copy local credentials or private task payloads.
+
+This slice is a foundation, not a claim that the complete local agent is
+finished. The next A1 implementation slice is a local runner that executes a
+validated task payload through the existing skill contracts, streams progress,
+and writes bounded result/artifact proof into the private task store. Its
+acceptance tests must cover ask/auto approval, cancellation, workspace locks,
+restart recovery, and no-replay behavior before local mode is called complete.
+
 ---
 
 ## A1. Local Workspace Agent v2

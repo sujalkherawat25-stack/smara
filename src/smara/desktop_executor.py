@@ -42,12 +42,12 @@ import httpx
 # process where Python does not set ``__package__``.
 try:
     from .desktop_integrations import LocalIntegrationCancelled, execute_local_integration, local_connector_catalog
-    from .local_agent import LocalTaskJournal, decorate_local_result, journal_path, local_skill_catalog, skill_spec, validate_local_step, workspace_lock
+    from .local_agent import LocalTaskJournal, LocalTaskStore, decorate_local_result, journal_path, local_skill_catalog, local_tasks_path, skill_spec, validate_local_step, workspace_lock
     from .local_documents import build_document, is_document_operation
     from .workspace_contract import WorkspaceJobSpec, build_stage_result, validate_workspace_job, workspace_job_summary
 except ImportError:  # pragma: no cover - exercised by the packaged binary
     from desktop_integrations import LocalIntegrationCancelled, execute_local_integration, local_connector_catalog
-    from local_agent import LocalTaskJournal, decorate_local_result, journal_path, local_skill_catalog, skill_spec, validate_local_step, workspace_lock
+    from local_agent import LocalTaskJournal, LocalTaskStore, decorate_local_result, journal_path, local_skill_catalog, local_tasks_path, skill_spec, validate_local_step, workspace_lock
     from local_documents import build_document, is_document_operation
     from workspace_contract import WorkspaceJobSpec, build_stage_result, validate_workspace_job, workspace_job_summary
 
@@ -2159,6 +2159,12 @@ class DesktopRunner:
         # corrupted, the executor must stop rather than continue with a stale
         # token or stale permissions.
         state = _load_state(self.state_path)
+        # Local-first mode owns its task lifecycle on this PC.  A paired state
+        # may still exist for optional cloud use, but the hosted lease loop is
+        # disabled so a stale/background process cannot claim cloud work while
+        # the user has selected Local mode in Desktop Settings.
+        if state.get("runtime_mode", "cloud") == "local":
+            return False
         # Used only for local undo snapshots; never persisted or sent to Smara.
         state["_state_path"] = str(self.state_path)
         journal = LocalTaskJournal(journal_path(self.state_path))
@@ -2316,6 +2322,11 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--approve-task", help="approve one Desktop-owned task on this PC")
     parser.add_argument("--deny-task", help="reject one Desktop-owned task on this PC")
     parser.add_argument("--journal-status", action="store_true", help="print bounded local task reconciliation status")
+    parser.add_argument("--local-task-list", action="store_true", help="print the private local task/session list")
+    parser.add_argument("--local-task-create", action="store_true", help="create one private local task from a JSON object on stdin")
+    parser.add_argument("--local-task-detail", help="print one private local task and its bounded events")
+    parser.add_argument("--local-task-approve", help="approve one private local task on this PC")
+    parser.add_argument("--local-task-cancel", help="cancel one private local task on this PC")
     parser.add_argument("--skills", action="store_true", help="print the installed local skill protocol")
     parser.add_argument("--credential-list", action="store_true", help="list local credential names without values")
     parser.add_argument("--credential-set", help="save a local credential from stdin")
@@ -2331,6 +2342,57 @@ def _main(argv: list[str] | None = None) -> int:
     # also keeps their stdout machine-readable for support bundles.
     if args.journal_status:
         print(json.dumps(LocalTaskJournal(journal_path(args.state)).summary(), ensure_ascii=False, indent=2))
+        return 0
+    if args.local_task_list:
+        print(json.dumps(LocalTaskStore(local_tasks_path(args.state)).summaries(), ensure_ascii=False, indent=2))
+        return 0
+    if args.local_task_create:
+        try:
+            request = json.load(sys.stdin)
+            if not isinstance(request, dict):
+                raise ValueError("local task input must be an object")
+            task = LocalTaskStore(local_tasks_path(args.state)).create(
+                title=request.get("title"), objective=request.get("objective"),
+                session_id=request.get("session_id"), requires_approval=request.get("requires_approval", True) is not False,
+                approval_mode=request.get("approval_mode", "ask"), required_capability=request.get("required_capability"),
+                payload=request.get("payload"),
+            )
+        except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"Local task could not be created: {exc}") from exc
+        print(json.dumps(task, ensure_ascii=False))
+        return 0
+    if args.local_task_detail:
+        if not args.local_task_detail.strip() or len(args.local_task_detail) > 160:
+            raise SystemExit("Local task id is invalid.")
+        task = LocalTaskStore(local_tasks_path(args.state)).detail(args.local_task_detail.strip())
+        if task is None:
+            raise SystemExit("Local task was not found.")
+        print(json.dumps(task, ensure_ascii=False))
+        return 0
+    if args.local_task_approve:
+        if not args.local_task_approve.strip() or len(args.local_task_approve) > 160:
+            raise SystemExit("Local task id is invalid.")
+        try:
+            store = LocalTaskStore(local_tasks_path(args.state))
+            task = store.get(args.local_task_approve.strip())
+            if task is None:
+                raise KeyError(args.local_task_approve.strip())
+            if task.get("status") == "waiting_approval":
+                task = store.update(args.local_task_approve.strip(), "queued", event="local.task.approved")
+            else:
+                task = store.summary(task)
+        except (KeyError, ValueError, OSError) as exc:
+            raise SystemExit(f"Local task could not be approved: {exc}") from exc
+        print(json.dumps(task, ensure_ascii=False))
+        return 0
+    if args.local_task_cancel:
+        if not args.local_task_cancel.strip() or len(args.local_task_cancel) > 160:
+            raise SystemExit("Local task id is invalid.")
+        try:
+            task = LocalTaskStore(local_tasks_path(args.state)).cancel(args.local_task_cancel.strip())
+        except (KeyError, ValueError, OSError) as exc:
+            raise SystemExit(f"Local task could not be cancelled: {exc}") from exc
+        print(json.dumps(task, ensure_ascii=False))
         return 0
     if args.skills:
         print(json.dumps(local_skill_catalog(), ensure_ascii=False, indent=2))

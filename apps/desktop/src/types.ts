@@ -1,6 +1,7 @@
 export type Screen = "chat" | "activity" | "settings";
 
 export interface ConnectionState {
+  runtime_mode: "local" | "cloud";
   api_url: string;
   web_url: string;
   workspace: string;
@@ -62,6 +63,7 @@ export interface TaskSummary {
   objective: string;
   status: string;
   approval_mode?: "hosted" | "desktop";
+  local_approval_mode?: "ask" | "auto";
   updated_at?: string;
   created_at?: string;
   result?: string | null;

@@ -148,14 +148,18 @@ and must run as approved durable tasks.
 
 The CLI is the same hosted client: `smara tools`, `smara tool calculate
 --arguments '{"expression":"2+2"}'`, `smara desktop list`, and
-`smara desktop pair`. It stores no task or memory database locally.
+`smara desktop pair`. The Desktop also has an explicit Local-first mode with a
+small, bounded private task/session journal; it never becomes a second memory
+database and does not upload local task payloads implicitly.
 
 ### Persistent desktop executor
 
 The independent `smara-desktop` command is the local executor. It makes only
-outbound HTTPS requests, stores its paired device token in the operating
-system's Smara config directory, and waits for a hosted lease before doing
-anything. Start with the least-privileged pairing:
+outbound HTTPS requests when paired, stores its paired device token in the
+operating system's Smara config directory, and can run private model chat
+without hosted sign-in in Local-first mode. Cloud-coordinated execution still
+waits for a hosted lease. Start with the least-privileged pairing when you
+want that optional bridge:
 
 ```powershell
 smara desktop pair --capability local_file_read

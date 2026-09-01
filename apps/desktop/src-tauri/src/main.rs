@@ -26,6 +26,7 @@ fn shared_http_client() -> &'static reqwest::Client {
 
 #[derive(Debug, Clone, Serialize)]
 struct ConnectionState {
+    runtime_mode: String,
     api_url: String,
     web_url: String,
     workspace: String,
@@ -55,6 +56,8 @@ struct RemoteStatus {
 
 #[derive(Debug, Deserialize)]
 struct LocalSettings {
+    #[serde(default)]
+    runtime_mode: String,
     api_url: String,
     web_url: String,
     workspace: String,
@@ -70,6 +73,8 @@ struct LocalSettings {
 
 #[derive(Debug, Deserialize)]
 struct PairArgs {
+    #[serde(default)]
+    runtime_mode: String,
     api_url: String,
     code: String,
     allowed_roots: Vec<String>,
@@ -471,8 +476,15 @@ fn current_connection() -> ConnectionState {
         .or_else(|| state.as_ref().and_then(|value| value.get("approval_mode")).and_then(Value::as_str))
         .filter(|value| matches!(*value, "ask" | "auto"))
         .unwrap_or("ask").to_owned();
+    // New installations are local-first.  Existing paired installations
+    // without an explicit mode stay on the legacy cloud path until the user
+    // chooses Local mode in Settings, preventing a surprise behavior change.
+    let runtime_mode = preferences.as_ref().and_then(|value| value.get("runtime_mode")).and_then(Value::as_str)
+        .or_else(|| state.as_ref().and_then(|value| value.get("runtime_mode")).and_then(Value::as_str))
+        .filter(|value| matches!(*value, "local" | "cloud"))
+        .unwrap_or(if state.is_some() { "cloud" } else { "local" }).to_owned();
     let token_path = cli_token_path();
-    ConnectionState { api_url, web_url, workspace, model_profile, paired, executor_id: state.as_ref().and_then(|value| value.get("executor_id")).and_then(Value::as_str).map(str::to_owned), capabilities, allowed_roots, terminal_allowlist, browser_domains, auto_approve_safe, approval_mode, paused: pause_path().exists(), running: pid.is_some(), pid, log_path: log_path().display().to_string(), has_cli_token: read_json(&token_path).and_then(|value| value.get("access_token").and_then(Value::as_str).map(|token| !token.is_empty())).unwrap_or(false), last_error: None }
+    ConnectionState { runtime_mode, api_url, web_url, workspace, model_profile, paired, executor_id: state.as_ref().and_then(|value| value.get("executor_id")).and_then(Value::as_str).map(str::to_owned), capabilities, allowed_roots, terminal_allowlist, browser_domains, auto_approve_safe, approval_mode, paused: pause_path().exists(), running: pid.is_some(), pid, log_path: log_path().display().to_string(), has_cli_token: read_json(&token_path).and_then(|value| value.get("access_token").and_then(Value::as_str).map(|token| !token.is_empty())).unwrap_or(false), last_error: None }
 }
 
 #[tauri::command]
@@ -489,7 +501,8 @@ fn save_settings(settings: LocalSettings) -> Result<ConnectionState, String> {
     // dropped by an unrelated connection/permissions update.
     let existing_profiles = read_json(&preferences_path()).and_then(|value| value.get("local_model_profiles").cloned());
     let approval_mode = if settings.approval_mode.trim() == "auto" { "auto" } else { "ask" };
-    let mut value = json!({ "api_url": api_url, "web_url": web_url, "workspace": if settings.workspace.trim().is_empty() { "default" } else { settings.workspace.trim() }, "model_profile": if settings.model_profile.trim().is_empty() { "default" } else { settings.model_profile.trim() }, "allowed_roots": settings.allowed_roots, "terminal_allowlist": settings.terminal_allowlist, "browser_domains": settings.browser_domains, "auto_approve_safe": settings.auto_approve_safe, "approval_mode": approval_mode });
+    let runtime_mode = if settings.runtime_mode.trim() == "cloud" { "cloud" } else { "local" };
+    let mut value = json!({ "runtime_mode": runtime_mode, "api_url": api_url, "web_url": web_url, "workspace": if settings.workspace.trim().is_empty() { "default" } else { settings.workspace.trim() }, "model_profile": if settings.model_profile.trim().is_empty() { "default" } else { settings.model_profile.trim() }, "allowed_roots": settings.allowed_roots, "terminal_allowlist": settings.terminal_allowlist, "browser_domains": settings.browser_domains, "auto_approve_safe": settings.auto_approve_safe, "approval_mode": approval_mode });
     value = preserve_local_model_profiles(value, existing_profiles);
     write_json(&preferences_path(), &value)?;
     if let Some(mut state) = read_json(&state_path()) {
@@ -500,6 +513,7 @@ fn save_settings(settings: LocalSettings) -> Result<ConnectionState, String> {
             object.insert("browser_domains".to_owned(), value["browser_domains"].clone());
             object.insert("auto_approve_safe".to_owned(), value["auto_approve_safe"].clone());
             object.insert("approval_mode".to_owned(), value["approval_mode"].clone());
+            object.insert("runtime_mode".to_owned(), value["runtime_mode"].clone());
             write_json(&state_path(), &state)?;
         }
     }
@@ -644,6 +658,7 @@ fn pair_desktop(args: PairArgs) -> Result<ConnectionState, String> {
     let mut state = read_json(&path).ok_or_else(|| "Desktop pairing state could not be read after pairing.".to_owned())?;
     state["auto_approve_safe"] = Value::Bool(args.auto_approve_safe);
     state["approval_mode"] = Value::String(if args.approval_mode.trim() == "auto" { "auto".to_owned() } else { "ask".to_owned() });
+    state["runtime_mode"] = Value::String(if args.runtime_mode.trim() == "cloud" { "cloud".to_owned() } else { "local".to_owned() });
     write_json(&path, &state)?;
     Ok(current_connection())
 }
@@ -704,6 +719,10 @@ fn read_log() -> Result<String, String> {
 
 #[tauri::command]
 async fn load_tasks() -> Result<Vec<Value>, String> {
+    if current_connection().runtime_mode == "local" {
+        let output = run_executor(vec!["--state".to_owned(), state_path().display().to_string(), "--local-task-list".to_owned()])?;
+        return serde_json::from_str(&output).map_err(|_| "The private local task store returned invalid data.".to_owned());
+    }
     let token = cli_token()?;
     let api_url = current_connection().api_url;
     let response = shared_http_client().get(format!("{api_url}/v1/tasks")).bearer_auth(token).timeout(std::time::Duration::from_secs(12)).send().await.map_err(|error| format!("Could not load hosted tasks: {error}"))?;
@@ -720,6 +739,26 @@ async fn load_tasks() -> Result<Vec<Value>, String> {
 async fn load_task_details(task_id: String) -> Result<Value, String> {
     if task_id.trim().is_empty() || task_id.len() > 160 || !task_id.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-')) {
         return Err("Task id is invalid.".to_owned());
+    }
+    if current_connection().runtime_mode == "local" || task_id.starts_with("local_") {
+        let output = run_executor(vec!["--state".to_owned(), state_path().display().to_string(), "--local-task-detail".to_owned(), task_id])?;
+        let detail: Value = serde_json::from_str(&output).map_err(|_| "The private local task store returned invalid data.".to_owned())?;
+        let object = detail.as_object().ok_or_else(|| "The private local task record was invalid.".to_owned())?;
+        let task = json!({
+            "id": object.get("id").cloned().unwrap_or(Value::Null),
+            "session_id": object.get("session_id").cloned().unwrap_or(Value::Null),
+            "title": object.get("title").cloned().unwrap_or(Value::Null),
+            "objective": object.get("objective").cloned().unwrap_or(Value::Null),
+            "status": object.get("status").cloned().unwrap_or(Value::Null),
+            "approval_mode": "desktop",
+            "created_at": object.get("created_at").cloned().unwrap_or(Value::Null),
+            "updated_at": object.get("updated_at").cloned().unwrap_or(Value::Null),
+            "result": object.get("result").cloned().unwrap_or(Value::Null),
+            "error": object.get("error").cloned().unwrap_or(Value::Null),
+        });
+        let mut wrapped = object.clone();
+        wrapped.insert("task".to_owned(), task);
+        return Ok(Value::Object(wrapped));
     }
     let token = cli_token()?;
     let api_url = current_connection().api_url;
@@ -742,6 +781,19 @@ async fn load_task_details(task_id: String) -> Result<Value, String> {
 fn decide_local_task(task_id: String, approved: bool) -> Result<(), String> {
     if task_id.trim().is_empty() || task_id.len() > 160 || !task_id.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-')) {
         return Err("Task id is invalid.".to_owned());
+    }
+    if current_connection().runtime_mode == "local" || task_id.starts_with("local_") {
+        if approved {
+            // Local execution is intentionally still a separate runner slice;
+            // resolving approval here makes the state transition visible
+            // without silently executing an unknown payload.
+            let output = run_executor(vec!["--state".to_owned(), state_path().display().to_string(), "--local-task-approve".to_owned(), task_id])?;
+            if !output.is_empty() { return Ok(()); }
+        } else {
+            run_executor(vec!["--state".to_owned(), state_path().display().to_string(), "--local-task-cancel".to_owned(), task_id])?;
+            return Ok(());
+        }
+        return Err("Local task approval was recorded, but no local runner is installed for this task yet.".to_owned());
     }
     let flag = if approved { "--approve-task" } else { "--deny-task" };
     run_executor(vec!["--state".to_owned(), state_path().display().to_string(), flag.to_owned(), task_id])?;
@@ -833,6 +885,9 @@ async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModel
 #[tauri::command]
 async fn stream_chat(app: AppHandle, args: ChatArgs) -> Result<(), String> {
     if args.message.trim().is_empty() { return Err("Message cannot be empty.".to_owned()); }
+    if current_connection().runtime_mode == "local" && !args.model_profile.starts_with("local:") {
+        return Err("Local-first mode needs a private Desktop model. Choose one in Settings, or switch Runtime mode to Hosted + Desktop.".to_owned());
+    }
     if let Some(profile_id) = args.model_profile.strip_prefix("local:") {
         let profiles = stored_local_model_profiles();
         let profile = profiles.iter().find(|profile| profile.id == profile_id).ok_or_else(|| "This local model profile no longer exists. Choose another model in Settings.".to_owned())?;

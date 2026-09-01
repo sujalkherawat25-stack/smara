@@ -99,6 +99,18 @@ def test_desktop_reconciles_uncertain_journal_from_hosted_status(tmp_path: Path)
     assert journal.get("step-1")["status"] == "completed"
 
 
+def test_local_first_state_never_claims_hosted_work(tmp_path: Path):
+    state_path = tmp_path / "desktop.json"
+    state_path.write_text(json.dumps({"runtime_mode": "local", "smara_url": "https://smara.test", "token": "token", "executor_id": "desktop-1"}), encoding="utf-8")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"local-first executor made hosted request: {request.url}")
+
+    runner = DesktopRunner(state_path)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert runner.run_once(client, {}) is False
+
+
 def test_paired_desktop_claims_only_declared_capability(tmp_path: Path):
     store = TaskStore(str(tmp_path / "smara.db"))
     pairing = store.create_executor_pairing("acct_1", "Sujal desktop", ["local_file_read"])

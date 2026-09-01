@@ -7,6 +7,7 @@ export const isNativeDesktop = typeof window !== "undefined" && "__TAURI_INTERNA
 export const desktop = {
   connection: () => invoke<ConnectionState>("load_connection"),
   saveSettings: (settings: {
+    runtime_mode: "local" | "cloud";
     api_url: string;
     web_url: string;
     workspace: string;
@@ -20,6 +21,7 @@ export const desktop = {
   checkConnection: (apiUrl: string) => invoke<RemoteStatus>("check_connection", { apiUrl }),
   login: (apiUrl: string, webUrl: string) => invoke<string>("login_cli", { apiUrl, webUrl }),
   pair: (args: {
+    runtime_mode: "local" | "cloud";
     api_url: string;
     code: string;
     allowed_roots: string[];
@@ -35,6 +37,7 @@ export const desktop = {
   revoke: () => invoke<ConnectionState>("revoke_executor"),
   log: () => invoke<string>("read_log"),
   tasks: () => invoke<TaskSummary[]>("load_tasks"),
+  localTaskDetails: (taskId: string) => invoke<TaskDetail>("load_task_details", { taskId }),
   taskDetails: (taskId: string) => invoke<TaskDetail>("load_task_details", { taskId }),
   decideLocalTask: (taskId: string, approved: boolean) => invoke<void>("decide_local_task", { taskId, approved }),
   openWeb: () => invoke<void>("open_web"),
