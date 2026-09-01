@@ -85,6 +85,33 @@ def test_local_task_store_rejects_unknown_capability_and_oversized_payload(tmp_p
         store.create(title="large", objective="large", payload={"data": "x" * (64 * 1024)})
 
 
+def test_local_task_store_recovery_requires_explicit_retry(tmp_path: Path):
+    store = LocalTaskStore(local_tasks_path(tmp_path / "desktop.json"))
+    created = store.create(
+        title="Write note", objective="Create a bounded note", required_capability="local_file_write",
+        approval_mode="auto", payload={"operation": "write", "path": "note.txt", "content": "hello"},
+    )
+    claimed = store.claim(created["id"])
+    assert claimed and claimed["status"] == "running"
+    assert store.recover_interrupted() == [created["id"]]
+    recovered = store.get(created["id"])
+    assert recovered and recovered["status"] == "review_required"
+    assert store.claim(created["id"]) is None
+    assert store.approve(created["id"])["status"] == "queued"
+
+
+def test_local_task_store_running_cancel_is_checkpointed(tmp_path: Path):
+    store = LocalTaskStore(local_tasks_path(tmp_path / "desktop.json"))
+    created = store.create(
+        title="Run check", objective="Run a bounded check", required_capability="local_terminal",
+        approval_mode="auto", payload={"argv": ["python", "-V"], "cwd": str(tmp_path)},
+    )
+    assert store.claim(created["id"])
+    assert store.cancel(created["id"])["status"] == "cancelling"
+    assert store.should_cancel(created["id"]) is True
+    assert store.finish_cancelled(created["id"])["status"] == "cancelled"
+
+
 def test_failed_task_retry_returns_local_work_to_approval(tmp_path: Path):
     store = TaskStore(str(tmp_path / "smara.db"))
     task = store.create("acct_1", "work", "Local retry", "retry this local operation", True, [{

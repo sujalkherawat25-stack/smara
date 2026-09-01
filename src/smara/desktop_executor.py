@@ -1,9 +1,9 @@
-"""Persistent, outbound-only Smara Desktop executor.
+"""Persistent Smara Desktop capability executor.
 
-The desktop process is deliberately a small capability runner.  It never
-opens an inbound listener and it never receives a task unless the hosted API
-has leased a step to its paired executor.  Risky capabilities must be paired
-explicitly and the task must already have passed Smara's approval gate.
+The desktop process is deliberately a small capability runner. It never opens
+an inbound listener. In cloud mode it receives only hosted, paired leases; in
+local-first mode it drains a private on-device queue. Both paths dispatch the
+same validated skills and approval boundaries.
 """
 from __future__ import annotations
 
@@ -530,6 +530,25 @@ def _load_state(path: Path) -> dict:
     return dict(value)
 
 
+def _load_local_state(path: Path) -> dict:
+    """Load permission-only state for an unpaired Local-first installation."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise RuntimeError("Local Desktop settings are unavailable. Save Local permissions in Settings first.") from exc
+    if not isinstance(value, dict) or value.get("runtime_mode") != "local":
+        raise RuntimeError("Local-first mode is not active in Desktop Settings.")
+    for field in ("allowed_roots", "terminal_allowlist", "browser_domains", "local_capabilities"):
+        if not isinstance(value.get(field, []), list) or not all(isinstance(item, str) for item in value.get(field, [])):
+            raise RuntimeError(f"Local Desktop setting '{field}' is invalid.")
+    state = dict(value)
+    state["capabilities"] = [item for item in state.get("local_capabilities", []) if item in {
+        "local_file_read", "local_file_write", "local_terminal", "local_browser", "local_integration",
+    }]
+    state["_state_path"] = str(path)
+    return state
+
+
 def _pause_path(state_path: Path) -> Path:
     return state_path.with_suffix(state_path.suffix + ".paused")
 
@@ -564,6 +583,46 @@ def _single_runner(state_path: Path):
         else:
             import fcntl
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+@contextlib.contextmanager
+def _single_local_runner(state_path: Path, timeout_seconds: float = 75.0):
+    """Serialize detached local queue drainers, waiting for the active run."""
+    lock_path = state_path.with_suffix(state_path.suffix + ".local-runner.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+b")
+    handle.seek(0, os.SEEK_END)
+    if handle.tell() == 0:
+        handle.write(b"0")
+        handle.flush()
+    deadline = time.monotonic() + max(1.0, timeout_seconds)
+    while True:
+        try:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except OSError as exc:
+            if time.monotonic() >= deadline:
+                handle.close()
+                raise RuntimeError("Another private local task is still running.") from exc
+            time.sleep(0.1)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         handle.close()
 
 
@@ -2305,6 +2364,67 @@ class DesktopRunner:
                 time.sleep(delay)
 
 
+@dataclass
+class LocalRunner:
+    """Drain the private Local-first task queue without contacting the VM."""
+
+    state_path: Path
+
+    def run_once(self, task_id: str | None = None) -> bool:
+        state = _load_local_state(self.state_path)
+        store = LocalTaskStore(local_tasks_path(self.state_path))
+        task = store.claim(task_id)
+        if task is None:
+            return False
+        local_task_id = str(task["id"])
+        capability = task.get("required_capability")
+        payload = task.get("payload")
+        if not isinstance(capability, str) or not isinstance(payload, dict):
+            store.fail(local_task_id, "The local task is missing a validated capability payload.")
+            return True
+        step = {
+            "step_id": local_task_id,
+            "task_id": local_task_id,
+            "requires_approval": False,
+            "required_capability": capability,
+            "executor_payload": payload,
+            "idempotency_key": f"local:{local_task_id}:attempt:{task.get('attempt', 1)}",
+        }
+
+        def checkpoint() -> bool:
+            return store.should_cancel(local_task_id)
+
+        def progress(message: str) -> None:
+            store.progress(local_task_id, message)
+
+        try:
+            progress(f"{capability.replace('_', ' ').title()} started")
+            result = execute_step(step, state, checkpoint=checkpoint, progress_hook=progress)
+            if checkpoint():
+                raise ExecutionCancelled("The local task was cancelled before its result was committed.")
+            store.complete(local_task_id, result)
+            LOG.info("completed private local task %s capability=%s", local_task_id, capability)
+        except ExecutionCancelled as exc:
+            store.finish_cancelled(local_task_id, str(exc))
+            LOG.info("cancelled private local task %s", local_task_id)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+            store.fail(local_task_id, str(exc))
+            LOG.warning("failed private local task %s: %s", local_task_id, str(exc)[:300])
+        return True
+
+    def drain(self, task_id: str | None = None) -> int:
+        store = LocalTaskStore(local_tasks_path(self.state_path))
+        # A process or Windows restart can leave a mutation ambiguous. Mark it
+        # for explicit owner review instead of replaying it automatically.
+        store.recover_interrupted()
+        completed = 0
+        while self.run_once(task_id if completed == 0 else None):
+            completed += 1
+            if task_id is not None:
+                break
+        return completed
+
+
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Smara's outbound-only local executor")
     parser.add_argument("--api", default=os.getenv("SMARA_API_URL", "http://127.0.0.1:8080"))
@@ -2327,6 +2447,8 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--local-task-detail", help="print one private local task and its bounded events")
     parser.add_argument("--local-task-approve", help="approve one private local task on this PC")
     parser.add_argument("--local-task-cancel", help="cancel one private local task on this PC")
+    parser.add_argument("--local-run", action="store_true", help="drain approved private local tasks and exit")
+    parser.add_argument("--local-run-task", help="run one approved private local task and exit")
     parser.add_argument("--skills", action="store_true", help="print the installed local skill protocol")
     parser.add_argument("--credential-list", action="store_true", help="list local credential names without values")
     parser.add_argument("--credential-set", help="save a local credential from stdin")
@@ -2374,13 +2496,7 @@ def _main(argv: list[str] | None = None) -> int:
             raise SystemExit("Local task id is invalid.")
         try:
             store = LocalTaskStore(local_tasks_path(args.state))
-            task = store.get(args.local_task_approve.strip())
-            if task is None:
-                raise KeyError(args.local_task_approve.strip())
-            if task.get("status") == "waiting_approval":
-                task = store.update(args.local_task_approve.strip(), "queued", event="local.task.approved")
-            else:
-                task = store.summary(task)
+            task = store.approve(args.local_task_approve.strip())
         except (KeyError, ValueError, OSError) as exc:
             raise SystemExit(f"Local task could not be approved: {exc}") from exc
         print(json.dumps(task, ensure_ascii=False))
@@ -2439,6 +2555,14 @@ def _main(argv: list[str] | None = None) -> int:
         return 0
     if args.connector_revoke:
         print(json.dumps({"ok": True, "removed": revoke_local_connector(args.connector_revoke)}))
+        return 0
+    if args.local_run or args.local_run_task:
+        requested = args.local_run_task.strip() if isinstance(args.local_run_task, str) else None
+        if requested and (len(requested) > 160 or not all(char.isalnum() or char in "_-" for char in requested)):
+            raise SystemExit("Local task id is invalid.")
+        with _single_local_runner(args.state):
+            count = LocalRunner(args.state).drain(requested)
+        print(json.dumps({"ok": True, "tasks_run": count}, ensure_ascii=False))
         return 0
     if args.resume:
         _pause_path(args.state).unlink(missing_ok=True)

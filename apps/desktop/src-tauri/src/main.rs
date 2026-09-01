@@ -280,6 +280,46 @@ fn string_list(value: Option<&Value>) -> Vec<String> {
     value.and_then(Value::as_array).map(|items| items.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default()
 }
 
+fn derived_local_capabilities(allowed_roots: &[String], terminal_allowlist: &[String], browser_domains: &[String]) -> Vec<String> {
+    let mut capabilities = Vec::new();
+    if allowed_roots.iter().any(|item| !item.trim().is_empty()) {
+        capabilities.push("local_file_read".to_owned());
+        capabilities.push("local_file_write".to_owned());
+    }
+    if terminal_allowlist.iter().any(|item| !item.trim().is_empty()) {
+        capabilities.push("local_terminal".to_owned());
+    }
+    if browser_domains.iter().any(|item| !item.trim().is_empty()) {
+        capabilities.push("local_browser".to_owned());
+    }
+    let connector_ready = read_json(&app_data_dir().join("credentials.json"))
+        .and_then(|value| value.as_object().map(|object| object.contains_key("TAVILY_API_KEY") || object.contains_key("GITHUB_TOKEN")))
+        .unwrap_or(false);
+    if connector_ready {
+        capabilities.push("local_integration".to_owned());
+    }
+    capabilities
+}
+
+fn sync_local_capabilities() -> Result<(), String> {
+    let preferences = read_json(&preferences_path()).unwrap_or_else(|| json!({}));
+    let allowed_roots = string_list(preferences.get("allowed_roots"));
+    let terminal_allowlist = string_list(preferences.get("terminal_allowlist"));
+    let browser_domains = string_list(preferences.get("browser_domains"));
+    let capabilities = derived_local_capabilities(&allowed_roots, &terminal_allowlist, &browser_domains);
+    let mut state = read_json(&state_path()).unwrap_or_else(|| json!({}));
+    if let Some(object) = state.as_object_mut() {
+        object.insert("runtime_mode".to_owned(), Value::String(
+            preferences.get("runtime_mode").and_then(Value::as_str).unwrap_or("local").to_owned(),
+        ));
+        object.insert("allowed_roots".to_owned(), serde_json::to_value(allowed_roots).map_err(|error| error.to_string())?);
+        object.insert("terminal_allowlist".to_owned(), serde_json::to_value(terminal_allowlist).map_err(|error| error.to_string())?);
+        object.insert("browser_domains".to_owned(), serde_json::to_value(browser_domains).map_err(|error| error.to_string())?);
+        object.insert("local_capabilities".to_owned(), serde_json::to_value(capabilities).map_err(|error| error.to_string())?);
+    }
+    write_json(&state_path(), &state)
+}
+
 fn executor_executable() -> PathBuf {
     if let Some(value) = std::env::var_os("SMARA_DESKTOP_EXECUTABLE") {
         return PathBuf::from(value);
@@ -462,7 +502,7 @@ fn current_connection() -> ConnectionState {
     let model_profile = preferences.as_ref().and_then(|value| value.get("model_profile")).and_then(Value::as_str).unwrap_or("default").to_owned();
     let pid = read_json(&runtime_path()).and_then(|value| value.get("pid").and_then(Value::as_u64).map(|value| value as u32)).filter(|value| process_alive(*value));
     let paired = state.as_ref().map(|value| value.get("executor_id").and_then(Value::as_str).is_some() && (value.get("token").and_then(Value::as_str).is_some() || value.get("token_dpapi").and_then(Value::as_str).is_some())).unwrap_or(false);
-    let capabilities = string_list(state.as_ref().and_then(|value| value.get("capabilities")));
+    let paired_capabilities = string_list(state.as_ref().and_then(|value| value.get("capabilities")));
     let configured_list = |key: &str| -> Vec<String> {
         if let Some(value) = preferences.as_ref().and_then(|item| item.get(key)) { string_list(Some(value)) } else { string_list(state.as_ref().and_then(|item| item.get(key))) }
     };
@@ -483,6 +523,11 @@ fn current_connection() -> ConnectionState {
         .or_else(|| state.as_ref().and_then(|value| value.get("runtime_mode")).and_then(Value::as_str))
         .filter(|value| matches!(*value, "local" | "cloud"))
         .unwrap_or(if state.is_some() { "cloud" } else { "local" }).to_owned();
+    let capabilities = if runtime_mode == "local" {
+        derived_local_capabilities(&allowed_roots, &terminal_allowlist, &browser_domains)
+    } else {
+        paired_capabilities
+    };
     let token_path = cli_token_path();
     ConnectionState { runtime_mode, api_url, web_url, workspace, model_profile, paired, executor_id: state.as_ref().and_then(|value| value.get("executor_id")).and_then(Value::as_str).map(str::to_owned), capabilities, allowed_roots, terminal_allowlist, browser_domains, auto_approve_safe, approval_mode, paused: pause_path().exists(), running: pid.is_some(), pid, log_path: log_path().display().to_string(), has_cli_token: read_json(&token_path).and_then(|value| value.get("access_token").and_then(Value::as_str).map(|token| !token.is_empty())).unwrap_or(false), last_error: None }
 }
@@ -502,20 +547,21 @@ fn save_settings(settings: LocalSettings) -> Result<ConnectionState, String> {
     let existing_profiles = read_json(&preferences_path()).and_then(|value| value.get("local_model_profiles").cloned());
     let approval_mode = if settings.approval_mode.trim() == "auto" { "auto" } else { "ask" };
     let runtime_mode = if settings.runtime_mode.trim() == "cloud" { "cloud" } else { "local" };
-    let mut value = json!({ "runtime_mode": runtime_mode, "api_url": api_url, "web_url": web_url, "workspace": if settings.workspace.trim().is_empty() { "default" } else { settings.workspace.trim() }, "model_profile": if settings.model_profile.trim().is_empty() { "default" } else { settings.model_profile.trim() }, "allowed_roots": settings.allowed_roots, "terminal_allowlist": settings.terminal_allowlist, "browser_domains": settings.browser_domains, "auto_approve_safe": settings.auto_approve_safe, "approval_mode": approval_mode });
+    let local_capabilities = derived_local_capabilities(&settings.allowed_roots, &settings.terminal_allowlist, &settings.browser_domains);
+    let mut value = json!({ "runtime_mode": runtime_mode, "api_url": api_url, "web_url": web_url, "workspace": if settings.workspace.trim().is_empty() { "default" } else { settings.workspace.trim() }, "model_profile": if settings.model_profile.trim().is_empty() { "default" } else { settings.model_profile.trim() }, "allowed_roots": settings.allowed_roots, "terminal_allowlist": settings.terminal_allowlist, "browser_domains": settings.browser_domains, "local_capabilities": local_capabilities, "auto_approve_safe": settings.auto_approve_safe, "approval_mode": approval_mode });
     value = preserve_local_model_profiles(value, existing_profiles);
     write_json(&preferences_path(), &value)?;
-    if let Some(mut state) = read_json(&state_path()) {
-        if let Some(object) = state.as_object_mut() {
-            object.insert("smara_url".to_owned(), Value::String(api_url.to_owned()));
-            object.insert("allowed_roots".to_owned(), value["allowed_roots"].clone());
-            object.insert("terminal_allowlist".to_owned(), value["terminal_allowlist"].clone());
-            object.insert("browser_domains".to_owned(), value["browser_domains"].clone());
-            object.insert("auto_approve_safe".to_owned(), value["auto_approve_safe"].clone());
-            object.insert("approval_mode".to_owned(), value["approval_mode"].clone());
-            object.insert("runtime_mode".to_owned(), value["runtime_mode"].clone());
-            write_json(&state_path(), &state)?;
-        }
+    let mut state = read_json(&state_path()).unwrap_or_else(|| json!({}));
+    if let Some(object) = state.as_object_mut() {
+        object.insert("smara_url".to_owned(), Value::String(api_url.to_owned()));
+        object.insert("allowed_roots".to_owned(), value["allowed_roots"].clone());
+        object.insert("terminal_allowlist".to_owned(), value["terminal_allowlist"].clone());
+        object.insert("browser_domains".to_owned(), value["browser_domains"].clone());
+        object.insert("local_capabilities".to_owned(), value["local_capabilities"].clone());
+        object.insert("auto_approve_safe".to_owned(), value["auto_approve_safe"].clone());
+        object.insert("approval_mode".to_owned(), value["approval_mode"].clone());
+        object.insert("runtime_mode".to_owned(), value["runtime_mode"].clone());
+        write_json(&state_path(), &state)?;
     }
     Ok(current_connection())
 }
@@ -548,13 +594,53 @@ fn run_executor(args: Vec<String>) -> Result<String, String> {
 fn run_executor_with_input(args: Vec<String>, input: &str) -> Result<String, String> {
     let mut command = executor_command(&args);
     command.stdin(Stdio::piped());
-    let mut child = command.spawn().map_err(|error| format!("Could not start the local credential vault: {error}"))?;
-    child.stdin.take().ok_or_else(|| "Could not open the local credential vault input.".to_owned())?.write_all(input.as_bytes()).map_err(|error| format!("Could not save the local credential: {error}"))?;
-    let output = child.wait_with_output().map_err(|error| format!("Could not finish saving the local credential: {error}"))?;
+    let mut child = command.spawn().map_err(|error| format!("Could not start the local executor input: {error}"))?;
+    child.stdin.take().ok_or_else(|| "Could not open the local executor input.".to_owned())?.write_all(input.as_bytes()).map_err(|error| format!("Could not send local executor input: {error}"))?;
+    let output = child.wait_with_output().map_err(|error| format!("Could not finish the local executor request: {error}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
     if !output.status.success() { return Err(if stderr.is_empty() { stdout } else { stderr }); }
     Ok(stdout)
+}
+
+fn start_local_runner() -> Result<(), String> {
+    let args = vec!["--state".to_owned(), state_path().display().to_string(), "--local-run".to_owned()];
+    let mut command = executor_command(&args);
+    command.stdout(Stdio::null()).stderr(Stdio::null());
+    command.spawn().map_err(|error| format!("Could not start the private local runner: {error}"))?;
+    Ok(())
+}
+
+fn create_private_local_task(request: &Value, conversation_id: &str) -> Result<Value, String> {
+    let connection = current_connection();
+    let capability = request.get("capability").and_then(Value::as_str).unwrap_or("");
+    if !connection.capabilities.iter().any(|item| item == capability) {
+        return Err(format!("{capability} is not enabled in Desktop Permissions."));
+    }
+    let title = request.get("title").and_then(Value::as_str).unwrap_or("").trim();
+    let objective = request.get("objective").and_then(Value::as_str).unwrap_or("").trim();
+    let executor_payload = request.get("payload").and_then(Value::as_object).ok_or_else(|| "The private model returned an invalid local action payload.".to_owned())?;
+    if title.is_empty() || title.len() > 160 || objective.is_empty() || objective.len() > 8_000 {
+        return Err("The private model returned an invalid local task title or objective.".to_owned());
+    }
+    let body = json!({
+        "title": title,
+        "objective": objective,
+        "session_id": conversation_id,
+        "requires_approval": true,
+        "approval_mode": connection.approval_mode,
+        "required_capability": capability,
+        "payload": executor_payload,
+    });
+    let output = run_executor_with_input(
+        vec!["--state".to_owned(), state_path().display().to_string(), "--local-task-create".to_owned()],
+        &serde_json::to_string(&body).map_err(|error| error.to_string())?,
+    )?;
+    let task: Value = serde_json::from_str(&output).map_err(|_| "The private local task store returned invalid data.".to_owned())?;
+    if task.get("status").and_then(Value::as_str) == Some("queued") {
+        start_local_runner()?;
+    }
+    Ok(task)
 }
 
 #[tauri::command]
@@ -567,12 +653,14 @@ fn list_local_credentials() -> Result<Vec<LocalCredentialSummary>, String> {
 fn save_local_credential(name: String, provider: String, secret: String) -> Result<Vec<LocalCredentialSummary>, String> {
     if secret.is_empty() { return Err("Enter a credential value before saving.".to_owned()); }
     run_executor_with_input(vec!["--credential-set".to_owned(), name, "--credential-provider".to_owned(), provider], &secret)?;
+    sync_local_capabilities()?;
     list_local_credentials()
 }
 
 #[tauri::command]
 fn delete_local_credential(name: String) -> Result<Vec<LocalCredentialSummary>, String> {
     run_executor(vec!["--credential-delete".to_owned(), name])?;
+    sync_local_capabilities()?;
     list_local_credentials()
 }
 
@@ -585,6 +673,7 @@ fn list_local_connectors() -> Result<Vec<LocalConnectorSummary>, String> {
 #[tauri::command]
 fn revoke_local_connector(provider: String) -> Result<Vec<LocalConnectorSummary>, String> {
     run_executor(vec!["--connector-revoke".to_owned(), provider])?;
+    sync_local_capabilities()?;
     list_local_connectors()
 }
 
@@ -649,6 +738,7 @@ fn resolve_local_secret(name: &str) -> Result<String, String> {
 fn pair_desktop(args: PairArgs) -> Result<ConnectionState, String> {
     let code = normalized_pairing_code(&args.code);
     if code.len() != 8 { return Err(format!("Pairing code must contain 8 hexadecimal characters ({}/8 entered).", code.len())); }
+    let local_capabilities = derived_local_capabilities(&args.allowed_roots, &args.terminal_allowlist, &args.browser_domains);
     let mut command_args = vec!["--api".to_owned(), normalized_api_url(&args.api_url), "--pair".to_owned(), code, "--pair-only".to_owned(), "--state".to_owned(), state_path().display().to_string()];
     for root in args.allowed_roots { command_args.extend(["--allow-root".to_owned(), root]); }
     for executable in args.terminal_allowlist { command_args.extend(["--terminal-allow".to_owned(), executable]); }
@@ -659,6 +749,7 @@ fn pair_desktop(args: PairArgs) -> Result<ConnectionState, String> {
     state["auto_approve_safe"] = Value::Bool(args.auto_approve_safe);
     state["approval_mode"] = Value::String(if args.approval_mode.trim() == "auto" { "auto".to_owned() } else { "ask".to_owned() });
     state["runtime_mode"] = Value::String(if args.runtime_mode.trim() == "cloud" { "cloud".to_owned() } else { "local".to_owned() });
+    state["local_capabilities"] = serde_json::to_value(local_capabilities).map_err(|error| error.to_string())?;
     write_json(&path, &state)?;
     Ok(current_connection())
 }
@@ -784,16 +875,16 @@ fn decide_local_task(task_id: String, approved: bool) -> Result<(), String> {
     }
     if current_connection().runtime_mode == "local" || task_id.starts_with("local_") {
         if approved {
-            // Local execution is intentionally still a separate runner slice;
-            // resolving approval here makes the state transition visible
-            // without silently executing an unknown payload.
             let output = run_executor(vec!["--state".to_owned(), state_path().display().to_string(), "--local-task-approve".to_owned(), task_id])?;
-            if !output.is_empty() { return Ok(()); }
+            if !output.is_empty() {
+                start_local_runner()?;
+                return Ok(());
+            }
         } else {
             run_executor(vec!["--state".to_owned(), state_path().display().to_string(), "--local-task-cancel".to_owned(), task_id])?;
             return Ok(());
         }
-        return Err("Local task approval was recorded, but no local runner is installed for this task yet.".to_owned());
+        return Err("The private local task could not be queued.".to_owned());
     }
     let flag = if approved { "--approve-task" } else { "--deny-task" };
     run_executor(vec!["--state".to_owned(), state_path().display().to_string(), flag.to_owned(), task_id])?;
@@ -833,8 +924,110 @@ fn emit_local_payload(app: &AppHandle, data: &str) -> Result<bool, String> {
     Ok(false)
 }
 
+async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalModelProfile, secret: &str) -> Result<Option<()>, String> {
+    let connection = current_connection();
+    if connection.capabilities.is_empty() {
+        return Ok(None);
+    }
+    let endpoint = local_chat_endpoint(&profile.base_url);
+    let capability_descriptions = connection.capabilities.iter().map(|capability| match capability.as_str() {
+        "local_file_read" => "local_file_read: read_file, list_tree, search_text, find_files, git_summary, workspace_snapshot",
+        "local_file_write" => "local_file_write: preview_only, write, append, patch, rename, move, delete, undo, create/edit DOCX/XLSX/PPTX/PDF",
+        "local_terminal" => "local_terminal: argv array plus approved cwd, or a deterministic recipe",
+        "local_browser" => "local_browser: open, inspect_text, inspect_dom, download on approved domains",
+        "local_integration" => "local_integration: Tavily search or GitHub list_repositories using a local credential alias",
+        _ => capability,
+    }).collect::<Vec<_>>().join("\n");
+    let system = format!(
+        "You are Smara's private desktop planner. Answer normally when no local action is needed. When the user asks to read, write, run, inspect, create a document, browse, search with a local connector, or access GitHub, you MUST call request_local_action exactly once and must not claim the action already happened. Use only the enabled capabilities below. Paths must be inside approved folders; terminal uses an argv array, never a shell string. Credentials are referenced only by alias and never included as values.\n\nEnabled capabilities:\n{capability_descriptions}"
+    );
+    let tool = json!({
+        "type": "function",
+        "function": {
+            "name": "request_local_action",
+            "description": "Create one approval-policy-controlled task on this Desktop using an enabled local capability.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["title", "objective", "capability", "payload"],
+                "properties": {
+                    "title": {"type": "string", "maxLength": 160},
+                    "objective": {"type": "string", "maxLength": 8000},
+                    "capability": {"type": "string", "enum": connection.capabilities},
+                    "payload": {"type": "object", "description": "Capability-specific payload validated again by the local executor."}
+                }
+            }
+        }
+    });
+    let payload = json!({
+        "model": profile.model,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": args.message}],
+        "tools": [tool],
+        "tool_choice": "auto",
+        "parallel_tool_calls": false,
+        "stream": false,
+        "max_tokens": 2048,
+        "temperature": 0.1,
+    });
+    let client = shared_http_client();
+    let mut request = client.post(endpoint).timeout(std::time::Duration::from_secs(300)).json(&payload);
+    if profile.auth_header == "api-subscription-key" { request = request.header("api-subscription-key", secret); }
+    else { request = request.bearer_auth(secret); }
+    let response = request.send().await.map_err(|error| format!("Could not reach the private {} provider: {error}", profile.label))?;
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED || response.status() == reqwest::StatusCode::FORBIDDEN {
+        return Err(format!("{} rejected the local API key. Update this provider in Settings.", profile.label));
+    }
+    if matches!(response.status().as_u16(), 400 | 404 | 422) {
+        // Some OpenAI-compatible endpoints do not implement tools. Preserve
+        // ordinary private chat through the existing streaming fallback.
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        return Err(format!("Private {} provider returned HTTP {}. Check its endpoint and model.", profile.label, response.status()));
+    }
+    let value = response.json::<Value>().await.map_err(|_| "The private model returned invalid JSON.".to_owned())?;
+    let message = value.get("choices").and_then(Value::as_array).and_then(|items| items.first()).and_then(|choice| choice.get("message"));
+    let Some(message) = message else { return Ok(None); };
+    let tool_call = message.get("tool_calls").and_then(Value::as_array).and_then(|items| items.first());
+    if let Some(call) = tool_call {
+        let function = call.get("function").unwrap_or(call);
+        if function.get("name").and_then(Value::as_str) != Some("request_local_action") {
+            return Err("The private model requested an unknown local tool.".to_owned());
+        }
+        let raw_arguments = function.get("arguments").and_then(Value::as_str).ok_or_else(|| "The private model returned invalid local tool arguments.".to_owned())?;
+        let arguments: Value = serde_json::from_str(raw_arguments).map_err(|_| "The private model returned malformed local tool arguments.".to_owned())?;
+        app.emit("smara-chat-event", json!({"type": "phase", "phase": "local_plan"})).map_err(|error| error.to_string())?;
+        app.emit("smara-chat-event", json!({"type": "tool_call", "name": arguments.get("capability").and_then(Value::as_str).unwrap_or("local_action")})).map_err(|error| error.to_string())?;
+        let task = create_private_local_task(&arguments, &args.conversation_id)?;
+        let task_id = task.get("id").and_then(Value::as_str).unwrap_or("");
+        let status = task.get("status").and_then(Value::as_str).unwrap_or("waiting_approval");
+        let title = task.get("title").and_then(Value::as_str).unwrap_or("Local task");
+        let answer = if status == "queued" {
+            format!("I started **{title}** on this Desktop. Its verified result will appear here and in Activity.")
+        } else {
+            format!("I prepared **{title}**. Open Activity to review and approve it on this Desktop.")
+        };
+        app.emit("smara-chat-event", json!({"type": "tool_result", "name": "local_task", "ok": true, "preview": status})).map_err(|error| error.to_string())?;
+        app.emit("smara-chat-event", json!({"type": "token", "text": answer})).map_err(|error| error.to_string())?;
+        app.emit("smara-chat-event", json!({"type": "done", "tools_used": 1, "task_id": task_id})).map_err(|error| error.to_string())?;
+        return Ok(Some(()));
+    }
+    if let Some(content) = message.get("content").and_then(Value::as_str).filter(|text| !text.trim().is_empty()) {
+        app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"})).map_err(|error| error.to_string())?;
+        app.emit("smara-chat-event", json!({"type": "token", "text": content})).map_err(|error| error.to_string())?;
+        app.emit("smara-chat-event", json!({"type": "done", "tools_used": 0})).map_err(|error| error.to_string())?;
+        return Ok(Some(()));
+    }
+    Ok(None)
+}
+
 async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModelProfile) -> Result<(), String> {
     let secret = resolve_local_secret(&profile.credential_name)?;
+    if current_connection().runtime_mode == "local" {
+        if try_local_agent_turn(&app, args, profile, &secret).await?.is_some() {
+            return Ok(());
+        }
+    }
     let endpoint = local_chat_endpoint(&profile.base_url);
     let payload = json!({
         "model": profile.model,
@@ -941,7 +1134,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{local_delta_text, local_event_payload, normalized_api_url, normalized_pairing_code, normalized_web_url, preserve_local_model_profiles};
+    use super::{derived_local_capabilities, local_delta_text, local_event_payload, normalized_api_url, normalized_pairing_code, normalized_web_url, preserve_local_model_profiles};
     use serde_json::json;
 
     #[test]
@@ -955,6 +1148,19 @@ mod tests {
     fn local_stream_reads_message_fallback_without_reasoning_text() {
         let value = json!({"choices":[{"message":{"content":"hello","reasoning_content":"private"}}]});
         assert_eq!(local_delta_text(&value).as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn local_permissions_derive_only_explicitly_enabled_capabilities() {
+        let capabilities = derived_local_capabilities(
+            &["C:\\approved".to_owned()],
+            &["python".to_owned()],
+            &["github.com".to_owned()],
+        );
+        assert!(capabilities.contains(&"local_file_read".to_owned()));
+        assert!(capabilities.contains(&"local_file_write".to_owned()));
+        assert!(capabilities.contains(&"local_terminal".to_owned()));
+        assert!(capabilities.contains(&"local_browser".to_owned()));
     }
 
     #[test]

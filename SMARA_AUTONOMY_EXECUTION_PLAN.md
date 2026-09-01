@@ -93,18 +93,35 @@ The first local-first slice is now implemented in the Desktop build:
   scheduling, and paired Desktop leases. Switching modes is an explicit user
   action and does not copy local credentials or private task payloads.
 
-This slice is a foundation, not a claim that the complete local agent is
-finished. The next A1 implementation slice is a local runner that executes a
-validated task payload through the existing skill contracts, streams progress,
-and writes bounded result/artifact proof into the private task store. Its
-acceptance tests must cover ask/auto approval, cancellation, workspace locks,
-restart recovery, and no-replay behavior before local mode is called complete.
+The Desktop-owned A1 runner slice is now complete in software:
+
+- Private-model chat may request a typed local action instead of pretending it
+  executed one. The task is created in the private Desktop store and shown in
+  Activity.
+- `Ask before acting` keeps the task at `waiting_approval`; `Approve for me`
+  queues only actions inside the declared local capabilities. Desktop remains
+  the approval authority in both cases.
+- A single local runner claims queued work and dispatches it through the same
+  hardened file, document, terminal, browser, and local-connector skills used
+  by the paired executor.
+- Progress, steps, artifacts, bounded result proof, cancellation requests, and
+  errors are journaled locally. A restart moves an uncertain running mutation
+  to `review_required`; it is never replayed automatically.
+- Fresh unpaired installations now persist a permission-only runtime state, so
+  local work does not depend on a hosted account or pairing record. Connector
+  capability changes synchronize immediately after a credential is saved,
+  removed, or revoked.
+
+Automated acceptance covers ask/approve, execution, proof, cancellation,
+interrupted-run recovery, no replay, unpaired operation, path/shell/domain
+boundaries, and connector secret redaction. The remaining Windows/network
+restart drill is an owner-operated release check, not missing implementation.
 
 ---
 
 ## A1. Local Workspace Agent v2
 
-### Implementation status (2026-08-31)
+### Implementation status (2026-09-01)
 
 - **A1.1 shipped in the control plane:** local steps now carry the versioned
   `smara.workspace.v1` job envelope. The desktop validates workspace-relative
@@ -122,11 +139,14 @@ restart recovery, and no-replay behavior before local mode is called complete.
   inheriting an unbounded generic retry limit), while hosted APIs redact raw
   executor payloads. Web and Desktop run consoles now show scope, isolation,
   repair budget, stage proof, artifacts, and acceptance-check status.
-- **A1 remaining gates:** exercise a disposable multi-stage repository through
-  inspect → plan → edit → run → verify → report; complete the physical
-  network/application/Windows restart and conflict drills; and run the final
-  owner-controlled adversarial acceptance checks before reopening production
-  gates. These are release-validation activities, not new protocol work.
+- **A1 private Desktop runner shipped:** local tasks have legal state
+  transitions, a cross-process mutation lock, one active runner, progress and
+  proof journals, cooperative cancellation, and explicit recovery review.
+  Private model tool requests create real Desktop tasks; results return to the
+  Desktop chat instead of being hidden in hosted Work.
+- **A1 remaining release gate:** run the physical Windows restart/network-loss
+  drill and a disposable multi-stage repository drill on the installed package.
+  These are owner-device validation activities, not unfinished code paths.
 
 ### Goal
 
@@ -167,7 +187,7 @@ never silently repeat a possibly completed mutation.
    - Support download/open/copy for bounded artifacts and a clear local path
      reference without exposing file contents by default.
 
-5. **Recovery rules**
+5. **Recovery rules** ✅ for Desktop-owned local tasks
    - Persist checkpoints before every mutation.
    - Reconcile uncertain journal entries with hosted task state before resuming.
    - Require user review instead of replaying an ambiguous write, command, or

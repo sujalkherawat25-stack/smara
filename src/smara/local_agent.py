@@ -29,7 +29,22 @@ except ImportError:  # pragma: no cover - exercised by the bundled executable
 JOURNAL_MAX_ENTRIES = 200
 JOURNAL_STATUSES = {"claimed", "prepared", "completed", "failed", "cancelled", "uncertain"}
 LOCAL_TASK_MAX_ENTRIES = 200
-LOCAL_TASK_STATUSES = {"draft", "queued", "waiting_approval", "running", "completed", "failed", "cancelled"}
+LOCAL_TASK_STATUSES = {
+    "draft", "queued", "waiting_approval", "running", "cancelling",
+    "review_required", "completed", "failed", "cancelled",
+}
+LOCAL_TASK_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+LOCAL_TASK_TRANSITIONS = {
+    "draft": {"queued", "waiting_approval", "cancelled"},
+    "waiting_approval": {"queued", "cancelled"},
+    "queued": {"running", "cancelled"},
+    "running": {"cancelling", "review_required", "completed", "failed", "cancelled"},
+    "cancelling": {"review_required", "failed", "cancelled"},
+    "review_required": {"queued", "waiting_approval", "cancelled"},
+    "failed": {"queued", "waiting_approval", "cancelled"},
+    "completed": set(),
+    "cancelled": set(),
+}
 LOCK_TIMEOUT_SECONDS = 0.0
 
 
@@ -362,6 +377,52 @@ class LocalTaskStore:
         finally:
             temporary.unlink(missing_ok=True)
 
+    @contextlib.contextmanager
+    def _mutation(self) -> Iterator[dict[str, Any]]:
+        """Serialize cross-process task mutations around the atomic file.
+
+        Reads need no lock because ``os.replace`` exposes complete files only.
+        Mutations do need one: the native UI and detached runner are separate
+        processes and must not overwrite each other's approval/progress state.
+        """
+        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = lock_path.open("a+b")
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"0")
+            handle.flush()
+        deadline = time.monotonic() + 5.0
+        while True:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if time.monotonic() >= deadline:
+                    handle.close()
+                    raise RuntimeError("The private task store is busy; try again.") from exc
+                time.sleep(0.05)
+        value = self._read()
+        try:
+            yield value
+            self._write(value)
+        finally:
+            with contextlib.suppress(OSError):
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
+
     @staticmethod
     def _clean_text(value: object, *, field: str, limit: int) -> str:
         if not isinstance(value, str) or not value.strip():
@@ -409,13 +470,19 @@ class LocalTaskStore:
             "payload": payload,
             "result": None,
             "error": None,
+            "run_id": None,
+            "attempt": 0,
+            "cancel_requested": False,
+            "started_at": None,
+            "finished_at": None,
             "created_at": now,
             "updated_at": now,
-            "events": [{"type": "local.task.created", "at": now}],
+            "steps": [],
+            "artifacts": [],
+            "events": [{"type": "local.task.created", "created_at": now}],
         }
-        value = self._read()
-        value["tasks"] = [task] + [item for item in value["tasks"] if item.get("id") != task_id]
-        self._write(value)
+        with self._mutation() as value:
+            value["tasks"] = [task] + [item for item in value["tasks"] if item.get("id") != task_id]
         return self.summary(task)
 
     def get(self, task_id: str) -> dict[str, Any] | None:
@@ -429,7 +496,8 @@ class LocalTaskStore:
         """Return the UI-safe view; payloads never appear in task lists."""
         value = {key: task.get(key) for key in (
             "id", "session_id", "title", "objective", "status", "requires_approval",
-            "required_capability", "result", "error", "created_at", "updated_at",
+            "required_capability", "result", "error", "run_id", "attempt",
+            "cancel_requested", "started_at", "finished_at", "created_at", "updated_at",
         )}
         # Match the shared Desktop task contract while retaining the private
         # policy in a separate, local-only field for future runner decisions.
@@ -442,39 +510,219 @@ class LocalTaskStore:
         if task is None:
             return None
         value = self.summary(task)
-        value["steps"] = []
+        value["steps"] = list(task.get("steps") or [])[-64:]
         value["events"] = list(task.get("events") or [])[-64:]
-        value["artifacts"] = []
+        value["artifacts"] = list(task.get("artifacts") or [])[-20:]
         return value
+
+    @staticmethod
+    def _transition(task: dict[str, Any], status: str) -> None:
+        current = str(task.get("status") or "draft")
+        if status == current:
+            return
+        if status not in LOCAL_TASK_TRANSITIONS.get(current, set()):
+            raise ValueError(f"local task cannot transition from {current} to {status}")
+        task["status"] = status
+
+    @staticmethod
+    def _event(task: dict[str, Any], event: str, *, message: str | None = None) -> None:
+        created_at = _timestamp()
+        item: dict[str, Any] = {"type": event[:120], "created_at": created_at}
+        if message:
+            item["message"] = str(message)[:500]
+        events = task.setdefault("events", [])
+        if not isinstance(events, list):
+            events = []
+        events.append(item)
+        task["events"] = events[-64:]
 
     def update(self, task_id: str, status: str, *, result: str | None = None, error: str | None = None, event: str | None = None) -> dict[str, Any]:
         if status not in LOCAL_TASK_STATUSES:
             raise ValueError(f"unknown local task status: {status}")
-        value = self._read()
-        task = next((item for item in value["tasks"] if item.get("id") == task_id), None)
-        if task is None:
-            raise KeyError(task_id)
-        task["status"] = status
-        task["updated_at"] = _timestamp()
-        if result is not None:
-            task["result"] = str(result)[:40_000]
-        if error is not None:
-            task["error"] = str(error)[:2_000]
-        if event:
-            events = task.setdefault("events", [])
-            if isinstance(events, list):
-                events.append({"type": event[:120], "at": task["updated_at"]})
-                task["events"] = events[-64:]
-        self._write(value)
+        with self._mutation() as value:
+            task = next((item for item in value["tasks"] if item.get("id") == task_id), None)
+            if task is None:
+                raise KeyError(task_id)
+            self._transition(task, status)
+            task["updated_at"] = _timestamp()
+            if result is not None:
+                task["result"] = str(result)[:40_000]
+            if error is not None:
+                task["error"] = str(error)[:2_000]
+            if event:
+                self._event(task, event)
         return self.summary(task)
 
-    def cancel(self, task_id: str) -> dict[str, Any]:
+    def approve(self, task_id: str) -> dict[str, Any]:
+        with self._mutation() as value:
+            task = next((item for item in value["tasks"] if item.get("id") == task_id), None)
+            if task is None:
+                raise KeyError(task_id)
+            current = task.get("status")
+            if current in {"waiting_approval", "review_required", "failed"}:
+                self._transition(task, "queued")
+                task["error"] = None
+                task["cancel_requested"] = False
+                task["updated_at"] = _timestamp()
+                self._event(task, "local.task.approved" if current == "waiting_approval" else "local.task.retry_approved")
+            elif current not in {"queued", "running", "cancelling", "completed"}:
+                raise ValueError(f"local task cannot be approved from {current}")
+        return self.summary(task)
+
+    def claim(self, task_id: str | None = None) -> dict[str, Any] | None:
+        with self._mutation() as value:
+            task = next((item for item in value["tasks"] if item.get("status") == "queued" and (task_id is None or item.get("id") == task_id)), None)
+            if task is None:
+                return None
+            self._transition(task, "running")
+            now = _timestamp()
+            task["run_id"] = f"run_{uuid.uuid4().hex[:20]}"
+            task["attempt"] = int(task.get("attempt") or 0) + 1
+            task["cancel_requested"] = False
+            task["started_at"] = now
+            task["finished_at"] = None
+            task["updated_at"] = now
+            task["steps"] = []
+            self._event(task, "local.task.started")
+            return dict(task)
+
+    def progress(self, task_id: str, message: str) -> dict[str, Any]:
+        message = self._clean_text(message, field="progress", limit=500)
+        with self._mutation() as value:
+            task = next((item for item in value["tasks"] if item.get("id") == task_id), None)
+            if task is None:
+                raise KeyError(task_id)
+            if task.get("status") not in {"running", "cancelling"}:
+                return self.summary(task)
+            now = _timestamp()
+            steps = task.setdefault("steps", [])
+            if not isinstance(steps, list):
+                steps = []
+            steps.append({"name": message, "status": "running", "created_at": now})
+            task["steps"] = steps[-64:]
+            task["updated_at"] = now
+            self._event(task, "local.task.progress", message=message)
+        return self.summary(task)
+
+    def should_cancel(self, task_id: str) -> bool:
         task = self.get(task_id)
-        if task is None:
-            raise KeyError(task_id)
-        if task.get("status") in {"completed", "failed", "cancelled"}:
-            return self.summary(task)
-        return self.update(task_id, "cancelled", error="Cancelled on this Desktop.", event="local.task.cancelled")
+        return bool(task is None or task.get("cancel_requested") or task.get("status") in {"cancelling", "cancelled"})
+
+    @staticmethod
+    def _proof_from_result(result: str) -> tuple[str, list[dict[str, Any]]]:
+        summary = result[:40_000]
+        artifacts: list[dict[str, Any]] = []
+        try:
+            value = json.loads(result)
+        except (TypeError, ValueError):
+            return summary, artifacts
+        if not isinstance(value, dict):
+            return summary, artifacts
+        action = str(value.get("action") or "Local task")
+        operation = str(value.get("operation") or "completed")
+        summary = f"{action}: {operation}"
+        file_name = value.get("file_name")
+        if isinstance(file_name, str) and file_name:
+            artifacts.append({
+                "id": f"artifact_{uuid.uuid4().hex[:16]}", "kind": "local_file",
+                "name": file_name[:240], "sha256": value.get("sha256"),
+                "created_at": _timestamp(),
+            })
+            summary += f" · {file_name}"
+        proof = value.get("proof")
+        if isinstance(proof, dict):
+            digest = proof.get("content_sha256") or proof.get("result_sha256")
+            if isinstance(digest, str) and digest:
+                summary += f" · proof {digest[:12]}"
+        return summary[:2_000], artifacts[:20]
+
+    def complete(self, task_id: str, result: str) -> dict[str, Any]:
+        summary, artifacts = self._proof_from_result(result)
+        with self._mutation() as value:
+            task = next((item for item in value["tasks"] if item.get("id") == task_id), None)
+            if task is None:
+                raise KeyError(task_id)
+            self._transition(task, "completed")
+            now = _timestamp()
+            task["result"] = str(result)[:40_000]
+            task["result_summary"] = summary
+            task["error"] = None
+            task["cancel_requested"] = False
+            task["finished_at"] = now
+            task["updated_at"] = now
+            task["artifacts"] = artifacts
+            self._event(task, "local.task.completed")
+        return self.summary(task)
+
+    def fail(self, task_id: str, error: str, *, interrupted: bool = False) -> dict[str, Any]:
+        with self._mutation() as value:
+            task = next((item for item in value["tasks"] if item.get("id") == task_id), None)
+            if task is None:
+                raise KeyError(task_id)
+            target = "review_required" if interrupted else "failed"
+            self._transition(task, target)
+            now = _timestamp()
+            task["error"] = str(error)[:2_000]
+            task["finished_at"] = now
+            task["updated_at"] = now
+            task["cancel_requested"] = False
+            self._event(task, "local.task.interrupted" if interrupted else "local.task.failed")
+        return self.summary(task)
+
+    def recover_interrupted(self) -> list[str]:
+        recovered: list[str] = []
+        with self._mutation() as value:
+            for task in value["tasks"]:
+                if task.get("status") not in {"running", "cancelling"}:
+                    continue
+                self._transition(task, "review_required")
+                task["error"] = "Execution was interrupted. Review and approve a retry; Smara will not replay it automatically."
+                task["cancel_requested"] = False
+                task["finished_at"] = _timestamp()
+                task["updated_at"] = task["finished_at"]
+                self._event(task, "local.task.interrupted")
+                recovered.append(str(task.get("id") or ""))
+        return recovered
+
+    def cancel(self, task_id: str) -> dict[str, Any]:
+        with self._mutation() as value:
+            task = next((item for item in value["tasks"] if item.get("id") == task_id), None)
+            if task is None:
+                raise KeyError(task_id)
+            current = str(task.get("status") or "draft")
+            if current in LOCAL_TASK_TERMINAL_STATUSES:
+                return self.summary(task)
+            if current == "running":
+                self._transition(task, "cancelling")
+                task["cancel_requested"] = True
+                event = "local.task.cancel_requested"
+            elif current == "cancelling":
+                task["cancel_requested"] = True
+                event = "local.task.cancel_requested"
+            else:
+                self._transition(task, "cancelled")
+                task["cancel_requested"] = True
+                task["finished_at"] = _timestamp()
+                event = "local.task.cancelled"
+            task["error"] = "Cancelled on this Desktop."
+            task["updated_at"] = _timestamp()
+            self._event(task, event)
+        return self.summary(task)
+
+    def finish_cancelled(self, task_id: str, error: str = "Cancelled on this Desktop.") -> dict[str, Any]:
+        with self._mutation() as value:
+            task = next((item for item in value["tasks"] if item.get("id") == task_id), None)
+            if task is None:
+                raise KeyError(task_id)
+            if task.get("status") not in LOCAL_TASK_TERMINAL_STATUSES:
+                self._transition(task, "cancelled")
+            now = _timestamp()
+            task["error"] = str(error)[:2_000]
+            task["cancel_requested"] = True
+            task["finished_at"] = now
+            task["updated_at"] = now
+            self._event(task, "local.task.cancelled")
+        return self.summary(task)
 
 
 def journal_path(state_path: Path) -> Path:

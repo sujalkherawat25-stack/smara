@@ -7,7 +7,8 @@ import pytest
 
 from smara.models import TaskCreate
 from smara.store import TaskStore
-from smara.desktop_executor import DesktopRunner, _changed_file_hashes, _read_file, _workspace_inspect, _write_file, execute_step, journal_path, normalize_pairing_code
+from smara.desktop_executor import DesktopRunner, LocalRunner, _changed_file_hashes, _load_local_state, _read_file, _single_local_runner, _single_runner, _workspace_inspect, _write_file, execute_step, journal_path, normalize_pairing_code
+from smara.local_agent import LocalTaskStore, local_tasks_path
 from smara.local_agent import LocalTaskJournal
 from smara.workspace_contract import build_workspace_job
 
@@ -109,6 +110,67 @@ def test_local_first_state_never_claims_hosted_work(tmp_path: Path):
     runner = DesktopRunner(state_path)
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         assert runner.run_once(client, {}) is False
+
+
+def test_unpaired_local_runner_executes_approved_task_and_records_proof(tmp_path: Path):
+    state_path = tmp_path / "desktop.json"
+    state_path.write_text(json.dumps({
+        "runtime_mode": "local",
+        "smara_url": "https://smara.test",
+        "allowed_roots": [str(tmp_path)],
+        "terminal_allowlist": ["python"],
+        "browser_domains": [],
+        "local_capabilities": ["local_file_read", "local_file_write", "local_terminal"],
+    }), encoding="utf-8")
+    state = _load_local_state(state_path)
+    assert state["capabilities"] == ["local_file_read", "local_file_write", "local_terminal"]
+    store = LocalTaskStore(local_tasks_path(state_path))
+    task = store.create(
+        title="Create local proof", objective="Write a local proof file",
+        approval_mode="auto", required_capability="local_file_write",
+        payload={"operation": "write", "path": "proof.txt", "content": "LOCAL-OK"},
+    )
+    assert LocalRunner(state_path).drain(task["id"]) == 1
+    detail = store.detail(task["id"])
+    assert detail and detail["status"] == "completed"
+    assert (tmp_path / "proof.txt").read_text(encoding="utf-8") == "LOCAL-OK"
+    assert detail["steps"] and detail["events"] and detail["artifacts"]
+    assert "local_file_write" in str(detail["result"])
+
+
+def test_cloud_and_local_runner_locks_release_cleanly(tmp_path: Path):
+    state_path = tmp_path / "desktop.json"
+    with _single_runner(state_path):
+        pass
+    with _single_runner(state_path):
+        pass
+    with _single_local_runner(state_path, timeout_seconds=1):
+        pass
+    with _single_local_runner(state_path, timeout_seconds=1):
+        pass
+
+
+def test_local_runner_does_not_execute_waiting_or_interrupted_task(tmp_path: Path):
+    state_path = tmp_path / "desktop.json"
+    state_path.write_text(json.dumps({
+        "runtime_mode": "local", "allowed_roots": [str(tmp_path)],
+        "terminal_allowlist": [], "browser_domains": [],
+        "local_capabilities": ["local_file_read", "local_file_write"],
+    }), encoding="utf-8")
+    store = LocalTaskStore(local_tasks_path(state_path))
+    task = store.create(
+        title="Approval boundary", objective="Do not write before approval",
+        required_capability="local_file_write",
+        payload={"operation": "write", "path": "blocked.txt", "content": "NO"},
+    )
+    assert LocalRunner(state_path).drain(task["id"]) == 0
+    assert not (tmp_path / "blocked.txt").exists()
+    store.approve(task["id"])
+    claimed = store.claim(task["id"])
+    assert claimed and claimed["status"] == "running"
+    assert LocalRunner(state_path).drain(task["id"]) == 0
+    assert store.get(task["id"])["status"] == "review_required"
+    assert not (tmp_path / "blocked.txt").exists()
 
 
 def test_paired_desktop_claims_only_declared_capability(tmp_path: Path):

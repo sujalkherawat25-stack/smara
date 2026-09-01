@@ -352,7 +352,9 @@ def test_local_credential_vault_injects_only_requested_alias_and_redacts_output(
 
 def test_local_tavily_adapter_uses_vault_and_returns_bounded_secret_free_proof(monkeypatch, tmp_path: Path):
     vault = tmp_path / "credentials.json"
+    audit = tmp_path / "connector-audit.json"
     monkeypatch.setenv("SMARA_DESKTOP_CREDENTIALS", str(vault))
+    monkeypatch.setenv("SMARA_DESKTOP_CONNECTOR_AUDIT", str(audit))
     secret = "tavily-local-secret"
     save_local_credential("TAVILY_API_KEY", secret, "tavily")
     calls: list[dict] = []
@@ -372,7 +374,7 @@ def test_local_tavily_adapter_uses_vault_and_returns_bounded_secret_free_proof(m
             calls.append({"url": url, **kwargs})
             return Response()
 
-    monkeypatch.setattr("smara.desktop_executor.httpx.Client", Client)
+    monkeypatch.setattr("smara.desktop_integrations.httpx.Client", Client)
     state = {"capabilities": ["local_integration"], "allowed_roots": [str(tmp_path)]}
     result = json.loads(execute_step({
         "required_capability": "local_integration",
@@ -392,7 +394,9 @@ def test_local_tavily_adapter_uses_vault_and_returns_bounded_secret_free_proof(m
 
 def test_local_github_adapter_is_read_only_and_classifies_bad_credentials(monkeypatch, tmp_path: Path):
     vault = tmp_path / "credentials.json"
+    audit = tmp_path / "connector-audit.json"
     monkeypatch.setenv("SMARA_DESKTOP_CREDENTIALS", str(vault))
+    monkeypatch.setenv("SMARA_DESKTOP_CONNECTOR_AUDIT", str(audit))
     save_local_credential("GITHUB_TOKEN", "github-local-secret", "github")
 
     class Response:
@@ -410,7 +414,7 @@ def test_local_github_adapter_is_read_only_and_classifies_bad_credentials(monkey
             assert url == "https://api.github.com/user/repos"
             return Response()
 
-    monkeypatch.setattr("smara.desktop_executor.httpx.Client", Client)
+    monkeypatch.setattr("smara.desktop_integrations.httpx.Client", Client)
     state = {"capabilities": ["local_integration"], "allowed_roots": [str(tmp_path)]}
     result = json.loads(execute_step({
         "required_capability": "local_integration",
@@ -448,7 +452,7 @@ def test_local_connector_lifecycle_records_only_proof_and_can_revoke(monkeypatch
         def __exit__(self, *_args): return None
         def post(self, *_args, **_kwargs): return Response()
 
-    monkeypatch.setattr("smara.desktop_executor.httpx.Client", Client)
+    monkeypatch.setattr("smara.desktop_integrations.httpx.Client", Client)
     summaries = {item["provider"]: item for item in local_connector_summaries()}
     assert summaries["tavily"]["credential_configured"] is True
     result = execute_step({

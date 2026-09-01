@@ -157,9 +157,13 @@ database and does not upload local task payloads implicitly.
 The independent `smara-desktop` command is the local executor. It makes only
 outbound HTTPS requests when paired, stores its paired device token in the
 operating system's Smara config directory, and can run private model chat
-without hosted sign-in in Local-first mode. Cloud-coordinated execution still
-waits for a hosted lease. Start with the least-privileged pairing when you
-want that optional bridge:
+without hosted sign-in in Local-first mode. Private chat tool requests create
+Desktop-owned tasks; `Ask before acting` waits in Activity, while `Approve for
+me` queues only declared local capabilities. The local runner journals
+progress, results, artifacts, cancellation, and recovery proof without sending
+the task payload to hosted Smara. Cloud-coordinated execution still waits for
+a hosted lease. Start with the least-privileged pairing when you want that
+optional bridge:
 
 ```powershell
 smara desktop pair --capability local_file_read
@@ -211,6 +215,17 @@ smara desktop list
 smara desktop revoke desktop_ID
 ```
 
+Local-runner diagnostics are available without a hosted account:
+
+```powershell
+smara-desktop --local-task-list
+smara-desktop --local-task-detail local_TASK_ID
+smara-desktop --local-run
+```
+
+An interrupted `running` task becomes `review_required`; it is never replayed
+until the owner explicitly retries it from Desktop Activity.
+
 After pairing is verified, `scripts/install-smara-desktop.ps1` registers the
 executor for the current Windows user at sign-in with limited privileges and
 duplicate-instance prevention. `scripts/uninstall-smara-desktop.ps1` removes
@@ -241,10 +256,11 @@ the operator's server-side search key and cannot see a user's browser session.
 ### Native Smara Desktop (beta)
 
 `apps/desktop` contains the Windows-native Tauri companion for this executor.
-It provides one lightweight home for hosted chat, task status, local activity,
-pairing, permissions, pause/resume, logs, and revoke. It reuses the Python
-executor and the same hosted API; it does not create a second agent brain or
-memory store. See [`apps/desktop/README.md`](apps/desktop/README.md) for the
+It provides one lightweight home for private model chat, Desktop-owned local
+tasks and approvals, hosted chat, task status, pairing, permissions,
+pause/resume, logs, and revoke. Local mode has a bounded planner/runner and
+private task journal, but deliberately no independent long-term memory
+database. See [`apps/desktop/README.md`](apps/desktop/README.md) for the
 developer run/build commands and the current packaging boundary.
 
 The native Smara Telegram worker uses the same account database and one-time
