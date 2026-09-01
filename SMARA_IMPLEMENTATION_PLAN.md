@@ -257,6 +257,32 @@ not an implementation failure.
 
 ## 6. Performance and architecture upgrade plan (active next phase)
 
+### 6.0 Local-first approval policy (next product slice)
+
+The hosted service may create, coordinate, and audit a Desktop task, but it
+must never approve a local side effect. The paired Desktop is the decision
+surface whenever the user is present. Implement two explicit Desktop modes:
+
+- **Ask for approval:** prompt before every local file, terminal, browser, or
+  local-connector action and show the exact scope and preview.
+- **Approve for me:** automatically release only actions within the paired
+  Desktop's declared workspace, capabilities, connector scopes, executable
+  allowlist, and time-limited session policy. Delete/overwrite outside scope,
+  external writes, publishing, sending, payment, deployment, credential
+  changes, and newly requested domains/executables always pause for explicit
+  approval.
+
+The Web task console remains a read-only coordinator for Desktop-owned work:
+it shows **Waiting on Desktop**, the task graph, progress, artifacts, diff,
+and result, but has no approve/deny control for local steps. Desktop Activity
+must show the policy selector, a local approval card, live progress, bounded
+output, changed files, tests, artifacts, cancel, pause-all, and revoke.
+
+Acceptance tests: Web approval attempts for Desktop tasks return a clear 409;
+Desktop approval succeeds only with the paired executor token; both modes
+enforce workspace/capability boundaries; an auto-approved run records its
+policy and session expiry; and no local task is duplicated after reconnect.
+
 The goal is not to make Smara "fast" by removing memory, tools, verification,
 or approvals. The goal is to stop paying the full agent-loop cost for work that
 does not need it, reuse warm resources, and wake workers/executors immediately
