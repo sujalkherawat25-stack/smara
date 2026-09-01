@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
+from .streaming import append_stream_delta
 from .tool_registry import ToolContext, ToolError, ToolRegistry
 
 MAX_AGENT_ITERATIONS = 3
@@ -232,7 +233,7 @@ class BoundedAgentStepRuntime:
             f"Planning-pass draft (use only if accurate):\n{draft[:4_000] or '(none)'}\n\n"
             "Return only the final answer."
         )[:MAX_AGENT_PROMPT_CHARS]
-        parts: list[str] = []
+        streamed = ""
         # Some OpenAI-compatible models keep the planner's JSON discipline
         # when asked for the final prose answer.  Hold that envelope until it
         # is complete so the UI never receives raw {"action":"final"...}
@@ -245,12 +246,14 @@ class BoundedAgentStepRuntime:
                     async for chunk in stream(system=system, message=message):
                         if not isinstance(chunk, str) or not chunk:
                             continue
-                        remaining = MAX_AGENT_OUTPUT_CHARS - sum(len(part) for part in parts)
+                        previous = streamed
+                        _, delta = append_stream_delta(previous, chunk)
+                        remaining = MAX_AGENT_OUTPUT_CHARS - len(previous)
                         if remaining <= 0:
                             break
-                        bounded = chunk[:remaining]
-                        parts.append(bounded)
-                        if len(parts) == 1 and bounded.lstrip().startswith("{"):
+                        bounded = delta[:remaining]
+                        streamed = previous + bounded
+                        if not previous and streamed.lstrip().startswith("{"):
                             buffering_envelope = True
                         if not buffering_envelope:
                             token_hook(bounded)
@@ -258,14 +261,14 @@ class BoundedAgentStepRuntime:
                 # A stream can fail before any content (safe to retry through
                 # the non-stream endpoint) or after partial content (do not
                 # issue a second answer and duplicate text in the UI).
-                if parts:
-                    return "".join(parts).strip()
-        if not parts:
+                if streamed:
+                    return streamed.strip()
+        if not streamed:
             answer = (await self._complete(system=system, message=message, deadline=deadline)).strip()
             if answer:
-                parts.append(answer[:MAX_AGENT_OUTPUT_CHARS])
-                token_hook(parts[0])
-        answer = "".join(parts).strip()
+                streamed = answer[:MAX_AGENT_OUTPUT_CHARS]
+                token_hook(streamed)
+        answer = streamed.strip()
         if not answer:
             raise AgentStepError("Smara agent provider returned an empty final answer.")
         decision = _decode_decision(answer)

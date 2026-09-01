@@ -117,6 +117,15 @@ class FailingDirectStreamProvider(FakeProvider):
         raise RuntimeError("temporary stream failure")
 
 
+class CumulativeDirectStreamProvider(FakeProvider):
+    async def stream_complete(self, *, system: str, message: str):
+        # Simulate gateways that resend the accumulated answer (or a small
+        # overlap) instead of returning strict deltas.
+        for chunk in ("Hi", "Hi!!! How", "How can I", "I help", "help??"):
+            await asyncio.sleep(0)
+            yield chunk
+
+
 class ToolProvider:
     _base_url = "https://llm.example/v1"
     _api_key = "test-key"
@@ -386,6 +395,18 @@ def test_direct_sse_falls_back_when_stream_fails_before_first_token():
     ))
     assert turn.message == "A bounded direct response."
     assert emitted == ["A bounded direct response."]
+
+
+def test_direct_sse_normalizes_cumulative_and_overlapping_provider_chunks():
+    emitted = []
+    runtime = SmaraAgentRuntime(CumulativeDirectStreamProvider())
+    turn = asyncio.run(runtime.chat_with_tools(
+        account_id="acct_1", workspace_id="work", message="hello",
+        token_hook=emitted.append,
+    ))
+    assert turn.message == "Hi!!! How can I help??"
+    assert "".join(emitted) == turn.message
+    assert emitted == ["Hi", "!!! How", " can I", " help", "??"]
 
 
 def test_runtime_puts_attachment_text_in_explicit_user_turn():

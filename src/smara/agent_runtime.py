@@ -22,6 +22,7 @@ import httpx
 from .agent_step import BoundedAgentStepRuntime
 from .agent_routing import route_request
 from .config import settings
+from .streaming import append_stream_delta
 from .tool_registry import ToolContext, ToolError, default_tool_registry
 
 
@@ -413,24 +414,25 @@ class SmaraAgentRuntime:
     ) -> str:
         """Answer a conversational turn without the tool-planning round trip."""
         if token_hook:
-            parts: list[str] = []
+            streamed = ""
             stream = getattr(self._provider, "stream_complete", None)
             if callable(stream):
                 try:
                     async for chunk in stream(system=system, message=message):
                         if isinstance(chunk, str) and chunk:
-                            parts.append(chunk)
-                            token_hook(chunk)
+                            streamed, delta = append_stream_delta(streamed, chunk)
+                            if delta:
+                                token_hook(delta)
                 except Exception:
                     # A streaming connection can fail after partial output.
                     # Do not issue a second answer into the same UI stream.
                     # Before the first token, however, the normal completion
                     # endpoint is a safe fallback and avoids turning a brief
                     # provider-stream outage into a failed chat turn.
-                    if parts:
-                        return "".join(parts).strip()
-            if parts:
-                return "".join(parts).strip()
+                    if streamed:
+                        return streamed.strip()
+            if streamed:
+                return streamed.strip()
         answer = (await self._provider.complete(system=system, message=message)).strip()
         if answer and token_hook:
             token_hook(answer)

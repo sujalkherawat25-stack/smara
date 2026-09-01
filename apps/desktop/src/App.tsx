@@ -163,6 +163,7 @@ function App() {
   const assistantFrame = useRef<number | null>(null);
   const conversationId = useRef(`desktop-${Date.now()}`);
   const transcriptEndRef = useRef<HTMLDivElement>(null!);
+  const chatEventHandler = useRef<(event: ChatEvent) => void>(() => undefined);
 
   const refreshConnection = useCallback(async () => {
     if (!isNativeDesktop) {
@@ -345,12 +346,26 @@ function App() {
     }
   }, [connection.runtime_mode, flushAssistantText, queueAssistantText, watchDurableTask]);
 
+  // Keep one native listener for the lifetime of the app. The Tauri listen
+  // call is asynchronous; re-registering it whenever connection state changes
+  // can leave the old listener alive and duplicate every token/event.
+  chatEventHandler.current = handleChatEvent;
+
   useEffect(() => {
     if (!isNativeDesktop) return;
     let unlisten: (() => void) | undefined;
-    void desktop.onChatEvent((event) => handleChatEvent(event)).then((dispose) => { unlisten = dispose; }).catch((error) => setNotice(errorMessage(error, "Live chat events could not be connected.")));
-    return () => unlisten?.();
-  }, [handleChatEvent]);
+    let disposed = false;
+    void desktop.onChatEvent((event) => chatEventHandler.current(event)).then((dispose) => {
+      if (disposed) dispose();
+      else unlisten = dispose;
+    }).catch((error) => {
+      if (!disposed) setNotice(errorMessage(error, "Live chat events could not be connected."));
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   async function send(message = draft) {
     const text = message.trim();

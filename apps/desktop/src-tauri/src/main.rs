@@ -912,14 +912,44 @@ fn local_event_payload(line: &str) -> Option<&str> {
     trimmed.strip_prefix("data:").map(str::trim).or_else(|| trimmed.starts_with('{').then_some(trimmed))
 }
 
-fn emit_local_payload(app: &AppHandle, data: &str) -> Result<bool, String> {
+fn append_stream_delta(current: &str, chunk: &str) -> (String, String) {
+    if chunk.is_empty() { return (current.to_owned(), String::new()); }
+    if current.is_empty() { return (chunk.to_owned(), chunk.to_owned()); }
+    if chunk == current || current.starts_with(chunk) { return (current.to_owned(), String::new()); }
+    if let Some(delta) = chunk.strip_prefix(current) {
+        return (chunk.to_owned(), delta.to_owned());
+    }
+    let current_chars: Vec<char> = current.chars().collect();
+    let chunk_chars: Vec<char> = chunk.chars().collect();
+    let max_overlap = current_chars.len().min(chunk_chars.len());
+    for overlap in (1..=max_overlap).rev() {
+        if current_chars[current_chars.len() - overlap..] != chunk_chars[..overlap] { continue; }
+        let suffix: String = chunk_chars[overlap..].iter().collect();
+        let right = suffix.chars().next();
+        let left = if current_chars.len() > overlap { current_chars[current_chars.len() - overlap - 1] } else { ' ' };
+        let overlap_last = chunk_chars[overlap - 1];
+        let boundary = overlap >= 2 && (overlap_last.is_whitespace() || right.is_some_and(char::is_whitespace) || left.is_whitespace() || ".,!?;:)]}".contains(overlap_last));
+        let single_token = overlap == 1 && right.is_some_and(char::is_whitespace);
+        if boundary || single_token {
+            return (format!("{current}{suffix}"), suffix);
+        }
+        break;
+    }
+    (format!("{current}{chunk}"), chunk.to_owned())
+}
+
+fn emit_local_payload(app: &AppHandle, data: &str, streamed: &mut String) -> Result<bool, String> {
     if data == "[DONE]" {
         return Ok(false);
     }
     let value = serde_json::from_str::<Value>(data).map_err(|_| "Local provider returned invalid JSON.".to_owned())?;
     if let Some(text) = local_delta_text(&value).filter(|text| !text.is_empty()) {
-        app.emit("smara-chat-event", json!({"type": "token", "text": text})).map_err(|error| error.to_string())?;
-        return Ok(true);
+        let (next, delta) = append_stream_delta(streamed, &text);
+        *streamed = next;
+        if !delta.is_empty() {
+            app.emit("smara-chat-event", json!({"type": "token", "text": delta})).map_err(|error| error.to_string())?;
+            return Ok(true);
+        }
     }
     Ok(false)
 }
@@ -1049,6 +1079,7 @@ async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModel
     app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"})).map_err(|error| error.to_string())?;
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
+    let mut streamed = String::new();
     let mut emitted = false;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|error| format!("Local provider stream disconnected: {error}"))?;
@@ -1057,7 +1088,7 @@ async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModel
             let line = buffer[..index].trim_end_matches('\r').to_owned();
             buffer.drain(..=index);
             if let Some(data) = local_event_payload(&line) {
-                emitted |= emit_local_payload(&app, data)?;
+                emitted |= emit_local_payload(&app, data, &mut streamed)?;
             }
         }
     }
@@ -1065,7 +1096,7 @@ async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModel
     // object. Accept that response without making users retry their message.
     if !emitted && !buffer.trim().is_empty() {
         if let Some(raw) = local_event_payload(buffer.trim()) {
-            emitted |= emit_local_payload(&app, raw)?;
+            emitted |= emit_local_payload(&app, raw, &mut streamed)?;
         }
     }
     if !emitted {
@@ -1134,7 +1165,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{derived_local_capabilities, local_delta_text, local_event_payload, normalized_api_url, normalized_pairing_code, normalized_web_url, preserve_local_model_profiles};
+    use super::{append_stream_delta, derived_local_capabilities, local_delta_text, local_event_payload, normalized_api_url, normalized_pairing_code, normalized_web_url, preserve_local_model_profiles};
     use serde_json::json;
 
     #[test]
@@ -1148,6 +1179,19 @@ mod tests {
     fn local_stream_reads_message_fallback_without_reasoning_text() {
         let value = json!({"choices":[{"message":{"content":"hello","reasoning_content":"private"}}]});
         assert_eq!(local_delta_text(&value).as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn local_stream_deduplicates_cumulative_snapshots_and_overlaps() {
+        let mut text = String::new();
+        let mut deltas = Vec::new();
+        for chunk in ["Hi", "Hi!!! How", "How can I", "I help", "help??"] {
+            let (next, delta) = append_stream_delta(&text, chunk);
+            text = next;
+            deltas.push(delta);
+        }
+        assert_eq!(text, "Hi!!! How can I help??");
+        assert_eq!(deltas, ["Hi", "!!! How", " can I", " help", "??"]);
     }
 
     #[test]

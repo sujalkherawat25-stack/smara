@@ -735,12 +735,17 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
             yield agent_events.error(message, kind=kind)
             return
         queue: asyncio.Queue[str] = asyncio.Queue()
-        answer_started = False
+        # A runtime may announce the answer phase before its first token, while
+        # the token hook also needs to announce it for providers that omit the
+        # phase. Keep one phase row per turn so the Desktop activity rail stays
+        # truthful and readable.
+        emitted_phases: set[str] = set()
 
         def event_hook(event_type: str, payload: dict) -> None:
             if event_type == "agent.phase":
                 phase_name = payload.get("phase")
-                if phase_name in {"triage", "retrieve", "reason_act", "answer"}:
+                if phase_name in {"triage", "retrieve", "reason_act", "answer"} and phase_name not in emitted_phases:
+                    emitted_phases.add(str(phase_name))
                     queue.put_nowait(agent_events.phase(str(phase_name)))
             elif event_type == "agent.status":
                 queue.put_nowait(
@@ -770,10 +775,9 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
                 ))
 
         def token_hook(text: str) -> None:
-            nonlocal answer_started
-            if not answer_started:
+            if "answer" not in emitted_phases:
                 queue.put_nowait(agent_events.phase("answer"))
-                answer_started = True
+                emitted_phases.add("answer")
             queue.put_nowait(agent_events.token(text))
 
         async def run_chat():

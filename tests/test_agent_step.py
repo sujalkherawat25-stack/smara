@@ -50,6 +50,14 @@ class EnvelopeStreamingProvider(FakeProvider):
             yield token
 
 
+class CumulativeStreamingProvider(FakeProvider):
+    async def stream_complete(self, *, system: str, message: str):
+        self.calls.append((system, message))
+        for token in ("The", "The result", "result is 42."):
+            await asyncio.sleep(0)
+            yield token
+
+
 class CountingTool:
     spec = ToolSpec(
         "count_once",
@@ -154,6 +162,24 @@ def test_agent_step_streams_final_provider_tokens_after_bounded_planning():
     assert tokens == ["The result ", "is 42."]
     assert result.text == "The result is 42."
     assert "do not return a JSON envelope" in provider.calls[-1][0]
+
+
+def test_agent_step_normalizes_cumulative_provider_tokens():
+    provider = CumulativeStreamingProvider([
+        json.dumps({"action": "final", "answer": "The result is 42."}),
+    ])
+    tokens = []
+
+    async def execute():
+        return await BoundedAgentStepRuntime(provider, default_tool_registry()).run(
+            task={"objective": "Calculate 6 * 7"},
+            tool_context=ToolContext("acct_test", "workspace"),
+            token_hook=tokens.append,
+        )
+
+    result = asyncio.run(execute())
+    assert result.text == "The result is 42."
+    assert "".join(tokens) == result.text
 
 
 def test_agent_step_falls_back_to_non_stream_when_stream_fails_before_output():
