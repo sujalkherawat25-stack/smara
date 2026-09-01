@@ -7,10 +7,14 @@ while the registry keeps the review/test/publish lifecycle auditable.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import os
 import re
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from threading import RLock
 from typing import Any, Literal
 
@@ -32,6 +36,10 @@ _DANGEROUS_KEYS = {
     "authorization", "client_secret",
 }
 _SECRET_VALUE = re.compile(r"(?:bearer\s+|sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_-]{12,})", re.I)
+_INPUT_REFERENCE = re.compile(r"^\$input\.([a-z][a-z0-9_-]{1,63})$")
+_MUTATING_CAPABILITIES = {"local_file_write", "local_terminal"}
+SKILL_STORE_VERSION = 1
+SKILL_REGISTRY_MAX_ENTRIES = 128
 
 
 def _reject_executable_or_secret(value: Any) -> None:
@@ -314,6 +322,82 @@ class SkillManifest(BaseModel):
         return hashlib.sha256(encoded).hexdigest()
 
 
+def _input_references(value: Any, found: set[str]) -> None:
+    """Collect explicit ``$input.name`` references from a workflow payload."""
+    if isinstance(value, dict):
+        for item in value.values():
+            _input_references(item, found)
+    elif isinstance(value, list):
+        for item in value:
+            _input_references(item, found)
+    elif isinstance(value, str):
+        match = _INPUT_REFERENCE.fullmatch(value.strip())
+        if match:
+            found.add(match.group(1))
+
+
+def draft_skill_from_workflow(
+    *,
+    name: str,
+    version: str,
+    description: str,
+    owner: str,
+    workflow: list[dict[str, Any]],
+    tests: list[dict[str, Any]],
+    provider: str = "smara",
+    rollback: dict[str, Any] | None = None,
+) -> SkillManifest:
+    """Convert an approved bounded workflow into a reviewable draft manifest.
+
+    The workflow validator remains the source of truth for stage order,
+    capability allowlists, payload size, and credential rejection.  This
+    helper only translates that already-safe event shape into a reusable
+    declarative package; it never infers executable code or secrets.
+    """
+    from .workflow import validate_workflow
+
+    normalized = validate_workflow(workflow)
+    references: set[str] = set()
+    capabilities: set[str] = set()
+    stages: list[dict[str, Any]] = []
+    mutating = False
+    for index, item in enumerate(normalized):
+        payload = dict(item["payload"])
+        _input_references(payload, references)
+        capability = item["capability"]
+        capabilities.add(capability)
+        operation = payload.get("operation") or payload.get("action") or item["stage"]
+        if capability in _MUTATING_CAPABILITIES or str(operation).lower() in {"write", "edit", "delete", "run", "download"}:
+            mutating = True
+        stages.append({
+            "id": f"{item['stage']}_{index}",
+            "tool": capability,
+            "operation": str(operation)[:120],
+            "depends_on": [stages[-1]["id"]] if stages else [],
+            "arguments": payload,
+            "requires_approval": capability in _MUTATING_CAPABILITIES,
+        })
+    input_models = [
+        {"name": input_name, "type": "string", "description": "Inferred from the approved workflow."}
+        for input_name in sorted(references)
+    ]
+    return SkillManifest.model_validate({
+        "schema_version": SKILL_MANIFEST_SCHEMA,
+        "name": name,
+        "version": version,
+        "description": description,
+        "inputs": input_models,
+        "outputs": [{"name": "result", "type": "object", "description": "Bounded workflow result."}],
+        "permissions": {"capabilities": sorted(capabilities), "connectors": [], "approved_domains": []},
+        "risk": "confirm" if mutating else "safe",
+        "provider": provider,
+        "owner": owner,
+        "stages": stages,
+        "tests": tests,
+        "rollback": rollback or {"strategy": "none"},
+    })
+
+
 def validate_skill_manifest(value: Any) -> SkillManifest:
     """Parse a manifest and expose one safe error type to callers."""
     if not isinstance(value, dict):
@@ -449,3 +533,106 @@ class SkillRegistry:
     def summaries(self) -> list[dict[str, Any]]:
         with self._lock:
             return [record.summary() for record in self._records.values()]
+
+
+class PersistentSkillRegistry(SkillRegistry):
+    """Atomic, restart-safe registry for private Desktop skill packages.
+
+    The file contains manifests and lifecycle metadata only; credential values
+    are rejected by validation and are never written.  A malformed or tampered
+    file fails closed instead of being silently replaced with an empty store.
+    """
+
+    def __init__(self, path: Path, *, max_entries: int = SKILL_REGISTRY_MAX_ENTRIES) -> None:
+        super().__init__()
+        self.path = path
+        self.max_entries = max(10, min(max_entries, SKILL_REGISTRY_MAX_ENTRIES))
+        self._load()
+
+    def _load(self) -> None:
+        try:
+            value = json.loads(self.path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError) as exc:
+            raise RuntimeError("The local skill store is unreadable; no skills were loaded.") from exc
+        if not isinstance(value, dict) or value.get("version") != SKILL_STORE_VERSION:
+            raise RuntimeError("The local skill store has an unsupported schema version.")
+        entries = value.get("skills")
+        if not isinstance(entries, list) or len(entries) > self.max_entries:
+            raise RuntimeError("The local skill store contains too many or invalid entries.")
+        loaded: dict[tuple[str, str], SkillRecord] = {}
+        allowed_keys = {"manifest", "state", "fingerprint", "tested", "test_run_id", "approved_by"}
+        for item in entries:
+            if not isinstance(item, dict) or set(item) != allowed_keys:
+                raise RuntimeError("The local skill store contains an invalid record.")
+            manifest = validate_skill_manifest(item.get("manifest"))
+            state = item.get("state")
+            if state not in SKILL_STATES or not isinstance(item.get("tested"), bool):
+                raise RuntimeError("The local skill store contains an invalid lifecycle state.")
+            fingerprint = item.get("fingerprint")
+            if fingerprint != manifest.fingerprint():
+                raise RuntimeError("The local skill store contains a stale manifest fingerprint.")
+            if state in {"tested", "published", "deprecated"} and item["tested"] is not True:
+                raise RuntimeError("A tested skill record must retain its test marker.")
+            if state == "published" and not isinstance(item.get("approved_by"), str):
+                raise RuntimeError("A published skill record must retain its approver.")
+            key = (manifest.name, manifest.version)
+            if key in loaded:
+                raise RuntimeError("The local skill store contains a duplicate skill version.")
+            loaded[key] = SkillRecord(
+                manifest, state, fingerprint, item["tested"], item.get("test_run_id"), item.get("approved_by")
+            )
+        with self._lock:
+            self._records = loaded
+
+    def _persist_locked(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        records = list(self._records.values())[: self.max_entries]
+        payload = {
+            "version": SKILL_STORE_VERSION,
+            "skills": [
+                {
+                    "manifest": record.manifest.model_dump(mode="json"),
+                    "state": record.state,
+                    "fingerprint": record.fingerprint,
+                    "tested": record.tested,
+                    "test_run_id": record.test_run_id,
+                    "approved_by": record.approved_by,
+                }
+                for record in records
+            ],
+        }
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=self.path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            with contextlib.suppress(OSError):
+                os.fsync(handle.fileno())
+        try:
+            os.replace(temporary, self.path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _persist_after(self, operation):
+        with self._lock:
+            previous = dict(self._records)
+            try:
+                result = operation()
+                self._persist_locked()
+                return result
+            except Exception:
+                self._records = previous
+                raise
+
+    def register(self, manifest: SkillManifest | dict[str, Any]) -> SkillRecord:
+        return self._persist_after(lambda: super(PersistentSkillRegistry, self).register(manifest))
+
+    def record_test(self, name: str, version: str, *, passed: bool, run_id: str) -> SkillRecord:
+        return self._persist_after(lambda: super(PersistentSkillRegistry, self).record_test(name, version, passed=passed, run_id=run_id))
+
+    def publish(self, name: str, version: str, *, approved_by: str) -> SkillRecord:
+        return self._persist_after(lambda: super(PersistentSkillRegistry, self).publish(name, version, approved_by=approved_by))
+
+    def deprecate(self, name: str, version: str) -> SkillRecord:
+        return self._persist_after(lambda: super(PersistentSkillRegistry, self).deprecate(name, version))

@@ -727,8 +727,9 @@ before it is enabled.
    `smara.skill.v1` manifest/registry now adds typed inputs/outputs, bounded
    declarative DAG stages, connector declarations, risk, rollback, disposable
    tests, deterministic approval fingerprints, and draft → tested → published
-   → deprecated lifecycle. Durable persistence and teach-to-skill capture are
-   still A3 work.
+   → deprecated lifecycle. Private Desktop persistence and validated
+   workflow-to-draft teach-to-skill capture are implemented; multi-user
+   durable storage and scheduled routines remain A3 work.
 2. Add richer task decomposition and verification so a request can become
    inspect → plan → edit → run → verify → report. **Implemented as a bounded
    first slice (2026-08-30):** the hosted planner can request one explicit,

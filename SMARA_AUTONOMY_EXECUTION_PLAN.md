@@ -279,7 +279,7 @@ browser sessions on the user's device.
 
 ## A3. Skills and Routines
 
-### A3.1 implementation slice (2026-09-01)
+### A3.1/A3.2 implementation slice (2026-09-01)
 
 The reusable-skill contract foundation is now implemented in
 `src/smara/skill_protocol.py` and covered by focused policy tests:
@@ -297,8 +297,23 @@ The reusable-skill contract foundation is now implemented in
   earlier approval. Registry records are detached copies so callers cannot
   mutate the approved state accidentally.
 
-This is the policy/runtime foundation only. Durable database storage,
-teach-to-skill capture, and scheduled routines remain the next A3 slices.
+This is the policy/runtime foundation. The persistence and teach-to-skill
+translation slice built on it is now shipped as well:
+
+- `PersistentSkillRegistry` stores private skill manifests and lifecycle
+  metadata with an atomic replace, bounded entry count, schema validation, and
+  fail-closed tamper detection. Reopening the store preserves published
+  approvals; corrupt or stale files are rejected without being replaced.
+- `draft_skill_from_workflow(...)` converts only the existing validated,
+  sequential local workflow contract into a draft skill. It infers explicit
+  `$input.name` references, derives capability permissions, marks mutating
+  stages as `risk=confirm`, and carries no executable code or credentials.
+- Restart, tamper, workflow-secret, mutation-risk, and persistence tests are
+  included in `tests/test_skill_protocol.py`.
+
+Durable database-backed multi-user storage and scheduled routines remain the
+next A3 slices; the private Desktop registry is intentionally not a hosted
+source of truth.
 
 ### Goal
 

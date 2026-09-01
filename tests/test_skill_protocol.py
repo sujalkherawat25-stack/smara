@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 
 from smara.skill_protocol import (
     SKILL_MANIFEST_SCHEMA,
     SkillManifest,
+    PersistentSkillRegistry,
     SkillRegistry,
+    draft_skill_from_workflow,
     validate_skill_manifest,
 )
 
@@ -134,3 +137,65 @@ def test_failed_test_keeps_skill_in_draft_and_duplicate_registration_is_rejected
     assert failed.state == "draft"
     with pytest.raises(RuntimeError, match="already registered"):
         registry.register(_manifest())
+
+
+def test_teach_to_skill_converts_only_a_bounded_workflow():
+    manifest = draft_skill_from_workflow(
+        name="workspace-health",
+        version="1.0.0",
+        description="Inspect a workspace and report its bounded health.",
+        owner="acct_test",
+        workflow=[
+            {"stage": "inspect", "capability": "local_file_read", "payload": {"path": "$input.root"}},
+            {"stage": "report", "capability": "local_file_read", "payload": {"path": "$input.root"}},
+        ],
+        tests=[{"name": "empty", "inputs": {"root": "workspace"}, "expected_status": "completed"}],
+    )
+    assert manifest.inputs[0].name == "root"
+    assert manifest.permissions.capabilities == ["local_file_read"]
+    assert manifest.risk == "safe"
+    assert manifest.stages[1].depends_on == ["inspect_0"]
+
+    mutating = draft_skill_from_workflow(
+        name="workspace-edit",
+        version="1.0.0",
+        description="Apply a bounded workspace edit.",
+        owner="acct_test",
+        workflow=[
+            {"stage": "inspect", "capability": "local_file_read", "payload": {"path": "$input.root"}},
+            {"stage": "edit", "capability": "local_file_write", "payload": {"path": "note.txt", "content": "ok"}},
+        ],
+        tests=[{"name": "edit", "inputs": {"root": "workspace"}}],
+    )
+    assert mutating.risk == "confirm"
+    assert mutating.stages[1].requires_approval is True
+
+
+def test_teach_to_skill_keeps_workflow_secret_and_cycle_guards():
+    with pytest.raises(ValueError, match="credentials"):
+        draft_skill_from_workflow(
+            name="bad-skill", version="1.0.0", description="bad", owner="acct_test",
+            workflow=[
+                {"stage": "inspect", "capability": "local_file_read", "payload": {"api_key": "secret"}},
+                {"stage": "report", "capability": "local_file_read", "payload": {"path": "x"}},
+            ],
+            tests=[{"name": "bad"}],
+        )
+
+
+def test_persistent_registry_survives_restart_and_fails_closed_on_tamper(tmp_path):
+    path = tmp_path / "skills.json"
+    registry = PersistentSkillRegistry(path)
+    registry.register(_manifest())
+    registry.record_test("workspace-health", "1.0.0", passed=True, run_id="run-persist")
+    registry.publish("workspace-health", "1.0.0", approved_by="acct_test")
+
+    reopened = PersistentSkillRegistry(path)
+    assert reopened.assert_runnable("workspace-health", "1.0.0").state == "published"
+    assert reopened.summaries()[0]["fingerprint"]
+
+    tampered = json.loads(path.read_text(encoding="utf-8"))
+    tampered["skills"][0]["manifest"]["description"] = "tampered"
+    path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="fingerprint"):
+        PersistentSkillRegistry(path)
