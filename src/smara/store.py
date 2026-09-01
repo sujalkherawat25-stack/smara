@@ -1180,7 +1180,7 @@ class TaskStore:
                     c.execute(
                         "INSERT INTO approvals(task_id,status,note,decided_at) VALUES(?,?,?,?) "
                         "ON CONFLICT(task_id) DO UPDATE SET status=excluded.status,note=excluded.note,decided_at=excluded.decided_at",
-                        (task_id, "approved", "Automatically approved by this desktop's safe-read policy.", now),
+                        (task_id, "approved", "Automatically approved by this desktop's local approval policy.", now),
                     )
                     c.execute("UPDATE tasks SET status='queued',requires_approval=0,updated_at=? WHERE id=? AND account_id=? AND requires_approval=1", (now, task_id, executor["account_id"]))
                     c.execute(
@@ -1673,7 +1673,7 @@ class PostgresTaskStore(TaskStore):
                         c.execute(
                             "INSERT INTO approvals(task_id,status,note,decided_at) VALUES(%s,%s,%s,%s) "
                             "ON CONFLICT(task_id) DO UPDATE SET status=EXCLUDED.status,note=EXCLUDED.note,decided_at=EXCLUDED.decided_at",
-                            (task_id, "approved", "Automatically approved by this desktop's safe-read policy.", now),
+                                (task_id, "approved", "Automatically approved by this desktop's local approval policy.", now),
                         )
                         c.execute("UPDATE tasks SET status='queued',requires_approval=FALSE,updated_at=%s WHERE id=%s AND account_id=%s AND requires_approval=TRUE", (now, task_id, executor["account_id"]))
                         c.execute(

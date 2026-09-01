@@ -2174,9 +2174,13 @@ class DesktopRunner:
             headers=_headers(state),
             params={
                 "wait_seconds": str(wait_seconds),
-                # This local policy is explicit and persisted by the Desktop
-                # UI. The server still limits it to safe read-only steps.
-                "auto_approve_safe": "true" if state.get("auto_approve_safe") is True else "false",
+                # Approval is a Desktop policy, never a hosted decision. The
+                # legacy safe-read switch remains narrow; the explicit
+                # "Approve for me" mode can release any declared local
+                # capability, while the server still enforces the paired
+                # executor's capability allowlist and desktop-only steps.
+                "auto_approve_safe": "true" if state.get("auto_approve_safe") is True and state.get("approval_mode", "ask") != "auto" else "false",
+                "auto_approve_local": "true" if state.get("approval_mode", "ask") == "auto" else "false",
             },
         )
         response.raise_for_status()

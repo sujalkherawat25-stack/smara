@@ -217,6 +217,15 @@ h1 { font-size: 20px; letter-spacing: -.03em; }
 @media (max-width: 720px) { .chat-auth-card { grid-template-columns: 1fr; gap: 8px; }.chat-auth-card strong { white-space: normal; }.chat-auth-card .button { justify-self: start; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 
+/* Local approval mode is intentionally a compact, always-visible control.
+   It remains usable on narrow windows and makes the decision boundary clear. */
+.desktop-policy-mode { display: flex !important; align-items: center; gap: 9px; }
+.desktop-policy-mode > span { color: var(--subtle); font-size: 10px; font-weight: 600; }
+.desktop-policy-mode select { width: auto; min-width: 158px; height: 32px; padding: 0 9px; font-size: 11px; }
+.callout-amber { align-items: flex-start; }
+.callout-amber > div { min-width: 0; }
+@media (max-width: 720px) { .desktop-policy-mode { width: 100%; justify-content: space-between; }.desktop-policy-mode select { flex: 1; } }
+
 /* A long transcript should remain readable without hiding the newest turn. */
 .jump-latest { position: absolute; right: 44px; bottom: 92px; z-index: 3; min-height: 30px; padding: 0 12px; border: 1px solid rgba(144,169,255,.55); border-radius: 999px; color: #11152a; background: var(--blue); box-shadow: 0 8px 24px rgba(0,0,0,.28); font-size: 11px; font-weight: 650; }
 .jump-latest:hover { background: #adc0ff; }

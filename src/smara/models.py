@@ -199,8 +199,13 @@ class ExecutorClaim(BaseModel):
     ``auto_approve_safe`` is deliberately narrow: it may release only
     read-only local work. Writes, terminal commands, and any unknown
     capability still require explicit Desktop approval.
+
+    ``auto_approve_local`` is the explicit Desktop "Approve for me" mode. It
+    can release declared local capabilities, but only for desktop-only steps
+    and only when the paired executor advertises each required capability.
     """
     auto_approve_safe: bool = False
+    auto_approve_local: bool = False
 
 
 class ExecutorComplete(BaseModel):
