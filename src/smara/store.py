@@ -1099,7 +1099,7 @@ class TaskStore:
         if result.rowcount != 1:
             raise KeyError(executor_id)
 
-    def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 180, auto_approve_safe: bool = False) -> dict | None:
+    def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 180, auto_approve_safe: bool = False, auto_approve_local: bool = False) -> dict | None:
         executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
         safe_capabilities = {"local_file_read", "local_browser", "local_integration"}
         with self._connect() as c:
@@ -1142,13 +1142,13 @@ class TaskStore:
                     event_type, payload = "executor.lease_expired_uncertain", '{"recovered":false,"replay_blocked":true}'
                 c.execute("UPDATE executor_leases SET completed_at=? WHERE step_id=? AND completed_at IS NULL", (now, item["id"]))
                 c.execute("INSERT INTO task_events VALUES(?,?,?,?,?)", (f"evt_{uuid.uuid4().hex}", item["task_id"], event_type, payload, now))
-            if auto_approve_safe:
+            if auto_approve_safe or auto_approve_local:
                 # A desktop may opt into automatic release for explicitly
                 # read-only work. The policy is evaluated here, inside the
                 # same transaction as claiming, so a UI flag cannot bypass
                 # account/capability checks or race another executor.
-                allowed_safe = tuple(sorted(safe_capabilities & capabilities))
-                safe_values = tuple(sorted(safe_capabilities))
+                allowed_safe = tuple(sorted(capabilities if auto_approve_local else safe_capabilities & capabilities))
+                safe_values = tuple(sorted(capabilities if auto_approve_local else safe_capabilities))
                 if not allowed_safe:
                     candidates = []
                 else:
@@ -1185,7 +1185,7 @@ class TaskStore:
                     c.execute("UPDATE tasks SET status='queued',requires_approval=0,updated_at=? WHERE id=? AND account_id=? AND requires_approval=1", (now, task_id, executor["account_id"]))
                     c.execute(
                         "INSERT INTO task_events VALUES(?,?,?,?,?)",
-                        (f"evt_{uuid.uuid4().hex}", task_id, "approval.approved", '{"source":"desktop_policy","policy":"safe_read"}', now),
+                        (f"evt_{uuid.uuid4().hex}", task_id, "approval.approved", json.dumps({"source":"desktop_policy", "policy":"approve_for_me" if auto_approve_local else "safe_read"}), now),
                     )
             rows = c.execute("""SELECT t.*,s.id AS step_id,s.task_run_id,s.idempotency_key,s.name,s.required_capability,s.executor_payload
               FROM tasks t JOIN task_steps s ON s.task_id=t.id
@@ -1601,7 +1601,7 @@ class PostgresTaskStore(TaskStore):
             task["updated_at"] = now
             return task
 
-    def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 180, auto_approve_safe: bool = False) -> dict | None:
+    def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 180, auto_approve_safe: bool = False, auto_approve_local: bool = False) -> dict | None:
         """Postgres desktop claim with the same SKIP LOCKED lease guarantee."""
         executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
         safe_capabilities = {"local_file_read", "local_browser", "local_integration"}
@@ -1640,9 +1640,9 @@ class PostgresTaskStore(TaskStore):
                     event_type, payload = "executor.lease_expired_uncertain", '{"recovered":false,"replay_blocked":true}'
                 c.execute("UPDATE executor_leases SET completed_at=%s WHERE step_id=%s AND completed_at IS NULL", (now, item["id"]))
                 c.execute("INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)", (f"evt_{uuid.uuid4().hex}", item["task_id"], event_type, payload, now))
-            if auto_approve_safe:
-                allowed_safe = tuple(sorted(safe_capabilities & capabilities))
-                safe_values = tuple(sorted(safe_capabilities))
+            if auto_approve_safe or auto_approve_local:
+                allowed_safe = tuple(sorted(capabilities if auto_approve_local else safe_capabilities & capabilities))
+                safe_values = tuple(sorted(capabilities if auto_approve_local else safe_capabilities))
                 if allowed_safe:
                     allowed_placeholders = ",".join("%s" for _ in allowed_safe)
                     safe_placeholders = ",".join("%s" for _ in safe_values)
@@ -1678,7 +1678,7 @@ class PostgresTaskStore(TaskStore):
                         c.execute("UPDATE tasks SET status='queued',requires_approval=FALSE,updated_at=%s WHERE id=%s AND account_id=%s AND requires_approval=TRUE", (now, task_id, executor["account_id"]))
                         c.execute(
                             "INSERT INTO task_events VALUES(%s,%s,%s,%s,%s)",
-                            (f"evt_{uuid.uuid4().hex}", task_id, "approval.approved", '{"source":"desktop_policy","policy":"safe_read"}', now),
+                            (f"evt_{uuid.uuid4().hex}", task_id, "approval.approved", json.dumps({"source":"desktop_policy", "policy":"approve_for_me" if auto_approve_local else "safe_read"}), now),
                         )
             rows = c.execute("""SELECT t.*,s.id AS step_id,s.task_run_id,s.idempotency_key,s.name,s.required_capability,s.executor_payload
               FROM tasks t JOIN task_steps s ON s.task_id=t.id

@@ -198,7 +198,7 @@ class ExecutorClaim(BaseModel):
 
     ``auto_approve_safe`` is deliberately narrow: it may release only
     read-only local work. Writes, terminal commands, and any unknown
-    capability still require the account owner approval recorded in Smara.
+    capability still require explicit Desktop approval.
     """
     auto_approve_safe: bool = False
 

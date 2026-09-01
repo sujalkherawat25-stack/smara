@@ -37,6 +37,7 @@ struct ConnectionState {
     terminal_allowlist: Vec<String>,
     browser_domains: Vec<String>,
     auto_approve_safe: bool,
+    approval_mode: String,
     paused: bool,
     running: bool,
     pid: Option<u32>,
@@ -63,6 +64,8 @@ struct LocalSettings {
     browser_domains: Vec<String>,
     #[serde(default)]
     auto_approve_safe: bool,
+    #[serde(default)]
+    approval_mode: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,6 +77,8 @@ struct PairArgs {
     browser_domains: Vec<String>,
     #[serde(default)]
     auto_approve_safe: bool,
+    #[serde(default)]
+    approval_mode: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -462,8 +467,12 @@ fn current_connection() -> ConnectionState {
     let auto_approve_safe = preferences.as_ref().and_then(|value| value.get("auto_approve_safe")).and_then(Value::as_bool)
         .or_else(|| state.as_ref().and_then(|value| value.get("auto_approve_safe")).and_then(Value::as_bool))
         .unwrap_or(false);
+    let approval_mode = preferences.as_ref().and_then(|value| value.get("approval_mode")).and_then(Value::as_str)
+        .or_else(|| state.as_ref().and_then(|value| value.get("approval_mode")).and_then(Value::as_str))
+        .filter(|value| matches!(*value, "ask" | "auto"))
+        .unwrap_or("ask").to_owned();
     let token_path = cli_token_path();
-    ConnectionState { api_url, web_url, workspace, model_profile, paired, executor_id: state.as_ref().and_then(|value| value.get("executor_id")).and_then(Value::as_str).map(str::to_owned), capabilities, allowed_roots, terminal_allowlist, browser_domains, auto_approve_safe, paused: pause_path().exists(), running: pid.is_some(), pid, log_path: log_path().display().to_string(), has_cli_token: read_json(&token_path).and_then(|value| value.get("access_token").and_then(Value::as_str).map(|token| !token.is_empty())).unwrap_or(false), last_error: None }
+    ConnectionState { api_url, web_url, workspace, model_profile, paired, executor_id: state.as_ref().and_then(|value| value.get("executor_id")).and_then(Value::as_str).map(str::to_owned), capabilities, allowed_roots, terminal_allowlist, browser_domains, auto_approve_safe, approval_mode, paused: pause_path().exists(), running: pid.is_some(), pid, log_path: log_path().display().to_string(), has_cli_token: read_json(&token_path).and_then(|value| value.get("access_token").and_then(Value::as_str).map(|token| !token.is_empty())).unwrap_or(false), last_error: None }
 }
 
 #[tauri::command]
@@ -479,7 +488,8 @@ fn save_settings(settings: LocalSettings) -> Result<ConnectionState, String> {
     // These profiles point at encrypted local credentials and must never be
     // dropped by an unrelated connection/permissions update.
     let existing_profiles = read_json(&preferences_path()).and_then(|value| value.get("local_model_profiles").cloned());
-    let mut value = json!({ "api_url": api_url, "web_url": web_url, "workspace": if settings.workspace.trim().is_empty() { "default" } else { settings.workspace.trim() }, "model_profile": if settings.model_profile.trim().is_empty() { "default" } else { settings.model_profile.trim() }, "allowed_roots": settings.allowed_roots, "terminal_allowlist": settings.terminal_allowlist, "browser_domains": settings.browser_domains, "auto_approve_safe": settings.auto_approve_safe });
+    let approval_mode = if settings.approval_mode.trim() == "auto" { "auto" } else { "ask" };
+    let mut value = json!({ "api_url": api_url, "web_url": web_url, "workspace": if settings.workspace.trim().is_empty() { "default" } else { settings.workspace.trim() }, "model_profile": if settings.model_profile.trim().is_empty() { "default" } else { settings.model_profile.trim() }, "allowed_roots": settings.allowed_roots, "terminal_allowlist": settings.terminal_allowlist, "browser_domains": settings.browser_domains, "auto_approve_safe": settings.auto_approve_safe, "approval_mode": approval_mode });
     value = preserve_local_model_profiles(value, existing_profiles);
     write_json(&preferences_path(), &value)?;
     if let Some(mut state) = read_json(&state_path()) {
@@ -489,6 +499,7 @@ fn save_settings(settings: LocalSettings) -> Result<ConnectionState, String> {
             object.insert("terminal_allowlist".to_owned(), value["terminal_allowlist"].clone());
             object.insert("browser_domains".to_owned(), value["browser_domains"].clone());
             object.insert("auto_approve_safe".to_owned(), value["auto_approve_safe"].clone());
+            object.insert("approval_mode".to_owned(), value["approval_mode"].clone());
             write_json(&state_path(), &state)?;
         }
     }
@@ -632,6 +643,7 @@ fn pair_desktop(args: PairArgs) -> Result<ConnectionState, String> {
     let path = state_path();
     let mut state = read_json(&path).ok_or_else(|| "Desktop pairing state could not be read after pairing.".to_owned())?;
     state["auto_approve_safe"] = Value::Bool(args.auto_approve_safe);
+    state["approval_mode"] = Value::String(if args.approval_mode.trim() == "auto" { "auto".to_owned() } else { "ask".to_owned() });
     write_json(&path, &state)?;
     Ok(current_connection())
 }

@@ -15,6 +15,7 @@ const fallbackConnection: ConnectionState = {
   terminal_allowlist: [],
   browser_domains: [],
   auto_approve_safe: false,
+  approval_mode: "ask",
   paused: false,
   running: false,
   pid: null,
@@ -580,6 +581,7 @@ function SettingsScreen({ connection, onSaved, onPaired, onSignIn }: { connectio
   const [terminal, setTerminal] = useState(connection.terminal_allowlist.join("\n"));
   const [domains, setDomains] = useState(connection.browser_domains.join("\n"));
   const [autoApproveSafe, setAutoApproveSafe] = useState(connection.auto_approve_safe);
+  const [approvalMode, setApprovalMode] = useState<"ask" | "auto">(connection.approval_mode || "ask");
   const [code, setCode] = useState("");
   const [pairing, setPairing] = useState(false);
   const [credentials, setCredentials] = useState<LocalCredentialSummary[]>([]);
@@ -590,17 +592,34 @@ function SettingsScreen({ connection, onSaved, onPaired, onSignIn }: { connectio
   const [credentialSecret, setCredentialSecret] = useState("");
   const [credentialBusy, setCredentialBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  useEffect(() => { setApiUrl(connection.api_url); setWebUrl(connection.web_url); setWorkspace(connection.workspace); setModelProfile(connection.model_profile); setRoots(connection.allowed_roots.join("\n")); setTerminal(connection.terminal_allowlist.join("\n")); setDomains(connection.browser_domains.join("\n")); setAutoApproveSafe(connection.auto_approve_safe); }, [connection]);
+  useEffect(() => { setApiUrl(connection.api_url); setWebUrl(connection.web_url); setWorkspace(connection.workspace); setModelProfile(connection.model_profile); setRoots(connection.allowed_roots.join("\n")); setTerminal(connection.terminal_allowlist.join("\n")); setDomains(connection.browser_domains.join("\n")); setAutoApproveSafe(connection.auto_approve_safe); setApprovalMode(connection.approval_mode || "ask"); }, [connection]);
   useEffect(() => {
     if (!isNativeDesktop) return;
     void desktop.credentials().then(setCredentials).catch(() => setCredentials([]));
     void desktop.connectors().then(setConnectors).catch(() => setConnectors([]));
     void desktop.modelProfiles().then(setLocalModelProfiles).catch(() => setLocalModelProfiles([]));
   }, []);
+  useEffect(() => {
+    // Keep the policy control prominent even in older bundled layouts: the
+    // selector is local-only and never grants the hosted service authority.
+    const policy = document.querySelector(".approval-policy");
+    const legacy = policy?.querySelector(".policy-toggle") as HTMLElement | null;
+    if (!policy || !legacy) return;
+    legacy.style.display = "none";
+    const wrapper = document.createElement("label");
+    wrapper.className = "policy-toggle desktop-policy-mode";
+    wrapper.innerHTML = '<span>Local approval mode</span><select aria-label="Local approval mode"><option value="ask">Ask for approval</option><option value="auto">Approve for me</option></select>';
+    const select = wrapper.querySelector("select") as HTMLSelectElement;
+    select.value = approvalMode;
+    const onChange = () => setApprovalMode(select.value === "auto" ? "auto" : "ask");
+    select.addEventListener("change", onChange);
+    policy.appendChild(wrapper);
+    return () => { select.removeEventListener("change", onChange); wrapper.remove(); legacy.style.display = ""; };
+  }, [approvalMode]);
   async function save(selectedModel = modelProfile) {
     if (!isNativeDesktop) return null;
     setFormError(null);
-    try { const next = await desktop.saveSettings({ api_url: apiUrl.trim(), web_url: webUrl.trim(), workspace: workspace.trim() || "default", model_profile: selectedModel.trim() || "default", allowed_roots: splitLines(roots), terminal_allowlist: splitLines(terminal), browser_domains: splitLines(domains), auto_approve_safe: autoApproveSafe }); onSaved(next); return next; } catch (error) { setFormError(errorMessage(error, "Could not save settings")); return null; }
+    try { const next = await desktop.saveSettings({ api_url: apiUrl.trim(), web_url: webUrl.trim(), workspace: workspace.trim() || "default", model_profile: selectedModel.trim() || "default", allowed_roots: splitLines(roots), terminal_allowlist: splitLines(terminal), browser_domains: splitLines(domains), auto_approve_safe: approvalMode === "auto" ? false : autoApproveSafe, approval_mode: approvalMode }); onSaved(next); return next; } catch (error) { setFormError(errorMessage(error, "Could not save settings")); return null; }
   }
   async function pair() {
     const normalizedCode = normalizePairingCode(code);
@@ -610,7 +629,7 @@ function SettingsScreen({ connection, onSaved, onPaired, onSignIn }: { connectio
     }
     setPairing(true);
     setFormError(null);
-    try { onPaired(await desktop.pair({ api_url: apiUrl.trim(), code: normalizedCode, allowed_roots: splitLines(roots), terminal_allowlist: splitLines(terminal), browser_domains: splitLines(domains), auto_approve_safe: autoApproveSafe })); setCode(""); } catch (error) { setFormError(errorMessage(error, "Pairing failed. Check that the code is fresh and try again.")); } finally { setPairing(false); }
+    try { onPaired(await desktop.pair({ api_url: apiUrl.trim(), code: normalizedCode, allowed_roots: splitLines(roots), terminal_allowlist: splitLines(terminal), browser_domains: splitLines(domains), auto_approve_safe: approvalMode === "auto" ? false : autoApproveSafe, approval_mode: approvalMode })); setCode(""); } catch (error) { setFormError(errorMessage(error, "Pairing failed. Check that the code is fresh and try again.")); } finally { setPairing(false); }
   }
   function chooseCredentialProvider(provider: string) {
     setCredentialProvider(provider);

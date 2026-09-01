@@ -477,3 +477,16 @@ def test_desktop_cannot_release_hosted_owned_task(tmp_path: Path):
     store.request_approval(task["id"], "acct_1")
     with pytest.raises(ValueError, match="Desktop-owned"):
         store.decide_for_executor(desktop["executor_id"], desktop["token"], task["id"], True)
+
+
+def test_approve_for_me_releases_declared_local_write(tmp_path: Path):
+    store = TaskStore(tmp_path / "smara.db")
+    desktop = store.pair_executor(store.create_executor_pairing("acct_1", "Desktop", ["local_file_write"])["code"])
+    task = store.create("acct_1", "work", "Write report", "Create a local report", True, [{
+        "name": "desktop.local_file_write", "executor_kind": "desktop", "required_capability": "local_file_write",
+    }])
+    store.request_approval(task["id"], "acct_1")
+    claimed = store.claim_for_executor(desktop["executor_id"], desktop["token"], auto_approve_local=True)
+    assert claimed and claimed["required_capability"] == "local_file_write"
+    events = store.events(task["id"], "acct_1")
+    assert any(e["type"] == "approval.approved" and "approve_for_me" in e["payload"] for e in events)

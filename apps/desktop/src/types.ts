@@ -12,6 +12,7 @@ export interface ConnectionState {
   terminal_allowlist: string[];
   browser_domains: string[];
   auto_approve_safe: boolean;
+  approval_mode: "ask" | "auto";
   paused: boolean;
   running: boolean;
   pid: number | null;
