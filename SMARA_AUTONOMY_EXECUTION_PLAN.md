@@ -279,6 +279,27 @@ browser sessions on the user's device.
 
 ## A3. Skills and Routines
 
+### A3.1 implementation slice (2026-09-01)
+
+The reusable-skill contract foundation is now implemented in
+`src/smara/skill_protocol.py` and covered by focused policy tests:
+
+- `smara.skill.v1` manifests are strict, versioned, and declarative. They
+  describe typed inputs/outputs, bounded DAG stages, local capabilities,
+  connectors, risk, limits, tests, owner, and rollback instructions.
+- Manifest validation rejects unknown fields, credential-shaped values,
+  executable/script payloads, unknown capabilities, missing permissions,
+  dependency cycles, and oversized arguments before a skill can be registered.
+- A thread-safe registry enforces draft → tested → published → deprecated.
+  Publishing requires a passed disposable test and explicit approver identity.
+- Every registered version has a deterministic fingerprint. A changed
+  manifest, including a nested mutation, fails closed instead of reusing an
+  earlier approval. Registry records are detached copies so callers cannot
+  mutate the approved state accidentally.
+
+This is the policy/runtime foundation only. Durable database storage,
+teach-to-skill capture, and scheduled routines remain the next A3 slices.
+
 ### Goal
 
 Turn reliable, reviewed workflows into reusable capabilities without allowing

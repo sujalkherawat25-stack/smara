@@ -721,9 +721,14 @@ before it is enabled.
 
 ### Required upgrades
 
-1. Add a clear local skill protocol: capability, input schema, approval level,
-   time/output/byte limits, idempotency key, result schema, artifact list,
-   redaction rules, and failure state.
+1. **Implemented:** local capability contracts already define input schema,
+   approval level, time/output/byte limits, idempotency key, result schema,
+   artifact list, redaction rules, and failure state. The reusable
+   `smara.skill.v1` manifest/registry now adds typed inputs/outputs, bounded
+   declarative DAG stages, connector declarations, risk, rollback, disposable
+   tests, deterministic approval fingerprints, and draft → tested → published
+   → deprecated lifecycle. Durable persistence and teach-to-skill capture are
+   still A3 work.
 2. Add richer task decomposition and verification so a request can become
    inspect → plan → edit → run → verify → report. **Implemented as a bounded
    first slice (2026-08-30):** the hosted planner can request one explicit,
