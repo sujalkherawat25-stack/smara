@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use futures_util::StreamExt;
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
@@ -779,6 +780,51 @@ fn chrono_like_now() -> String {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|value| value.as_millis().to_string()).unwrap_or_else(|_| "0".to_owned())
 }
 
+fn direct_local_request_text(message: &str) -> String {
+    let mut value = message.trim().to_ascii_lowercase();
+    loop {
+        let trimmed = value.trim_start_matches(|character: char| character.is_whitespace() || matches!(character, ',' | '.' | '!' | '?'));
+        let next = ["okay", "ok", "great", "thanks", "thank you", "well", "so", "please"]
+            .iter()
+            .find_map(|prefix| trimmed.strip_prefix(prefix).map(str::to_owned));
+        match next {
+            Some(next) if next.len() < trimmed.len() => value = next,
+            _ => return trimmed.trim().to_owned(),
+        }
+    }
+}
+
+fn local_builtin_answer(message: &str) -> Option<(&'static str, String)> {
+    let request = direct_local_request_text(message);
+    let normalized = request.trim_matches(|character: char| matches!(character, '.' | '!' | '?')).trim();
+    let clock_requests = [
+        "time",
+        "current time",
+        "what time is it",
+        "what time it is",
+        "tell me the time",
+        "tell me current time",
+    ];
+    if clock_requests.contains(&normalized) {
+        return Some((
+            "current_time",
+            format!("The local time is {}.", Local::now().format("%A, %d %B %Y, %I:%M:%S %p %Z")),
+        ));
+    }
+    None
+}
+
+async fn emit_local_builtin_answer(app: &AppHandle, args: &ChatArgs, tool: &str, answer: &str) -> Result<(), String> {
+    app.emit("smara-chat-event", json!({"type": "phase", "phase": "local_tool"})).map_err(|error| error.to_string())?;
+    app.emit("smara-chat-event", json!({"type": "tool_call", "name": tool})).map_err(|error| error.to_string())?;
+    app.emit("smara-chat-event", json!({"type": "tool_result", "name": tool, "ok": true, "preview": "Completed on this PC"})).map_err(|error| error.to_string())?;
+    let _ = persist_local_chat_turn(&args.conversation_id, &args.message, answer);
+    app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"})).map_err(|error| error.to_string())?;
+    app.emit("smara-chat-event", json!({"type": "token", "text": answer})).map_err(|error| error.to_string())?;
+    app.emit("smara-chat-event", json!({"type": "done", "tools_used": 1})).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn resolve_local_secret(name: &str) -> Result<String, String> {
     let value = run_executor(vec!["--credential-get".to_owned(), name.to_owned()])?;
     if value.is_empty() { return Err("The local model credential is empty; save it again.".to_owned()); }
@@ -1166,6 +1212,11 @@ async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModel
 #[tauri::command]
 async fn stream_chat(app: AppHandle, args: ChatArgs) -> Result<(), String> {
     if args.message.trim().is_empty() { return Err("Message cannot be empty.".to_owned()); }
+    if current_connection().runtime_mode == "local" {
+        if let Some((tool, answer)) = local_builtin_answer(&args.message) {
+            return emit_local_builtin_answer(&app, &args, tool, &answer).await;
+        }
+    }
     if current_connection().runtime_mode == "local" && !args.model_profile.starts_with("local:") {
         return Err("Local-first mode needs a private Desktop model. Choose one in Settings, or switch Runtime mode to Hosted + Desktop.".to_owned());
     }
@@ -1222,7 +1273,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{append_stream_delta, derived_local_capabilities, local_delta_text, local_event_payload, normalized_api_url, normalized_pairing_code, normalized_web_url, preserve_local_model_profiles};
+    use super::{append_stream_delta, derived_local_capabilities, direct_local_request_text, local_builtin_answer, local_delta_text, local_event_payload, normalized_api_url, normalized_pairing_code, normalized_web_url, preserve_local_model_profiles};
     use serde_json::json;
 
     #[test]
@@ -1249,6 +1300,14 @@ mod tests {
         }
         assert_eq!(text, "Hi!!! How can I help??");
         assert_eq!(deltas, ["Hi", "!!! How", " can I", " help", "??"]);
+    }
+
+    #[test]
+    fn local_clock_is_available_without_a_model_or_hosted_connection() {
+        assert_eq!(direct_local_request_text("okay great, what time it is"), "what time it is");
+        let (tool, answer) = local_builtin_answer("okay great, what time it is").expect("clock request");
+        assert_eq!(tool, "current_time");
+        assert!(answer.starts_with("The local time is "));
     }
 
     #[test]
