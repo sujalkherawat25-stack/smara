@@ -324,3 +324,9 @@ html, #root { height: 100%; }
   .settings-tab { min-height: 48px; }
   .settings-grid[data-active-section="connection"] { grid-template-columns: 1fr; }
 }
+
+.preset-bar { margin: 12px 0 16px; padding: 12px 14px; border: 1px solid var(--stroke); border-radius: 10px; background: rgba(255,255,255,.025); }
+.preset-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.preset-btn { padding: 7px 12px; border: 1px solid var(--stroke); border-radius: 7px; background: rgba(255,255,255,.04); color: var(--text); font-size: 12px; font-weight: 500; cursor: pointer; transition: all 120ms ease; }
+.preset-btn:hover { border-color: var(--blue); background: rgba(144,169,255,.12); color: var(--text); transform: translateY(-1px); }
+
