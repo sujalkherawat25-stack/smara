@@ -192,7 +192,19 @@ async def _remember_explicit_profile_facts(*, account_id: str, workspace_id: str
 
 
 async def _durable_profile_context(*, account_id: str, workspace_id: str) -> str:
-    facts = await _async_store().call("account_memory_facts", account_id, workspace_id)
+    loaded = await _async_store().call("account_memory_facts", account_id, workspace_id)
+    facts = dict(loaded) if isinstance(loaded, dict) else {}
+    # Authentication already has a stable, account-scoped display name. Use
+    # it as a fallback for a new user before they have explicitly supplied a
+    # preferred name in chat; never overwrite an explicit preference.
+    if not facts.get("preferred_name"):
+        try:
+            account = await asyncio.to_thread(account_store.account_by_id, account_id)
+        except Exception:
+            account = None
+        display_name = str((account or {}).get("display_name") or "").strip()
+        if display_name:
+            facts["preferred_name"] = display_name[:180]
     return profile_context(facts)
 
 

@@ -40,7 +40,7 @@ def explicit_profile_facts(message: str) -> dict[str, str]:
             # next sentence ("My name is Sujal. I prefer …").
             name = _clean(re.split(r"[.!?]", match.group(1), maxsplit=1)[0])
             # Avoid capturing a full sentence from a casual "I'm fine".
-            if name and len(name.split()) <= 5 and name.lower() not in {"fine", "good", "okay", "ok", "here"}:
+            if len(name) >= 3 and len(name.split()) <= 5 and name.lower() not in {"fine", "good", "okay", "ok", "here"}:
                 facts["preferred_name"] = name
                 break
     preference = _PREFERENCE_PATTERN.search(text)

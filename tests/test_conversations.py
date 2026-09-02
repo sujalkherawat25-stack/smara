@@ -75,6 +75,10 @@ def test_explicit_profile_facts_survive_a_fresh_conversation_and_remain_scoped(t
     assert "preferred name is Sujal" in provider.system
 
 
+def test_profile_extractor_does_not_treat_a_two_letter_acknowledgement_as_a_name():
+    assert "preferred_name" not in explicit_profile_facts("so I am sk")
+
+
 def test_long_conversation_compacts_older_turns_into_bounded_summary(tmp_path):
     store = TaskStore(str(tmp_path / "smara.db"))
     for number in range(18):
