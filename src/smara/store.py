@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from .work_signals import WorkSignalBus
 from .workspace_contract import validate_workspace_job
+from .skill_protocol import validate_skill_manifest
 
 
 def _now() -> str:
@@ -158,6 +159,13 @@ class TaskStore:
               next_run_at TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
               last_run_at TEXT, last_task_id TEXT, lease_owner TEXT, lease_expires_at TEXT,
               created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS skills (
+              id TEXT PRIMARY KEY, account_id TEXT NOT NULL, name TEXT NOT NULL,
+              version TEXT NOT NULL, manifest_json TEXT NOT NULL, state TEXT NOT NULL,
+              fingerprint TEXT NOT NULL, tested INTEGER NOT NULL DEFAULT 0,
+              test_run_id TEXT, approved_by TEXT, created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL, UNIQUE(account_id,name,version));
+            CREATE INDEX IF NOT EXISTS skills_account_updated_idx ON skills(account_id,updated_at);
             CREATE INDEX IF NOT EXISTS schedules_due_idx ON schedules(enabled,next_run_at);
             CREATE INDEX IF NOT EXISTS task_steps_ready_idx
               ON task_steps(status,retry_at,executor_kind,task_id,ordinal);
@@ -284,6 +292,106 @@ class TaskStore:
         with self._connect() as c:
             result = c.execute("UPDATE schedules SET enabled=FALSE,updated_at=? WHERE id=? AND account_id=?", (_now(), schedule_id, account_id))
         if result.rowcount != 1: raise KeyError(schedule_id)
+
+    @staticmethod
+    def _skill_row(row) -> dict:
+        result = dict(row)
+        try:
+            result["manifest"] = json.loads(result.pop("manifest_json"))
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Stored skill manifest is invalid.") from exc
+        result["tested"] = bool(result.get("tested"))
+        return result
+
+    def create_skill(self, account_id: str, manifest: dict) -> dict:
+        """Persist a validated draft skill under one account/version."""
+        parsed = validate_skill_manifest(manifest)
+        if parsed.owner != account_id:
+            raise ValueError("skill owner must match the authenticated account")
+        now = _now()
+        skill_id = f"skill_{uuid.uuid4().hex}"
+        payload = json.dumps(parsed.model_dump(mode="json"), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        with self._connect() as c:
+            existing = c.execute(
+                "SELECT 1 FROM skills WHERE account_id=? AND name=? AND version=?",
+                (account_id, parsed.name, parsed.version),
+            ).fetchone()
+            if existing:
+                raise ValueError(f"skill {parsed.name}@{parsed.version} is already registered")
+            c.execute(
+                "INSERT INTO skills(id,account_id,name,version,manifest_json,state,fingerprint,tested,test_run_id,approved_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (skill_id, account_id, parsed.name, parsed.version, payload, "draft", parsed.fingerprint(), False, None, None, now, now),
+            )
+            row = c.execute("SELECT * FROM skills WHERE id=?", (skill_id,)).fetchone()
+        return self._skill_row(row)
+
+    def get_skill(self, account_id: str, name: str, version: str) -> dict:
+        with self._connect() as c:
+            row = c.execute(
+                "SELECT * FROM skills WHERE account_id=? AND name=? AND version=?",
+                (account_id, name, version),
+            ).fetchone()
+        if not row:
+            raise KeyError("skill")
+        return self._skill_row(row)
+
+    def list_skills(self, account_id: str) -> list[dict]:
+        with self._connect() as c:
+            rows = c.execute("SELECT * FROM skills WHERE account_id=? ORDER BY name,version", (account_id,)).fetchall()
+        return [self._skill_row(row) for row in rows]
+
+    def record_skill_test(self, account_id: str, name: str, version: str, *, passed: bool, run_id: str) -> dict:
+        if not isinstance(run_id, str) or not run_id.strip() or len(run_id) > 200:
+            raise ValueError("test run id is required")
+        current = self.get_skill(account_id, name, version)
+        if current["state"] in {"published", "deprecated"}:
+            raise ValueError("published or deprecated skills cannot be retested in place; register a new version")
+        now = _now()
+        state = "tested" if passed else "draft"
+        with self._connect() as c:
+            c.execute(
+                "UPDATE skills SET state=?,tested=?,test_run_id=?,updated_at=? WHERE id=? AND account_id=?",
+                (state, bool(passed), run_id.strip(), now, current["id"], account_id),
+            )
+            row = c.execute("SELECT * FROM skills WHERE id=? AND account_id=?", (current["id"], account_id)).fetchone()
+        return self._skill_row(row)
+
+    def publish_skill(self, account_id: str, name: str, version: str) -> dict:
+        current = self.get_skill(account_id, name, version)
+        if current["state"] != "tested" or not current["tested"]:
+            raise ValueError("skill must pass a disposable test before publishing")
+        now = _now()
+        with self._connect() as c:
+            c.execute(
+                "UPDATE skills SET state='published',approved_by=?,updated_at=? WHERE id=? AND account_id=? AND state='tested' AND tested=1",
+                (account_id, now, current["id"], account_id),
+            )
+            row = c.execute("SELECT * FROM skills WHERE id=? AND account_id=?", (current["id"], account_id)).fetchone()
+        return self._skill_row(row)
+
+    def deprecate_skill(self, account_id: str, name: str, version: str) -> dict:
+        current = self.get_skill(account_id, name, version)
+        if current["state"] != "published":
+            raise ValueError("only published skills can be deprecated")
+        now = _now()
+        with self._connect() as c:
+            c.execute(
+                "UPDATE skills SET state='deprecated',updated_at=? WHERE id=? AND account_id=? AND state='published'",
+                (now, current["id"], account_id),
+            )
+            row = c.execute("SELECT * FROM skills WHERE id=? AND account_id=?", (current["id"], account_id)).fetchone()
+        return self._skill_row(row)
+
+    def assert_skill_runnable(self, account_id: str, name: str, version: str, manifest: dict | None = None) -> dict:
+        current = self.get_skill(account_id, name, version)
+        if current["state"] != "published":
+            raise ValueError("skill is not published")
+        parsed = validate_skill_manifest(current["manifest"])
+        if parsed.fingerprint() != current["fingerprint"]:
+            raise ValueError("skill manifest changed after approval; publish a new version")
+        if manifest is not None and validate_skill_manifest(manifest).fingerprint() != current["fingerprint"]:
+            raise ValueError("skill manifest changed after approval; publish a new version")
+        return current
 
     def fire_due_schedules(self, scheduler_id: str = "scheduler", limit: int = 10) -> list[dict]:
         now = _now(); due: list[dict] = []

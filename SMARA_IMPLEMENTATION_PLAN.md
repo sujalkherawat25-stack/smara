@@ -791,6 +791,8 @@ claim.
 - `research.fetch_url`
 - `desktop.request_action` through an approved durable task
 - `desktop.request_workflow` through one approved, sequential durable task graph
+- `/v1/skills/*` account-scoped declarative skill lifecycle (draft, teach,
+  disposable-test record, publish, deprecate)
 
 Personal integration tools are intentionally disabled in the hosted release.
 The plugin catalogue is declarative; external MCP/plugin code is not yet an

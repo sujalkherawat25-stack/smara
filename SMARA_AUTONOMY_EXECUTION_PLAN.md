@@ -310,10 +310,15 @@ translation slice built on it is now shipped as well:
   stages as `risk=confirm`, and carries no executable code or credentials.
 - Restart, tamper, workflow-secret, mutation-risk, and persistence tests are
   included in `tests/test_skill_protocol.py`.
+- The hosted control plane now persists the same validated manifests per
+  account in the durable task store (`skills` table/migration `021_skills.sql`)
+  and exposes list, create, teach, test, publish, and deprecate endpoints under
+  `/v1/skills/*`. Publishing records the authenticated account as approver;
+  account filters are applied to every read and mutation.
 
-Durable database-backed multi-user storage and scheduled routines remain the
-next A3 slices; the private Desktop registry is intentionally not a hosted
-source of truth.
+Scheduled routines and authenticated event triggers remain the next A3 slice.
+The private Desktop registry remains separate from the hosted source of truth;
+published hosted skills are persisted per account in the control-plane store.
 
 ### Goal
 

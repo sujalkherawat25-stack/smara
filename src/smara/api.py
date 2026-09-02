@@ -20,7 +20,7 @@ import httpx
 import jwt
 
 from .config import settings
-from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, CliDeviceAuthorize, CliPairingExchange, CliPairingStart, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, ExecutorProgress, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, ScheduleCreate, ScheduleView, TaskCreate, TaskView, ToolInvokeRequest
+from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, CliDeviceAuthorize, CliPairingExchange, CliPairingStart, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, ExecutorProgress, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, ScheduleCreate, ScheduleView, SkillCreate, SkillTeachRequest, SkillTestRequest, TaskCreate, TaskView, ToolInvokeRequest
 from .store import open_task_store
 from .agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime
 from .agent_routing import route_request
@@ -44,6 +44,7 @@ from .runtime_resources import RuntimeResources
 from .store_async import AsyncStoreFacade
 from .work_signals import wait_for_signal, WorkSignalBus
 from .workspace_contract import validate_workspace_job, workspace_job_summary
+from .skill_protocol import draft_skill_from_workflow, validate_skill_manifest
 
 LOG = logging.getLogger("smara.api")
 configure_sentry(settings.sentry_dsn)
@@ -350,6 +351,23 @@ def schedule_view(row: dict) -> ScheduleView:
         "created_at": _as_datetime(row["created_at"]),
         "updated_at": _as_datetime(row["updated_at"]),
     })
+
+
+def skill_view(row: dict) -> dict:
+    """Return an account-scoped skill record without internal DB fields."""
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "version": row["version"],
+        "state": row["state"],
+        "manifest": row["manifest"],
+        "fingerprint": row["fingerprint"],
+        "tested": bool(row.get("tested")),
+        "test_run_id": row.get("test_run_id"),
+        "approved_by": row.get("approved_by"),
+        "created_at": _as_datetime(row["created_at"]),
+        "updated_at": _as_datetime(row["updated_at"]),
+    }
 
 @app.get("/health")
 async def health():
@@ -1110,6 +1128,75 @@ async def create_schedule(body: ScheduleCreate, user: str = Depends(account_id))
         starts_at = starts_at.replace(tzinfo=timezone.utc)
     steps = [step.model_dump() for step in body.steps]
     return schedule_view(store.create_schedule(user, body.workspace_id, body.title, body.objective, body.interval_seconds, starts_at.isoformat(), body.requires_approval, steps))
+
+
+@app.get("/v1/skills")
+async def list_skills(user: str = Depends(account_id)):
+    return {"skills": [skill_view(row) for row in store.list_skills(user)]}
+
+
+@app.post("/v1/skills", status_code=201)
+async def create_skill(body: SkillCreate, user: str = Depends(account_id)):
+    try:
+        manifest = validate_skill_manifest(body.manifest)
+        return skill_view(store.create_skill(user, manifest.model_dump(mode="json")))
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/v1/skills/teach", status_code=201)
+async def teach_skill(body: SkillTeachRequest, user: str = Depends(account_id)):
+    try:
+        manifest = draft_skill_from_workflow(
+            name=body.name,
+            version=body.version,
+            description=body.description,
+            owner=user,
+            workflow=body.workflow,
+            tests=body.tests,
+            rollback=body.rollback,
+        )
+        return skill_view(store.create_skill(user, manifest.model_dump(mode="json")))
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.get("/v1/skills/{name}/{version}")
+async def get_skill(name: str, version: str, user: str = Depends(account_id)):
+    try:
+        return skill_view(store.get_skill(user, name, version))
+    except KeyError as exc:
+        raise HTTPException(404, "Skill not found.") from exc
+
+
+@app.post("/v1/skills/{name}/{version}/test")
+async def test_skill(name: str, version: str, body: SkillTestRequest, user: str = Depends(account_id)):
+    try:
+        return skill_view(store.record_skill_test(user, name, version, passed=body.passed, run_id=body.run_id))
+    except KeyError as exc:
+        raise HTTPException(404, "Skill not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/v1/skills/{name}/{version}/publish")
+async def publish_skill(name: str, version: str, user: str = Depends(account_id)):
+    try:
+        return skill_view(store.publish_skill(user, name, version))
+    except KeyError as exc:
+        raise HTTPException(404, "Skill not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/v1/skills/{name}/{version}/deprecate")
+async def deprecate_skill(name: str, version: str, user: str = Depends(account_id)):
+    try:
+        return skill_view(store.deprecate_skill(user, name, version))
+    except KeyError as exc:
+        raise HTTPException(404, "Skill not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 @app.delete("/v1/schedules/{schedule_id}", status_code=204)
 async def cancel_schedule(schedule_id: str, user: str = Depends(account_id)):

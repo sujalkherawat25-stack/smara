@@ -97,6 +97,26 @@ class ScheduleView(BaseModel):
     updated_at: datetime
 
 
+class SkillCreate(BaseModel):
+    """A strict manifest is validated again by the skill protocol at runtime."""
+
+    manifest: dict[str, Any] = Field(min_length=1, max_length=64)
+
+
+class SkillTestRequest(BaseModel):
+    passed: bool
+    run_id: str = Field(min_length=1, max_length=200)
+
+
+class SkillTeachRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=64)
+    version: str = Field(min_length=5, max_length=32)
+    description: str = Field(min_length=1, max_length=2_000)
+    workflow: list[dict[str, Any]] = Field(min_length=2, max_length=6)
+    tests: list[dict[str, Any]] = Field(min_length=1, max_length=20)
+    rollback: dict[str, Any] | None = Field(default=None, max_length=8)
+
+
 class ChatRequest(BaseModel):
     """A short conversational turn; durable work belongs in TaskCreate."""
     message: str = Field(min_length=1, max_length=20_000)
