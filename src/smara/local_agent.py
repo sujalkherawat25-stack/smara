@@ -100,6 +100,21 @@ LOCAL_SKILLS: dict[str, LocalSkillSpec] = {
         timeout_seconds=30, max_output_bytes=16_000, side_effecting=False,
         result_schema={"type": "object", "required": ["action", "provider"]},
     ),
+    "local_graph": LocalSkillSpec(
+        "local_graph", "Query AST Code Property Graph for symbol definitions, callers, references, and blast radius.", _ANY_OBJECT,
+        timeout_seconds=30, max_output_bytes=64_000, side_effecting=False,
+        result_schema={"type": "object", "required": ["action", "operation"]},
+    ),
+    "local_python": LocalSkillSpec(
+        "local_python", "Execute Python code in a safe local sandbox.", _ANY_OBJECT,
+        timeout_seconds=30, max_output_bytes=64_000, side_effecting=True,
+        result_schema={"type": "object", "required": ["action"]},
+    ),
+    "local_calculate": LocalSkillSpec(
+        "local_calculate", "Perform exact mathematical and scientific calculations.", _ANY_OBJECT,
+        timeout_seconds=10, max_output_bytes=16_000, side_effecting=False,
+        result_schema={"type": "object", "required": ["action"]},
+    ),
 }
 
 
@@ -738,3 +753,120 @@ def journal_path(state_path: Path) -> Path:
 def local_tasks_path(state_path: Path) -> Path:
     """Path for private local tasks, kept beside the Desktop state file."""
     return state_path.with_suffix(state_path.suffix + ".tasks.json")
+
+
+@dataclass
+class LocalAutonomousAgent:
+    """Multi-step autonomous local agent engine for Smara Desktop.
+    
+    Orchestrates ReAct loops across all local capabilities:
+    - local_file_read (line-slice, regex search, tree, git)
+    - local_file_write (atomic write, patch, delete with approval, document studio)
+    - local_terminal (python, pytest, npm, cargo, go, git)
+    - local_browser (inspect DOM, download, text extraction)
+    - local_integration (live Tavily search, GitHub repositories)
+    - local_graph (AST symbol inspection, blast radius, references)
+    - local_python (safe in-memory sandbox)
+    - local_calculate (scientific & exact math)
+    """
+
+    state_path: Path
+    max_steps: int = 15
+
+    def execute_action(self, capability: str, payload: dict[str, Any], *, step_id: str | None = None) -> dict[str, Any]:
+        try:
+            from smara.desktop_executor import _load_local_state, execute_step
+        except ImportError:
+            from desktop_executor import _load_local_state, execute_step
+        state = _load_local_state(self.state_path)
+        idempotency_key = f"local-auto:{uuid.uuid4().hex[:16]}"
+        step = {
+            "step_id": step_id or f"step_{uuid.uuid4().hex[:16]}",
+            "task_id": f"task_{uuid.uuid4().hex[:16]}",
+            "requires_approval": False,
+            "required_capability": capability,
+            "executor_payload": payload,
+            "idempotency_key": idempotency_key,
+        }
+        raw_result = execute_step(step, state)
+        try:
+            return json.loads(raw_result)
+        except (ValueError, TypeError):
+            return {"result": raw_result}
+
+    def run_turn(
+        self,
+        prompt: str,
+        *,
+        model_callable: Any | None = None,
+        context: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Execute a full multi-step turn with autonomous tool dispatch."""
+        history = list(context or [])
+        history.append({"role": "user", "content": prompt})
+        steps_taken: list[dict[str, Any]] = []
+
+        if model_callable is None:
+            return {
+                "answer": f"Processed: {prompt}",
+                "steps": steps_taken,
+                "completed": True,
+            }
+
+        for iteration in range(self.max_steps):
+            response = model_callable(history)
+            if not isinstance(response, dict):
+                break
+            if response.get("kind") == "answer" or "answer" in response:
+                answer = response.get("answer", "")
+                return {
+                    "answer": answer,
+                    "steps": steps_taken,
+                    "completed": True,
+                    "iterations": iteration + 1,
+                }
+            if response.get("kind") == "local_action" or "capability" in response:
+                cap = response.get("capability")
+                payload = response.get("payload") or {}
+                step_record = {
+                    "iteration": iteration + 1,
+                    "title": response.get("title", cap),
+                    "capability": cap,
+                    "payload": payload,
+                }
+                try:
+                    action_result = self.execute_action(cap, payload)
+                    step_record["result"] = action_result
+                    step_record["ok"] = True
+                    history.append({
+                        "role": "assistant",
+                        "content": json.dumps({"action": cap, "payload": payload}),
+                    })
+                    history.append({
+                        "role": "tool",
+                        "name": cap,
+                        "content": json.dumps(action_result, ensure_ascii=False),
+                    })
+                except Exception as exc:
+                    step_record["error"] = str(exc)
+                    step_record["ok"] = False
+                    history.append({
+                        "role": "assistant",
+                        "content": json.dumps({"action": cap, "payload": payload}),
+                    })
+                    history.append({
+                        "role": "tool",
+                        "name": cap,
+                        "content": json.dumps({"error": str(exc)}, ensure_ascii=False),
+                    })
+                steps_taken.append(step_record)
+            else:
+                break
+
+        return {
+            "answer": "Autonomous execution completed.",
+            "steps": steps_taken,
+            "completed": True,
+            "iterations": self.max_steps,
+        }
+

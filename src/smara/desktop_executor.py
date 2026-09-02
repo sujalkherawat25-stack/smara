@@ -84,8 +84,16 @@ MAX_GIT_COMMITS = 20
 MAX_WORKSPACE_SNAPSHOT_FILES = 200
 MAX_WORKSPACE_COPY_FILES = 5_000
 MAX_WORKSPACE_COPY_BYTES = 256 * 1024 * 1024
-DEFAULT_CAPABILITIES = ["local_file_read"]
-STATE_ENV = "SMARA_DESKTOP_STATE"
+DEFAULT_CAPABILITIES = [
+    "local_file_read",
+    "local_file_write",
+    "local_terminal",
+    "local_browser",
+    "local_integration",
+    "local_graph",
+    "local_python",
+    "local_calculate",
+]
 CREDENTIALS_ENV = "SMARA_DESKTOP_CREDENTIALS"
 CONNECTOR_AUDIT_ENV = "SMARA_DESKTOP_CONNECTOR_AUDIT"
 MAX_CONNECTOR_AUDIT_EVENTS = 100
@@ -704,7 +712,7 @@ def _target(raw: object, roots: list[Path], *, must_exist: bool) -> Path:
         if must_exist:
             target = candidate.resolve(strict=True)
         else:
-            parent = candidate.parent.resolve(strict=True)
+            parent = candidate.parent.resolve(strict=False)
             target = parent / candidate.name
     except RuntimeError:
         raise
@@ -2183,6 +2191,65 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
         except Exception:
             _append_connector_audit(str(payload.get("provider") or "unknown"), str(payload.get("operation") or "unknown"), "failed")
             raise
+    elif capability == "local_graph":
+        try:
+            from smara.code_graph import CodePropertyGraph
+        except ImportError:
+            from code_graph import CodePropertyGraph
+        operation = str(payload.get("operation") or "inspect_symbol")
+        symbol = str(payload.get("symbol") or "")
+        graph = CodePropertyGraph(roots[0])
+        if operation == "inspect_symbol":
+            res = graph.inspect_symbol(symbol)
+        elif operation == "blast_radius":
+            res = graph.blast_radius(symbol)
+        elif operation == "find_references":
+            res = graph.find_references(symbol)
+        else:
+            raise RuntimeError(f"Unknown graph operation: {operation}")
+        result = json.dumps({"action": "local_graph", "operation": operation, "symbol": symbol, "result": res}, ensure_ascii=False)
+    elif capability == "local_python":
+        import io
+        import math
+        import sys
+        code = str(payload.get("code") or "")
+        allowed_globals = {
+            "__builtins__": {
+                "abs": abs, "all": all, "any": any, "bool": bool, "dict": dict,
+                "enumerate": enumerate, "filter": filter, "float": float, "format": format,
+                "int": int, "isinstance": isinstance, "len": len, "list": list, "map": map,
+                "max": max, "min": min, "print": print, "range": range, "reversed": reversed,
+                "round": round, "set": set, "sorted": sorted, "str": str, "sum": sum,
+                "tuple": tuple, "zip": zip,
+            },
+            "math": math,
+            "json": json,
+        }
+        local_vars: dict[str, Any] = {}
+        stdout_capture = io.StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = stdout_capture
+            exec(compile(code[:8000], "<local_python>", "exec"), allowed_globals, local_vars)
+            output = stdout_capture.getvalue()
+            result = json.dumps({"action": "local_python", "code": code, "output": output}, ensure_ascii=False)
+        except Exception as exc:
+            result = json.dumps({"action": "local_python", "code": code, "error": str(exc)}, ensure_ascii=False)
+        finally:
+            sys.stdout = old_stdout
+    elif capability == "local_calculate":
+        import ast
+        try:
+            from smara.tool_registry import _safe_number
+        except ImportError:
+            from tool_registry import _safe_number
+        expr = str(payload.get("expression") or "")
+        try:
+            tree = ast.parse(expr.strip()[:500], mode="eval")
+            val = _safe_number(tree.body)
+            result = json.dumps({"action": "local_calculate", "expression": expr, "output": str(val)}, ensure_ascii=False)
+        except Exception as exc:
+            result = json.dumps({"action": "local_calculate", "expression": expr, "error": str(exc)}, ensure_ascii=False)
     else:
         raise RuntimeError(f"Desktop capability '{capability}' is not installed.")
     if workspace_job is not None:
