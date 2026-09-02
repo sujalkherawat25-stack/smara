@@ -79,7 +79,13 @@ class _ASTSymbolVisitor(ast.NodeVisitor):
         name = f"{self._current_class}.{node.name}" if self._current_class else node.name
         kind = "method" if self._current_class else ("async_function" if is_async else "function")
         docstring = ast.get_docstring(node) or ""
-        params = [arg.arg for arg in node.args.args]
+        params = [arg.arg for arg in getattr(node.args, "posonlyargs", [])]
+        params.extend(arg.arg for arg in node.args.args)
+        if node.args.vararg:
+            params.append(f"*{node.args.vararg.arg}")
+        params.extend(arg.arg for arg in node.args.kwonlyargs)
+        if node.args.kwarg:
+            params.append(f"**{node.args.kwarg.arg}")
         symbol = SymbolInfo(
             name=name,
             kind=kind,

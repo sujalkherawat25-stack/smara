@@ -41,7 +41,7 @@ _DURABLE_RE = re.compile(
     r"\b(?:create\s+(?:a\s+)?(?:file|folder|directory|script)\s+(?:in|on|at|under))|"
     r"\b(?:delete\s+(?:the\s+)?(?:file|folder|directory))|"
     r"\b(?:rename\s+(?:the\s+)?file|move\s+(?:the\s+)?file)|"
-    r"\b(?:remind\s+me|schedule\s+(?:a\s+)?task|schedule\s+every)|"
+    r"\b(?:remind\s+me|schedule\s+(?:a\s+)?(?:task|job|report|script|reminder|workflow|check|run)|schedule\s+(?:every|daily|weekly|monthly|hourly|at))\b|"
     r"\b(?:run\s+(?:a\s+)?(?:terminal|shell|bash|powershell)\s+command)|"
     r"\b(?:run\s+(?:a\s+)?terminal\b)|"
     r"\b(?:run\s+command|run\s+script\s+on\s+desktop)|"
