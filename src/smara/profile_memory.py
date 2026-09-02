@@ -12,7 +12,6 @@ import re
 
 _NAME_PATTERNS = (
     re.compile(r"\bmy\s+name\s+is\s+([A-Za-z][A-Za-z .'-]{0,70})", re.IGNORECASE),
-    re.compile(r"\b(?:i\s+am|i['’]m)\s+([A-Za-z][A-Za-z .'-]{0,70})", re.IGNORECASE),
     re.compile(r"\bcall\s+me\s+([A-Za-z][A-Za-z .'-]{0,70})", re.IGNORECASE),
 )
 _PREFERENCE_PATTERN = re.compile(
@@ -39,7 +38,9 @@ def explicit_profile_facts(message: str) -> dict[str, str]:
             # Do not let a permissive human-name character set swallow the
             # next sentence ("My name is Sujal. I prefer …").
             name = _clean(re.split(r"[.!?]", match.group(1), maxsplit=1)[0])
-            # Avoid capturing a full sentence from a casual "I'm fine".
+            # "I am ..." is deliberately not a name form.  It is too easy
+            # to turn ordinary prose ("I am Indian, remember?") into a
+            # false identity record.  Names must be stated explicitly.
             if len(name) >= 3 and len(name.split()) <= 5 and name.lower() not in {"fine", "good", "okay", "ok", "here"}:
                 facts["preferred_name"] = name
                 break
@@ -55,6 +56,9 @@ def profile_context(facts: dict[str, str] | None) -> str:
     """Render facts as data, never as instructions for the model."""
     facts = facts or {}
     lines: list[str] = []
+    account_name = str(facts.get("account_display_name") or "").strip()
+    if account_name:
+        lines.append(f"The signed-in account display name is {account_name}.")
     name = str(facts.get("preferred_name") or "").strip()
     if name:
         lines.append(f"The user has explicitly said their preferred name is {name}.")
@@ -62,3 +66,30 @@ def profile_context(facts: dict[str, str] | None) -> str:
     if preference:
         lines.append(f"The user has explicitly stated this preference: {preference}.")
     return "\n".join(lines)
+
+
+def profile_summary(facts: dict[str, str] | None) -> str:
+    """Return a conservative, deterministic answer to identity questions.
+
+    Semantic recall is useful for project context but is not a trustworthy
+    source for personal identity: it can contain old wording, quoted text, or
+    assistant mistakes.  This summary intentionally uses only the signed-in
+    account display name and explicitly saved facts.
+    """
+    facts = facts or {}
+    account_name = str(facts.get("account_display_name") or "").strip()
+    preferred_name = str(facts.get("preferred_name") or "").strip()
+    preference = str(facts.get("stated_preference") or "").strip()
+    parts: list[str] = []
+    if preferred_name:
+        parts.append(f"You asked me to call you {preferred_name}.")
+    elif account_name:
+        parts.append(f"You are signed in as {account_name}.")
+    else:
+        parts.append("I do not have a confirmed personal profile saved yet.")
+    if preference:
+        parts.append(f"You have told me that you prefer {preference}.")
+    else:
+        parts.append("I do not have any other confirmed personal preferences saved.")
+    parts.append("I keep project and conversation context separately, and I do not treat unverified chat text as your identity.")
+    return " ".join(parts)

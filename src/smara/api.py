@@ -23,7 +23,7 @@ from .config import settings
 from .models import AccountDeletionRequest, ApprovalDecision, ArtifactView, ChatRequest, ChatResponse, CliDeviceAuthorize, CliPairingExchange, CliPairingStart, EvidenceView, ExecutorComplete, ExecutorFailure, ExecutorHeartbeat, ExecutorPairingCreate, ExecutorPairRequest, ExecutorProgress, IntegrationActionCreate, IntegrationActionDecision, IntegrationConfigure, IntegrationCredentialInput, PushSubscriptionInput, ResearchTaskCreate, ScheduleCreate, ScheduleView, SkillCreate, SkillTeachRequest, SkillTestRequest, TaskCreate, TaskView, ToolInvokeRequest
 from .store import open_task_store
 from .agent_runtime import OpenAICompatibleProvider, SmaraAgentRuntime
-from .agent_routing import route_request
+from .agent_routing import is_identity_memory_request, route_request
 from . import agent_events, llm_errors
 from .syntarus_adapter import SyntarusMemory
 from .vault import SecretVault
@@ -45,7 +45,7 @@ from .store_async import AsyncStoreFacade
 from .work_signals import wait_for_signal, WorkSignalBus
 from .workspace_contract import validate_workspace_job, workspace_job_summary
 from .skill_protocol import draft_skill_from_workflow, validate_skill_manifest
-from .profile_memory import explicit_profile_facts, profile_context
+from .profile_memory import explicit_profile_facts, profile_context, profile_summary
 
 LOG = logging.getLogger("smara.api")
 configure_sentry(settings.sentry_dsn)
@@ -191,21 +191,27 @@ async def _remember_explicit_profile_facts(*, account_id: str, workspace_id: str
     return profile_context(existing)
 
 
-async def _durable_profile_context(*, account_id: str, workspace_id: str) -> str:
+async def _durable_profile_facts(*, account_id: str, workspace_id: str) -> dict[str, str]:
     loaded = await _async_store().call("account_memory_facts", account_id, workspace_id)
     facts = dict(loaded) if isinstance(loaded, dict) else {}
-    # Authentication already has a stable, account-scoped display name. Use
-    # it as a fallback for a new user before they have explicitly supplied a
-    # preferred name in chat; never overwrite an explicit preference.
-    if not facts.get("preferred_name"):
-        try:
-            account = await asyncio.to_thread(account_store.account_by_id, account_id)
-        except Exception:
-            account = None
-        display_name = str((account or {}).get("display_name") or "").strip()
-        if display_name:
-            facts["preferred_name"] = display_name[:180]
-    return profile_context(facts)
+    # This is authenticated account identity, not a user-stated nickname.
+    # Keep it distinct from preferred_name so the model never mislabels it.
+    try:
+        account = await asyncio.to_thread(account_store.account_by_id, account_id)
+    except Exception:
+        account = None
+    display_name = str((account or {}).get("display_name") or "").strip()
+    if display_name:
+        facts["account_display_name"] = display_name[:180]
+    return facts
+
+
+async def _durable_profile_context(*, account_id: str, workspace_id: str) -> str:
+    return profile_context(await _durable_profile_facts(account_id=account_id, workspace_id=workspace_id))
+
+
+async def _identity_profile_answer(*, account_id: str, workspace_id: str) -> str:
+    return profile_summary(await _durable_profile_facts(account_id=account_id, workspace_id=workspace_id))
 
 
 def _queue_durable_chat_task(body: ChatRequest, user: str) -> tuple[dict, str]:
@@ -746,6 +752,13 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
             memory_used=False,
             tools_used=0,
         )
+    if is_identity_memory_request(body.message):
+        message = await _identity_profile_answer(account_id=user, workspace_id=body.workspace_id)
+        await _async_store().call(
+            "append_conversation_exchange",
+            conversation_id, user, body.workspace_id, body.message, message, None,
+        )
+        return ChatResponse(conversation_id=conversation_id, message=message, memory_used=True, tools_used=0)
     durable_profile = await _durable_profile_context(account_id=user, workspace_id=body.workspace_id)
     attachment_context = _attachment_context(body, user)
     try:
@@ -832,6 +845,25 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
                 request_id=trace.trace_id,
                 timings=trace.as_dict(),
                 task_id=task["id"],
+            )
+            return
+        if is_identity_memory_request(body.message):
+            message = await _identity_profile_answer(account_id=user, workspace_id=body.workspace_id)
+            yield agent_events.phase("triage")
+            yield agent_events.status("Retrieving your verified profile")
+            yield agent_events.phase("answer")
+            yield agent_events.token(message)
+            await _async_store().call(
+                "append_conversation_exchange",
+                conversation_id, user, body.workspace_id, body.message, message, None,
+            )
+            trace.mark("persisted")
+            yield agent_events.done(
+                memory_used=True,
+                tools_used=0,
+                total_ms=agent_events.elapsed_ms(started_at),
+                request_id=trace.trace_id,
+                timings=trace.as_dict(),
             )
             return
         durable_profile = await _durable_profile_context(account_id=user, workspace_id=body.workspace_id)

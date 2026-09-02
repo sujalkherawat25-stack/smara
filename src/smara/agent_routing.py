@@ -42,16 +42,21 @@ _DURABLE_RE = re.compile(
     re.IGNORECASE,
 )
 _MEMORY_RE = re.compile(
-    r"\b(?:remember|recall|memory|history|earlier|before|previous|last\s+time|"
+    r"\b(?:remember|remeber|recall|memory|history|earlier|before|previous|last\s+time|"
     r"you\s+said|we\s+discussed|my\s+(?:plan|preference|project|context|name|work)|my)\b",
     re.IGNORECASE,
 )
 _IDENTITY_MEMORY_RE = re.compile(
-    r"\b(?:do\s+you\s+(?:know|remember)\s+me|who\s+am\s+i|"
+    r"\b(?:do\s+you\s+(?:know|remember|remeber)\s+me|who\s+am\s+i|"
     r"what(?:'s|\s+is)\s+my\s+name|tell\s+me\s+about\s+me|"
-    r"what\s+do\s+you\s+know\s+about\s+me)\b",
+    r"what\s+do\s+you\s+(?:know|remember|remeber)\s+about\s+me)\b",
     re.IGNORECASE,
 )
+
+
+def is_identity_memory_request(message: str) -> bool:
+    """Whether a prompt asks for the user's own identity/profile facts."""
+    return bool(_IDENTITY_MEMORY_RE.search(str(message or "").strip()))
 _TOOL_RE = re.compile(
     r"\b(?:search|research|look\s+up|find|fetch|weather|latest|today|current|"
     r"news|source|cite|citation|gmail|calendar|drive|github)\b",
@@ -105,7 +110,7 @@ def route_request(
     # often contains neither "memory" nor "remember".  Treating these as
     # small talk was the reason a restarted desktop could answer "Not yet"
     # despite the account having durable context.
-    memory_requested = bool(explicit_memory or _MEMORY_RE.search(text) or _IDENTITY_MEMORY_RE.search(text))
+    memory_requested = bool(explicit_memory or _MEMORY_RE.search(text) or is_identity_memory_request(text))
     if local_only and _LOCAL_INTEGRATION_RE.search(text):
         return RouteDecision(
             "E", "personal connector requires the paired desktop", 0.99, 3, True, (), True

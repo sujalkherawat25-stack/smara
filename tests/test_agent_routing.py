@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 
-from smara.agent_routing import route_request
+from smara.agent_routing import is_identity_memory_request, route_request
 from smara.agent_runtime import SmaraAgentRuntime
 
 
@@ -21,6 +21,7 @@ def test_route_natural_clock_and_identity_requests_reliably():
     identity = route_request("Do you know me?")
     assert identity.lane == "C"
     assert identity.memory_needed is True
+    assert is_identity_memory_request("what do you remeber about me") is True
 
 
 def test_route_detailed_citation_requests_to_deterministic_deep_research():

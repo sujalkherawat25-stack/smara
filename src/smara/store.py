@@ -686,6 +686,15 @@ class TaskStore:
             ).fetchall()
         return {str(row["fact_key"]): str(row["fact_value"]) for row in rows}
 
+    def forget_account_fact(self, account_id: str, workspace_id: str, fact_key: str) -> bool:
+        """Remove one account-scoped profile fact without touching other memory."""
+        with self._connect() as c:
+            result = c.execute(
+                "DELETE FROM account_memory_facts WHERE account_id=? AND workspace_id=? AND fact_key=?",
+                (account_id, workspace_id, str(fact_key).strip()[:64]),
+            )
+        return bool(result.rowcount)
+
     def conversations(self, account_id: str, *, limit: int = 50) -> list[dict]:
         with self._connect() as c:
             rows = c.execute(

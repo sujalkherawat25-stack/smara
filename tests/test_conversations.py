@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from smara.agent_runtime import SmaraAgentRuntime
-from smara.profile_memory import explicit_profile_facts, profile_context
+from smara.profile_memory import explicit_profile_facts, profile_context, profile_summary
 from smara.store import TaskStore
 
 
@@ -77,6 +77,19 @@ def test_explicit_profile_facts_survive_a_fresh_conversation_and_remain_scoped(t
 
 def test_profile_extractor_does_not_treat_a_two_letter_acknowledgement_as_a_name():
     assert "preferred_name" not in explicit_profile_facts("so I am sk")
+
+
+def test_profile_extractor_never_interprets_an_i_am_statement_as_a_name():
+    assert "preferred_name" not in explicit_profile_facts("I am Indian, remember me")
+
+
+def test_profile_summary_only_uses_verified_account_or_explicit_facts(tmp_path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    store.remember_account_facts("acct_1", "default", {"preferred_name": "bad inferred phrase"})
+    assert store.forget_account_fact("acct_1", "default", "preferred_name") is True
+    summary = profile_summary({"account_display_name": "Sujal Kherawat"})
+    assert "Sujal Kherawat" in summary
+    assert "bad inferred phrase" not in summary
 
 
 def test_long_conversation_compacts_older_turns_into_bounded_summary(tmp_path):
