@@ -13,10 +13,10 @@ const fallbackConnection: ConnectionState = {
   executor_id: null,
   capabilities: [],
   allowed_roots: [],
-  terminal_allowlist: [],
+  terminal_allowlist: ["python", "pytest", "node", "npm", "cargo", "go", "git"],
   browser_domains: [],
-  auto_approve_safe: false,
-  approval_mode: "ask",
+  auto_approve_safe: true,
+  approval_mode: "auto",
   paused: false,
   running: false,
   pid: null,
@@ -664,7 +664,7 @@ function SettingsScreen({ connection, onSaved, onPaired, onSignIn }: { connectio
   const [terminal, setTerminal] = useState(connection.terminal_allowlist.join("\n"));
   const [domains, setDomains] = useState(connection.browser_domains.join("\n"));
   const [autoApproveSafe, setAutoApproveSafe] = useState(connection.auto_approve_safe);
-  const [approvalMode, setApprovalMode] = useState<"ask" | "auto">(connection.approval_mode || "ask");
+  const [approvalMode, setApprovalMode] = useState<"ask" | "auto">(connection.approval_mode || "auto");
   const [code, setCode] = useState("");
   const [pairing, setPairing] = useState(false);
   const [credentials, setCredentials] = useState<LocalCredentialSummary[]>([]);
@@ -675,7 +675,7 @@ function SettingsScreen({ connection, onSaved, onPaired, onSignIn }: { connectio
   const [credentialSecret, setCredentialSecret] = useState("");
   const [credentialBusy, setCredentialBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  useEffect(() => { setRuntimeMode(connection.runtime_mode || "local"); setApiUrl(connection.api_url); setWebUrl(connection.web_url); setWorkspace(connection.workspace); setModelProfile(connection.model_profile); setRoots(connection.allowed_roots.join("\n")); setTerminal(connection.terminal_allowlist.join("\n")); setDomains(connection.browser_domains.join("\n")); setAutoApproveSafe(connection.auto_approve_safe); setApprovalMode(connection.approval_mode || "ask"); }, [connection]);
+  useEffect(() => { setRuntimeMode(connection.runtime_mode || "local"); setApiUrl(connection.api_url); setWebUrl(connection.web_url); setWorkspace(connection.workspace); setModelProfile(connection.model_profile); setRoots(connection.allowed_roots.join("\n")); setTerminal(connection.terminal_allowlist.join("\n")); setDomains(connection.browser_domains.join("\n")); setAutoApproveSafe(connection.auto_approve_safe); setApprovalMode(connection.approval_mode || "auto"); }, [connection]);
   useEffect(() => {
     if (!isNativeDesktop) return;
     void desktop.credentials().then(setCredentials).catch(() => setCredentials([]));

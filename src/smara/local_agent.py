@@ -458,13 +458,19 @@ class LocalTaskStore:
                 raise ValueError("payload exceeds the 64 KB limit")
         now = _timestamp()
         task_id = f"local_{uuid.uuid4().hex[:20]}"
+        is_delete = (
+            required_capability == "local_file_write"
+            and isinstance(payload, dict)
+            and payload.get("operation") == "delete"
+        )
+        needs_approval = is_delete or (requires_approval and approval_mode == "ask")
         task = {
             "id": task_id,
             "session_id": (session_id or f"local-session-{uuid.uuid4().hex[:12]}")[:160],
             "title": title,
             "objective": objective,
-            "status": "waiting_approval" if requires_approval and approval_mode == "ask" else "queued",
-            "requires_approval": bool(requires_approval),
+            "status": "waiting_approval" if needs_approval else "queued",
+            "requires_approval": bool(needs_approval),
             "approval_mode": approval_mode,
             "required_capability": required_capability,
             "payload": payload,

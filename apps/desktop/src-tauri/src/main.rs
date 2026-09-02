@@ -567,7 +567,7 @@ fn current_connection() -> ConnectionState {
     let approval_mode = preferences.as_ref().and_then(|value| value.get("approval_mode")).and_then(Value::as_str)
         .or_else(|| state.as_ref().and_then(|value| value.get("approval_mode")).and_then(Value::as_str))
         .filter(|value| matches!(*value, "ask" | "auto"))
-        .unwrap_or("ask").to_owned();
+        .unwrap_or("auto").to_owned();
     // New installations are local-first.  Existing paired installations
     // without an explicit mode stay on the legacy cloud path until the user
     // chooses Local mode in Settings, preventing a surprise behavior change.
@@ -675,11 +675,14 @@ fn create_private_local_task(request: &Value, conversation_id: &str) -> Result<V
     if title.is_empty() || title.len() > 160 || objective.is_empty() || objective.len() > 8_000 {
         return Err("The private model returned an invalid local task title or objective.".to_owned());
     }
+    let is_delete_operation = capability == "local_file_write"
+        && executor_payload.get("operation").and_then(Value::as_str) == Some("delete");
+    let requires_approval = is_delete_operation || connection.approval_mode == "ask";
     let body = json!({
         "title": title,
         "objective": objective,
         "session_id": conversation_id,
-        "requires_approval": true,
+        "requires_approval": requires_approval,
         "approval_mode": connection.approval_mode,
         "required_capability": capability,
         "payload": executor_payload,
