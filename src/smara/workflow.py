@@ -16,7 +16,7 @@ from .local_agent import LOCAL_SKILLS
 from .workspace_contract import validate_workspace_job
 
 
-MAX_WORKFLOW_STAGES = 6
+MAX_WORKFLOW_STAGES = 16
 MAX_STAGE_BYTES = 64 * 1024
 MAX_WORKFLOW_BYTES = 256 * 1024
 _STAGE_NAME = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
@@ -36,17 +36,15 @@ def _contains_secret_field(value: Any) -> bool:
 
 
 def validate_workflow(stages: Any) -> list[dict[str, Any]]:
-    """Validate and normalize a sequential inspect-to-report graph.
+    """Validate and normalize a sequential inspect-to-report graph with repair loop support.
 
     Dependencies are generated from the order supplied by the hosted planner,
-    so callers cannot create cycles or accidentally run a later mutation before
-    an earlier inspection.  Capability-specific payload checks still happen in
+    so callers cannot create cycles. Capability-specific payload checks still happen in
     the desktop executor under its normal allowlist and approval gates.
     """
     if not isinstance(stages, list) or not 2 <= len(stages) <= MAX_WORKFLOW_STAGES:
         raise ValueError(f"A local workflow needs 2-{MAX_WORKFLOW_STAGES} stages.")
     normalized: list[dict[str, Any]] = []
-    previous_order = -1
     total_bytes = 0
     for index, item in enumerate(stages):
         if not isinstance(item, dict) or set(item) != _ALLOWED_KEYS:
@@ -56,10 +54,8 @@ def validate_workflow(stages: Any) -> list[dict[str, Any]]:
         payload = item.get("payload")
         if not isinstance(stage, str) or not _STAGE_NAME.fullmatch(stage) or stage not in _STAGE_ORDER:
             raise ValueError("Workflow stage names must be inspect, plan, edit, run, verify, or report.")
-        order = _STAGE_ORDER[stage]
-        if order < previous_order:
-            raise ValueError("Workflow stages must follow inspect → plan → edit → run → verify → report order.")
-        previous_order = order
+        if index == 0 and stage not in {"inspect", "plan"}:
+            raise ValueError("Workflows must start with an inspect or plan stage.")
         if not isinstance(capability, str) or capability not in LOCAL_SKILLS:
             raise ValueError("Workflow stage capability is not an installed local skill.")
         if not isinstance(payload, dict):

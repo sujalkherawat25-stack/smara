@@ -90,12 +90,58 @@ _BINARY_OPS = {
 }
 _UNARY_OPS = {ast.UAdd: operator.pos, ast.USub: operator.neg}
 
+SAFE_MATH_FUNCTIONS = {
+    "sqrt": math.sqrt,
+    "sin": math.sin,
+    "cos": math.cos,
+    "tan": math.tan,
+    "log": math.log,
+    "log10": math.log10,
+    "log2": math.log2,
+    "exp": math.exp,
+    "abs": abs,
+    "round": round,
+    "floor": math.floor,
+    "ceil": math.ceil,
+    "min": min,
+    "max": max,
+    "sum": sum,
+    "pow": pow,
+}
+
+SAFE_MATH_CONSTANTS = {
+    "pi": math.pi,
+    "e": math.e,
+    "tau": math.tau,
+    "inf": math.inf,
+}
+
 
 def _safe_number(node: ast.AST) -> int | float:
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
         if not math.isfinite(float(node.value)) or abs(float(node.value)) > 1_000_000_000_000:
             raise ToolError("Calculator values must be finite and bounded.")
         return node.value
+    if isinstance(node, ast.Name):
+        name = node.id.lower()
+        if name in SAFE_MATH_CONSTANTS:
+            return SAFE_MATH_CONSTANTS[name]
+    if isinstance(node, ast.Call):
+        func_name = None
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id.lower()
+        elif isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id.lower() == "math":
+            func_name = node.func.attr.lower()
+        if func_name and func_name in SAFE_MATH_FUNCTIONS:
+            args = [_safe_number(arg) for arg in node.args]
+            try:
+                result = SAFE_MATH_FUNCTIONS[func_name](*args)
+                if not isinstance(result, (int, float)) or not math.isfinite(float(result)) or abs(float(result)) > 1_000_000_000_000:
+                    raise ToolError("Calculator result is outside safe limits.")
+                return result
+            except Exception as exc:
+                raise ToolError(f"Math function error: {exc}") from exc
+        raise ToolError("Only bounded numeric arithmetic is allowed.")
     if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY_OPS:
         return _UNARY_OPS[type(node.op)](_safe_number(node.operand))
     if isinstance(node, ast.BinOp) and type(node.op) in _BINARY_OPS:
@@ -115,10 +161,10 @@ def _safe_number(node: ast.AST) -> int | float:
 class CalculateTool:
     spec = ToolSpec(
         "calculate",
-        "Evaluate a small numeric expression without executing code.",
+        "Evaluate a numeric expression or math formula (supports basic ops, sqrt, trig, log, powers, round, abs, min, max, pi, e).",
         {
             "type": "object",
-            "properties": {"expression": {"type": "string", "maxLength": 200}},
+            "properties": {"expression": {"type": "string", "maxLength": 500}},
             "required": ["expression"],
             "additionalProperties": False,
         },
@@ -129,13 +175,63 @@ class CalculateTool:
         if not isinstance(expression, str) or not expression.strip():
             raise ToolError("Calculator needs a numeric expression.")
         try:
-            tree = ast.parse(expression.strip()[:200], mode="eval")
-            if sum(1 for _ in ast.walk(tree)) > 50:
+            tree = ast.parse(expression.strip()[:500], mode="eval")
+            if sum(1 for _ in ast.walk(tree)) > 100:
                 raise ToolError("Calculator expression is too complex.")
             result = _safe_number(tree.body)
         except (SyntaxError, TypeError, ValueError) as exc:
             raise ToolError("Calculator expression is not valid.") from exc
         return ToolResult(True, str(result))
+
+
+class ExecutePythonTool:
+    spec = ToolSpec(
+        "execute_python",
+        "Safely execute a Python snippet for complex calculation, data transformation, or text processing.",
+        {
+            "type": "object",
+            "properties": {"code": {"type": "string", "maxLength": 8_000}},
+            "required": ["code"],
+            "additionalProperties": False,
+        },
+    )
+
+    async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        code = arguments.get("code")
+        if not isinstance(code, str) or not code.strip():
+            raise ToolError("Python execution requires non-empty code.")
+        import io
+        import sys
+        allowed_globals = {
+            "__builtins__": {
+                "abs": abs, "all": all, "any": any, "bool": bool, "dict": dict,
+                "enumerate": enumerate, "filter": filter, "float": float, "format": format,
+                "int": int, "isinstance": isinstance, "len": len, "list": list, "map": map,
+                "max": max, "min": min, "print": print, "range": range, "reversed": reversed,
+                "round": round, "set": set, "sorted": sorted, "str": str, "sum": sum,
+                "tuple": tuple, "zip": zip,
+            },
+            "math": math,
+            "json": json,
+        }
+        local_vars: dict[str, Any] = {}
+        stdout_capture = io.StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = stdout_capture
+            exec(code[:8_000], allowed_globals, local_vars)
+            output = stdout_capture.getvalue()
+            if not output.strip() and "result" in local_vars:
+                output = str(local_vars["result"])
+            elif not output.strip() and local_vars:
+                last_val = list(local_vars.values())[-1]
+                output = str(last_val)
+            return ToolResult(True, _bounded(output.strip() or "(Execution completed with no output)"))
+        except Exception as exc:
+            raise ToolError(f"Python execution failed: {type(exc).__name__}: {exc}") from exc
+        finally:
+            sys.stdout = old_stdout
+
 
 
 class ResearchSearchTool:
@@ -497,7 +593,7 @@ class ToolRegistry:
         return ToolResult(result.ok, _bounded(result.content, limit), list(result.citations)[:20], dict(result.meta))
 
 
-def default_tool_registry(http_client: httpx.AsyncClient | None = None, *, integration_runner: Callable[[str, str, dict[str, Any]], Awaitable[str]] | None = None, integration_requester: Callable[[str, str, str, str, dict[str, Any]], dict[str, Any]] | None = None, desktop_requester: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None, desktop_workflow_requester: Callable[[str, list[dict[str, Any]]], dict[str, Any]] | None = None, include_user_integrations: bool = True) -> ToolRegistry:
+def default_tool_registry(http_client: httpx.AsyncClient | None = None, *, integration_runner: Callable[[str, str, dict[str, Any]], Awaitable[str]] | None = None, integration_requester: Callable[[str, str, str, str, dict[str, Any]], dict[str, Any]] | None = None, desktop_requester: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None, desktop_workflow_requester: Callable[[str, list[dict[str, Any]]], dict[str, Any]] | None = None, include_user_integrations: bool = True, include_python: bool = False) -> ToolRegistry:
     registry = ToolRegistry([
         CurrentTimeTool(),
         CalculateTool(),
@@ -505,6 +601,8 @@ def default_tool_registry(http_client: httpx.AsyncClient | None = None, *, integ
         ResearchSearchTool(http_client),
         ResearchFetchTool(http_client),
     ])
+    if include_python:
+        registry.register(ExecutePythonTool())
     if include_user_integrations:
         registry.register(IntegrationReadTool("integration.gmail.search", "Search connected Gmail messages (read-only).", "gmail", "gmail.search", {"query": {"type": "string", "maxLength": 200}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}}))
         registry.register(IntegrationReadTool("integration.calendar.list", "List connected Calendar events (read-only).", "calendar", "calendar.list", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}))

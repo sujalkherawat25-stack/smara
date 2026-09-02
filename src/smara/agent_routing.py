@@ -36,9 +36,18 @@ _TIME_RE = re.compile(
 _CALC_RE = re.compile(r"^(?:please\s+)?(?:calculate|compute)\s+(.+?)[!.?\s]*$", re.IGNORECASE)
 _CALC_EXPRESSION_RE = re.compile(r"^[0-9+\-*/%().\s]+$")
 _DURABLE_RE = re.compile(
-    r"\b(?:write|append|patch|edit|rename|move|delete|create|send|email|message|"
-    r"remind|schedule|terminal|command|run\s+(?:a\s+)?script|browser|open\s+website|"
-    r"desktop|local\s+(?:file|folder|app)|upload|download|cancel|stop|pause|resume)\b",
+    r"\b(?:write|append|patch|edit|rename|move|delete|create)\b[^\n]{0,80}\b(?:to|in|into|on|under)\b[^\n]{0,80}\b(?:documents|desktop|folder|disk|file|directory|workspace)\b|"
+    r"\b(?:save\s+(?:it\s+)?to\s+(?:my\s+)?(?:documents|desktop|folder|disk|file|workspace))|"
+    r"\b(?:create\s+(?:a\s+)?(?:file|folder|directory|script)\s+(?:in|on|at|under))|"
+    r"\b(?:delete\s+(?:the\s+)?(?:file|folder|directory))|"
+    r"\b(?:rename\s+(?:the\s+)?file|move\s+(?:the\s+)?file)|"
+    r"\b(?:remind\s+me|schedule\s+(?:a\s+)?task|schedule\s+every)|"
+    r"\b(?:run\s+(?:a\s+)?(?:terminal|shell|bash|powershell)\s+command)|"
+    r"\b(?:run\s+(?:a\s+)?terminal\b)|"
+    r"\b(?:run\s+command|run\s+script\s+on\s+desktop)|"
+    r"\b(?:open\s+(?:website|browser|url)\s+on\s+desktop)|"
+    r"\b(?:cancel|stop|pause|resume)\s+(?:the\s+)?(?:task|job|schedule|workflow)\b|"
+    r"\b(?:send\s+email|send\s+message\s+via)\b",
     re.IGNORECASE,
 )
 _MEMORY_RE = re.compile(
@@ -88,6 +97,7 @@ _DEEP_RESEARCH_RE = re.compile(
 _READ_TOOLS = (
     "current_time",
     "calculate",
+    "execute_python",
     "research.deep",
     "research.web_search",
     "research.fetch_url",
@@ -161,3 +171,4 @@ def route_request(
             )
         return RouteDecision("D", "read-only tool request", 0.91, complexity, memory_requested, _READ_TOOLS, False)
     return RouteDecision("B", "self-contained answer", 0.84, 1, memory_requested, _READ_TOOLS, False)
+

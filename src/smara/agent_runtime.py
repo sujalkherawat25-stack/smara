@@ -58,7 +58,7 @@ _TOOL_HINT_RE = re.compile(
 )
 
 MEMORY_LOOKUP_TIMEOUT_SECONDS = 1.5
-CONTEXT_MAX_CHARS = 12_000
+CONTEXT_MAX_CHARS = 64_000
 _TARGET_WORDS_RE = re.compile(
     r"\b(?:at\s+least\s+|minimum(?:\s+of)?\s+|around\s+|about\s+|approximately\s+)?([\d][\d,]{2,6})(?:\s*[-–]\s*|\s+)words?\b",
     re.IGNORECASE,
@@ -158,9 +158,9 @@ def _bounded_context(
 ) -> str:
     """Pack context in priority order without losing recent user turns."""
     sections: list[tuple[str, str, int]] = [
-        ("Relevant shared Syntarus memory", memory, 4_000),
-        ("Bounded summary of earlier conversation", summary, 2_500),
-        ("Recent conversation context (oldest to newest)", recent, 5_000),
+        ("Relevant shared Syntarus memory", memory, 24_000),
+        ("Bounded summary of earlier conversation", summary, 16_000),
+        ("Recent conversation context (oldest to newest)", recent, 32_000),
     ]
     chunks: list[str] = []
     used = 0
@@ -177,13 +177,7 @@ def _bounded_context(
 
 
 def _triage(message: str) -> tuple[str, int, bool]:
-    """Cheap local triage so greetings do not pay for a tool-planning loop.
-
-    Memento uses a small model for this decision. Smara keeps the first pass
-    deterministic and zero-cost: only clearly factual/actionable prompts enter
-    the bounded tool loop. The model still decides which registered tool to
-    call once the request is classified as tool-worthy.
-    """
+    """Classify request intent and enable tools for actionable requests."""
     decision = route_request(message)
     if decision.lane == "A":
         return "deterministic", decision.complexity, True
@@ -196,6 +190,7 @@ def _triage(message: str) -> tuple[str, int, bool]:
     if _CHITCHAT_RE.fullmatch(message.strip()):
         return "chitchat", decision.complexity, False
     return "conversation", decision.complexity, False
+
 
 
 class OpenAICompatibleProvider:
@@ -456,10 +451,9 @@ class SmaraAgentRuntime:
             memory_context, conversation_summary, recent
         )
         system = (
-            "You are Smara, a helpful personal/work agent. Be concise and honest. "
-            "A direct chat response cannot claim that it performed an external action. "
-            "For work that needs tools, time, approval, or an artifact, explain that it "
-            "should be created as a durable Smara task."
+            "You are Smara, a powerful, proactive, and capable personal and work AI agent. "
+            "Help the user solve problems, write high-quality code, analyze documents, and plan execution thoroughly. "
+            "Be precise, clear, and comprehensive. A direct chat response cannot claim that it performed an external action."
         )
         if memory_context:
             system += "\n\nRelevant shared Syntarus memory (may be incomplete):\n" + memory_context
@@ -686,9 +680,8 @@ class SmaraAgentRuntime:
         conversation = conversation_id or f"chat_{uuid.uuid4().hex}"
         if not use_tools:
             system = (
-                "You are Smara, a helpful personal/work agent. Be concise, warm, and honest. "
-                "Do not claim that you performed an external action. If the user asks for "
-                "real work, explain that it can be started as a durable Smara task."
+                "You are Smara, a powerful, proactive, and capable personal and work AI agent. "
+                "Provide direct, high-quality, and comprehensive answers. Write full, working code when requested."
             )
             if memory_context:
                 system += "\n\nRelevant shared Syntarus memory (may be incomplete):\n" + memory_context

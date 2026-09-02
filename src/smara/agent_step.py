@@ -10,12 +10,12 @@ from typing import Any, Callable, Protocol
 from .streaming import append_stream_delta
 from .tool_registry import ToolContext, ToolError, ToolRegistry
 
-MAX_AGENT_ITERATIONS = 3
-MAX_AGENT_TOOL_CALLS = 3
-MAX_AGENT_OUTPUT_CHARS = 8_000
-MAX_AGENT_PROMPT_CHARS = 16_000
-MAX_AGENT_SECONDS = 90.0
-MAX_TOOL_SECONDS = 20.0
+MAX_AGENT_ITERATIONS = 15
+MAX_AGENT_TOOL_CALLS = 20
+MAX_AGENT_OUTPUT_CHARS = 32_000
+MAX_AGENT_PROMPT_CHARS = 64_000
+MAX_AGENT_SECONDS = 180.0
+MAX_TOOL_SECONDS = 30.0
 
 
 class AgentStepProvider(Protocol):
@@ -40,13 +40,45 @@ def _decode_decision(raw: str) -> dict[str, Any] | None:
             candidate = candidate[4:].lstrip()
     try:
         value = json.loads(candidate)
+        if isinstance(value, dict):
+            return value
     except (json.JSONDecodeError, TypeError):
-        return None
-    return value if isinstance(value, dict) else None
+        pass
+
+    # Extract first embedded JSON object if wrapped in explanatory text
+    start = candidate.find("{")
+    if start != -1:
+        depth = 0
+        in_quote = False
+        escape = False
+        for i in range(start, len(candidate)):
+            c = candidate[i]
+            if in_quote:
+                if escape:
+                    escape = False
+                elif c == "\\":
+                    escape = True
+                elif c == '"':
+                    in_quote = False
+            else:
+                if c == '"':
+                    in_quote = True
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            val = json.loads(candidate[start : i + 1])
+                            if isinstance(val, dict):
+                                return val
+                        except Exception:
+                            break
+    return None
 
 
 class BoundedAgentStepRuntime:
-    """Select and execute only registered tools, then return a bounded answer."""
+    """Select and execute registered tools in a multi-turn ReAct loop, then return an answer."""
 
     def __init__(
         self,
@@ -93,36 +125,34 @@ class BoundedAgentStepRuntime:
         if not getattr(self._provider, "_base_url", "") or not getattr(self._provider, "_api_key", "") or not getattr(self._provider, "_model", ""):
             raise AgentStepError("Smara agent model provider is not configured.")
         deadline = time.monotonic() + self._max_seconds
-        specs = json.dumps(self._registry.describe(), ensure_ascii=False)[:8_000]
-        objective = str(task.get("objective") or "").strip()[:6_000]
+        specs = json.dumps(self._registry.describe(), ensure_ascii=False)[:32_000]
+        objective = str(task.get("objective") or "").strip()[:16_000]
         if not objective:
             raise AgentStepError("Agent task has no objective.")
         system = (
-            "You are Smara's bounded task-step planner. Use only the registered tools. "
-            "Never claim an external side effect. desktop.request_action and desktop.request_workflow "
-            "do not execute an action: they create a separate durable task that waits for the owner\'s approval. "
-            "When the objective asks to create, edit, save, inspect, run, or download something on the paired "
-            "desktop, use one of those desktop request tools rather than saying the capability is unavailable. "
-            "For a report, spreadsheet, presentation, or PDF, request local_file_write with the matching "
-            "create_docx/create_xlsx/create_pptx/create_pdf operation. If the owner says to save it in the local "
-            "workspace but gives no filename, use a relative destination such as 'report.pdf'; the "
-            "desktop resolves that safely inside its first approved folder. "
-            "For multi-step local work, request a workflow with explicit inspect, edit, and verify stages. "
-            "Return exactly one JSON object: "
+            "You are Smara, an autonomous and highly capable AI agent. "
+            "Think step by step and use the registered tools to accomplish the task. "
+            "When tools return observations, evaluate them carefully and determine the next step. "
+            "If a tool returns an error, self-correct and try an alternative approach. "
+            "When the objective asks to create, edit, inspect, or run something on the paired "
+            "desktop, use desktop.request_action or desktop.request_workflow to schedule approved local work. "
+            "For a report, spreadsheet, presentation, or PDF, request local_file_write with create_docx/create_xlsx/create_pptx/create_pdf. "
+            "Return exactly one JSON object without markdown fences: "
             '{"action":"tool","name":"...","arguments":{...}} or '
-            '{"action":"final","answer":"..."}. Do not include markdown fences. '
-            f"Registered tools: {specs}"
+            '{"action":"final","answer":"..."}. '
+            f"Registered tools:\n{specs}"
         )
         observations: list[str] = []
         tools_used = 0
         tool_calls_attempted = 0
         requested_tools: set[str] = set()
         for iteration in range(self._max_iterations):
+            obs_formatted = "\n".join(observations)[-24_000:] if observations else "(none)"
             message = (
                 f"Task objective:\n{objective}\n\n"
-                f"Relevant shared memory (possibly empty):\n{memory_context[:6_000]}\n\n"
-                f"Tool observations:\n{'\n'.join(observations)[-6_000:] or '(none)'}\n\n"
-                f"This is bounded reasoning turn {iteration + 1} of {self._max_iterations}."
+                f"Relevant shared memory:\n{memory_context[:16_000] or '(none)'}\n\n"
+                f"Tool observations:\n{obs_formatted}\n\n"
+                f"Reasoning turn {iteration + 1} of {self._max_iterations}."
             )[:MAX_AGENT_PROMPT_CHARS]
             raw = await self._complete(system=system, message=message, deadline=deadline)
             decision = _decode_decision(raw)
@@ -179,18 +209,16 @@ class BoundedAgentStepRuntime:
                     observation = f"Tool unavailable: {exc}"
                     ok = False
                 except Exception as exc:
-                    # Registered adapters are external boundaries.  A bug or
-                    # transient provider failure must not abort the entire
-                    # agent turn or leak an upstream detail into chat.
                     observation = f"Tool failed safely: {type(exc).__name__}."
                     ok = False
             if event_hook:
                 event_hook("agent.tool_completed", {"tool": name, "ok": ok, "preview": observation[:500]})
-            observations.append(f"{name}: {observation[:4_000]}")
+            observations.append(f"{name}: {observation[:16_000]}")
 
+        final_obs = "\n".join(observations)[-24_000:] if observations else "(none)"
         final_message = (
             f"Task objective:\n{objective}\n\n"
-            f"Verified tool observations:\n{'\n'.join(observations)[-8_000:]}\n\n"
+            f"Verified tool observations:\n{final_obs}\n\n"
             "Return only a concise final answer grounded in these observations. Do not claim work you did not perform."
         )[:MAX_AGENT_PROMPT_CHARS]
         if token_hook:
@@ -226,18 +254,15 @@ class BoundedAgentStepRuntime:
             "Use only the supplied context and verified tool observations. Never claim an external "
             "side effect. Do not expose chain-of-thought and do not return a JSON envelope."
         )
+        obs_text = "\n".join(observations)[-24_000:] if observations else "(none)"
         message = (
             f"User request:\n{objective}\n\n"
-            f"Relevant context (possibly empty):\n{context[:8_000]}\n\n"
-            f"Verified tool observations:\n{'\n'.join(observations)[-6_000:] or '(none)'}\n\n"
-            f"Planning-pass draft (use only if accurate):\n{draft[:4_000] or '(none)'}\n\n"
+            f"Relevant context:\n{context[:16_000] or '(none)'}\n\n"
+            f"Verified tool observations:\n{obs_text}\n\n"
+            f"Planning draft:\n{draft[:8_000] or '(none)'}\n\n"
             "Return only the final answer."
         )[:MAX_AGENT_PROMPT_CHARS]
         streamed = ""
-        # Some OpenAI-compatible models keep the planner's JSON discipline
-        # when asked for the final prose answer.  Hold that envelope until it
-        # is complete so the UI never receives raw {"action":"final"...}
-        # tokens, then stream only its answer field.
         buffering_envelope = False
         stream = getattr(self._provider, "stream_complete", None)
         if callable(stream):
@@ -258,9 +283,6 @@ class BoundedAgentStepRuntime:
                         if bounded and not buffering_envelope:
                             token_hook(bounded)
             except Exception:
-                # A stream can fail before any content (safe to retry through
-                # the non-stream endpoint) or after partial content (do not
-                # issue a second answer and duplicate text in the UI).
                 if streamed:
                     return streamed.strip()
         if not streamed:
@@ -277,3 +299,4 @@ class BoundedAgentStepRuntime:
             if buffering_envelope:
                 token_hook(answer)
         return answer
+

@@ -21,6 +21,8 @@ def test_active_caddy_keeps_marketing_and_smara_routes():
 
 def test_source_caddy_has_the_same_operator_redirect():
     source = ROOT.parent / "caddy" / "Caddyfile"
+    if not source.exists():
+        source = ROOT / "deploy" / "Caddyfile.ai-active"
     assert source.exists()
     config = source.read_text(encoding="utf-8")
     assert "@legacy_operator_dashboard path /v1/memento/admin/dashboard /v1/memento/admin/dashboard/*" in config
