@@ -427,8 +427,9 @@ def test_local_github_adapter_is_read_only_and_classifies_bad_credentials(monkey
 
 def test_local_connector_catalogue_is_explicit_and_secret_free():
     connectors = {item["provider"]: item for item in local_connector_catalog()}
-    assert set(connectors) == {"tavily", "github"}
+    assert set(connectors) == {"tavily", "exa", "github"}
     assert connectors["tavily"]["credential_alias"] == "TAVILY_API_KEY"
+    assert connectors["exa"]["credential_alias"] == "EXA_API_KEY"
     assert connectors["github"]["operation"] == "list_repositories"
     assert all(item["credential_configured"] is False for item in connectors.values())
 
