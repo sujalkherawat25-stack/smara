@@ -738,7 +738,25 @@ def _read_file(payload: dict, roots: list[Path]) -> str:
     # only reachable after the hosted approval gate has released the step.
     if payload.get("share_content") is True:
         result["content_shared"] = True
-        result["content"] = content.decode("utf-8", errors="replace")[:MAX_FILE_BYTES]
+        raw_text = content.decode("utf-8", errors="replace")
+        start_line = payload.get("start_line")
+        end_line = payload.get("end_line")
+        with_line_numbers = payload.get("line_numbers") is True
+        if start_line is not None or end_line is not None:
+            lines = raw_text.splitlines()
+            s_idx = max(1, int(start_line)) if start_line is not None else 1
+            e_idx = min(len(lines), int(end_line)) if end_line is not None else len(lines)
+            selected = lines[s_idx - 1:e_idx]
+            if with_line_numbers:
+                formatted = [f"{s_idx + i:5d} | {line}" for i, line in enumerate(selected)]
+                result["content"] = "\n".join(formatted)
+            else:
+                result["content"] = "\n".join(selected)
+            result["start_line"] = s_idx
+            result["end_line"] = e_idx
+            result["total_lines"] = len(lines)
+        else:
+            result["content"] = raw_text[:MAX_FILE_BYTES]
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -849,10 +867,23 @@ def _search_workspace(payload: dict, roots: list[Path]) -> str:
     scanned_files = 0
     matches: list[dict[str, object]] = []
     truncated = False
+    is_regex = payload.get("is_regex") is True
+    compiled_regex = None
+    if is_regex:
+        try:
+            compiled_regex = re.compile(query, re.IGNORECASE if not payload.get("case_sensitive") else 0)
+        except re.error as exc:
+            raise RuntimeError(f"Invalid regular expression: {exc}") from exc
+
     try:
         for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+            # Exclude vendor and cache directories for fast, clean search
+            directories[:] = [
+                d for d in directories
+                if not d.startswith(".") and d not in {"node_modules", "venv", ".venv", "__pycache__", "target", "dist", "build"}
+                and not (Path(current) / d).is_symlink()
+            ]
             current_path = Path(current)
-            directories[:] = sorted(item for item in directories if not (current_path / item).is_symlink())
             for filename in sorted(files):
                 if scanned_files >= max_files or len(matches) >= max_matches:
                     truncated = True
@@ -871,8 +902,12 @@ def _search_workspace(payload: dict, roots: list[Path]) -> str:
                     continue
                 text = raw.decode("utf-8", errors="replace")
                 for number, line in enumerate(text.splitlines(), 1):
-                    if needle not in line.casefold():
-                        continue
+                    if is_regex and compiled_regex:
+                        if not compiled_regex.search(line):
+                            continue
+                    else:
+                        if needle not in line.casefold():
+                            continue
                     matches.append({
                         "path": _relative_path(child, root),
                         "line": number,
@@ -1106,6 +1141,7 @@ def _workspace_inspect(payload: dict, roots: list[Path]) -> str:
 
 def _atomic_bytes(path: Path, data: bytes) -> None:
     """Replace one validated file without ever exposing a partial write."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as handle:
         temporary = Path(handle.name)
         handle.write(data)
@@ -1338,7 +1374,12 @@ def _write_file_unlocked(payload: dict, roots: list[Path], state: dict | None = 
         return _write_document_unlocked(payload, roots, state)
     if operation == "prepare_workspace":
         return _prepare_workspace(payload, roots, state or {})
-    if not isinstance(operation, str) or operation not in {"write", "append", "patch", "rename", "move", "delete", "undo"}:
+    if operation == "create_directory":
+        target = _target(payload.get("path"), roots, must_exist=False)
+        target.mkdir(parents=True, exist_ok=True)
+        preview = {"operation": "create_directory", "from": target.name, "to": target.name, "changed": True, "diff": f"+ directory {target.name}", "diff_truncated": False}
+        return json.dumps({"action": "local_file_write", "operation": "create_directory", "file_name": target.name, "bytes_written": 0, "preview": preview, "undo_available": False}, ensure_ascii=False)
+    if not isinstance(operation, str) or operation not in {"write", "append", "patch", "rename", "move", "delete", "undo", "create_directory"}:
         raise RuntimeError("local_file_write supports text edits plus create/edit DOCX, XLSX, PPTX, and PDF operations.")
 
     directory = _undo_dir(state, roots)
