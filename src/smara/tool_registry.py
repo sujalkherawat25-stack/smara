@@ -12,6 +12,7 @@ import json
 import math
 import operator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
 
 import httpx
@@ -543,6 +544,302 @@ class DesktopWorkflowRequestTool:
         return ToolResult(True, _bounded(json.dumps(response, ensure_ascii=False)))
 
 
+class GraphInspectSymbolTool:
+    spec = ToolSpec(
+        "graph.inspect_symbol",
+        "Inspect a code symbol (function, class, method) across the workspace using AST indexing to view its exact signature, docstring, callers, and callees.",
+        {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Name of the class, function, or method to inspect"}
+            },
+            "required": ["symbol"],
+            "additionalProperties": False,
+        },
+    )
+
+    def __init__(self, workspace_root: str | Path | None = None):
+        self._root = Path(workspace_root or ".").resolve()
+        self._graph: Any = None
+
+    def _get_graph(self):
+        if self._graph is None:
+            from .code_graph import CodePropertyGraph
+            self._graph = CodePropertyGraph(self._root)
+        return self._graph
+
+    async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        symbol = arguments.get("symbol")
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise ToolError("graph.inspect_symbol requires a non-empty symbol name.")
+        graph = self._get_graph()
+        info = graph.inspect_symbol(symbol.strip())
+        if not info:
+            raise ToolError(f"Symbol '{symbol}' was not found in the workspace code graph.")
+        return ToolResult(True, _bounded(json.dumps(info, ensure_ascii=False, indent=2)))
+
+
+class GraphBlastRadiusTool:
+    spec = ToolSpec(
+        "graph.blast_radius",
+        "Pre-calculate the blast radius and downstream impact (dependent files, callers, and associated test suites) of editing a symbol or file.",
+        {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "minLength": 1, "maxLength": 300, "description": "File path (e.g. 'src/smara/auth.py') or symbol name to analyze"}
+            },
+            "required": ["target"],
+            "additionalProperties": False,
+        },
+    )
+
+    def __init__(self, workspace_root: str | Path | None = None):
+        self._root = Path(workspace_root or ".").resolve()
+        self._graph: Any = None
+
+    def _get_graph(self):
+        if self._graph is None:
+            from .code_graph import CodePropertyGraph
+            self._graph = CodePropertyGraph(self._root)
+        return self._graph
+
+    async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        target = arguments.get("target")
+        if not isinstance(target, str) or not target.strip():
+            raise ToolError("graph.blast_radius requires a target file or symbol name.")
+        graph = self._get_graph()
+        radius = graph.blast_radius(target.strip())
+        return ToolResult(True, _bounded(json.dumps(radius, ensure_ascii=False, indent=2)))
+
+
+class GraphFindReferencesTool:
+    spec = ToolSpec(
+        "graph.find_references",
+        "Find all definitions and call references of a symbol across the workspace graph.",
+        {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Symbol name to find references for"}
+            },
+            "required": ["symbol"],
+            "additionalProperties": False,
+        },
+    )
+
+    def __init__(self, workspace_root: str | Path | None = None):
+        self._root = Path(workspace_root or ".").resolve()
+        self._graph: Any = None
+
+    def _get_graph(self):
+        if self._graph is None:
+            from .code_graph import CodePropertyGraph
+            self._graph = CodePropertyGraph(self._root)
+        return self._graph
+
+class DesktopActionRequestTool:
+    """Create an approved desktop step; never executes on the worker host."""
+
+    spec = ToolSpec(
+        "desktop.request_action",
+        "Create a durable approval-gated task for a paired desktop capability. The local action is not run by this chat step. local_file_read supports read_file, list_tree, search_text, find_files, git_summary, and metadata-only workspace_snapshot. local_file_write supports preview_only planning, bounded text edits, document creation/editing, and prepare_workspace isolation: DOCX reports, XLSX workbooks, PPTX briefings, PDF reports, PDF merge, and PDF page extraction. Every mutation returns a preview and local undo id.",
+        {
+            "type": "object",
+            "properties": {
+                "capability": {"type": "string", "enum": ["local_file_read", "local_file_write", "local_terminal", "local_browser", "local_integration"]},
+                "preview": {"type": "string", "minLength": 1, "maxLength": 1_000},
+                "payload": {
+                    "type": "object",
+                    "maxProperties": 30,
+                    "description": "Capability payload. local_file_read supports read_file, list_tree, literal search_text, find_files, git_summary, and metadata-only workspace_snapshot. local_file_write supports preview_only, write/append/patch/rename/move/delete/undo, prepare_workspace isolation, create_docx and edit_docx (title/sections or exact text replacement), create_xlsx and edit_xlsx (bounded sheets, rows, cells, safe aggregate formulas), create_pptx and edit_pptx (briefing slides), create_pdf, merge_pdf, and extract_pdf_pages. All document output stays under an approved folder, is capped at 8 MB, and returns a readable preview plus local undo id. local_terminal uses argv and cwd. local_browser supports open, explicit isolated connector handoff ({operation:handoff, provider:github|google}), inspect_text, inspect_dom, or download with an approved HTTP(S) url; handoff uses a separate local Chromium profile and never returns cookies, paths, codes, or passkeys, inspect_dom accepts a simple tag/#id/.class selector and bounded max_elements, while download requires a destination inside an approved folder and is capped at 50 MB. local_integration supports only approval-gated local Tavily search ({provider:tavily, operation:search, query}) and GitHub repository listing ({provider:github, operation:list_repositories, limit}); their credentials stay in the desktop vault.",
+                },
+            },
+            "required": ["capability", "preview", "payload"],
+            "additionalProperties": False,
+        },
+    )
+
+    async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        if context.desktop_requester is None:
+            raise ToolError("Desktop actions are available only inside an approved hosted task.")
+        capability, preview, payload = arguments.get("capability"), arguments.get("preview"), arguments.get("payload")
+        if not isinstance(capability, str) or capability not in set(self.spec.parameters["properties"]["capability"]["enum"]):
+            raise ToolError("Desktop capability is not supported.")
+        if not isinstance(preview, str) or not preview.strip() or not isinstance(payload, dict):
+            raise ToolError("Desktop action needs a preview and object payload.")
+        if "workspace_job" in payload:
+            try:
+                job = validate_workspace_job(payload["workspace_job"])
+            except RuntimeError as exc:
+                raise ToolError(str(exc)) from exc
+            if capability not in job.allowed_capabilities:
+                raise ToolError("workspace_job does not allow the requested desktop capability.")
+        try:
+            result = context.desktop_requester(capability, preview[:1_000], payload)
+        except Exception as exc:
+            raise ToolError(
+                f"Desktop task request failed safely ({type(exc).__name__}). "
+                "Check that the paired Desktop is online, then retry."
+            ) from exc
+        return ToolResult(True, _bounded(json.dumps({"approval_required": True, **result}, ensure_ascii=False)))
+
+
+class DesktopWorkflowRequestTool:
+    """Create one approval-gated, sequential local task graph."""
+
+    spec = ToolSpec(
+        "desktop.request_workflow",
+        "Create one durable approval-gated local workflow. The hosted planner supplies explicit inspect, plan, edit, run, verify, and report stages; the paired desktop executes them in order and never runs a stage without approval.",
+        {
+            "type": "object",
+            "properties": {
+                "preview": {"type": "string", "minLength": 1, "maxLength": 1_000},
+                "stages": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 6,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "stage": {"type": "string", "enum": ["inspect", "plan", "edit", "run", "verify", "report"]},
+                            "capability": {"type": "string", "enum": ["local_file_read", "local_file_write", "local_terminal", "local_browser", "local_integration"]},
+                            "payload": {"type": "object", "maxProperties": 30},
+                        },
+                        "required": ["stage", "capability", "payload"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["preview", "stages"],
+            "additionalProperties": False,
+        },
+    )
+
+    async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        if context.desktop_workflow_requester is None:
+            raise ToolError("Desktop workflows are available only inside an approved hosted task.")
+        preview, raw_stages = arguments.get("preview"), arguments.get("stages")
+        if not isinstance(preview, str) or not preview.strip():
+            raise ToolError("Desktop workflow needs a preview.")
+        try:
+            stages = validate_workflow(raw_stages)
+            result = context.desktop_workflow_requester(preview[:1_000], stages)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+        except Exception as exc:
+            raise ToolError(
+                f"Desktop workflow request failed safely ({type(exc).__name__}). "
+                "Check that the paired Desktop is online, then retry."
+            ) from exc
+        if not isinstance(result, dict):
+            raise ToolError("Desktop workflow request returned an invalid result.")
+        response = dict(result)
+        # These fields are protocol guarantees, not callback-controlled data.
+        response["approval_required"] = True
+        response["workflow"] = workflow_summary(stages)
+        return ToolResult(True, _bounded(json.dumps(response, ensure_ascii=False)))
+
+
+class GraphInspectSymbolTool:
+    spec = ToolSpec(
+        "graph.inspect_symbol",
+        "Inspect a code symbol (function, class, method) across the workspace using AST indexing to view its exact signature, docstring, callers, and callees.",
+        {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Name of the class, function, or method to inspect"}
+            },
+            "required": ["symbol"],
+            "additionalProperties": False,
+        },
+    )
+
+    def __init__(self, workspace_root: str | Path | None = None):
+        self._root = Path(workspace_root or ".").resolve()
+        self._graph: Any = None
+
+    def _get_graph(self):
+        if self._graph is None:
+            from .code_graph import CodePropertyGraph
+            self._graph = CodePropertyGraph(self._root)
+        return self._graph
+
+    async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        symbol = arguments.get("symbol")
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise ToolError("graph.inspect_symbol requires a non-empty symbol name.")
+        graph = self._get_graph()
+        info = graph.inspect_symbol(symbol.strip())
+        if not info:
+            raise ToolError(f"Symbol '{symbol}' was not found in the workspace code graph.")
+        return ToolResult(True, _bounded(json.dumps(info, ensure_ascii=False, indent=2)))
+
+
+class GraphBlastRadiusTool:
+    spec = ToolSpec(
+        "graph.blast_radius",
+        "Pre-calculate the blast radius and downstream impact (dependent files, callers, and associated test suites) of editing a symbol or file.",
+        {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "minLength": 1, "maxLength": 300, "description": "File path (e.g. 'src/smara/auth.py') or symbol name to analyze"}
+            },
+            "required": ["target"],
+            "additionalProperties": False,
+        },
+    )
+
+    def __init__(self, workspace_root: str | Path | None = None):
+        self._root = Path(workspace_root or ".").resolve()
+        self._graph: Any = None
+
+    def _get_graph(self):
+        if self._graph is None:
+            from .code_graph import CodePropertyGraph
+            self._graph = CodePropertyGraph(self._root)
+        return self._graph
+
+    async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        target = arguments.get("target")
+        if not isinstance(target, str) or not target.strip():
+            raise ToolError("graph.blast_radius requires a target file or symbol name.")
+        graph = self._get_graph()
+        radius = graph.blast_radius(target.strip())
+        return ToolResult(True, _bounded(json.dumps(radius, ensure_ascii=False, indent=2)))
+
+
+class GraphFindReferencesTool:
+    spec = ToolSpec(
+        "graph.find_references",
+        "Find all definitions and call references of a symbol across the workspace graph.",
+        {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Symbol name to find references for"}
+            },
+            "required": ["symbol"],
+            "additionalProperties": False,
+        },
+    )
+
+    def __init__(self, workspace_root: str | Path | None = None):
+        self._root = Path(workspace_root or ".").resolve()
+        self._graph: Any = None
+
+    def _get_graph(self):
+        if self._graph is None:
+            from .code_graph import CodePropertyGraph
+            self._graph = CodePropertyGraph(self._root)
+        return self._graph
+
+    async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        symbol = arguments.get("symbol")
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise ToolError("graph.find_references requires a non-empty symbol name.")
+        graph = self._get_graph()
+        refs = graph.find_references(symbol.strip())
+        return ToolResult(True, _bounded(json.dumps(refs, ensure_ascii=False, indent=2)))
+
+
 class ToolRegistry:
     def __init__(self, tools: list[Tool] | None = None):
         self._tools: dict[str, Tool] = {}
@@ -574,26 +871,31 @@ class ToolRegistry:
     async def invoke(self, name: str, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         tool = self._tools.get(name)
         if tool is None:
-            raise ToolError("Requested tool is not registered.")
+            raise ToolError(f"Tool '{name}' is not registered.")
         if tool.spec.side_effecting or tool.spec.requires_approval:
             raise ToolError("This tool requires a durable approved task and cannot run directly.")
         if not isinstance(arguments, dict):
             raise ToolError("Tool arguments must be an object.")
         properties = tool.spec.parameters.get("properties", {})
         unknown = set(arguments) - set(properties)
-        if unknown or tool.spec.parameters.get("additionalProperties") is False:
-            if unknown:
-                raise ToolError("Tool arguments contain unsupported fields.")
+        if unknown and tool.spec.parameters.get("additionalProperties") is False:
+            raise ToolError("Tool arguments contain unsupported fields.")
         result = await tool.run(arguments, context)
-        # `research.deep` already applies a source-balanced, 16k evidence
-        # budget. Re-applying the generic 4k tool cap here discarded later
-        # source labels before the citation writer received them. Other
-        # direct-chat tools retain the smaller defensive boundary.
         limit = 16_000 if name == "research.deep" else MAX_TOOL_RESULT_CHARS
         return ToolResult(result.ok, _bounded(result.content, limit), list(result.citations)[:20], dict(result.meta))
 
 
-def default_tool_registry(http_client: httpx.AsyncClient | None = None, *, integration_runner: Callable[[str, str, dict[str, Any]], Awaitable[str]] | None = None, integration_requester: Callable[[str, str, str, str, dict[str, Any]], dict[str, Any]] | None = None, desktop_requester: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None, desktop_workflow_requester: Callable[[str, list[dict[str, Any]]], dict[str, Any]] | None = None, include_user_integrations: bool = True, include_python: bool = False) -> ToolRegistry:
+def default_tool_registry(
+    http_client: httpx.AsyncClient | None = None,
+    *,
+    integration_runner: Callable[[str, str, dict[str, Any]], Awaitable[str]] | None = None,
+    integration_requester: Callable[[str, str, str, str, dict[str, Any]], dict[str, Any]] | None = None,
+    desktop_requester: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None,
+    desktop_workflow_requester: Callable[[str, list[dict[str, Any]]], dict[str, Any]] | None = None,
+    include_user_integrations: bool = True,
+    include_python: bool = False,
+    include_graph: bool = False,
+) -> ToolRegistry:
     registry = ToolRegistry([
         CurrentTimeTool(),
         CalculateTool(),
@@ -603,6 +905,10 @@ def default_tool_registry(http_client: httpx.AsyncClient | None = None, *, integ
     ])
     if include_python:
         registry.register(ExecutePythonTool())
+    if include_graph:
+        registry.register(GraphInspectSymbolTool())
+        registry.register(GraphBlastRadiusTool())
+        registry.register(GraphFindReferencesTool())
     if include_user_integrations:
         registry.register(IntegrationReadTool("integration.gmail.search", "Search connected Gmail messages (read-only).", "gmail", "gmail.search", {"query": {"type": "string", "maxLength": 200}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}}))
         registry.register(IntegrationReadTool("integration.calendar.list", "List connected Calendar events (read-only).", "calendar", "calendar.list", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}))

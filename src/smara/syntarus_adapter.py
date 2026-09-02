@@ -1,8 +1,9 @@
 """The sole boundary between Smara and Syntarus Memory."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class MemoryPort(Protocol):
@@ -152,7 +153,29 @@ class SyntarusMemory:
         ).hexdigest()
         return digest[:24]
 
+    async def graph_context_for_task(self, task: dict) -> str:
+        """Retrieve topological graph context and entity relations from Syntarus."""
+        scope = MemoryScope(task["account_id"], task["workspace_id"], task["id"], task.get("task_run_id", task["id"]))
+        query = f"graph_entities: {task['objective']}"
+        result = await self._search(query, user_id=scope.user_id, workspace_id=scope.workspace_id)
+        return str(result.get("context", result.get("context_string", "")))[:16_000]
+
+    async def remember_graph_entities(self, task: dict, entities: list[dict[str, Any]]) -> dict:
+        """Persist structured entity triples discovered during execution into Syntarus graph memory."""
+        scope = MemoryScope(task["account_id"], task["workspace_id"], task["id"], task.get("task_run_id", task["id"]))
+        metadata = scope.metadata(memory_kind="graph_entities", status="verified", source_type="code_graph")
+        metadata["entity_count"] = len(entities)
+        content = json.dumps(entities, ensure_ascii=False)[:12_000]
+        return await self._client.add(
+            user_id=scope.user_id,
+            run_id=scope.run_id,
+            messages=[{"role": "user", "content": task["objective"]}, {"role": "assistant", "content": content}],
+            metadata=metadata,
+            idempotency_key=f"smara-graph-{task['id']}",
+        )
+
     async def aclose(self) -> None:
         close = getattr(self._client, "aclose", None)
         if close is not None:
             await close()
+
