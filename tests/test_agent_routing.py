@@ -18,6 +18,7 @@ def test_route_exact_safe_requests_to_deterministic_lane():
 
 def test_route_natural_clock_and_identity_requests_reliably():
     assert route_request("what time it is").deterministic_tool == ("current_time", {})
+    assert route_request("okay great, what time it is").deterministic_tool == ("current_time", {})
     identity = route_request("Do you know me?")
     assert identity.lane == "C"
     assert identity.memory_needed is True

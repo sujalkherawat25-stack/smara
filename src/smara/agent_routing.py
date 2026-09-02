@@ -98,6 +98,18 @@ _READ_TOOLS = (
 )
 
 
+def _direct_request_text(message: str) -> str:
+    """Remove harmless conversational lead-ins before exact safe-tool routing.
+
+    A request like "okay great, what time it is" must be handled exactly as
+    "what time it is".  This does not remove substantive clauses, and durable
+    work is still detected from the original message before direct tools run.
+    """
+    text = str(message or "").strip()
+    lead_in = re.compile(r"^(?:(?:okay|ok|great|thanks?|thank\s+you|well|so|please)[\s,!.]*)+", re.IGNORECASE)
+    return lead_in.sub("", text).strip()
+
+
 def route_request(
     message: str,
     *,
@@ -106,6 +118,7 @@ def route_request(
     local_only: bool = False,
 ) -> RouteDecision:
     text = message.strip()
+    direct_text = _direct_request_text(text)
     # Identity questions are memory questions even though natural phrasing
     # often contains neither "memory" nor "remember".  Treating these as
     # small talk was the reason a restarted desktop could answer "Not yet"
@@ -119,12 +132,12 @@ def route_request(
         return RouteDecision(
             "E", "durable or approval-gated work", 0.98, 3, True, (), True
         )
-    if _TIME_RE.fullmatch(text):
+    if _TIME_RE.fullmatch(direct_text):
         return RouteDecision(
             "A", "exact current-time request", 0.99, 1, False, ("current_time",), False,
             ("current_time", {}),
         )
-    calc = _CALC_RE.fullmatch(text)
+    calc = _CALC_RE.fullmatch(direct_text)
     if calc and _CALC_EXPRESSION_RE.fullmatch(calc.group(1).strip()):
         return RouteDecision(
             "A", "exact bounded arithmetic request", 0.99, 1, False, ("calculate",), False,
