@@ -154,8 +154,16 @@ external action is attributable, bounded, and reviewable.
 
 ## First execution slice
 
-1. Ship L0's conversational deterministic router fix and regression test.
-2. Add the local-agent evaluation harness and its first direct-utility cases.
-3. Build the Desktop Capability Broker with local clock, calculator, status,
-   and capability discovery, independent of the selected model.
-4. Run the native Desktop package against that corpus before adding more tools.
+1. ✅ Shipped L0's conversational deterministic router and regression tests.
+2. 🟡 The Desktop-native utility tests cover clock, calculation, status, and
+   strict arithmetic input rejection. The larger disposable-workspace corpus
+   remains next.
+3. ✅ Built the first Desktop Capability Broker slice: local clock,
+   calculator, status/capability discovery, and typed task emission are
+   independent of a hosted connection. Local chat no longer requires a model
+   just to use those built-ins.
+4. ✅ Added a strict JSON-plan fallback for private providers that do not
+   implement OpenAI function calls. Every JSON plan goes through the same
+   capability and payload validation as native function calls.
+5. 🟡 Run the native package against the broader corpus before adding more
+   mutating workflows.

@@ -893,6 +893,38 @@ async fn emit_local_builtin_answer(app: &AppHandle, args: &ChatArgs, tool: &str,
     Ok(())
 }
 
+async fn emit_local_task_plan(app: &AppHandle, args: &ChatArgs, arguments: &Value) -> Result<(), String> {
+    app.emit("smara-chat-event", json!({"type": "phase", "phase": "local_plan"})).map_err(|error| error.to_string())?;
+    app.emit("smara-chat-event", json!({"type": "tool_call", "name": arguments.get("capability").and_then(Value::as_str).unwrap_or("local_action")})).map_err(|error| error.to_string())?;
+    let task = create_private_local_task(arguments, &args.conversation_id)?;
+    let task_id = task.get("id").and_then(Value::as_str).unwrap_or("");
+    let status = task.get("status").and_then(Value::as_str).unwrap_or("waiting_approval");
+    let title = task.get("title").and_then(Value::as_str).unwrap_or("Local task");
+    let answer = if status == "queued" { format!("I started **{title}** on this Desktop. Its verified result will appear here and in Activity.") } else { format!("I prepared **{title}**. Open Activity to review and approve it on this Desktop.") };
+    let _ = persist_local_chat_turn(&args.conversation_id, &args.message, &answer);
+    app.emit("smara-chat-event", json!({"type": "tool_result", "name": "local_task", "ok": true, "preview": status})).map_err(|error| error.to_string())?;
+    app.emit("smara-chat-event", json!({"type": "token", "text": answer})).map_err(|error| error.to_string())?;
+    app.emit("smara-chat-event", json!({"type": "done", "tools_used": 1, "task_id": task_id})).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn parse_local_json_plan(content: &str) -> Option<Value> {
+    let trimmed = content.trim();
+    let body = trimmed.strip_prefix("```json").or_else(|| trimmed.strip_prefix("```"))
+        .map(|value| value.trim().strip_suffix("```").unwrap_or(value.trim()).trim())
+        .unwrap_or(trimmed);
+    let value: Value = serde_json::from_str(body).ok()?;
+    let kind = value.get("kind").and_then(Value::as_str)?;
+    match kind {
+        "local_action" if value.get("title").and_then(Value::as_str).is_some()
+            && value.get("objective").and_then(Value::as_str).is_some()
+            && value.get("capability").and_then(Value::as_str).is_some()
+            && value.get("payload").and_then(Value::as_object).is_some() => Some(value),
+        "answer" if value.get("answer").and_then(Value::as_str).is_some() => Some(value),
+        _ => None,
+    }
+}
+
 fn resolve_local_secret(name: &str) -> Result<String, String> {
     let value = run_executor(vec!["--credential-get".to_owned(), name.to_owned()])?;
     if value.is_empty() { return Err("The local model credential is empty; save it again.".to_owned()); }
@@ -1119,6 +1151,34 @@ fn emit_local_payload(app: &AppHandle, data: &str, streamed: &mut String) -> Res
     Ok(false)
 }
 
+async fn try_local_json_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalModelProfile, secret: &str, capability_descriptions: &str) -> Result<Option<()>, String> {
+    let system = format!(
+        "You are Smara's private Desktop planner. Return exactly one JSON object, with no Markdown. For a local action return {{\"kind\":\"local_action\",\"title\":string,\"objective\":string,\"capability\":string,\"payload\":object}}. For an ordinary answer return {{\"kind\":\"answer\",\"answer\":string}}. Never claim an action happened. Use only enabled capabilities, keep every path inside an approved folder, use argv arrays for terminal commands, and never include credential values.\n\nEnabled capabilities:\n{capability_descriptions}"
+    );
+    let mut messages = vec![json!({"role": "system", "content": system})];
+    messages.extend(local_chat_history(&args.conversation_id));
+    messages.push(json!({"role": "user", "content": args.message}));
+    let payload = json!({"model": profile.model, "messages": messages, "stream": false, "max_tokens": 2048, "temperature": 0.0});
+    let endpoint = local_chat_endpoint(&profile.base_url);
+    let mut request = shared_http_client().post(endpoint).timeout(std::time::Duration::from_secs(120)).json(&payload);
+    if profile.auth_header == "api-subscription-key" { request = request.header("api-subscription-key", secret); } else { request = request.bearer_auth(secret); }
+    let response = request.send().await.map_err(|error| format!("Could not reach the private {} provider: {error}", profile.label))?;
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED || response.status() == reqwest::StatusCode::FORBIDDEN { return Err(format!("{} rejected the local API key. Update this provider in Settings.", profile.label)); }
+    if !response.status().is_success() { return Ok(None); }
+    let value = response.json::<Value>().await.map_err(|_| "The private model returned invalid JSON.".to_owned())?;
+    let content = value.get("choices").and_then(Value::as_array).and_then(|items| items.first()).and_then(|choice| choice.get("message")).and_then(|message| message.get("content")).and_then(Value::as_str);
+    let Some(plan) = content.and_then(parse_local_json_plan) else { return Ok(None); };
+    if plan.get("kind").and_then(Value::as_str) == Some("local_action") {
+        emit_local_task_plan(app, args, &plan).await?;
+    } else if let Some(answer) = plan.get("answer").and_then(Value::as_str) {
+        let _ = persist_local_chat_turn(&args.conversation_id, &args.message, answer);
+        app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"})).map_err(|error| error.to_string())?;
+        app.emit("smara-chat-event", json!({"type": "token", "text": answer})).map_err(|error| error.to_string())?;
+        app.emit("smara-chat-event", json!({"type": "done", "tools_used": 0})).map_err(|error| error.to_string())?;
+    }
+    Ok(Some(()))
+}
+
 async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalModelProfile, secret: &str) -> Result<Option<()>, String> {
     let connection = current_connection();
     if connection.capabilities.is_empty() {
@@ -1176,9 +1236,10 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
         return Err(format!("{} rejected the local API key. Update this provider in Settings.", profile.label));
     }
     if matches!(response.status().as_u16(), 400 | 404 | 422) {
-        // Some OpenAI-compatible endpoints do not implement tools. Preserve
-        // ordinary private chat through the existing streaming fallback.
-        return Ok(None);
+        // Some OpenAI-compatible endpoints do not implement function calls.
+        // Give them one strictly parsed JSON-plan attempt before falling back
+        // to ordinary private chat.
+        return try_local_json_agent_turn(app, args, profile, secret, &capability_descriptions).await;
     }
     if !response.status().is_success() {
         return Err(format!("Private {} provider returned HTTP {}. Check its endpoint and model.", profile.label, response.status()));
@@ -1194,21 +1255,13 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
         }
         let raw_arguments = function.get("arguments").and_then(Value::as_str).ok_or_else(|| "The private model returned invalid local tool arguments.".to_owned())?;
         let arguments: Value = serde_json::from_str(raw_arguments).map_err(|_| "The private model returned malformed local tool arguments.".to_owned())?;
-        app.emit("smara-chat-event", json!({"type": "phase", "phase": "local_plan"})).map_err(|error| error.to_string())?;
-        app.emit("smara-chat-event", json!({"type": "tool_call", "name": arguments.get("capability").and_then(Value::as_str).unwrap_or("local_action")})).map_err(|error| error.to_string())?;
-        let task = create_private_local_task(&arguments, &args.conversation_id)?;
-        let task_id = task.get("id").and_then(Value::as_str).unwrap_or("");
-        let status = task.get("status").and_then(Value::as_str).unwrap_or("waiting_approval");
-        let title = task.get("title").and_then(Value::as_str).unwrap_or("Local task");
-        let answer = if status == "queued" {
-            format!("I started **{title}** on this Desktop. Its verified result will appear here and in Activity.")
-        } else {
-            format!("I prepared **{title}**. Open Activity to review and approve it on this Desktop.")
-        };
-        let _ = persist_local_chat_turn(&args.conversation_id, &args.message, &answer);
-        app.emit("smara-chat-event", json!({"type": "tool_result", "name": "local_task", "ok": true, "preview": status})).map_err(|error| error.to_string())?;
-        app.emit("smara-chat-event", json!({"type": "token", "text": answer})).map_err(|error| error.to_string())?;
-        app.emit("smara-chat-event", json!({"type": "done", "tools_used": 1, "task_id": task_id})).map_err(|error| error.to_string())?;
+        emit_local_task_plan(app, args, &arguments).await?;
+        return Ok(Some(()));
+    }
+    // A tool-capable provider may still answer in prose instead of selecting
+    // the advertised function. Give the typed JSON contract one chance
+    // before accepting that prose, so local work is not silently skipped.
+    if let Some(()) = try_local_json_agent_turn(app, args, profile, secret, &capability_descriptions).await? {
         return Ok(Some(()));
     }
     if let Some(content) = message.get("content").and_then(Value::as_str).filter(|text| !text.trim().is_empty()) {
@@ -1341,7 +1394,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{append_stream_delta, derived_local_capabilities, direct_local_request_text, evaluate_local_arithmetic, local_builtin_answer, local_delta_text, local_event_payload, normalized_api_url, normalized_pairing_code, normalized_web_url, preserve_local_model_profiles};
+    use super::{append_stream_delta, derived_local_capabilities, direct_local_request_text, evaluate_local_arithmetic, local_builtin_answer, local_delta_text, local_event_payload, normalized_api_url, normalized_pairing_code, normalized_web_url, parse_local_json_plan, preserve_local_model_profiles};
     use serde_json::json;
 
     #[test]
@@ -1387,6 +1440,15 @@ mod tests {
         assert_eq!(tool, "calculate");
         assert_eq!(answer, "The local calculation result is 20.");
         assert_eq!(local_builtin_answer("what can you do locally").expect("status request").0, "local_status");
+    }
+
+    #[test]
+    fn json_fallback_accepts_only_typed_local_plans() {
+        let action = parse_local_json_plan(r#"{"kind":"local_action","title":"Read notes","objective":"Read notes.txt","capability":"local_file_read","payload":{"operation":"read_file","path":"notes.txt"}}"#).expect("action plan");
+        assert_eq!(action.get("capability").and_then(serde_json::Value::as_str), Some("local_file_read"));
+        assert!(parse_local_json_plan(r#"{"title":"Missing kind"}"#).is_none());
+        assert!(parse_local_json_plan("run powershell now").is_none());
+        assert_eq!(parse_local_json_plan("```json\n{\"kind\":\"answer\",\"answer\":\"Done\"}\n```").and_then(|value| value.get("answer").and_then(serde_json::Value::as_str).map(str::to_owned)).as_deref(), Some("Done"));
     }
 
     #[test]
