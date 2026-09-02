@@ -49,6 +49,35 @@ function uid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function initialConversationId() {
+  // Local mode uses the private transcript journal in the native companion,
+  // so keep one stable id across app restarts. Hosted sessions continue to
+  // receive a fresh id per process; the shared Syntarus memory write now
+  // carries continuity across those conversations without risking a stale
+  // id being reused after an account switch.
+  try {
+    const existing = window.localStorage.getItem("smara.local.conversation_id");
+    if (existing) return existing;
+    const value = `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    window.localStorage.setItem("smara.local.conversation_id", value);
+    return value;
+  } catch {
+    return `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
+function localConversationId() {
+  try {
+    const existing = window.localStorage.getItem("smara.local.conversation_id");
+    if (existing) return existing;
+    const value = `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    window.localStorage.setItem("smara.local.conversation_id", value);
+    return value;
+  } catch {
+    return `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
 function splitLines(value: string) {
   return value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean);
 }
@@ -161,7 +190,7 @@ function App() {
   const pendingAssistantText = useRef("");
   const durableWatchIds = useRef(new Set<string>());
   const assistantFrame = useRef<number | null>(null);
-  const conversationId = useRef(`desktop-${Date.now()}`);
+  const conversationId = useRef(initialConversationId());
   const transcriptEndRef = useRef<HTMLDivElement>(null!);
   const chatEventHandler = useRef<(event: ChatEvent) => void>(() => undefined);
 
@@ -214,6 +243,17 @@ function App() {
       if (next?.runtime_mode === "local" || next?.has_cli_token) await refreshTasks();
     })();
   }, [refreshConnection, refreshTasks]);
+
+  useEffect(() => {
+    // A stable local transcript id must never be sent to a different hosted
+    // account. Rotate it when the runtime is hosted and restore it whenever
+    // the user switches back to local mode.
+    if (connection.runtime_mode === "local") {
+      if (!conversationId.current.startsWith("local-")) conversationId.current = localConversationId();
+    } else if (conversationId.current.startsWith("local-")) {
+      conversationId.current = `desktop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+  }, [connection.runtime_mode]);
 
   useEffect(() => {
     if (screen !== "activity" || (!connection.has_cli_token && connection.runtime_mode !== "local") || !isNativeDesktop) return;

@@ -157,11 +157,15 @@ class IntegrationToolProvider:
 
 
 class FakeSyntarus:
+    def __init__(self):
+        self.add_calls = []
+
     async def search(self, query, **kwargs):
         self.query, self.kwargs = query, kwargs
         return {"context": "Sujal prefers concise reports."}
 
     async def add(self, **kwargs):
+        self.add_calls.append(kwargs)
         return {"ok": True}
 
 
@@ -171,6 +175,25 @@ class LegacySyntarus:
 
     async def add(self, **kwargs):
         return {"ok": True}
+
+
+def test_conversation_turn_is_persisted_with_account_and_chat_provenance():
+    sdk = FakeSyntarus()
+    result = asyncio.run(SyntarusMemory(sdk).remember_conversation_turn(
+        account_id="acct_owner",
+        workspace_id="default",
+        conversation_id="chat_123",
+        user_message="Remember that I prefer concise reports.",
+        assistant_message="I will keep future reports concise.",
+    ))
+    assert result["ok"] is True
+    assert len(sdk.add_calls) == 1
+    call = sdk.add_calls[0]
+    assert call["user_id"] == "acct_owner"
+    assert call["metadata"]["source"] == "smara_conversation"
+    assert call["metadata"]["memory_kind"] == "conversation_turn"
+    assert call["run_id"].startswith("chat_")
+    assert call["idempotency_key"].startswith("smara-chat-chat_123-")
 
 
 def test_runtime_reuses_syntarus_only_through_memory_port():

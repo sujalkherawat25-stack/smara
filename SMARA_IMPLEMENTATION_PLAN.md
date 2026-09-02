@@ -756,20 +756,34 @@ before it is enabled.
   durable.
 - Desktop execution results can be attached to the hosted task and later
   included in hosted memory flows.
+- **Implemented 2026-09-02:** every successful hosted chat turn is also written
+  through the Syntarus SDK as an idempotent, account-scoped
+  `conversation_turn`. This closes the previous gap where only task/research
+  completions were remembered, so a new conversation can recall stable facts.
+- **Implemented 2026-09-02:** private local-mode chat keeps a bounded transcript
+  in the Desktop app-data directory (16 messages / 24,000 characters). It is
+  loaded into the next local model request and survives an app restart without
+  uploading private text.
 
-### Deliberate gap
+### Privacy and scope
 
-There is no separate encrypted local long-term memory database. Private local
-chat is not automatically synchronized into hosted memory. This is currently a
-privacy boundary, not an accidental second implementation.
+- The local transcript is a bounded continuity cache, not a second semantic
+  memory engine. It contains only the latest local turns and is never exposed
+  to the hosted service in unsigned/local-only mode.
+- Hosted conversation writes use the same account namespace as task outcomes;
+  retries use deterministic idempotency keys, and write failures are bounded
+  and never turn a successful chat into a failed request.
+- The private **Founder** tier is an operator-only account flag. It bypasses
+  product quotas while usage remains metered in the Syntarus telemetry plane;
+  it is not listed in public pricing or plan-selection UI.
 
-### Decision required before offline-agent work
+### Decision required before broader offline-agent work
 
 **Decision for the beta:**
 
-- **Adopted:** hosted memory only; local execution keeps only a bounded,
-  redacted journal, logs, undo snapshots, and task artifacts. No local
-  long-term memory is uploaded or silently synchronized.
+- **Adopted:** hosted memory is authoritative for signed-in Web/CLI/task turns;
+  local-only mode keeps the bounded private transcript described above. No
+  local text is uploaded silently when the Desktop has no hosted token.
 - **Later offline enhancement:** add an encrypted local cache for local
   conversation summaries, workspace facts, pending intents, and explicit
   remember/recall/forget controls. Sync must be opt-in and conflict-aware.
@@ -841,8 +855,9 @@ These are deferred by owner decision and must remain disabled/documented:
 5. Run the broader agent evaluation corpus: chat, research, codebase changes,
    approvals, failures, attachments, reconnects, cancellations, and duplicate
    prevention.
-6. Decide whether the later offline local-memory enhancement is needed; do not
-   create a second memory system by default.
+6. Decide whether the later encrypted offline-memory enhancement is needed; the
+   current bounded local transcript is already shipped and is deliberately not
+   a second semantic memory service.
 7. Only after the beta gates are green, reopen the deferred production
    hardening gates in Section 11.
 

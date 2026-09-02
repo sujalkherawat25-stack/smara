@@ -98,6 +98,60 @@ class SyntarusMemory:
             idempotency_key=f"smara-research-{task['id']}",
         )
 
+    async def remember_conversation_turn(
+        self,
+        *,
+        account_id: str,
+        workspace_id: str,
+        conversation_id: str,
+        user_message: str,
+        assistant_message: str,
+        turn_id: str | None = None,
+    ) -> dict:
+        """Persist a completed hosted chat turn in the shared memory plane.
+
+        Chat history remains in Smara's bounded conversation store for prompt
+        context.  This separate write gives the long-lived Syntarus memory
+        extractor the same user/workspace provenance as durable task results,
+        so later conversations can recall stable facts instead of starting
+        from an empty memory namespace.  The deterministic idempotency key
+        makes reconnects and client retries safe.
+        """
+        stable_turn_id = turn_id or self._stable_turn_key(user_message, assistant_message)
+        scope = MemoryScope(
+            account_id,
+            workspace_id,
+            conversation_id,
+            f"chat_{stable_turn_id}",
+        )
+        metadata = scope.metadata(
+            memory_kind="conversation_turn",
+            status="verified",
+            source_type="chat",
+        )
+        metadata["source"] = "smara_conversation"
+        return await self._client.add(
+            user_id=scope.user_id,
+            run_id=scope.run_id,
+            messages=[
+                {"role": "user", "content": user_message[:12_000]},
+                {"role": "assistant", "content": assistant_message[:12_000]},
+            ],
+            metadata=metadata,
+            idempotency_key=f"smara-chat-{conversation_id}-{stable_turn_id}",
+        )
+
+    @staticmethod
+    def _stable_turn_key(user_message: str, assistant_message: str) -> str:
+        # Avoid importing a second hashing dependency at call sites and keep
+        # the key compact enough for providers that cap idempotency lengths.
+        import hashlib
+
+        digest = hashlib.sha256(
+            f"{user_message}\x00{assistant_message}".encode("utf-8", "ignore")
+        ).hexdigest()
+        return digest[:24]
+
     async def aclose(self) -> None:
         close = getattr(self._client, "aclose", None)
         if close is not None:

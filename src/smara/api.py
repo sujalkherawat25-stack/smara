@@ -82,6 +82,7 @@ configure_admin(store, account_store)
 app.include_router(admin_router)
 attachment_store = AttachmentStore(Path(settings.database_path or "./data/smara.db").parent / "attachments")
 limiter = RedisFixedWindowLimiter(settings.redis_url, settings.rate_limit_per_minute, allow_local_fallback=settings.dev_mode)
+MEMORY_WRITE_TIMEOUT_SECONDS = 8.0
 def _agent_runtime(model_profile: str | None = None) -> SmaraAgentRuntime:
     """Construct the runtime without importing any MemoryOS implementation."""
     resources = getattr(app.state, "runtime_resources", None)
@@ -129,6 +130,49 @@ async def _close_request_memory(runtime: SmaraAgentRuntime) -> None:
     memory = getattr(runtime, "_memory", None)
     if memory is not None:
         await memory.aclose()
+
+
+async def _remember_chat_turn(
+    runtime: SmaraAgentRuntime | None,
+    *,
+    account_id: str,
+    workspace_id: str,
+    conversation_id: str,
+    user_message: str,
+    assistant_message: str,
+) -> bool:
+    """Best-effort persistence for every completed hosted conversation turn.
+
+    Smara's Postgres conversation log remains the source for bounded prompt
+    history.  Syntarus is the durable cross-conversation memory plane.  A
+    provider outage must never turn a successful chat into a failed request,
+    so this helper is bounded and reports the failure without leaking content.
+    """
+    memory = getattr(runtime, "_memory", None) if runtime is not None else None
+    if memory is None or not user_message.strip() or not assistant_message.strip():
+        return False
+    try:
+        await asyncio.wait_for(
+            memory.remember_conversation_turn(
+                account_id=account_id,
+                workspace_id=workspace_id,
+                conversation_id=conversation_id,
+                user_message=user_message,
+                assistant_message=assistant_message,
+            ),
+            timeout=MEMORY_WRITE_TIMEOUT_SECONDS,
+        )
+        return True
+    except TimeoutError:
+        LOG.warning("conversation_memory_write_timeout account=%s workspace=%s", account_id, workspace_id)
+    except Exception as exc:
+        LOG.warning(
+            "conversation_memory_write_failed account=%s workspace=%s error_type=%s",
+            account_id,
+            workspace_id,
+            type(exc).__name__,
+        )
+    return False
 
 
 def _queue_durable_chat_task(body: ChatRequest, user: str) -> tuple[dict, str]:
@@ -696,6 +740,14 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
             "append_conversation_exchange",
             conversation_id, user, body.workspace_id, body.message, turn.message, turn.model,
         )
+        await _remember_chat_turn(
+            runtime,
+            account_id=user,
+            workspace_id=body.workspace_id,
+            conversation_id=conversation_id,
+            user_message=body.message,
+            assistant_message=turn.message,
+        )
         return ChatResponse(**turn.__dict__)
     except httpx.HTTPStatusError as exc:
         # Keep non-streaming clients (CLI, integrations, API consumers) on
@@ -834,6 +886,14 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
             await _async_store().call(
                 "append_conversation_exchange",
                 conversation_id, user, body.workspace_id, body.message, turn.message, turn.model,
+            )
+            await _remember_chat_turn(
+                runtime,
+                account_id=user,
+                workspace_id=body.workspace_id,
+                conversation_id=conversation_id,
+                user_message=body.message,
+                assistant_message=turn.message,
             )
             trace.mark("persisted")
             yield agent_events.done(

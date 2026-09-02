@@ -197,6 +197,57 @@ fn write_json(path: &Path, value: &Value) -> Result<(), String> {
     fs::write(path, serialized).map_err(|error| format!("Could not write {}: {error}", path.display()))
 }
 
+fn local_chat_history_path() -> PathBuf {
+    app_data_dir().join("local-chat-history.json")
+}
+
+/// Load a bounded local conversation transcript. This is intentionally a
+/// small, plain app-data journal: it keeps private local mode useful after a
+/// restart without uploading anything or pretending it is the shared
+/// Syntarus memory plane.
+fn local_chat_history(conversation_id: &str) -> Vec<Value> {
+    read_json(&local_chat_history_path())
+        .and_then(|value| value.get(conversation_id).cloned())
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|turn| {
+            turn.get("role").and_then(Value::as_str).is_some_and(|role| role == "user" || role == "assistant")
+                && turn.get("content").and_then(Value::as_str).is_some_and(|content| !content.trim().is_empty())
+        })
+        .collect()
+}
+
+fn persist_local_chat_turn(conversation_id: &str, user_message: &str, assistant_message: &str) -> Result<(), String> {
+    let mut root = read_json(&local_chat_history_path()).unwrap_or_else(|| json!({}));
+    let object = root.as_object_mut().ok_or_else(|| "Local chat history is invalid.".to_owned())?;
+    let mut turns = object
+        .get(conversation_id)
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    turns.push(json!({"role": "user", "content": user_message.trim().chars().take(12_000).collect::<String>()}));
+    turns.push(json!({"role": "assistant", "content": assistant_message.trim().chars().take(12_000).collect::<String>()}));
+    // Keep the most recent 16 messages and a hard character ceiling. The
+    // model request is bounded even if a provider returns a very long answer.
+    if turns.len() > 16 {
+        turns = turns.split_off(turns.len() - 16);
+    }
+    let mut total = 0usize;
+    let mut bounded = Vec::with_capacity(turns.len());
+    for turn in turns.into_iter().rev() {
+        let content_len = turn.get("content").and_then(Value::as_str).map(str::len).unwrap_or(0);
+        if total + content_len > 24_000 && !bounded.is_empty() {
+            break;
+        }
+        total += content_len;
+        bounded.push(turn);
+    }
+    bounded.reverse();
+    object.insert(conversation_id.to_owned(), Value::Array(bounded));
+    write_json(&local_chat_history_path(), &root)
+}
+
 fn model_credential_name(id: &str) -> String {
     let mut value = String::from("SMARA_MODEL_");
     for character in id.chars() {
@@ -989,9 +1040,12 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
             }
         }
     });
+    let mut messages = vec![json!({"role": "system", "content": system})];
+    messages.extend(local_chat_history(&args.conversation_id));
+    messages.push(json!({"role": "user", "content": args.message}));
     let payload = json!({
         "model": profile.model,
-        "messages": [{"role": "system", "content": system}, {"role": "user", "content": args.message}],
+        "messages": messages,
         "tools": [tool],
         "tool_choice": "auto",
         "parallel_tool_calls": false,
@@ -1037,12 +1091,14 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
         } else {
             format!("I prepared **{title}**. Open Activity to review and approve it on this Desktop.")
         };
+        let _ = persist_local_chat_turn(&args.conversation_id, &args.message, &answer);
         app.emit("smara-chat-event", json!({"type": "tool_result", "name": "local_task", "ok": true, "preview": status})).map_err(|error| error.to_string())?;
         app.emit("smara-chat-event", json!({"type": "token", "text": answer})).map_err(|error| error.to_string())?;
         app.emit("smara-chat-event", json!({"type": "done", "tools_used": 1, "task_id": task_id})).map_err(|error| error.to_string())?;
         return Ok(Some(()));
     }
     if let Some(content) = message.get("content").and_then(Value::as_str).filter(|text| !text.trim().is_empty()) {
+        let _ = persist_local_chat_turn(&args.conversation_id, &args.message, content);
         app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"})).map_err(|error| error.to_string())?;
         app.emit("smara-chat-event", json!({"type": "token", "text": content})).map_err(|error| error.to_string())?;
         app.emit("smara-chat-event", json!({"type": "done", "tools_used": 0})).map_err(|error| error.to_string())?;
@@ -1059,12 +1115,12 @@ async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModel
         }
     }
     let endpoint = local_chat_endpoint(&profile.base_url);
+    let mut messages = vec![json!({"role": "system", "content": "You are Smara running privately on the user's desktop. Be concise, useful, and clear about limits. Do not claim to have run tools or changed files."})];
+    messages.extend(local_chat_history(&args.conversation_id));
+    messages.push(json!({"role": "user", "content": args.message}));
     let payload = json!({
         "model": profile.model,
-        "messages": [
-            {"role": "system", "content": "You are Smara running privately on the user's desktop. Be concise, useful, and clear about limits. Do not claim to have run tools or changed files."},
-            {"role": "user", "content": args.message},
-        ],
+        "messages": messages,
         "stream": true,
         "max_tokens": 2048,
         "temperature": 0.2,
@@ -1102,6 +1158,7 @@ async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModel
     if !emitted {
         return Err(format!("{} returned no visible answer. Check the model name and token limit.", profile.label));
     }
+    let _ = persist_local_chat_turn(&args.conversation_id, &args.message, &streamed);
     app.emit("smara-chat-event", json!({"type": "done", "tools_used": 0})).map_err(|error| error.to_string())?;
     Ok(())
 }
