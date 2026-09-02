@@ -100,11 +100,22 @@ _STATE_CACHE: dict[str, tuple[int, int, dict]] = {}
 LOCAL_RECIPES: dict[str, tuple[str, ...]] = {
     "python.test": ("python", "-m", "pytest", "-q"),
     "python.compile": ("python", "-m", "compileall", "-q", "."),
+    "python.run": ("python",),
+    "pytest": ("pytest", "-q"),
     "node.test": ("npm", "test"),
     "node.build": ("npm", "run", "build"),
+    "npm.install": ("npm", "install"),
+    "npm.start": ("npm", "start"),
     "rust.test": ("cargo", "test"),
     "rust.check": ("cargo", "check"),
+    "cargo.build": ("cargo", "build"),
+    "cargo.run": ("cargo", "run"),
     "git.diff-check": ("git", "diff", "--check"),
+    "git.status": ("git", "status", "--short"),
+    "git.diff": ("git", "diff"),
+    "git.log": ("git", "log", "-n", "10", "--oneline"),
+    "go.test": ("go", "test", "./..."),
+    "go.build": ("go", "build", "./..."),
 }
 
 
