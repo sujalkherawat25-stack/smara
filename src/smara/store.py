@@ -1755,7 +1755,7 @@ class PostgresTaskStore(TaskStore):
                     allowed_placeholders = ",".join("%s" for _ in allowed_safe)
                     safe_placeholders = ",".join("%s" for _ in safe_values)
                     candidates = c.execute(
-                        f"""SELECT DISTINCT t.id
+                        f"""SELECT t.id
                              FROM tasks t JOIN task_steps s ON s.task_id=t.id
                             WHERE t.account_id=%s AND t.status IN ('queued','waiting_approval')
                               AND t.requires_approval=TRUE AND s.status='queued'
@@ -1776,8 +1776,17 @@ class PostgresTaskStore(TaskStore):
                             FOR UPDATE OF t""",
                         (executor["account_id"], *allowed_safe, *safe_values),
                     ).fetchall()
+                    # PostgreSQL does not allow ``FOR UPDATE`` with
+                    # ``DISTINCT``.  A task can have several eligible queued
+                    # steps, so the join may return the same task more than
+                    # once; lock the task rows and de-duplicate in Python
+                    # before writing the single approval record.
+                    approved_task_ids: set[str] = set()
                     for candidate in candidates:
                         task_id = candidate["id"]
+                        if task_id in approved_task_ids:
+                            continue
+                        approved_task_ids.add(task_id)
                         c.execute(
                             "INSERT INTO approvals(task_id,status,note,decided_at) VALUES(%s,%s,%s,%s) "
                             "ON CONFLICT(task_id) DO UPDATE SET status=EXCLUDED.status,note=EXCLUDED.note,decided_at=EXCLUDED.decided_at",
