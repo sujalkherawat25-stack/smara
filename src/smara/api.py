@@ -45,6 +45,7 @@ from .store_async import AsyncStoreFacade
 from .work_signals import wait_for_signal, WorkSignalBus
 from .workspace_contract import validate_workspace_job, workspace_job_summary
 from .skill_protocol import draft_skill_from_workflow, validate_skill_manifest
+from .profile_memory import explicit_profile_facts, profile_context
 
 LOG = logging.getLogger("smara.api")
 configure_sentry(settings.sentry_dsn)
@@ -173,6 +174,26 @@ async def _remember_chat_turn(
             type(exc).__name__,
         )
     return False
+
+
+async def _remember_explicit_profile_facts(*, account_id: str, workspace_id: str, user_message: str) -> str:
+    """Persist only direct user-stated profile facts before future recall.
+
+    Syntarus retains the complete conversation-memory event.  This compact
+    account-scoped index makes identity recall deterministic while that
+    semantic memory is being indexed, and remains usable if retrieval is
+    briefly unavailable.
+    """
+    facts = explicit_profile_facts(user_message)
+    if facts:
+        await _async_store().call("remember_account_facts", account_id, workspace_id, facts)
+    existing = await _async_store().call("account_memory_facts", account_id, workspace_id)
+    return profile_context(existing)
+
+
+async def _durable_profile_context(*, account_id: str, workspace_id: str) -> str:
+    facts = await _async_store().call("account_memory_facts", account_id, workspace_id)
+    return profile_context(facts)
 
 
 def _queue_durable_chat_task(body: ChatRequest, user: str) -> tuple[dict, str]:
@@ -713,6 +734,7 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
             memory_used=False,
             tools_used=0,
         )
+    durable_profile = await _durable_profile_context(account_id=user, workspace_id=body.workspace_id)
     attachment_context = _attachment_context(body, user)
     try:
         runtime = _agent_runtime(body.model_profile)
@@ -729,6 +751,7 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
                 conversation_id=conversation_id,
                 conversation_history=history,
                 conversation_summary=summary,
+                durable_profile_context=durable_profile,
                 attachment_context=attachment_context,
                 http_client=client,
                 integration_runner=(connected_integration_runner(
@@ -740,6 +763,7 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
             "append_conversation_exchange",
             conversation_id, user, body.workspace_id, body.message, turn.message, turn.model,
         )
+        await _remember_explicit_profile_facts(account_id=user, workspace_id=body.workspace_id, user_message=body.message)
         await _remember_chat_turn(
             runtime,
             account_id=user,
@@ -798,6 +822,7 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
                 task_id=task["id"],
             )
             return
+        durable_profile = await _durable_profile_context(account_id=user, workspace_id=body.workspace_id)
         try:
             runtime = _agent_runtime(body.model_profile)
         except ValueError as exc:
@@ -861,6 +886,7 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
                     conversation_id=conversation_id,
                     conversation_history=history,
                     conversation_summary=summary,
+                    durable_profile_context=durable_profile,
                     attachment_context=attachment_context,
                     http_client=client,
                     integration_runner=(connected_integration_runner(
@@ -887,6 +913,7 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
                 "append_conversation_exchange",
                 conversation_id, user, body.workspace_id, body.message, turn.message, turn.model,
             )
+            await _remember_explicit_profile_facts(account_id=user, workspace_id=body.workspace_id, user_message=body.message)
             await _remember_chat_turn(
                 runtime,
                 account_id=user,

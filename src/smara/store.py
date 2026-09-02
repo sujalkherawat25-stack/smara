@@ -152,6 +152,13 @@ class TaskStore:
               FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE);
             CREATE INDEX IF NOT EXISTS conversation_turns_recent
               ON conversation_turns(conversation_id,sequence);
+            CREATE TABLE IF NOT EXISTS account_memory_facts (
+              account_id TEXT NOT NULL, workspace_id TEXT NOT NULL, fact_key TEXT NOT NULL,
+              fact_value TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'explicit_user_statement',
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY(account_id,workspace_id,fact_key));
+            CREATE INDEX IF NOT EXISTS account_memory_facts_account_updated
+              ON account_memory_facts(account_id,updated_at);
             CREATE TABLE IF NOT EXISTS schedules (
               id TEXT PRIMARY KEY, account_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
               title TEXT NOT NULL, objective TEXT NOT NULL, interval_seconds INTEGER NOT NULL,
@@ -652,6 +659,33 @@ class TaskStore:
                 )
                 c.execute("DELETE FROM conversation_turns WHERE conversation_id=? AND sequence<=?", (conversation_id, cutoff))
 
+    def remember_account_facts(self, account_id: str, workspace_id: str, facts: dict[str, str]) -> None:
+        """Upsert only vetted, explicit profile facts for reliable recall."""
+        if not facts:
+            return
+        now = _now()
+        with self._connect() as c:
+            for key, value in facts.items():
+                key = str(key).strip()[:64]
+                value = str(value).strip()[:500]
+                if not key or not value:
+                    continue
+                c.execute(
+                    """INSERT INTO account_memory_facts(account_id,workspace_id,fact_key,fact_value,source,updated_at)
+                       VALUES(?,?,?,?,?,?)
+                       ON CONFLICT(account_id,workspace_id,fact_key) DO UPDATE SET
+                         fact_value=excluded.fact_value,source=excluded.source,updated_at=excluded.updated_at""",
+                    (account_id, workspace_id, key, value, "explicit_user_statement", now),
+                )
+
+    def account_memory_facts(self, account_id: str, workspace_id: str) -> dict[str, str]:
+        with self._connect() as c:
+            rows = c.execute(
+                "SELECT fact_key,fact_value FROM account_memory_facts WHERE account_id=? AND workspace_id=? ORDER BY updated_at DESC LIMIT 20",
+                (account_id, workspace_id),
+            ).fetchall()
+        return {str(row["fact_key"]): str(row["fact_value"]) for row in rows}
+
     def conversations(self, account_id: str, *, limit: int = 50) -> list[dict]:
         with self._connect() as c:
             rows = c.execute(
@@ -1009,6 +1043,7 @@ class TaskStore:
                 "dead_letters": self.dead_letters(account_id),
                 "conversations": [dict(row) for row in c.execute("SELECT * FROM conversations WHERE account_id=? ORDER BY created_at", (account_id,))],
                 "conversation_turns": [dict(row) for row in c.execute("SELECT * FROM conversation_turns WHERE account_id=? ORDER BY conversation_id,sequence", (account_id,))],
+                "explicit_memory_facts": [dict(row) for row in c.execute("SELECT fact_key,fact_value,source,updated_at FROM account_memory_facts WHERE account_id=? ORDER BY updated_at", (account_id,))],
                 "cli_devices": [dict(row) for row in c.execute("SELECT name,expires_at,created_at,last_seen_at,revoked_at FROM cli_devices WHERE account_id=? ORDER BY created_at", (account_id,))],
                 "integrations": [dict(row) for row in c.execute("SELECT id,account_id,provider,display_name,policy,granted_scopes,health,created_at,updated_at FROM integration_connections WHERE account_id=?", (account_id,))],
                 "integration_actions": [dict(row) for row in c.execute("SELECT * FROM integration_action_log WHERE account_id=? ORDER BY created_at", (account_id,))],
@@ -1044,6 +1079,7 @@ class TaskStore:
             c.execute("DELETE FROM integration_connections WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM push_subscriptions WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM conversation_turns WHERE account_id=?", (account_id,))
+            c.execute("DELETE FROM account_memory_facts WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM conversations WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM cli_devices WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM desktop_executors WHERE account_id=?", (account_id,))

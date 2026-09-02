@@ -29,7 +29,8 @@ _CHITCHAT_RE = re.compile(
     re.IGNORECASE,
 )
 _TIME_RE = re.compile(
-    r"^(?:(?:what(?:'s| is) the\s+)?(?:current\s+)?time|what\s+time\s+is\s+it)[!.?\s]*$",
+    r"^(?:(?:what(?:'s| is)\s+(?:the\s+)?)?(?:current\s+)?time|"
+    r"what\s+time\s+(?:is\s+it|it\s+is)|tell\s+me\s+(?:the\s+)?(?:current\s+)?time)[!.?\s]*$",
     re.IGNORECASE,
 )
 _CALC_RE = re.compile(r"^(?:please\s+)?(?:calculate|compute)\s+(.+?)[!.?\s]*$", re.IGNORECASE)
@@ -43,6 +44,12 @@ _DURABLE_RE = re.compile(
 _MEMORY_RE = re.compile(
     r"\b(?:remember|recall|memory|history|earlier|before|previous|last\s+time|"
     r"you\s+said|we\s+discussed|my\s+(?:plan|preference|project|context|name|work)|my)\b",
+    re.IGNORECASE,
+)
+_IDENTITY_MEMORY_RE = re.compile(
+    r"\b(?:do\s+you\s+(?:know|remember)\s+me|who\s+am\s+i|"
+    r"what(?:'s|\s+is)\s+my\s+name|tell\s+me\s+about\s+me|"
+    r"what\s+do\s+you\s+know\s+about\s+me)\b",
     re.IGNORECASE,
 )
 _TOOL_RE = re.compile(
@@ -94,6 +101,11 @@ def route_request(
     local_only: bool = False,
 ) -> RouteDecision:
     text = message.strip()
+    # Identity questions are memory questions even though natural phrasing
+    # often contains neither "memory" nor "remember".  Treating these as
+    # small talk was the reason a restarted desktop could answer "Not yet"
+    # despite the account having durable context.
+    memory_requested = bool(explicit_memory or _MEMORY_RE.search(text) or _IDENTITY_MEMORY_RE.search(text))
     if local_only and _LOCAL_INTEGRATION_RE.search(text):
         return RouteDecision(
             "E", "personal connector requires the paired desktop", 0.99, 3, True, (), True
@@ -113,9 +125,9 @@ def route_request(
             "A", "exact bounded arithmetic request", 0.99, 1, False, ("calculate",), False,
             ("calculate", {"expression": calc.group(1).strip()}),
         )
-    if _CHITCHAT_RE.fullmatch(text) or (has_attachments and not _MEMORY_RE.search(text) and not _TOOL_RE.search(text)):
-        return RouteDecision("B", "self-contained conversational turn", 0.98, 1, bool(explicit_memory), _READ_TOOLS, False)
-    if explicit_memory or _MEMORY_RE.search(text):
+    if _CHITCHAT_RE.fullmatch(text) or (has_attachments and not memory_requested and not _TOOL_RE.search(text)):
+        return RouteDecision("B", "self-contained conversational turn", 0.98, 1, memory_requested, _READ_TOOLS, False)
+    if memory_requested:
         if not _TOOL_RE.search(text):
             return RouteDecision("C", "personal or prior-context question", 0.94, 2, True, _READ_TOOLS, False)
     if _TOOL_RE.search(text) or _DEEP_RESEARCH_RE.search(text):
@@ -126,8 +138,8 @@ def route_request(
             # shallow search result and producing an evidence-starved answer.
             return RouteDecision(
                 "D", "multi-source research request", max(0.91, 0.94), max(3, complexity),
-                bool(explicit_memory or _MEMORY_RE.search(text)), _READ_TOOLS, False,
+                memory_requested, _READ_TOOLS, False,
                 ("research.deep", {"query": text, "max_sources": 5}),
             )
-        return RouteDecision("D", "read-only tool request", 0.91, complexity, bool(explicit_memory or _MEMORY_RE.search(text)), _READ_TOOLS, False)
-    return RouteDecision("B", "self-contained answer", 0.84, 1, bool(explicit_memory), _READ_TOOLS, False)
+        return RouteDecision("D", "read-only tool request", 0.91, complexity, memory_requested, _READ_TOOLS, False)
+    return RouteDecision("B", "self-contained answer", 0.84, 1, memory_requested, _READ_TOOLS, False)

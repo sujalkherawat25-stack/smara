@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from smara.agent_runtime import SmaraAgentRuntime
+from smara.profile_memory import explicit_profile_facts, profile_context
 from smara.store import TaskStore
 
 
@@ -53,6 +54,27 @@ def test_runtime_receives_recent_conversation_context():
     assert "Smara: Understood." in provider.system
 
 
+def test_explicit_profile_facts_survive_a_fresh_conversation_and_remain_scoped(tmp_path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    facts = explicit_profile_facts("My name is Sujal. I prefer concise reports.")
+    assert facts == {"preferred_name": "Sujal", "stated_preference": "concise reports"}
+    store.remember_account_facts("acct_1", "default", facts)
+    assert store.account_memory_facts("acct_1", "other") == {}
+    context = profile_context(store.account_memory_facts("acct_1", "default"))
+    assert "preferred name is Sujal" in context
+
+    provider = HistoryProvider()
+    turn = asyncio.run(SmaraAgentRuntime(provider).chat_with_tools(
+        account_id="acct_1",
+        workspace_id="default",
+        message="Do you know me?",
+        conversation_id="new_after_restart",
+        durable_profile_context=context,
+    ))
+    assert turn.memory_used is True
+    assert "preferred name is Sujal" in provider.system
+
+
 def test_long_conversation_compacts_older_turns_into_bounded_summary(tmp_path):
     store = TaskStore(str(tmp_path / "smara.db"))
     for number in range(18):
@@ -87,6 +109,8 @@ def test_account_deletion_removes_conversations_and_cli_devices(tmp_path):
     expires = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
     store.append_conversation_exchange("chat_1", "acct_1", "work", "hello", "hi")
     store.register_cli_device("acct_1", "Laptop", "jti", expires)
+    store.remember_account_facts("acct_1", "work", {"preferred_name": "Sujal"})
     store.delete_account("acct_1")
     assert store.conversations("acct_1") == []
     assert store.cli_devices("acct_1") == []
+    assert store.account_memory_facts("acct_1", "work") == {}
