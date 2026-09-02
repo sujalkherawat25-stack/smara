@@ -794,6 +794,63 @@ fn direct_local_request_text(message: &str) -> String {
     }
 }
 
+/// Evaluate only ordinary arithmetic locally. This deliberately accepts no
+/// names, functions, shell syntax, or file paths: it is a convenience tool,
+/// not a second command interpreter.
+fn evaluate_local_arithmetic(expression: &str) -> Option<f64> {
+    struct Parser<'a> { chars: Vec<char>, index: usize, _source: &'a str }
+    impl<'a> Parser<'a> {
+        fn new(source: &'a str) -> Self { Self { chars: source.chars().collect(), index: 0, _source: source } }
+        fn skip_ws(&mut self) { while self.chars.get(self.index).is_some_and(|value| value.is_whitespace()) { self.index += 1; } }
+        fn eat(&mut self, expected: char) -> bool { self.skip_ws(); if self.chars.get(self.index) == Some(&expected) { self.index += 1; true } else { false } }
+        fn number(&mut self) -> Option<f64> {
+            self.skip_ws();
+            let start = self.index;
+            while self.chars.get(self.index).is_some_and(|value| value.is_ascii_digit() || *value == '.') { self.index += 1; }
+            if start == self.index { return None; }
+            self.chars[start..self.index].iter().collect::<String>().parse().ok()
+        }
+        fn factor(&mut self) -> Option<f64> {
+            self.skip_ws();
+            if self.eat('+') { return self.factor(); }
+            if self.eat('-') { return self.factor().map(|value| -value); }
+            if self.eat('(') { let value = self.expression()?; return self.eat(')').then_some(value); }
+            self.number()
+        }
+        fn term(&mut self) -> Option<f64> {
+            let mut value = self.factor()?;
+            loop {
+                if self.eat('*') { value *= self.factor()?; }
+                else if self.eat('/') { let divisor = self.factor()?; if divisor == 0.0 { return None; } value /= divisor; }
+                else { return Some(value); }
+            }
+        }
+        fn expression(&mut self) -> Option<f64> {
+            let mut value = self.term()?;
+            loop {
+                if self.eat('+') { value += self.term()?; }
+                else if self.eat('-') { value -= self.term()?; }
+                else { return Some(value); }
+            }
+        }
+    }
+    if expression.is_empty() || expression.len() > 128 || !expression.chars().all(|value| value.is_ascii_digit() || value.is_whitespace() || matches!(value, '+' | '-' | '*' | '/' | '(' | ')' | '.')) { return None; }
+    let mut parser = Parser::new(expression);
+    let value = parser.expression()?;
+    parser.skip_ws();
+    (parser.index == parser.chars.len() && value.is_finite()).then_some(value)
+}
+
+fn local_capability_summary() -> String {
+    let connection = current_connection();
+    let capabilities = if connection.capabilities.is_empty() { "no file, terminal, browser, or connector permissions yet".to_owned() }
+    else { connection.capabilities.join(", ").replace('_', " ") };
+    format!(
+        "This Desktop can use local time and calculations now. Enabled permissions: {capabilities}. Local tasks run with {} approval.",
+        if connection.approval_mode == "auto" { "automatic safe" } else { "ask-first" },
+    )
+}
+
 fn local_builtin_answer(message: &str) -> Option<(&'static str, String)> {
     let request = direct_local_request_text(message);
     let normalized = request.trim_matches(|character: char| matches!(character, '.' | '!' | '?')).trim();
@@ -810,6 +867,17 @@ fn local_builtin_answer(message: &str) -> Option<(&'static str, String)> {
             "current_time",
             format!("The local time is {}.", Local::now().format("%A, %d %B %Y, %I:%M:%S %p %Z")),
         ));
+    }
+    if ["what can you do", "what can you do locally", "local capabilities", "local status", "help"].contains(&normalized) {
+        return Some(("local_status", local_capability_summary()));
+    }
+    let calculation = normalized.strip_prefix("calculate ")
+        .or_else(|| normalized.strip_prefix("what is "))
+        .or_else(|| normalized.strip_prefix("solve "))
+        .and_then(evaluate_local_arithmetic);
+    if let Some(value) = calculation {
+        let display = if value.fract() == 0.0 { format!("{value:.0}") } else { format!("{value}") };
+        return Some(("calculate", format!("The local calculation result is {display}.")));
     }
     None
 }
@@ -1273,7 +1341,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{append_stream_delta, derived_local_capabilities, direct_local_request_text, local_builtin_answer, local_delta_text, local_event_payload, normalized_api_url, normalized_pairing_code, normalized_web_url, preserve_local_model_profiles};
+    use super::{append_stream_delta, derived_local_capabilities, direct_local_request_text, evaluate_local_arithmetic, local_builtin_answer, local_delta_text, local_event_payload, normalized_api_url, normalized_pairing_code, normalized_web_url, preserve_local_model_profiles};
     use serde_json::json;
 
     #[test]
@@ -1308,6 +1376,17 @@ mod tests {
         let (tool, answer) = local_builtin_answer("okay great, what time it is").expect("clock request");
         assert_eq!(tool, "current_time");
         assert!(answer.starts_with("The local time is "));
+    }
+
+    #[test]
+    fn local_utilities_are_safe_and_do_not_need_a_model() {
+        assert_eq!(evaluate_local_arithmetic("(12 + 3) * 2"), Some(30.0));
+        assert_eq!(evaluate_local_arithmetic("12 / 0"), None);
+        assert_eq!(evaluate_local_arithmetic("1 + powershell"), None);
+        let (tool, answer) = local_builtin_answer("please calculate 19.5 + 0.5").expect("calculation request");
+        assert_eq!(tool, "calculate");
+        assert_eq!(answer, "The local calculation result is 20.");
+        assert_eq!(local_builtin_answer("what can you do locally").expect("status request").0, "local_status");
     }
 
     #[test]
