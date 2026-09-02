@@ -38,6 +38,10 @@ LOCAL_CONNECTORS: dict[str, LocalConnectorSpec] = {
         "tavily", "search", "TAVILY_API_KEY", "local_api_key", "read_only",
         ("web.search",), 5,
     ),
+    "exa": LocalConnectorSpec(
+        "exa", "search", "EXA_API_KEY", "local_api_key", "read_only",
+        ("web.search",), 5,
+    ),
     "github": LocalConnectorSpec(
         "github", "list_repositories", "GITHUB_TOKEN", "local_api_key", "read_only",
         ("repositories:read",), MAX_LOCAL_INTEGRATION_RESULTS,
@@ -158,6 +162,60 @@ def _tavily_search(client: httpx.Client, payload: dict[str, Any], secret: str, s
     }, ensure_ascii=False)[:MAX_LOCAL_INTEGRATION_OUTPUT]
 
 
+def _exa_search(client: httpx.Client, payload: dict[str, Any], secret: str, spec: LocalConnectorSpec) -> str:
+    query = payload.get("query")
+    if not isinstance(query, str) or not query.strip() or len(query.strip()) > 500:
+        raise RuntimeError("Exa search needs a query up to 500 characters.")
+    max_results = payload.get("max_results", 5)
+    if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 10:
+        raise RuntimeError("Exa max_results must be between 1 and 10.")
+    include_domains = payload.get("include_domains", [])
+    if not isinstance(include_domains, list) or len(include_domains) > 5 or not all(isinstance(item, str) and item.strip() for item in include_domains):
+        raise RuntimeError("Exa include_domains must contain at most 5 domain names.")
+
+    body_data: dict[str, Any] = {
+        "query": query.strip(),
+        "type": "auto",
+        "numResults": max_results,
+        "contents": {"highlights": {"maxCharacters": 1200}},
+    }
+    if include_domains:
+        body_data["includeDomains"] = [item.strip()[:120] for item in include_domains]
+
+    response = client.post(
+        "https://api.exa.ai/search",
+        headers={"x-api-key": secret, "Content-Type": "application/json"},
+        json=body_data,
+    )
+    body = _json_response("exa", response)
+    rows = body.get("results", []) if isinstance(body, dict) else []
+    if not isinstance(rows, list):
+        rows = []
+    results: list[dict[str, str]] = []
+    citations: list[str] = []
+    for item in rows[:max_results]:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url")
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            continue
+        highlights = item.get("highlights") or []
+        snippet = " ".join(str(v).strip() for v in highlights if str(v).strip()) or str(item.get("text") or "")
+        results.append({
+            "title": _bounded_text(item.get("title"), 300),
+            "url": url[:2_000],
+            "snippet": _bounded_text(snippet, 1_000),
+        })
+        citations.append(url[:2_000])
+    proof = hashlib.sha256(json.dumps(results, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return json.dumps({
+        "action": "local_integration", "provider": "exa", "operation": "search",
+        "query": query.strip(), "results": results, "citations": citations,
+        "connector": _connector_metadata(spec),
+        "proof": {"provider": "exa", "result_sha256": proof, "results": len(results)},
+    }, ensure_ascii=False)[:MAX_LOCAL_INTEGRATION_OUTPUT]
+
+
 def _github_repositories(client: httpx.Client, payload: dict[str, Any], secret: str, spec: LocalConnectorSpec) -> str:
     limit = payload.get("limit", 10)
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_LOCAL_INTEGRATION_RESULTS:
@@ -198,7 +256,7 @@ def execute_local_integration(payload: dict[str, Any], credentials_resolver, *, 
     """Run one explicitly approved, local-only integration read."""
     provider = payload.get("provider")
     if not isinstance(provider, str) or provider.strip().lower() not in LOCAL_CONNECTORS:
-        raise RuntimeError("Supported local integrations are Tavily search and GitHub repositories.")
+        raise RuntimeError("Supported local integrations are Tavily search, Exa search, and GitHub repositories.")
     provider = provider.strip().lower()
     spec = LOCAL_CONNECTORS[provider]
     operation = payload.get("operation")
@@ -218,6 +276,8 @@ def execute_local_integration(payload: dict[str, Any], credentials_resolver, *, 
         ) as client:
             if provider == "tavily":
                 result = _tavily_search(client, payload, secret, spec)
+            elif provider == "exa":
+                result = _exa_search(client, payload, secret, spec)
             else:
                 result = _github_repositories(client, payload, secret, spec)
     except httpx.HTTPError as exc:
