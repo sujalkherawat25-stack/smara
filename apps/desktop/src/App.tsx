@@ -2,8 +2,12 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { desktop, isNativeDesktop } from "./api";
 import type { ActivityItem, ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatMessage, CodingConventionsData, ConnectionState, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, SearchResultItem, SemanticIndexStats, SwarmMessageData, SwarmTaskResultData, SymbolEvolutionData, TaskSummary, TestFailureItem, TestSuiteResultData, WebScrapeData } from "./types";
 import smaraLogo from "./assets/smara-logo.svg";
+import { TaskMemoryTab } from "./components/TaskMemoryTab";
+import { ProgressiveSkillsTab } from "./components/ProgressiveSkillsTab";
+import { DAGFlowTab } from "./components/DAGFlowTab";
+import { SubagentSwarmTab } from "./components/SubagentSwarmTab";
 
-export type NavTab = "chat" | "goals" | "swarm" | "search" | "browser" | "graph" | "tests" | "git" | "terminal" | "skills" | "models" | "integrations" | "workspace" | "cloud" | "benchmarks";
+export type NavTab = "chat" | "goals" | "dag" | "swarm" | "memory" | "skills" | "search" | "browser" | "graph" | "tests" | "benchmarks" | "git" | "terminal" | "models" | "integrations" | "workspace" | "cloud";
 
 const fallbackConnection: ConnectionState = {
   runtime_mode: "local",
@@ -367,12 +371,28 @@ export default function App() {
           </button>
 
           <button
+            className={`rail-btn ${tab === "dag" ? "active" : ""}`}
+            onClick={() => setTab("dag")}
+          >
+            <span className="rail-icon">⚡</span>
+            <span className="rail-label">DAG Flow</span>
+          </button>
+
+          <button
             className={`rail-btn ${tab === "swarm" ? "active" : ""}`}
             onClick={() => setTab("swarm")}
           >
             <span className="rail-icon">🐝</span>
-            <span className="rail-label">Swarm Teamwork</span>
-            <span className="rail-counter" style={{ background: "rgba(168, 85, 247, 0.25)", color: "#c084fc" }}>4 AGENTS</span>
+            <span className="rail-label">Swarm & Subagents</span>
+            <span className="rail-counter" style={{ background: "rgba(168, 85, 247, 0.25)", color: "#c084fc" }}>SWARM</span>
+          </button>
+
+          <button
+            className={`rail-btn ${tab === "memory" ? "active" : ""}`}
+            onClick={() => setTab("memory")}
+          >
+            <span className="rail-icon">🧠</span>
+            <span className="rail-label">Task Memory</span>
           </button>
 
           <button
@@ -514,8 +534,20 @@ export default function App() {
             <GoalsTab onSetNotice={setNotice} />
           )}
 
+          {tab === "dag" && (
+            <DAGFlowTab onSetNotice={setNotice} />
+          )}
+
           {tab === "swarm" && (
-            <SwarmTab onSetNotice={setNotice} />
+            <SubagentSwarmTab onSetNotice={setNotice} />
+          )}
+
+          {tab === "memory" && (
+            <TaskMemoryTab onSetNotice={setNotice} />
+          )}
+
+          {tab === "skills" && (
+            <ProgressiveSkillsTab onSetNotice={setNotice} />
           )}
 
           {tab === "search" && (
@@ -540,10 +572,6 @@ export default function App() {
 
           {tab === "terminal" && (
             <TerminalTab />
-          )}
-
-          {tab === "skills" && (
-            <SkillsTab onSetNotice={setNotice} />
           )}
 
           {tab === "models" && (
@@ -3027,210 +3055,7 @@ function GoalsTab({ onSetNotice }: { onSetNotice: (msg: string) => void }) {
   );
 }
 
-// -------------------------------------------------------------
-// LEARNED PROCEDURAL SKILLS STUDIO TAB (Hermes L4 Parity)
-// -------------------------------------------------------------
-function SkillsTab({ onSetNotice }: { onSetNotice: (msg: string) => void }) {
-  const [skills, setSkills] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedSkill, setSelectedSkill] = useState<any | null>(null);
-  const [showModal, setShowModal] = useState(false);
-  const [name, setName] = useState("");
-  const [desc, setDesc] = useState("");
-  const [triggers, setTriggers] = useState("");
-  const [md, setMd] = useState("");
 
-  const refreshSkills = async () => {
-    setLoading(true);
-    try {
-      const data = await desktop.listLearnedSkills();
-      setSkills(data || []);
-    } catch {
-      // fallback
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void refreshSkills();
-  }, []);
-
-  const handleSaveSkill = async () => {
-    if (!name.trim() || !desc.trim() || !md.trim()) return;
-    try {
-      const triggerList = triggers.split(",").map((t) => t.trim()).filter(Boolean);
-      await desktop.saveLearnedSkill(name.trim(), desc.trim(), triggerList, md.trim());
-      onSetNotice(`✓ Learned procedural skill '${name.trim()}' saved to .smara/skills/`);
-      setShowModal(false);
-      setName("");
-      setDesc("");
-      setTriggers("");
-      setMd("");
-      await refreshSkills();
-    } catch (err: any) {
-      onSetNotice(`Save skill error: ${err?.message || String(err)}`);
-    }
-  };
-
-  const handleDelete = async (skillName: string) => {
-    try {
-      await desktop.deleteLearnedSkill(skillName);
-      onSetNotice(`Deleted skill '${skillName}'`);
-      if (selectedSkill?.name === skillName) setSelectedSkill(null);
-      await refreshSkills();
-    } catch (err: any) {
-      onSetNotice(`Delete error: ${err?.message || String(err)}`);
-    }
-  };
-
-  return (
-    <div className="tab-pane-container">
-      <div className="pane-header">
-        <div>
-          <h2>🧠 L4 Learned Procedural Skills Studio</h2>
-          <p>Closed-loop autonomous skill memory: procedural runbooks and reasoning patterns recalled by agents across sessions.</p>
-        </div>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button type="button" className="btn-new-branch" onClick={() => setShowModal(true)}>
-            + Teach New Skill
-          </button>
-          <button type="button" className="btn-refresh-git" onClick={refreshSkills} disabled={loading}>
-            {loading ? "Refreshing..." : "🔄 Refresh"}
-          </button>
-        </div>
-      </div>
-
-      {/* New Skill Modal */}
-      {showModal && (
-        <div className="modal-backdrop" onClick={() => setShowModal(false)}>
-          <div className="modal-dialog-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "600px" }}>
-            <h3>Teach Smara a New Procedural Skill</h3>
-            <p>Define a repeatable procedure with trigger phrases that the agent will automatically execute when needed.</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px", margin: "12px 0" }}>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Skill name (e.g., docker_compose_staging)"
-              />
-              <input
-                type="text"
-                value={desc}
-                onChange={(e) => setDesc(e.target.value)}
-                placeholder="Brief description of the procedure..."
-              />
-              <input
-                type="text"
-                value={triggers}
-                onChange={(e) => setTriggers(e.target.value)}
-                placeholder="Trigger keywords comma-separated (e.g., docker, compose, staging, deploy)"
-              />
-              <textarea
-                value={md}
-                onChange={(e) => setMd(e.target.value)}
-                rows={6}
-                placeholder="Step-by-step instructions in Markdown (e.g. 1. Run build, 2. Test ports)..."
-              />
-            </div>
-            <div className="modal-actions">
-              <button type="button" onClick={() => setShowModal(false)}>Cancel</button>
-              <button type="button" className="btn-create-branch-confirm" onClick={handleSaveSkill} disabled={!name.trim() || !desc.trim() || !md.trim()}>
-                Save Skill
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Skills Grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "16px", marginBottom: "24px" }}>
-        {skills.map((s) => (
-          <div
-            key={s.name}
-            style={{
-              background: "#161b22",
-              border: selectedSkill?.name === s.name ? "1px solid #38bdf8" : "1px solid #30363d",
-              borderRadius: "8px",
-              padding: "16px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "8px",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <strong style={{ color: "#58a6ff", fontSize: "14px", fontFamily: "monospace" }}>{s.name}</strong>
-              <span style={{ fontSize: "11px", color: "#3fb950", background: "rgba(46, 160, 67, 0.15)", padding: "2px 8px", borderRadius: "10px" }}>
-                ★ {s.success_count || 1} uses
-              </span>
-            </div>
-            <p style={{ color: "#8b949e", fontSize: "12px", margin: 0 }}>{s.description}</p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", margin: "4px 0" }}>
-              {(s.triggers || []).map((t: string) => (
-                <span key={t} style={{ fontSize: "10px", background: "#21262d", color: "#c9d1d9", padding: "1px 6px", borderRadius: "4px" }}>
-                  #{t}
-                </span>
-              ))}
-            </div>
-            <div style={{ display: "flex", gap: "8px", marginTop: "auto" }}>
-              <button
-                type="button"
-                className="btn-inspect-symbol"
-                style={{ flex: 1 }}
-                onClick={() => setSelectedSkill(s)}
-              >
-                Inspect Procedure
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDelete(s.name)}
-                style={{ background: "transparent", border: "1px solid rgba(248,81,73,0.3)", color: "#f85149", padding: "4px 8px", borderRadius: "4px" }}
-              >
-                🗑️
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Selected Skill Detail Viewer */}
-      {selectedSkill && (
-        <div style={{
-          background: "#0d1117",
-          border: "1px solid #38bdf8",
-          borderRadius: "8px",
-          padding: "16px",
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-            <div>
-              <h3 style={{ margin: 0, color: "#38bdf8" }}>📖 Procedural Instructions: {selectedSkill.name}</h3>
-              <span style={{ fontSize: "12px", color: "#8b949e" }}>{selectedSkill.description}</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setSelectedSkill(null)}
-              style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#c9d1d9", padding: "4px 8px", borderRadius: "4px" }}
-            >
-              ✕ Close
-            </button>
-          </div>
-          <div style={{
-            background: "#161b22",
-            border: "1px solid #30363d",
-            borderRadius: "6px",
-            padding: "12px",
-            maxHeight: "350px",
-            overflowY: "auto",
-          }}>
-            <pre style={{ margin: 0, fontSize: "12px", whiteSpace: "pre-wrap", color: "#e6edf3", fontFamily: "Consolas, monospace", lineHeight: 1.5 }}>
-              {selectedSkill.instructions_md}
-            </pre>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // -------------------------------------------------------------
 // SEMANTIC SEARCH TAB
@@ -4145,289 +3970,7 @@ function WorkspaceTab({
   );
 }
 
-// -------------------------------------------------------------
-// MULTI-AGENT SWARM TEAMWORK TAB
-// -------------------------------------------------------------
-function SwarmTab({ onSetNotice }: { onSetNotice: (msg: string) => void }) {
-  const [objective, setObjective] = useState("Verify workspace integrity and report conventions");
-  const [running, setRunning] = useState(false);
-  const [latestResult, setLatestResult] = useState<SwarmTaskResultData | null>(null);
-  const [history, setHistory] = useState<SwarmTaskResultData[]>([]);
 
-  // Agent States: idle | working | completed
-  const [agentStates, setAgentStates] = useState({
-    architect: "idle" as "idle" | "working" | "completed",
-    implementer: "idle" as "idle" | "working" | "completed",
-    verifier: "idle" as "idle" | "working" | "completed",
-    auditor: "idle" as "idle" | "working" | "completed",
-  });
-
-  const loadHistory = useCallback(async () => {
-    try {
-      if (isNativeDesktop) {
-        const hist = await desktop.getSwarmHistory();
-        setHistory(hist || []);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
-
-  async function handleLaunchSwarm() {
-    if (!objective.trim()) return;
-    setRunning(true);
-    setAgentStates({
-      architect: "working",
-      implementer: "idle",
-      verifier: "idle",
-      auditor: "idle",
-    });
-
-    try {
-      if (isNativeDesktop) {
-        // Step 1: Architect working
-        setTimeout(() => setAgentStates(prev => ({ ...prev, architect: "completed", implementer: "working" })), 1200);
-        setTimeout(() => setAgentStates(prev => ({ ...prev, implementer: "completed", verifier: "working" })), 2600);
-        setTimeout(() => setAgentStates(prev => ({ ...prev, verifier: "completed", auditor: "working" })), 4200);
-
-        const res = await desktop.runSwarmTask(objective);
-        setLatestResult(res);
-        setAgentStates({
-          architect: "completed",
-          implementer: "completed",
-          verifier: "completed",
-          auditor: "completed",
-        });
-        onSetNotice(`✓ Swarm completed: ${res.status} in ${res.duration_ms}ms`);
-        await loadHistory();
-      } else {
-        // Mock fallback
-        setTimeout(() => setAgentStates(prev => ({ ...prev, architect: "completed", implementer: "working" })), 800);
-        setTimeout(() => setAgentStates(prev => ({ ...prev, implementer: "completed", verifier: "working" })), 1600);
-        setTimeout(() => {
-          setAgentStates({
-            architect: "completed",
-            implementer: "completed",
-            verifier: "completed",
-            auditor: "completed",
-          });
-          setLatestResult({
-            session_id: "swarm-mock-1",
-            objective,
-            status: "SUCCESS",
-            duration_ms: 2400,
-            architect_plan: {
-              objective,
-              target_symbols: ["DualPlaneMemoryBridge", "LocalAutonomousEngine"],
-              blast_radius: ["PytestRunner"],
-              adrs_consulted: ["Dual-Plane Memory Architecture"],
-              conventions_noted: ["Functions use strict type annotations (72.4%)"],
-              steps: [
-                "1. Audit target symbols",
-                "2. Validate blast radius impact",
-                "3. Execute safe file modifications with atomic rollback snapshots",
-                "4. Execute test suite and verify zero regressions",
-              ],
-              risk_level: "MEDIUM",
-            },
-            files_modified: ["src/smara/dual_plane_memory.py"],
-            tests_run: 4,
-            tests_passed: 4,
-            healing_applied: false,
-            audit_passed: true,
-            commit_message: `feat(swarm): ${objective.toLowerCase()}`,
-            inter_agent_messages: [
-              {
-                from_role: "architect",
-                to_role: "implementer",
-                action: "HANDOFF_PLAN",
-                payload: { status: "Plan ready" },
-                timestamp: new Date().toISOString(),
-              },
-              {
-                from_role: "implementer",
-                to_role: "verifier",
-                action: "HANDOFF_MUTATIONS",
-                payload: { snapshot: "swarm_snap_1" },
-                timestamp: new Date().toISOString(),
-              },
-              {
-                from_role: "verifier",
-                to_role: "auditor",
-                action: "HANDOFF_VERIFICATION",
-                payload: { tests_passed: 4 },
-                timestamp: new Date().toISOString(),
-              },
-              {
-                from_role: "auditor",
-                to_role: "architect",
-                action: "AUDIT_PASSED",
-                payload: { deliverable_signed: true },
-                timestamp: new Date().toISOString(),
-              },
-            ],
-          });
-          onSetNotice("✓ Swarm completed: SUCCESS");
-        }, 2400);
-      }
-    } catch (e: any) {
-      onSetNotice(`Swarm error: ${e?.message || String(e)}`);
-      setAgentStates({
-        architect: "idle",
-        implementer: "idle",
-        verifier: "idle",
-        auditor: "idle",
-      });
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  return (
-    <div className="tab-pane-container swarm-container">
-      <div className="pane-header">
-        <div>
-          <h2>🐝 Autonomous Multi-Agent Swarm</h2>
-          <p>4 specialized subagents collaborating autonomously with blast-radius containment, atomic rollback snapshots, test auto-healing, and security auditor verification.</p>
-        </div>
-      </div>
-
-      {/* Input / Control Bar */}
-      <div className="swarm-input-box">
-        <span style={{ fontSize: "12px", fontWeight: 600, color: "#cbd5e1" }}>Engineering Task Objective:</span>
-        <div className="swarm-input-row">
-          <input
-            type="text"
-            value={objective}
-            onChange={(e) => setObjective(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !running && handleLaunchSwarm()}
-            placeholder="Describe high-level engineering task for the autonomous swarm..."
-          />
-          <button
-            type="button"
-            className="btn-launch-swarm"
-            onClick={handleLaunchSwarm}
-            disabled={running || !objective.trim()}
-          >
-            {running ? "Swarm Working..." : "🚀 Launch Swarm"}
-          </button>
-        </div>
-      </div>
-
-      {/* 4-Agent Pipeline Visualizer */}
-      <div className="swarm-pipeline-grid">
-        {/* Agent 1: Lead Architect */}
-        <div className={`swarm-agent-card ${agentStates.architect}`}>
-          <div className="agent-top-row">
-            <span className="agent-avatar-icon">🧠</span>
-            <span className={`agent-status-badge ${agentStates.architect}`}>{agentStates.architect}</span>
-          </div>
-          <h4 className="agent-name">Lead Architect</h4>
-          <p className="agent-role-desc">Task decomposition, AST blast-radius, and ADR memory recall.</p>
-          <div className="agent-meta-box">
-            <span>Risk: {latestResult?.architect_plan?.risk_level || "MEDIUM"}</span>
-            <br />
-            <span>Scoped: {latestResult?.architect_plan?.target_symbols?.length || 2} symbols</span>
-          </div>
-        </div>
-
-        {/* Agent 2: Implementer */}
-        <div className={`swarm-agent-card ${agentStates.implementer}`}>
-          <div className="agent-top-row">
-            <span className="agent-avatar-icon">💻</span>
-            <span className={`agent-status-badge ${agentStates.implementer}`}>{agentStates.implementer}</span>
-          </div>
-          <h4 className="agent-name">Implementer</h4>
-          <p className="agent-role-desc">Atomic file mutations with pre-flight rollback snapshots.</p>
-          <div className="agent-meta-box">
-            <span>Snapshots: ACTIVE</span>
-            <br />
-            <span>Files: {latestResult?.files_modified?.length || 1} modified</span>
-          </div>
-        </div>
-
-        {/* Agent 3: Verifier & QA */}
-        <div className={`swarm-agent-card ${agentStates.verifier}`}>
-          <div className="agent-top-row">
-            <span className="agent-avatar-icon">🧪</span>
-            <span className={`agent-status-badge ${agentStates.verifier}`}>{agentStates.verifier}</span>
-          </div>
-          <h4 className="agent-name">Verification & QA</h4>
-          <p className="agent-role-desc">Pytest test runner, stack trace auto-healing, and E2E checks.</p>
-          <div className="agent-meta-box">
-            <span>Tests: {latestResult ? `${latestResult.tests_passed}/${latestResult.tests_run}` : "Ready"}</span>
-            <br />
-            <span>Self-Heal: {latestResult?.healing_applied ? "APPLIED" : "CLEAN"}</span>
-          </div>
-        </div>
-
-        {/* Agent 4: Security Auditor */}
-        <div className={`swarm-agent-card ${agentStates.auditor}`}>
-          <div className="agent-top-row">
-            <span className="agent-avatar-icon">🛡️</span>
-            <span className={`agent-status-badge ${agentStates.auditor}`}>{agentStates.auditor}</span>
-          </div>
-          <h4 className="agent-name">Security Auditor</h4>
-          <p className="agent-role-desc">Path traversal validation, convention audits, and conventional commits.</p>
-          <div className="agent-meta-box">
-            <span>Audit: {latestResult?.audit_passed ? "PASSED" : "STANDBY"}</span>
-            <br />
-            <span>Commit: {latestResult?.commit_message ? "SIGNED" : "READY"}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Latest Result Delivery Card */}
-      {latestResult && (
-        <div style={{ background: "rgba(18, 24, 38, 0.8)", border: "1px solid rgba(59, 130, 246, 0.3)", borderRadius: "10px", padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <span style={{ fontSize: "16px", fontWeight: 700, color: latestResult.status === "SUCCESS" ? "#4ade80" : "#facc15" }}>
-                ✓ {latestResult.status}: Session {latestResult.session_id}
-              </span>
-              <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>({latestResult.duration_ms}ms)</span>
-            </div>
-            {latestResult.commit_message && (
-              <span style={{ fontSize: "11px", background: "rgba(34, 197, 94, 0.15)", color: "#4ade80", padding: "3px 8px", borderRadius: "4px", border: "1px solid rgba(34, 197, 94, 0.3)" }}>
-                Git Commit Ready
-              </span>
-            )}
-          </div>
-          {latestResult.commit_message && (
-            <pre style={{ margin: 0, padding: "8px 12px", background: "#090d13", borderRadius: "6px", fontSize: "11.5px", color: "#cbd5e1", whiteSpace: "pre-wrap", border: "1px solid var(--border-soft)" }}>
-              {latestResult.commit_message}
-            </pre>
-          )}
-        </div>
-      )}
-
-      {/* Inter-Agent Handoff Messages Feed */}
-      <div className="swarm-feed-panel">
-        <h4 style={{ margin: 0, fontSize: "13.5px", color: "#f1f5f9" }}>📡 Inter-Agent Communication Ledger</h4>
-        <div className="swarm-feed-list">
-          {(!latestResult || latestResult.inter_agent_messages.length === 0) ? (
-            <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: 0 }}>
-              Launch a swarm task above to observe real-time inter-agent message handoffs.
-            </p>
-          ) : (
-            latestResult.inter_agent_messages.map((m, idx) => (
-              <div key={idx} className="swarm-feed-item">
-                <span className="swarm-handoff-tag">{m.from_role.toUpperCase()} ➔ {m.to_role.toUpperCase()}</span>
-                <span style={{ fontWeight: 600, color: "#38bdf8" }}>[{m.action}]</span>
-                <span style={{ color: "#cbd5e1", flex: 1 }}>{JSON.stringify(m.payload).slice(0, 140)}...</span>
-                <span style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>{m.timestamp.slice(11, 19)}</span>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // -------------------------------------------------------------
 // CLOUD & DUAL-PLANE MEMORY TAB

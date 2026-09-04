@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, CodingConventionsData, ConnectionState, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, RemoteStatus, SearchResultItem, SemanticIndexStats, SwarmTaskResultData, SymbolEvolutionData, TaskDetail, TaskSummary, TestSuiteResultData, WebScrapeData } from "./types";
+import type { ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, CodingConventionsData, ConnectionState, DAGNodeData, DAGWorkflowData, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ProgressiveSkillDetail, ProgressiveSkillItem, RemoteStatus, SearchResultItem, SemanticIndexStats, SubagentDelegationData, SubagentRolesData, SwarmTaskResultData, SymbolEvolutionData, TaskDetail, TaskMemoryActionResult, TaskMemorySearchItem, TaskMemorySnapshot, TaskMemoryStoreData, TaskSummary, TestSuiteResultData, WebScrapeData } from "./types";
 
 export const isNativeDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -106,6 +106,35 @@ export const desktop = {
   runSweBenchmark: () => invoke<any>("run_swe_benchmark"),
   getBenchmarkScorecards: () => invoke<any>("get_benchmark_scorecards"),
   openBenchmarkReport: (path: string) => invoke<boolean>("open_benchmark_report", { path }),
+  // Local Task Memory
+  listTaskMemory: (target: "memory" | "user") => invoke<TaskMemoryStoreData>("list_task_memory", { target }),
+  addTaskMemoryEntry: (content: string, target: "memory" | "user") => invoke<TaskMemoryActionResult>("add_task_memory_entry", { content, target }),
+  replaceTaskMemoryEntry: (oldSubstring: string, newContent: string, target: "memory" | "user") =>
+    invoke<TaskMemoryActionResult>("replace_task_memory_entry", { oldSubstring, newContent, target }),
+  removeTaskMemoryEntry: (substring: string, target: "memory" | "user") =>
+    invoke<TaskMemoryActionResult>("remove_task_memory_entry", { substring, target }),
+  searchTaskMemory: (query: string, target?: "memory" | "user") =>
+    invoke<TaskMemorySearchItem[]>("search_task_memory", { query, target: target || null }),
+  getMemorySnapshot: (maxChars?: number) =>
+    invoke<TaskMemorySnapshot>("get_memory_snapshot", { maxChars: maxChars || null }),
+  // Progressive Skills
+  listSkillsV2: (tagFilter?: string) => invoke<ProgressiveSkillItem[]>("list_skills_v2", { tagFilter: tagFilter || null }),
+  viewSkillV2: (skillName: string, relativePath?: string) =>
+    invoke<ProgressiveSkillDetail>("view_skill_v2", { skillName, relativePath: relativePath || null }),
+  createSkillV2: (name: string, description: string, tags: string[], instructions: string) =>
+    invoke<any>("create_skill_v2", { name, description, tags, instructions }),
+  // Interactive DAG Flow
+  getDagWorkflow: (workflowId?: string) => invoke<DAGWorkflowData>("get_dag_workflow", { workflowId: workflowId || null }),
+  stepDagWorkflow: (workflowData: DAGWorkflowData) => invoke<DAGWorkflowData>("step_dag_workflow", { workflowData }),
+  runDagWorkflow: (workflowData: DAGWorkflowData) => invoke<DAGWorkflowData>("run_dag_workflow", { workflowData }),
+  retryDagNode: (workflowData: DAGWorkflowData, nodeId: string) =>
+    invoke<DAGWorkflowData>("retry_dag_node", { workflowData, nodeId }),
+  injectDagNode: (workflowData: DAGWorkflowData, newNode: Partial<DAGNodeData>, afterNodeId?: string, beforeNodeId?: string) =>
+    invoke<DAGWorkflowData>("inject_dag_node", { workflowData, newNode, afterNodeId: afterNodeId || null, beforeNodeId: beforeNodeId || null }),
+  // Subagent Swarm Orchestrator
+  getSubagentRoles: () => invoke<SubagentRolesData>("get_subagent_roles"),
+  runSubagentDelegation: (goal: string, role: string, context?: string) =>
+    invoke<SubagentDelegationData>("run_subagent_delegation", { goal, role, context: context || null }),
 };
 
 

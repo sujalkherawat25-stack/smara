@@ -1,7 +1,7 @@
 """Closed-Loop Autonomous Skill Learning Engine for Smara.
 
 Allows Smara to extract, refine, and recall reusable procedural reasoning templates
-(Skills) across sessions, establishing parity with and surpassing NousResearch Hermes Agent's L4 Memory.
+(Skills) across sessions, establishing continuous lifelong learning memory.
 """
 from __future__ import annotations
 

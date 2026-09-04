@@ -2169,28 +2169,41 @@ fn read_file_preview(path: String) -> Result<Value, String> {
 
 fn run_python_bridge_code_sync(py_code: &str) -> Result<Value, String> {
     let python_candidates = [
-        "C:\\Users\\sujal\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+        "python",
         "python.exe",
+        "C:\\Users\\sujal\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
     ];
 
+    let cwd = if Path::new(r"C:\Users\sujal\memoryos\smara").exists() {
+        Path::new(r"C:\Users\sujal\memoryos\smara")
+    } else {
+        Path::new(r"C:\Users\sujal\.gemini\antigravity\brain\9b6e09f1-dce7-4001-953e-163359a4335d\scratch\smara")
+    };
+
+    let mut last_err = String::from("No Python executable succeeded");
+
     for py in python_candidates {
-        if Path::new(py).is_file() || py == "python.exe" {
-            let mut cmd = Command::new(py);
-            cmd.arg("-c").arg(py_code);
-            cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-            cmd.env("PYTHONPATH", "src;C:\\Users\\sujal\\.gemini\\antigravity\\brain\\9b6e09f1-dce7-4001-953e-163359a4335d\\scratch\\smara\\src");
-            cmd.current_dir("C:\\Users\\sujal\\.gemini\\antigravity\\brain\\9b6e09f1-dce7-4001-953e-163359a4335d\\scratch\\smara");
-            command_hidden(&mut cmd);
-            
-            if let Ok(output) = cmd.output() {
-                let stdout_str = String::from_utf8_lossy(&output.stdout);
-                if let Ok(val) = serde_json::from_str::<Value>(stdout_str.trim()) {
-                    return Ok(val);
-                }
+        let mut cmd = Command::new(py);
+        cmd.arg("-c").arg(py_code);
+        cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.env("PYTHONPATH", format!("src;{};{}\\src", cwd.display(), cwd.display()));
+        cmd.current_dir(cwd);
+        command_hidden(&mut cmd);
+        
+        if let Ok(output) = cmd.output() {
+            let stdout_str = String::from_utf8_lossy(&output.stdout);
+            let stderr_str = String::from_utf8_lossy(&output.stderr);
+            if let Ok(val) = serde_json::from_str::<Value>(stdout_str.trim()) {
+                return Ok(val);
+            }
+            if !output.status.success() {
+                last_err = format!("Python error (exit {}): {}", output.status, stderr_str.trim());
+            } else if !stdout_str.trim().is_empty() {
+                last_err = format!("Invalid JSON output: {}", stdout_str.trim());
             }
         }
     }
-    Err("Python bridge execution failed".to_string())
+    Err(last_err)
 }
 
 async fn run_python_bridge_code(py_code: &str) -> Result<Value, String> {
@@ -2641,9 +2654,207 @@ fn open_benchmark_report(path: String) -> Result<bool, String> {
     Ok(true)
 }
 
+#[tauri::command]
+async fn list_task_memory(target: String) -> Result<Value, String> {
+    let clean_target = target.trim().to_lowercase();
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nt = '{}'\nentries = s.read_entries(t)\nprint(json.dumps({{'target': t, 'entries': entries}}))\n",
+        clean_target
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn add_task_memory_entry(content: String, target: String) -> Result<Value, String> {
+    let clean_target = target.trim().to_lowercase();
+    let clean_content = content.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n");
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nres = s.add_entry(\"{}\".replace(\"\\\\n\", \"\\n\"), target=\"{}\")\nprint(json.dumps(res))\n",
+        clean_content, clean_target
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn replace_task_memory_entry(old_substring: String, new_content: String, target: String) -> Result<Value, String> {
+    let clean_target = target.trim().to_lowercase();
+    let clean_old = old_substring.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n");
+    let clean_new = new_content.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n");
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nres = s.replace_entry(old_substring=\"{}\".replace(\"\\\\n\", \"\\n\"), new_content=\"{}\".replace(\"\\\\n\", \"\\n\"), target=\"{}\")\nprint(json.dumps(res))\n",
+        clean_old, clean_new, clean_target
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn remove_task_memory_entry(substring: String, target: String) -> Result<Value, String> {
+    let clean_target = target.trim().to_lowercase();
+    let clean_sub = substring.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n");
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nres = s.remove_entry(substring=\"{}\".replace(\"\\\\n\", \"\\n\"), target=\"{}\")\nprint(json.dumps(res))\n",
+        clean_sub, clean_target
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn search_task_memory(query: String, target: Option<String>) -> Result<Value, String> {
+    let clean_query = query.replace('\\', "\\\\").replace('"', "\\\"");
+    let target_str = match target {
+        Some(t) => format!("'{}'", t.trim().to_lowercase()),
+        None => "None".to_string(),
+    };
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nres = s.search_entries(query=\"{}\", target={})\nprint(json.dumps(res))\n",
+        clean_query, target_str
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn get_memory_snapshot(max_chars: Option<usize>) -> Result<Value, String> {
+    let limit = max_chars.unwrap_or(12000);
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nsnap = s.render_frozen_snapshot(max_chars={})\nprint(json.dumps({{'snapshot': snap}}))\n",
+        limit
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn list_skills_v2(tag_filter: Option<String>) -> Result<Value, String> {
+    let filter_str = match tag_filter {
+        Some(f) if !f.trim().is_empty() => format!("'{}'", f.trim().replace('"', "\\\"")),
+        _ => "None".to_string(),
+    };
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillsRegistry\nr = SkillsRegistry()\nprint(json.dumps(r.list_skills(tag_filter={})))\n",
+        filter_str
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn view_skill_v2(skill_name: String, relative_path: Option<String>) -> Result<Value, String> {
+    let clean_name = skill_name.trim().replace('"', "\\\"");
+    let rel_str = match relative_path {
+        Some(p) if !p.trim().is_empty() => format!("'{}'", p.trim().replace('"', "\\\"")),
+        _ => "None".to_string(),
+    };
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillsRegistry\nr = SkillsRegistry()\nprint(json.dumps(r.view_skill(skill_name=\"{}\", relative_path={})))\n",
+        clean_name, rel_str
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn create_skill_v2(name: String, description: String, tags: Vec<String>, instructions: String) -> Result<Value, String> {
+    let clean_name = name.trim().replace('"', "\\\"");
+    let clean_desc = description.trim().replace('"', "\\\"");
+    let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".into());
+    let clean_inst = instructions.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n");
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillsRegistry\nr = SkillsRegistry()\nres = r.create_skill(name=\"{}\", description=\"{}\", tags={}, instructions=\"{}\".replace(\"\\\\n\", \"\\n\"))\nprint(json.dumps(res))\n",
+        clean_name, clean_desc, tags_json, clean_inst
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn get_dag_workflow(workflow_id: Option<String>) -> Result<Value, String> {
+    let wid = workflow_id.unwrap_or_else(|| "smara_verification_flow".to_string());
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow, DAGNode\nwf = DAGWorkflow(workflow_id=\"{}\", title=\"Smara Autonomous Verification Pipeline\")\nwf.add_node(DAGNode(id=\"inspect_env\", title=\"Inspect Environment & Working Tree\", capability=\"local_terminal\", payload={{\"command\": \"git status\"}}))\nwf.add_node(DAGNode(id=\"run_tests\", title=\"Pytest Verification Suite\", capability=\"test_suite\", depends_on=[\"inspect_env\"]))\nwf.add_node(DAGNode(id=\"ast_analysis\", title=\"AST Blast Radius & Symbol Check\", capability=\"ast_graph\", depends_on=[\"inspect_env\"]))\nwf.add_node(DAGNode(id=\"security_audit\", title=\"Sanitize Injections & Coding Conventions\", capability=\"security_audit\", depends_on=[\"run_tests\", \"ast_analysis\"]))\nwf.add_node(DAGNode(id=\"synthesis_report\", title=\"Synthesize Deployment Scorecard\", capability=\"report\", depends_on=[\"security_audit\"]))\nwf.update_node_readiness()\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n",
+        wid
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn step_dag_workflow(workflow_data: Value) -> Result<Value, String> {
+    let wf_str = serde_json::to_string(&workflow_data).unwrap_or_else(|_| "{}".to_string()).replace('\\', "\\\\").replace('"', "\\\"");
+    let py_code = format!(
+        "import json, sys, time\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow\nwf = DAGWorkflow.from_dict(json.loads(\"{}\"))\ndef exec_step(n):\n    time.sleep(0.05)\n    return f'Executed {{n.id}} successfully'\nwf.step(exec_step)\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n",
+        wf_str
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn run_dag_workflow(workflow_data: Value) -> Result<Value, String> {
+    let wf_str = serde_json::to_string(&workflow_data).unwrap_or_else(|_| "{}".to_string()).replace('\\', "\\\\").replace('"', "\\\"");
+    let py_code = format!(
+        "import json, sys, time\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow\nwf = DAGWorkflow.from_dict(json.loads(\"{}\"))\ndef exec_step(n):\n    time.sleep(0.05)\n    return f'Executed {{n.id}} successfully'\nwf.run_until_complete(exec_step)\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n",
+        wf_str
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn retry_dag_node(workflow_data: Value, node_id: String) -> Result<Value, String> {
+    let wf_str = serde_json::to_string(&workflow_data).unwrap_or_else(|_| "{}".to_string()).replace('\\', "\\\\").replace('"', "\\\"");
+    let clean_nid = node_id.trim().replace('"', "");
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow\nwf = DAGWorkflow.from_dict(json.loads(\"{}\"))\nwf.retry_node(\"{}\")\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n",
+        wf_str, clean_nid
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn inject_dag_node(workflow_data: Value, new_node: Value, after_node_id: Option<String>, before_node_id: Option<String>) -> Result<Value, String> {
+    let wf_str = serde_json::to_string(&workflow_data).unwrap_or_else(|_| "{}".to_string()).replace('\\', "\\\\").replace('"', "\\\"");
+    let node_str = serde_json::to_string(&new_node).unwrap_or_else(|_| "{}".to_string()).replace('\\', "\\\\").replace('"', "\\\"");
+    let after_str = match after_node_id {
+        Some(a) => format!("'{}'", a.trim()),
+        None => "None".to_string(),
+    };
+    let before_str = match before_node_id {
+        Some(b) => format!("'{}'", b.trim()),
+        None => "None".to_string(),
+    };
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow, DAGNode\nwf = DAGWorkflow.from_dict(json.loads(\"{}\"))\nnd = DAGNode.from_dict(json.loads(\"{}\"))\nwf.inject_node(nd, after_node_id={}, before_node_id={})\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n",
+        wf_str, node_str, after_str, before_str
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn get_subagent_roles() -> Result<Value, String> {
+    Ok(json!({
+        "roles": [
+            {"id": "researcher", "name": "Documentation & Web Researcher", "description": "Researches reference docs, parses complex PDFs, and crawls web sources."},
+            {"id": "coder", "name": "Codebase & AST Engineer", "description": "Inspects AST property graphs, checks symbol references, and edits source code in isolation."},
+            {"id": "tester", "name": "Test Runner & Verifier", "description": "Runs automated pytest suites, analyzes blast radius, and checks test passes."},
+            {"id": "auditor", "name": "Security & Convention Auditor", "description": "Audits coding style invariants, detects prompt injections, and validates clean architecture."},
+            {"id": "generalist", "name": "Autonomous Generalist", "description": "General task executor with bounded steps and safety controls."}
+        ],
+        "blocked_tools": ["delegate_task", "memory", "clarify", "dag_flow"],
+        "safe_tools": ["file_read", "file_write", "terminal_command", "browser_scrape", "ast_search", "web_search", "pytest_runner"]
+    }))
+}
+
+#[tauri::command]
+async fn run_subagent_delegation(goal: String, role: String, context: Option<String>) -> Result<Value, String> {
+    let clean_goal = goal.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n");
+    let clean_role = role.trim().to_lowercase();
+    let ctx_str = match context {
+        Some(c) => format!("\"{}\"", c.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n")),
+        None => "None".to_string(),
+    };
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.subagent_orchestrator import SubagentOrchestrator, SubagentRole\norch = SubagentOrchestrator()\ntry:\n    r = SubagentRole('{}')\nexcept Exception:\n    r = SubagentRole.GENERALIST\nres = orch.delegate(goal=\"{}\".replace(\"\\\\n\", \"\\n\"), role=r, context={})\nprint(json.dumps(res.to_dict()))\n",
+        clean_role, clean_goal, ctx_str
+    );
+    run_python_bridge_code(&py_code).await
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_task_details, decide_local_task, stream_chat, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile, open_file_in_default_app, reveal_file_in_explorer, read_file_preview, inspect_ast_graph, run_test_suite, auto_fix_tests, rollback_refactor_snapshot, get_git_status, get_git_branches, create_git_branch, switch_git_branch, generate_ai_commit_message, commit_git_changes, get_git_log, detect_git_conflicts, resolve_git_conflict, get_file_git_diff, semantic_search, rebuild_semantic_index, scrape_web_page, capture_browser_screenshot, run_browser_e2e, diagnose_browser_ui_component, get_dual_plane_status, sync_dual_plane_memory, query_dual_plane_memory, list_adrs, create_adr, get_coding_conventions, get_symbol_evolution, run_swarm_task, get_swarm_history, get_dynamic_tools, run_dynamic_tool, synthesize_dynamic_tool, run_goal_task, get_goal_sessions, run_deep_research, generate_pr_draft, publish_pr_branch, run_terminal_command, list_learned_skills, save_learned_skill, delete_learned_skill, run_gaia_benchmark, run_swe_benchmark, get_benchmark_scorecards, open_benchmark_report])
+        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_task_details, decide_local_task, stream_chat, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile, open_file_in_default_app, reveal_file_in_explorer, read_file_preview, inspect_ast_graph, run_test_suite, auto_fix_tests, rollback_refactor_snapshot, get_git_status, get_git_branches, create_git_branch, switch_git_branch, generate_ai_commit_message, commit_git_changes, get_git_log, detect_git_conflicts, resolve_git_conflict, get_file_git_diff, semantic_search, rebuild_semantic_index, scrape_web_page, capture_browser_screenshot, run_browser_e2e, diagnose_browser_ui_component, get_dual_plane_status, sync_dual_plane_memory, query_dual_plane_memory, list_adrs, create_adr, get_coding_conventions, get_symbol_evolution, run_swarm_task, get_swarm_history, get_dynamic_tools, run_dynamic_tool, synthesize_dynamic_tool, run_goal_task, get_goal_sessions, run_deep_research, generate_pr_draft, publish_pr_branch, run_terminal_command, list_learned_skills, save_learned_skill, delete_learned_skill, run_gaia_benchmark, run_swe_benchmark, get_benchmark_scorecards, open_benchmark_report, list_task_memory, add_task_memory_entry, replace_task_memory_entry, remove_task_memory_entry, search_task_memory, get_memory_snapshot, list_skills_v2, view_skill_v2, create_skill_v2, get_dag_workflow, step_dag_workflow, run_dag_workflow, retry_dag_node, inject_dag_node, get_subagent_roles, run_subagent_delegation])
         .run(tauri::generate_context!())
         .expect("error while running Smara Desktop");
 }

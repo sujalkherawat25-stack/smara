@@ -356,4 +356,101 @@ export interface SwarmTaskResultData {
   inter_agent_messages: SwarmMessageData[];
 }
 
+export interface TaskMemoryStoreData {
+  target: "memory" | "user";
+  entries: string[];
+}
+
+export interface TaskMemoryActionResult {
+  status: "success" | "error" | "noop";
+  message: string;
+  entry_count?: number;
+  updated_entry?: string;
+  removed_entry?: string;
+}
+
+export interface TaskMemorySearchItem {
+  store: string;
+  content: string;
+  relevance: number;
+}
+
+export interface TaskMemorySnapshot {
+  snapshot: string;
+}
+
+export interface ProgressiveSkillItem {
+  name: string;
+  description: string;
+  version: string;
+  tags: string[];
+  source: string;
+  skill_dir: string;
+}
+
+export interface ProgressiveSkillDetail {
+  status: string;
+  skill: string;
+  metadata?: {
+    name?: string;
+    description?: string;
+    version?: string;
+    tags?: string[];
+    source?: string;
+  };
+  instructions?: string;
+  available_assets?: string[];
+  file?: string;
+  content?: string;
+  message?: string;
+}
+
+export type DAGNodeStatus = "PENDING" | "READY" | "RUNNING" | "COMPLETED" | "FAILED" | "BLOCKED" | "SKIPPED";
+
+export interface DAGNodeData {
+  id: string;
+  title: string;
+  capability: string;
+  payload: Record<string, any>;
+  depends_on: string[];
+  status: DAGNodeStatus;
+  result?: any;
+  error?: string | null;
+  duration_ms: number;
+  retries: number;
+  max_retries: number;
+}
+
+export interface DAGWorkflowData {
+  id: string;
+  title: string;
+  is_paused: boolean;
+  nodes: DAGNodeData[];
+  ascii_view?: string;
+}
+
+export interface SubagentRoleInfo {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface SubagentRolesData {
+  roles: SubagentRoleInfo[];
+  blocked_tools: string[];
+  safe_tools: string[];
+}
+
+export interface SubagentDelegationData {
+  task_id: string;
+  goal: string;
+  status: "SUCCESS" | "FAILED" | "TIMEOUT";
+  summary: string;
+  trace_steps: number;
+  duration_ms: number;
+  tools_used: string[];
+  error?: string | null;
+}
+
+
 

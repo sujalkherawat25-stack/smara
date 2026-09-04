@@ -463,7 +463,7 @@ class DualPlaneMemoryBridge:
         except Exception:
             pass
 
-        # 5. Learned Procedural Skills (Hermes L4 Parity)
+        # 5. Learned Procedural Skills (Smara Autonomous System)
         learned_skills = []
         try:
             matched = self.skill_learner.find_relevant_skills(q, top_k=2)
