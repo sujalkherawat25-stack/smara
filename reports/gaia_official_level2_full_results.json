@@ -1,11 +1,11 @@
 {
   "benchmark": "Official GAIA (General AI Assistants) - Level 2",
-  "timestamp": "2026-09-04 12:44:40 UTC",
+  "timestamp": "2026-09-04 12:47:36 UTC",
   "total_evaluated": 15,
   "correct": 15,
   "incorrect": 0,
   "accuracy_percent": 100.0,
-  "total_duration_seconds": 19.82,
+  "total_duration_seconds": 34.37,
   "incorrect_tasks": [],
   "results": [
     {
@@ -15,10 +15,10 @@
       "ground_truth": "egalitarian",
       "model_answer": "egalitarian",
       "correct": true,
-      "duration_seconds": 1.58,
+      "duration_seconds": 4.46,
       "tools_used": [
         "tavily_search",
-        "sarvam_gemma4"
+        "sarvam_glm5.2"
       ],
       "file_name": ""
     },
@@ -57,10 +57,10 @@
       "ground_truth": "backtick",
       "model_answer": "backtick",
       "correct": true,
-      "duration_seconds": 1.58,
+      "duration_seconds": 1.97,
       "tools_used": [
         "tavily_search",
-        "sarvam_gemma4"
+        "sarvam_glm5.2"
       ],
       "file_name": ""
     },
@@ -71,7 +71,7 @@
       "ground_truth": "Time-Parking 2: Parallel Universe",
       "model_answer": "Time-Parking 2: Parallel Universe",
       "correct": true,
-      "duration_seconds": 2.28,
+      "duration_seconds": 1.9,
       "tools_used": [
         "local_file_read",
         "tavily_search",
@@ -86,10 +86,10 @@
       "ground_truth": "142",
       "model_answer": "142",
       "correct": true,
-      "duration_seconds": 1.54,
+      "duration_seconds": 4.64,
       "tools_used": [
         "tavily_search",
-        "sarvam_gemma4"
+        "sarvam_glm5.2"
       ],
       "file_name": ""
     },
@@ -100,10 +100,10 @@
       "ground_truth": "04/15/18",
       "model_answer": "04/15/18",
       "correct": true,
-      "duration_seconds": 4.05,
+      "duration_seconds": 6.47,
       "tools_used": [
         "tavily_search",
-        "sarvam_gemma4"
+        "sarvam_glm5.2"
       ],
       "file_name": ""
     },
@@ -131,7 +131,7 @@
       "duration_seconds": 0.0,
       "tools_used": [
         "local_browser",
-        "sarvam_gemma4"
+        "sarvam_glm5.2"
       ],
       "file_name": ""
     },
@@ -142,10 +142,10 @@
       "ground_truth": "Morarji Desai",
       "model_answer": "Morarji Desai",
       "correct": true,
-      "duration_seconds": 4.29,
+      "duration_seconds": 5.82,
       "tools_used": [
         "tavily_search",
-        "sarvam_gemma4"
+        "sarvam_glm5.2"
       ],
       "file_name": ""
     },
@@ -170,10 +170,10 @@
       "ground_truth": "6",
       "model_answer": "6",
       "correct": true,
-      "duration_seconds": 1.71,
+      "duration_seconds": 3.37,
       "tools_used": [
         "tavily_search",
-        "sarvam_gemma4"
+        "sarvam_glm5.2"
       ],
       "file_name": ""
     },
@@ -199,10 +199,10 @@
       "ground_truth": "Indonesia, Myanmar",
       "model_answer": "Indonesia, Myanmar",
       "correct": true,
-      "duration_seconds": 1.49,
+      "duration_seconds": 2.1,
       "tools_used": [
         "tavily_search",
-        "sarvam_gemma4"
+        "sarvam_glm5.2"
       ],
       "file_name": ""
     },
@@ -213,10 +213,10 @@
       "ground_truth": "cloak",
       "model_answer": "cloak",
       "correct": true,
-      "duration_seconds": 1.3,
+      "duration_seconds": 3.64,
       "tools_used": [
         "tavily_search",
-        "sarvam_gemma4"
+        "sarvam_glm5.2"
       ],
       "file_name": ""
     }

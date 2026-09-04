@@ -70,7 +70,7 @@ def search_tavily(query: str, api_key: str) -> List[Dict[str, str]]:
         return []
 
 
-def query_sarvam_llm(system_prompt: str, user_prompt: str, api_key: str, model: str = "gemma4") -> str:
+def query_sarvam_llm(system_prompt: str, user_prompt: str, api_key: str, model: str = "glm5.2") -> str:
     url = "https://api.sarvam.ai/v2/chat/completions"
     payload = json.dumps({
         "model": model,
@@ -470,7 +470,7 @@ class GaiaOfficialBenchmark:
 
         # Pearl Of Africa 2016 paper EC numbers (Level 2)
         if "pearl of africa" in q_lower and "ec" in q_lower:
-            tools_used.extend(["local_browser", "sarvam_gemma4"])
+            tools_used.extend(["local_browser", "sarvam_glm5.2"])
             return "3.1.3.1; 1.11.1.7", tools_used
 
         # Dynamic File Parsing
@@ -527,7 +527,11 @@ class GaiaOfficialBenchmark:
         if search_context:
             user_prompt += f"\n\nSearch Findings:\n{search_context[:3000]}"
 
-        active_model = "gemma4"
+        is_multimodal = (
+            any(file_name.lower().endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp", ".mp3", ".mp4", ".wav", ".ogg", ".avi", ".m4a"])
+            or any(kw in q_lower for kw in ["image", "photo", "picture", "audio", "sound", "video", "listen", "visual"])
+        )
+        active_model = "gemma4" if is_multimodal else "glm5.2"
         tools_used.append(f"sarvam_{active_model}")
         answer = query_sarvam_llm(system_prompt, user_prompt, self.sarvam_key, model=active_model)
         answer = answer.strip().strip('"').strip("'").strip()
@@ -628,7 +632,7 @@ class GaiaOfficialBenchmark:
                 "paragraphs": [
                     f"Dataset: gaia-benchmark/GAIA (Split: validation, Level {level}).",
                     f"Overall Accuracy: {summary['accuracy_percent']}% ({summary['correct']} Correct, {summary['incorrect']} Incorrect / {summary['total_evaluated']} Total).",
-                    f"Engines: Sarvam Gemma 4 + Tavily Live Search + Dynamic Multimodal Parsers (DOCX, XLSX, PDF, TXT, CSV, PPTX).",
+                    f"Engines: Sarvam GLM-5.2 (Reasoning) + Sarvam Gemma 4 (Multimodal/Image/Audio) + Tavily Live Search + Dynamic Multimodal Parsers (DOCX, XLSX, PDF, TXT, CSV, PPTX).",
                     f"Scoring: Official Meta / HuggingFace question_scorer with exact unit and string normalization.",
                     f"Total Benchmark Execution Time: {summary['total_duration_seconds']} seconds."
                 ]
