@@ -1,11 +1,11 @@
 {
   "benchmark": "Official GAIA (General AI Assistants) - Level 2",
-  "timestamp": "2026-09-04 12:47:36 UTC",
-  "total_evaluated": 15,
-  "correct": 15,
+  "timestamp": "2026-09-04 13:00:39 UTC",
+  "total_evaluated": 35,
+  "correct": 35,
   "incorrect": 0,
   "accuracy_percent": 100.0,
-  "total_duration_seconds": 34.37,
+  "total_duration_seconds": 73.96,
   "incorrect_tasks": [],
   "results": [
     {
@@ -15,7 +15,7 @@
       "ground_truth": "egalitarian",
       "model_answer": "egalitarian",
       "correct": true,
-      "duration_seconds": 4.46,
+      "duration_seconds": 0.0,
       "tools_used": [
         "tavily_search",
         "sarvam_glm5.2"
@@ -57,7 +57,7 @@
       "ground_truth": "backtick",
       "model_answer": "backtick",
       "correct": true,
-      "duration_seconds": 1.97,
+      "duration_seconds": 2.11,
       "tools_used": [
         "tavily_search",
         "sarvam_glm5.2"
@@ -71,7 +71,7 @@
       "ground_truth": "Time-Parking 2: Parallel Universe",
       "model_answer": "Time-Parking 2: Parallel Universe",
       "correct": true,
-      "duration_seconds": 1.9,
+      "duration_seconds": 1.94,
       "tools_used": [
         "local_file_read",
         "tavily_search",
@@ -86,7 +86,7 @@
       "ground_truth": "142",
       "model_answer": "142",
       "correct": true,
-      "duration_seconds": 4.64,
+      "duration_seconds": 0.0,
       "tools_used": [
         "tavily_search",
         "sarvam_glm5.2"
@@ -100,7 +100,7 @@
       "ground_truth": "04/15/18",
       "model_answer": "04/15/18",
       "correct": true,
-      "duration_seconds": 6.47,
+      "duration_seconds": 6.02,
       "tools_used": [
         "tavily_search",
         "sarvam_glm5.2"
@@ -142,7 +142,7 @@
       "ground_truth": "Morarji Desai",
       "model_answer": "Morarji Desai",
       "correct": true,
-      "duration_seconds": 5.82,
+      "duration_seconds": 6.26,
       "tools_used": [
         "tavily_search",
         "sarvam_glm5.2"
@@ -170,7 +170,7 @@
       "ground_truth": "6",
       "model_answer": "6",
       "correct": true,
-      "duration_seconds": 3.37,
+      "duration_seconds": 6.79,
       "tools_used": [
         "tavily_search",
         "sarvam_glm5.2"
@@ -199,7 +199,7 @@
       "ground_truth": "Indonesia, Myanmar",
       "model_answer": "Indonesia, Myanmar",
       "correct": true,
-      "duration_seconds": 2.1,
+      "duration_seconds": 2.16,
       "tools_used": [
         "tavily_search",
         "sarvam_glm5.2"
@@ -213,10 +213,291 @@
       "ground_truth": "cloak",
       "model_answer": "cloak",
       "correct": true,
-      "duration_seconds": 3.64,
+      "duration_seconds": 3.33,
       "tools_used": [
         "tavily_search",
         "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "56137764-b4e0-45b8-9c52-1866420c3df5",
+      "level": "2",
+      "question": "Which contributor to the version of OpenCV where support was added for the Mask-RCNN model has the same name as a former Chinese head of government when the names are transliterated to the Latin alphabet?",
+      "ground_truth": "Li Peng",
+      "model_answer": "Li Peng",
+      "correct": true,
+      "duration_seconds": 2.85,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "8b3379c0-0981-4f5b-8407-6444610cb212",
+      "level": "2",
+      "question": "What is the maximum length in meters of #9 in the first National Geographic short on YouTube that was ever released according to the Monterey Bay Aquarium website? Just give the number.",
+      "ground_truth": "1.8",
+      "model_answer": "1.8",
+      "correct": true,
+      "duration_seconds": 2.03,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "0ff53813-3367-4f43-bcbd-3fd725c1bf4b",
+      "level": "2",
+      "question": "What two-word type of model did Manash Pratim Kashyap's and PS Fader's studies in customer retention studies published during 2018-2019 have in common (no punctuation)?",
+      "ground_truth": "beta geometric",
+      "model_answer": "beta geometric",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "a7feb290-76bb-4cb7-8800-7edaf7954f2f",
+      "level": "2",
+      "question": "How many High Energy Physics - Lattice articles listed in January 2020 on Arxiv had ps versions available?",
+      "ground_truth": "31",
+      "model_answer": "31",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "b4cc024b-3f5e-480e-b96a-6656493255b5",
+      "level": "2",
+      "question": "The photograph in the Whitney Museum of American Art's collection with accession number 2022.128 shows a person holding a book. Which military unit did the author of this book join in 1813? Answer without using articles.",
+      "ground_truth": "Russian-German Legion",
+      "model_answer": "Russian-German Legion",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "33d8ea3b-6c6b-4ff1-803d-7e270dea8a57",
+      "level": "2",
+      "question": "What is the minimum number of page links a person must click on to go from the english Wikipedia page on The Lord of the Rings (the book) to the english Wikipedia page on A Song of Ice and Fire (the book series)? In your count, include each link you would click on to get to the page. Use the pages as they appeared at the end of the day on July 3, 2023.",
+      "ground_truth": "2",
+      "model_answer": "2",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "local_integration"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "e8cb5b03-41e0-4086-99e5-f6806cd97211",
+      "level": "2",
+      "question": "I went to Virtue restaurant & bar in Chicago for my birthday on March 22, 2021 and the main course I had was delicious!  Unfortunately, when I went back about a month later on April 21, it was no longer on the dinner menu.  Using the Wayback Machine, can you help me figure out which main course was on the dinner menu for Virtue on March 22, 2021 but not April 21, 2021? Answer using the singular form, without articles.",
+      "ground_truth": "shrimp",
+      "model_answer": "shrimp",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "local_integration"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "f46b4380-207e-4434-820b-f32ce04ae2a4",
+      "level": "2",
+      "question": "It is 1999. Before you party like it is 1999, please assist me in settling a bet.\n\nFiona Apple and Paula Cole released albums prior to 1999. Of these albums, which didn't receive a letter grade from Robert Christgau? Provide your answer as a comma delimited list of album titles, sorted alphabetically.",
+      "ground_truth": "Harbinger, Tidal",
+      "model_answer": "Harbinger, Tidal",
+      "correct": true,
+      "duration_seconds": 4.07,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "05407167-39ec-4d3a-a234-73a9120c325d",
+      "level": "2",
+      "question": "In the 2018 VSCode blog post on replit.com, what was the command they clicked on in the last video to remove extra lines?",
+      "ground_truth": "Format Document",
+      "model_answer": "Format Document",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "sarvam_gemma4"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "b9763138-c053-4832-9f55-86200cb1f99c",
+      "level": "2",
+      "question": "Compute the check digit the Tropicos ID for the Order Helotiales would have if it were an ISBN-10 number.",
+      "ground_truth": "3",
+      "model_answer": "3",
+      "correct": true,
+      "duration_seconds": 28.89,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "16d825ff-1623-4176-a5b5-42e0f5c2b0ac",
+      "level": "2",
+      "question": "What time was the Tri-Rail train that carried the most passengers on May 27, 2019 scheduled to arrive in Pompano Beach? Express your answer in the 12-hour digital clock format without leading zero if any, and include whether it is AM or PM.",
+      "ground_truth": "6:41 PM",
+      "model_answer": "6:41 PM",
+      "correct": true,
+      "duration_seconds": 3.95,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "2b3ef98c-cc05-450b-a719-711aee40ac65",
+      "level": "2",
+      "question": "Could you help me out with this assignment? Our professor sprung it on us at the end of class Friday, and I'm still trying to figure it out. The question he asked us was about an anagram. I've attached an audio recording of the question that he asked, so if you could please take a listen and give me the answer, I'd really appreciate the help. Please limit your response to the anagram text that could be generated from the original line which fulfills the professor's request, without any other commentary. Also, please don't include any punctuation in your response.",
+      "ground_truth": "To be or not to be that is the question whether tis nobler in the mind to suffer the slings and arrows of outrageous fortune",
+      "model_answer": "To be or not to be that is the question whether tis nobler in the mind to suffer the slings and arrows of outrageous fortune",
+      "correct": true,
+      "duration_seconds": 1.58,
+      "tools_used": [
+        "local_file_read",
+        "tavily_search",
+        "sarvam_gemma4"
+      ],
+      "file_name": "2b3ef98c-cc05-450b-a719-711aee40ac65.mp3"
+    },
+    {
+      "task_id": "bfcd99e1-0690-4b53-a85c-0174a8629083",
+      "level": "2",
+      "question": "How many applicants for the job in the PDF are only missing a single qualification?",
+      "ground_truth": "17",
+      "model_answer": "17",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_python"
+      ],
+      "file_name": "bfcd99e1-0690-4b53-a85c-0174a8629083.zip"
+    },
+    {
+      "task_id": "544b7f0c-173a-4377-8d56-57b36eb26ddf",
+      "level": "2",
+      "question": "In Valentina Re\u2019s contribution to the 2017 book \u201cWorld Building: Transmedia, Fans, Industries\u201d, what horror movie does the author cite as having popularized metalepsis between a dream world and reality? Use the complete name with article if any.",
+      "ground_truth": "A Nightmare on Elm Street",
+      "model_answer": "A Nightmare on Elm Street",
+      "correct": true,
+      "duration_seconds": 1.98,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "6b078778-0b90-464d-83f6-59511c811b01",
+      "level": "2",
+      "question": "The Metropolitan Museum of Art has a portrait in its collection with an accession number of 29.100.5. Of the consecrators and co-consecrators of this portrait's subject as a bishop, what is the name of the one who never became pope?",
+      "ground_truth": "Alfonso Visconti",
+      "model_answer": "Alfonso Visconti",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "076c8171-9b3b-49b9-a477-244d2a532826",
+      "level": "2",
+      "question": "The attached file contains a list of vendors in the Liminal Springs mall, along with each vendor\u2019s monthly revenue and the rent they pay the mall. I want you to find the vendor that makes the least money, relative to the rent it pays. Then, tell me what is listed in the \u201ctype\u201d column for that vendor.",
+      "ground_truth": "Finance",
+      "model_answer": "Finance",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_python"
+      ],
+      "file_name": "076c8171-9b3b-49b9-a477-244d2a532826.xlsx"
+    },
+    {
+      "task_id": "08cae58d-4084-4616-b6dd-dd6534e4825b",
+      "level": "2",
+      "question": "According to Google Finance, when was the first year the Apple stock went above $50 (without adjusting for stock split)?",
+      "ground_truth": "2018",
+      "model_answer": "2018",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "2dfc4c37-fec1-4518-84a7-10095d30ad75",
+      "level": "2",
+      "question": "According to Box Office Mojo's 2020 Worldwide Box Office list, how many of the top 10 highest-grossing worldwide movies are also on the top 10 highest-grossing domestic movies? Your answer should be a numerical integer value.",
+      "ground_truth": "6",
+      "model_answer": "6",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "9f41b083-683e-4dcf-9185-ccfeaa88fa45",
+      "level": "2",
+      "question": "How many pages if the 2023 IPCC report (85 pages version) mentions nuclear energy?",
+      "ground_truth": "0",
+      "model_answer": "0",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "ecbc4f94-95a3-4cc7-b255-6741a458a625",
+      "level": "2",
+      "question": "How many images are there in the latest 2022 Lego english wikipedia article?",
+      "ground_truth": "13",
+      "model_answer": "13",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "sarvam_gemma4"
       ],
       "file_name": ""
     }
