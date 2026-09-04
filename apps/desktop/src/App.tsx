@@ -103,6 +103,12 @@ export default function App() {
   const [previewFile, setPreviewFile] = useState<FilePreview | null>(null);
   const [currentExecution, setCurrentExecution] = useState<string | null>(null);
   const [currentThought, setCurrentThought] = useState<string | null>(null);
+  const [sidebarMode, setSidebarMode] = useState<"sessions" | "bots">("sessions");
+  const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
+  const [capTab, setCapTab] = useState<"dag" | "memory" | "skills" | "swarm" | "benchmarks" | "git">("dag");
+  const [selectedModel, setSelectedModel] = useState("GLM 5.2 · Med");
+  const [audioMuted, setAudioMuted] = useState(false);
+  const [sidebarVisible, setSidebarVisible] = useState(true);
 
   const handlePreview = async (filePath: string) => {
     try {
@@ -304,209 +310,201 @@ export default function App() {
   }
 
   return (
-    <div className="smara-app">
-      {/* Top Header */}
-      <header className="smara-topbar">
-        <div className="topbar-left">
-          <div className="brand-badge">
-            <img src={smaraLogo} alt="Smara" className="brand-logo" />
-            <span className="brand-title">Smara</span>
-            <span className="brand-tag">v2.0 Autonomous</span>
-          </div>
-
-          <div className="mode-pill-toggle">
-            <span className="active-mode-indicator">⚡ Autonomous (0 Approvals)</span>
-          </div>
+    <div className="sleek-app">
+      {/* Sleek Topbar */}
+      <header className="sleek-topbar">
+        <div className="sleek-topbar-left">
+          <button
+            type="button"
+            className="sleek-icon-btn"
+            onClick={() => setSidebarVisible(!sidebarVisible)}
+            title="Toggle Sidebar"
+          >
+            ⇄
+          </button>
+          <span style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>Smara Desktop</span>
         </div>
 
-        <div className="topbar-right">
+        <div className="sleek-topbar-right">
           <button
             type="button"
-            className="topbar-benchmark-pill"
-            onClick={() => setTab("benchmarks")}
-            title="View GAIA & SWE-bench Official Evaluation Scorecards"
+            className="sleek-icon-btn"
+            onClick={() => setCapabilitiesOpen(true)}
+            title="Autonomous Capabilities (DAG, Memory, Skills, Swarm)"
           >
-            <span>🏆 100% GAIA Verified</span>
+            ⚡
           </button>
-
           <button
             type="button"
-            className="topbar-search-trigger"
-            onClick={() => setShowSpotlight(true)}
-            title="Search Codebase (Ctrl+K)"
+            className="sleek-icon-btn"
+            onClick={() => setAudioMuted(!audioMuted)}
+            title={audioMuted ? "Unmute Audio" : "Mute Audio"}
           >
-            <span>🔍 Search Code</span>
-            <kbd className="topbar-kbd">Ctrl+K</kbd>
+            {audioMuted ? "🔇" : "🔊"}
           </button>
-
           <button
-            className={`syntarus-cloud-btn ${connection.has_cli_token ? "cloud-connected" : ""}`}
-            onClick={() => setTab("cloud")}
-            title="Shared Syntarus Cloud Memory Plane"
+            type="button"
+            className="sleek-icon-btn"
+            onClick={() => setTab(tab === "integrations" ? "chat" : "integrations")}
+            title="Settings & Connectors"
           >
-            <span className="cloud-dot" />
-            <span>{connection.has_cli_token ? "Syntarus Cloud Synced" : "Syntarus Plane: Standby"}</span>
+            ⚙
           </button>
         </div>
       </header>
 
-      {/* Main Container */}
-      <div className="smara-body">
-        {/* Navigation Sidebar */}
-        <aside className="smara-nav-rail">
-          <button
-            className={`rail-btn ${tab === "chat" ? "active" : ""}`}
-            onClick={() => setTab("chat")}
-          >
-            <span className="rail-icon">💬</span>
-            <span className="rail-label">Chat & Agent</span>
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "goals" ? "active" : ""}`}
-            onClick={() => setTab("goals")}
-          >
-            <span className="rail-icon">🎯</span>
-            <span className="rail-label">Goal Engine</span>
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "dag" ? "active" : ""}`}
-            onClick={() => setTab("dag")}
-          >
-            <span className="rail-icon">⚡</span>
-            <span className="rail-label">DAG Flow</span>
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "swarm" ? "active" : ""}`}
-            onClick={() => setTab("swarm")}
-          >
-            <span className="rail-icon">🐝</span>
-            <span className="rail-label">Swarm & Subagents</span>
-            <span className="rail-counter" style={{ background: "rgba(168, 85, 247, 0.25)", color: "#c084fc" }}>SWARM</span>
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "memory" ? "active" : ""}`}
-            onClick={() => setTab("memory")}
-          >
-            <span className="rail-icon">🧠</span>
-            <span className="rail-label">Task Memory</span>
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "search" ? "active" : ""}`}
-            onClick={() => setTab("search")}
-          >
-            <span className="rail-icon">🔍</span>
-            <span className="rail-label">Code Search</span>
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "browser" ? "active" : ""}`}
-            onClick={() => setTab("browser")}
-          >
-            <span className="rail-icon">🌐</span>
-            <span className="rail-label">Browser & E2E</span>
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "graph" ? "active" : ""}`}
-            onClick={() => setTab("graph")}
-          >
-            <span className="rail-icon">⚡</span>
-            <span className="rail-label">Code Graph</span>
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "tests" ? "active" : ""}`}
-            onClick={() => setTab("tests")}
-          >
-            <span className="rail-icon">🧪</span>
-            <span className="rail-label">Tests & Refactor</span>
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "benchmarks" ? "active" : ""}`}
-            onClick={() => setTab("benchmarks")}
-          >
-            <span className="rail-icon">🏆</span>
-            <span className="rail-label">Benchmarks</span>
-            <span className="rail-counter" style={{ background: "rgba(16, 185, 129, 0.25)", color: "#34d399" }}>100% GAIA</span>
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "git" ? "active" : ""}`}
-            onClick={() => setTab("git")}
-          >
-            <span className="rail-icon">🌿</span>
-            <span className="rail-label">Git Workspace</span>
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "terminal" ? "active" : ""}`}
-            onClick={() => setTab("terminal")}
-          >
-            <span className="rail-icon">💻</span>
-            <span className="rail-label">Terminal</span>
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "skills" ? "active" : ""}`}
-            onClick={() => setTab("skills")}
-          >
-            <span className="rail-icon">📚</span>
-            <span className="rail-label">Learned Skills</span>
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "models" ? "active" : ""}`}
-            onClick={() => setTab("models")}
-          >
-            <span className="rail-icon">🧠</span>
-            <span className="rail-label">Models & AI</span>
-            {modelProfiles.length > 0 && <span className="rail-counter">{modelProfiles.length}</span>}
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "integrations" ? "active" : ""}`}
-            onClick={() => setTab("integrations")}
-          >
-            <span className="rail-icon">🔌</span>
-            <span className="rail-label">Integrations</span>
-            {credentials.length > 0 && <span className="rail-counter">{credentials.length}</span>}
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "workspace" ? "active" : ""}`}
-            onClick={() => setTab("workspace")}
-          >
-            <span className="rail-icon">📁</span>
-            <span className="rail-label">Workspace</span>
-          </button>
-
-          <button
-            className={`rail-btn ${tab === "cloud" ? "active" : ""}`}
-            onClick={() => setTab("cloud")}
-          >
-            <span className="rail-icon">☁️</span>
-            <span className="rail-label">Syntarus Cloud</span>
-          </button>
-
-          <div className="rail-bottom-card">
-            <div className="zero-approval-badge">
-              <span className="badge-sparkle">🛡️</span>
-              <div>
-                <strong>Zero Friction</strong>
-                <p>Reads, searches, AST graph, and calculations run with 0 approval delays.</p>
-              </div>
+      {/* Main Workspace Body */}
+      <div className="sleek-body">
+        {/* Sleek Sidebar */}
+        {sidebarVisible && (
+          <aside className="sleek-sidebar">
+            <div className="sidebar-mode-nav">
+              <button
+                type="button"
+                className={`sidebar-tab-btn ${sidebarMode === "sessions" ? "active" : ""}`}
+                onClick={() => setSidebarMode("sessions")}
+              >
+                SESSIONS
+              </button>
+              <button
+                type="button"
+                className={`sidebar-tab-btn ${sidebarMode === "bots" ? "active" : ""}`}
+                onClick={() => setSidebarMode("bots")}
+              >
+                BOTS
+              </button>
             </div>
-          </div>
-        </aside>
+
+            <div className="sidebar-content">
+              {sidebarMode === "sessions" ? (
+                <>
+                  <button
+                    type="button"
+                    className="sidebar-action-row"
+                    onClick={() => {
+                      setMessages([]);
+                      setDraft("");
+                      setTab("chat");
+                    }}
+                    title="Start fresh session (Ctrl+N)"
+                  >
+                    <div className="sidebar-action-left">
+                      <span className="icon">💬</span>
+                      <span>New session</span>
+                    </div>
+                    <span className="kbd-badge">Ctrl N</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="sidebar-action-row"
+                    onClick={() => setCapabilitiesOpen(true)}
+                    title="Autonomous Agent Capabilities"
+                  >
+                    <div className="sidebar-action-left">
+                      <span className="icon">⚡</span>
+                      <span>Capabilities</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`sidebar-action-row ${tab === "integrations" ? "active" : ""}`}
+                    onClick={() => setTab(tab === "integrations" ? "chat" : "integrations")}
+                    title="Messaging & Connectors"
+                  >
+                    <div className="sidebar-action-left">
+                      <span className="icon">✉️</span>
+                      <span>Messaging</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`sidebar-action-row ${tab === "workspace" ? "active" : ""}`}
+                    onClick={() => setTab(tab === "workspace" ? "chat" : "workspace")}
+                    title="Artifacts & Previews"
+                  >
+                    <div className="sidebar-action-left">
+                      <span className="icon">📄</span>
+                      <span>Artifacts</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`sidebar-action-row ${tab === "goals" ? "active" : ""}`}
+                    onClick={() => setTab(tab === "goals" ? "chat" : "goals")}
+                    title="Scheduled Jobs"
+                  >
+                    <div className="sidebar-action-left">
+                      <span className="icon">⏱️</span>
+                      <span>Scheduled jobs</span>
+                    </div>
+                  </button>
+
+                  <div className="sidebar-section-divider">
+                    <span>Projects</span>
+                  </div>
+
+                  <div className="sidebar-empty-label">
+                    <span style={{ fontSize: 13, opacity: 0.6 }}>📂</span>
+                    <span>No sessions yet</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="sidebar-btn-subtle"
+                    onClick={() => setTab("workspace")}
+                  >
+                    <span>+</span>
+                    <span>New project</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="sidebar-section-divider">
+                    <span>BOTS</span>
+                    <span style={{ cursor: "pointer", fontSize: 12 }}>+</span>
+                  </div>
+
+                  <div
+                    className="sidebar-bot-card active"
+                    onClick={() => {
+                      setTab("chat");
+                      setSidebarMode("bots");
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                      <div className="bot-avatar-badge">
+                        <div className="eyes">
+                          <span className="eye" />
+                          <span className="eye" />
+                        </div>
+                      </div>
+                      <div className="bot-meta">
+                        <span className="bot-name">Smara</span>
+                        <span className="bot-status">Autonomous Agent</span>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 10, color: "#64748b" }}>now</span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="sidebar-footer">
+              <div className="sidebar-footer-profile">
+                <span className="status-dot-pulse" />
+                <span>sujal</span>
+              </div>
+              <span style={{ fontSize: 10, color: "#64748b" }}>ready</span>
+            </div>
+          </aside>
+        )}
 
         {/* Content View */}
-        <main className="smara-content">
+        <main className="smara-content" style={{ padding: 0 }}>
           {notice && (
             <div className="top-notice">
               <span>ℹ️ {notice}</span>
@@ -520,13 +518,18 @@ export default function App() {
               draft={draft}
               setDraft={setDraft}
               onSend={() => void send()}
-              onStarter={(prompt) => void send(prompt)}
               streaming={streaming}
               currentExecution={currentExecution}
               currentThought={currentThought}
               activity={activity}
               transcriptEndRef={transcriptEndRef}
               onPreview={handlePreview}
+              sidebarMode={sidebarMode}
+              selectedModel={selectedModel}
+              setSelectedModel={setSelectedModel}
+              audioMuted={audioMuted}
+              setAudioMuted={setAudioMuted}
+              onOpenCapabilities={() => setCapabilitiesOpen(true)}
             />
           )}
 
@@ -650,6 +653,83 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {/* Capabilities Modal / Drawer */}
+      {capabilitiesOpen && (
+        <div className="capabilities-modal-overlay" onClick={() => setCapabilitiesOpen(false)}>
+          <div className="capabilities-modal-window" onClick={(e) => e.stopPropagation()}>
+            <div className="capabilities-header">
+              <div className="capabilities-tabs">
+                <button
+                  type="button"
+                  className={`cap-tab-btn ${capTab === "dag" ? "active" : ""}`}
+                  onClick={() => setCapTab("dag")}
+                >
+                  <span>⚡</span>
+                  <span>Interactive DAG Flow</span>
+                </button>
+                <button
+                  type="button"
+                  className={`cap-tab-btn ${capTab === "memory" ? "active" : ""}`}
+                  onClick={() => setCapTab("memory")}
+                >
+                  <span>🧠</span>
+                  <span>Task Memory</span>
+                </button>
+                <button
+                  type="button"
+                  className={`cap-tab-btn ${capTab === "skills" ? "active" : ""}`}
+                  onClick={() => setCapTab("skills")}
+                >
+                  <span>📚</span>
+                  <span>Progressive Skills</span>
+                </button>
+                <button
+                  type="button"
+                  className={`cap-tab-btn ${capTab === "swarm" ? "active" : ""}`}
+                  onClick={() => setCapTab("swarm")}
+                >
+                  <span>🐝</span>
+                  <span>Subagent Swarm</span>
+                </button>
+                <button
+                  type="button"
+                  className={`cap-tab-btn ${capTab === "benchmarks" ? "active" : ""}`}
+                  onClick={() => setCapTab("benchmarks")}
+                >
+                  <span>🏆</span>
+                  <span>Benchmarks</span>
+                </button>
+                <button
+                  type="button"
+                  className={`cap-tab-btn ${capTab === "git" ? "active" : ""}`}
+                  onClick={() => setCapTab("git")}
+                >
+                  <span>🌿</span>
+                  <span>Git Workspace</span>
+                </button>
+              </div>
+              <button
+                type="button"
+                className="btn-close-cap"
+                onClick={() => setCapabilitiesOpen(false)}
+                title="Close (Esc)"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="capabilities-modal-body">
+              {capTab === "dag" && <DAGFlowTab onSetNotice={setNotice} />}
+              {capTab === "memory" && <TaskMemoryTab onSetNotice={setNotice} />}
+              {capTab === "skills" && <ProgressiveSkillsTab onSetNotice={setNotice} />}
+              {capTab === "swarm" && <SubagentSwarmTab onSetNotice={setNotice} />}
+              {capTab === "benchmarks" && <BenchmarksTab onSetNotice={setNotice} />}
+              {capTab === "git" && <GitTab />}
+            </div>
+          </div>
+        </div>
+      )}
 
       {previewFile && (
         <DocumentPreviewModal
@@ -805,163 +885,185 @@ function ChatTab({
   draft,
   setDraft,
   onSend,
-  onStarter,
   streaming,
   currentExecution,
   currentThought,
-  activity,
   transcriptEndRef,
   onPreview,
+  sidebarMode,
+  selectedModel,
+  setSelectedModel,
+  audioMuted,
+  setAudioMuted,
+  onOpenCapabilities,
 }: {
   messages: ChatMessage[];
   draft: string;
   setDraft: (val: string) => void;
   onSend: () => void;
-  onStarter: (prompt: string) => void;
   streaming: boolean;
   currentExecution?: string | null;
   currentThought?: string | null;
   activity: ActivityItem[];
   transcriptEndRef: RefObject<HTMLDivElement>;
   onPreview: (path: string) => void;
+  sidebarMode: "sessions" | "bots";
+  selectedModel: string;
+  setSelectedModel: (val: string) => void;
+  audioMuted: boolean;
+  setAudioMuted: (val: boolean) => void;
+  onOpenCapabilities: () => void;
 }) {
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streaming, transcriptEndRef]);
 
   return (
-    <div className="chat-tab-container">
-      <div className="chat-main-area">
-        {messages.length === 0 ? (
-          <div className="chat-hero">
-            <div className="hero-badge">⚡ AUTONOMOUS AI CODING & RESEARCH AGENT</div>
-            <h2>👋 Welcome! How can Smara assist you today?</h2>
-            <p>Your zero-friction autonomous coding & research partner — equipped with 100% Meta GAIA multimodal reasoning (PDF, Audio, Video), SWE-bench auto-repair, AST Code Property Graphs, and dual-plane memory.</p>
-
-            <div className="starter-cards-grid">
-              {starterPrompts.map((s, idx) => (
-                <button key={idx} className="starter-card" onClick={() => onStarter(s.prompt)}>
-                  <div className="card-header">
-                    <strong>{s.title}</strong>
-                    <span className="card-arrow">↗</span>
-                  </div>
-                  <p>{s.desc}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="transcript-feed">
-            {messages.map((m) => {
-              const detected = m.role === "assistant" ? detectFiles(m.text) : [];
-              return (
-                <div key={m.id} className={`message-bubble-row ${m.role === "user" ? "user-row" : "agent-row"}`}>
-                  <div className="msg-avatar">{m.role === "user" ? "👤" : "⚡"}</div>
-                  <div className={`msg-card ${m.failed ? "msg-failed" : ""}`}>
-                    <div className="msg-header">
-                      <span className="msg-author">{m.role === "user" ? "You" : "Smara Agent"}</span>
-                    </div>
-                    <div className="msg-text">{m.text}</div>
-                    {detected.length > 0 && (
-                      <div className="file-action-cards-container">
-                        {detected.map((f, i) => (
-                          <FileActionCard key={i} filePath={f} onPreview={onPreview} />
-                        ))}
-                      </div>
-                    )}
-                    {m.pending && (
-                      <div className="streaming-dots">
-                        <span /><span /><span />
-                      </div>
-                    )}
-                    {m.error && <div className="msg-err-box">{m.error}</div>}
-                  </div>
-                </div>
-              );
-            })}
-            {streaming && (
-              <div className="active-execution-pill">
-                <span className="exec-spinner">⚡</span>
-                <div className="exec-content">
-                  <div className="exec-title">{currentExecution || "Autonomous agent analyzing task..."}</div>
-                  {currentThought && <div className="exec-thought">🧠 {currentThought}</div>}
+    <div className="sleek-main-stage">
+      {messages.length === 0 ? (
+        <div className="sleek-hero-container">
+          {sidebarMode === "bots" ? (
+            <>
+              <div className="hero-bot-avatar">
+                <div className="eyes">
+                  <span className="eye" />
+                  <span className="eye" />
                 </div>
               </div>
-            )}
-            <div ref={transcriptEndRef} />
-          </div>
-        )}
+              <h1 className="wordmark-title">SMARA</h1>
+              <p className="wordmark-subtitle">Say something to get started.</p>
+            </>
+          ) : (
+            <>
+              <h1 className="wordmark-title">SMARA AGENT</h1>
+              <p className="wordmark-subtitle">
+                Search the repo, edit files, run tests, open PRs. Tell me the goal and I'll handle the mechanical parts.
+              </p>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="transcript-feed" style={{ paddingBottom: 120 }}>
+          {messages.map((m) => {
+            const detected = m.role === "assistant" ? detectFiles(m.text) : [];
+            return (
+              <div key={m.id} className={`message-bubble-row ${m.role === "user" ? "user-row" : "agent-row"}`}>
+                <div className="msg-avatar">{m.role === "user" ? "👤" : "⚡"}</div>
+                <div className={`msg-card ${m.failed ? "msg-failed" : ""}`}>
+                  <div className="msg-header">
+                    <span className="msg-author">{m.role === "user" ? "You" : "Smara Agent"}</span>
+                  </div>
+                  <div className="msg-text">{m.text}</div>
+                  {detected.length > 0 && (
+                    <div className="file-action-cards-container">
+                      {detected.map((f, i) => (
+                        <FileActionCard key={i} filePath={f} onPreview={onPreview} />
+                      ))}
+                    </div>
+                  )}
+                  {m.pending && (
+                    <div className="streaming-dots">
+                      <span /><span /><span />
+                    </div>
+                  )}
+                  {m.error && <div className="msg-err-box">{m.error}</div>}
+                </div>
+              </div>
+            );
+          })}
+          {streaming && (
+            <div className="active-execution-pill">
+              <span className="exec-spinner">⚡</span>
+              <div className="exec-content">
+                <div className="exec-title">{currentExecution || "Autonomous agent analyzing task..."}</div>
+                {currentThought && <div className="exec-thought">🧠 {currentThought}</div>}
+              </div>
+            </div>
+          )}
+          <div ref={transcriptEndRef} />
+        </div>
+      )}
 
-        {/* Composer */}
-        <div className="composer-deck">
-          <div className="quick-action-pills">
-            <button type="button" onClick={() => setDraft("Run the official GAIA Level 1 benchmark evaluation and show detailed accuracy scorecards.")}>🏆 GAIA Benchmark</button>
-            <button type="button" onClick={() => setDraft("Analyze the PDF document in reports/gaia_official_level1_full_results.pdf and summarize findings.")}>📄 Multimodal PDF</button>
-            <button type="button" onClick={() => setDraft("Run pytest test suite and auto-fix failures: ")}>🧪 Test Auto-Fixer</button>
-            <button type="button" onClick={() => setDraft("Search code semantically for ")}>🔍 Semantic Code Search</button>
-            <button type="button" onClick={() => setDraft("Inspect Git workspace status and commit changes with AI message")}>🌿 Git Workspace</button>
-            <button type="button" onClick={() => setDraft("Inspect AST Code Graph for symbol ")}>⚡ AST Code Graph</button>
-            <button type="button" onClick={() => setDraft("Scrape and test web page: ")}>🌐 Browser Sidecar</button>
-          </div>
+      {/* Floating Bottom Composer Dock */}
+      <div className="floating-composer-container">
+        <div className="floating-composer-dock">
+          <button
+            type="button"
+            className="btn-goal-context"
+            onClick={onOpenCapabilities}
+            title="Open Autonomous Capabilities & DAG Engine"
+          >
+            <span>+</span>
+            <span>{messages.length === 0 ? "Start with a goal" : "Add more context"}</span>
+          </button>
 
-          <div className="composer-input-box">
-            <textarea
-              rows={2}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  onSend();
-                }
-              }}
-              placeholder="Ask Smara a question, research topic, or code task..."
-              disabled={streaming}
-            />
+          <input
+            type="text"
+            className="composer-dock-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onSend();
+              }
+            }}
+            placeholder={messages.length === 0 ? "Ask Smara anything, describe a task, or start with a goal..." : "Send a message or follow-up..."}
+            disabled={streaming}
+          />
+
+          <div className="composer-dock-actions">
             <button
-              className={`send-action-btn ${draft.trim() ? "btn-active" : ""}`}
+              type="button"
+              className="model-selector-pill"
+              onClick={() => setSelectedModel(selectedModel.includes("GLM") ? "Sarvam AI · Fast" : "GLM 5.2 · Med")}
+              title="Click to toggle model"
+            >
+              <span>{selectedModel}</span>
+              <span style={{ fontSize: 9 }}>▾</span>
+            </button>
+
+            <button
+              type="button"
+              className="dock-icon-action"
+              title="Voice Input"
+              onClick={() => setDraft(draft ? `${draft} [voice]` : "Explain the codebase structure")}
+            >
+              🎙️
+            </button>
+
+            <button
+              type="button"
+              className="dock-icon-action"
+              onClick={() => setAudioMuted(!audioMuted)}
+              title={audioMuted ? "Unmute Audio" : "Mute Audio"}
+            >
+              {audioMuted ? "🔇" : "🔊"}
+            </button>
+
+            <button
+              type="button"
+              className="btn-waveform-submit"
               onClick={onSend}
               disabled={!draft.trim() || streaming}
+              title="Send Prompt"
             >
-              {streaming ? "⚙️" : "↑"}
+              {streaming ? "⚙" : "〰"}
             </button>
           </div>
-          <div className="composer-footer-hints">
-            <span><strong>Enter</strong> to run</span>
-            <span><strong>Shift + Enter</strong> for newline</span>
-            <span className="frictionless-tag">⚡ 0 Approval Friction</span>
+        </div>
+
+        <div className="floating-composer-footer">
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ cursor: "pointer" }} onClick={() => setDraft("")}>⌘</span>
+            <span>sujal</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ color: "#10b981" }}>● inference ready</span>
+            <span># v0.2.0</span>
           </div>
         </div>
       </div>
-
-      {/* Live Tool Activity Rail */}
-      <aside className="chat-live-rail">
-        <div className="rail-title">
-          <span>Live Tool Execution</span>
-          <span className={`live-pulse ${streaming ? "pulsing" : ""}`}>
-            {streaming ? "Active" : "Idle"}
-          </span>
-        </div>
-
-        <div className="rail-items-list">
-          {activity.length === 0 ? (
-            <div className="rail-empty-box">
-              <span className="empty-icon">⌘</span>
-              <p>Autonomous tool execution steps (Exa search, AST graph, terminal runs) will stream live here.</p>
-            </div>
-          ) : (
-            activity.map((item) => (
-              <div key={item.id} className={`live-item live-${item.tone}`}>
-                <div className="item-dot" />
-                <div className="item-text">
-                  <strong>{item.label}</strong>
-                  {item.detail && <span>{item.detail}</span>}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </aside>
     </div>
   );
 }
