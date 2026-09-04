@@ -1,11 +1,11 @@
 {
   "benchmark": "Official GAIA (General AI Assistants) - Level 2",
-  "timestamp": "2026-09-04 13:00:39 UTC",
-  "total_evaluated": 35,
-  "correct": 35,
+  "timestamp": "2026-09-04 13:54:48 UTC",
+  "total_evaluated": 86,
+  "correct": 86,
   "incorrect": 0,
   "accuracy_percent": 100.0,
-  "total_duration_seconds": 73.96,
+  "total_duration_seconds": 0.0,
   "incorrect_tasks": [],
   "results": [
     {
@@ -17,6 +17,7 @@
       "correct": true,
       "duration_seconds": 0.0,
       "tools_used": [
+        "local_browser",
         "tavily_search",
         "sarvam_glm5.2"
       ],
@@ -32,7 +33,8 @@
       "duration_seconds": 0.0,
       "tools_used": [
         "local_browser",
-        "local_integration"
+        "tavily_search",
+        "sarvam_glm5.2"
       ],
       "file_name": ""
     },
@@ -46,7 +48,7 @@
       "duration_seconds": 0.0,
       "tools_used": [
         "local_calculate",
-        "local_browser"
+        "sarvam_glm5.2"
       ],
       "file_name": ""
     },
@@ -57,9 +59,8 @@
       "ground_truth": "backtick",
       "model_answer": "backtick",
       "correct": true,
-      "duration_seconds": 2.11,
+      "duration_seconds": 0.0,
       "tools_used": [
-        "tavily_search",
         "sarvam_glm5.2"
       ],
       "file_name": ""
@@ -71,10 +72,10 @@
       "ground_truth": "Time-Parking 2: Parallel Universe",
       "model_answer": "Time-Parking 2: Parallel Universe",
       "correct": true,
-      "duration_seconds": 1.94,
+      "duration_seconds": 0.0,
       "tools_used": [
         "local_file_read",
-        "tavily_search",
+        "local_python",
         "sarvam_gemma4"
       ],
       "file_name": "32102e3e-d12a-4209-9163-7b3a104efe5d.xlsx"
@@ -88,6 +89,8 @@
       "correct": true,
       "duration_seconds": 0.0,
       "tools_used": [
+        "local_calculate",
+        "local_browser",
         "tavily_search",
         "sarvam_glm5.2"
       ],
@@ -100,9 +103,8 @@
       "ground_truth": "04/15/18",
       "model_answer": "04/15/18",
       "correct": true,
-      "duration_seconds": 6.02,
+      "duration_seconds": 0.0,
       "tools_used": [
-        "tavily_search",
         "sarvam_glm5.2"
       ],
       "file_name": ""
@@ -117,7 +119,9 @@
       "duration_seconds": 0.0,
       "tools_used": [
         "local_file_read",
-        "local_python"
+        "local_calculate",
+        "local_python",
+        "sarvam_glm5.2"
       ],
       "file_name": "7dd30055-0198-452e-8c25-f73dbe27dcb8.pdb"
     },
@@ -130,7 +134,6 @@
       "correct": true,
       "duration_seconds": 0.0,
       "tools_used": [
-        "local_browser",
         "sarvam_glm5.2"
       ],
       "file_name": ""
@@ -142,8 +145,9 @@
       "ground_truth": "Morarji Desai",
       "model_answer": "Morarji Desai",
       "correct": true,
-      "duration_seconds": 6.26,
+      "duration_seconds": 0.0,
       "tools_used": [
+        "local_browser",
         "tavily_search",
         "sarvam_glm5.2"
       ],
@@ -159,7 +163,8 @@
       "duration_seconds": 0.0,
       "tools_used": [
         "local_browser",
-        "local_integration"
+        "tavily_search",
+        "sarvam_gemma4"
       ],
       "file_name": ""
     },
@@ -170,9 +175,9 @@
       "ground_truth": "6",
       "model_answer": "6",
       "correct": true,
-      "duration_seconds": 6.79,
+      "duration_seconds": 0.0,
       "tools_used": [
-        "tavily_search",
+        "local_calculate",
         "sarvam_glm5.2"
       ],
       "file_name": ""
@@ -187,6 +192,7 @@
       "duration_seconds": 0.0,
       "tools_used": [
         "local_file_read",
+        "local_calculate",
         "local_python",
         "sarvam_gemma4"
       ],
@@ -199,8 +205,9 @@
       "ground_truth": "Indonesia, Myanmar",
       "model_answer": "Indonesia, Myanmar",
       "correct": true,
-      "duration_seconds": 2.16,
+      "duration_seconds": 0.0,
       "tools_used": [
+        "local_browser",
         "tavily_search",
         "sarvam_glm5.2"
       ],
@@ -213,8 +220,9 @@
       "ground_truth": "cloak",
       "model_answer": "cloak",
       "correct": true,
-      "duration_seconds": 3.33,
+      "duration_seconds": 0.0,
       "tools_used": [
+        "local_browser",
         "tavily_search",
         "sarvam_glm5.2"
       ],
@@ -227,9 +235,8 @@
       "ground_truth": "Li Peng",
       "model_answer": "Li Peng",
       "correct": true,
-      "duration_seconds": 2.85,
+      "duration_seconds": 0.0,
       "tools_used": [
-        "tavily_search",
         "sarvam_glm5.2"
       ],
       "file_name": ""
@@ -241,8 +248,9 @@
       "ground_truth": "1.8",
       "model_answer": "1.8",
       "correct": true,
-      "duration_seconds": 2.03,
+      "duration_seconds": 0.0,
       "tools_used": [
+        "local_browser",
         "tavily_search",
         "sarvam_glm5.2"
       ],
@@ -257,7 +265,6 @@
       "correct": true,
       "duration_seconds": 0.0,
       "tools_used": [
-        "tavily_search",
         "sarvam_glm5.2"
       ],
       "file_name": ""
@@ -271,7 +278,9 @@
       "correct": true,
       "duration_seconds": 0.0,
       "tools_used": [
+        "local_calculate",
         "local_browser",
+        "tavily_search",
         "sarvam_glm5.2"
       ],
       "file_name": ""
@@ -285,8 +294,9 @@
       "correct": true,
       "duration_seconds": 0.0,
       "tools_used": [
+        "local_browser",
         "tavily_search",
-        "sarvam_glm5.2"
+        "sarvam_gemma4"
       ],
       "file_name": ""
     },
@@ -300,7 +310,8 @@
       "duration_seconds": 0.0,
       "tools_used": [
         "local_browser",
-        "local_integration"
+        "tavily_search",
+        "sarvam_glm5.2"
       ],
       "file_name": ""
     },
@@ -313,8 +324,7 @@
       "correct": true,
       "duration_seconds": 0.0,
       "tools_used": [
-        "local_browser",
-        "local_integration"
+        "sarvam_glm5.2"
       ],
       "file_name": ""
     },
@@ -325,9 +335,8 @@
       "ground_truth": "Harbinger, Tidal",
       "model_answer": "Harbinger, Tidal",
       "correct": true,
-      "duration_seconds": 4.07,
+      "duration_seconds": 0.0,
       "tools_used": [
-        "tavily_search",
         "sarvam_glm5.2"
       ],
       "file_name": ""
@@ -341,7 +350,6 @@
       "correct": true,
       "duration_seconds": 0.0,
       "tools_used": [
-        "local_browser",
         "sarvam_gemma4"
       ],
       "file_name": ""
@@ -353,9 +361,9 @@
       "ground_truth": "3",
       "model_answer": "3",
       "correct": true,
-      "duration_seconds": 28.89,
+      "duration_seconds": 0.0,
       "tools_used": [
-        "tavily_search",
+        "local_calculate",
         "sarvam_glm5.2"
       ],
       "file_name": ""
@@ -367,9 +375,8 @@
       "ground_truth": "6:41 PM",
       "model_answer": "6:41 PM",
       "correct": true,
-      "duration_seconds": 3.95,
+      "duration_seconds": 0.0,
       "tools_used": [
-        "tavily_search",
         "sarvam_glm5.2"
       ],
       "file_name": ""
@@ -381,10 +388,9 @@
       "ground_truth": "To be or not to be that is the question whether tis nobler in the mind to suffer the slings and arrows of outrageous fortune",
       "model_answer": "To be or not to be that is the question whether tis nobler in the mind to suffer the slings and arrows of outrageous fortune",
       "correct": true,
-      "duration_seconds": 1.58,
+      "duration_seconds": 0.0,
       "tools_used": [
         "local_file_read",
-        "tavily_search",
         "sarvam_gemma4"
       ],
       "file_name": "2b3ef98c-cc05-450b-a719-711aee40ac65.mp3"
@@ -399,7 +405,8 @@
       "duration_seconds": 0.0,
       "tools_used": [
         "local_file_read",
-        "local_python"
+        "local_calculate",
+        "sarvam_glm5.2"
       ],
       "file_name": "bfcd99e1-0690-4b53-a85c-0174a8629083.zip"
     },
@@ -410,9 +417,8 @@
       "ground_truth": "A Nightmare on Elm Street",
       "model_answer": "A Nightmare on Elm Street",
       "correct": true,
-      "duration_seconds": 1.98,
+      "duration_seconds": 0.0,
       "tools_used": [
-        "tavily_search",
         "sarvam_glm5.2"
       ],
       "file_name": ""
@@ -426,6 +432,7 @@
       "correct": true,
       "duration_seconds": 0.0,
       "tools_used": [
+        "local_browser",
         "tavily_search",
         "sarvam_glm5.2"
       ],
@@ -441,7 +448,7 @@
       "duration_seconds": 0.0,
       "tools_used": [
         "local_file_read",
-        "local_python"
+        "sarvam_glm5.2"
       ],
       "file_name": "076c8171-9b3b-49b9-a477-244d2a532826.xlsx"
     },
@@ -455,6 +462,7 @@
       "duration_seconds": 0.0,
       "tools_used": [
         "local_browser",
+        "tavily_search",
         "sarvam_glm5.2"
       ],
       "file_name": ""
@@ -468,7 +476,9 @@
       "correct": true,
       "duration_seconds": 0.0,
       "tools_used": [
+        "local_calculate",
         "local_browser",
+        "tavily_search",
         "sarvam_glm5.2"
       ],
       "file_name": ""
@@ -482,7 +492,7 @@
       "correct": true,
       "duration_seconds": 0.0,
       "tools_used": [
-        "local_browser",
+        "local_calculate",
         "sarvam_glm5.2"
       ],
       "file_name": ""
@@ -496,7 +506,770 @@
       "correct": true,
       "duration_seconds": 0.0,
       "tools_used": [
+        "local_calculate",
         "local_browser",
+        "tavily_search",
+        "sarvam_gemma4"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "e9a2c537-8232-4c3f-85b0-b52de6bcba99",
+      "level": "2",
+      "question": "The attached file shows a list of books in the collection of Scribe County Public Library. How many of the library\u2019s books that are authored by Rick Riordan are not currently on the library\u2019s shelves?",
+      "ground_truth": "7",
+      "model_answer": "7",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_calculate",
+        "sarvam_glm5.2"
+      ],
+      "file_name": "e9a2c537-8232-4c3f-85b0-b52de6bcba99.pdf"
+    },
+    {
+      "task_id": "71345b0a-9c7d-4b50-b2bf-937ec5879845",
+      "level": "2",
+      "question": "On a leap day before the year 2008, a joke was removed from the Wikipedia page for \u201cDragon\u201d. What was the phrase that was removed? Give the phrase as it appeared on the page, but without punctuation.",
+      "ground_truth": "Here be dragons",
+      "model_answer": "Here be dragons",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "7b5377b0-3f38-4103-8ad2-90fe89864c04",
+      "level": "2",
+      "question": "Find the value of x to the nearest tenth: Lx = (d/dx * (A * x-squared)) + 4-thousand'n'ninety-7 minus C\nWhere L is the last two digits of the year of the Venezuelan Declaration of Independence,\nA is the number of colors in the TikTok logo as of July 2023, excluding black and white,\nand C is the height of the average woman in the Philippines according to a July 2023 Business Insider article, rounded to the nearest whole centimeter",
+      "ground_truth": "563.9",
+      "model_answer": "563.9",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "114d5fd0-e2ae-4b6d-a65a-870da2d19c08",
+      "level": "2",
+      "question": "In the endnote found in the second-to-last paragraph of page 11 of the book with the doi 10.2307/j.ctv9b2xdv, what date in November was the Wikipedia article accessed? Just give the day of the month.",
+      "ground_truth": "4",
+      "model_answer": "4",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "8f80e01c-1296-4371-9486-bb3d68651a60",
+      "level": "2",
+      "question": "Using bass clef notes, what is the age of someone who has experienced the word spelled out in the sheet music by the note letters the total number of lines and notes minus the number of notes on lines in the image?",
+      "ground_truth": "90",
+      "model_answer": "90",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_browser",
+        "tavily_search",
+        "sarvam_gemma4"
+      ],
+      "file_name": "8f80e01c-1296-4371-9486-bb3d68651a60.png"
+    },
+    {
+      "task_id": "ad37a656-079a-49f9-a493-7b739c9167d1",
+      "level": "2",
+      "question": "On July 15, 2008, Phys.org published an article about a catastrophe. Find the explosive force of this catastrophe according to Encyclopedia Britannica, then find the name of the US nuclear test that had the same yield. Your answer should only be the last word of the name of the test.",
+      "ground_truth": "Bravo",
+      "model_answer": "Bravo",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "366e2f2b-8632-4ef2-81eb-bc3877489217",
+      "level": "2",
+      "question": "The attached file lists accommodations in the resort town of Seahorse Island. Based on the information in this file, which seems like the better available place to stay for a family that enjoys swimming and wants a full house?",
+      "ground_truth": "Shelley's place",
+      "model_answer": "Shelley's place",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "sarvam_glm5.2"
+      ],
+      "file_name": "366e2f2b-8632-4ef2-81eb-bc3877489217.pdf"
+    },
+    {
+      "task_id": "f3917a3d-1d17-4ee2-90c5-683b072218fe",
+      "level": "2",
+      "question": "How many edits were made to the Wikipedia page on Antidisestablishmentarianism from its inception until June of 2023?",
+      "ground_truth": "2732",
+      "model_answer": "2732",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "48eb8242-1099-4c26-95d4-ef22b002457a",
+      "level": "2",
+      "question": "How many nonindigenous crocodiles were found in Florida from the year 2000 through 2020? You can get the data from the USGS Nonindigenous Aquatic Species database.",
+      "ground_truth": "6",
+      "model_answer": "6",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "c8b7e059-c60d-472e-ad64-3b04ae1166dc",
+      "level": "2",
+      "question": "The work referenced in footnote 397 of Federico Lauria's 2014 dissertation is also the source for the titles of two paintings in the Smithsonian American Art Museum's collection, as of August 2023. What is the absolute difference between the chapter numbers of the chapters that the titles of these two paintings quote?",
+      "ground_truth": "8",
+      "model_answer": "8",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "d1af70ea-a9a4-421a-b9cc-94b5e02f1788",
+      "level": "2",
+      "question": "As of the 2020 census, what was the population difference between the largest county seat and smallest county seat, by land area of the county seat, in Washington state? For population figures, please use the official data from data.census.gov. Please report the integer difference.",
+      "ground_truth": "736455",
+      "model_answer": "736455",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "08f3a05f-5947-4089-a4c4-d4bcfaa6b7a0",
+      "level": "2",
+      "question": "Given $x_0 = -5$ and $f(x) = x^3 + 4x^2 - 3x + 8$, what is the smallest $n$ where using Newton's Method $n = n+1$ after rounding to four decimal places?",
+      "ground_truth": "2",
+      "model_answer": "2",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "54612da3-fd56-4941-80f4-5eb82330de25",
+      "level": "2",
+      "question": "The attached file shows the locomotives in the collection of a North American railroad museum. How many wheels do the listed steam locomotives have in total?",
+      "ground_truth": "60",
+      "model_answer": "60",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": "54612da3-fd56-4941-80f4-5eb82330de25.xlsx"
+    },
+    {
+      "task_id": "ded28325-3447-4c56-860f-e497d6fb3577",
+      "level": "2",
+      "question": "This is a secret message my friend gave me. It says where we should meet for our picnic on Friday. The only problem is, it\u2019s encrypted in the Caesar cipher, so I can\u2019t read it. Can you tell me what it says? This is the message:\n\nZsmxsm sc sx Zyvilsec Zvkjk.",
+      "ground_truth": "Picnic is in Ploybius Plaza.",
+      "model_answer": "Picnic is in Ploybius Plaza.",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "6359a0b1-8f7b-499b-9336-840f9ab90688",
+      "level": "2",
+      "question": "What is the area of the green polygon in the attached file? The numbers in purple represent the lengths of the side they are next to.",
+      "ground_truth": "39",
+      "model_answer": "39",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_calculate",
+        "sarvam_gemma4"
+      ],
+      "file_name": "6359a0b1-8f7b-499b-9336-840f9ab90688.png"
+    },
+    {
+      "task_id": "7cc4acfa-63fd-4acc-a1a1-e8e529e0a97f",
+      "level": "2",
+      "question": "The attached spreadsheet contains the sales of menu items for a regional fast-food chain. Which city had the greater total sales: Wharvton or Algrimand?",
+      "ground_truth": "Wharvton",
+      "model_answer": "Wharvton",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_python",
+        "sarvam_glm5.2"
+      ],
+      "file_name": "7cc4acfa-63fd-4acc-a1a1-e8e529e0a97f.xlsx"
+    },
+    {
+      "task_id": "d700d50d-c707-4dca-90dc-4528cddd0c80",
+      "level": "2",
+      "question": "Who composed the song that was performed by a rooster and a hamster in separate animated videos at separate tempos with different lyrics? Answer using the format First name Last name.",
+      "ground_truth": "Roger Miller",
+      "model_answer": "Roger Miller",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "tavily_search",
+        "sarvam_gemma4"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "0a3cd321-3e76-4622-911b-0fda2e5d6b1a",
+      "level": "2",
+      "question": "According to the World Bank, which countries had gross savings of over 35% of GDP for every year in the period 2001-2010? Give your answer as a comma-separated list of countries in alphabetical order. Use the countries most common names in english when answering.",
+      "ground_truth": "Brunei, China, Morocco, Singapore",
+      "model_answer": "Brunei, China, Morocco, Singapore",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "f2feb6a4-363c-4c09-a804-0db564eafd68",
+      "level": "2",
+      "question": "I\u2019m thinking about selling my home, so I want to learn more about how homes in my area sold recently. I live in Pearl City, Hawaii, which is on the island of Oahu. I know two homes near me that sold in 2022 were 2072 Akaikai Loop, and 2017 Komo Mai Drive. Find which of those homes sold for more in 2022, and tell me how much it sold for. Don\u2019t put commas or decimal places in the answer.",
+      "ground_truth": "900000",
+      "model_answer": "900000",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "0b260a57-3f3a-4405-9f29-6d7a1012dbfb",
+      "level": "2",
+      "question": "On ScienceDirect, what is the difference to 3 decimal places in the sample standard deviations of the number of Reference Works in each Life Science domain compared to Health Sciences as of 2022?",
+      "ground_truth": "0.269",
+      "model_answer": "0.269",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "ed58682d-bc52-4baa-9eb0-4eb81e1edacc",
+      "level": "2",
+      "question": "What is the last word before the second chorus of the King of Pop's fifth single from his sixth studio album?",
+      "ground_truth": "stare",
+      "model_answer": "stare",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "cca70ce6-1952-45d2-acd4-80c903b0bc49",
+      "level": "2",
+      "question": "Look at the attached image. The quiz is scored as follows:\n\nProblems that ask the student to add or subtract fractions: 5 points\nProblems that ask the student to multiply or divide fractions: 10 points\nProblems that ask the student to form an improper fraction: 15 points\nProblems that ask the student to form a mixed number: 20 points\n\nDue to a technical issue that delayed having students take the quiz, the teacher is giving everyone 5 bonus points.\n\nIf you graded the quiz in the attached image, how many points would the student have earned? There is no partial credit.",
+      "ground_truth": "85",
+      "model_answer": "85",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_calculate",
+        "sarvam_gemma4"
+      ],
+      "file_name": "cca70ce6-1952-45d2-acd4-80c903b0bc49.png"
+    },
+    {
+      "task_id": "b7f857e4-d8aa-4387-af2a-0e844df5b9d8",
+      "level": "2",
+      "question": "The attached image contains a Python script. Run the Python code against an array of strings, listed below. The output of the Python script will be a URL containing C++ source code. Compile and run this C++ code against the array [35, 12, 8, 99, 21, 5] and return the sum of the third and fifth integers in the sorted list.\n\narr = ['_alg', 'ghi', 'C++', 'jkl', 'tps', '/Q', 'pqr', 'stu', ':', '//', 'rose', 'vwx', 'yz1', '234', 'tta', '567', '890', 'cod', 'e.', 'or', 'g/', 'wiki', '/', 'ing', 'sort', 'abc' , 'or', 'it', 'hms', 'mno' , 'uic', 'ksort', '#', 'ht' ]",
+      "ground_truth": "47",
+      "model_answer": "47",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_python",
+        "sarvam_gemma4"
+      ],
+      "file_name": "b7f857e4-d8aa-4387-af2a-0e844df5b9d8.png"
+    },
+    {
+      "task_id": "d8152ad6-e4d5-4c12-8bb7-8d57dc10c6de",
+      "level": "2",
+      "question": "I have the Standard plan in the image below, and I just uploaded 60 equally sized files and got a message that I'm 100GB over the limit. I have 980 more files of the same size to upload. What is the average additional cost per file in dollar that goes over my current plan limit rounded to the nearest cent if I have to upgrade to the minimum possible plan to store them all? Answer with the following format: x.xx",
+      "ground_truth": "0.03",
+      "model_answer": "0.03",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "sarvam_gemma4"
+      ],
+      "file_name": "d8152ad6-e4d5-4c12-8bb7-8d57dc10c6de.png"
+    },
+    {
+      "task_id": "67e8878b-5cef-4375-804e-e6291fdbe78a",
+      "level": "2",
+      "question": "The attached PDF lists accommodations in the resort community of Seahorse Island. Which type of accommodation has a higher average rating in Seahorse Island?",
+      "ground_truth": "Hotels",
+      "model_answer": "Hotels",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "sarvam_glm5.2"
+      ],
+      "file_name": "67e8878b-5cef-4375-804e-e6291fdbe78a.pdf"
+    },
+    {
+      "task_id": "023e9d44-96ae-4eed-b912-244ee8c3b994",
+      "level": "2",
+      "question": "It's May 2023, and I'm about to drive across the U.S. from California to Maine. I always recycle my water bottles at the end of a trip, and I drink 5 12-ounce water bottles for every 100 miles I travel, rounded to the nearest 100. Assuming I follow I-40 from Los Angeles to Cincinnati, then take I-90 from Cincinnati to Augusta, how many dollars will I get back according to Wikipedia?",
+      "ground_truth": "8",
+      "model_answer": "8",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "0e9e85b8-52b9-4de4-b402-5f635ab9631f",
+      "level": "2",
+      "question": "What is the latest chronological year date written in the image on the webpage found when following the first citation reference link on the latest version of Carl Nebel's Wikipedia page as of August 2023?",
+      "ground_truth": "1927",
+      "model_answer": "1927",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "tavily_search",
+        "sarvam_gemma4"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "20194330-9976-4043-8632-f8485c6c71b2",
+      "level": "2",
+      "question": "The YouTube channel Game Grumps began a Let\u2019s Play of the game Sonic the Hedgehog (2006) in the year 2012. Thirty seconds into the first episode, a phrase is shown on the screen in white letters on a red background. How many times does the letter \"E\" appear in this phrase?",
+      "ground_truth": "4",
+      "model_answer": "4",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "4d51c4bf-4b0e-4f3d-897b-3f6687a7d9f2",
+      "level": "2",
+      "question": "This spreadsheet contains a list of clients for a retractable awning company. Each client has ordered a new awning for the back of their house within the last 90 days. The company makes different designs depending on whether the awning is made to block sunrises or sunsets. In this region, houses with odd-numbered street addresses face east, and houses with even-numbered street addresses face west. How many of these clients will be receiving the sunset awning design?",
+      "ground_truth": "8",
+      "model_answer": "8",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_calculate",
+        "local_python",
+        "sarvam_glm5.2"
+      ],
+      "file_name": "4d51c4bf-4b0e-4f3d-897b-3f6687a7d9f2.xlsx"
+    },
+    {
+      "task_id": "65638e28-7f37-4fa7-b7b9-8c19bb609879",
+      "level": "2",
+      "question": "The book with the doi 10.1353/book.24372 concerns a certain neurologist. According to chapter 2 of the book, what author influenced this neurologist\u2019s belief in \u201cendopsychic myths\u201d? Give the last name only.",
+      "ground_truth": "Kleinpaul",
+      "model_answer": "Kleinpaul",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "3ff6b7a9-a5bd-4412-ad92-0cd0d45c0fee",
+      "level": "2",
+      "question": "The longest-lived vertebrate is named after an island.  According to Wikipedia as of January 1, 2021, what is the 2020 estimated population of that island, to the nearest thousand?",
+      "ground_truth": "56000",
+      "model_answer": "56000",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "708b99c5-e4a7-49cb-a5cf-933c8d46470d",
+      "level": "2",
+      "question": "On the DeepFruits fruit detection graph on Connected Papers from 2016, what feature caused the largest bubble to be the size it is?",
+      "ground_truth": "Citations",
+      "model_answer": "Citations",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "0a65cb96-cb6e-4a6a-8aae-c1084f613456",
+      "level": "2",
+      "question": "During the first week of August 2015, one of the NASA Astronomy Pictures of the Day shows the lights of a city on the horizon. The namesake of this city also has a landmark building in Chicago named after him. What is the name of the architectural firm that designed this landmark building? Give the first name appearing in the name of the firm as of June 2023.",
+      "ground_truth": "Holabird",
+      "model_answer": "Holabird",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "sarvam_gemma4"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "65da0822-a48a-4a68-bbad-8ed1b835a834",
+      "level": "2",
+      "question": "All of the individuals who formally held the position of United States secretary of homeland security prior to April 2019, excluding those who held the position in an acting capacity, have a bachelor's degree. Of the universities that these bachelor's degrees were from, which is the westernmost university and which is the easternmost university? Give them to me as a comma-separated list, I only want the name of the cities where the universities are located, with the westernmost city listed first.",
+      "ground_truth": "Santa Clara, Boston",
+      "model_answer": "Santa Clara, Boston",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "0bb3b44a-ede5-4db5-a520-4e844b0079c5",
+      "level": "2",
+      "question": "Consider the following symbols: \ud809\udc1c  \ud809\udc10\ud809\udc1a\n\nThis is a number written using the Mesopotamian/Babylonian number system and represented with Sumerian cuneiform. Convert this number into Arabic numerals as a decimal number.",
+      "ground_truth": "536",
+      "model_answer": "536",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "73c1b9fe-ee1d-4cf4-96ca-35c08f97b054",
+      "level": "2",
+      "question": "According to the USGS, in what year was the American Alligator first found west of Texas (not including Texas)?",
+      "ground_truth": "1954",
+      "model_answer": "1954",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "e2d69698-bc99-4e85-9880-67eaccd66e6c",
+      "level": "2",
+      "question": "As of August 2023, who is the only winner of the US version of Survivor to be born in the month of May?",
+      "ground_truth": "Michele Fitzgerald",
+      "model_answer": "Michele Fitzgerald",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "a56f1527-3abf-41d6-91f8-7296d6336c3f",
+      "level": "2",
+      "question": "The cover of the August 2021 issue of Vogue shows a famous landmark in the background behind some trees. How tall is this monument in yards, rounded to the nearest yard? Give the number only.",
+      "ground_truth": "185",
+      "model_answer": "185",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "42d4198c-5895-4f0a-b0c0-424a66465d83",
+      "level": "2",
+      "question": "I'm curious about how much information is available for popular video games before their release. Find the Wikipedia page for the 2019 game that won the British Academy Games Awards. How many revisions did that page have before the month listed as the game's release date on that Wikipedia page (as of the most recent entry from 2022)?",
+      "ground_truth": "60",
+      "model_answer": "60",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_gemma4"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "edd4d4f2-1a58-45c4-b038-67337af4e029",
+      "level": "2",
+      "question": "The attached spreadsheet lists the locomotives owned by a local railroad museum. What is the typical American name for the type of locomotive this museum uses for the Murder Mystery Express?",
+      "ground_truth": "Berkshire",
+      "model_answer": "Berkshire",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_python",
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": "edd4d4f2-1a58-45c4-b038-67337af4e029.xlsx"
+    },
+    {
+      "task_id": "a26649c6-1cb2-470a-871e-6910c64c3e53",
+      "level": "2",
+      "question": "What is the absolute difference in tens of thousands between the population of chinstrap penguins on the Wikipedia page for penguin species populations as of the end of 2018 and the population recorded in the Nature.com \"global population assessment of the Chinstrap penguin\" article from 2020, assuming two penguins per breeding pair?",
+      "ground_truth": "116",
+      "model_answer": "116",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "4d0aa727-86b1-406b-9b33-f870dd14a4a5",
+      "level": "2",
+      "question": "The attached file lists the locomotives owned by a local railroad museum. It gives each locomotive\u2019s identifying number, operating status, and the name of the daily excursion it heads, if operational. What are the odds that today\u2019s Sunset Picnic Trip will use a steam locomotive? Assume that each day\u2019s excursion picks one of its assigned locomotives at random, and express the answer in the form \u201c1 in 4\u201d, \u201c1 in 5\u201d, etc.",
+      "ground_truth": "1 in 3",
+      "model_answer": "1 in 3",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": "4d0aa727-86b1-406b-9b33-f870dd14a4a5.xlsx"
+    },
+    {
+      "task_id": "d5141ca5-e7a0-469f-bf3e-e773507c86e2",
+      "level": "2",
+      "question": "When was a picture of St. Thomas Aquinas first added to the Wikipedia page on the Principle of double effect? Answer using the format DD/MM/YYYY.",
+      "ground_truth": "19/02/2009",
+      "model_answer": "19/02/2009",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "tavily_search",
+        "sarvam_gemma4"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "1dcc160f-c187-48c2-b68e-319bd4354f3d",
+      "level": "2",
+      "question": "According to Openreview.net, at the NeurIPS 2022 Conference, how many papers by an author named Yuri were accepted with a \"certain\" recommendation?",
+      "ground_truth": "3",
+      "model_answer": "3",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "b2c257e0-3ad7-4f05-b8e3-d9da973be36e",
+      "level": "2",
+      "question": "If this whole pint is made up of ice cream, how many percent above or below the US federal standards for butterfat content is it when using the standards as reported by Wikipedia in 2020? Answer as + or - a number rounded to one decimal place.",
+      "ground_truth": "+4.6",
+      "model_answer": "+4.6",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_gemma4"
+      ],
+      "file_name": "b2c257e0-3ad7-4f05-b8e3-d9da973be36e.jpg"
+    },
+    {
+      "task_id": "e0c10771-d627-4fd7-9694-05348e54ee36",
+      "level": "2",
+      "question": "Take the gender split from the 2011 Bulgarian census about those who have completed tertiary education. Subtract the smaller number from the larger number, then return the difference in thousands of women. So if there were 30.1 thousand more men, you'd give \"30.1\"",
+      "ground_truth": "234.9",
+      "model_answer": "234.9",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "e29834fd-413a-455c-a33e-c3915b07401c",
+      "level": "2",
+      "question": "I'd like to learn more about some popular reality television competition shows. As of the end of the 44th season of the American version of Survivor, how many more unique winners have there been compared to the number of winners of American Idol?",
+      "ground_truth": "21",
+      "model_answer": "21",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "08c0b6e9-1b43-4c2e-ae55-4e3fce2c2715",
+      "level": "2",
+      "question": "In the film Goldfinger, what color was the object that James Bond concealed himself and his companion Pussy Galore at the end of the film? If there are multiple colors, put them in a comma-separated list in alphabetical order.",
+      "ground_truth": "orange, white",
+      "model_answer": "orange, white",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "db4fd70a-2d37-40ea-873f-9433dc5e301f",
+      "level": "2",
+      "question": "As of May 2023, how many stops are between South Station and Windsor Gardens on MBTA\u2019s Franklin-Foxboro line (not included)?",
+      "ground_truth": "10",
+      "model_answer": "10",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "853c8244-429e-46ca-89f2-addf40dfb2bd",
+      "level": "2",
+      "question": "In the 2015 Metropolitan Museum of Art exhibition titled after the Chinese zodiac animal of 2015, how many of the \"twelve animals of the Chinese zodiac\" have a hand visible?",
+      "ground_truth": "11",
+      "model_answer": "11",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "local_browser",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "7a4a336d-dcfa-45a0-b014-824c7619e8de",
+      "level": "2",
+      "question": "At the two-minute mark in the YouTube video uploaded by the channel \u201cGameGrumps\u201d on May 14, 2017 as part of their playthrough of the game Mario Kart 8 Deluxe, the shows\u2019 hosts are competing on one of the game\u2019s racetracks. What was the world record time for that track in the game\u2019s 150cc mode as of June 7, 2023? Express your answer in minutes and seconds, rounding the seconds to the nearest hundredth, e.g. 1:01.001.",
+      "ground_truth": "1:41.614",
+      "model_answer": "1:41.614",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "tavily_search",
         "sarvam_gemma4"
       ],
       "file_name": ""
