@@ -269,3 +269,70 @@ def calculate(expression: str) -> str:
         return str(res)
     except Exception as e:
         return f"Math Error: {e}"
+
+
+def memory_tool(action: str, target: str = "memory", content: str = "", old_text: str = "", query: str = "") -> str:
+    """Manage durable task memory (MEMORY.md or USER.md)."""
+    from smara.task_memory import get_default_memory_store
+    store = get_default_memory_store()
+    act = action.lower().strip()
+    if act == "add":
+        res = store.add_entry(content, target=target)
+    elif act == "replace":
+        res = store.replace_entry(old_text, content, target=target)
+    elif act == "remove":
+        res = store.remove_entry(old_text, target=target)
+    elif act == "search":
+        hits = store.search_entries(query or content, target=target)
+        return json.dumps(hits, indent=2)
+    elif act == "list":
+        entries = store.read_entries(target=target)
+        return json.dumps(entries, indent=2)
+    else:
+        return f"Unknown memory action '{action}'. Valid actions: add, replace, remove, search, list"
+    return json.dumps(res, indent=2)
+
+
+def skills_list_tool(tag_filter: Optional[str] = None) -> str:
+    """List available skills with metadata."""
+    from smara.skills_system import get_default_skills_registry
+    registry = get_default_skills_registry()
+    skills = registry.list_skills(tag_filter=tag_filter)
+    if not skills:
+        return "No skills currently discovered in workspace or global library."
+    return json.dumps(skills, indent=2)
+
+
+def skill_view_tool(skill_name: str, relative_path: Optional[str] = None) -> str:
+    """Load full instructions or referenced documents for a skill."""
+    from smara.skills_system import get_default_skills_registry
+    registry = get_default_skills_registry()
+    res = registry.view_skill(skill_name, relative_path=relative_path)
+    return json.dumps(res, indent=2)
+
+
+def delegate_task_tool(goal: str, context: Optional[str] = None, role: str = "generalist") -> str:
+    """Spawn an isolated worker subagent to execute a sub-task."""
+    from smara.subagent_orchestrator import get_default_orchestrator, SubagentRole
+    orchestrator = get_default_orchestrator()
+    try:
+        sub_role = SubagentRole(role.lower().strip())
+    except ValueError:
+        sub_role = SubagentRole.GENERALIST
+    res = orchestrator.delegate(goal, context=context, role=sub_role)
+    return json.dumps(res.to_dict(), indent=2)
+
+
+def dag_flow_tool(action: str, workflow_data: Optional[str] = None) -> str:
+    """Execute or inspect an interactive DAG workflow."""
+    from smara.dag_flow import DAGWorkflow, DAGNode
+    act = action.lower().strip()
+    if act == "create_and_run" and workflow_data:
+        try:
+            data = json.loads(workflow_data) if isinstance(workflow_data, str) else workflow_data
+            wf = DAGWorkflow.from_dict(data)
+            summary = wf.run_until_complete(lambda node: f"Executed capability {node.capability}")
+            return json.dumps(summary, indent=2)
+        except Exception as e:
+            return f"Error executing DAG workflow: {e}"
+    return f"Unknown dag_flow action '{action}'. Valid actions: create_and_run"
