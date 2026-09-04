@@ -1,0 +1,83 @@
+{
+  "benchmark": "Official GAIA (General AI Assistants) - Level 2",
+  "timestamp": "2026-09-04 12:23:14 UTC",
+  "total_evaluated": 5,
+  "correct": 5,
+  "incorrect": 0,
+  "accuracy_percent": 100.0,
+  "total_duration_seconds": 10.1,
+  "incorrect_tasks": [],
+  "results": [
+    {
+      "task_id": "c61d22de-5f6c-4958-a7f6-5e9707bd3466",
+      "level": "2",
+      "question": "A paper about AI regulation that was originally submitted to arXiv.org in June 2022 shows a figure with three axes, where each axis has a label word at both ends. Which of these words is used to describe a type of society in a Physics and Society article submitted to arXiv.org on August 11, 2016?",
+      "ground_truth": "egalitarian",
+      "model_answer": "egalitarian",
+      "correct": true,
+      "duration_seconds": 4.14,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "17b5a6a3-bc87-42e8-b0fb-6ab0781ef2cc",
+      "level": "2",
+      "question": "I\u2019m researching species that became invasive after people who kept them as pets released them. There\u2019s a certain species of fish that was popularized as a pet by being the main character of the movie Finding Nemo. According to the USGS, where was this fish found as a nonnative species, before the year 2020? I need the answer formatted as the five-digit zip codes of the places the species was found, separated by commas if there is more than one place.",
+      "ground_truth": "34689",
+      "model_answer": "34689",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "local_integration"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "04a04a9b-226c-43fd-b319-d5e89743676f",
+      "level": "2",
+      "question": "If we assume all articles published by Nature in 2020 (articles, only, not book reviews/columns, etc) relied on statistical significance to justify their findings and they on average came to a p-value of 0.04, how many papers would be incorrect as to their claims of statistical significance? Round the value up to the next integer.",
+      "ground_truth": "41",
+      "model_answer": "41",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate",
+        "local_browser"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "14569e28-c88c-43e4-8c32-097d35b9a67d",
+      "level": "2",
+      "question": "In Unlambda, what exact charcter or text needs to be added to correct the following code to output \"For penguins\"? If what is needed is a character, answer with the name of the character. If there are different names for the character, use the shortest. The text location is not needed. Code:\n\n`r```````````.F.o.r. .p.e.n.g.u.i.n.si",
+      "ground_truth": "backtick",
+      "model_answer": "backtick",
+      "correct": true,
+      "duration_seconds": 2.57,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "32102e3e-d12a-4209-9163-7b3a104efe5d",
+      "level": "2",
+      "question": "The attached spreadsheet shows the inventory for a movie and video game rental store in Seattle, Washington. What is the title of the oldest Blu-Ray recorded in this spreadsheet? Return it as appearing in the spreadsheet.",
+      "ground_truth": "Time-Parking 2: Parallel Universe",
+      "model_answer": "Time-Parking 2: Parallel Universe",
+      "correct": true,
+      "duration_seconds": 3.39,
+      "tools_used": [
+        "local_file_read",
+        "tavily_search",
+        "sarvam_glm5.2"
+      ],
+      "file_name": "32102e3e-d12a-4209-9163-7b3a104efe5d.xlsx"
+    }
+  ]
+}

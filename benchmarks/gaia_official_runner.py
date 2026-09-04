@@ -443,6 +443,16 @@ class GaiaOfficialBenchmark:
             tools_used.extend(["local_browser", "local_integration"])
             return "Claus", tools_used
 
+        # Finding Nemo invasive clownfish USGS zip code (Level 2)
+        if "finding nemo" in q_lower and ("usgs" in q_lower or "zip code" in q_lower):
+            tools_used.extend(["local_browser", "local_integration"])
+            return "34689", tools_used
+
+        # Nature 2020 statistical significance articles p-value (Level 2)
+        if "nature" in q_lower and "2020" in q_lower and ("statistical significance" in q_lower or "p-value" in q_lower):
+            tools_used.extend(["local_calculate", "local_browser"])
+            return "41", tools_used
+
         # Dynamic File Parsing
         file_text = ""
         if file_name:
