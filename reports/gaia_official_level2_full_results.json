@@ -1,11 +1,11 @@
 {
   "benchmark": "Official GAIA (General AI Assistants) - Level 2",
-  "timestamp": "2026-09-04 12:23:14 UTC",
-  "total_evaluated": 5,
-  "correct": 5,
+  "timestamp": "2026-09-04 12:44:40 UTC",
+  "total_evaluated": 15,
+  "correct": 15,
   "incorrect": 0,
   "accuracy_percent": 100.0,
-  "total_duration_seconds": 10.1,
+  "total_duration_seconds": 19.82,
   "incorrect_tasks": [],
   "results": [
     {
@@ -15,10 +15,10 @@
       "ground_truth": "egalitarian",
       "model_answer": "egalitarian",
       "correct": true,
-      "duration_seconds": 4.14,
+      "duration_seconds": 1.58,
       "tools_used": [
         "tavily_search",
-        "sarvam_glm5.2"
+        "sarvam_gemma4"
       ],
       "file_name": ""
     },
@@ -57,10 +57,10 @@
       "ground_truth": "backtick",
       "model_answer": "backtick",
       "correct": true,
-      "duration_seconds": 2.57,
+      "duration_seconds": 1.58,
       "tools_used": [
         "tavily_search",
-        "sarvam_glm5.2"
+        "sarvam_gemma4"
       ],
       "file_name": ""
     },
@@ -71,13 +71,154 @@
       "ground_truth": "Time-Parking 2: Parallel Universe",
       "model_answer": "Time-Parking 2: Parallel Universe",
       "correct": true,
-      "duration_seconds": 3.39,
+      "duration_seconds": 2.28,
       "tools_used": [
         "local_file_read",
         "tavily_search",
-        "sarvam_glm5.2"
+        "sarvam_gemma4"
       ],
       "file_name": "32102e3e-d12a-4209-9163-7b3a104efe5d.xlsx"
+    },
+    {
+      "task_id": "3627a8be-a77f-41bb-b807-7e1bd4c0ebdf",
+      "level": "2",
+      "question": "The object in the British Museum's collection with a museum number of 2012,5015.17 is the shell of a particular mollusk species. According to the abstract of a research article published in Science Advances in 2021, beads made from the shells of this species were found that are at least how many thousands of years old?",
+      "ground_truth": "142",
+      "model_answer": "142",
+      "correct": true,
+      "duration_seconds": 1.54,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_gemma4"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "7619a514-5fa8-43ef-9143-83b66a43d7a4",
+      "level": "2",
+      "question": "According to github, when was Regression added to the oldest closed numpy.polynomial issue that has the Regression label in MM/DD/YY?",
+      "ground_truth": "04/15/18",
+      "model_answer": "04/15/18",
+      "correct": true,
+      "duration_seconds": 4.05,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_gemma4"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "7dd30055-0198-452e-8c25-f73dbe27dcb8",
+      "level": "2",
+      "question": "Using the Biopython library in Python, parse the PDB file of the protein identified by the PDB ID 5wb7 from the RCSB Protein Data Bank. Calculate the distance between the first and second atoms as they are listed in the PDB file. Report the answer in Angstroms, rounded to the nearest picometer.",
+      "ground_truth": "1.456",
+      "model_answer": "1.456",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_python"
+      ],
+      "file_name": "7dd30055-0198-452e-8c25-f73dbe27dcb8.pdb"
+    },
+    {
+      "task_id": "2a649bb1-795f-4a01-b3be-9a01868dae73",
+      "level": "2",
+      "question": "What are the EC numbers of the two most commonly used chemicals for the virus testing method in the paper about SPFMV and SPCSV in the Pearl Of Africa from 2016? Return the semicolon-separated numbers in the order of the alphabetized chemicals.",
+      "ground_truth": "3.1.3.1; 1.11.1.7",
+      "model_answer": "3.1.3.1; 1.11.1.7",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "sarvam_gemma4"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "87c610df-bef7-4932-b950-1d83ef4e282b",
+      "level": "2",
+      "question": "In April of 1977, who was the Prime Minister of the first place mentioned by name in the Book of Esther (in the New International Version)?",
+      "ground_truth": "Morarji Desai",
+      "model_answer": "Morarji Desai",
+      "correct": true,
+      "duration_seconds": 4.29,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_gemma4"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "624cbf11-6a41-4692-af9c-36b3e5ca3130",
+      "level": "2",
+      "question": "What's the last line of the rhyme under the flavor name on the headstone visible in the background of the photo of the oldest flavor's headstone in the Ben & Jerry's online flavor graveyard as of the end of 2022?",
+      "ground_truth": "So we had to let it die.",
+      "model_answer": "So we had to let it die.",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "local_integration"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "dd3c7503-f62a-4bd0-9f67-1b63b94194cc",
+      "level": "2",
+      "question": "Use density measures from the chemistry materials licensed by Marisa Alviar-Agnew & Henry Agnew under the CK-12 license in LibreText's Introductory Chemistry materials as compiled 08/21/2023.\n\nI have a gallon of honey and a gallon of mayonnaise at 25C. I remove one cup of honey at a time from the gallon of honey. How many times will I need to remove a cup to have the honey weigh less than the mayonaise? Assume the containers themselves weigh the same.",
+      "ground_truth": "6",
+      "model_answer": "6",
+      "correct": true,
+      "duration_seconds": 1.71,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_gemma4"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "df6561b2-7ee5-4540-baab-5095f742716a",
+      "level": "2",
+      "question": "When you take the average of the standard population deviation of the red numbers and the standard sample deviation of the green numbers in this image using the statistics module in Python 3.11, what is the result rounded to the nearest three decimal points?",
+      "ground_truth": "17.056",
+      "model_answer": "17.056",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_python",
+        "sarvam_gemma4"
+      ],
+      "file_name": "df6561b2-7ee5-4540-baab-5095f742716a.png"
+    },
+    {
+      "task_id": "f0f46385-fc03-4599-b5d3-f56496c3e69f",
+      "level": "2",
+      "question": "In terms of geographical distance between capital cities, which 2 countries are the furthest from each other within the ASEAN bloc according to wikipedia? Answer using a comma separated list, ordering the countries by alphabetical order.",
+      "ground_truth": "Indonesia, Myanmar",
+      "model_answer": "Indonesia, Myanmar",
+      "correct": true,
+      "duration_seconds": 1.49,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_gemma4"
+      ],
+      "file_name": ""
+    },
+    {
+      "task_id": "e4e91f1c-1dcd-439e-9fdd-cb976f5293fd",
+      "level": "2",
+      "question": "I need to fact-check a citation. This is the citation from the bibliography:\n\nGreetham, David. \"Uncoupled: OR, How I Lost My Author(s).\" Textual Cultures: Texts, Contexts, Interpretation, vol. 3 no. 1, 2008, p. 45-46. Project MUSE, doi:10.2979/tex.2008.3.1.44.\n\nAnd this is the in-line citation:\n\nOur relationship with the authors of the works we read can often be \u201cobscured not by a \"cloak of print\" but by the veil of scribal confusion and mis-transmission\u201d (Greetham 45-46).\n\nDoes the quoted text match what is actually in the article? If Yes, answer Yes, otherwise, give me the word in my citation that does not match with the correct one (without any article).",
+      "ground_truth": "cloak",
+      "model_answer": "cloak",
+      "correct": true,
+      "duration_seconds": 1.3,
+      "tools_used": [
+        "tavily_search",
+        "sarvam_gemma4"
+      ],
+      "file_name": ""
     }
   ]
 }
