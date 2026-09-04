@@ -9,3 +9,11 @@ frontend/node_modules/
 frontend/dist/
 build/
 smara-desktop.spec
+.pytest-tmp/
+my_pytest_tmp/
+tests_tmp/
+pytest-run-*/
+.smara-undo/
+.smara/
+*.metadata.json
+*.log

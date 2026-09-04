@@ -1,0 +1,169 @@
+# PRODUCTION STACK NOTICE
+# This compose file currently runs the canonical Smara production service even
+# though the live Compose project keeps the legacy name `smara-staging`.
+# Do not deploy a second stack with that name. A future planned migration may
+# rename the Compose project after a controlled cutover.
+#
+# Cross-stack bridge: only `api` and `telegram-worker` join `memoryos_default`.
+# Every other Smara service remains on this stack's private default network.
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    restart: unless-stopped
+    # The API also joins memoryos_default for account resolution.  Give this
+    # Redis an unambiguous alias so Docker DNS cannot send Smara traffic to
+    # the legacy MemoryOS Redis service (which has different auth settings).
+    networks:
+      default:
+        aliases: [smara-redis]
+    volumes: ["smara-redis:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: smara
+      POSTGRES_USER: smara
+      POSTGRES_PASSWORD: ${SMARA_POSTGRES_PASSWORD:?set SMARA_POSTGRES_PASSWORD in .env}
+    volumes: ["smara-postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smara -d smara"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  api:
+    build: .
+    command: ["uvicorn", "smara.api:app", "--host", "0.0.0.0", "--port", "8080"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://smara-redis:6379/0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # A host-local port keeps the API private; Caddy is the only public entry.
+    # Staging uses SMARA_HOST_PORT=8090 so it cannot collide with live Smara.
+    ports: ["${SMARA_BIND_ADDRESS:-127.0.0.1}:${SMARA_HOST_PORT:-8080}:8080"]
+    volumes: ["smara-data:/app/data"]
+    networks: [default, memoryos]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+  # Canonical Smara UI. Caddy serves this container at the ai.syntarus.com root.
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_SMARA_MODE: ${VITE_SMARA_MODE:-true}
+        VITE_SMARA_API_URL: ${VITE_SMARA_API_URL:-/smara-api}
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
+    ports: ["${SMARA_FRONTEND_BIND_ADDRESS:-127.0.0.1}:${SMARA_FRONTEND_HOST_PORT:-8081}:80"]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+  worker:
+    build: .
+    command: ["python", "-m", "smara.worker"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://smara-redis:6379/0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes: ["smara-data:/app/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os; from redis import Redis; assert Redis.from_url(os.environ['SMARA_REDIS_URL'], socket_connect_timeout=3).ping()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+  scheduler:
+    build: .
+    command: ["python", "-m", "smara.scheduler"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://smara-redis:6379/0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes: ["smara-data:/app/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os; from redis import Redis; assert Redis.from_url(os.environ['SMARA_REDIS_URL'], socket_connect_timeout=3).ping()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+  integration-worker:
+    build: .
+    command: ["python", "-m", "smara.integration_worker"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://smara-redis:6379/0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes: ["smara-data:/app/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os; from redis import Redis; assert Redis.from_url(os.environ['SMARA_REDIS_URL'], socket_connect_timeout=3).ping()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+  # Smara-owned Telegram edge. This replaces the legacy Memento poller after
+  # the native auth/link flow has been verified in production.
+  telegram-worker:
+    build: .
+    command: ["python", "-m", "smara.telegram_worker"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SMARA_REDIS_URL: ${SMARA_REDIS_URL:-redis://smara-redis:6379/0}
+      SMARA_TELEGRAM_CHAT_URL: ${SMARA_TELEGRAM_CHAT_URL:-http://api:8080}
+    depends_on:
+      api:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    volumes: ["smara-data:/app/data"]
+    networks: [default, memoryos]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://api:8080/health', timeout=5)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+volumes:
+  smara-data:
+  smara-postgres:
+  smara-redis:
+networks:
+  memoryos:
+    external: true
+    name: memoryos_default

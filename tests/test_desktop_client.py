@@ -19,7 +19,7 @@ from smara.desktop_executor import (
     resolve_local_credential,
     save_local_credential,
 )
-from smara.desktop_integrations import local_connector_catalog
+from smara.desktop_integrations import _normalise_local_integration_payload, local_connector_catalog
 
 
 def test_desktop_file_read_write_stays_inside_approved_root(tmp_path: Path):
@@ -34,6 +34,30 @@ def test_desktop_file_read_write_stays_inside_approved_root(tmp_path: Path):
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == "done"
     with pytest.raises(RuntimeError, match="outside"):
         execute_step({"required_capability": "local_file_read", "executor_payload": {"path": str(tmp_path.parent / "note.txt")}}, state)
+
+
+def test_local_calculate_and_python_are_bounded_expression_tools(tmp_path: Path):
+    state = {"capabilities": ["local_calculate", "local_python"], "allowed_roots": [str(tmp_path)]}
+    calculated = json.loads(execute_step({"required_capability": "local_calculate", "executor_payload": {"expression": "sqrt(144) + sin(pi / 2) * log(e**3)"}}, state))
+    assert calculated["action"] == "local_calculate"
+    assert calculated["result"] == pytest.approx(15.0)
+    evaluated = json.loads(execute_step({"required_capability": "local_python", "executor_payload": {"expression": "sum([1*1, 2*2, 3*3])"}}, state))
+    # Comprehensions and imports are intentionally rejected; this simple
+    # expression proves the tool can still do useful local calculations.
+    assert evaluated["result"] == 14
+    with pytest.raises(RuntimeError, match="safe Python functions|unsupported syntax|imports|sandbox"):
+        execute_step({"required_capability": "local_python", "executor_payload": {"expression": "__import__('os').getcwd()"}}, state)
+
+
+def test_local_graph_inspects_symbols_in_approved_workspace(tmp_path: Path):
+    source = tmp_path / "module.py"
+    source.write_text("def helper(value):\n    return value + 1\n\ndef run():\n    return helper(2)\n", encoding="utf-8")
+    state = {"capabilities": ["local_graph"], "allowed_roots": [str(tmp_path)]}
+    result = json.loads(execute_step({"required_capability": "local_graph", "executor_payload": {"operation": "inspect_symbol", "path": str(tmp_path), "symbol": "helper"}}, state))
+    assert result["action"] == "local_graph"
+    assert result["result"]["name"] == "helper"
+    references = json.loads(execute_step({"required_capability": "local_graph", "executor_payload": {"operation": "find_references", "path": str(tmp_path), "symbol": "helper"}}, state))
+    assert any(item.get("kind") == "definition" for item in references["result"])
 
 
 def test_desktop_file_preview_is_read_only_and_write_returns_diff_and_undo(tmp_path: Path):
@@ -390,6 +414,23 @@ def test_local_tavily_adapter_uses_vault_and_returns_bounded_secret_free_proof(m
         "provider": "tavily", "operation": "search", "auth_mode": "local_api_key", "risk": "read_only",
         "scopes": ["web.search"], "max_results": 5, "max_requests_per_run": 1,
     }
+
+
+def test_local_connectors_repair_safe_planner_variations():
+    provider, search = _normalise_local_integration_payload({
+        "operation": "research", "query": "AI agent benchmarks", "max_results": 100,
+    })
+    assert provider == "tavily"
+    assert search == {
+        "provider": "tavily", "operation": "search", "query": "AI agent benchmarks",
+        "max_results": 5, "credential_env": "TAVILY_API_KEY",
+    }
+    provider, repositories = _normalise_local_integration_payload({
+        "provider": "github", "operation": "list_repos", "limit": 100,
+    })
+    assert provider == "github"
+    assert repositories["operation"] == "list_repositories"
+    assert repositories["limit"] == 20
 
 
 def test_local_github_adapter_is_read_only_and_classifies_bad_credentials(monkeypatch, tmp_path: Path):

@@ -113,16 +113,61 @@ def _credential(spec: LocalConnectorSpec, payload: dict[str, Any], credentials_r
     return expected, values[expected]
 
 
+def _normalise_local_integration_payload(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Repair harmless planner aliases before dispatching one local read.
+
+    Private model tool calls are not perfectly consistent about naming a web
+    search or GitHub repository listing.  Normalize only known aliases and
+    clamp their bounded limits; unknown providers/operations remain unchanged
+    and are rejected by ``execute_local_integration``.
+    """
+    if not isinstance(payload, dict):
+        raise RuntimeError("Local integration payload must be an object.")
+    normalized = dict(payload)
+    provider = str(normalized.get("provider") or "").strip().lower()
+    operation = str(normalized.get("operation") or "").strip().lower()
+    query = normalized.get("query")
+    if (not provider or provider in {"search", "research", "web_search", "web"}) and isinstance(query, str) and query.strip():
+        provider = "tavily"
+    if provider in {"tavily", "exa"} and operation in {"", "research", "web_search", "search_web"}:
+        operation = "search"
+    if provider == "github" and operation in {"", "repositories", "list_repos", "repos"}:
+        operation = "list_repositories"
+    normalized["provider"] = provider
+    normalized["operation"] = operation
+    if provider in {"tavily", "exa"} and operation == "search":
+        raw_max = normalized.get("max_results", 5)
+        try:
+            max_results = int(raw_max)
+        except (TypeError, ValueError):
+            max_results = 5
+        normalized["max_results"] = max(1, min(5, max_results))
+        normalized.setdefault("credential_env", LOCAL_CONNECTORS[provider].credential_alias)
+    if provider == "github" and operation == "list_repositories":
+        raw_limit = normalized.get("limit", 10)
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            limit = 10
+        normalized["limit"] = max(1, min(MAX_LOCAL_INTEGRATION_RESULTS, limit))
+        normalized.setdefault("credential_env", "GITHUB_TOKEN")
+    return provider, normalized
+
+
 def _tavily_search(client: httpx.Client, payload: dict[str, Any], secret: str, spec: LocalConnectorSpec) -> str:
     query = payload.get("query")
     if not isinstance(query, str) or not query.strip() or len(query.strip()) > 500:
         raise RuntimeError("Tavily search needs a query up to 500 characters.")
-    max_results = payload.get("max_results", 5)
-    if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 5:
-        raise RuntimeError("Tavily max_results must be between 1 and 5.")
-    include_domains = payload.get("include_domains", [])
-    if not isinstance(include_domains, list) or len(include_domains) > 5 or not all(isinstance(item, str) and item.strip() for item in include_domains):
-        raise RuntimeError("Tavily include_domains must contain at most 5 domain names.")
+    # Accept int, float, or string and clamp to [1, 5]
+    raw_max = payload.get("max_results", 5)
+    try:
+        max_results = max(1, min(5, int(raw_max)))
+    except (TypeError, ValueError):
+        max_results = 5
+    include_domains = payload.get("include_domains") or []
+    if not isinstance(include_domains, list):
+        include_domains = []
+    include_domains = [str(d).strip()[:120] for d in include_domains if isinstance(d, str) and d.strip()][:5]
     response = client.post(
         "https://api.tavily.com/search",
         json={
@@ -132,7 +177,7 @@ def _tavily_search(client: httpx.Client, payload: dict[str, Any], secret: str, s
             "search_depth": "basic",
             "include_answer": False,
             "include_raw_content": False,
-            "include_domains": [item.strip()[:120] for item in include_domains],
+            "include_domains": include_domains,
         },
     )
     body = _json_response("tavily", response)
@@ -166,12 +211,16 @@ def _exa_search(client: httpx.Client, payload: dict[str, Any], secret: str, spec
     query = payload.get("query")
     if not isinstance(query, str) or not query.strip() or len(query.strip()) > 500:
         raise RuntimeError("Exa search needs a query up to 500 characters.")
-    max_results = payload.get("max_results", 5)
-    if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 10:
-        raise RuntimeError("Exa max_results must be between 1 and 10.")
-    include_domains = payload.get("include_domains", [])
-    if not isinstance(include_domains, list) or len(include_domains) > 5 or not all(isinstance(item, str) and item.strip() for item in include_domains):
-        raise RuntimeError("Exa include_domains must contain at most 5 domain names.")
+    # Accept int, float, or string and clamp to the published connector bound.
+    raw_max = payload.get("max_results", 5)
+    try:
+        max_results = max(1, min(spec.max_results, int(raw_max)))
+    except (TypeError, ValueError):
+        max_results = 5
+    include_domains = payload.get("include_domains") or []
+    if not isinstance(include_domains, list):
+        include_domains = []
+    include_domains = [str(d).strip()[:120] for d in include_domains if isinstance(d, str) and d.strip()][:5]
 
     body_data: dict[str, Any] = {
         "query": query.strip(),
@@ -254,7 +303,7 @@ def _github_repositories(client: httpx.Client, payload: dict[str, Any], secret: 
 
 def execute_local_integration(payload: dict[str, Any], credentials_resolver, *, checkpoint=None, progress_hook=None) -> str:
     """Run one explicitly approved, local-only integration read."""
-    provider = payload.get("provider")
+    provider, payload = _normalise_local_integration_payload(payload)
     if not isinstance(provider, str) or provider.strip().lower() not in LOCAL_CONNECTORS:
         raise RuntimeError("Supported local integrations are Tavily search, Exa search, and GitHub repositories.")
     provider = provider.strip().lower()

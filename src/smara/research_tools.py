@@ -8,6 +8,7 @@ changed without changing tasks, workers, or the Web/CLI clients.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -98,10 +99,14 @@ class WebSearchTool:
                 depth = str(getattr(settings, "search_depth", "advanced")).lower()
                 if depth not in {"basic", "advanced"}:
                     depth = "advanced"
+                tavily_payload = json.dumps(
+                    {"api_key": api_key, "query": search_query, "search_depth": depth, "max_results": count, "include_answer": False, "include_raw_content": False},
+                    separators=(",", ":"),
+                ).encode("utf-8")
                 response = await client.post(
                     search_url,
                     headers={"Content-Type": "application/json"},
-                    json={"api_key": api_key, "query": search_query, "search_depth": depth, "max_results": count, "include_answer": False, "include_raw_content": False},
+                    content=tavily_payload,
                 )
                 response.raise_for_status()
                 items = response.json().get("results") or []

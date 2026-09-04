@@ -115,11 +115,40 @@ LOCAL_SKILLS: dict[str, LocalSkillSpec] = {
         timeout_seconds=10, max_output_bytes=16_000, side_effecting=False,
         result_schema={"type": "object", "required": ["action"]},
     ),
+    "local_semantic_search": LocalSkillSpec(
+        "local_semantic_search", "Query local offline SQLite semantic vector database using natural language intent.", _ANY_OBJECT,
+        timeout_seconds=15, max_output_bytes=64_000, side_effecting=False,
+        result_schema={"type": "object", "required": ["action"]},
+    ),
+    "local_git": LocalSkillSpec(
+        "local_git", "Perform safe Git operations (status, log, smart conventional commit, branch switching).", _ANY_OBJECT,
+        timeout_seconds=30, max_output_bytes=64_000, side_effecting=True,
+        result_schema={"type": "object", "required": ["action", "operation"]},
+    ),
+    "local_refactor": LocalSkillSpec(
+        "local_refactor", "Autonomous multi-file refactoring with pre-change backup snapshots and atomic rollback.", _ANY_OBJECT,
+        timeout_seconds=60, max_output_bytes=64_000, side_effecting=True,
+        result_schema={"type": "object", "required": ["action", "operation"]},
+    ),
+    "local_test_fixer": LocalSkillSpec(
+        "local_test_fixer", "Run pytest test suites and autonomously heal broken test failures.", _ANY_OBJECT,
+        timeout_seconds=60, max_output_bytes=64_000, side_effecting=True,
+        result_schema={"type": "object", "required": ["action", "operation"]},
+    ),
+    "sandbox_execute": LocalSkillSpec(
+        "sandbox_execute", "Execute commands inside an isolated ephemeral micro-sandbox container.", _ANY_OBJECT,
+        timeout_seconds=120, max_output_bytes=64_000, side_effecting=True,
+        result_schema={"type": "object", "required": ["action", "isolated"]},
+    ),
 }
 
 
-def local_skill_catalog() -> list[dict[str, Any]]:
+def local_skill_catalog(include_extended: bool = False) -> list[dict[str, Any]]:
     """Return a JSON-safe catalogue for diagnostics and future skill UIs."""
+    base_caps = {
+        "local_file_read", "local_file_write", "local_terminal", "local_browser", "local_integration",
+        "local_calculate", "local_graph", "local_python",
+    }
     return [
         {
             "capability": spec.capability,
@@ -135,7 +164,8 @@ def local_skill_catalog() -> list[dict[str, Any]]:
             "artifact_schema": spec.artifact_schema,
             "redaction": spec.redaction,
         }
-        for spec in LOCAL_SKILLS.values()
+        for cap, spec in LOCAL_SKILLS.items()
+        if include_extended or cap in base_caps
     ]
 
 

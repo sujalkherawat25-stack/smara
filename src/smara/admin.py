@@ -268,9 +268,10 @@ async def operator_session(smara_operator: str | None = Cookie(default=None, ali
     return {"configured": True, "authenticated": True}
 
 
-@router.delete("/session", status_code=204)
-async def operator_sign_out(response: Response) -> None:
+@router.delete("/session", status_code=204, response_class=Response)
+async def operator_sign_out(response: Response) -> Response:
     response.delete_cookie(key=settings.operator_cookie_name, path="/")
+    return Response(status_code=204)
 
 
 @router.get("/overview")

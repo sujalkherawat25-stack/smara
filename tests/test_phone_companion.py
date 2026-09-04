@@ -20,6 +20,17 @@ def test_capture_and_push_subscription_are_account_scoped(tmp_path: Path):
     assert store.push_subscriptions("acct_2") == []
 
 
+def test_durable_notifications_are_account_scoped_and_acknowledgeable(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    created = store.create_notification("acct_1", "Scheduled report is ready.", title="Smara scheduled task", url="/work")
+    assert store.notifications("acct_1")[0]["id"] == created["id"]
+    assert store.notifications("acct_2") == []
+    assert store.acknowledge_notification(created["id"], "acct_2") is False
+    assert store.notifications("acct_1")
+    assert store.acknowledge_notification(created["id"], "acct_1") is True
+    assert store.notifications("acct_1") == []
+
+
 def test_capture_worker_has_safe_local_fallback(tmp_path: Path):
     store = TaskStore(str(tmp_path / "smara.db"))
     store.create_capture("acct_1", "voice", "Voice note", "aGVsbG8=", "audio/webm")

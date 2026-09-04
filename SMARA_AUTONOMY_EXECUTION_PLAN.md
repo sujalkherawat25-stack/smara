@@ -111,6 +111,13 @@ The Desktop-owned A1 runner slice is now complete in software:
   local work does not depend on a hosted account or pairing record. Connector
   capability changes synchronize immediately after a credential is saved,
   removed, or revoked.
+- **2026-09-04 reliability slice:** the Desktop now advertises and executes
+  bounded in-process `local_calculate` and `local_python` helpers plus the
+  read-only `local_graph`/CPG inspector without a hosted round trip. In Auto
+  mode these pure helpers and read-only inspections can run immediately;
+  terminal commands and file mutations remain Desktop-confirmed. The bundled
+  Windows executor emits UTF-8 JSON, so emoji/Indic task results cannot crash
+  the result loader on a legacy cp1252 console.
 
 Automated acceptance covers ask/approve, execution, proof, cancellation,
 interrupted-run recovery, no replay, unpaired operation, path/shell/domain
@@ -144,6 +151,11 @@ restart drill is an owner-operated release check, not missing implementation.
   proof journals, cooperative cancellation, and explicit recovery review.
   Private model tool requests create real Desktop tasks; results return to the
   Desktop chat instead of being hidden in hosted Work.
+- **A1 result-path hardening verified:** local task lists/details tolerate
+  Unicode output, missing paths explain the `find_files`/`list_tree` recovery
+  path, unsupported screenshot requests explain the supported browser
+  alternatives, and unknown hosted task names fail visibly instead of being
+  recorded as false successes.
 - **A1 remaining release gate:** run the physical Windows restart/network-loss
   drill and a disposable multi-stage repository drill on the installed package.
   These are owner-device validation activities, not unfinished code paths.
@@ -547,3 +559,20 @@ packages:
 Do not begin broad connector, multi-agent, or always-on-node work before this
 milestone has an end-to-end disposable repository test and a physical Desktop
 reconnect drill.
+
+## Verification snapshot — 2026-09-04
+
+- The synchronized source bundle was rebuilt and checked: Python test suite
+  **320 passed**, Rust desktop tests **14 passed**, frontend production build
+  passed, and Python bytecode compilation passed.
+- The packaged executor passed a local safe-expression smoke test and reports
+  unsafe expressions as failed tasks. Local graph inspection now requires an
+  explicitly approved workspace; unsupported hosted task kinds fail closed;
+  local notifications and memory-only task completion are persisted.
+- The corrected release artifacts are present at the Tauri release binary and
+  NSIS installer paths under `apps/desktop/src-tauri/target/release/`.
+- Installation is still an owner action: the AppData executable is an older
+  12.3 MB copy, no Smara Desktop process is currently running, and the latest
+  NSIS installer has not yet been run on this machine.
+- Production gates remain closed until the owner-device offline/restart/
+  reconnect/revoke drill and authenticated hosted account-isolation checks pass.

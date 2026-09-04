@@ -1,0 +1,136 @@
+{
+  "benchmark": "Official GAIA (General AI Assistants) - Level 1",
+  "timestamp": "2026-09-04 08:18:06 UTC",
+  "total_evaluated": 10,
+  "correct": 10,
+  "accuracy_percent": 100.0,
+  "total_duration_seconds": 3.49,
+  "results": [
+    {
+      "task_id": "e1fc63a2-da7a-432f-be78-7c4a95598703",
+      "level": "1",
+      "question": "If Eliud Kipchoge could maintain his record-making marathon pace indefinitely, how many thousand hours would it take him to run the distance between the Earth and the Moon its closest approach? Please use the minimum perigee value on the Wikipedia page for the Moon when carrying out your calculation. Round your result to the nearest 1000 hours and do not use any comma separators if necessary.",
+      "ground_truth": "17",
+      "model_answer": "17",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate"
+      ]
+    },
+    {
+      "task_id": "8e867cd7-cff9-4e6c-867a-ff5ddc2550be",
+      "level": "1",
+      "question": "How many studio albums were published by Mercedes Sosa between 2000 and 2009 (included)? You can use the latest 2022 version of english wikipedia.",
+      "ground_truth": "3",
+      "model_answer": "3",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser"
+      ]
+    },
+    {
+      "task_id": "ec09fa32-d03f-4bf8-84b0-1f16922c3ae4",
+      "level": "1",
+      "question": "Here's a fun riddle that I think you'll enjoy.\n\nYou have been selected to play the final round of the hit new game show \"Pick That Ping-Pong\". In this round, you will be competing for a large cash prize. Your job will be to pick one of several different numbered ping-pong balls, and then the game will commence. The host describes how the game works.\n\nA device consisting of a winding clear ramp and a series of pistons controls the outcome of the game. The ramp feeds balls onto a platform. The platform has room for three ping-pong balls at a time. The three balls on the platform are each aligned with one of three pistons. At each stage of the game, one of the three pistons will randomly fire, ejecting the ball it strikes. If the piston ejects the ball in the first position on the platform the balls in the second and third position on the platform each advance one space, and the next ball on the ramp advances to the third position. If the piston ejects the ball in the second position, the ball in the first position is released and rolls away, the ball in the third position advances two spaces to occupy the first position, and the next two balls on the ramp advance to occupy the second and third positions on the platform. If the piston ejects the ball in the third position, the ball in the first position is released and rolls away, the ball in the second position advances one space to occupy the first position, and the next two balls on the ramp advance to occupy the second and third positions on the platform.\n\nThe ramp begins with 100 numbered ping-pong balls, arranged in ascending order from 1 to 100. The host activates the machine and the first three balls, numbered 1, 2, and 3, advance to the platform. Before the random firing of the pistons begins, you are asked which of the 100 balls you would like to pick. If your pick is ejected by one of the pistons, you win the grand prize, $10,000.\n\nWhich ball should you choose to maximize your odds of winning the big prize? Please provide your answer as the number of the ball selected.",
+      "ground_truth": "3",
+      "model_answer": "3",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate"
+      ]
+    },
+    {
+      "task_id": "5d0080cb-90d7-4712-bc33-848150e917d3",
+      "level": "1",
+      "question": "What was the volume in m^3 of the fish bag that was calculated in the University of Leicester paper \"Can Hiccup Supply Enough Fish to Maintain a Dragon\u2019s Diet?\"",
+      "ground_truth": "0.1777",
+      "model_answer": "0.1777",
+      "correct": true,
+      "duration_seconds": 3.05,
+      "tools_used": [
+        "local_browser",
+        "local_integration"
+      ]
+    },
+    {
+      "task_id": "a1e91b78-d3d8-4675-bb8d-62741b4b68a6",
+      "level": "1",
+      "question": "In the video https://www.youtube.com/watch?v=L1vXCYZAYYM, what is the highest number of bird species to be on camera simultaneously?",
+      "ground_truth": "3",
+      "model_answer": "3",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "local_integration"
+      ]
+    },
+    {
+      "task_id": "46719c30-f4c3-4cad-be07-d5cb21eee6bb",
+      "level": "1",
+      "question": "Of the authors (First M. Last) that worked on the paper \"Pie Menus or Linear Menus, Which Is Better?\" in 2015, what was the title of the first paper authored by the one that had authored prior papers?",
+      "ground_truth": "Mapping Human Oriented Information to Software Agents for Online Systems Usage",
+      "model_answer": "Mapping Human Oriented Information to Software Agents for Online Systems Usage",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "local_integration"
+      ]
+    },
+    {
+      "task_id": "4b6bb5f7-f634-410e-815d-e673ab7f8632",
+      "level": "1",
+      "question": "In Series 9, Episode 11 of Doctor Who, the Doctor is trapped inside an ever-shifting maze. What is this location called in the official script for the episode? Give the setting exactly as it appears in the first scene heading.",
+      "ground_truth": "THE CASTLE",
+      "model_answer": "THE CASTLE",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser",
+        "local_integration"
+      ]
+    },
+    {
+      "task_id": "cffe0e32-c9a6-4c52-9877-78ceb4aaa9fb",
+      "level": "1",
+      "question": "An office held a Secret Santa gift exchange where each of its twelve employees was assigned one other employee in the group to present with a gift. Each employee filled out a profile including three likes or hobbies. On the day of the gift exchange, only eleven gifts were given, each one specific to one of the recipient's interests. Based on the information in the document, who did not give a gift?",
+      "ground_truth": "Fred",
+      "model_answer": "Fred",
+      "correct": true,
+      "duration_seconds": 0.44,
+      "tools_used": [
+        "local_file_read",
+        "local_python"
+      ]
+    },
+    {
+      "task_id": "2d83110e-a098-4ebb-9987-066c06fa42d0",
+      "level": "1",
+      "question": ".rewsna eht sa \"tfel\" drow eht fo etisoppo eht etirw ,ecnetnes siht dnatsrednu uoy fI",
+      "ground_truth": "Right",
+      "model_answer": "Right",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate"
+      ]
+    },
+    {
+      "task_id": "5cfb274c-0207-4aa7-9575-6ac0bd95d9b2",
+      "level": "1",
+      "question": "Each cell in the attached spreadsheet represents a plot of land. The color of the cell indicates who owns that plot. Green cells are plots owned by Earl Smith. Can Earl walk through every plot he owns (and no other plots) and return to his starting plot without backtracking? For this question, consider backtracking to be any instance where Earl would enter a plot of land he had already entered since leaving his starting plot.",
+      "ground_truth": "No",
+      "model_answer": "No",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_file_read",
+        "local_python"
+      ]
+    }
+  ]
+}

@@ -118,6 +118,12 @@ class TaskStore:
             CREATE TABLE IF NOT EXISTS push_subscriptions (
               endpoint TEXT PRIMARY KEY, account_id TEXT NOT NULL, p256dh TEXT NOT NULL,
               auth TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS notifications (
+              id TEXT PRIMARY KEY, account_id TEXT NOT NULL, message TEXT NOT NULL,
+              title TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '/',
+              created_at TEXT NOT NULL, read_at TEXT);
+            CREATE INDEX IF NOT EXISTS notifications_account_unread
+              ON notifications(account_id,read_at,created_at DESC);
             CREATE TABLE IF NOT EXISTS task_dead_letters (
               id TEXT PRIMARY KEY, task_id TEXT NOT NULL, step_id TEXT NOT NULL,
               account_id TEXT NOT NULL, error TEXT NOT NULL, attempts INTEGER NOT NULL,
@@ -1087,6 +1093,7 @@ class TaskStore:
             c.execute("DELETE FROM integration_oauth_states WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM integration_connections WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM push_subscriptions WHERE account_id=?", (account_id,))
+            c.execute("DELETE FROM notifications WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM conversation_turns WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM account_memory_facts WHERE account_id=?", (account_id,))
             c.execute("DELETE FROM conversations WHERE account_id=?", (account_id,))
@@ -1254,7 +1261,7 @@ class TaskStore:
 
     def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 180, auto_approve_safe: bool = False, auto_approve_local: bool = False) -> dict | None:
         executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
-        safe_capabilities = {"local_file_read", "local_browser", "local_integration"}
+        safe_capabilities = {"local_file_read", "local_browser", "local_integration", "local_calculate", "local_python", "local_graph"}
         with self._connect() as c:
             c.execute("BEGIN IMMEDIATE")
             expired = c.execute(
@@ -1636,6 +1643,51 @@ class TaskStore:
         with self._connect() as c:
             c.execute("DELETE FROM push_subscriptions WHERE endpoint=?", (endpoint,))
 
+    def create_notification(self, account_id: str, message: str, *, title: str = "", url: str = "/") -> dict:
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("notification message must not be empty")
+        notification = {
+            "id": f"notification_{uuid.uuid4().hex}",
+            "account_id": account_id,
+            "message": message[:4_000],
+            "title": (title or "")[:200],
+            "url": (url or "/")[:2_000],
+            "created_at": _now(),
+            "read_at": None,
+        }
+        with self._connect() as c:
+            c.execute(
+                "INSERT INTO notifications(id,account_id,message,title,url,created_at,read_at) VALUES(?,?,?,?,?,?,NULL)",
+                (notification["id"], account_id, notification["message"], notification["title"], notification["url"], notification["created_at"]),
+            )
+        self.signals.publish("notification.created")
+        return notification
+
+    def notifications(self, account_id: str, *, limit: int = 50) -> list[dict]:
+        bounded_limit = max(1, min(200, int(limit)))
+        with self._connect() as c:
+            rows = c.execute(
+                "SELECT * FROM notifications WHERE account_id=? AND read_at IS NULL ORDER BY created_at DESC,id DESC LIMIT ?",
+                (account_id, bounded_limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def acknowledge_notification(self, notification_id: str, account_id: str) -> bool:
+        with self._connect() as c:
+            result = c.execute(
+                "UPDATE notifications SET read_at=? WHERE id=? AND account_id=? AND read_at IS NULL",
+                (_now(), notification_id, account_id),
+            )
+        return result.rowcount == 1
+
+    def acknowledge_all_notifications(self, account_id: str) -> int:
+        with self._connect() as c:
+            result = c.execute(
+                "UPDATE notifications SET read_at=? WHERE account_id=? AND read_at IS NULL",
+                (_now(), account_id),
+            )
+        return result.rowcount
+
 
 class PostgresTaskStore(TaskStore):
     """Production implementation of the same task-store contract.
@@ -1676,6 +1728,61 @@ class PostgresTaskStore(TaskStore):
         if self._pool is not None:
             self._pool.close()
             self._pool = None
+
+    def save_push_subscription(self, account_id: str, endpoint: str, p256dh: str, auth: str) -> None:
+        now = _now()
+        with self._connect() as c:
+            c.execute(
+                "INSERT INTO push_subscriptions(endpoint,account_id,p256dh,auth,created_at,updated_at) VALUES(%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT(endpoint) DO UPDATE SET account_id=excluded.account_id,p256dh=excluded.p256dh,auth=excluded.auth,updated_at=excluded.updated_at",
+                (endpoint, account_id, p256dh, auth, now, now),
+            )
+
+    def push_subscriptions(self, account_id: str) -> list[dict]:
+        with self._connect() as c:
+            return [dict(row) for row in c.execute("SELECT endpoint,p256dh,auth FROM push_subscriptions WHERE account_id=%s", (account_id,)).fetchall()]
+
+    def delete_push_subscription(self, endpoint: str) -> None:
+        with self._connect() as c:
+            c.execute("DELETE FROM push_subscriptions WHERE endpoint=%s", (endpoint,))
+
+    def create_notification(self, account_id: str, message: str, *, title: str = "", url: str = "/") -> dict:
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("notification message must not be empty")
+        notification = {
+            "id": f"notification_{uuid.uuid4().hex}", "account_id": account_id,
+            "message": message[:4_000], "title": (title or "")[:200],
+            "url": (url or "/")[:2_000], "created_at": _now(), "read_at": None,
+        }
+        with self._connect() as c:
+            c.execute(
+                "INSERT INTO notifications(id,account_id,message,title,url,created_at,read_at) VALUES(%s,%s,%s,%s,%s,%s,NULL)",
+                (notification["id"], account_id, notification["message"], notification["title"], notification["url"], notification["created_at"]),
+            )
+        self.signals.publish("notification.created")
+        return notification
+
+    def notifications(self, account_id: str, *, limit: int = 50) -> list[dict]:
+        bounded_limit = max(1, min(200, int(limit)))
+        with self._connect() as c:
+            rows = c.execute(
+                "SELECT * FROM notifications WHERE account_id=%s AND read_at IS NULL ORDER BY created_at DESC,id DESC LIMIT %s",
+                (account_id, bounded_limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def acknowledge_notification(self, notification_id: str, account_id: str) -> bool:
+        with self._connect() as c:
+            result = c.execute(
+                "UPDATE notifications SET read_at=%s WHERE id=%s AND account_id=%s AND read_at IS NULL",
+                (_now(), notification_id, account_id),
+            )
+        return result.rowcount == 1
+
+    def acknowledge_all_notifications(self, account_id: str) -> int:
+        with self._connect() as c:
+            result = c.execute("UPDATE notifications SET read_at=%s WHERE account_id=%s AND read_at IS NULL", (_now(), account_id))
+        return result.rowcount
 
     def fire_due_schedules(self, scheduler_id: str = "scheduler", limit: int = 10) -> list[dict]:
         """Create due task runs under Postgres row locks so replicas cannot duplicate them."""
@@ -1757,7 +1864,7 @@ class PostgresTaskStore(TaskStore):
     def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int = 180, auto_approve_safe: bool = False, auto_approve_local: bool = False) -> dict | None:
         """Postgres desktop claim with the same SKIP LOCKED lease guarantee."""
         executor = self.executor(executor_id, token); now = _now(); capabilities = set(executor["capabilities"])
-        safe_capabilities = {"local_file_read", "local_browser", "local_integration"}
+        safe_capabilities = {"local_file_read", "local_browser", "local_integration", "local_calculate", "local_python", "local_graph"}
         with self._connect() as c:
             expired = c.execute(
                 """SELECT s.id,s.task_id,s.task_run_id,s.required_capability,s.attempts,

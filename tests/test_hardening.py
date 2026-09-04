@@ -61,3 +61,12 @@ def test_sandbox_is_not_claimed_when_deployment_capability_is_disabled(tmp_path:
     }])
     assert __import__("asyncio").run(run_once(store, None, sandbox_enabled=False)) is False
     assert store.get(task["id"], "acct_1")["status"] == "queued"
+
+
+def test_unknown_hosted_task_fails_instead_of_claiming_success(tmp_path: Path):
+    store = TaskStore(str(tmp_path / "smara.db"))
+    task = store.create("acct_1", "work", "Unsupported", "Do something unregistered", False, [{"name": "unknown.external"}])
+    assert __import__("asyncio").run(run_once(store, None)) is True
+    saved = store.get(task["id"], "acct_1")
+    assert saved["status"] == "failed"
+    assert "no executor" in store.steps(task["id"], "acct_1")[0]["last_error"].lower()

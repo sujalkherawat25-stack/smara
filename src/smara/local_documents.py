@@ -395,6 +395,91 @@ def _edit_pptx(payload: dict[str, Any], before: bytes) -> DocumentBuild:
     return DocumentBuild(output.getvalue(), {"format": "pptx", "mode": "append_slides", "slides_added": len(slides)})
 
 
+def _get_pdf_fonts() -> tuple[str, str]:
+    """Register and return Unicode-capable TrueType fonts if available, falling back to Helvetica."""
+    reg_name = "SmaraUnicodeRegular"
+    bold_name = "SmaraUnicodeBold"
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from pathlib import Path
+        import os
+
+        try:
+            pdfmetrics.getFont(reg_name)
+            pdfmetrics.getFont(bold_name)
+            return reg_name, bold_name
+        except Exception:
+            pass
+
+        font_dirs = [
+            Path("C:/Windows/Fonts"),
+            Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts",
+            Path("/usr/share/fonts/truetype"),
+            Path("/System/Library/Fonts"),
+        ]
+        candidates = [
+            ("arial.ttf", "arialbd.ttf"),
+            ("segoeui.ttf", "segoeuib.ttf"),
+            ("calibri.ttf", "calibrib.ttf"),
+            ("tahoma.ttf", "tahomabd.ttf"),
+        ]
+        for fdir in font_dirs:
+            if not fdir.exists():
+                continue
+            for reg, bld in candidates:
+                p_reg = fdir / reg
+                p_bld = fdir / bld
+                if p_reg.exists():
+                    try:
+                        pdfmetrics.registerFont(TTFont(reg_name, str(p_reg)))
+                        if p_bld.exists():
+                            pdfmetrics.registerFont(TTFont(bold_name, str(p_bld)))
+                        else:
+                            pdfmetrics.registerFont(TTFont(bold_name, str(p_reg)))
+                        return reg_name, bold_name
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return "Helvetica", "Helvetica-Bold"
+
+
+def _clean_latin_text(text: str) -> str:
+    if not text:
+        return ""
+    replacements = {
+        "—": "--",
+        "–": "-",
+        "“": '"',
+        "”": '"',
+        "‘": "'",
+        "’": "'",
+        "•": "*",
+        "…": "...",
+        "→": "->",
+        "←": "<-",
+        "≥": ">=",
+        "≤": "<=",
+        "±": "+/-",
+        "×": "x",
+        "·": "*",
+        "°": " deg",
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    return text.encode("latin-1", "replace").decode("latin-1")
+
+
+def _clean_pdf_text(text: str, is_unicode: bool = True) -> str:
+    if not text:
+        return ""
+    if is_unicode:
+        # Keep UTF-8 string intact (including currency symbols, em-dashes, bullets, and accents)
+        return "".join(ch for ch in str(text) if ch.isprintable() or ch in "\n\t")
+    return _clean_latin_text(text)
+
+
 def _create_pdf(payload: dict[str, Any]) -> DocumentBuild:
     try:
         from reportlab.lib.pagesizes import A4
@@ -402,17 +487,20 @@ def _create_pdf(payload: dict[str, Any]) -> DocumentBuild:
         from reportlab.pdfgen import canvas
     except ImportError as exc:  # pragma: no cover - packaging dependency
         raise RuntimeError("PDF report support is not installed in Smara Desktop.") from exc
-    title = _title(payload, default="Smara report")
-    sections = _sections(payload)
-    # ReportLab's bundled base fonts are Latin-only. Refuse text those fonts
-    # cannot render rather than silently producing black-square glyphs. DOCX,
-    # XLSX and PPTX remain Unicode-native; a bundled Indic font is a separate
-    # desktop asset rather than an unreviewed system-font dependency.
-    pdf_text = [title]
-    for section in sections:
-        pdf_text.extend([section["heading"], section["body"], *section["paragraphs"], *section["bullets"]])
-    if any(any(ord(char) > 255 for char in value) for value in pdf_text):
-        raise RuntimeError("PDF reports currently need Latin-based text. Use DOCX, XLSX, or PPTX for Unicode text until Smara's packaged Indic PDF font is enabled.")
+
+    reg_font, bold_font = _get_pdf_fonts()
+    is_unicode = reg_font != "Helvetica"
+
+    title = _clean_pdf_text(_title(payload, default="Smara report"), is_unicode=is_unicode)
+    raw_sections = _sections(payload)
+    sections = []
+    for s in raw_sections:
+        sections.append({
+            "heading": _clean_pdf_text(s.get("heading", ""), is_unicode=is_unicode),
+            "body": _clean_pdf_text(s.get("body", ""), is_unicode=is_unicode),
+            "paragraphs": [_clean_pdf_text(p, is_unicode=is_unicode) for p in s.get("paragraphs", [])],
+            "bullets": [_clean_pdf_text(b, is_unicode=is_unicode) for b in s.get("bullets", [])],
+        })
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4, pageCompression=1)
     width, height = A4
@@ -421,14 +509,18 @@ def _create_pdf(payload: dict[str, Any]) -> DocumentBuild:
 
     def line(text: str, size: int = 10, *, bold: bool = False, indent: int = 0) -> None:
         nonlocal y, pages
-        font = "Helvetica-Bold" if bold else "Helvetica"
+        font = bold_font if bold else reg_font
         pdf.setFont(font, size)
         max_width = width - x - 54 - indent
         words = text.split() or [""]
         current = ""
         for word in words:
             candidate = word if not current else f"{current} {word}"
-            if current and stringWidth(candidate, font, size) > max_width:
+            try:
+                cand_width = stringWidth(candidate, font, size)
+            except Exception:
+                cand_width = len(candidate) * (size * 0.6)
+            if current and cand_width > max_width:
                 if y < 58:
                     pdf.showPage(); pages += 1; y = height - 58; pdf.setFont(font, size)
                 pdf.drawString(x + indent, y, current)
@@ -451,10 +543,10 @@ def _create_pdf(payload: dict[str, Any]) -> DocumentBuild:
         for paragraph in section["paragraphs"]:
             line(paragraph)
         for bullet in section["bullets"]:
-            line(f"- {bullet}", indent=12)
+            line(f"• {bullet}", indent=12)
         y -= 5
     pdf.save()
-    return DocumentBuild(buffer.getvalue(), {"format": "pdf", "mode": "created", "title": title, "sections": len(sections), "pages": pages})
+    return DocumentBuild(buffer.getvalue(), {"format": "pdf", "mode": "created", "title": title, "sections": len(sections), "pages": pages, "font": reg_font})
 
 
 def _transform_pdf(operation: str, payload: dict[str, Any], read_source: Callable[[object, str], bytes]) -> DocumentBuild:

@@ -26,6 +26,10 @@ from .workflow import validate_workflow, workflow_summary
 from .workspace_contract import build_workspace_job, validate_relative_path
 
 
+class UnsupportedHostedTask(RuntimeError):
+    """A task reached the hosted worker without a registered executor."""
+
+
 async def _memory_context(memory: SyntarusMemory | None, task: dict, store: TaskStore) -> str:
     """Memory enriches a task but never prevents the task from running."""
     if memory is None:
@@ -62,6 +66,14 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
     try:
         context = ""
         context = await _memory_context(memory, task, store)
+        if task["name"] == "memory_only":
+            # A durable memory task is intentionally provider-free.  It is
+            # useful for capture/ingest workflows and must not fall through
+            # to the hosted-agent executor.
+            result = "Memory context retrieved and durable outcome recorded."
+            await _memory_write(memory, task, store, "completion", result=result)
+            store.complete_step(task["step_id"], task["account_id"], result)
+            return True
         if task["name"].startswith("research."):
             synthesizer = None
             if settings.research_synthesis_enabled:
@@ -311,14 +323,13 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
                 result = run_sandbox(command)
             store.complete_step(task["step_id"], task["account_id"], result)
             return True
-    # Executor integration is intentionally explicit. This worker has no
-    # implicit shell/browser privileges; a registered executor will replace
-    # this deterministic safe completion step.
-        result = "Task accepted by Smara. Executor integration is required to perform external actions."
-        if context:
-            result += " Relevant shared memory was retrieved."
-        await _memory_write(memory, task, store, "completion", result=result)
-        store.complete_step(task["step_id"], task["account_id"], result)
+        # Never turn an unknown capability into a false success.  A hosted
+        # worker has no implicit shell/browser privileges; unsupported work
+        # must be visible as a terminal failure and remain eligible for an
+        # explicit, separately registered executor or human retry.
+        raise UnsupportedHostedTask(
+            f"No executor is registered for hosted task '{task.get('name') or 'unknown'}'."
+        )
     except Exception as exc:
         kind = llm_errors.classify(exc) if task.get("name") in {"agent.execute", "execute_task"} else llm_errors.KIND_UNKNOWN
         if kind != llm_errors.KIND_UNKNOWN:
@@ -331,7 +342,7 @@ async def run_once(store: TaskStore, memory: SyntarusMemory | None, *, sandbox_e
             }
         else:
             safe_error = str(exc)
-            retryable = True
+            retryable = not isinstance(exc, UnsupportedHostedTask)
         store.fail_step(task["step_id"], task["account_id"], safe_error, retryable=retryable)
     return True
 

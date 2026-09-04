@@ -690,6 +690,17 @@ Telegram send, Gmail, Calendar, and Drive remain separate adapters: each needs
 its own local consent/token flow, scope limits, redaction contract, and tests
 before it is enabled.
 
+### L5.1 — In-process local reasoning helpers
+
+**Status: implemented and covered by the Desktop executor regression suite on
+2026-09-04.** The local capability registry now includes `local_calculate` for
+bounded numeric expressions, `local_python` for a restricted expression-only
+Python sandbox, and `local_graph` for Python symbol/reference/blast-radius
+inspection through the Code Property Graph. These helpers do not need a hosted
+round trip or local credentials. Imports, statements, attributes, I/O,
+subprocesses, unbounded exponentiation, oversized expressions, and non-finite
+results are rejected.
+
 ### L6 — Artifact and result workspace
 
 - **Implemented:** Desktop Activity task selection now fetches the durable task
@@ -711,9 +722,12 @@ before it is enabled.
 
 ### Current state
 
-- The hosted runtime is the default planner and coordinator.
-- Direct private desktop model profiles provide local chat, but not a durable
-  local task planner/tool loop.
+- The hosted runtime remains the coordinator for cloud, scheduled, and
+  long-running work; local-first mode now has its own durable Desktop task
+  planner/runner for approved local work.
+- Direct private desktop model profiles can plan typed local actions, create
+  durable local task records, execute the registered skills, and return the
+  result into Desktop chat without a hosted sign-in.
 - Hosted tasks survive a closed laptop. Local steps wait for the executor to
   reconnect.
 - The task graph already handles leases, retries, cancellation, approvals,
@@ -742,9 +756,10 @@ before it is enabled.
    journal, fail-closed uncertain-side-effect handling, per-workspace
    cross-process locks, and an authenticated step-status reconciliation pass
    prevent duplicate replay and stale uncertain entries after reconnect.
-5. Keep the hosted planner as the default. Add a local fallback planner only
-   after the skill protocol, task reconciliation, and local memory policy are
-   stable; otherwise two independent agent brains will diverge.
+5. **Implemented first local fallback slice:** local planning is now available
+   when Desktop is in Local mode and never silently falls back to the hosted
+   planner. Keep the hosted planner for cloud/scheduled work and continue to
+   expand local verification and adapters without sharing private payloads.
 
 ## 9. Memory plan
 

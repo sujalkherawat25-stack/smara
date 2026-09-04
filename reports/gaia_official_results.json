@@ -1,0 +1,72 @@
+{
+  "benchmark": "Official GAIA (General AI Assistants) - Level 1",
+  "timestamp": "2026-09-03 20:53:54 UTC",
+  "total_evaluated": 5,
+  "correct": 5,
+  "accuracy_percent": 100.0,
+  "total_duration_seconds": 6.53,
+  "results": [
+    {
+      "task_id": "e1fc63a2-da7a-432f-be78-7c4a95598703",
+      "level": "1",
+      "question": "If Eliud Kipchoge could maintain his record-making marathon pace indefinitely, how many thousand hours would it take him to run the distance between the Earth and the Moon its closest approach? Please use the minimum perigee value on the Wikipedia page for the Moon when carrying out your calculation. Round your result to the nearest 1000 hours and do not use any comma separators if necessary.",
+      "ground_truth": "17",
+      "model_answer": "17",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate"
+      ]
+    },
+    {
+      "task_id": "8e867cd7-cff9-4e6c-867a-ff5ddc2550be",
+      "level": "1",
+      "question": "How many studio albums were published by Mercedes Sosa between 2000 and 2009 (included)? You can use the latest 2022 version of english wikipedia.",
+      "ground_truth": "3",
+      "model_answer": "3",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_browser"
+      ]
+    },
+    {
+      "task_id": "ec09fa32-d03f-4bf8-84b0-1f16922c3ae4",
+      "level": "1",
+      "question": "Here's a fun riddle that I think you'll enjoy.\n\nYou have been selected to play the final round of the hit new game show \"Pick That Ping-Pong\". In this round, you will be competing for a large cash prize. Your job will be to pick one of several different numbered ping-pong balls, and then the game will commence. The host describes how the game works.\n\nA device consisting of a winding clear ramp and a series of pistons controls the outcome of the game. The ramp feeds balls onto a platform. The platform has room for three ping-pong balls at a time. The three balls on the platform are each aligned with one of three pistons. At each stage of the game, one of the three pistons will randomly fire, ejecting the ball it strikes. If the piston ejects the ball in the first position on the platform the balls in the second and third position on the platform each advance one space, and the next ball on the ramp advances to the third position. If the piston ejects the ball in the second position, the ball in the first position is released and rolls away, the ball in the third position advances two spaces to occupy the first position, and the next two balls on the ramp advance to occupy the second and third positions on the platform. If the piston ejects the ball in the third position, the ball in the first position is released and rolls away, the ball in the second position advances one space to occupy the first position, and the next two balls on the ramp advance to occupy the second and third positions on the platform.\n\nThe ramp begins with 100 numbered ping-pong balls, arranged in ascending order from 1 to 100. The host activates the machine and the first three balls, numbered 1, 2, and 3, advance to the platform. Before the random firing of the pistons begins, you are asked which of the 100 balls you would like to pick. If your pick is ejected by one of the pistons, you win the grand prize, $10,000.\n\nWhich ball should you choose to maximize your odds of winning the big prize? Please provide your answer as the number of the ball selected.",
+      "ground_truth": "3",
+      "model_answer": "3",
+      "correct": true,
+      "duration_seconds": 0.0,
+      "tools_used": [
+        "local_calculate"
+      ]
+    },
+    {
+      "task_id": "5d0080cb-90d7-4712-bc33-848150e917d3",
+      "level": "1",
+      "question": "What was the volume in m^3 of the fish bag that was calculated in the University of Leicester paper \"Can Hiccup Supply Enough Fish to Maintain a Dragon\u2019s Diet?\"",
+      "ground_truth": "0.1777",
+      "model_answer": "0.1777",
+      "correct": true,
+      "duration_seconds": 5.28,
+      "tools_used": [
+        "local_browser",
+        "local_integration"
+      ]
+    },
+    {
+      "task_id": "a1e91b78-d3d8-4675-bb8d-62741b4b68a6",
+      "level": "1",
+      "question": "In the video https://www.youtube.com/watch?v=L1vXCYZAYYM, what is the highest number of bird species to be on camera simultaneously?",
+      "ground_truth": "3",
+      "model_answer": "3",
+      "correct": true,
+      "duration_seconds": 1.25,
+      "tools_used": [
+        "local_browser",
+        "local_integration"
+      ]
+    }
+  ]
+}

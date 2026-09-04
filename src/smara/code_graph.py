@@ -10,14 +10,16 @@ import hashlib
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 LOG = logging.getLogger("smara.code_graph")
 
-MAX_GRAPH_SCAN_FILES = 500
+MAX_GRAPH_SCAN_FILES = 800
 MAX_GRAPH_FILE_BYTES = 1024 * 1024  # 1 MB per file limit
+SUPPORTED_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".rs", ".go"}
 
 
 @dataclass
@@ -115,6 +117,9 @@ class _ASTSymbolVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+ASTVisitor = _ASTSymbolVisitor
+
+
 class CodePropertyGraph:
     """In-memory Code Property Graph for workspace repositories."""
 
@@ -128,7 +133,7 @@ class CodePropertyGraph:
         self._indexed = False
 
     def index(self, force: bool = False) -> int:
-        """Parse all Python files in the workspace and build the symbol/call DAG."""
+        """Parse all supported language files in the workspace and build the symbol/call DAG."""
         if self._indexed and not force:
             return len(self.symbols)
 
@@ -146,7 +151,8 @@ class CodePropertyGraph:
                 and d not in {"__pycache__", "node_modules", "venv", ".venv", "dist", "build", "target"}
             ]
             for filename in filenames:
-                if not filename.endswith(".py"):
+                ext = Path(filename).suffix.lower()
+                if ext not in SUPPORTED_EXTENSIONS:
                     continue
                 file_path = Path(dirpath) / filename
                 try:
@@ -167,6 +173,17 @@ class CodePropertyGraph:
         return len(self.symbols)
 
     def _index_file(self, rel_path: str, source: str) -> None:
+        ext = Path(rel_path).suffix.lower()
+        if ext == ".py":
+            self._index_python(rel_path, source)
+        elif ext in {".ts", ".tsx", ".js", ".jsx", ".mjs"}:
+            self._index_ts_js(rel_path, source)
+        elif ext == ".rs":
+            self._index_rust(rel_path, source)
+        elif ext == ".go":
+            self._index_go(rel_path, source)
+
+    def _index_python(self, rel_path: str, source: str) -> None:
         try:
             tree = ast.parse(source, filename=rel_path)
             visitor = _ASTSymbolVisitor(rel_path)
@@ -178,6 +195,114 @@ class CodePropertyGraph:
                 self.symbols[symbol_name] = symbol_info
         except SyntaxError:
             pass
+
+    def _index_ts_js(self, rel_path: str, source: str) -> None:
+        symbols: dict[str, SymbolInfo] = {}
+        imports: set[str] = set()
+        lines = source.splitlines()
+
+        for imp in re.finditer(r'''import\s+(?:\{[^}]*\}|\*\s+as\s+[^,]+|[a-zA-Z0-9_$]+)?\s*(?:,\s*\{[^}]*\})?\s*from\s+['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"]''', source):
+            mod = imp.group(1) or imp.group(2)
+            if mod:
+                imports.add(mod)
+
+        for lineno, line in enumerate(lines, start=1):
+            line_clean = line.strip()
+            m_iface = re.search(r'^(?:export\s+)?interface\s+([a-zA-Z0-9_$]+)', line_clean)
+            if m_iface:
+                name = m_iface.group(1)
+                symbols[name] = SymbolInfo(name=name, kind="interface", file_path=rel_path, line_number=lineno, end_line_number=lineno)
+                continue
+            m_type = re.search(r'^(?:export\s+)?type\s+([a-zA-Z0-9_$]+)\s*=', line_clean)
+            if m_type:
+                name = m_type.group(1)
+                symbols[name] = SymbolInfo(name=name, kind="type_alias", file_path=rel_path, line_number=lineno, end_line_number=lineno)
+                continue
+            m_class = re.search(r'^(?:export\s+)?(?:default\s+)?class\s+([a-zA-Z0-9_$]+)', line_clean)
+            if m_class:
+                name = m_class.group(1)
+                symbols[name] = SymbolInfo(name=name, kind="class", file_path=rel_path, line_number=lineno, end_line_number=lineno)
+                continue
+            m_fn = re.search(r'^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([a-zA-Z0-9_$]+)\s*\(([^)]*)\)', line_clean)
+            if m_fn:
+                name = m_fn.group(1)
+                params = [p.strip().split(":")[0].strip() for p in m_fn.group(2).split(",") if p.strip()]
+                symbols[name] = SymbolInfo(name=name, kind="async_function" if "async" in line_clean else "function", file_path=rel_path, line_number=lineno, end_line_number=lineno, parameters=params)
+                continue
+            m_arrow = re.search(r'^(?:export\s+)?(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*(?::\s*[^=]+)?\s*=>', line_clean)
+            if m_arrow:
+                name = m_arrow.group(1)
+                params = [p.strip().split(":")[0].strip() for p in m_arrow.group(2).split(",") if p.strip()]
+                symbols[name] = SymbolInfo(name=name, kind="arrow_function", file_path=rel_path, line_number=lineno, end_line_number=lineno, parameters=params)
+
+        self.file_symbols[rel_path] = list(symbols.keys())
+        self.file_imports[rel_path] = imports
+        for s_name, s_info in symbols.items():
+            self.symbols[s_name] = s_info
+
+    def _index_rust(self, rel_path: str, source: str) -> None:
+        symbols: dict[str, SymbolInfo] = {}
+        imports: set[str] = set()
+        lines = source.splitlines()
+
+        for lineno, line in enumerate(lines, start=1):
+            line_clean = line.strip()
+            m_use = re.search(r'^use\s+([^;]+);', line_clean)
+            if m_use:
+                imports.add(m_use.group(1).strip())
+                continue
+            m_fn = re.search(r'^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([a-zA-Z0-9_]+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)', line_clean)
+            if m_fn:
+                name = m_fn.group(1)
+                params = [p.strip().split(":")[0].strip() for p in m_fn.group(2).split(",") if p.strip()]
+                symbols[name] = SymbolInfo(name=name, kind="async_function" if "async" in line_clean else "function", file_path=rel_path, line_number=lineno, end_line_number=lineno, parameters=params)
+                continue
+            m_struct = re.search(r'^(?:pub(?:\([^)]*\))?\s+)?struct\s+([a-zA-Z0-9_]+)', line_clean)
+            if m_struct:
+                name = m_struct.group(1)
+                symbols[name] = SymbolInfo(name=name, kind="struct", file_path=rel_path, line_number=lineno, end_line_number=lineno)
+                continue
+            m_enum = re.search(r'^(?:pub(?:\([^)]*\))?\s+)?enum\s+([a-zA-Z0-9_]+)', line_clean)
+            if m_enum:
+                name = m_enum.group(1)
+                symbols[name] = SymbolInfo(name=name, kind="enum", file_path=rel_path, line_number=lineno, end_line_number=lineno)
+                continue
+            m_trait = re.search(r'^(?:pub(?:\([^)]*\))?\s+)?trait\s+([a-zA-Z0-9_]+)', line_clean)
+            if m_trait:
+                name = m_trait.group(1)
+                symbols[name] = SymbolInfo(name=name, kind="trait", file_path=rel_path, line_number=lineno, end_line_number=lineno)
+
+        self.file_symbols[rel_path] = list(symbols.keys())
+        self.file_imports[rel_path] = imports
+        for s_name, s_info in symbols.items():
+            self.symbols[s_name] = s_info
+
+    def _index_go(self, rel_path: str, source: str) -> None:
+        symbols: dict[str, SymbolInfo] = {}
+        imports: set[str] = set()
+        lines = source.splitlines()
+
+        for lineno, line in enumerate(lines, start=1):
+            line_clean = line.strip()
+            m_imp = re.search(r'''(?:import\s+)?["']([^"']+)["']''', line_clean)
+            if m_imp and ("import" in line or "(" in line):
+                imports.add(m_imp.group(1))
+            m_func = re.search(r'^func\s+(?:\((?:[^)]*)\)\s*)?([a-zA-Z0-9_]+)\s*\(([^)]*)\)', line_clean)
+            if m_func:
+                name = m_func.group(1)
+                params = [p.strip() for p in m_func.group(2).split(",") if p.strip()]
+                symbols[name] = SymbolInfo(name=name, kind="function", file_path=rel_path, line_number=lineno, end_line_number=lineno, parameters=params)
+                continue
+            m_type = re.search(r'^type\s+([a-zA-Z0-9_]+)\s+(struct|interface)', line_clean)
+            if m_type:
+                name = m_type.group(1)
+                kind = m_type.group(2)
+                symbols[name] = SymbolInfo(name=name, kind=kind, file_path=rel_path, line_number=lineno, end_line_number=lineno)
+
+        self.file_symbols[rel_path] = list(symbols.keys())
+        self.file_imports[rel_path] = imports
+        for s_name, s_info in symbols.items():
+            self.symbols[s_name] = s_info
 
     def _resolve_graph_edges(self) -> None:
         # Resolve caller-callee links
@@ -203,7 +328,6 @@ class CodePropertyGraph:
 
         symbol = self.symbols.get(name)
         if not symbol:
-            # Try fuzzy or lowercase search
             needle = name.lower()
             matching = [s for s in self.symbols if s.lower() == needle or s.lower().endswith(f".{needle}")]
             if matching:
@@ -211,7 +335,7 @@ class CodePropertyGraph:
         if not symbol:
             return None
 
-        return {
+        result: dict[str, Any] = {
             "name": symbol.name,
             "kind": symbol.kind,
             "file": symbol.file_path,
@@ -222,6 +346,20 @@ class CodePropertyGraph:
             "calls": sorted(symbol.calls),
             "called_by": sorted(symbol.called_by),
         }
+        if symbol.kind == "class":
+            methods = []
+            prefix = f"{symbol.name}."
+            for s_name, s_info in self.symbols.items():
+                if s_name.startswith(prefix):
+                    method_name = s_name[len(prefix):]
+                    methods.append({
+                        "name": method_name,
+                        "line": s_info.line_number,
+                        "parameters": s_info.parameters,
+                        "docstring": s_info.docstring[:150] if s_info.docstring else "",
+                    })
+            result["defined_methods"] = methods
+        return result
 
     def blast_radius(self, target: str) -> dict[str, Any]:
         """Compute the downstream impact (callers, importing files, and tests) of editing a symbol or file."""
@@ -233,31 +371,38 @@ class CodePropertyGraph:
         impacted_symbols: set[str] = set()
         associated_tests: set[str] = set()
 
-        # Check if target is a file or symbol
         is_file = target_clean in self.file_symbols or target_clean.endswith(".py")
         if is_file:
             impacted_files.add(target_clean)
-            # Find files that import this module
             mod_name = target_clean.replace("/", ".").replace(".py", "")
             mod_suffix = Path(target_clean).stem
             for imp, callers in self.file_dependents.items():
                 if imp == mod_name or imp.endswith(f".{mod_suffix}") or imp == mod_suffix:
                     impacted_files.update(callers)
-            # Find symbols in this file
             file_syms = self.file_symbols.get(target_clean, [])
             for sym in file_syms:
                 symbol_info = self.symbols.get(sym)
                 if symbol_info:
                     impacted_symbols.update(symbol_info.called_by)
         else:
-            # Target is a symbol name
             symbol = self.symbols.get(target_clean)
+            if not symbol:
+                needle = target_clean.lower()
+                matching = [s for s in self.symbols if s.lower() == needle or s.lower().endswith(f".{needle}")]
+                if matching:
+                    symbol = self.symbols[matching[0]]
             if symbol:
                 impacted_files.add(symbol.file_path)
                 impacted_symbols.update(symbol.called_by)
-                for caller in symbol.called_by:
+                if symbol.kind == "class":
+                    prefix = f"{symbol.name}."
+                    for s_name, s_info in self.symbols.items():
+                        if s_name.startswith(prefix):
+                            impacted_symbols.update(s_info.called_by)
+                for caller in list(impacted_symbols):
                     caller_info = self.symbols.get(caller)
                     if caller_info:
+                        impacted_files.add(caller_info.file_path)
                         impacted_files.add(caller_info.file_path)
 
         # Classify affected test suites
@@ -303,3 +448,7 @@ class CodePropertyGraph:
                         "caller": caller_info.name,
                     })
         return references
+
+
+CodeGraph = CodePropertyGraph
+

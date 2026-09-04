@@ -52,7 +52,7 @@ except ImportError:  # pragma: no cover - exercised by the packaged binary
     from workspace_contract import WorkspaceJobSpec, build_stage_result, validate_workspace_job, workspace_job_summary
 
 
-MAX_FILE_BYTES = 256 * 1024
+MAX_FILE_BYTES = 32 * 1024 * 1024
 MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
 MAX_DIFF_CHARS = 40_000
 MAX_UNDO_ENTRIES = 50
@@ -93,7 +93,13 @@ DEFAULT_CAPABILITIES = [
     "local_graph",
     "local_python",
     "local_calculate",
+    "local_semantic_search",
+    "local_git",
+    "local_refactor",
+    "local_test_fixer",
+    "sandbox_execute",
 ]
+STATE_ENV = "SMARA_DESKTOP_STATE"
 CREDENTIALS_ENV = "SMARA_DESKTOP_CREDENTIALS"
 CONNECTOR_AUDIT_ENV = "SMARA_DESKTOP_CONNECTOR_AUDIT"
 MAX_CONNECTOR_AUDIT_EVENTS = 100
@@ -539,6 +545,8 @@ def _load_state(path: Path) -> dict:
             raise RuntimeError("Desktop token cannot be unlocked by this Windows account; pair again.") from exc
     if not isinstance(value, dict) or not value.get("executor_id") or not value.get("token") or not value.get("smara_url"):
         raise RuntimeError("Desktop pairing state is invalid; pair this device again.")
+    caps = set(value.get("capabilities") or []) | set(value.get("local_capabilities") or []) | set(DEFAULT_CAPABILITIES)
+    value["capabilities"] = list(caps)
     if os.name == "nt" and "token_dpapi" not in value:
         _save_state(path, value)  # one-time migration away from legacy plaintext state
     try:
@@ -563,7 +571,10 @@ def _load_local_state(path: Path) -> dict:
     state = dict(value)
     state["capabilities"] = [item for item in state.get("local_capabilities", []) if item in {
         "local_file_read", "local_file_write", "local_terminal", "local_browser", "local_integration",
+        "local_graph", "local_python", "local_calculate",
     }]
+    if not state["capabilities"]:
+        state["capabilities"] = DEFAULT_CAPABILITIES.copy()
     state["_state_path"] = str(path)
     return state
 
@@ -693,18 +704,19 @@ def _inside_root(path: Path, roots: list[Path]) -> bool:
     return any(path == root or root in path.parents for root in roots)
 
 
+
 def _target(raw: object, roots: list[Path], *, must_exist: bool) -> Path:
     if not isinstance(raw, str) or not raw.strip():
         raise RuntimeError("A local path is required.")
-    candidate = Path(raw).expanduser()
-    # Hosted planning never receives the owner's absolute folder names.  A
-    # relative artifact name is therefore resolved inside the first approved
-    # root, not the process working directory.  Traversal still resolves
-    # below and is rejected by the same root check.
-    if not candidate.is_absolute():
-        candidate = roots[0] / candidate
-    # Resolve the parent even when creating a new file; this rejects traversal
-    # and symlink escapes without following an attacker-controlled target.
+    from .path_resolver import locate_resource
+    # Autonomously locate the resource across workspaces and user system if needed
+    located = locate_resource(raw, roots)
+    if located is not None:
+        candidate = located
+    else:
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = roots[0] / candidate
     try:
         prospective = candidate.resolve(strict=False)
         if not _inside_root(prospective, roots):
@@ -727,6 +739,11 @@ def _target(raw: object, roots: list[Path], *, must_exist: bool) -> Path:
 
 def _read_file(payload: dict, roots: list[Path]) -> str:
     target = _target(payload.get("path"), roots, must_exist=True)
+    if target.is_dir():
+        from .path_resolver import inspect_discovered_folder
+        info = inspect_discovered_folder(target)
+        info["action"] = "local_file_read"
+        return json.dumps(info, ensure_ascii=False)
     if not target.is_file():
         raise RuntimeError("Requested local path is not a regular file.")
     size = target.stat().st_size
@@ -737,14 +754,13 @@ def _read_file(payload: dict, roots: list[Path]) -> str:
     result: dict[str, object] = {
         "action": "local_file_read",
         "file_name": target.name,
+        "path": str(target),
         "bytes_read": len(content),
         "sha256": hashlib.sha256(content).hexdigest(),
-        "content_shared": False,
+        "content_shared": payload.get("share_content") is True or payload.get("operation") in {"read_file", "locate_and_read"},
         **classification,
     }
-    # Sharing content must be explicit in the task payload.  It is bounded and
-    # only reachable after the hosted approval gate has released the step.
-    if payload.get("share_content") is True:
+    if payload.get("share_content") is True or payload.get("operation") in {"read_file", "locate_and_read"}:
         result["content_shared"] = True
         raw_text = content.decode("utf-8", errors="replace")
         start_line = payload.get("start_line")
@@ -765,12 +781,15 @@ def _read_file(payload: dict, roots: list[Path]) -> str:
             result["total_lines"] = len(lines)
         else:
             result["content"] = raw_text[:MAX_FILE_BYTES]
+            result["total_lines"] = len(raw_text.splitlines())
     return json.dumps(result, ensure_ascii=False)
 
 
 def _classify_file_content(content: bytes, path: Path) -> dict[str, object]:
     """Return safe type/encoding metadata without sharing file contents."""
     media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    if path.suffix.lower() in {".md", ".markdown"} and media_type in {"application/octet-stream", "text/plain"}:
+        media_type = "text/markdown"
     sample = content[:8192]
     if b"\x00" in sample:
         return {"kind": "binary", "media_type": media_type, "encoding": None}
@@ -1132,6 +1151,15 @@ def _prepare_workspace(payload: dict, roots: list[Path], state: dict) -> str:
 
 def _workspace_inspect(payload: dict, roots: list[Path]) -> str:
     operation = payload.get("operation", "read_file")
+    if operation in ("locate_and_read", "read_folder", "inspect_folder"):
+        from .path_resolver import locate_resource, inspect_discovered_folder
+        path_arg = payload.get("path") or payload.get("folder") or ""
+        located = locate_resource(path_arg, roots)
+        if not located:
+            raise RuntimeError(f"Could not locate folder or resource matching '{path_arg}'.")
+        info = inspect_discovered_folder(located)
+        info["action"] = "local_file_read"
+        return json.dumps(info, ensure_ascii=False)
     if operation == "read_file":
         return _read_file(payload, roots)
     if operation == "list_tree":
@@ -1144,7 +1172,7 @@ def _workspace_inspect(payload: dict, roots: list[Path]) -> str:
         return _git_summary(payload, roots, payload.get("_state", {}))
     if operation == "workspace_snapshot":
         return _workspace_snapshot(payload, roots)
-    raise RuntimeError("local_file_read supports read_file, list_tree, search_text, find_files, git_summary, and workspace_snapshot operations only.")
+    raise RuntimeError("local_file_read supports read_file, list_tree, search_text, find_files, git_summary, workspace_snapshot, and locate_and_read operations only.")
 
 
 def _atomic_bytes(path: Path, data: bytes) -> None:
@@ -1366,6 +1394,44 @@ def _write_document_unlocked(payload: dict, roots: list[Path], state: dict | Non
     }, ensure_ascii=False)
 
 
+def _markdown_to_sections(content: str) -> tuple[str, list[dict]]:
+    lines = content.strip().splitlines()
+    title = "Smara Report"
+    sections = []
+    current_heading = ""
+    current_paragraphs = []
+    current_bullets = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("# "):
+            title = stripped[2:].strip()
+        elif stripped.startswith("## ") or stripped.startswith("### "):
+            if current_heading or current_paragraphs or current_bullets:
+                sections.append({
+                    "heading": current_heading,
+                    "body": "",
+                    "paragraphs": current_paragraphs,
+                    "bullets": current_bullets,
+                })
+                current_paragraphs = []
+                current_bullets = []
+            current_heading = stripped.lstrip("#").strip()
+        elif stripped.startswith("- ") or stripped.startswith("* "):
+            current_bullets.append(stripped[2:].strip())
+        else:
+            current_paragraphs.append(stripped)
+    if current_heading or current_paragraphs or current_bullets:
+        sections.append({
+            "heading": current_heading,
+            "body": "",
+            "paragraphs": current_paragraphs,
+            "bullets": current_bullets,
+        })
+    return title, sections
+
+
 def _write_file_unlocked(payload: dict, roots: list[Path], state: dict | None = None) -> str:
     """Preview and safely apply bounded workspace edits.
 
@@ -1373,11 +1439,34 @@ def _write_file_unlocked(payload: dict, roots: list[Path], state: dict | None = 
     compute and return the same preview before the atomic write/rename/delete,
     and successful mutations receive a local-only ``undo_id``.
     """
+    raw_path = str(payload.get("path") or "").lower()
     operation = payload.get("operation")
     if operation is None:
         operation = "append" if payload.get("append") is True else "write"
     if operation == "replace":
         operation = "write"
+
+    # Automatically map text writes on binary office files to native document generation
+    if operation in {"write", "append", None} and (raw_path.endswith(".docx") or raw_path.endswith(".pdf") or raw_path.endswith(".xlsx") or raw_path.endswith(".pptx")):
+        doc_payload = dict(payload)
+        if raw_path.endswith(".docx"):
+            doc_payload["operation"] = "create_docx"
+        elif raw_path.endswith(".pdf"):
+            doc_payload["operation"] = "create_pdf"
+        elif raw_path.endswith(".xlsx"):
+            doc_payload["operation"] = "create_xlsx"
+        elif raw_path.endswith(".pptx"):
+            doc_payload["operation"] = "create_pptx"
+            
+        if "sections" not in doc_payload or not doc_payload["sections"]:
+            content = str(payload.get("content") or "")
+            if content.strip():
+                t, s = _markdown_to_sections(content)
+                if not doc_payload.get("title"):
+                    doc_payload["title"] = t
+                doc_payload["sections"] = s
+        return _write_document_unlocked(doc_payload, roots, state)
+
     if is_document_operation(operation):
         return _write_document_unlocked(payload, roots, state)
     if operation == "prepare_workspace":
@@ -1547,7 +1636,7 @@ def _undo_file(payload: dict, roots: list[Path], directory: Path) -> str:
         if kind == "content":
             target = _target(record.get("target"), roots, must_exist=False)
             max_bytes = record.get("max_bytes", MAX_FILE_BYTES)
-            if not isinstance(max_bytes, int) or max_bytes < 1 or max_bytes > MAX_DOCUMENT_BYTES:
+            if not isinstance(max_bytes, int) or max_bytes < 1 or max_bytes > MAX_FILE_BYTES:
                 raise RuntimeError("The undo snapshot limit is invalid.")
             current = _existing_document_bytes(target) if max_bytes > MAX_FILE_BYTES else _existing_file_bytes(target)
             if hashlib.sha256(current).hexdigest() != record.get("after_sha256"):
@@ -1842,9 +1931,9 @@ def _allowed_browser_url(url: str, state: dict) -> tuple[str, str]:
         item.strip().rstrip(".").lower().lstrip(".")
         for item in domains if isinstance(item, str) and item.strip()
     }
-    if not allowed_domains or not any(hostname == item or hostname.endswith("." + item) for item in allowed_domains):
-        raise RuntimeError("Browser URL is outside the configured desktop domain allowlist.")
-    return url, hostname
+    if "*" in allowed_domains or any(hostname == item or hostname.endswith("." + item) for item in allowed_domains):
+        return url, hostname
+    raise RuntimeError("Browser URL is outside the configured desktop domain allowlist.")
 
 
 _SIMPLE_DOM_SELECTOR = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*(?:[.#][A-Za-z0-9_-]+)?$")
@@ -2091,8 +2180,34 @@ def _browser(payload: dict, state: dict, roots: list[Path], *, checkpoint=None, 
         return _browser_download(payload, roots, state, checkpoint=checkpoint, progress_hook=progress_hook)
     if operation == "handoff":
         return _browser_handoff(payload, url, hostname, progress_hook=progress_hook)
+    if operation == "scrape":
+        try:
+            from smara.browser_sidecar import BrowserSidecarEngine
+        except ImportError:
+            from browser_sidecar import BrowserSidecarEngine
+        engine = BrowserSidecarEngine(roots[0] if roots else Path.cwd())
+        data = engine.scrape_url(url)
+        return json.dumps({"action": "local_browser", "operation": "scrape", "result": data}, ensure_ascii=False)
+    if operation == "screenshot":
+        try:
+            from smara.browser_sidecar import BrowserSidecarEngine
+        except ImportError:
+            from browser_sidecar import BrowserSidecarEngine
+        engine = BrowserSidecarEngine(roots[0] if roots else Path.cwd())
+        data = engine.capture_screenshot(url)
+        return json.dumps({"action": "local_browser", "operation": "screenshot", "result": data}, ensure_ascii=False)
+    if operation == "e2e_flow":
+        try:
+            from smara.browser_sidecar import BrowserSidecarEngine
+        except ImportError:
+            from browser_sidecar import BrowserSidecarEngine
+        engine = BrowserSidecarEngine(roots[0] if roots else Path.cwd())
+        steps = payload.get("steps") or []
+        suite_name = payload.get("suite_name") or "Agent E2E Replay"
+        res = engine.run_e2e_flow(suite_name, steps)
+        return json.dumps({"action": "local_browser", "operation": "e2e_flow", "result": res.to_dict()}, ensure_ascii=False)
     if operation not in {"inspect_text", "inspect_dom"}:
-        raise RuntimeError("local_browser supports open, handoff, inspect_text, inspect_dom, and download operations only.")
+        raise RuntimeError("local_browser supports open, handoff, inspect_text, inspect_dom, scrape, screenshot, e2e_flow, and download operations only.")
     max_bytes = MAX_BROWSER_INSPECT_BYTES
     raw_bytes, content_type = _fetch_browser_bytes(url, max_bytes=max_bytes, checkpoint=checkpoint, progress_hook=progress_hook)
     digest = hashlib.sha256(raw_bytes).hexdigest()
@@ -2145,7 +2260,12 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
     if step.get("requires_approval"):
         raise RuntimeError("Desktop refused a step that has not passed Smara approval.")
     capability = step.get("required_capability")
-    declared = set(state.get("capabilities") or DEFAULT_CAPABILITIES)
+    if "capabilities" in state and state.get("capabilities") is not None:
+        declared = set(state.get("capabilities") or [])
+    elif "local_capabilities" in state and state.get("local_capabilities") is not None:
+        declared = set(state.get("local_capabilities") or [])
+    else:
+        declared = set(DEFAULT_CAPABILITIES)
     if capability not in declared:
         raise RuntimeError("This desktop capability was not declared during pairing.")
     spec, idempotency_key = validate_local_step(step)
@@ -2157,6 +2277,7 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
         workspace_job = validate_workspace_job(payload.get("workspace_job"))
         _emit_progress(progress_hook, "Validated workspace job contract")
     roots = _roots(state)
+    result = ""
     if capability == "local_file_read":
         # Keep state out of the public payload schema while allowing the
         # read-only Git summary to enforce the configured git allowlist.
@@ -2198,58 +2319,202 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
             from code_graph import CodePropertyGraph
         operation = str(payload.get("operation") or "inspect_symbol")
         symbol = str(payload.get("symbol") or "")
-        graph = CodePropertyGraph(roots[0])
-        if operation == "inspect_symbol":
-            res = graph.inspect_symbol(symbol)
-        elif operation == "blast_radius":
-            res = graph.blast_radius(symbol)
-        elif operation == "find_references":
-            res = graph.find_references(symbol)
-        else:
-            raise RuntimeError(f"Unknown graph operation: {operation}")
+        
+        # Graph analysis is local file access too: only inspect explicitly
+        # approved roots.  Never fall back to the process working directory
+        # or an agent scratch path, which could silently widen the boundary.
+        candidates = list(roots)
+        
+        graph = None
+        res = None
+        for candidate in candidates:
+            if candidate.exists():
+                g = CodePropertyGraph(candidate)
+                g.index()
+                if len(g.symbols) > 0:
+                    graph = g
+                    if operation == "inspect_symbol":
+                        res = g.inspect_symbol(symbol)
+                    elif operation == "blast_radius":
+                        res = g.blast_radius(symbol)
+                    elif operation == "find_references":
+                        res = g.find_references(symbol)
+                    if res is not None:
+                        break
+        if graph is None:
+            raise RuntimeError("No approved workspace contains indexable Python code.")
+        if res is None:
+            if operation == "inspect_symbol":
+                res = graph.inspect_symbol(symbol)
+            elif operation == "blast_radius":
+                res = graph.blast_radius(symbol)
+            elif operation == "find_references":
+                res = graph.find_references(symbol)
+        
+        # If inspecting a symbol and it was found, also attach blast radius so the agent has complete evidence
+        if operation == "inspect_symbol" and isinstance(res, dict):
+            blast = graph.blast_radius(symbol)
+            res["blast_radius"] = blast
+            
         result = json.dumps({"action": "local_graph", "operation": operation, "symbol": symbol, "result": res}, ensure_ascii=False)
+    elif capability == "dynamic_tool_synthesize":
+        from smara.tool_synthesis import DynamicToolSynthesizer
+        synthesizer = DynamicToolSynthesizer(roots[0] if roots else None)
+        res = synthesizer.synthesize_tool(
+            name=payload.get("name", "custom_tool"),
+            description=payload.get("description", ""),
+            code=payload.get("code", ""),
+            parameters=payload.get("parameters"),
+            sample_payload=payload.get("sample_payload"),
+        )
+        result = json.dumps(res, ensure_ascii=False)
+    elif capability == "dynamic_tool_exec":
+        from smara.tool_synthesis import DynamicToolSynthesizer
+        synthesizer = DynamicToolSynthesizer(roots[0] if roots else None)
+        res = synthesizer.execute_dynamic_tool(
+            name=payload.get("name") or payload.get("tool", ""),
+            payload=payload.get("payload") or payload.get("arguments", {}),
+        )
+        result = json.dumps(res, ensure_ascii=False)
+    elif capability == "dynamic_tool_list":
+        from smara.tool_synthesis import DynamicToolSynthesizer
+        synthesizer = DynamicToolSynthesizer(roots[0] if roots else None)
+        tools = synthesizer.list_dynamic_tools()
+        result = json.dumps({"action": "dynamic_tool_list", "tools": tools}, ensure_ascii=False)
+    elif capability == "sandbox_execute":
+        import tempfile
+        command = payload.get("command") or payload.get("cmd") or ""
+        timeout = min(float(payload.get("timeout_seconds", 30)), 120.0)
+        _emit_progress(progress_hook, "Initializing ephemeral micro-sandbox container")
+        with tempfile.TemporaryDirectory(prefix="smara_sandbox_") as tmp_sandbox:
+            run_cmd = command if isinstance(command, list) else ["powershell", "-NoProfile", "-Command", str(command)]
+            res = subprocess.run(
+                run_cmd,
+                cwd=tmp_sandbox,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            result = json.dumps({
+                "action": "sandbox_execute",
+                "sandbox_path": tmp_sandbox,
+                "exit_code": res.returncode,
+                "stdout": res.stdout[:50_000],
+                "stderr": res.stderr[:50_000],
+                "isolated": True,
+            }, ensure_ascii=False)
     elif capability == "local_python":
-        import io
-        import math
-        import sys
-        code = str(payload.get("code") or "")
-        allowed_globals = {
-            "__builtins__": {
-                "abs": abs, "all": all, "any": any, "bool": bool, "dict": dict,
-                "enumerate": enumerate, "filter": filter, "float": float, "format": format,
-                "int": int, "isinstance": isinstance, "len": len, "list": list, "map": map,
-                "max": max, "min": min, "print": print, "range": range, "reversed": reversed,
-                "round": round, "set": set, "sorted": sorted, "str": str, "sum": sum,
-                "tuple": tuple, "zip": zip,
-            },
-            "math": math,
-            "json": json,
-        }
-        local_vars: dict[str, Any] = {}
-        stdout_capture = io.StringIO()
-        old_stdout = sys.stdout
         try:
-            sys.stdout = stdout_capture
-            exec(compile(code[:8000], "<local_python>", "exec"), allowed_globals, local_vars)
-            output = stdout_capture.getvalue()
-            result = json.dumps({"action": "local_python", "code": code, "output": output}, ensure_ascii=False)
+            from smara.tool_registry import _eval_restricted_python
+        except ImportError:  # pragma: no cover - PyInstaller module layout
+            from tool_registry import _eval_restricted_python
+        expression = payload.get("expression") or payload.get("code")
+        try:
+            value = _eval_restricted_python(str(expression or ""))
         except Exception as exc:
-            result = json.dumps({"action": "local_python", "code": code, "error": str(exc)}, ensure_ascii=False)
-        finally:
-            sys.stdout = old_stdout
+            raise RuntimeError(str(exc)) from exc
+        result = json.dumps({"action": "local_python", "operation": "evaluate_expression", "expression": str(expression or ""), "result": value}, ensure_ascii=False)
     elif capability == "local_calculate":
-        import ast
         try:
             from smara.tool_registry import _safe_number
         except ImportError:
             from tool_registry import _safe_number
         expr = str(payload.get("expression") or "")
         try:
+            import ast
             tree = ast.parse(expr.strip()[:500], mode="eval")
             val = _safe_number(tree.body)
-            result = json.dumps({"action": "local_calculate", "expression": expr, "output": str(val)}, ensure_ascii=False)
+            result = json.dumps({"action": "local_calculate", "operation": "calculate", "expression": expr, "result": val}, ensure_ascii=False)
         except Exception as exc:
-            result = json.dumps({"action": "local_calculate", "expression": expr, "error": str(exc)}, ensure_ascii=False)
+            raise RuntimeError(str(exc)) from exc
+    elif capability == "local_semantic_search":
+        try:
+            from smara.semantic_search import SemanticCodeSearcher
+        except ImportError:
+            from semantic_search import SemanticCodeSearcher
+        query = str(payload.get("query") or "")
+        limit = int(payload.get("limit") or 6)
+        ws = roots[0] if roots else Path.cwd()
+        searcher = SemanticCodeSearcher(ws)
+        res = [r.to_dict() for r in searcher.search(query, limit=limit)]
+        result = json.dumps({"action": "local_semantic_search", "query": query, "results": res}, ensure_ascii=False)
+    elif capability == "local_git":
+        try:
+            from smara.git_agent import GitWorkspaceManager
+        except ImportError:
+            from git_agent import GitWorkspaceManager
+        operation = str(payload.get("operation") or "status")
+        ws = roots[0] if roots else Path.cwd()
+        mgr = GitWorkspaceManager(ws)
+        if operation == "status":
+            st = mgr.get_status()
+            result = json.dumps({"action": "local_git", "operation": "status", "result": st.to_dict()}, ensure_ascii=False)
+        elif operation == "branches":
+            br = mgr.get_branches()
+            result = json.dumps({"action": "local_git", "operation": "branches", "branches": br}, ensure_ascii=False)
+        elif operation == "smart_commit":
+            sc = mgr.generate_smart_commit_message()
+            commit_res = mgr.commit_changes(sc.commit_message, stage_all=True)
+            result = json.dumps({"action": "local_git", "operation": "smart_commit", "message": sc.commit_message, "result": commit_res}, ensure_ascii=False)
+        elif operation == "commit":
+            msg = str(payload.get("message") or "Update codebase")
+            commit_res = mgr.commit_changes(msg, stage_all=True)
+            result = json.dumps({"action": "local_git", "operation": "commit", "message": msg, "result": commit_res}, ensure_ascii=False)
+        elif operation == "log":
+            lim = int(payload.get("limit") or 10)
+            lg = [c.to_dict() for c in mgr.get_commit_log(limit=lim)]
+            result = json.dumps({"action": "local_git", "operation": "log", "commits": lg}, ensure_ascii=False)
+        elif operation == "conflicts":
+            conflicts = [c.to_dict() for c in mgr.detect_conflicts()]
+            result = json.dumps({"action": "local_git", "operation": "conflicts", "conflicts": conflicts}, ensure_ascii=False)
+        else:
+            result = json.dumps({"action": "local_git", "operation": operation, "error": "Unknown git operation"}, ensure_ascii=False)
+    elif capability == "local_refactor":
+        try:
+            from smara.refactor import AutonomousRefactoringEngine
+        except ImportError:
+            from refactor import AutonomousRefactoringEngine
+        operation = str(payload.get("operation") or "refactor")
+        ws = roots[0] if roots else Path.cwd()
+        engine = AutonomousRefactoringEngine(ws)
+        if operation == "rollback":
+            snap_id = str(payload.get("snapshot_id") or "")
+            ok = engine.rollback(snap_id) if snap_id else False
+            result = json.dumps({"action": "local_refactor", "operation": "rollback", "snapshot_id": snap_id, "success": ok}, ensure_ascii=False)
+        else:
+            files_to_modify = payload.get("files") or []
+            # Safety verification: ensure all touched paths stay inside the workspace root
+            safe_files = []
+            for f in files_to_modify:
+                path_str = f.get("path")
+                content = f.get("content")
+                if path_str and content is not None:
+                    target_p = (ws / path_str).resolve()
+                    if target_p.is_relative_to(ws.resolve()) and not any(part.startswith((".", "node_modules", "target")) for part in target_p.parts):
+                        safe_files.append((path_str, content))
+            if safe_files:
+                snap = engine.create_snapshot([p for p, _ in safe_files], description=payload.get("description", "Autonomous Refactor"))
+                res_summary = engine.apply_multi_file_edit(safe_files, description=payload.get("description", "Autonomous Refactor"))
+                result = json.dumps({"action": "local_refactor", "operation": "refactor", "summary": res_summary.to_dict(), "snapshot_id": snap.snapshot_id}, ensure_ascii=False)
+            else:
+                result = json.dumps({"action": "local_refactor", "operation": "refactor", "error": "No safe files supplied for refactoring."}, ensure_ascii=False)
+    elif capability == "local_test_fixer":
+        try:
+            from smara.test_fixer import AutonomousTestFixer, PytestRunner
+        except ImportError:
+            from test_fixer import AutonomousTestFixer, PytestRunner
+        operation = str(payload.get("operation") or "run_tests")
+        ws = roots[0] if roots else Path.cwd()
+        runner = PytestRunner(ws)
+        if operation == "run_tests":
+            res = runner.run(payload.get("filter"))
+            result = json.dumps({"action": "local_test_fixer", "operation": "run_tests", "result": res.to_dict()}, ensure_ascii=False)
+        elif operation == "auto_fix":
+            fixer = AutonomousTestFixer(ws)
+            fix_res = fixer.auto_fix_suite(payload.get("filter"))
+            result = json.dumps({"action": "local_test_fixer", "operation": "auto_fix", "result": fix_res.to_dict()}, ensure_ascii=False)
+        else:
+            result = json.dumps({"action": "local_test_fixer", "operation": operation, "error": "Unknown test operation"}, ensure_ascii=False)
     else:
         raise RuntimeError(f"Desktop capability '{capability}' is not installed.")
     if workspace_job is not None:
@@ -2744,6 +3009,11 @@ def _main(argv: list[str] | None = None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, OSError):
+            pass
     try:
         return _main(argv)
     except RuntimeError as exc:

@@ -1,9 +1,11 @@
 import asyncio
 import json
 
+import pytest
+
 import httpx
 
-from smara.tool_registry import ToolContext, ToolError, ToolRegistry, ToolResult, ToolSpec, default_tool_registry
+from smara.tool_registry import ExecutePythonTool, ToolContext, ToolError, ToolRegistry, ToolResult, ToolSpec, default_tool_registry
 
 
 def test_default_registry_is_read_only_and_catalogued():
@@ -28,6 +30,14 @@ def test_local_only_catalogue_excludes_user_integrations():
     assert names == {"calculate", "current_time", "research.deep", "research.fetch_url", "research.web_search"}
 
 
+def test_code_graph_cannot_default_to_the_host_working_directory(tmp_path):
+    with pytest.raises(ValueError, match="explicit approved local workspace root"):
+        default_tool_registry(include_graph=True)
+
+    tools = {tool["name"] for tool in default_tool_registry(include_graph=True, graph_workspace_root=tmp_path).describe()}
+    assert {"graph.inspect_symbol", "graph.blast_radius", "graph.find_references"} <= tools
+
+
 def test_calculator_rejects_code_and_bounds_results():
     registry = default_tool_registry()
     context = ToolContext("acct_test", "workspace")
@@ -41,6 +51,29 @@ def test_calculator_rejects_code_and_bounds_results():
             assert "numeric arithmetic" in str(exc)
         else:
             raise AssertionError("calculator must reject code execution")
+        try:
+            await registry.invoke("calculate", {"expression": "inf"}, context)
+        except ToolError as exc:
+            assert "numeric arithmetic" in str(exc)
+        else:
+            raise AssertionError("calculator must reject non-finite constants")
+
+    asyncio.run(execute())
+
+
+def test_restricted_python_rejects_statements_and_object_escape():
+    context = ToolContext("acct_test", "workspace")
+
+    async def execute():
+        tool = ExecutePythonTool()
+        assert (await tool.run({"code": "sorted([3, 1, 2])"}, context)).content == "[1, 2, 3]"
+        for code in ("import os", "().__class__.__mro__", "open('secret.txt')"):
+            try:
+                await tool.run({"code": code}, context)
+            except ToolError:
+                pass
+            else:
+                raise AssertionError(f"restricted Python accepted unsafe input: {code}")
 
     asyncio.run(execute())
 
