@@ -43,11 +43,13 @@ import httpx
 try:
     from .desktop_integrations import LocalIntegrationCancelled, execute_local_integration, local_connector_catalog
     from .local_agent import LocalTaskJournal, LocalTaskStore, decorate_local_result, journal_path, local_skill_catalog, local_tasks_path, skill_spec, validate_local_step, workspace_lock
+    from .local_agent_runtime import LocalModelConfig, run_shared_local_turn
     from .local_documents import build_document, is_document_operation
     from .workspace_contract import WorkspaceJobSpec, build_stage_result, validate_workspace_job, workspace_job_summary
 except ImportError:  # pragma: no cover - exercised by the packaged binary
     from desktop_integrations import LocalIntegrationCancelled, execute_local_integration, local_connector_catalog
     from local_agent import LocalTaskJournal, LocalTaskStore, decorate_local_result, journal_path, local_skill_catalog, local_tasks_path, skill_spec, validate_local_step, workspace_lock
+    from local_agent_runtime import LocalModelConfig, run_shared_local_turn
     from local_documents import build_document, is_document_operation
     from workspace_contract import WorkspaceJobSpec, build_stage_result, validate_workspace_job, workspace_job_summary
 
@@ -569,10 +571,11 @@ def _load_local_state(path: Path) -> dict:
         if not isinstance(value.get(field, []), list) or not all(isinstance(item, str) for item in value.get(field, [])):
             raise RuntimeError(f"Local Desktop setting '{field}' is invalid.")
     state = dict(value)
-    state["capabilities"] = [item for item in state.get("local_capabilities", []) if item in {
-        "local_file_read", "local_file_write", "local_terminal", "local_browser", "local_integration",
-        "local_graph", "local_python", "local_calculate",
-    }]
+    # Keep the local-first path in sync with the complete installed skill
+    # protocol.  Older builds silently dropped Git, refactor, test-fixer, and
+    # sandbox capabilities here, which made the Desktop appear less capable
+    # than the CLI even when those permissions were enabled.
+    state["capabilities"] = [item for item in state.get("local_capabilities", []) if item in set(DEFAULT_CAPABILITIES)]
     if not state["capabilities"]:
         state["capabilities"] = DEFAULT_CAPABILITIES.copy()
     state["_state_path"] = str(path)
@@ -2809,6 +2812,60 @@ class LocalRunner:
         return completed
 
 
+def _run_shared_local_agent_turn(request: dict, state_path: Path) -> dict:
+    """Run one private multi-step agent turn for the Tauri companion.
+
+    The model connection is supplied over stdin by the native UI and never
+    appears in process arguments or the returned JSON.  All actual local work
+    still flows through ``LocalAutonomousAgent.execute_action`` and the same
+    validated ``execute_step`` path used by the detached executor.
+    """
+    if not isinstance(request, dict):
+        raise RuntimeError("Local agent request must be an object.")
+    prompt = request.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 12_000:
+        raise RuntimeError("Local agent prompt is empty or too long.")
+    state = _load_local_state(state_path)
+    roots = _roots(state)
+    requested_workspace = request.get("workspace")
+    workspace = roots[0]
+    if isinstance(requested_workspace, str) and requested_workspace.strip():
+        candidate = Path(requested_workspace).expanduser().resolve()
+        if any(candidate == root or root in candidate.parents for root in roots):
+            workspace = candidate
+    model = request.get("model")
+    if not isinstance(model, dict):
+        raise RuntimeError("Local agent model configuration is missing.")
+    base_url = model.get("base_url")
+    model_name = model.get("model")
+    if not isinstance(base_url, str) or not base_url.strip() or not isinstance(model_name, str) or not model_name.strip():
+        raise RuntimeError("Local agent model endpoint or model name is missing.")
+    api_key = model.get("api_key") if isinstance(model.get("api_key"), str) else ""
+    auth_header = model.get("auth_header") if model.get("auth_header") in {"authorization", "api-subscription-key"} else "authorization"
+    context = request.get("context")
+    if not isinstance(context, list):
+        context = []
+    bounded_context = [item for item in context[-16:] if isinstance(item, dict)]
+    result = run_shared_local_turn(
+        prompt=prompt,
+        state_path=state_path,
+        config=LocalModelConfig(
+            base_url=base_url,
+            model=model_name,
+            api_key=api_key,
+            auth_header=auth_header,
+            label=str(model.get("label") or "private model")[:80],
+            timeout_seconds=300.0,
+            max_tokens=16_384,
+        ),
+        context=bounded_context,
+        max_steps=20,
+    )
+    result["workspace"] = str(workspace)
+    result["capabilities"] = list(state.get("capabilities") or [])
+    return result
+
+
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Smara's outbound-only local executor")
     parser.add_argument("--api", default=os.getenv("SMARA_API_URL", "http://127.0.0.1:8080"))
@@ -2833,6 +2890,7 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--local-task-cancel", help="cancel one private local task on this PC")
     parser.add_argument("--local-run", action="store_true", help="drain approved private local tasks and exit")
     parser.add_argument("--local-run-task", help="run one approved private local task and exit")
+    parser.add_argument("--local-agent-turn", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--skills", action="store_true", help="print the installed local skill protocol")
     parser.add_argument("--credential-list", action="store_true", help="list local credential names without values")
     parser.add_argument("--credential-set", help="save a local credential from stdin")
@@ -2894,8 +2952,19 @@ def _main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"Local task could not be cancelled: {exc}") from exc
         print(json.dumps(task, ensure_ascii=False))
         return 0
+    if args.local_agent_turn:
+        try:
+            request = json.load(sys.stdin)
+            result = _run_shared_local_agent_turn(request, args.state)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
+            raise SystemExit(f"Local autonomous turn failed: {exc}") from exc
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
     if args.skills:
-        print(json.dumps(local_skill_catalog(), ensure_ascii=False, indent=2))
+        # Diagnostics must advertise the complete installed protocol.  The
+        # base catalogue is intentionally small for legacy callers; Desktop
+        # and the shared autonomous planner support every extended skill.
+        print(json.dumps(local_skill_catalog(include_extended=True), ensure_ascii=False, indent=2))
         return 0
     if args.connector_list:
         print(json.dumps(local_connector_summaries(), ensure_ascii=False))

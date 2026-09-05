@@ -802,8 +802,18 @@ class LocalAutonomousAgent:
 
     state_path: Path
     max_steps: int = 20
+    # Optional host callback used by the CLI.  The Desktop leaves this unset
+    # and dispatches through the validated desktop_executor protocol; the CLI
+    # can reuse the exact same ReAct loop while retaining its richer TUI/RAV
+    # capability implementations.
+    action_executor: Any | None = None
 
     def execute_action(self, capability: str, payload: dict[str, Any], *, step_id: str | None = None) -> dict[str, Any]:
+        if self.action_executor is not None:
+            result = self.action_executor(capability, payload)
+            if isinstance(result, dict):
+                return result
+            return {"result": result}
         try:
             from smara.desktop_executor import _load_local_state, execute_step
         except ImportError:

@@ -419,10 +419,52 @@ class LocalAutonomousEngine:
             self.tui.print_progress(f"Self-healed on attempt {res.get('_attempts')}")
         return res
 
+    def _run_shared_local_turn(self, user_prompt: str, profile: dict[str, Any], api_key: str) -> str:
+        """Use the shared 20-step ReAct runtime used by Smara Desktop."""
+        from .local_agent_runtime import LocalModelConfig, run_shared_local_turn
+        started_at = time.time()
+
+        def execute(capability: str, payload: dict[str, Any]) -> dict[str, Any]:
+            result = self.execute_capability(capability, payload, title=capability.replace("_", " ").title())
+            if isinstance(result, dict) and result.get("error"):
+                raise RuntimeError(str(result["error"]))
+            return result
+
+        result = run_shared_local_turn(
+            prompt=user_prompt,
+            state_path=_desktop_state_path(),
+            config=LocalModelConfig(
+                base_url=str(profile.get("base_url") or ""),
+                model=str(profile.get("model") or ""),
+                api_key=api_key,
+                auth_header=str(profile.get("auth_header") or "authorization"),
+                label=str(profile.get("label") or profile.get("id") or "private model"),
+                timeout_seconds=300.0,
+                max_tokens=16_384,
+            ),
+            context=self.history[-16:],
+            max_steps=20,
+            action_executor=execute,
+        )
+        answer = str(result.get("answer") or "The local agent completed its bounded run.").strip()
+        if not answer:
+            answer = "The local agent completed without a visible answer."
+        self.tui.print_assistant_header("Smara")
+        self.tui.stream_markdown_chunk(answer)
+        self.tui.print_stats(time.time() - started_at, len(result.get("steps") or []))
+        self.history.append({"role": "user", "content": user_prompt})
+        self.history.append({"role": "assistant", "content": answer})
+        return answer
+
     def run_turn(self, user_prompt: str) -> str:
         """Run a full autonomous turn with tool calling and final response streaming."""
         profile = self.active_profile
         api_key = _resolve_profile_key(profile, self.credentials)
+        # Keep CLI execution on the same bounded multi-step runtime as the
+        # Desktop.  The legacy one-shot path remains below only for a
+        # credential-less development profile that cannot call a model.
+        if api_key:
+            return self._run_shared_local_turn(user_prompt, profile, api_key)
         endpoint = profile["base_url"].rstrip("/")
         if not endpoint.endswith("/chat/completions"):
             endpoint = f"{endpoint}/chat/completions"

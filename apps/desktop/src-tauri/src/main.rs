@@ -342,6 +342,11 @@ fn derived_local_capabilities(_allowed_roots: &[String], _terminal_allowlist: &[
         "local_terminal".to_owned(),
         "local_browser".to_owned(),
         "local_integration".to_owned(),
+        "local_semantic_search".to_owned(),
+        "local_git".to_owned(),
+        "local_refactor".to_owned(),
+        "local_test_fixer".to_owned(),
+        "sandbox_execute".to_owned(),
     ]
 }
 
@@ -403,28 +408,63 @@ fn command_hidden(command: &mut Command) {
 }
 
 fn executor_command(args: &[String]) -> Command {
-    // 1. Python direct invocation with live smara codebase (always has full updated skills)
-    let python_candidates = [
-        "C:\\Users\\sujal\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
-        "python.exe",
-    ];
-    for py in python_candidates {
-        if Path::new(py).is_file() || py == "python.exe" {
-            let mut cmd = Command::new(py);
-            cmd.arg("-m").arg("smara.desktop_executor").args(args);
-            cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-            cmd.env("SMARA_DESKTOP_STATE", state_path());
-            cmd.env("PYTHONPATH", "src;C:\\Users\\sujal\\.gemini\\antigravity\\brain\\9b6e09f1-dce7-4001-953e-163359a4335d\\scratch\\smara\\src");
-            cmd.current_dir("C:\\Users\\sujal\\.gemini\\antigravity\\brain\\9b6e09f1-dce7-4001-953e-163359a4335d\\scratch\\smara");
-            command_hidden(&mut cmd);
-            return cmd;
-        }
-    }
-    
+    // Prefer the bundled executor.  Older builds preferred a hard-coded
+    // Antigravity scratch checkout whenever `python.exe` was on PATH, which
+    // silently ran stale code instead of the executor bundled with this app.
     let direct_exe = executor_executable();
     if direct_exe.is_file() {
         let mut command = Command::new(direct_exe);
         command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        command.env("SMARA_DESKTOP_STATE", state_path());
+        command_hidden(&mut command);
+        return command;
+    }
+
+    // Development fallback: use the repository's own virtualenv/source,
+    // never an unrelated checkout.  The compile-time path is only used when
+    // that source tree still exists (e.g. running the release binary from a
+    // checkout); installed builds use the bundled executor above.
+    let mut source_roots: Vec<PathBuf> = Vec::new();
+    if let Some(root) = std::env::var_os("SMARA_REPO_ROOT") {
+        source_roots.push(PathBuf::from(root));
+    }
+    let compiled_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("..");
+    if compiled_root.join("src").join("smara").join("desktop_executor.py").is_file() {
+        source_roots.push(compiled_root);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        if cwd.join("src").join("smara").join("desktop_executor.py").is_file() {
+            source_roots.push(cwd);
+        }
+    }
+    source_roots.dedup();
+    let python_names = [
+        "C:\\Users\\sujal\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+        "python.exe",
+    ];
+    for root in &source_roots {
+        let local_python = root.join(".venv").join("Scripts").join("python.exe");
+        let python_candidates = [local_python, PathBuf::from(python_names[0])];
+        for py in python_candidates {
+            if !py.is_file() { continue; }
+            let mut command = Command::new(&py);
+            command.arg("-m").arg("smara.desktop_executor").args(args);
+            command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+            command.env("SMARA_DESKTOP_STATE", state_path());
+            command.env("PYTHONPATH", root.join("src"));
+            command.current_dir(root);
+            command_hidden(&mut command);
+            return command;
+        }
+    }
+
+    // Last resort for a developer machine with Python on PATH.  Keep the
+    // current directory and inherited PYTHONPATH intact; this path is only a
+    // diagnostic fallback and cannot point at a hidden/stale checkout.
+    if source_roots.is_empty() {
+        let mut command = Command::new("python.exe");
+        command.arg("-m").arg("smara.desktop_executor").args(args);
+        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         command.env("SMARA_DESKTOP_STATE", state_path());
         command_hidden(&mut command);
         return command;
@@ -1701,12 +1741,68 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
     Ok(None)
 }
 
+async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModelProfile, secret: &str) -> Result<(), String> {
+    let connection = current_connection();
+    let workspace = if args.workspace.trim().is_empty() || args.workspace.trim() == "default" {
+        connection.workspace.clone()
+    } else {
+        args.workspace.trim().to_owned()
+    };
+    let request = json!({
+        "prompt": args.message,
+        "conversation_id": args.conversation_id,
+        "workspace": workspace,
+        "context": local_chat_history(&args.conversation_id),
+        "model": {
+            "label": profile.label,
+            "base_url": profile.base_url,
+            "model": normalize_provider_model(&profile.provider, &profile.model),
+            "api_key": secret,
+            "auth_header": profile.auth_header,
+        },
+    });
+    app.emit("smara-chat-event", json!({"type": "phase", "phase": "local_agent"})).map_err(|error| error.to_string())?;
+    app.emit("smara-chat-event", json!({"type": "thought", "text": "Planning a bounded multi-step local run on this Desktop..."})).map_err(|error| error.to_string())?;
+    let output = run_executor_with_input(
+        vec!["--state".to_owned(), state_path().display().to_string(), "--local-agent-turn".to_owned()],
+        &serde_json::to_string(&request).map_err(|error| error.to_string())?,
+    )?;
+    let result: Value = serde_json::from_str(&output).map_err(|_| "The shared local agent returned invalid JSON.".to_owned())?;
+    let steps = result.get("steps").and_then(Value::as_array).cloned().unwrap_or_default();
+    for (index, step) in steps.iter().enumerate() {
+        let capability = step.get("capability").and_then(Value::as_str).unwrap_or("local_action");
+        let title = step.get("title").and_then(Value::as_str).unwrap_or(capability);
+        let ok = step.get("ok").and_then(Value::as_bool).unwrap_or(step.get("error").is_none());
+        let iteration = step.get("iteration").and_then(Value::as_u64).unwrap_or((index + 1) as u64);
+        app.emit("smara-chat-event", json!({"type": "phase", "phase": "reason_act", "iteration": iteration})).map_err(|error| error.to_string())?;
+        app.emit("smara-chat-event", json!({"type": "thought", "text": format!("Step {iteration}: {title}")})).map_err(|error| error.to_string())?;
+        app.emit("smara-chat-event", json!({"type": "tool_call", "name": capability, "preview": title, "iteration": iteration})).map_err(|error| error.to_string())?;
+        let preview = if let Some(error) = step.get("error").and_then(Value::as_str) {
+            error.chars().take(500).collect::<String>()
+        } else if let Some(value) = step.get("result") {
+            let text = value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string());
+            text.chars().take(500).collect::<String>()
+        } else {
+            "Completed".to_owned()
+        };
+        app.emit("smara-chat-event", json!({"type": "tool_result", "name": capability, "ok": ok, "preview": preview, "iteration": iteration})).map_err(|error| error.to_string())?;
+    }
+    let answer = result.get("answer").and_then(Value::as_str).unwrap_or("The local agent completed its bounded run.").trim().to_owned();
+    let answer = strip_thinking_tags(&answer);
+    if answer.is_empty() {
+        return Err("The local agent completed without a visible answer. Retry with a more specific objective.".to_owned());
+    }
+    let _ = persist_local_chat_turn(&args.conversation_id, &args.message, &answer);
+    app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"})).map_err(|error| error.to_string())?;
+    app.emit("smara-chat-event", json!({"type": "token", "text": answer})).map_err(|error| error.to_string())?;
+    app.emit("smara-chat-event", json!({"type": "done", "tools_used": steps.len(), "iterations": result.get("iterations").cloned().unwrap_or_else(|| json!(steps.len()))})).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModelProfile) -> Result<(), String> {
     let secret = resolve_local_secret(&profile.credential_name)?;
     if current_connection().runtime_mode == "local" {
-        if try_local_agent_turn(&app, args, profile, &secret).await?.is_some() {
-            return Ok(());
-        }
+        return stream_shared_local_agent_chat(app, args, profile, &secret).await;
     }
     let endpoint = local_chat_endpoint(&profile.base_url);
     let mut messages = vec![json!({"role": "system", "content": "You are Smara running privately on the user's desktop. Be concise, useful, and clear about limits. Do not claim to have run tools or changed files."})];
@@ -1904,53 +2000,11 @@ async fn try_autonomous_resource_discovery(app: &AppHandle, args: &ChatArgs) -> 
 }
 
 async fn try_autonomous_swarm_action(app: &AppHandle, args: &ChatArgs) -> Result<Option<()>, String> {
-    let msg_lower = args.message.to_lowercase();
-    let is_swarm = msg_lower.starts_with("run swarm") || msg_lower.starts_with("swarm:") || msg_lower.contains("swarm to") || msg_lower.contains("run swarm");
-    if !is_swarm {
-        return Ok(None);
-    }
-    let mut objective = args.message.trim().to_string();
-    for prefix in &["run swarm to ", "run swarm: ", "run swarm ", "swarm: "] {
-        if msg_lower.starts_with(prefix) {
-            objective = args.message[prefix.len()..].trim().to_string();
-            break;
-        }
-    }
-
-    let _ = app.emit("smara-chat-event", json!({"type": "thought", "text": format!("Initializing 4-Agent Autonomous Swarm for objective: '{objective}'...")}));
-    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-
-    // 1. Lead Architect
-    let _ = app.emit("smara-chat-event", json!({"type": "tool_call", "name": "swarm_architect", "preview": "Lead Architect: AST blast radius & interface decomposition"}));
-    tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-    let _ = app.emit("smara-chat-event", json!({"type": "tool_result", "name": "swarm_architect", "ok": true, "preview": "Decomposition complete"}));
-
-    // 2. Implementer
-    let _ = app.emit("smara-chat-event", json!({"type": "tool_call", "name": "swarm_implementer", "preview": "Implementer: Scoped mutations & atomic rollback snapshots"}));
-    tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-    let _ = app.emit("smara-chat-event", json!({"type": "tool_result", "name": "swarm_implementer", "ok": true, "preview": "Code & test suites generated"}));
-
-    // 3. Verification
-    let _ = app.emit("smara-chat-event", json!({"type": "tool_call", "name": "swarm_verifier", "preview": "Verification & QA: Running pytest test suite & AST verification"}));
-    tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-    let _ = app.emit("smara-chat-event", json!({"type": "tool_result", "name": "swarm_verifier", "ok": true, "preview": "11 passed in 0.31s"}));
-
-    // 4. Auditor
-    let _ = app.emit("smara-chat-event", json!({"type": "tool_call", "name": "swarm_auditor", "preview": "Security Auditor: Sandbox boundary verification & semantic commit"}));
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    let _ = app.emit("smara-chat-event", json!({"type": "tool_result", "name": "swarm_auditor", "ok": true, "preview": "Audit passed: zero security regressions"}));
-
-    let _ = app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"}));
-
-    let answer = format!(
-        "### ⚡ Swarm Teamwork: Project Delivered\n\nAll 4 specialized autonomous agents have successfully coordinated to complete the task:\n\n1. **🧠 Lead Architect**: Analyzed requirements, designed interface contracts, and decomposed the architecture.\n2. **⚡ Implementer**: Generated the token-bucket rate limiter middleware and test suites with atomic pre-flight snapshotting.\n3. **🧪 Verification & QA**: Verified the test suite using pytest—all 11 unit tests passed.\n4. **🛡️ Security Auditor**: Verified sandbox isolation, validated `X-Forwarded-For` header bounds, and confirmed zero regression.\n\n#### Delivered Files:\n- `rate_limiter/__init__.py` (Token-bucket rate limiter middleware)\n- `test_rate_limiter.py` (Full test suite with burst, refill, IPv6, and fail-open tests)\n\nBoth files are saved in your workspace and ready for integration."
-    );
-
-    let _ = persist_local_chat_turn(&args.conversation_id, &args.message, &answer);
-    let _ = app.emit("smara-chat-event", json!({"type": "token", "text": answer}));
-    let _ = app.emit("smara-chat-event", json!({"type": "done", "tools_used": 4}));
-
-    Ok(Some(()))
+    // Swarm requests now flow through the shared local agent instead of a
+    // benchmark-like canned response.  Keep this compatibility hook inert so
+    // older callers cannot accidentally re-enable the fixed-result path.
+    let _ = (app, args);
+    Ok(None)
 }
 
 #[tauri::command]
@@ -1961,9 +2015,6 @@ async fn stream_chat(app: AppHandle, args: ChatArgs) -> Result<(), String> {
             return Ok(());
         }
         if let Some(()) = try_autonomous_resource_discovery(&app, &args).await? {
-            return Ok(());
-        }
-        if let Some(()) = try_autonomous_swarm_action(&app, &args).await? {
             return Ok(());
         }
         if let Some((tool, answer)) = local_builtin_answer(&args.message) {
