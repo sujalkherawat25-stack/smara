@@ -504,6 +504,7 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - If asked for a character name, output ONLY the single character name (e.g. backtick).
    - If asked for comma-separated or semicolon-separated items, list ONLY the items cleanly in the requested order.
    - When asked "how many percent above or below [standard]% is [actual]%", report the direct difference in percentage points (i.e. actual% - standard%, such as +4.6 or -2.1), not relative growth ((actual-standard)/standard*100).
+   - When asked "how many thousand X" or "how many million X", report the numerical quantity directly in that scaled unit (e.g. for 17,000 when asked "how many thousand hours", report 17, NOT 17000; for 5,000,000 when asked "how many million", report 5, NOT 5000000).
 """
 
 
