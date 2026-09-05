@@ -23,13 +23,13 @@ The objective is not arbitrary machine control. It is a dependable local agent
 that plans, asks once when needed, executes in the approved workspace, shows
 live proof, and works while Hosted Smara is unavailable.
 
-## Reference review: Hermes Desktop
+## Reference review: external local-agent architecture
 
-The locally installed Hermes Agent source is MIT licensed and was reviewed as
-an architectural reference. Smara will not copy credentials, user data, or
-unreviewed code. The useful patterns to adapt natively are:
+An externally installed, permissively licensed local-agent implementation was
+reviewed as an architectural reference. Smara will not copy credentials, user
+data, or unreviewed code. The useful patterns to adapt natively are:
 
-| Hermes pattern | Smara implementation choice |
+| Reference pattern | Smara implementation choice |
 | --- | --- |
 | Large tool catalogue | Small typed, capability-scoped catalogue with one validator per operation |
 | Toolsets and discovery | Desktop Capability Broker lists only currently enabled skills and connectors |
@@ -38,8 +38,8 @@ unreviewed code. The useful patterns to adapt natively are:
 | Skills and cron | Declarative skills/routines; no arbitrary downloaded scripts |
 | Browser / terminal supervision | Visible runs, bounded outputs, cancellation, workspace locks, and approval policy |
 
-Do **not** copy Hermes' unrestricted shell assumptions, arbitrary plugin code,
-cloud execution backends, or local credential files into Smara.
+Do **not** copy unrestricted shell assumptions, arbitrary plugin code, cloud
+execution backends, or local credential files into Smara.
 
 ## Non-negotiable local contract
 

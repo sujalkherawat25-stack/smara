@@ -92,6 +92,7 @@ DEFAULT_CAPABILITIES = [
     "local_terminal",
     "local_browser",
     "local_integration",
+    "local_media",
     "local_graph",
     "local_python",
     "local_calculate",
@@ -2315,6 +2316,41 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
         except Exception:
             _append_connector_audit(str(payload.get("provider") or "unknown"), str(payload.get("operation") or "unknown"), "failed")
             raise
+    elif capability == "local_media":
+        # Media stays local: the only model/provider call, if one is needed,
+        # is made directly by the Desktop helper.  The action envelope and
+        # returned proof never include a credential or raw file bytes.
+        target = _target(payload.get("path") or payload.get("file_path"), roots, must_exist=True)
+        if not target.is_file():
+            raise RuntimeError("Local media inspection requires a regular file.")
+        if target.stat().st_size > MAX_FILE_BYTES:
+            raise RuntimeError(f"Local media file exceeds the {MAX_FILE_BYTES} byte limit.")
+        operation = str(payload.get("operation") or "read_document").strip().lower()
+        try:
+            from smara.agent_tools import audio_transcribe, file_read, image_inspect, video_inspect, zip_extract_and_read
+        except ImportError:  # pragma: no cover - bundled executor layout
+            from agent_tools import audio_transcribe, file_read, image_inspect, video_inspect, zip_extract_and_read
+        if operation in {"inspect_image", "image", "ocr"}:
+            observation = image_inspect(str(target), prompt=str(payload.get("prompt") or "Describe the image and transcribe all visible text."))
+        elif operation in {"transcribe_audio", "audio", "transcribe"}:
+            observation = audio_transcribe(str(target))
+        elif operation in {"inspect_video", "video"}:
+            observation = video_inspect(str(target), action=str(payload.get("video_action") or "transcript"), prompt=str(payload.get("prompt") or ""))
+        elif operation in {"inspect_archive", "archive", "zip"}:
+            observation = zip_extract_and_read(str(target), target_file=payload.get("target_file"))
+        elif operation in {"read_document", "document", "read"}:
+            observation = file_read(str(target), max_chars=min(64_000, max(1_000, int(payload.get("max_chars") or 16_000))))
+        else:
+            raise RuntimeError("local_media supports inspect_image, transcribe_audio, inspect_video, inspect_archive, and read_document.")
+        if not isinstance(observation, str):
+            observation = str(observation)
+        if observation.lstrip().lower().startswith(("error:", "image inspection error:", "audio transcription error:")):
+            raise RuntimeError(observation[:1_000])
+        result = json.dumps({
+            "action": "local_media", "operation": operation, "file_name": target.name,
+            "path": str(target), "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+            "observation": observation[:64_000],
+        }, ensure_ascii=False)
     elif capability == "local_graph":
         try:
             from smara.code_graph import CodePropertyGraph

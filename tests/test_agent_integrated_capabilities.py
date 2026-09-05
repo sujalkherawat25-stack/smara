@@ -16,9 +16,10 @@ from smara.skills_system import SkillsRegistry, get_default_skills_registry
 from smara.dag_flow import DAGNode, DAGWorkflow
 
 
-def test_integrated_tools():
+def test_integrated_tools(tmp_path: Path, monkeypatch):
     # 1. Test Memory Tool Actions
-    store = get_default_memory_store()
+    store = TaskMemoryStore(tmp_path / "memory")
+    monkeypatch.setattr("smara.task_memory._default_store", store)
     add_res = json.loads(memory_tool("add", target="memory", content="Testing integrated architecture."))
     assert add_res["status"] in ("success", "noop")
 

@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -175,9 +176,16 @@ class TaskMemoryStore:
         header = "# Project & Environment Notes" if "memory" in file_path.name.lower() else "# User Profile & Preferences"
         body = ENTRY_DELIMITER.join(entries)
         full_text = f"{header}\n\n§\n{body}\n" if body else f"{header}\n"
-        temp_file = file_path.with_suffix(".tmp")
-        temp_file.write_text(full_text, encoding="utf-8")
-        temp_file.replace(file_path)
+        # A fixed ``MEMORY.tmp`` races with another Desktop/CLI process and
+        # can remain locked on Windows.  A unique sibling still gives atomic
+        # replacement while keeping concurrent writers from clobbering each
+        # other's temporary file.
+        temp_file = file_path.with_name(f".{file_path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temp_file.write_text(full_text, encoding="utf-8")
+            os.replace(temp_file, file_path)
+        finally:
+            temp_file.unlink(missing_ok=True)
 
     def render_frozen_snapshot(self, max_chars: int = DEFAULT_MAX_CHARS) -> str:
         """

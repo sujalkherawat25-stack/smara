@@ -36,6 +36,19 @@ def test_desktop_file_read_write_stays_inside_approved_root(tmp_path: Path):
         execute_step({"required_capability": "local_file_read", "executor_payload": {"path": str(tmp_path.parent / "note.txt")}}, state)
 
 
+def test_local_media_reads_a_document_inside_the_approved_root(tmp_path: Path):
+    source = tmp_path / "evidence.txt"
+    source.write_text("bounded local evidence", encoding="utf-8")
+    state = {"capabilities": ["local_media"], "allowed_roots": [str(tmp_path)]}
+    result = json.loads(execute_step({
+        "required_capability": "local_media",
+        "executor_payload": {"operation": "read_document", "path": str(source)},
+    }, state))
+    assert result["action"] == "local_media"
+    assert result["file_name"] == "evidence.txt"
+    assert "bounded local evidence" in result["observation"]
+
+
 def test_local_calculate_and_python_are_bounded_expression_tools(tmp_path: Path):
     state = {"capabilities": ["local_calculate", "local_python"], "allowed_roots": [str(tmp_path)]}
     calculated = json.loads(execute_step({"required_capability": "local_calculate", "executor_payload": {"expression": "sqrt(144) + sin(pi / 2) * log(e**3)"}}, state))

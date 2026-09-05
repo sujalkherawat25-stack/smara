@@ -14,6 +14,14 @@ from typing import Any
 
 import httpx
 
+
+# This is a character ceiling because the local adapter supports providers
+# with different tokenizers.  It leaves headroom for the system prompt and a
+# 16k-token answer while preventing a workbook, browser page, or repeated
+# tool result from silently overflowing a provider context window.
+MAX_LOCAL_HISTORY_CHARS = 160_000
+MAX_LOCAL_TOOL_OBSERVATION_CHARS = 24_000
+
 # The shared runtime is imported as ``smara.local_agent_runtime`` in the
 # source/CLI and as a top-level module by the PyInstaller Desktop executor.
 # Keep both import modes working so the packaged binary can start without a
@@ -82,10 +90,67 @@ def _parse_plan(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _compact_history(history: list[dict[str, Any]], *, max_chars: int = MAX_LOCAL_HISTORY_CHARS) -> list[dict[str, Any]]:
+    """Keep the objective and recent evidence within a provider-safe budget.
+
+    This is intentionally deterministic: it never asks a second model to
+    summarize sensitive local output.  Old tool observations retain an
+    explicit truncation marker, so the planner can request a bounded reread
+    instead of treating omitted text as evidence.
+    """
+    items = [dict(item) for item in history if isinstance(item, dict) and isinstance(item.get("content"), str)]
+    if sum(len(str(item.get("content") or "")) for item in items) <= max_chars:
+        return items
+
+    # Preserve the original user objective and the latest evidence/actions.
+    head = items[:1] if items and items[0].get("role") == "user" else []
+    tail = items[-8:]
+    protected_ids = {id(item) for item in head + tail}
+    compacted: list[dict[str, Any]] = []
+    for item in items:
+        content = str(item.get("content") or "")
+        if id(item) in protected_ids:
+            compacted.append(item)
+            continue
+        reduced = dict(item)
+        if item.get("role") == "tool":
+            reduced["content"] = content[:600] + "\n[Earlier tool output omitted; request a bounded reread if needed.]"
+        else:
+            reduced["content"] = content[:400] + "\n[Earlier turn compacted.]"
+        compacted.append(reduced)
+
+    total = sum(len(str(item.get("content") or "")) for item in compacted)
+    if total <= max_chars:
+        return compacted
+    # As a final deterministic guard, keep the first objective plus newest
+    # turns only.  This must not silently exceed the caller-selected model.
+    result = [dict(item) for item in head]
+    if result and len(str(result[0].get("content") or "")) > max_chars:
+        result[0]["content"] = str(result[0].get("content") or "")[:max_chars]
+    remaining = max_chars - sum(len(str(item.get("content") or "")) for item in result)
+    selected_tail: list[dict[str, Any]] = []
+    for item in reversed(tail):
+        if id(item) in {id(entry) for entry in head} or remaining <= 0:
+            continue
+        content = str(item.get("content") or "")[:min(MAX_LOCAL_TOOL_OBSERVATION_CHARS, remaining)]
+        if not content:
+            continue
+        copy = dict(item)
+        copy["content"] = content
+        selected_tail.append(copy)
+        remaining -= len(content)
+        if remaining <= 0:
+            break
+    # We choose the newest turns first to fit the budget, then restore their
+    # chronological order before sending the transcript to the model.
+    result.extend(reversed(selected_tail))
+    return result
+
+
 def _messages_from_history(history: list[dict[str, Any]]) -> list[dict[str, str]]:
     """Map the shared loop history to a provider-neutral chat transcript."""
     messages: list[dict[str, str]] = []
-    for item in history:
+    for item in _compact_history(history):
         if not isinstance(item, dict):
             continue
         role = item.get("role")
@@ -97,9 +162,9 @@ def _messages_from_history(history: list[dict[str, Any]]) -> list[dict[str, str]
             # tool-call IDs. Present results as a bounded user-visible turn so
             # Ollama, Sarvam, GLM, and other compatible gateways all accept it.
             name = str(item.get("name") or "local tool")
-            messages.append({"role": "user", "content": f"[Result from {name}]\n{content[:40_000]}"})
+            messages.append({"role": "user", "content": f"[Result from {name}]\n{content[:MAX_LOCAL_TOOL_OBSERVATION_CHARS]}"})
         elif role in {"user", "assistant"}:
-            messages.append({"role": role, "content": content[:40_000]})
+            messages.append({"role": role, "content": content[:MAX_LOCAL_TOOL_OBSERVATION_CHARS]})
     return messages
 
 
@@ -144,7 +209,10 @@ class OpenAICompatiblePlanner:
             "objective is complete. Otherwise call request_local_action exactly "
             "once. Never claim a local action happened before its result is "
             "provided. Keep paths inside approved workspace roots, avoid secrets, "
-            "and prefer read/inspect/test before mutating files.\n\n"
+            "and prefer read/inspect/test before mutating files. If evidence is "
+            "missing, say what is missing rather than guessing. Do not repeat an "
+            "identical tool call after an error; repair the plan or stop clearly. "
+            "Use local_media for approved images, audio, archives, and rich documents.\n\n"
             "Installed capabilities:\n" + capability_lines
         )
 

@@ -19,7 +19,7 @@ from smara.store import TaskStore
 def test_local_skill_catalog_is_explicit_and_bounded():
     catalogue = local_skill_catalog()
     assert {item["capability"] for item in catalogue} == {
-        "local_file_read", "local_file_write", "local_terminal", "local_browser", "local_integration",
+        "local_file_read", "local_file_write", "local_terminal", "local_browser", "local_integration", "local_media",
         "local_calculate", "local_python", "local_graph",
     }
     assert all(item["input_schema"]["additionalProperties"] is False for item in catalogue)

@@ -56,15 +56,23 @@ def test_file_write_rejects_syntax_error():
         assert not broken_file.exists()
 
 
-def test_browser_action_scrape():
-    # Test scraping a public HTTP endpoint
+def test_browser_action_scrape(monkeypatch):
+    # Exercise the adapter contract without an external network dependency.
+    monkeypatch.setattr(
+        "smara.browser_sidecar.BrowserSidecarEngine.scrape_url",
+        lambda _self, url: {"success": True, "url": url, "title": "Example Domain", "content_snippet": "Example content"},
+    )
     out = browser_action_tool(action="scrape", url="https://example.com")
     data = json.loads(out)
     assert data.get("success") is True
     assert "example" in data.get("title", "").lower() or "example" in data.get("content_snippet", "").lower()
 
 
-def test_browser_action_screenshot():
+def test_browser_action_screenshot(monkeypatch):
+    monkeypatch.setattr(
+        "smara.browser_sidecar.BrowserSidecarEngine.capture_screenshot",
+        lambda _self, url, output_path=None: {"success": True, "url": url, "file_path": str(output_path or "capture.png"), "file_size": 1},
+    )
     with tempfile.TemporaryDirectory() as tmpdir:
         screen_path = Path(tmpdir) / "test_shot.png"
         out = browser_action_tool(action="screenshot", url="https://example.com", output_path=str(screen_path))

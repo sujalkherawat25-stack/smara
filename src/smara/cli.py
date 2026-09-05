@@ -1072,8 +1072,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_goal.add_argument("goal_action", nargs="?", default="list", choices=["list", "status", "resume"])
     p_goal.add_argument("goal_id", nargs="?", default=None)
 
-    p_bench = subparsers.add_parser("benchmark", help="Run official agent benchmarks (GAIA, SWE-bench, Desktop)")
-    p_bench.add_argument("--suite", choices=["gaia", "swe-bench", "desktop"], default="gaia", help="Benchmark suite to run")
+    p_bench = subparsers.add_parser("benchmark", help="Run reproducible agent benchmark gates")
+    p_bench.add_argument("--suite", choices=["gaia", "swe-bench", "desktop", "osworld"], default="gaia", help="Benchmark suite or readiness gate to run")
     p_bench.add_argument("--level", choices=["1", "2", "3"], default="1", help="GAIA Level (default: 1)")
     p_bench.add_argument("--count", type=int, default=None, help="Max tasks to evaluate (default: all)")
     p_bench.add_argument("--report", action="store_true", help="Automatically open generated PDF scorecard")
@@ -1468,21 +1468,18 @@ def main(argv: list[str] | None = None) -> int:
         auto_open = getattr(parsed_args, "report", False)
 
         if suite == "gaia":
-            print(tui.paint(f"\n🏆 Launching Official GAIA Benchmark Suite (Level {level})...\n", "BOLD"))
-            from benchmarks.gaia_official_runner import GaiaOfficialBenchmark
+            print(tui.paint(f"\n🏆 Launching strict GAIA shared-runtime evaluation (Level {level})...\n", "BOLD"))
+            from benchmarks.gaia_fair_runner import GaiaFairBenchmark
             token = os.environ.get("HF_TOKEN", "")
-            runner = GaiaOfficialBenchmark(token=token, workspace_root=engine.workspace)
-            summary = runner.evaluate_level(level=level, max_tasks=count)
+            runner = GaiaFairBenchmark(token=token, workspace_root=engine.workspace)
+            try:
+                summary = runner.evaluate_level(level=level, max_tasks=count)
+            except RuntimeError as exc:
+                print(tui.paint(f"GAIA evaluation did not start: {exc}", "YELLOW"))
+                return 2
             color = "GREEN" if summary["accuracy_percent"] >= 90.0 else "YELLOW"
-            print(tui.paint(f"\n✓ GAIA Level {level} Evaluation Complete: {summary['correct']}/{summary['total_evaluated']} ({summary['accuracy_percent']}%) in {summary['total_duration_seconds']}s\n", color))
-            pdf_path = engine.workspace / "reports" / f"gaia_official_level{level}_full_results.pdf"
-            if not pdf_path.exists():
-                pdf_path = engine.workspace / "reports" / f"gaia_official_level{level}_results.pdf"
-            if pdf_path.exists():
-                print(f"  📄 Official Scorecard PDF: {tui.paint(str(pdf_path), 'CYAN')}")
-                if auto_open:
-                    import webbrowser
-                    webbrowser.open(str(pdf_path))
+            print(tui.paint(f"\n✓ GAIA Level {level}: {summary['correct']}/{summary['total_scored']} strict matches ({summary['accuracy_percent']}%). {summary['execution_errors']} execution errors.\n", color))
+            print(f"  📄 Reproducible JSON report: {tui.paint(summary['report_path'], 'CYAN')}")
             return 0
 
         elif suite == "swe-bench":
@@ -1520,6 +1517,17 @@ def main(argv: list[str] | None = None) -> int:
                     import webbrowser
                     webbrowser.open(str(pdf_path))
             return 0
+
+        elif suite == "osworld":
+            from benchmarks.osworld_readiness import OSWorldReadinessRunner
+            summary = OSWorldReadinessRunner(workspace_root=engine.workspace).preflight()
+            color = "GREEN" if summary["status"] == "ready_to_invoke_external_environment" else "YELLOW"
+            print(tui.paint(f"\nOSWorld readiness: {summary['status']}\n", color))
+            for item in summary["checks"]:
+                marker = "✓" if item["ok"] else "•"
+                print(f"  {marker} {item['name']}: {item['detail']}")
+            print(f"\n  📄 Readiness report: {tui.paint(summary['report_path'], 'CYAN')}")
+            return 0 if summary["status"] == "ready_to_invoke_external_environment" else 2
 
     if cmd == "tool":
         from .tool_synthesis import DynamicToolSynthesizer

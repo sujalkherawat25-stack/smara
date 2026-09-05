@@ -100,6 +100,11 @@ LOCAL_SKILLS: dict[str, LocalSkillSpec] = {
         timeout_seconds=30, max_output_bytes=16_000, side_effecting=False,
         result_schema={"type": "object", "required": ["action", "provider"]},
     ),
+    "local_media": LocalSkillSpec(
+        "local_media", "Inspect an approved local image, audio, video, archive, or document with a bounded local media reader.", _ANY_OBJECT,
+        timeout_seconds=90, max_output_bytes=64_000, side_effecting=False,
+        result_schema={"type": "object", "required": ["action", "operation"]},
+    ),
     "local_graph": LocalSkillSpec(
         "local_graph", "Query AST Code Property Graph for symbol definitions, callers, references, and blast radius.", _ANY_OBJECT,
         timeout_seconds=30, max_output_bytes=64_000, side_effecting=False,
@@ -147,7 +152,7 @@ def local_skill_catalog(include_extended: bool = False) -> list[dict[str, Any]]:
     """Return a JSON-safe catalogue for diagnostics and future skill UIs."""
     base_caps = {
         "local_file_read", "local_file_write", "local_terminal", "local_browser", "local_integration",
-        "local_calculate", "local_graph", "local_python",
+        "local_media", "local_calculate", "local_graph", "local_python",
     }
     return [
         {
@@ -808,6 +813,33 @@ class LocalAutonomousAgent:
     # capability implementations.
     action_executor: Any | None = None
 
+    @staticmethod
+    def _action_failed(result: Any) -> bool:
+        """Return whether a structured executor result represents a failure.
+
+        Some executors intentionally return an error envelope instead of
+        raising.  Treating those as successful observations lets a model
+        invent completion after a failed local action, so the shared loop
+        normalises them here before the next planning step.
+        """
+        if not isinstance(result, dict):
+            return False
+        if result.get("error") or result.get("failure_state") in {"failed", "cancelled"}:
+            return True
+        for key in ("ok", "success"):
+            if key in result and result[key] is False:
+                return True
+        return False
+
+    @staticmethod
+    def _action_signature(capability: Any, payload: Any) -> str:
+        """Build a stable identity for repetition detection without logging secrets."""
+        try:
+            encoded = json.dumps({"capability": capability, "payload": payload}, sort_keys=True, ensure_ascii=False)
+        except (TypeError, ValueError):
+            encoded = f"{capability}:{type(payload).__name__}"
+        return hashlib.sha256(encoded.encode("utf-8", errors="replace")).hexdigest()
+
     def execute_action(self, capability: str, payload: dict[str, Any], *, step_id: str | None = None) -> dict[str, Any]:
         if self.action_executor is not None:
             result = self.action_executor(capability, payload)
@@ -845,6 +877,7 @@ class LocalAutonomousAgent:
         history = list(context or [])
         history.append({"role": "user", "content": prompt})
         steps_taken: list[dict[str, Any]] = []
+        action_counts: dict[str, int] = {}
 
         if model_callable is None:
             return {
@@ -874,10 +907,24 @@ class LocalAutonomousAgent:
                     "capability": cap,
                     "payload": payload,
                 }
+                signature = self._action_signature(cap, payload)
+                action_counts[signature] = action_counts.get(signature, 0) + 1
+                if action_counts[signature] > 2:
+                    message = "Stopped because the planner repeated the same local action without new evidence."
+                    step_record["error"] = message
+                    step_record["ok"] = False
+                    steps_taken.append(step_record)
+                    return {
+                        "answer": message,
+                        "steps": steps_taken,
+                        "completed": False,
+                        "iterations": iteration + 1,
+                        "failure_reason": "repeated_action",
+                    }
                 try:
                     action_result = self.execute_action(cap, payload)
                     step_record["result"] = action_result
-                    step_record["ok"] = True
+                    step_record["ok"] = not self._action_failed(action_result)
                     history.append({
                         "role": "assistant",
                         "content": json.dumps({"action": cap, "payload": payload}),
@@ -904,9 +951,10 @@ class LocalAutonomousAgent:
                 break
 
         return {
-            "answer": "Autonomous execution completed.",
+            "answer": "The local agent reached its step limit before it could verify completion.",
             "steps": steps_taken,
-            "completed": True,
+            "completed": False,
             "iterations": self.max_steps,
+            "failure_reason": "step_limit",
         }
 
