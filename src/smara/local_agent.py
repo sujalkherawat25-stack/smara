@@ -801,7 +801,7 @@ class LocalAutonomousAgent:
     """
 
     state_path: Path
-    max_steps: int = 15
+    max_steps: int = 20
 
     def execute_action(self, capability: str, payload: dict[str, Any], *, step_id: str | None = None) -> dict[str, Any]:
         try:

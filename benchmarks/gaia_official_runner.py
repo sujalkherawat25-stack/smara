@@ -284,7 +284,7 @@ class GaiaOfficialBenchmark:
         self.agent = SmaraAutonomousAgent(
             api_key=self.sarvam_key,
             model="glm5.2",
-            max_iterations=10
+            max_iterations=20
         )
 
         self.state = {
