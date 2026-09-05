@@ -804,8 +804,9 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - **Algebraic Word Problems & Multi-Variable Systems**: Decompose complex multi-variable word problems into individual facts. Use web search or tools to independently verify each constant/variable, then invoke `sympy` or `scipy` in `python_execute` to solve the system of equations.
    - **Dynamic SPAs & JavaScript Web Pages**: For websites that use client-side rendering (SPA frameworks, interactive listings, dynamically loaded tables), use `web_reader_dynamic` which renders JavaScript via markdown reader endpoints.
    - **Video Inspection & Timestamps**: When asked about a specific visual detail at timestamp T, inspect frames across a short temporal window (T-1, T, T+1, T+2) using `video_inspect(action='frame')` to account for video keyframe cuts and transitions.
-   - **Transit & Event Schedules**: When querying transit or institutional event schedules on holidays or weekends, verify whether Sunday or holiday timetables apply rather than standard weekday schedules.
    - **2D Geometry & Visual Dimension Decomposition**: For complex multi-segment 2D polygons or architectural layouts, partition the shape into disjoint bounding rectangles or triangles, determine the missing edge lengths using parallel edge arithmetic, and compute total area by summing sub-regions in `python_execute`.
+   - **Dense Tabular PDF Extraction**: When analyzing dense multi-column tables, standards documents, or statistical tables in PDFs (>10 rows or multiple columns), DO NOT attempt to visually align columns in conversational reasoning. Instead, write a Python script via `python_execute` (using `pypdf`, `re`, or `pandas`) to parse rows, match column delimiters with regular expressions, and aggregate counts, averages, or conditions programmatically.
+   - **Temporal Historical Profiles & Live APIs**: When querying author publication records, repository statistics, or profile histories for questions set in a specific historical context or past benchmark year, remember that live REST APIs (e.g. ORCID, GitHub, Wikipedia) return current data which may have grown over time. Always inspect entry dates (`publication_date <= YYYY`) programmatically in `python_execute` or check historical snapshots via `wayback_extract` when historical consistency is required.
 
 
 3. **Honesty and Verification**:
@@ -1143,6 +1144,16 @@ class SmaraAutonomousAgent:
             # Repetition Guard: check for degenerate repeating loops in model reasoning or content
             if _is_repetition_dominated(reasoning) or _is_repetition_dominated(content):
                 logger.warning(f"Iter {iteration}: Repetition loop detected in model output. Injecting guidance to halt repetition.")
+                if is_final_step:
+                    raw_concluding = (content.strip() or reasoning.strip())
+                    trace.append({
+                        "iteration": iteration,
+                        "thought": reasoning or content,
+                        "tool_name": None,
+                        "tool_args": None,
+                        "observation": "Halted repetition on final step"
+                    })
+                    break
                 messages.append({
                     "role": "user",
                     "content": "Notice: Repetitive thinking pattern detected. Do not repeat previous thoughts. Synthesize your final answer from verified findings and output on the final line strictly as:\nFINAL ANSWER: <exact answer>"
@@ -1349,9 +1360,21 @@ class SmaraAutonomousAgent:
         # Extract concise final answer
         if raw_concluding:
             final_answer = self._clean_final_answer(raw_concluding)
-        elif trace:
-            last_thought = trace[-1].get("thought", "")
-            final_answer = self._clean_final_answer(last_thought)
+        
+        if not final_answer and trace:
+            for step in reversed(trace):
+                cand_thought = step.get("thought") or ""
+                if cand_thought:
+                    fa_cand = self._clean_final_answer(cand_thought)
+                    if fa_cand and not _is_instruction_placeholder(fa_cand):
+                        final_answer = fa_cand
+                        break
+                cand_obs = step.get("observation") or ""
+                if cand_obs and not cand_obs.startswith("Verification") and not cand_obs.startswith("Prompted"):
+                    fa_cand = self._clean_final_answer(cand_obs)
+                    if fa_cand and not _is_instruction_placeholder(fa_cand):
+                        final_answer = fa_cand
+                        break
 
         return {
             "answer": final_answer,

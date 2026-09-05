@@ -497,7 +497,10 @@ def pdf_search(
             output_parts = []
             for idx in range(first_idx, last_idx):
                 pg = reader.pages[idx]
-                txt = (pg.extract_text() or "").strip()
+                try:
+                    txt = (pg.extract_text(extraction_mode="layout") or "").strip()
+                except Exception:
+                    txt = (pg.extract_text() or "").strip()
                 img_count = len(getattr(pg, "images", []))
                 img_note = f" [Contains {img_count} embedded image(s)/diagram(s)]" if img_count else ""
                 output_parts.append(f"[Physical Page {idx + 1}{img_note}]:\n{txt}")
@@ -509,7 +512,10 @@ def pdf_search(
                 for idx in range(total_pages):
                     if idx == first_idx:
                         continue
-                    txt = reader.pages[idx].extract_text() or ""
+                    try:
+                        txt = reader.pages[idx].extract_text(extraction_mode="layout") or ""
+                    except Exception:
+                        txt = reader.pages[idx].extract_text() or ""
                     lines = [line.strip() for line in txt.splitlines() if line.strip()]
                     if lines and (lines[0] == p_str or lines[-1] == p_str or f"\n{p_str}\n" in txt or f" {p_str}\n" in txt):
                         printed_match = (idx, txt)
