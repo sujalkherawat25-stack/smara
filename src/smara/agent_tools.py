@@ -884,3 +884,91 @@ def patch_file_tool(
     occ = res.get("occurrences", 1)
     return f"Patch applied successfully to {res.get('path')} (strategy: {strategy}, occurrences: {occ}):\n{diff_text}"
 
+
+def terminal_execute(command: str, cwd: Optional[str] = None, timeout: int = 45) -> str:
+    """Execute a system shell command (PowerShell on Windows, bash on Unix) with timeout and output capture."""
+    cmd_cwd = Path(cwd).resolve() if cwd else Path.cwd()
+    if not cmd_cwd.exists():
+        return f"Error: Working directory does not exist: {cwd}"
+
+    try:
+        if sys.platform == "win32":
+            shell_cmd = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command]
+        else:
+            shell_cmd = ["/bin/bash", "-c", command]
+
+        res = subprocess.run(
+            shell_cmd,
+            cwd=str(cmd_cwd),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            encoding="utf-8",
+            errors="replace"
+        )
+        out = res.stdout.strip()
+        err = res.stderr.strip()
+        status_msg = f"[Exit Code: {res.returncode}]"
+
+        output_parts = []
+        if out:
+            output_parts.append(out)
+        if err:
+            output_parts.append(f"STDERR:\n{err}")
+        if not output_parts:
+            output_parts.append("(Command executed with no stdout/stderr output)")
+
+        full_res = f"{status_msg}\n" + "\n\n".join(output_parts)
+        return _truncate_output(full_res, max_chars=16000)
+    except subprocess.TimeoutExpired:
+        return f"Command execution timed out after {timeout} seconds: '{command}'"
+    except Exception as e:
+        return f"Command execution error: {e}"
+
+
+def file_write(path: str, content: str) -> str:
+    """Create or overwrite a file with direct content, ensuring parent directories exist and verifying syntax."""
+    try:
+        target_path = Path(path).resolve()
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if target_path.suffix.lower() == ".py":
+            import ast
+            try:
+                ast.parse(content, filename=str(target_path))
+            except SyntaxError as syn_err:
+                return f"File Write Error: Python syntax error on line {syn_err.lineno}: {syn_err.msg}. File was not written."
+
+        target_path.write_text(content, encoding="utf-8")
+        line_count = len(content.splitlines())
+        return f"File successfully written to {target_path} ({len(content)} characters, {line_count} lines)."
+    except Exception as e:
+        return f"File write error: {e}"
+
+
+def browser_action_tool(action: str, url: str, output_path: Optional[str] = None) -> str:
+    """Interactive browser automation for scraping, DOM snapshot, or real screenshot capture."""
+    from smara.browser_sidecar import BrowserSidecarEngine
+    act = (action or "scrape").lower().strip()
+    engine = BrowserSidecarEngine()
+
+    try:
+        if act in ["screenshot", "capture"]:
+            out_p = Path(output_path) if output_path else None
+            res = engine.capture_screenshot(url, output_path=out_p)
+            return json.dumps({
+                "action": "screenshot",
+                "success": res.get("success", False),
+                "url": res.get("url", url),
+                "file_path": res.get("file_path", ""),
+                "file_size": res.get("file_size", 0),
+            }, indent=2)
+        elif act in ["scrape", "navigate", "dom_snapshot", "dom"]:
+            res = engine.scrape_url(url)
+            return json.dumps(res, indent=2)
+        else:
+            return f"Unknown browser action '{action}'. Available actions: scrape, navigate, screenshot, dom_snapshot"
+    except Exception as e:
+        return f"Browser action error: {e}"
+
+

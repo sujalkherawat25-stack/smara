@@ -53,6 +53,9 @@ from smara.agent_tools import (
     dag_flow_tool,
     todo_tool,
     patch_file_tool,
+    terminal_execute,
+    file_write,
+    browser_action_tool,
 )
 from smara.task_memory import get_default_memory_store
 from smara.task_planner import SmaraTaskPlanner
@@ -650,6 +653,80 @@ TOOL_SCHEMAS = [
                 "required": ["path", "old_string", "new_string"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "terminal",
+            "description": "Execute a shell command (PowerShell on Windows, bash on Unix) with timeout and output capture. Use for running test suites (pytest), build systems (cargo, npm), git commands, or linters.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The command line string to execute."
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Optional working directory in which to execute the command."
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Execution timeout in seconds (default 45).",
+                        "default": 45
+                    }
+                },
+                "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "file_write",
+            "description": "Directly create or overwrite a file with given content, automatically creating parent directories. For editing existing files, prefer 'patch'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Target file path to write."
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full text content to write to the file."
+                    }
+                },
+                "required": ["path", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_action",
+            "description": "Autonomous headless browser automation for web pages. Actions: 'scrape' to fetch title/headings/clean text; 'screenshot' to capture visual page snapshot to disk; 'dom_snapshot' to inspect DOM structure.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The URL to interact with."
+                    },
+                    "action": {
+                        "type": "string",
+                        "enum": ["scrape", "screenshot", "dom_snapshot"],
+                        "default": "scrape",
+                        "description": "Browser action to execute."
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Optional file path to save screenshot when action='screenshot'."
+                    }
+                },
+                "required": ["url"]
+            }
+        }
     }
 ]
 
@@ -660,11 +737,11 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
     if prof == "full":
         return TOOL_SCHEMAS
     elif prof in ["coding", "swe"]:
-        allowed = {"patch", "python_execute", "file_read", "todo", "delegate_task", "dag_flow"}
+        allowed = {"terminal", "file_write", "patch", "python_execute", "file_read", "todo", "delegate_task", "dag_flow"}
     elif prof in ["research", "web"]:
-        allowed = {"web_search", "web_extract", "web_reader_dynamic", "wayback_extract", "wikipedia_page", "pdf_search", "calculate", "file_read", "todo"}
+        allowed = {"browser_action", "web_search", "web_extract", "web_reader_dynamic", "wayback_extract", "wikipedia_page", "pdf_search", "calculate", "file_read", "todo"}
     elif prof in ["multimodal", "vision", "audio"]:
-        allowed = {"image_inspect", "audio_transcribe", "video_inspect", "file_read", "todo"}
+        allowed = {"browser_action", "image_inspect", "audio_transcribe", "video_inspect", "file_read", "todo"}
     else:
         return TOOL_SCHEMAS
     return [s for s in TOOL_SCHEMAS if s.get("function", {}).get("name") in allowed]
@@ -677,7 +754,9 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
 1. **ReAct Problem Solving**:
    - Break down problems methodically: Thought -> Action -> Observation -> Final Answer.
    - For multi-step tasks (3+ steps) or complex coding/research trajectories, maintain a task checklist via `todo`. Active tasks survive context compaction.
-   - For editing source files, always use `patch` instead of rewriting full files. It uses fuzzy matching and verifies syntax.
+   - For creating files, use `file_write`. For surgical edits on existing files, always use `patch`.
+   - For running terminal commands, test suites, builds, or git, use `terminal`.
+   - For headless browser actions, screenshots, or scraping, use `browser_action`.
    - Keep internal reasoning concise and focused (under 150 words) before executing tools or stating answers.
    - For factual web research, use `web_search` and `web_extract`.
    - For historical snapshots of web pages, use `wayback_extract`.
@@ -784,6 +863,9 @@ class SmaraAutonomousAgent:
             "dag_flow": self._dispatch_dag_flow,
             "todo": self._dispatch_todo,
             "patch": self._dispatch_patch,
+            "terminal": self._dispatch_terminal,
+            "file_write": self._dispatch_file_write,
+            "browser_action": self._dispatch_browser_action,
         }
 
     def _dispatch_todo(self, args: Dict[str, Any]) -> str:
@@ -797,6 +879,23 @@ class SmaraAutonomousAgent:
         new_string = args.get("new_string") or args.get("new_str") or ""
         replace_all = args.get("replace_all", False)
         return patch_file_tool(path=path, old_string=old_string, new_string=new_string, replace_all=replace_all)
+
+    def _dispatch_terminal(self, args: Dict[str, Any]) -> str:
+        cmd = args.get("command") or args.get("cmd") or ""
+        cwd = args.get("cwd")
+        timeout = args.get("timeout", 45)
+        return terminal_execute(command=cmd, cwd=cwd, timeout=timeout)
+
+    def _dispatch_file_write(self, args: Dict[str, Any]) -> str:
+        path = args.get("path") or args.get("file_path") or ""
+        content = args.get("content", "")
+        return file_write(path=path, content=content)
+
+    def _dispatch_browser_action(self, args: Dict[str, Any]) -> str:
+        act = args.get("action", "scrape")
+        url = args.get("url") or ""
+        out_p = args.get("output_path")
+        return browser_action_tool(action=act, url=url, output_path=out_p)
 
     def _dispatch_web_search(self, args: Dict[str, Any]) -> str:
         q = args.get("query") or args.get("q") or ""
@@ -1056,12 +1155,16 @@ class SmaraAutonomousAgent:
                     if fn_name in IDEMPOTENT_TOOLS and call_count >= 2:
                         stall_note = f"[Stall Guard Notice: Tool '{fn_name}' has been called {call_count+1} times with identical arguments without advancing the state. Do not repeat this query. Try a different search angle or proceed to synthesize your answer from existing findings.]\n\n"
 
-                    if fn_name == "patch":
+                    if fn_name in ["patch", "file_write"]:
                         p = str(parsed_args.get("path") or "")
                         if p and any(p.lower().endswith(ext) for ext in [".py", ".js", ".ts", ".rs", ".go", ".c", ".cpp", ".sh"]):
                             touched_code_files.add(p)
                     elif fn_name in ["python_execute"]:
                         touched_code_files.clear()
+                    elif fn_name == "terminal":
+                        cmd_str = str(parsed_args.get("command") or "").lower()
+                        if any(kw in cmd_str for kw in ["pytest", "test", "check", "cargo test", "npm test", "go test", "python -m pytest"]):
+                            touched_code_files.clear()
 
                     logger.info(f"[Tool Call] {fn_name}({parsed_args})")
                     raw_obs = str(self.execute_tool(fn_name, parsed_args))
@@ -1105,12 +1208,16 @@ class SmaraAutonomousAgent:
                     fn_args = call_obj.get("arguments", {})
                     obs = str(self.execute_tool(fn_name, fn_args))
                     tools_used.append(fn_name)
-                    if fn_name == "patch":
+                    if fn_name in ["patch", "file_write"]:
                         p = str(fn_args.get("path") or "")
                         if p and any(p.lower().endswith(ext) for ext in [".py", ".js", ".ts", ".rs", ".go", ".c", ".cpp", ".sh"]):
                             touched_code_files.add(p)
                     elif fn_name in ["python_execute"]:
                         touched_code_files.clear()
+                    elif fn_name == "terminal":
+                        cmd_str = str(fn_args.get("command") or "").lower()
+                        if any(kw in cmd_str for kw in ["pytest", "test", "check", "cargo test", "npm test", "go test", "python -m pytest"]):
+                            touched_code_files.clear()
                     messages.append({"role": "assistant", "content": content or f"Tool call: {fn_name}"})
                     messages.append({
                         "role": "user",
