@@ -40,6 +40,7 @@ from smara.agent_tools import (
     audio_transcribe,
     video_inspect,
     image_inspect,
+    wikipedia_page,
     memory_tool,
     skills_list_tool,
     skill_view_tool,
@@ -47,6 +48,12 @@ from smara.agent_tools import (
     dag_flow_tool
 )
 from smara.task_memory import get_default_memory_store
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 logger = logging.getLogger("smara.autonomous_agent")
 if not logger.handlers:
@@ -114,6 +121,33 @@ TOOL_SCHEMAS = [
                     }
                 },
                 "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wikipedia_page",
+            "description": "Fetch current or historical Wikipedia articles, count revisions, or list images using the official Wikipedia MediaWiki API. Actions: 'text' (article text at date or current), 'revisions_count' (count revisions before date), 'images' (count/list content images at date).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title_or_url": {
+                        "type": "string",
+                        "description": "Wikipedia article title or full URL."
+                    },
+                    "date_or_timestamp": {
+                        "type": "string",
+                        "description": "Optional cutoff date/timestamp (e.g., '2022', '2022-12-31', '2019-05-01')."
+                    },
+                    "action": {
+                        "type": "string",
+                        "enum": ["text", "revisions_count", "images"],
+                        "description": "Action to perform (default: 'text').",
+                        "default": "text"
+                    }
+                },
+                "required": ["title_or_url"]
             }
         }
     },
@@ -373,12 +407,13 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - Break down problems methodically: Thought -> Action -> Observation -> Final Answer.
    - Keep internal reasoning concise and focused (under 150 words) before executing tools or stating answers.
    - For factual web research, use `web_search` and `web_extract`.
-   - For historical snapshots or Wikipedia revisions on a specific date, use `wayback_extract`.
-   - For arithmetic, statistical calculations, data processing, regex, or counting, execute Python code via `python_execute` or `calculate`.
+   - For historical snapshots of web pages, use `wayback_extract`.
+   - For current or historical Wikipedia articles, revision histories, or image counts, use `wikipedia_page`.
+   - For arithmetic, statistical calculations, data processing, regex, geometry, or counting, ALWAYS execute Python code via `python_execute` or `calculate` instead of estimating.
    - For local attached files, use `file_read` or `zip_extract_and_read`.
    - For audio recordings (.mp3, .wav), use `audio_transcribe`.
    - For YouTube videos or video files, use `video_inspect` (actions: 'transcript', 'info', 'frame').
-   - For images, charts, and diagrams, use `image_inspect` or `file_read`.
+   - For images, charts, diagrams, and photos, use `image_inspect` or `file_read`.
    - For complex modular tasks, delegate sub-goals using `delegate_task`.
    - To consult domain-specific guidelines, check `skills_list` and load instructions via `skill_view`.
    - When learning important project facts or user preferences, save them via `memory`.
@@ -395,6 +430,7 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - For numerical questions with units (e.g. 'Report the answer in Angstroms...'), report ONLY the bare number in that requested unit without adding unit symbols or text (e.g. 1.456, NOT 1.456 Å or 146 pm).
    - If asked for a character name, output ONLY the single character name (e.g. backtick).
    - If asked for comma-separated or semicolon-separated items, list ONLY the items cleanly in the requested order.
+   - When asked "how many percent above or below [standard]% is [actual]%", report the direct difference in percentage points (i.e. actual% - standard%, such as +4.6 or -2.1), not relative growth ((actual-standard)/standard*100).
 """
 
 
@@ -438,6 +474,7 @@ class SmaraAutonomousAgent:
             "web_search": self._dispatch_web_search,
             "web_extract": self._dispatch_web_extract,
             "wayback_extract": self._dispatch_wayback_extract,
+            "wikipedia_page": self._dispatch_wikipedia_page,
             "python_execute": self._dispatch_python_execute,
             "file_read": self._dispatch_file_read,
             "zip_extract_and_read": self._dispatch_zip_extract,
@@ -463,6 +500,12 @@ class SmaraAutonomousAgent:
         u = args.get("url") or ""
         ts = args.get("timestamp") or args.get("date") or ""
         return wayback_extract(u, timestamp=ts)
+
+    def _dispatch_wikipedia_page(self, args: Dict[str, Any]) -> str:
+        t = args.get("title_or_url") or args.get("title") or args.get("url") or ""
+        d = args.get("date_or_timestamp") or args.get("date") or args.get("timestamp") or ""
+        a = args.get("action", "text")
+        return wikipedia_page(t, date_or_timestamp=d, action=a)
 
     def _dispatch_python_execute(self, args: Dict[str, Any]) -> str:
         code = args.get("code") or args.get("script") or ""
@@ -551,7 +594,7 @@ class SmaraAutonomousAgent:
             "model": self.model,
             "messages": messages,
             "temperature": 0.0,
-            "max_tokens": 4096,
+            "max_tokens": 8192,
         }
         if tools:
             payload["tools"] = tools
@@ -568,7 +611,7 @@ class SmaraAutonomousAgent:
 
         for attempt in range(3):
             try:
-                with urllib.request.urlopen(req, timeout=40) as resp:
+                with urllib.request.urlopen(req, timeout=90) as resp:
                     return json.loads(resp.read().decode("utf-8"))
             except urllib.error.HTTPError as he:
                 err_msg = he.read().decode("utf-8", errors="ignore")
@@ -614,15 +657,16 @@ class SmaraAutonomousAgent:
         tools_used: List[str] = []
         final_answer = ""
         raw_concluding = ""
+        consecutive_no_tool = 0
 
         logger.info(f"Starting autonomous ReAct agent for task: {task[:90]}...")
 
         for iteration in range(1, self.max_iterations + 1):
             logger.info(f"Agent Loop Iteration {iteration}/{self.max_iterations}")
 
-            # On the final iteration, force final answer synthesis without tools
+            # If agent has already observed tool outputs or reached final iteration, disable tools to force clean synthesis
             is_final_step = (iteration == self.max_iterations)
-            active_tools = None if is_final_step else TOOL_SCHEMAS
+            active_tools = None if (is_final_step or consecutive_no_tool >= 1) else TOOL_SCHEMAS
 
             if is_final_step:
                 messages.append({
@@ -639,10 +683,16 @@ class SmaraAutonomousAgent:
                 break
 
             choice = resp.get("choices", [{}])[0]
+            finish_reason = choice.get("finish_reason")
             msg = choice.get("message", {})
             content = msg.get("content") or ""
             reasoning = msg.get("reasoning_content") or ""
             tool_calls = msg.get("tool_calls") or []
+
+            logger.info(f"Iter {iteration} resp: finish_reason={finish_reason}, content_len={len(content)}, reasoning_len={len(reasoning)}, tool_calls={len(tool_calls)}")
+            if not tool_calls:
+                logger.info(f"Iter {iteration} content: {repr(content[:150])}")
+                logger.info(f"Iter {iteration} reasoning tail: {repr(reasoning[-200:])}")
 
             # If tool calls were generated
             if tool_calls:
@@ -685,10 +735,12 @@ class SmaraAutonomousAgent:
                         "content": str(obs)
                     })
 
+                consecutive_no_tool = 0
                 continue
 
-            # Check if model formatted tool calls inside text
-            xml_match = re.search(r"<tool_call>\s*({.*?})\s*</tool_call>", content, re.DOTALL)
+            # Check if model formatted tool calls inside text or reasoning
+            text_to_check = (content or "") + "\n" + (reasoning or "")
+            xml_match = re.search(r"<tool_call>\s*({.*?})\s*</tool_call>", text_to_check, re.DOTALL)
             if xml_match:
                 try:
                     call_obj = json.loads(xml_match.group(1))
@@ -698,26 +750,33 @@ class SmaraAutonomousAgent:
                     obs = self.execute_tool(fn_name, fn_args)
                     tools_used.append(fn_name)
 
-                    messages.append({"role": "assistant", "content": content})
+                    messages.append({"role": "assistant", "content": content or f"Tool call: {fn_name}"})
                     messages.append({
                         "role": "user",
                         "content": f"Tool '{fn_name}' returned:\n{obs}"
                     })
                     trace.append({
                         "iteration": iteration,
-                        "thought": content,
+                        "thought": text_to_check,
                         "tool_name": fn_name,
                         "tool_args": fn_args,
                         "observation": obs[:300]
                     })
+                    consecutive_no_tool = 0
                     continue
                 except Exception as ex:
                     logger.warning(f"Error parsing text tool call: {ex}")
 
             # Check if model has provided the definitive final answer
             has_final_answer = bool(re.search(r"(?:FINAL ANSWER|Final Answer|final answer):\s*", content, re.IGNORECASE))
+            if not has_final_answer and reasoning:
+                if re.search(r"(?:FINAL ANSWER|Final Answer|final answer):\s*", reasoning, re.IGNORECASE):
+                    has_final_answer = True
+                    if not content.strip():
+                        content = reasoning
+
             if has_final_answer or is_final_step:
-                raw_concluding = content.strip()
+                raw_concluding = (content.strip() or reasoning.strip())
                 logger.info(f"Agent concluded in iteration {iteration}: {raw_concluding[:120]}...")
                 trace.append({
                     "iteration": iteration,
@@ -730,18 +789,20 @@ class SmaraAutonomousAgent:
 
             # If no tool call and no FINAL ANSWER, the agent is thinking out loud.
             # Feed the thought back and prompt the agent to execute actions or state FINAL ANSWER.
-            logger.info(f"Iteration {iteration}: Model responded without tool call or FINAL ANSWER. Prompting to proceed.")
-            messages.append({"role": "assistant", "content": content})
+            consecutive_no_tool += 1
+            logger.info(f"Iteration {iteration}: Model responded without tool call or FINAL ANSWER (consecutive={consecutive_no_tool}). Prompting to proceed.")
+            assistant_content = content.strip() or (f"Previous calculation: {reasoning[-400:]}" if reasoning else "Thinking...")
+            messages.append({"role": "assistant", "content": assistant_content})
             messages.append({
                 "role": "user",
-                "content": "Please proceed by executing the necessary tool call (web_search, python_execute, web_extract, file_read) to verify your findings, or provide your definitive answer as 'FINAL ANSWER: <exact answer>'."
+                "content": "You have gathered the necessary observations. Synthesize your final result and output strictly on a single line as:\nFINAL ANSWER: <exact answer>"
             })
             trace.append({
                 "iteration": iteration,
                 "thought": reasoning or content,
                 "tool_name": None,
                 "tool_args": None,
-                "observation": "Prompted agent to proceed with tool execution"
+                "observation": "Prompted agent to synthesize final answer"
             })
             continue
 

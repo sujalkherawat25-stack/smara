@@ -136,8 +136,10 @@ def web_extract(url: str, max_chars: int = 5000) -> str:
 def wayback_extract(url: str, timestamp: str = "", target_date: str = "", max_chars: int = 5000) -> str:
     """Find and extract a historical snapshot from archive.org Wayback Machine."""
     ts = timestamp or target_date or ""
-    clean_date = re.sub(r"[^0-9]", "", ts) or "20210322"
-    api_url = f"https://archive.org/wayback/available?url={urllib.parse.quote(url)}&timestamp={clean_date}"
+    clean_date = re.sub(r"[^0-9]", "", ts)
+    api_url = f"https://archive.org/wayback/available?url={urllib.parse.quote(url)}"
+    if clean_date:
+        api_url += f"&timestamp={clean_date}"
     req = urllib.request.Request(
         api_url,
         headers={"User-Agent": "SmaraAgent/1.0"}
@@ -153,6 +155,116 @@ def wayback_extract(url: str, timestamp: str = "", target_date: str = "", max_ch
             return f"Found snapshot ({closest.get('timestamp', '')}):\n" + web_extract(snapshot_url, max_chars=max_chars)
     except Exception as e:
         return f"Wayback Error: {e}"
+
+
+def wikipedia_page(title_or_url: str, date_or_timestamp: str = "", action: str = "text", max_chars: int = 8000) -> str:
+    """Fetch Wikipedia articles, historical revisions, image counts, or revision histories via the official Wikipedia MediaWiki API.
+    Actions:
+    - 'text': Extract plain text of the article (at date_or_timestamp if specified, or current).
+    - 'revisions_count': Count total revisions on the page prior to date_or_timestamp.
+    - 'images': Count and list content images in the article at date_or_timestamp.
+    """
+    title = title_or_url.strip()
+    if "wikipedia.org/wiki/" in title:
+        title = title.split("wikipedia.org/wiki/")[-1].split("#")[0].split("?")[0]
+        title = urllib.parse.unquote(title)
+
+    headers = {"User-Agent": "SmaraAgent/1.0 (smara@memoryos.org)"}
+    clean_date = date_or_timestamp.strip()
+    if clean_date:
+        m = re.search(r"(\d{4})[-/]?(\d{2})?[-/]?(\d{2})?", clean_date)
+        if m:
+            year = m.group(1)
+            month = m.group(2) or "12"
+            day = m.group(3) or "28"
+            clean_date = f"{year}-{month}-{day}T23:59:59Z"
+
+    if action == "revisions_count":
+        api_url = f"https://en.wikipedia.org/w/api.php?action=query&prop=revisions&titles={urllib.parse.quote(title)}&rvlimit=500&rvdir=older&format=json"
+        if clean_date:
+            api_url += f"&rvstart={urllib.parse.quote(clean_date)}"
+        try:
+            req = urllib.request.Request(api_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                pages = data.get("query", {}).get("pages", {})
+                page = list(pages.values())[0] if pages else {}
+                revs = page.get("revisions", [])
+                return f"Page '{page.get('title', title)}' had {len(revs)} revisions prior to {clean_date or 'now'}."
+        except Exception as e:
+            return f"Wikipedia Revisions Error: {e}"
+
+    elif action == "images":
+        oldid = None
+        try:
+            if clean_date:
+                rev_url = f"https://en.wikipedia.org/w/api.php?action=query&prop=revisions&titles={urllib.parse.quote(title)}&rvlimit=1&rvstart={urllib.parse.quote(clean_date)}&rvdir=older&format=json"
+                req = urllib.request.Request(rev_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=25) as resp:
+                    rdata = json.loads(resp.read().decode("utf-8"))
+                    pages = rdata.get("query", {}).get("pages", {})
+                    page = list(pages.values())[0] if pages else {}
+                    revs = page.get("revisions", [])
+                    if revs:
+                        oldid = revs[0].get("revid")
+
+            parse_url = f"https://en.wikipedia.org/w/api.php?action=parse&format=json"
+            if oldid:
+                parse_url += f"&oldid={oldid}"
+            else:
+                parse_url += f"&page={urllib.parse.quote(title)}"
+            parse_url += "&prop=images"
+
+            req = urllib.request.Request(parse_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                pdata = json.loads(resp.read().decode("utf-8"))
+                parse_info = pdata.get("parse", {})
+                raw_images = parse_info.get("images", [])
+                content_imgs = [
+                    img for img in raw_images
+                    if not img.endswith((".ogg", ".oga", ".wav", ".mp3"))
+                    and not any(x in img.lower() for x in [
+                        "protection", "icon", "symbol", "flag_of", "commons-logo",
+                        "sound-openclipart", "toy_soldier", "stub", "portal", "wikiproject", "navbox"
+                    ])
+                ]
+                return f"Wikipedia page '{parse_info.get('title', title)}' (revision {oldid or 'latest'}) contains {len(content_imgs)} content images:\n" + "\n".join(content_imgs)
+        except Exception as e:
+            return f"Wikipedia Images Error: {e}"
+
+    else:
+        oldid = None
+        try:
+            if clean_date:
+                rev_url = f"https://en.wikipedia.org/w/api.php?action=query&prop=revisions&titles={urllib.parse.quote(title)}&rvlimit=1&rvstart={urllib.parse.quote(clean_date)}&rvdir=older&format=json"
+                req = urllib.request.Request(rev_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=25) as resp:
+                    rdata = json.loads(resp.read().decode("utf-8"))
+                    pages = rdata.get("query", {}).get("pages", {})
+                    page = list(pages.values())[0] if pages else {}
+                    revs = page.get("revisions", [])
+                    if revs:
+                        oldid = revs[0].get("revid")
+
+            if oldid:
+                html_url = f"https://en.wikipedia.org/w/index.php?title={urllib.parse.quote(title)}&oldid={oldid}"
+                req = urllib.request.Request(html_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=25) as resp:
+                    html_text = resp.read().decode("utf-8", errors="replace")
+                    cleaned = clean_html(html_text)
+                    return f"Wikipedia '{title}' (revision {oldid} from {clean_date}):\n" + cleaned[:max_chars]
+            else:
+                extract_url = f"https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&explaintext=true&titles={urllib.parse.quote(title)}"
+                req = urllib.request.Request(extract_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=25) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    pages = data.get("query", {}).get("pages", {})
+                    page = list(pages.values())[0] if pages else {}
+                    extract = page.get("extract", "")
+                    return f"Wikipedia '{page.get('title', title)}':\n" + extract[:max_chars]
+        except Exception as e:
+            return f"Wikipedia Extract Error: {e}"
+
 
 
 def python_execute(code: str, timeout: int = 30) -> str:
