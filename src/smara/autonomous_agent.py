@@ -17,6 +17,9 @@ import json
 import logging
 import os
 import re
+import collections
+import concurrent.futures
+import hashlib
 import sys
 import time
 import urllib.request
@@ -63,6 +66,91 @@ if not logger.handlers:
     handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(name)s: %(message)s"))
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
+
+
+IDEMPOTENT_TOOLS = frozenset({
+    "web_search",
+    "web_extract",
+    "web_reader_dynamic",
+    "wayback_extract",
+    "wikipedia_page",
+    "file_read",
+    "pdf_search",
+    "calculate",
+    "skills_list",
+    "skill_view",
+})
+
+
+def _is_repetition_dominated(text: str, min_len: int = 400, window: int = 60, min_repeats: int = 5) -> bool:
+    """Detect if a text fragment is dominated by verbatim repeated sequences (loop breaker)."""
+    if not isinstance(text, str) or len(text) < min_len:
+        return False
+    n = len(text)
+    # Fast check: repeated normalized lines covering significant portion
+    counts: Dict[str, int] = collections.defaultdict(int)
+    for line in text.splitlines():
+        s = line.strip()
+        if s:
+            counts[s] += 1
+            if counts[s] >= min_repeats and counts[s] * len(s) >= n * 0.4:
+                return True
+    # Sliding window check
+    wcounts: Dict[str, int] = collections.defaultdict(int)
+    needed = max(min_repeats, int(n * 0.4 / window))
+    for i in range(n - window + 1):
+        frag = text[i : i + window]
+        wcounts[frag] += 1
+        if wcounts[frag] >= needed:
+            return True
+    return False
+
+
+def _compact_conversation_history(messages: List[Dict[str, Any]], max_chars: int = 35000) -> List[Dict[str, Any]]:
+    """Three-Zone Context Compactor:
+    Zone 1: Pinned Head (system prompt and original user task)
+    Zone 2: Pinned Tail (most recent 4 messages)
+    Zone 3: Middle Turns (compact large observations to preserve attention and token budget)
+    """
+    total_chars = sum(len(str(m.get("content") or "")) for m in messages)
+    if total_chars <= max_chars or len(messages) <= 6:
+        return messages
+
+    head_count = 2
+    tail_count = min(4, len(messages) - head_count)
+    middle_messages = messages[head_count : len(messages) - tail_count]
+
+    compacted_middle: List[Dict[str, Any]] = []
+    for m in middle_messages:
+        role = m.get("role")
+        content = str(m.get("content") or "")
+        if role == "tool" and len(content) > 800:
+            compacted_m = dict(m)
+            compacted_m["content"] = content[:350] + f"\n... [Context Compaction: {len(content)-550} chars omitted to preserve attention budget] ...\n" + content[-200:]
+            compacted_middle.append(compacted_m)
+        elif role == "assistant" and len(content) > 1200:
+            compacted_m = dict(m)
+            compacted_m["content"] = content[:600] + "\n... [Assistant thought condensed] ...\n" + content[-300:]
+            compacted_middle.append(compacted_m)
+        else:
+            compacted_middle.append(m)
+
+    return messages[:head_count] + compacted_middle + messages[len(messages) - tail_count:]
+
+
+def _offload_massive_result(content: str, call_id: str, max_chars: int = 14000) -> str:
+    """If tool output is massive, persist full output to cache directory and return a clean excerpt."""
+    if len(content) <= max_chars:
+        return content
+    try:
+        cache_dir = Path("data/cache")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_dir / f"{call_id}.txt"
+        cache_file.write_text(content, encoding="utf-8", errors="replace")
+        half = max_chars // 2 - 200
+        return content[:half] + f"\n\n... [Output exceeds inline limit ({len(content)} characters). Full result cached to {cache_file.as_posix()}. Use python_execute or file_read to inspect/slice] ...\n\n" + content[-half:]
+    except Exception:
+        return content[:max_chars] + f"\n... [Truncated {len(content) - max_chars} characters]"
 
 
 TOOL_SCHEMAS = [
@@ -455,6 +543,29 @@ TOOL_SCHEMAS = [
                 "required": ["goal"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "dag_flow",
+            "description": "Construct and execute a Directed Acyclic Graph (DAG) workflow for complex multi-stage tasks requiring dependency resolution and node pipelines.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["create_and_run"],
+                        "default": "create_and_run",
+                        "description": "DAG workflow action."
+                    },
+                    "workflow_data": {
+                        "type": "string",
+                        "description": "JSON string containing nodes list (each with id, title, capability, payload, depends_on)."
+                    }
+                },
+                "required": ["action", "workflow_data"]
+            }
+        }
     }
 ]
 
@@ -474,6 +585,7 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - For YouTube videos or video files, use `video_inspect` (actions: 'transcript', 'info', 'frame'). When asked what appears at a specific timestamp, use action='frame' with `timestamp_seconds=N`.
    - For images, charts, diagrams, and photos, use `image_inspect` or `file_read`.
    - For complex modular tasks, delegate sub-goals using `delegate_task`.
+   - For multi-stage dependency workflows or parallel task graphs, construct and execute DAGs using `dag_flow`.
    - To consult domain-specific guidelines, check `skills_list` and load instructions via `skill_view`.
    - When learning important project facts or user preferences, save them via `memory`.
 
@@ -543,6 +655,7 @@ class SmaraAutonomousAgent:
         self.model = model
         self.max_iterations = max_iterations
         self.memory_store = get_default_memory_store()
+        self._seen_tool_signatures: Dict[str, int] = collections.defaultdict(int)
 
         self._tool_handlers = {
             "web_search": self._dispatch_web_search,
@@ -562,6 +675,7 @@ class SmaraAutonomousAgent:
             "skills_list": self._dispatch_skills_list,
             "skill_view": self._dispatch_skill_view,
             "delegate_task": self._dispatch_delegate_task,
+            "dag_flow": self._dispatch_dag_flow,
         }
 
     def _dispatch_web_search(self, args: Dict[str, Any]) -> str:
@@ -654,6 +768,13 @@ class SmaraAutonomousAgent:
             role=args.get("role", "generalist")
         )
 
+    def _dispatch_dag_flow(self, args: Dict[str, Any]) -> str:
+        return dag_flow_tool(
+            action=args.get("action", "create_and_run"),
+            workflow_data=args.get("workflow_data")
+        )
+
+
     def execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
         """Safely invoke registered tool handler."""
         handler = self._tool_handlers.get(tool_name)
@@ -666,22 +787,13 @@ class SmaraAutonomousAgent:
             return f"Error executing tool {tool_name}: {e}"
 
     def _call_sarvam_api(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-        """Perform HTTP POST request to Sarvam /v2/chat/completions."""
-        # Active context window protection:
-        # Check total character footprint across messages. If it exceeds 60k chars,
-        # compress older tool observations in history to prevent 422 payload overflow.
-        total_chars = sum(len(str(m.get("content") or "")) for m in messages)
-        if total_chars > 60000 and len(messages) > 5:
-            for idx in range(2, max(2, len(messages) - 4)):
-                m = messages[idx]
-                if m.get("role") == "tool":
-                    c = str(m.get("content") or "")
-                    if len(c) > 1000:
-                        m["content"] = c[:500] + "\n... [Historical observation compressed to maintain context window] ...\n" + c[-250:]
+        """Perform HTTP POST request to Sarvam /v2/chat/completions with Three-Zone Context Compaction."""
+        # Active Three-Zone Context Compaction: protects Head/Tail and compresses middle steps
+        compacted_messages = _compact_conversation_history(messages, max_chars=35000)
 
         payload: Dict[str, Any] = {
             "model": self.model,
-            "messages": messages,
+            "messages": compacted_messages,
             "temperature": 0.0,
             "max_tokens": 8192,
         }
@@ -783,32 +895,60 @@ class SmaraAutonomousAgent:
                 logger.info(f"Iter {iteration} content: {repr(content[:150])}")
                 logger.info(f"Iter {iteration} reasoning tail: {repr(reasoning[-200:])}")
 
+            # Repetition Guard: check for degenerate repeating loops in model reasoning or content
+            if _is_repetition_dominated(reasoning) or _is_repetition_dominated(content):
+                logger.warning(f"Iter {iteration}: Repetition loop detected in model output. Injecting guidance to halt repetition.")
+                messages.append({
+                    "role": "user",
+                    "content": "Notice: Repetitive thinking pattern detected. Do not repeat previous thoughts. Synthesize your final answer from verified findings and output on the final line strictly as:\nFINAL ANSWER: <exact answer>"
+                })
+                continue
+
             # If tool calls were generated
             if tool_calls:
-                # Ensure content is empty string if None for OpenAI/Sarvam format compliance
                 clean_msg = dict(msg)
                 if clean_msg.get("content") is None:
                     clean_msg["content"] = ""
                 messages.append(clean_msg)
 
-                for tc in tool_calls:
+                parsed_calls = []
+                for idx_tc, tc in enumerate(tool_calls):
                     fn_name = tc.get("function", {}).get("name", "")
                     raw_args = tc.get("function", {}).get("arguments", "{}")
-                    call_id = tc.get("id", f"call_{iteration}")
-
+                    call_id = tc.get("id", f"call_{iteration}_{idx_tc}")
                     try:
                         parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                     except Exception:
                         parsed_args = {"query": str(raw_args)}
+                    parsed_calls.append((tc, fn_name, parsed_args, call_id))
+
+                def _execute_single_call(item):
+                    tc, fn_name, parsed_args, call_id = item
+                    # Stall Guard: track tool invocation signature
+                    canonical_args = json.dumps(parsed_args, sort_keys=True, default=str)
+                    sig = hashlib.sha256(f"{fn_name}:{canonical_args}".encode("utf-8")).hexdigest()[:16]
+                    call_count = self._seen_tool_signatures[sig]
+                    self._seen_tool_signatures[sig] += 1
+
+                    stall_note = ""
+                    if fn_name in IDEMPOTENT_TOOLS and call_count >= 2:
+                        stall_note = f"[Stall Guard Notice: Tool '{fn_name}' has been called {call_count+1} times with identical arguments without advancing the state. Do not repeat this query. Try a different search angle or proceed to synthesize your answer from existing findings.]\n\n"
 
                     logger.info(f"[Tool Call] {fn_name}({parsed_args})")
-                    obs = str(self.execute_tool(fn_name, parsed_args))
+                    raw_obs = str(self.execute_tool(fn_name, parsed_args))
+                    # Spill safety: offload massive results to disk cache
+                    obs = stall_note + _offload_massive_result(raw_obs, call_id=call_id)
+                    return tc, fn_name, parsed_args, call_id, obs
+
+                # Concurrent dispatch when multiple tool calls are emitted in one turn
+                if len(parsed_calls) > 1:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(parsed_calls), 4)) as pool:
+                        results = list(pool.map(_execute_single_call, parsed_calls))
+                else:
+                    results = [_execute_single_call(parsed_calls[0])]
+
+                for tc, fn_name, parsed_args, call_id, obs in results:
                     tools_used.append(fn_name)
-
-                    # Cap tool observation to 16,000 chars to avoid context overflow
-                    if len(obs) > 16000:
-                        obs = obs[:8000] + f"\n\n... [Observation truncated: {len(obs)-16000} characters omitted to preserve context window] ...\n\n" + obs[-8000:]
-
                     trace.append({
                         "iteration": iteration,
                         "thought": reasoning or content,
@@ -816,7 +956,6 @@ class SmaraAutonomousAgent:
                         "tool_args": parsed_args,
                         "observation": obs[:300] + ("..." if len(obs) > 300 else "")
                     })
-
                     messages.append({
                         "role": "tool",
                         "tool_call_id": call_id,
@@ -863,6 +1002,25 @@ class SmaraAutonomousAgent:
                     content = (content + "\n" if content.strip() else "") + fa_match.group(0)
                 elif not content.strip():
                     content = reasoning
+
+            # Verification Gate: verify calculations before accepting immediate unverified answers
+            if has_final_answer and not is_final_step:
+                needs_calc = any(kw in task.lower() for kw in ["calculate", "standard deviation", "how many", "difference", "sum of", "volume", "speed"])
+                if iteration == 1 and not tools_used and needs_calc:
+                    logger.info("Verification Gate: Prompting single-pass calculation check before final answer acceptance.")
+                    messages.append({"role": "assistant", "content": content or reasoning})
+                    messages.append({
+                        "role": "user",
+                        "content": "Verification check: Before confirming your final answer, execute verification code via 'python_execute' or 'calculate' to confirm the exact numerical values and prevent calculation errors."
+                    })
+                    trace.append({
+                        "iteration": iteration,
+                        "thought": reasoning or content,
+                        "tool_name": None,
+                        "tool_args": None,
+                        "observation": "Verification Gate: Prompted verification check before finalizing."
+                    })
+                    continue
 
             if has_final_answer or is_final_step:
                 raw_concluding = (content.strip() or reasoning.strip())

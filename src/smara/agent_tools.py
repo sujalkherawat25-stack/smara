@@ -808,12 +808,31 @@ def dag_flow_tool(action: str, workflow_data: Optional[str] = None) -> str:
     """Execute or inspect an interactive DAG workflow."""
     from smara.dag_flow import DAGWorkflow, DAGNode
     act = action.lower().strip()
-    if act == "create_and_run" and workflow_data:
+    if act in ["create_and_run", "run"] and workflow_data:
         try:
             data = json.loads(workflow_data) if isinstance(workflow_data, str) else workflow_data
             wf = DAGWorkflow.from_dict(data)
-            summary = wf.run_until_complete(lambda node: f"Executed capability {node.capability}")
+
+            def node_runner(node: DAGNode):
+                cap = (node.capability or "").lower().strip()
+                p = node.payload or {}
+                if cap in ["python", "python_execute"]:
+                    return python_execute(p.get("code", ""))
+                elif cap in ["web_search", "search"]:
+                    return web_search(p.get("query", ""))
+                elif cap in ["calculate", "calc"]:
+                    return calculate(p.get("expression", ""))
+                elif cap in ["web_extract", "extract"]:
+                    return web_extract(p.get("url", ""))
+                elif cap in ["file_read", "read"]:
+                    return file_read(p.get("file_path", ""))
+                elif cap in ["pdf_search"]:
+                    return pdf_search(p.get("pdf_path", ""), query=p.get("query", ""))
+                return f"Executed capability {node.capability} on payload {p}"
+
+            summary = wf.run_until_complete(node_runner)
             return json.dumps(summary, indent=2)
         except Exception as e:
             return f"Error executing DAG workflow: {e}"
     return f"Unknown dag_flow action '{action}'. Valid actions: create_and_run"
+
