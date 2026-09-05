@@ -117,8 +117,30 @@ def clean_html(html_text: str) -> str:
     return "\n".join(lines)
 
 
+def web_reader_dynamic(url: str, max_chars: int = 16000) -> str:
+    """Fetch URL using dynamic headless reader (Jina Reader API) to render JavaScript and produce clean markdown."""
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    jina_url = f"https://r.jina.ai/{url}"
+    req = urllib.request.Request(
+        jina_url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/markdown,text/plain",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            content = resp.read().decode("utf-8", errors="replace")
+            if len(content) > max_chars:
+                return content[:max_chars] + f"\n... [Truncated {len(content) - max_chars} characters]"
+            return content or "Dynamic reader: content was empty."
+    except Exception as e:
+        return f"Dynamic Reader Error: {e}"
+
+
 def web_extract(url: str, max_chars: int = 5000) -> str:
-    """Fetch URL and extract readable plain text."""
+    """Fetch URL and extract readable plain text, falling back to dynamic headless reader if needed."""
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     req = urllib.request.Request(
@@ -131,10 +153,19 @@ def web_extract(url: str, max_chars: int = 5000) -> str:
             charset = resp.headers.get_content_charset() or "utf-8"
             html_text = raw_bytes.decode(charset, errors="replace")
             cleaned = clean_html(html_text)
+            if len(cleaned) < 150:
+                # Page might be client-rendered SPA / JavaScript; try dynamic reader
+                dyn = web_reader_dynamic(url, max_chars=max_chars)
+                if not dyn.startswith("Dynamic Reader Error") and len(dyn) > len(cleaned):
+                    return dyn
             if len(cleaned) > max_chars:
                 return cleaned[:max_chars] + f"\n... [Truncated {len(cleaned) - max_chars} characters]"
             return cleaned or "Web page content was empty."
     except Exception as e:
+        # If blocked or network error, attempt dynamic headless reader fallback
+        dyn = web_reader_dynamic(url, max_chars=max_chars)
+        if not dyn.startswith("Dynamic Reader Error"):
+            return dyn
         return f"Extract Error: {e}"
 
 
@@ -411,6 +442,54 @@ def file_read(file_path: Path | str, max_chars: int = 6000) -> str:
             return f"Error reading pdb: {e}"
 
     return f"Unsupported file extension: {ext}"
+
+
+def pdf_search(
+    pdf_path: str | Path,
+    query: str = "",
+    start_page: int = 1,
+    end_page: Optional[int] = None,
+    max_matches: int = 10,
+) -> str:
+    """Search for keyword or phrase across all pages of a PDF document, returning matching page numbers and excerpts."""
+    p = Path(pdf_path)
+    if not p.exists():
+        alt = Path("data/gaia_files") / p.name
+        if alt.exists():
+            p = alt
+        else:
+            return f"Error: PDF not found at {pdf_path}"
+
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(str(p))
+        total_pages = len(reader.pages)
+        first_idx = max(0, start_page - 1)
+        last_idx = min(total_pages, end_page) if end_page else total_pages
+
+        if not query:
+            return f"PDF '{p.name}' has {total_pages} total pages."
+
+        matches = []
+        q_lower = query.lower()
+        for idx in range(first_idx, last_idx):
+            page = reader.pages[idx]
+            txt = page.extract_text() or ""
+            if q_lower in txt.lower():
+                pos = txt.lower().find(q_lower)
+                start = max(0, pos - 150)
+                end = min(len(txt), pos + len(query) + 200)
+                snippet = txt[start:end].replace("\n", " ").strip()
+                matches.append(f"[Page {idx + 1}]: ...{snippet}...")
+                if len(matches) >= max_matches:
+                    break
+
+        if not matches:
+            return f"Query '{query}' was not found in '{p.name}' across pages {first_idx + 1}-{last_idx} (total pages: {total_pages})."
+
+        return f"Found {len(matches)} match(es) for '{query}' in '{p.name}' (pages {first_idx + 1}-{last_idx}):\n\n" + "\n\n".join(matches)
+    except Exception as e:
+        return f"Error searching PDF: {e}"
 
 
 def zip_extract_and_read(zip_path: Path | str, target_file: Optional[str] = None, max_files: int = 25) -> str:

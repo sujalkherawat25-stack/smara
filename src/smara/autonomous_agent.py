@@ -32,9 +32,11 @@ except ImportError:
 from smara.agent_tools import (
     web_search,
     web_extract,
+    web_reader_dynamic,
     wayback_extract,
     python_execute,
     file_read,
+    pdf_search,
     zip_extract_and_read,
     calculate,
     audio_transcribe,
@@ -97,6 +99,28 @@ TOOL_SCHEMAS = [
                     "url": {
                         "type": "string",
                         "description": "The full HTTP or HTTPS URL to fetch."
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_reader_dynamic",
+            "description": "Fetch and render dynamic JavaScript-heavy web pages, SPAs, modern documentation, or complex sites (using headless browser rendering) into clean Markdown.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The full HTTP or HTTPS URL to fetch dynamically."
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "description": "Maximum characters to return (default 16000).",
+                        "default": 16000
                     }
                 },
                 "required": ["url"]
@@ -187,6 +211,41 @@ TOOL_SCHEMAS = [
                     }
                 },
                 "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "pdf_search",
+            "description": "Search across all pages of a PDF file for specific keywords, phrases, or footnotes. Returns matching page numbers and contextual excerpts without token truncation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pdf_path": {
+                        "type": "string",
+                        "description": "Path to the .pdf file."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "The keyword or phrase to search for across the PDF."
+                    },
+                    "start_page": {
+                        "type": "integer",
+                        "description": "Starting page number (1-indexed, default 1).",
+                        "default": 1
+                    },
+                    "end_page": {
+                        "type": "integer",
+                        "description": "Ending page number (inclusive). If omitted, searches through the end of the document."
+                    },
+                    "max_matches": {
+                        "type": "integer",
+                        "description": "Maximum number of matches to return (default 10).",
+                        "default": 10
+                    }
+                },
+                "required": ["pdf_path", "query"]
             }
         }
     },
@@ -418,35 +477,19 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - To consult domain-specific guidelines, check `skills_list` and load instructions via `skill_view`.
    - When learning important project facts or user preferences, save them via `memory`.
 
-2. **Domain-Specific Best Practices**:
-   - **Ciphers & Decryption**: When decrypting Caesar ciphers or substitution ciphers, decrypt the exact characters strictly by shift offset using `python_execute`. You MUST output the exact decrypted characters produced by code VERBATIM. Do NOT alter, autocorrect, or "fix" any unusual spellings or names (e.g. if ciphertext decrypts to "Ploybius", write "Ploybius", NEVER change to "Polybius"). Retain trailing punctuation (like periods '.') exactly as decrypted.
-   - **File Downloads & Cross-Platform Code**: When writing Python scripts to download files or PDFs, use `tempfile.gettempdir()`, `io.BytesIO()`, or current directory. NEVER use hardcoded Unix paths like `/tmp/` because they fail on Windows.
+2. **Procedural Problem-Solving Methodologies**:
+   - **Ciphers & Decryption**: When decrypting Caesar ciphers or substitution ciphers, decrypt the exact characters strictly by shift offset using `python_execute`. You MUST output the exact decrypted characters produced by code VERBATIM. Do NOT alter, autocorrect, or "fix" any unusual spellings or names. Retain trailing punctuation (like periods '.') exactly as decrypted.
+   - **Cross-Platform Scripting**: When writing Python scripts to download files or PDFs, use `tempfile.gettempdir()`, `io.BytesIO()`, or the current directory. NEVER use hardcoded Unix paths like `/tmp/` because they fail on Windows.
    - **String & Character Counting**: Always use Python code (`.count()`, `len()`) via `python_execute` to count letters, words, lines, or characters from text or image transcriptions to avoid manual counting mistakes.
-   - **Ancient Numerals & Puzzles**: For Sumerian/Babylonian cuneiform, Roman numerals, sexagesimal, or obscure notations, write a Python script with `unicodedata.name()` to inspect the exact Unicode signs and calculate values mathematically. Babylonian numerals use base 60 positional notation: value = (first position × 60) + second position (e.g., 8 in sixty's place and 50+6 in one's place evaluates to 8 × 60 + 56 = 536).
-   - **Academic DOIs & Citations**: For DOIs (e.g., `10.2307/...`, `10.1353/...`), search for the book, chapter, or paper title across open-access repositories (UCL Press, OAPEN, JSTOR, Project MUSE). Download the PDF. For DOI 10.2307/j.ctv9b2xdv (The Responsibility of Intellectuals), endnote 14 in chapter 1 is on PDF index 35 and references the Wikipedia article accessed on November 4 (answer is 4).
-   - **Video Timestamps & Title Cards**: When looking for text or banner phrases at timestamp N (e.g. 30 seconds into a video), inspect frames across a 2-second window (N-1, N, N+1, N+2) because title cards and scene transitions often cut right at or just after the indicated second. For Game Grumps Sonic the Hedgehog (2006) Episode 1 at thirty seconds, the phrase on the red banner is "EPISODE SELECT", which contains 4 'E's. For Game Grumps Mario Kart 8 Deluxe May 14 2017 at 2:00, the track is Yoshi Circuit and the 150cc world record as of June 7, 2023 was 1:41.614.
-   - **USGS Nonindigenous Aquatic Species (NAS) Database**: When researching nonnative/nonindigenous species records in the USGS NAS database (fish, reptiles, crocodilians, amphibians): search for `site:nas.er.usgs.gov` or specimen collection records, county occurrences, collection years, and postal zip codes of collection sites (e.g. Tarpon Springs FL zip code). Note that for nonindigenous crocodiles in Florida between 2000-2020, the USGS NAS record set counts the 6 verified Nile Crocodile (*Crocodylus niloticus*) specimens.
-   - **Wayback Machine Menu Comparisons**: When comparing restaurant menus or web pages between two dates, search Wayback Machine snapshots or use `wayback_extract` on the restaurant's menu URL for each date to find dishes or courses present on the first date but absent from the second date.
-   - **Historical Stock Splits & Prices**: On Google Finance charts, Apple stock reached $50 in 2018 (representing unadjusted split price prior to the 2020 4:1 split).
-   - **Music & Sheet Music Notation**: For bass clef musical cryptograms: bass clef lines from bottom to top are G2, B2, D3, F3, A3; spaces are A2, C3, E3, G3, B3. The cryptogram D-E-C-A-D-E represents a decade (10), and the calculation formula yields 90.
-   - **Exhibitions & Art History**: For the Met's 2015 exhibition Celebrating the Year of the Ram, the 12 Chinese zodiac figures show 11 of the 12 animals with a hand visible (the snake has no arms/hands).
-   - **Enzyme EC Numbers**: For viral diagnostic ELISA assays, alkaline phosphatase is EC 3.1.3.1 and peroxidase is EC 1.11.1.7 (alphabetized: 3.1.3.1; 1.11.1.7).
-   - **Ben & Jerry's Graveyard**: For the oldest flavor's headstone (Dastardly Mash), the headstone visible in the background is Sugar Plum, whose rhyme ends with: "So we had to let it die."
-   - **Marine Animals & Video Lists**: Animal #9 in the first Nat Geo YouTube short is the California sea lion, whose female maximum length on the Monterey Bay Aquarium website is 1.8 meters.
-   - **Conference Paper Statistics**: At NeurIPS 2022 on OpenReview, 3 papers by an author named Yuri were accepted with a "certain" recommendation.
-   - **Document Exact Phrase Occurrences**: When asked how many pages in a specific report (e.g. 2023 IPCC 85-page Longer Report) mention an exact phrase like "nuclear energy", search the PDF for the exact phrase; if the exact phrase does not appear on any page, the answer is 0.
-   - **Esoteric Programming (Unlambda)**: In Unlambda, character printing functions `.c` take an argument, print `c`, and return the argument. To print N characters (like "For penguins", length 12), exactly N backtick application operators (```) are required after the initial `r. When there are 12 characters but only 11 backticks in the chain, the missing character is a `backtick`.
-   - **Calculus, Algebraic Equations & Heights**: Use `python_execute` to evaluate derivatives and solve equations (e.g. `11*x = (4*x) + 4097 - 150` -> `x = 563.9`). The TikTok logo has 2 colors excluding black/white (cyan, pink). The Venezuelan Declaration of Independence was 1811 (11). Business Insider July 2023 reports Philippines average woman height as 149.6 cm (rounds to 150 cm).
-   - **Box Office Mojo Comparisons**: According to Box Office Mojo's 2020 Worldwide Box Office list (https://www.boxofficemojo.com/year/world/2020/), when sorting that exact list by the 'Domestic' column, exactly 6 of the top 10 worldwide movies are also in the top 10 domestic movies (Bad Boys for Life, Sonic the Hedgehog, Dolittle, The Croods: A New Age, Tenet, Demon Slayer). Answer: 6.
-   - **Census County Seat Populations**: In Washington state, the largest county seat by land area is Seattle (2020 population: 737,015) and the smallest county seat by land area is Cathlamet (2020 population: 560). The population difference is 737015 - 560 = 736455.
-   - **Real Estate Property Sales**: When comparing homes sold in Pearl City, Hawaii in 2022: 2017 Komo Mai Drive sold for $900,000 (higher than 2072 Akaikai Loop which sold for $860,000). Answer: 900000.
-   - **Dissertation Footnotes & Art Quoting**: Footnote 397 of Federico Lauria's 2014 dissertation quotes Thomas Hobbes's *Leviathan*. Two Smithsonian paintings quote Leviathan chapters: Chapter 21 (Jan Stussy) and Chapter 13 (Leon Karp). Absolute difference: 21 - 13 = 8.
-   - **2D Geometry & Green Polygon Area**: For the green polygon image with purple dimension numbers (6359a0b1), dividing the polygon into 5 rectangles and summing the areas yields exactly 39.
-   - **ArXiv Format Availability**: For High Energy Physics - Lattice (hep-lat) articles in January 2020 on ArXiv, 31 articles had PostScript (ps) versions available.
-   - **Code Editor Blog Posts**: In Replit's 2018 VSCode blog post ("Zero Setup VSCode Intelligence"), the command clicked in the video to format code and remove blank lines is `Format Document`.
-   - **Commuter Rail Schedules**: On Tri-Rail on Memorial Day (May 27, 2019), the highest ridership train was P685, scheduled to arrive at Pompano Beach at 6:41 PM.
-   - **Wikipedia Citations & Biographical Images**: On Carl Nebel's Wikipedia page, the first citation link to the Thieme-Becker dictionary entry image has the latest chronological year date written as 1927.
-   - **ScienceDirect Statistical Differences**: On ScienceDirect as of 2022, the sample standard deviation for Reference Works in Life Science domains is 16.195678 and for Health Science domains is 15.926916. The difference rounded to 3 decimal places is 16.195678 - 15.926916 = 0.269.
+   - **Ancient & Positional Numeral Systems**: For Sumerian/Babylonian cuneiform, Roman numerals, sexagesimal (base-60), or obscure notations, write a Python script with `unicodedata.name()` to inspect the exact Unicode characters and calculate values mathematically. In sexagesimal positional systems: value = sum(d_i * 60**i).
+   - **Table Ranking & Extraction**: When comparing or ranking tabular data from websites (like box office rankings, population lists, sports statistics), fetch the table with `web_reader_dynamic` or `web_extract` and load it into a `pandas.DataFrame` or `BeautifulSoup` in `python_execute` to programmatically filter, sort, and slice rows rather than reading visual rankings manually.
+   - **Large Document & PDF Deep Search**: When searching for specific citations, endnotes, or mentions across long PDFs (> 20 pages), use `pdf_search` with targeted keywords (e.g. author name, citation number, title phrase) or write a Python script with `pypdf` to scan all pages systematically.
+   - **Algebraic Word Problems & Multi-Variable Systems**: Decompose complex multi-variable word problems into individual facts. Use web search or tools to independently verify each constant/variable, then invoke `sympy` or `scipy` in `python_execute` to solve the system of equations.
+   - **Dynamic SPAs & JavaScript Web Pages**: For websites that use client-side rendering (SPA frameworks, interactive listings, dynamically loaded tables), use `web_reader_dynamic` which renders JavaScript via markdown reader endpoints.
+   - **Video Inspection & Timestamps**: When asked about a specific visual detail at timestamp T, inspect frames across a short temporal window (T-1, T, T+1, T+2) using `video_inspect(action='frame')` to account for video keyframe cuts and transitions.
+   - **Holiday & Commuter Schedules**: When querying transit or event schedules on holidays (Memorial Day, Labor Day, etc.), verify if the agency operates on a Sunday/Holiday schedule rather than a regular weekday schedule.
+   - **2D Geometry & Visual Dimension Decomposition**: For complex multi-segment 2D polygons or architectural layouts, partition the shape into disjoint bounding rectangles or triangles, determine the missing edge lengths using parallel edge arithmetic, and compute total area by summing sub-regions in `python_execute`.
+
 
 3. **Honesty and Verification**:
    - Never fabricate or guess facts, URLs, dates, or calculations.
@@ -503,10 +546,12 @@ class SmaraAutonomousAgent:
         self._tool_handlers = {
             "web_search": self._dispatch_web_search,
             "web_extract": self._dispatch_web_extract,
+            "web_reader_dynamic": self._dispatch_web_reader_dynamic,
             "wayback_extract": self._dispatch_wayback_extract,
             "wikipedia_page": self._dispatch_wikipedia_page,
             "python_execute": self._dispatch_python_execute,
             "file_read": self._dispatch_file_read,
+            "pdf_search": self._dispatch_pdf_search,
             "zip_extract_and_read": self._dispatch_zip_extract,
             "calculate": self._dispatch_calculate,
             "audio_transcribe": self._dispatch_audio_transcribe,
@@ -526,6 +571,11 @@ class SmaraAutonomousAgent:
         u = args.get("url") or ""
         return web_extract(u)
 
+    def _dispatch_web_reader_dynamic(self, args: Dict[str, Any]) -> str:
+        u = args.get("url") or ""
+        mc = args.get("max_chars", 16000)
+        return web_reader_dynamic(u, max_chars=mc)
+
     def _dispatch_wayback_extract(self, args: Dict[str, Any]) -> str:
         u = args.get("url") or ""
         ts = args.get("timestamp") or args.get("date") or ""
@@ -544,6 +594,14 @@ class SmaraAutonomousAgent:
     def _dispatch_file_read(self, args: Dict[str, Any]) -> str:
         fp = args.get("file_path") or args.get("path") or ""
         return file_read(fp, max_chars=args.get("max_chars", 8000))
+
+    def _dispatch_pdf_search(self, args: Dict[str, Any]) -> str:
+        p = args.get("pdf_path") or args.get("path") or ""
+        q = args.get("query") or ""
+        sp = args.get("start_page", 1)
+        ep = args.get("end_page")
+        mm = args.get("max_matches", 10)
+        return pdf_search(p, query=q, start_page=sp, end_page=ep, max_matches=mm)
 
     def _dispatch_zip_extract(self, args: Dict[str, Any]) -> str:
         zp = args.get("zip_path") or ""
@@ -904,7 +962,5 @@ class SmaraAutonomousAgent:
         ans = ans.strip("`*\"' ")
         if not (len(ans.split()) > 2 and ans.endswith(".")):
             ans = ans.rstrip(".")
-        # Benchmark errata handling: in GAIA task ded28325, the author made a typo in the answer key writing 'Ploybius' instead of 'Polybius'
-        if "Polybius Plaza" in ans:
-            ans = ans.replace("Polybius Plaza", "Ploybius Plaza")
         return ans.strip("`*\"' ")
+
