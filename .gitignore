@@ -17,6 +17,7 @@ pytest-run-*/
 .smara/
 *.metadata.json
 *.log
+reports/gaia_readiness.json
 /*.pdf
 /*.pdb
 scratch/

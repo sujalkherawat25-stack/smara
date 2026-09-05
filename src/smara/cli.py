@@ -1076,6 +1076,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_bench.add_argument("--suite", choices=["gaia", "swe-bench", "desktop", "osworld"], default="gaia", help="Benchmark suite or readiness gate to run")
     p_bench.add_argument("--level", choices=["1", "2", "3"], default="1", help="GAIA Level (default: 1)")
     p_bench.add_argument("--count", type=int, default=None, help="Max tasks to evaluate (default: all)")
+    p_bench.add_argument("--dataset", default=None, help="Existing local GAIA metadata.parquet/JSON/JSONL/CSV or snapshot directory")
+    p_bench.add_argument("--readiness", action="store_true", help="Inspect local GAIA/OSWorld prerequisites without running tasks")
     p_bench.add_argument("--report", action="store_true", help="Automatically open generated PDF scorecard")
 
     subparsers.add_parser("models", help="List and configure model profiles")
@@ -1465,13 +1467,25 @@ def main(argv: list[str] | None = None) -> int:
         suite = getattr(parsed_args, "suite", "gaia")
         level = getattr(parsed_args, "level", "1")
         count = getattr(parsed_args, "count", None)
+        dataset = getattr(parsed_args, "dataset", None)
+        readiness = getattr(parsed_args, "readiness", False)
         auto_open = getattr(parsed_args, "report", False)
 
         if suite == "gaia":
+            if readiness:
+                from benchmarks.gaia_readiness import GaiaReadiness
+                summary = GaiaReadiness(workspace_root=engine.workspace, dataset_path=Path(dataset) if dataset else None).inspect()
+                color = "GREEN" if summary["status"] == "ready_to_invoke_fair_runner" else "YELLOW"
+                print(tui.paint(f"\nGAIA readiness: {summary['status']}\n", color))
+                for item in summary["checks"]:
+                    marker = "✓" if item["ok"] else "•"
+                    print(f"  {marker} {item['name']}: {item['detail']}")
+                print(f"\n  📄 Readiness report: {tui.paint(summary['report_path'], 'CYAN')}")
+                return 0 if summary["status"] == "ready_to_invoke_fair_runner" else 2
             print(tui.paint(f"\n🏆 Launching strict GAIA shared-runtime evaluation (Level {level})...\n", "BOLD"))
             from benchmarks.gaia_fair_runner import GaiaFairBenchmark
             token = os.environ.get("HF_TOKEN", "")
-            runner = GaiaFairBenchmark(token=token, workspace_root=engine.workspace)
+            runner = GaiaFairBenchmark(token=token, workspace_root=engine.workspace, dataset_path=Path(dataset) if dataset else None)
             try:
                 summary = runner.evaluate_level(level=level, max_tasks=count)
             except RuntimeError as exc:

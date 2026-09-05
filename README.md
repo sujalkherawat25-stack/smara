@@ -385,3 +385,25 @@ disposable Postgres database.
 steps. It uses a fresh Docker container with no network, no mounts, no inherited
 environment, a read-only root filesystem, dropped capabilities and bounded CPU,
 memory, process count and lifetime. It is not available through a public API.
+
+# Fair benchmark readiness
+
+Smara keeps benchmark preparation separate from benchmark execution. The GAIA
+runner accepts the official validation export from a local cache, so a later
+run can be reproduced without downloading task metadata or attachments:
+
+```powershell
+$env:SMARA_GAIA_DATASET = "$env:USERPROFILE\.cache\huggingface\hub\datasets--gaia-benchmark--GAIA\snapshots"
+smara benchmark --suite gaia --readiness
+```
+
+The readiness command only validates task fields, duplicate IDs, attachment
+coverage, and model configuration; it never calls a model, scores answers, or
+contacts the network. Use `--dataset <path>` to point at a metadata.parquet,
+JSON, JSONL, CSV export, or an equivalent snapshot directory. Legacy result
+reports are intentionally rejected as input datasets.
+
+For a real evaluation, configure `SMARA_BENCHMARK_MODEL_ENDPOINT` and
+`SMARA_BENCHMARK_MODEL`, review the readiness JSON report, then invoke the fair
+runner for the desired level. GAIA and OSWorld scores are never inferred from
+old reports or synthetic tasks.

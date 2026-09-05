@@ -9,8 +9,10 @@ from __future__ import annotations
 import os
 import time
 import urllib.request
+import csv
+import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from .evaluation_core import extract_final_answer, safe_trace, strict_answer_match, write_report
 
@@ -27,6 +29,106 @@ def _load_validation_split(token: str) -> Any:
             "The official GAIA dataset could not be loaded. Check Hugging Face access, network policy, and HF_TOKEN; "
             "no benchmark result was recorded."
         ) from exc
+
+
+def _rows_from_json(path: Path) -> list[dict[str, Any]]:
+    """Read a task export without treating reports/results as a dataset."""
+    if path.suffix.lower() == ".jsonl":
+        rows: list[dict[str, Any]] = []
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            value = json.loads(line)
+            if not isinstance(value, dict):
+                raise RuntimeError(f"GAIA JSONL line {line_no} is not an object.")
+            rows.append(value)
+        return rows
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        for key in ("validation", "data", "tasks", "examples"):
+            candidate = value.get(key)
+            if isinstance(candidate, list):
+                return [item for item in candidate if isinstance(item, dict)]
+    raise RuntimeError("GAIA JSON must contain a list of task objects (or validation/data/tasks/examples).")
+
+
+def _validate_local_rows(rows: Iterable[dict[str, Any]], source: Path) -> list[dict[str, Any]]:
+    """Validate the official task shape before any model or attachment work."""
+    validated: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(rows, 1):
+        row = dict(raw)
+        task_id = str(row.get("task_id") or "").strip()
+        question = str(row.get("Question") or "").strip()
+        expected = str(row.get("Final answer") or "").strip()
+        if not task_id or not question or not expected:
+            raise RuntimeError(
+                f"GAIA dataset {source} row {index} is missing task_id, Question, or Final answer. "
+                "Legacy result reports are not accepted as datasets."
+            )
+        if task_id in seen:
+            raise RuntimeError(f"GAIA dataset {source} contains duplicate task_id {task_id!r}.")
+        seen.add(task_id)
+        level = str(row.get("Level") or "").strip()
+        if level not in {"1", "2", "3"}:
+            raise RuntimeError(f"GAIA dataset {source} row {index} has invalid Level {level!r}.")
+        row["task_id"] = task_id
+        row["Question"] = question
+        row["Final answer"] = expected
+        row["Level"] = level
+        validated.append(row)
+    if not validated:
+        raise RuntimeError(f"GAIA dataset {source} contains no task rows.")
+    return validated
+
+
+def _load_local_validation_split(dataset_path: Path) -> list[dict[str, Any]]:
+    """Load a previously downloaded GAIA export, with zero network access."""
+    source = dataset_path.expanduser().resolve()
+    if not source.exists():
+        raise RuntimeError(f"Configured local GAIA dataset does not exist: {source}")
+    if source.is_dir():
+        candidates = list(source.rglob("metadata.parquet"))
+        if not candidates:
+            candidates = list(source.rglob("*.jsonl")) + list(source.rglob("*.json"))
+        if not candidates:
+            raise RuntimeError(f"No metadata.parquet, JSON, or JSONL task export found under {source}.")
+        # Prefer the validation metadata when a full snapshot contains test too.
+        candidates.sort(key=lambda item: ("validation" not in str(item).lower(), len(str(item))))
+        source = candidates[0]
+    suffix = source.suffix.lower()
+    if suffix in {".json", ".jsonl"}:
+        rows = _rows_from_json(source)
+    elif suffix == ".csv":
+        with source.open("r", encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+    elif suffix == ".parquet":
+        try:
+            import pyarrow.parquet as parquet
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError("Reading local GAIA parquet requires pyarrow (install smara[test-eval]).") from exc
+        try:
+            rows = parquet.read_table(source).to_pylist()
+        except Exception as exc:  # pragma: no cover - depends on local optional stack
+            raise RuntimeError(f"Could not read local GAIA parquet {source}: {exc}") from exc
+    else:
+        raise RuntimeError("Local GAIA dataset must be a metadata.parquet, JSON, JSONL, or CSV export.")
+    return _validate_local_rows(rows, source)
+
+
+def _discover_cached_dataset(workspace_root: Path) -> Path | None:
+    """Select an existing local snapshot before falling back to network mode."""
+    configured = os.getenv("SMARA_GAIA_DATASET", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    candidates = (
+        workspace_root / "data" / "gaia_dataset",
+        workspace_root / "data" / "gaia",
+        Path.home() / ".cache" / "huggingface" / "hub" / "datasets--gaia-benchmark--GAIA" / "snapshots",
+    )
+    return next((candidate for candidate in candidates if candidate.exists()), None)
 
 
 def _download_attachment(file_name: str, token: str, cache_root: Path) -> Path | None:
@@ -68,6 +170,7 @@ class GaiaFairBenchmark:
         state_path: Path | None = None,
         dataset_loader: Callable[[str], Any] | None = None,
         turn_runner: Callable[..., dict[str, Any]] | None = None,
+        dataset_path: Path | None = None,
     ):
         self.token = token or os.getenv("HF_TOKEN", "")
         self.workspace = (workspace_root or Path.cwd()).resolve()
@@ -75,6 +178,13 @@ class GaiaFairBenchmark:
         self.cache_dir = self.workspace / "data" / "gaia_files"
         self.dataset_loader = dataset_loader or _load_validation_split
         self.turn_runner = turn_runner
+        # A supplied loader is primarily used by callers with a controlled
+        # fixture; do not silently replace it with the host's global cache.
+        self.dataset_path = (
+            Path(dataset_path).expanduser()
+            if dataset_path is not None
+            else (None if dataset_loader is not None else _discover_cached_dataset(self.workspace))
+        )
         if state_path is None:
             from smara.desktop_executor import default_state_path
             state_path = default_state_path()
@@ -123,7 +233,7 @@ class GaiaFairBenchmark:
         started = time.monotonic()
         attachment: Path | None = None
         try:
-            attachment = _download_attachment(file_name, self.token, self.cache_dir / task_id) if file_name else None
+            attachment = self._resolve_attachment(task, task_id, file_name)
             if self.turn_runner is None:
                 from smara.local_agent_runtime import run_shared_local_turn
                 result = run_shared_local_turn(
@@ -164,8 +274,36 @@ class GaiaFairBenchmark:
             "duration_seconds": round(time.monotonic() - started, 3),
         }
 
+    def _resolve_attachment(self, task: dict[str, Any], task_id: str, file_name: str) -> Path | None:
+        """Prefer local dataset attachment paths; download only for official online mode."""
+        if not file_name:
+            return None
+        file_path = str(task.get("file_path") or "").strip()
+        candidates: list[Path] = []
+        if file_path:
+            path = Path(file_path).expanduser()
+            if path.is_absolute():
+                candidates.append(path)
+            elif self.dataset_path:
+                candidates.extend((self.dataset_path.parent / path, self.dataset_path / path))
+        candidates.extend((self.cache_dir / file_name, self.cache_dir / task_id / file_name))
+        if self.dataset_path and self.dataset_path.is_dir():
+            # A Hugging Face snapshot may keep attachments beside metadata or
+            # in a nested validation directory.  Resolve by basename only.
+            candidates.extend(self.dataset_path.rglob(file_name))
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate.resolve()
+        if self.dataset_path:
+            raise RuntimeError(f"Attachment {file_name!r} for task {task_id} is missing from the local GAIA cache.")
+        return _download_attachment(file_name, self.token, self.cache_dir / task_id)
+
     def evaluate_level(self, level: str = "1", start_idx: int = 0, max_tasks: int | None = None) -> dict[str, Any]:
-        validation = self.dataset_loader(self.token)
+        validation = (
+            _load_local_validation_split(self.dataset_path)
+            if self.dataset_path is not None
+            else self.dataset_loader(self.token)
+        )
         tasks = [dict(item) for item in validation if str(item.get("Level")) == str(level)]
         selected = tasks[start_idx : start_idx + max_tasks if max_tasks is not None else None]
         # Fail before executing a task when the model configuration is absent;
@@ -176,7 +314,7 @@ class GaiaFairBenchmark:
         correct = sum(1 for item in scored if item["correct"])
         report = {
             "runner": self.runner_name,
-            "dataset": "gaia-benchmark/GAIA",
+            "dataset": str(self.dataset_path) if self.dataset_path is not None else "gaia-benchmark/GAIA",
             "split": "validation",
             "level": str(level),
             "scoring": "strict normalized exact equality; no substring or answer-registry fallback",

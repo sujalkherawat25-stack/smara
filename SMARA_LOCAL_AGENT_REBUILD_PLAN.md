@@ -167,3 +167,20 @@ external action is attributable, bounded, and reviewable.
    capability and payload validation as native function calls.
 5. 🟡 Run the native package against the broader corpus before adding more
    mutating workflows.
+
+## Benchmark stack readiness slice (implemented)
+
+- ✅ GAIA evaluation now uses one shared local Desktop runtime and strict
+  normalized exact-answer scoring; legacy score reports and answer registries
+  are never inputs.
+- ✅ GAIA accepts an existing local `metadata.parquet`, JSON, JSONL, CSV, or
+  Hugging Face snapshot directory through `SMARA_GAIA_DATASET` or `--dataset`.
+- ✅ `smara benchmark --suite gaia --readiness` writes a non-scoring manifest
+  with schema, duplicate-ID, attachment, and model-configuration checks. It
+  performs no model calls and no network access.
+- ✅ The current machine's official cache contains 165 validation rows. The
+  local attachment cache is incomplete (31/38 files), so the benchmark gate
+  remains closed until the seven missing attachments are restored and a model
+  endpoint is configured.
+- 🟡 OSWorld remains a truthful preflight only; a versioned screenshot/input
+  adapter and vision action loop are still required before invoking it.
