@@ -173,6 +173,24 @@ def _offload_massive_result(content: str, call_id: str, max_chars: int = 14000) 
         return content[:max_chars] + f"\n... [Truncated {len(content) - max_chars} characters]"
 
 
+def _is_instruction_placeholder(text: str) -> bool:
+    """Detect if string is a prompt instruction placeholder rather than a genuine answer."""
+    if not text:
+        return True
+    t = text.strip().lower()
+    t_clean = re.sub(r"^[\<\\[\(\"']+|[\>\\]\)\"']+$", "", t).strip()
+    placeholders = {
+        "exact answer", "answer", "final answer", "your answer",
+        "insert answer here", "insert answer", "value", "exact answer here",
+        "result", "exact result", "undefined", "n/a", "none"
+    }
+    if t_clean in placeholders or t in placeholders:
+        return True
+    if re.match(r"^<[a-z0-9_\s\-]+>$", t) or re.match(r"^\[[a-z0-9_\s\-]+\]$", t):
+        return True
+    return False
+
+
 TOOL_SCHEMAS = [
     {
         "type": "function",
@@ -326,7 +344,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "pdf_search",
-            "description": "Search across all pages of a PDF file for specific keywords, phrases, or footnotes. Returns matching page numbers and contextual excerpts without token truncation.",
+            "description": "Search across all pages of a PDF file for specific keywords, or extract full page text and diagram descriptions for specific pages (by setting 'page' or 'start_page'/'end_page' with empty query).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -336,7 +354,12 @@ TOOL_SCHEMAS = [
                     },
                     "query": {
                         "type": "string",
-                        "description": "The keyword or phrase to search for across the PDF."
+                        "description": "Optional keyword or phrase to search for across the PDF. If empty, extracts page text directly.",
+                        "default": ""
+                    },
+                    "page": {
+                        "type": "integer",
+                        "description": "Specific 1-indexed page number to extract text and diagram/figure descriptions from."
                     },
                     "start_page": {
                         "type": "integer",
@@ -353,7 +376,7 @@ TOOL_SCHEMAS = [
                         "default": 10
                     }
                 },
-                "required": ["pdf_path", "query"]
+                "required": ["pdf_path"]
             }
         }
     },
@@ -777,7 +800,7 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - **String & Character Counting**: Always use Python code (`.count()`, `len()`) via `python_execute` to count letters, words, lines, or characters from text or image transcriptions to avoid manual counting mistakes.
    - **Ancient & Positional Numeral Systems**: For ancient numerals, non-standard glyphs, or positional notations (such as sexagesimal or Roman numerals), write a Python script with `unicodedata.name()` to inspect the exact characters and calculate values mathematically using base expansion: value = sum(d_i * B**i).
    - **Table Ranking & Extraction**: When comparing or ranking tabular data from websites (like charts, rankings, population lists, or statistics), fetch the table with `web_reader_dynamic` or `web_extract` and load it into a `pandas.DataFrame` or `BeautifulSoup` in `python_execute` to programmatically filter, sort, and slice rows rather than reading visual rankings manually.
-   - **Large Document & PDF Deep Search**: When searching for specific citations, endnotes, or mentions across long PDFs (> 20 pages), use `pdf_search` with targeted keywords (e.g. author name, citation number, title phrase) or write a Python script with `pypdf` to scan all pages systematically.
+   - **Large Document & PDF Deep Search**: When inspecting or searching across PDFs, use `pdf_search` with targeted keywords (e.g. author name, citation number, title phrase) or inspect specific pages directly with `pdf_search(pdf_path, page=N)`. It automatically reconciles physical PDF pages with printed book pages and reports embedded diagrams. Alternatively, write a Python script with `pypdf` to process pages systematically.
    - **Algebraic Word Problems & Multi-Variable Systems**: Decompose complex multi-variable word problems into individual facts. Use web search or tools to independently verify each constant/variable, then invoke `sympy` or `scipy` in `python_execute` to solve the system of equations.
    - **Dynamic SPAs & JavaScript Web Pages**: For websites that use client-side rendering (SPA frameworks, interactive listings, dynamically loaded tables), use `web_reader_dynamic` which renders JavaScript via markdown reader endpoints.
    - **Video Inspection & Timestamps**: When asked about a specific visual detail at timestamp T, inspect frames across a short temporal window (T-1, T, T+1, T+2) using `video_inspect(action='frame')` to account for video keyframe cuts and transitions.
@@ -830,7 +853,7 @@ class SmaraAutonomousAgent:
         api_key: Optional[str] = None,
         base_url: str = "https://api.sarvam.ai/v2/chat/completions",
         model: str = "glm5.2",
-        max_iterations: int = 14,
+        max_iterations: int = 16,
         toolset: str = "full",
     ):
         self.api_key = api_key or _get_api_key_from_vault_or_env()
@@ -932,10 +955,11 @@ class SmaraAutonomousAgent:
     def _dispatch_pdf_search(self, args: Dict[str, Any]) -> str:
         p = args.get("pdf_path") or args.get("path") or ""
         q = args.get("query") or ""
-        sp = args.get("start_page", 1)
-        ep = args.get("end_page")
+        page = args.get("page")
+        sp = page or args.get("start_page", 1)
+        ep = page or args.get("end_page")
         mm = args.get("max_matches", 10)
-        return pdf_search(p, query=q, start_page=sp, end_page=ep, max_matches=mm)
+        return pdf_search(p, query=q, start_page=sp, end_page=ep, page=page, max_matches=mm)
 
     def _dispatch_zip_extract(self, args: Dict[str, Any]) -> str:
         zp = args.get("zip_path") or ""
@@ -1236,13 +1260,22 @@ class SmaraAutonomousAgent:
                     logger.warning(f"Error parsing text tool call: {ex}")
 
             # Check if model has provided the definitive final answer
-            has_final_answer = bool(re.search(r"(?:FINAL ANSWER|Final Answer|final answer):\s*", content, re.IGNORECASE))
-            if not has_final_answer and reasoning:
-                fa_match = re.search(r"(?:FINAL ANSWER|Final Answer|final answer):\s*([^\n\r]+)", reasoning, re.IGNORECASE)
-                if fa_match:
+            has_final_answer = False
+            fa_pattern = r"(?:FINAL ANSWER|Final Answer|final answer):\s*([^\n\r]+)"
+            fa_match_c = re.search(fa_pattern, content or "")
+            if fa_match_c:
+                cand = fa_match_c.group(1).strip()
+                if not _is_instruction_placeholder(cand):
                     has_final_answer = True
-                    content = (content + "\n" if content.strip() else "") + fa_match.group(0)
-                elif not content.strip():
+
+            if not has_final_answer and reasoning:
+                fa_match_r = re.search(fa_pattern, reasoning)
+                if fa_match_r:
+                    cand = fa_match_r.group(1).strip()
+                    if not _is_instruction_placeholder(cand):
+                        has_final_answer = True
+                        content = (content + "\n" if content.strip() else "") + f"FINAL ANSWER: {cand}"
+                elif not content.strip() and not _is_instruction_placeholder(reasoning):
                     content = reasoning
 
             # Verification Gate: verify code modifications and calculations before confirming answer
@@ -1335,15 +1368,21 @@ class SmaraAutonomousAgent:
             return ""
 
         fa_match = re.search(r"(?:FINAL ANSWER|Final Answer|final answer|Answer):\s*([^\n\r]+)", text, re.IGNORECASE)
-        if fa_match:
-            ans = fa_match.group(1).strip()
+        cand_fa = fa_match.group(1).strip() if fa_match else ""
+        if cand_fa and not _is_instruction_placeholder(cand_fa):
+            ans = cand_fa
         else:
             ans_match = re.search(r"(?:the answer is|the result is|the value is|therefore,?\s*(?:the answer is)?)\s*([^.\n\r]+)", text, re.IGNORECASE)
-            if ans_match:
-                ans = ans_match.group(1).strip()
+            cand_alt = ans_match.group(1).strip() if ans_match else ""
+            if cand_alt and not _is_instruction_placeholder(cand_alt):
+                ans = cand_alt
             else:
                 lines = [line.strip() for line in text.splitlines() if line.strip()]
-                ans = lines[-1] if lines else text.strip()
+                ans = ""
+                for l in reversed(lines):
+                    if not _is_instruction_placeholder(l):
+                        ans = l
+                        break
 
         ans = re.sub(
             r"^(?:FINAL ANSWER|Final Answer|final answer|Answer|The answer is|The result is|It is|Output:?)\s*[:\-]?\s*",
@@ -1381,5 +1420,8 @@ class SmaraAutonomousAgent:
         ans = ans.strip("`*\"' ")
         if not (len(ans.split()) > 2 and ans.endswith(".")):
             ans = ans.rstrip(".")
-        return ans.strip("`*\"' ")
+        ans = ans.strip("`*\"' ")
+        if _is_instruction_placeholder(ans):
+            return ""
+        return ans
 

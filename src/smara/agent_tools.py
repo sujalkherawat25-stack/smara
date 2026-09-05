@@ -326,13 +326,22 @@ def python_execute(code: str, timeout: int = 30) -> str:
         temp_path = f.name
 
     try:
+        proc_env = os.environ.copy()
+        py_dir = str(Path(sys.executable).parent)
+        py_scripts = str(Path(sys.executable).parent / ("Scripts" if sys.platform == "win32" else "bin"))
+        current_path = proc_env.get("PATH", "")
+        proc_env["PATH"] = f"{py_scripts}{os.pathsep}{py_dir}{os.pathsep}{current_path}"
+        proc_env["PYTHONUNBUFFERED"] = "1"
+        proc_env["PYTHONIOENCODING"] = "utf-8"
+
         result = subprocess.run(
             [sys.executable, temp_path],
             capture_output=True,
             text=True,
             timeout=timeout,
             encoding="utf-8",
-            errors="replace"
+            errors="replace",
+            env=proc_env
         )
         out = result.stdout.strip()
         err = result.stderr.strip()
@@ -435,11 +444,15 @@ def file_read(file_path: Path | str, max_chars: int = 6000) -> str:
         try:
             import pypdf
             reader = pypdf.PdfReader(str(p))
+            total_pages = len(reader.pages)
             pages = []
             for idx, page in enumerate(reader.pages[:20]):
                 txt = page.extract_text() or ""
                 pages.append(f"[Page {idx+1}]\n{txt}")
-            return _truncate_output("\n\n".join(pages), max_chars=max_chars)
+            res = "\n\n".join(pages)
+            if total_pages > 20:
+                res += f"\n\n... [{total_pages - 20} additional pages in PDF. Total: {total_pages} pages. Use 'pdf_search' with 'page' or 'query' to inspect specific pages] ..."
+            return _truncate_output(res, max_chars=max_chars)
         except Exception as e:
             return f"Error reading pdf: {e}"
 
@@ -461,9 +474,10 @@ def pdf_search(
     query: str = "",
     start_page: int = 1,
     end_page: Optional[int] = None,
+    page: Optional[int] = None,
     max_matches: int = 10,
 ) -> str:
-    """Search for keyword or phrase across all pages of a PDF document, returning matching page numbers and excerpts."""
+    """Search for keyword/phrase across all pages of a PDF, or extract full text and diagram descriptions for specific pages."""
     p = _resolve_file_path(pdf_path)
     if not p.exists():
         return f"Error: PDF not found at {pdf_path}"
@@ -472,17 +486,52 @@ def pdf_search(
         import pypdf
         reader = pypdf.PdfReader(str(p))
         total_pages = len(reader.pages)
-        first_idx = max(0, start_page - 1)
-        last_idx = min(total_pages, end_page) if end_page else total_pages
 
-        if not query:
+        target_page = page or (start_page if (end_page is not None and start_page == end_page) else None)
+
+        # If query is empty or whitespace, extract page content directly
+        if not (query or "").strip():
+            first_idx = max(0, (target_page - 1) if target_page else (start_page - 1))
+            last_idx = min(total_pages, target_page if target_page else (end_page or (first_idx + 5)))
+
+            output_parts = []
+            for idx in range(first_idx, last_idx):
+                pg = reader.pages[idx]
+                txt = (pg.extract_text() or "").strip()
+                img_count = len(getattr(pg, "images", []))
+                img_note = f" [Contains {img_count} embedded image(s)/diagram(s)]" if img_count else ""
+                output_parts.append(f"[Physical Page {idx + 1}{img_note}]:\n{txt}")
+
+            # Reconcile printed page numbers: if target_page requested, check if any page's printed number matches
+            if target_page:
+                p_str = str(target_page)
+                printed_match = None
+                for idx in range(total_pages):
+                    if idx == first_idx:
+                        continue
+                    txt = reader.pages[idx].extract_text() or ""
+                    lines = [line.strip() for line in txt.splitlines() if line.strip()]
+                    if lines and (lines[0] == p_str or lines[-1] == p_str or f"\n{p_str}\n" in txt or f" {p_str}\n" in txt):
+                        printed_match = (idx, txt)
+                        break
+                if printed_match:
+                    p_idx, p_txt = printed_match
+                    img_c = len(getattr(reader.pages[p_idx], "images", []))
+                    img_note = f" [Contains {img_c} embedded image(s)/diagram(s)]" if img_c else ""
+                    output_parts.append(f"\n[Printed Page {target_page} (Physical Page {p_idx + 1}){img_note}]:\n{p_txt.strip()}")
+
+            if output_parts:
+                return f"PDF '{p.name}' (Total pages: {total_pages}):\n\n" + "\n\n".join(output_parts)
             return f"PDF '{p.name}' has {total_pages} total pages."
 
+        # Search query across pages
+        first_idx = max(0, start_page - 1)
+        last_idx = min(total_pages, end_page) if end_page else total_pages
         matches = []
         q_lower = query.lower()
         for idx in range(first_idx, last_idx):
-            page = reader.pages[idx]
-            txt = page.extract_text() or ""
+            pg = reader.pages[idx]
+            txt = pg.extract_text() or ""
             if q_lower in txt.lower():
                 pos = txt.lower().find(q_lower)
                 start = max(0, pos - 150)
@@ -892,6 +941,14 @@ def terminal_execute(command: str, cwd: Optional[str] = None, timeout: int = 45)
         return f"Error: Working directory does not exist: {cwd}"
 
     try:
+        proc_env = os.environ.copy()
+        py_dir = str(Path(sys.executable).parent)
+        py_scripts = str(Path(sys.executable).parent / ("Scripts" if sys.platform == "win32" else "bin"))
+        current_path = proc_env.get("PATH", "")
+        proc_env["PATH"] = f"{py_scripts}{os.pathsep}{py_dir}{os.pathsep}{current_path}"
+        proc_env["PYTHONUNBUFFERED"] = "1"
+        proc_env["PYTHONIOENCODING"] = "utf-8"
+
         if sys.platform == "win32":
             shell_cmd = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command]
         else:
@@ -904,7 +961,8 @@ def terminal_execute(command: str, cwd: Optional[str] = None, timeout: int = 45)
             text=True,
             timeout=timeout,
             encoding="utf-8",
-            errors="replace"
+            errors="replace",
+            env=proc_env
         )
         out = res.stdout.strip()
         err = res.stderr.strip()

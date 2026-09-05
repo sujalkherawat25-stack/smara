@@ -71,3 +71,45 @@ def test_browser_action_screenshot():
         data = json.loads(out)
         assert data.get("action") == "screenshot"
         assert data.get("success") is True
+
+
+def test_terminal_python_alignment():
+    """Verify terminal_execute prioritizes the current sys.executable environment."""
+    out = terminal_execute("python -c \"import sys; print(sys.executable)\"")
+    assert "[Exit Code: 0]" in out
+    assert str(Path(sys.executable).resolve()).lower() in out.lower()
+
+
+def test_final_answer_placeholder_rejection():
+    """Verify that template placeholders like <exact answer> are never emitted as final answers."""
+    from smara.autonomous_agent import SmaraAutonomousAgent, _is_instruction_placeholder
+    assert _is_instruction_placeholder("<exact answer>") is True
+    assert _is_instruction_placeholder("[exact answer]") is True
+    assert _is_instruction_placeholder("exact answer") is True
+    assert _is_instruction_placeholder("42") is False
+    assert _is_instruction_placeholder("rabbit") is False
+
+    assert SmaraAutonomousAgent._clean_final_answer("FINAL ANSWER: <exact answer>") == ""
+    assert SmaraAutonomousAgent._clean_final_answer("FINAL ANSWER: rabbit") == "rabbit"
+    assert SmaraAutonomousAgent._clean_final_answer("I was unable to find page 54. Therefore, the answer is rabbit.") == "rabbit"
+
+
+def test_pdf_search_empty_query_page_extraction():
+    """Verify pdf_search extracts full page structure when query is omitted."""
+    from smara.agent_tools import pdf_search
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pdf_file = Path(tmpdir) / "test_doc.pdf"
+        try:
+            import pypdf
+            writer = pypdf.PdfWriter()
+            writer.add_blank_page(width=300, height=300)
+            writer.add_blank_page(width=300, height=300)
+            with open(pdf_file, "wb") as f:
+                writer.write(f)
+
+            res = pdf_search(str(pdf_file), page=1)
+            assert "Physical Page 1" in res
+            assert "Total pages: 2" in res
+        except ImportError:
+            pytest.skip("pypdf not installed")
+
