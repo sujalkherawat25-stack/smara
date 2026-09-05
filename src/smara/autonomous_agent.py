@@ -174,7 +174,7 @@ def _offload_massive_result(content: str, call_id: str, max_chars: int = 14000) 
 
 
 def _is_instruction_placeholder(text: str) -> bool:
-    """Detect if string is a prompt instruction placeholder rather than a genuine answer."""
+    """Detect if string is a prompt instruction placeholder or internal tag rather than a genuine answer."""
     if not text:
         return True
     t = text.strip().lower()
@@ -182,7 +182,8 @@ def _is_instruction_placeholder(text: str) -> bool:
     placeholders = {
         "exact answer", "answer", "final answer", "your answer",
         "insert answer here", "insert answer", "value", "exact answer here",
-        "result", "exact result", "undefined", "n/a", "none"
+        "result", "exact result", "undefined", "n/a", "none",
+        "reached", "final answer reached", "step", "completed", "pending", "in_progress", "thought"
     }
     if t_clean in placeholders or t in placeholders:
         return True
@@ -1167,6 +1168,18 @@ class SmaraAutonomousAgent:
                 logger.info(f"Iter {iteration} content: {repr(content[:150])}")
                 logger.info(f"Iter {iteration} reasoning tail: {repr(reasoning[-200:])}")
 
+            # Length Truncation Guard: if reasoning ran out of tokens before generating content or tool call
+            if finish_reason == "length" and not content.strip() and not tool_calls:
+                logger.warning(f"Iter {iteration}: Reasoning exceeded token budget. Prompting for concise output.")
+                if is_final_step:
+                    raw_concluding = reasoning.strip()
+                    break
+                messages.append({
+                    "role": "user",
+                    "content": "Notice: Your internal thinking exceeded maximum length. Keep your thinking concise (under 100 words) and directly output your tool call or state your final answer as:\nFINAL ANSWER: <exact answer>"
+                })
+                continue
+
             # Repetition Guard: check for degenerate repeating loops in model reasoning or content
             if _is_repetition_dominated(reasoning) or _is_repetition_dominated(content):
                 logger.warning(f"Iter {iteration}: Repetition loop detected in model output. Injecting guidance to halt repetition.")
@@ -1395,12 +1408,14 @@ class SmaraAutonomousAgent:
                     if fa_cand and not _is_instruction_placeholder(fa_cand):
                         final_answer = fa_cand
                         break
-                cand_obs = step.get("observation") or ""
-                if cand_obs and not cand_obs.startswith("Verification") and not cand_obs.startswith("Prompted"):
-                    fa_cand = self._clean_final_answer(cand_obs)
-                    if fa_cand and not _is_instruction_placeholder(fa_cand):
-                        final_answer = fa_cand
-                        break
+                # Only check genuine tool output observations, never internal trace marker steps
+                if step.get("tool_name") is not None:
+                    cand_obs = step.get("observation") or ""
+                    if cand_obs and not cand_obs.startswith("Verification") and not cand_obs.startswith("Prompted"):
+                        fa_cand = self._clean_final_answer(cand_obs)
+                        if fa_cand and not _is_instruction_placeholder(fa_cand):
+                            final_answer = fa_cand
+                            break
 
         return {
             "answer": final_answer,
