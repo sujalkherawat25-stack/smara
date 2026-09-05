@@ -50,9 +50,12 @@ from smara.agent_tools import (
     skills_list_tool,
     skill_view_tool,
     delegate_task_tool,
-    dag_flow_tool
+    dag_flow_tool,
+    todo_tool,
+    patch_file_tool,
 )
 from smara.task_memory import get_default_memory_store
+from smara.task_planner import SmaraTaskPlanner
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -106,11 +109,16 @@ def _is_repetition_dominated(text: str, min_len: int = 400, window: int = 60, mi
     return False
 
 
-def _compact_conversation_history(messages: List[Dict[str, Any]], max_chars: int = 35000) -> List[Dict[str, Any]]:
+def _compact_conversation_history(
+    messages: List[Dict[str, Any]],
+    max_chars: int = 35000,
+    planner: Optional[Any] = None,
+) -> List[Dict[str, Any]]:
     """Three-Zone Context Compactor:
     Zone 1: Pinned Head (system prompt and original user task)
     Zone 2: Pinned Tail (most recent 4 messages)
     Zone 3: Middle Turns (compact large observations to preserve attention and token budget)
+    Also preserves active task checklist from SmaraTaskPlanner across compaction.
     """
     total_chars = sum(len(str(m.get("content") or "")) for m in messages)
     if total_chars <= max_chars or len(messages) <= 6:
@@ -134,6 +142,15 @@ def _compact_conversation_history(messages: List[Dict[str, Any]], max_chars: int
             compacted_middle.append(compacted_m)
         else:
             compacted_middle.append(m)
+
+    # If active task checklist exists, preserve it at the boundary between middle and tail
+    if planner is not None and getattr(planner, "has_items", lambda: False)():
+        active_snapshot = planner.format_for_injection()
+        if active_snapshot:
+            compacted_middle.append({
+                "role": "user",
+                "content": active_snapshot,
+            })
 
     return messages[:head_count] + compacted_middle + messages[len(messages) - tail_count:]
 
@@ -566,8 +583,92 @@ TOOL_SCHEMAS = [
                 "required": ["action", "workflow_data"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "todo",
+            "description": "Manage your task checklist for the current session. Use for complex tasks with 3+ steps or when executing multi-phase plans. Call with no parameters to read the current list. List order is priority. Only one item in_progress at a time. Active tasks are automatically preserved across context compression events.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "todos": {
+                        "type": "array",
+                        "description": "Task items to write.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string", "description": "Unique task ID."},
+                                "content": {"type": "string", "description": "Task description."},
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["pending", "in_progress", "completed", "cancelled"]
+                                },
+                                "parent": {
+                                    "type": "string",
+                                    "description": "Optional parent item ID for hierarchical subtasks."
+                                }
+                            },
+                            "required": ["id", "content", "status"]
+                        }
+                    },
+                    "merge": {
+                        "type": "boolean",
+                        "description": "true: update existing items by id and append new ones. false (default): replace entire checklist.",
+                        "default": False
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "patch",
+            "description": "Targeted find-and-replace edit on a file. Uses multi-strategy fuzzy matching (handles minor whitespace and indentation variations) and automatically performs Python AST syntax checks. Returns a unified diff of applied changes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to file to edit."
+                    },
+                    "old_string": {
+                        "type": "string",
+                        "description": "Exact text to find and replace. Must be unique in the file unless replace_all=true. Include surrounding context lines to ensure uniqueness."
+                    },
+                    "new_string": {
+                        "type": "string",
+                        "description": "Replacement text. To delete matched text, pass empty string ''."
+                    },
+                    "replace_all": {
+                        "type": "boolean",
+                        "description": "Replace all occurrences instead of requiring a unique match (default false).",
+                        "default": False
+                    }
+                },
+                "required": ["path", "old_string", "new_string"]
+            }
+        }
     }
 ]
+
+
+def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
+    """Return tool schemas filtered by profile to optimize token budget."""
+    prof = (profile or "full").lower().strip()
+    if prof == "full":
+        return TOOL_SCHEMAS
+    elif prof in ["coding", "swe"]:
+        allowed = {"patch", "python_execute", "file_read", "todo", "delegate_task", "dag_flow"}
+    elif prof in ["research", "web"]:
+        allowed = {"web_search", "web_extract", "web_reader_dynamic", "wayback_extract", "wikipedia_page", "pdf_search", "calculate", "file_read", "todo"}
+    elif prof in ["multimodal", "vision", "audio"]:
+        allowed = {"image_inspect", "audio_transcribe", "video_inspect", "file_read", "todo"}
+    else:
+        return TOOL_SCHEMAS
+    return [s for s in TOOL_SCHEMAS if s.get("function", {}).get("name") in allowed]
+
 
 BASE_SYSTEM_PROMPT = """You are Smara Autonomous Agent, an elite autonomous AI system.
 You solve complex multi-step reasoning, research, multimodal, coding, and mathematical tasks autonomously using tool execution.
@@ -575,6 +676,8 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
 ### Operational Guidelines:
 1. **ReAct Problem Solving**:
    - Break down problems methodically: Thought -> Action -> Observation -> Final Answer.
+   - For multi-step tasks (3+ steps) or complex coding/research trajectories, maintain a task checklist via `todo`. Active tasks survive context compaction.
+   - For editing source files, always use `patch` instead of rewriting full files. It uses fuzzy matching and verifies syntax.
    - Keep internal reasoning concise and focused (under 150 words) before executing tools or stating answers.
    - For factual web research, use `web_search` and `web_extract`.
    - For historical snapshots of web pages, use `wayback_extract`.
@@ -649,11 +752,14 @@ class SmaraAutonomousAgent:
         base_url: str = "https://api.sarvam.ai/v2/chat/completions",
         model: str = "glm5.2",
         max_iterations: int = 14,
+        toolset: str = "full",
     ):
         self.api_key = api_key or _get_api_key_from_vault_or_env()
         self.base_url = base_url
         self.model = model
         self.max_iterations = max_iterations
+        self.toolset = toolset
+        self.task_planner = SmaraTaskPlanner()
         self.memory_store = get_default_memory_store()
         self._seen_tool_signatures: Dict[str, int] = collections.defaultdict(int)
 
@@ -676,7 +782,21 @@ class SmaraAutonomousAgent:
             "skill_view": self._dispatch_skill_view,
             "delegate_task": self._dispatch_delegate_task,
             "dag_flow": self._dispatch_dag_flow,
+            "todo": self._dispatch_todo,
+            "patch": self._dispatch_patch,
         }
+
+    def _dispatch_todo(self, args: Dict[str, Any]) -> str:
+        todos = args.get("todos")
+        merge = args.get("merge", False)
+        return todo_tool(todos=todos, merge=merge, planner=self.task_planner)
+
+    def _dispatch_patch(self, args: Dict[str, Any]) -> str:
+        path = args.get("path") or args.get("file_path") or ""
+        old_string = args.get("old_string") or args.get("old_str") or ""
+        new_string = args.get("new_string") or args.get("new_str") or ""
+        replace_all = args.get("replace_all", False)
+        return patch_file_tool(path=path, old_string=old_string, new_string=new_string, replace_all=replace_all)
 
     def _dispatch_web_search(self, args: Dict[str, Any]) -> str:
         q = args.get("query") or args.get("q") or ""
@@ -788,8 +908,8 @@ class SmaraAutonomousAgent:
 
     def _call_sarvam_api(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Perform HTTP POST request to Sarvam /v2/chat/completions with Three-Zone Context Compaction."""
-        # Active Three-Zone Context Compaction: protects Head/Tail and compresses middle steps
-        compacted_messages = _compact_conversation_history(messages, max_chars=35000)
+        # Active Three-Zone Context Compaction: protects Head/Tail, compresses middle steps, preserves active todos
+        compacted_messages = _compact_conversation_history(messages, max_chars=35000, planner=self.task_planner)
 
         payload: Dict[str, Any] = {
             "model": self.model,
@@ -862,12 +982,14 @@ class SmaraAutonomousAgent:
 
         logger.info(f"Starting autonomous ReAct agent for task: {task[:90]}...")
 
+        touched_code_files: set[str] = set()
+
         for iteration in range(1, self.max_iterations + 1):
             logger.info(f"Agent Loop Iteration {iteration}/{self.max_iterations}")
 
             # If agent has already observed tool outputs or reached final iteration, disable tools to force clean synthesis
             is_final_step = (iteration == self.max_iterations)
-            active_tools = None if (is_final_step or consecutive_no_tool >= 1) else TOOL_SCHEMAS
+            active_tools = None if (is_final_step or consecutive_no_tool >= 1) else get_tool_schemas(self.toolset)
 
             if is_final_step:
                 messages.append({
@@ -934,6 +1056,13 @@ class SmaraAutonomousAgent:
                     if fn_name in IDEMPOTENT_TOOLS and call_count >= 2:
                         stall_note = f"[Stall Guard Notice: Tool '{fn_name}' has been called {call_count+1} times with identical arguments without advancing the state. Do not repeat this query. Try a different search angle or proceed to synthesize your answer from existing findings.]\n\n"
 
+                    if fn_name == "patch":
+                        p = str(parsed_args.get("path") or "")
+                        if p and any(p.lower().endswith(ext) for ext in [".py", ".js", ".ts", ".rs", ".go", ".c", ".cpp", ".sh"]):
+                            touched_code_files.add(p)
+                    elif fn_name in ["python_execute"]:
+                        touched_code_files.clear()
+
                     logger.info(f"[Tool Call] {fn_name}({parsed_args})")
                     raw_obs = str(self.execute_tool(fn_name, parsed_args))
                     # Spill safety: offload massive results to disk cache
@@ -976,6 +1105,12 @@ class SmaraAutonomousAgent:
                     fn_args = call_obj.get("arguments", {})
                     obs = str(self.execute_tool(fn_name, fn_args))
                     tools_used.append(fn_name)
+                    if fn_name == "patch":
+                        p = str(fn_args.get("path") or "")
+                        if p and any(p.lower().endswith(ext) for ext in [".py", ".js", ".ts", ".rs", ".go", ".c", ".cpp", ".sh"]):
+                            touched_code_files.add(p)
+                    elif fn_name in ["python_execute"]:
+                        touched_code_files.clear()
                     messages.append({"role": "assistant", "content": content or f"Tool call: {fn_name}"})
                     messages.append({
                         "role": "user",
@@ -1003,8 +1138,26 @@ class SmaraAutonomousAgent:
                 elif not content.strip():
                     content = reasoning
 
-            # Verification Gate: verify calculations before accepting immediate unverified answers
+            # Verification Gate: verify code modifications and calculations before confirming answer
             if has_final_answer and not is_final_step:
+                if touched_code_files:
+                    unverified = list(touched_code_files)
+                    touched_code_files.clear()
+                    logger.info(f"Verification Gate: Prompting verification check for unverified code edits: {unverified}")
+                    messages.append({"role": "assistant", "content": content or reasoning})
+                    messages.append({
+                        "role": "user",
+                        "content": f"Verification check: You modified the following code file(s): {', '.join(unverified)}. Before confirming your final answer, execute a verification test (via 'python_execute' or test runner) to confirm the code runs without syntax errors or regressions."
+                    })
+                    trace.append({
+                        "iteration": iteration,
+                        "thought": reasoning or content,
+                        "tool_name": None,
+                        "tool_args": None,
+                        "observation": f"Verification Gate: Prompted verification check for modified code files: {unverified}"
+                    })
+                    continue
+
                 needs_calc = any(kw in task.lower() for kw in ["calculate", "standard deviation", "how many", "difference", "sum of", "volume", "speed"])
                 if iteration == 1 and not tools_used and needs_calc:
                     logger.info("Verification Gate: Prompting single-pass calculation check before final answer acceptance.")

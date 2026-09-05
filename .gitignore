@@ -20,3 +20,4 @@ pytest-run-*/
 /*.pdf
 /*.pdb
 scratch/
+.worktrees/

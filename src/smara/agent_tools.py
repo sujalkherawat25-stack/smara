@@ -836,3 +836,51 @@ def dag_flow_tool(action: str, workflow_data: Optional[str] = None) -> str:
             return f"Error executing DAG workflow: {e}"
     return f"Unknown dag_flow action '{action}'. Valid actions: create_and_run"
 
+
+def todo_tool(
+    todos: Optional[List[Dict[str, Any]]] = None,
+    merge: bool = False,
+    planner: Optional[Any] = None,
+) -> str:
+    """Single entry point for the todo tool. Reads or writes task checklist."""
+    if planner is None:
+        from smara.task_planner import SmaraTaskPlanner
+        planner = SmaraTaskPlanner()
+
+    if todos is not None:
+        if isinstance(todos, str):
+            try:
+                todos = json.loads(todos)
+            except Exception:
+                return "Error: todos parameter must be a valid JSON array of items."
+        if not isinstance(todos, list):
+            return f"Error: todos must be a list of task objects, got {type(todos).__name__}."
+        items = planner.write(todos, merge=merge)
+    else:
+        items = planner.read()
+
+    summary = planner.summary()
+    return json.dumps({
+        "todos": items,
+        "summary": summary,
+        "revision": planner.snapshot().get("revision", 0),
+    }, indent=2)
+
+
+def patch_file_tool(
+    path: str,
+    old_string: str,
+    new_string: str,
+    replace_all: bool = False,
+) -> str:
+    """Targeted surgical find-and-replace edit on a file with AST validation and diff reporting."""
+    from smara.patch_engine import patch_file
+    res = patch_file(path, old_string, new_string, replace_all=replace_all)
+    if not res.get("success"):
+        return f"Patch Error: {res.get('error', 'Unknown patch failure')}"
+
+    diff_text = res.get("diff", "")
+    strategy = res.get("applied_strategy", "exact")
+    occ = res.get("occurrences", 1)
+    return f"Patch applied successfully to {res.get('path')} (strategy: {strategy}, occurrences: {occ}):\n{diff_text}"
+

@@ -47,6 +47,8 @@ class DelegationResult:
     duration_ms: int
     tools_used: List[str]
     error: Optional[str] = None
+    worktree_branch: Optional[str] = None
+    worktree_diff: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -63,6 +65,7 @@ class SubagentWorker:
         base_url: str = "https://api.sarvam.ai/v2/chat/completions",
         model: str = "glm5.2",
         max_iterations: int = 6,
+        isolate_worktree: bool = False,
     ):
         self.task_id = task_id
         self.role = role
@@ -70,10 +73,16 @@ class SubagentWorker:
         self.base_url = base_url
         self.model = model
         self.max_iterations = max_iterations
+        self.isolate_worktree = isolate_worktree or (role == SubagentRole.CODER)
 
     def run(self, goal: str, context: Optional[str] = None) -> DelegationResult:
         """Run isolated subagent loop on the delegated goal."""
         from smara.autonomous_agent import SmaraAutonomousAgent, TOOL_SCHEMAS
+        from smara.subagent_worktree import (
+            create_subagent_worktree,
+            inspect_subagent_worktree,
+            cleanup_subagent_worktree,
+        )
 
         t0 = time.time()
         # Filter out blocked tools
@@ -81,6 +90,20 @@ class SubagentWorker:
             s for s in TOOL_SCHEMAS
             if s.get("function", {}).get("name") not in DELEGATE_BLOCKED_TOOLS
         ]
+
+        worktree_info = None
+        worktree_branch = None
+        worktree_diff = None
+        prev_cwd = os.getcwd()
+
+        if self.isolate_worktree:
+            try:
+                worktree_info = create_subagent_worktree(prev_cwd, self.task_id)
+                if worktree_info:
+                    worktree_branch = worktree_info.get("branch")
+                    os.chdir(worktree_info["path"])
+            except Exception as wt_err:
+                logger.debug(f"Subagent worktree creation skipped: {wt_err}")
 
         child_agent = SmaraAutonomousAgent(
             api_key=self.api_key,
@@ -92,10 +115,21 @@ class SubagentWorker:
         scoped_prompt = f"Delegated Goal for {self.role.value.upper()} worker:\n{goal}"
         if context:
             scoped_prompt += f"\n\nRelevant Context:\n{context}"
+        if worktree_info:
+            scoped_prompt += f"\n\n[Workspace: Executing in isolated git worktree '{worktree_info['path']}' on branch '{worktree_branch}']"
 
         try:
             res = child_agent.run(task=scoped_prompt)
             duration = int((time.time() - t0) * 1000)
+
+            if worktree_info:
+                inspection = inspect_subagent_worktree(worktree_info)
+                if inspection.get("has_changes"):
+                    worktree_diff = inspection.get("diff", "")
+                else:
+                    cleanup_subagent_worktree(worktree_info, force=True)
+                    worktree_branch = None
+
             return DelegationResult(
                 task_id=self.task_id,
                 goal=goal,
@@ -103,11 +137,18 @@ class SubagentWorker:
                 summary=res.get("answer", ""),
                 trace_steps=len(res.get("trace", [])),
                 duration_ms=duration,
-                tools_used=res.get("tools_used", [])
+                tools_used=res.get("tools_used", []),
+                worktree_branch=worktree_branch,
+                worktree_diff=worktree_diff,
             )
         except Exception as e:
             logger.error(f"Subagent '{self.task_id}' failed: {e}")
             duration = int((time.time() - t0) * 1000)
+            if worktree_info:
+                try:
+                    cleanup_subagent_worktree(worktree_info, force=True)
+                except Exception:
+                    pass
             return DelegationResult(
                 task_id=self.task_id,
                 goal=goal,
@@ -116,8 +157,16 @@ class SubagentWorker:
                 trace_steps=0,
                 duration_ms=duration,
                 tools_used=[],
-                error=str(e)
+                error=str(e),
+                worktree_branch=None,
+                worktree_diff=None,
             )
+        finally:
+            if worktree_info and os.getcwd() != prev_cwd:
+                try:
+                    os.chdir(prev_cwd)
+                except Exception:
+                    pass
 
 
 class SubagentOrchestrator:
