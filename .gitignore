@@ -17,3 +17,6 @@ pytest-run-*/
 .smara/
 *.metadata.json
 *.log
+/*.pdf
+/*.pdb
+scratch/

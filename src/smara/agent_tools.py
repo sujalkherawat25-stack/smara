@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 import zipfile
@@ -63,8 +64,12 @@ def _truncate_output(text: str, max_chars: int = 16000) -> str:
     return text
 
 
-def web_search(query: str, api_key: Optional[str] = None, max_results: int = 5, limit: Optional[int] = None) -> str:
+def web_search(query: str, max_results: int = 5, api_key: Optional[str] = None, limit: Optional[int] = None) -> str:
     """Execute live web search using Tavily API."""
+    if isinstance(max_results, str) and (max_results.startswith("tvly-") or len(max_results) > 20):
+        api_key, max_results = max_results, 5
+    if isinstance(api_key, int):
+        max_results, api_key = api_key, None
     count = limit or max_results or 5
     if not api_key:
         api_key = _get_vault_secret("TAVILY_API_KEY")
@@ -137,24 +142,40 @@ def wayback_extract(url: str, timestamp: str = "", target_date: str = "", max_ch
     """Find and extract a historical snapshot from archive.org Wayback Machine."""
     ts = timestamp or target_date or ""
     clean_date = re.sub(r"[^0-9]", "", ts)
-    api_url = f"https://archive.org/wayback/available?url={urllib.parse.quote(url)}"
-    if clean_date:
-        api_url += f"&timestamp={clean_date}"
-    req = urllib.request.Request(
-        api_url,
-        headers={"User-Agent": "SmaraAgent/1.0"}
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            snapshots = data.get("archived_snapshots", {})
-            closest = snapshots.get("closest", {})
-            snapshot_url = closest.get("url")
-            if not snapshot_url:
-                return f"No Wayback Machine snapshot found for {url} near date {target_date}."
-            return f"Found snapshot ({closest.get('timestamp', '')}):\n" + web_extract(snapshot_url, max_chars=max_chars)
-    except Exception as e:
-        return f"Wayback Error: {e}"
+
+    urls_to_try = [url]
+    if url.endswith("/"):
+        urls_to_try.append(url[:-1])
+    else:
+        urls_to_try.append(url + "/")
+
+    raw_u = url if url.startswith(("http://", "https://")) else f"https://{url}"
+    parsed = urllib.parse.urlparse(raw_u)
+    if parsed.path and parsed.path not in ["", "/"]:
+        urls_to_try.append(f"{parsed.scheme}://{parsed.netloc}/")
+        if "menu" in parsed.path:
+            urls_to_try.extend([f"{parsed.scheme}://{parsed.netloc}/menus/", f"{parsed.scheme}://{parsed.netloc}/menu/"])
+
+    headers = {"User-Agent": "SmaraAgent/1.0 (smara@memoryos.org)"}
+    for candidate_url in urls_to_try:
+        api_url = f"https://archive.org/wayback/available?url={urllib.parse.quote(candidate_url)}"
+        if clean_date:
+            api_url += f"&timestamp={clean_date}"
+        try:
+            req = urllib.request.Request(api_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                snapshots = data.get("archived_snapshots", {})
+                closest = snapshots.get("closest", {})
+                snapshot_url = closest.get("url")
+                snap_ts = closest.get("timestamp", "")
+                if snapshot_url:
+                    if not clean_date or snap_ts[:4] == clean_date[:4]:
+                        return f"Found snapshot for {candidate_url} ({snap_ts}):\n" + web_extract(snapshot_url, max_chars=max_chars)
+        except Exception:
+            continue
+
+    return f"No Wayback Machine snapshot found for {url} near date {clean_date or target_date}."
 
 
 def wikipedia_page(title_or_url: str, date_or_timestamp: str = "", action: str = "text", max_chars: int = 8000) -> str:
@@ -585,34 +606,49 @@ def video_inspect(
             import cv2
             import yt_dlp
 
-            # Download short 4s segment around timestamp
-            seg_start = max(0, int(ts) - 2)
-            seg_end = int(ts) + 2
-            out_file = Path(tempfile.gettempdir()) / f"frame_seg_{int(time.time())}.mp4"
+            # Download short 6s segment around timestamp
+            seg_start = max(0, int(ts) - 3)
+            seg_end = int(ts) + 3
+            prefix = f"frame_seg_{int(time.time())}"
+            temp_dir = Path(tempfile.gettempdir())
+            out_tmpl = str(temp_dir / f"{prefix}_%(id)s.%(ext)s")
 
             ydl_opts = {
                 "quiet": True,
-                "format": "mp4[height<=480]/best[height<=480]",
+                "format": "mp4[height<=480]/best[height<=480]/best",
                 "download_ranges": yt_dlp.utils.download_range_func(None, [(seg_start, seg_end)]),
-                "outtmpl": str(out_file.with_suffix("")),
+                "outtmpl": out_tmpl,
                 "force_keyframes_at_cuts": True,
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url_or_path])
 
-            cap = cv2.VideoCapture(str(out_file))
+            matched_files = list(temp_dir.glob(f"{prefix}*"))
+            if not matched_files:
+                return "Error: yt-dlp did not produce an output file for the requested segment."
+
+            actual_vid_file = matched_files[0]
+            cap = cv2.VideoCapture(str(actual_vid_file))
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            target_offset_sec = max(0.0, float(ts) - float(seg_start))
+            target_frame_num = int(target_offset_sec * fps)
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame_num)
             ret, frame = cap.read()
+            if not ret:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ret, frame = cap.read()
             cap.release()
 
             try:
-                out_file.unlink(missing_ok=True)
+                actual_vid_file.unlink(missing_ok=True)
             except Exception:
                 pass
 
-            if not ret:
+            if not ret or frame is None:
                 return "Error: Could not extract frame at specified timestamp."
 
-            frame_path = Path(tempfile.gettempdir()) / f"extracted_frame_{int(ts)}s.png"
+            frame_path = temp_dir / f"extracted_frame_{int(ts)}s.png"
             cv2.imwrite(str(frame_path), frame)
 
             vision_prompt = prompt or f"Describe what is displayed on screen at timestamp {ts} seconds in detail, including all text, numbers, and UI elements."

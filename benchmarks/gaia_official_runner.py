@@ -484,7 +484,11 @@ if __name__ == "__main__":
     parser.add_argument("--count", type=int, default=None, help="Number of tasks to evaluate (default: all)")
     args = parser.parse_args()
 
-    token = os.environ.get("HF_TOKEN", "")
+    try:
+        from smara.agent_tools import _get_vault_secret
+        token = os.environ.get("HF_TOKEN") or _get_vault_secret("HF_TOKEN") or ""
+    except Exception:
+        token = os.environ.get("HF_TOKEN", "")
     runner = GaiaOfficialBenchmark(token=token)
     summary = runner.evaluate_level(level=args.level, start_idx=args.start, max_tasks=args.count)
 
