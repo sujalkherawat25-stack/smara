@@ -822,6 +822,7 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - **Dense Tabular PDF Extraction**: When analyzing dense multi-column tables, standards documents, or statistical tables in PDFs (>10 rows or multiple columns), DO NOT attempt to visually align columns in conversational reasoning. Instead, write a Python script via `python_execute` (using `pypdf`, `re`, or `pandas`) to parse rows, match column delimiters with regular expressions, and aggregate counts, averages, or conditions programmatically.
    - **Temporal Historical Profiles & Live APIs**: When querying author publication records, repository statistics, or profile histories for questions set in a specific historical context or past benchmark year, remember that live REST APIs (e.g. ORCID, GitHub, Wikipedia) return current data which may have grown over time. Always inspect entry dates (`publication_date <= YYYY`) programmatically in `python_execute` or check historical snapshots via `wayback_extract` when historical consistency is required.
    - **Parallel Multi-Query Batching**: When investigating multiple entities, standards, citations, or records (e.g. 5+ items), pass a list to `queries` in `web_search` or `urls` in `web_extract`, or write a concurrent Python script via `python_execute` (using `urllib` and `concurrent.futures.ThreadPoolExecutor`) to inspect all items concurrently in a single turn instead of querying one by one.
+   - **Progressive Scripted Accumulator**: For questions requiring checking status across multiple items (e.g. whether N standards are superseded, or aggregating publication totals), store the findings in a Python data structure via `python_execute` and calculate the final percentage, sum, or count deterministically in code (e.g. `print(round(len(superseded) / total * 100))`).
 
 
 3. **Honesty and Verification**:
@@ -1048,7 +1049,7 @@ class SmaraAutonomousAgent:
             logger.error(f"Error executing tool {tool_name} with args {tool_args}: {e}")
             return f"Error executing tool {tool_name}: {e}"
 
-    def _call_sarvam_api(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    def _call_sarvam_api(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, max_tokens: int = 16384) -> Dict[str, Any]:
         """Perform HTTP POST request to Sarvam /v2/chat/completions with Three-Zone Context Compaction."""
         # Active Three-Zone Context Compaction: protects Head/Tail, compresses middle steps, preserves active todos
         compacted_messages = _compact_conversation_history(messages, max_chars=35000, planner=self.task_planner)
@@ -1057,7 +1058,7 @@ class SmaraAutonomousAgent:
             "model": self.model,
             "messages": compacted_messages,
             "temperature": 0.0,
-            "max_tokens": 8192,
+            "max_tokens": max_tokens,
         }
         if tools:
             payload["tools"] = tools
@@ -1176,7 +1177,7 @@ class SmaraAutonomousAgent:
                     break
                 messages.append({
                     "role": "user",
-                    "content": "Notice: Your internal thinking exceeded maximum length. Keep your thinking concise (under 100 words) and directly output your tool call or state your final answer as:\nFINAL ANSWER: <exact answer>"
+                    "content": "Notice: Reasoning stream limit reached. Please execute your next tool call or state your final verified answer on the final line as:\nFINAL ANSWER: <exact answer>"
                 })
                 continue
 
@@ -1431,22 +1432,29 @@ class SmaraAutonomousAgent:
         if not text:
             return ""
 
+        # 1. Primary explicit prefix
         fa_match = re.search(r"(?:FINAL ANSWER|Final Answer|final answer|Answer):\s*([^\n\r]+)", text, re.IGNORECASE)
         cand_fa = fa_match.group(1).strip() if fa_match else ""
         if cand_fa and not _is_instruction_placeholder(cand_fa):
             ans = cand_fa
         else:
-            ans_match = re.search(r"(?:the answer is|the result is|the value is|therefore,?\s*(?:the answer is)?)\s*([^.\n\r]+)", text, re.IGNORECASE)
+            # 2. Strong concluding phrases
+            ans_match = re.search(r"(?:the answer is|the result is|the value is|the percentage is|percentage is|therefore,?\s*(?:the answer is)?)\s*([^.\n\r]+)", text, re.IGNORECASE)
             cand_alt = ans_match.group(1).strip() if ans_match else ""
             if cand_alt and not _is_instruction_placeholder(cand_alt):
                 ans = cand_alt
             else:
-                lines = [line.strip() for line in text.splitlines() if line.strip()]
-                ans = ""
-                for l in reversed(lines):
-                    if not _is_instruction_placeholder(l):
-                        ans = l
-                        break
+                # 3. Dual-stream mathematical percentage/ratio equations e.g. "180/5 = 36.0", "6/7 = 85.7% -> 86%", "equals 86%", "is 86%"
+                math_pct = re.findall(r"(?:=\s*|is\s*|equals?\s*|percentage is\s*)([0-9]+(?:\.[0-9]+)?)\s*%", text, re.IGNORECASE)
+                if math_pct:
+                    ans = math_pct[-1]
+                else:
+                    lines = [line.strip() for line in text.splitlines() if line.strip()]
+                    ans = ""
+                    for l in reversed(lines):
+                        if not _is_instruction_placeholder(l) and not l.startswith("###") and not l.startswith("==="):
+                            ans = l
+                            break
 
         ans = re.sub(
             r"^(?:FINAL ANSWER|Final Answer|final answer|Answer|The answer is|The result is|It is|Output:?)\s*[:\-]?\s*",
