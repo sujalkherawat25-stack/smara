@@ -1078,6 +1078,14 @@ def main(argv: list[str] | None = None) -> int:
     cmd = getattr(parsed_args, "command", None) or getattr(parsed_args, "subcommand", None)
 
     # Handle subcommands
+    if cmd == "ask":
+        msg = getattr(parsed_args, "message", "")
+        if msg:
+            engine.run_turn(msg)
+            return 0
+        print(tui.paint("Error: Message cannot be empty for 'ask'.", "RED"))
+        return 1
+
     if cmd == "git":
         from .git_agent import GitWorkspaceManager
         mgr = GitWorkspaceManager(engine.workspace)
