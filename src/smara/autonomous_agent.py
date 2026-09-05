@@ -196,7 +196,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "Search the live web using Tavily / Google / DuckDuckGo for factual, up-to-date, or historical information.",
+            "description": "Search the live web using Tavily / Google / DuckDuckGo for factual, up-to-date, or historical information. Supports single query or concurrent batch queries.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -204,13 +204,17 @@ TOOL_SCHEMAS = [
                         "type": "string",
                         "description": "The search query keywords."
                     },
+                    "queries": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of search queries to execute concurrently in parallel."
+                    },
                     "max_results": {
                         "type": "integer",
-                        "description": "Number of search results to return (default 5).",
+                        "description": "Number of search results to return per query (default 5).",
                         "default": 5
                     }
-                },
-                "required": ["query"]
+                }
             }
         }
     },
@@ -218,16 +222,25 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "web_extract",
-            "description": "Fetch and parse full readable text content from a web URL or Wikipedia article.",
+            "description": "Fetch and parse readable text content from web URLs or Wikipedia articles. Supports single URL or concurrent batch URLs.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "url": {
                         "type": "string",
                         "description": "The full HTTP or HTTPS URL to fetch."
+                    },
+                    "urls": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of URLs to fetch and extract concurrently in parallel."
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "description": "Maximum characters per page (default 5000).",
+                        "default": 5000
                     }
-                },
-                "required": ["url"]
+                }
             }
         }
     },
@@ -807,6 +820,7 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - **2D Geometry & Visual Dimension Decomposition**: For complex multi-segment 2D polygons or architectural layouts, partition the shape into disjoint bounding rectangles or triangles, determine the missing edge lengths using parallel edge arithmetic, and compute total area by summing sub-regions in `python_execute`.
    - **Dense Tabular PDF Extraction**: When analyzing dense multi-column tables, standards documents, or statistical tables in PDFs (>10 rows or multiple columns), DO NOT attempt to visually align columns in conversational reasoning. Instead, write a Python script via `python_execute` (using `pypdf`, `re`, or `pandas`) to parse rows, match column delimiters with regular expressions, and aggregate counts, averages, or conditions programmatically.
    - **Temporal Historical Profiles & Live APIs**: When querying author publication records, repository statistics, or profile histories for questions set in a specific historical context or past benchmark year, remember that live REST APIs (e.g. ORCID, GitHub, Wikipedia) return current data which may have grown over time. Always inspect entry dates (`publication_date <= YYYY`) programmatically in `python_execute` or check historical snapshots via `wayback_extract` when historical consistency is required.
+   - **Parallel Multi-Query Batching**: When investigating multiple entities, standards, citations, or records (e.g. 5+ items), pass a list to `queries` in `web_search` or `urls` in `web_extract`, or write a concurrent Python script via `python_execute` (using `urllib` and `concurrent.futures.ThreadPoolExecutor`) to inspect all items concurrently in a single turn instead of querying one by one.
 
 
 3. **Honesty and Verification**:
@@ -854,7 +868,7 @@ class SmaraAutonomousAgent:
         api_key: Optional[str] = None,
         base_url: str = "https://api.sarvam.ai/v2/chat/completions",
         model: str = "glm5.2",
-        max_iterations: int = 16,
+        max_iterations: int = 20,
         toolset: str = "full",
     ):
         self.api_key = api_key or _get_api_key_from_vault_or_env()
@@ -923,11 +937,14 @@ class SmaraAutonomousAgent:
 
     def _dispatch_web_search(self, args: Dict[str, Any]) -> str:
         q = args.get("query") or args.get("q") or ""
-        return web_search(q, max_results=args.get("max_results", 5))
+        qs = args.get("queries")
+        return web_search(query=q, queries=qs, max_results=args.get("max_results", 5))
 
     def _dispatch_web_extract(self, args: Dict[str, Any]) -> str:
         u = args.get("url") or ""
-        return web_extract(u)
+        us = args.get("urls")
+        mc = args.get("max_chars", 5000)
+        return web_extract(url=u, urls=us, max_chars=mc)
 
     def _dispatch_web_reader_dynamic(self, args: Dict[str, Any]) -> str:
         u = args.get("url") or ""
@@ -1108,11 +1125,20 @@ class SmaraAutonomousAgent:
 
         touched_code_files: set[str] = set()
 
-        for iteration in range(1, self.max_iterations + 1):
-            logger.info(f"Agent Loop Iteration {iteration}/{self.max_iterations}")
+        max_loop_iterations = self.max_iterations
+        iteration = 0
+        while iteration < max_loop_iterations:
+            iteration += 1
+            # Dynamic scaling: if active multi-stage todo plan exists and iteration reaches current budget, extend up to 24
+            if iteration == max_loop_iterations and max_loop_iterations < 24:
+                if (hasattr(self, "task_planner") and self.task_planner.has_items()) or len(tools_used) >= 6:
+                    max_loop_iterations = min(max_loop_iterations + 4, 24)
+                    logger.info(f"Dynamic Iteration Scaling: Extended turn budget to {max_loop_iterations} due to active multi-stage plan.")
+
+            logger.info(f"Agent Loop Iteration {iteration}/{max_loop_iterations}")
 
             # If agent has already observed tool outputs or reached final iteration, disable tools to force clean synthesis
-            is_final_step = (iteration == self.max_iterations)
+            is_final_step = (iteration == max_loop_iterations)
             active_tools = None if (is_final_step or consecutive_no_tool >= 1) else get_tool_schemas(self.toolset)
 
             if is_final_step:

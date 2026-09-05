@@ -64,17 +64,7 @@ def _truncate_output(text: str, max_chars: int = 16000) -> str:
     return text
 
 
-def web_search(query: str, max_results: int = 5, api_key: Optional[str] = None, limit: Optional[int] = None) -> str:
-    """Execute live web search using Tavily API."""
-    if isinstance(max_results, str) and (max_results.startswith("tvly-") or len(max_results) > 20):
-        api_key, max_results = max_results, 5
-    if isinstance(api_key, int):
-        max_results, api_key = api_key, None
-    count = limit or max_results or 5
-    if not api_key:
-        api_key = _get_vault_secret("TAVILY_API_KEY")
-    if not api_key or not query.strip():
-        return "Error: Missing Tavily API key or query."
+def _single_web_search(query: str, count: int, api_key: str) -> str:
     url = "https://api.tavily.com/search"
     payload = json.dumps({
         "api_key": api_key,
@@ -95,9 +85,62 @@ def web_search(query: str, max_results: int = 5, api_key: Optional[str] = None, 
                 link = r.get("url", "")
                 snippet = r.get("content", "")
                 formatted.append(f"[{idx+1}] {title}\nURL: {link}\n{snippet}")
-            return _truncate_output("\n\n".join(formatted))
+            return "\n\n".join(formatted)
     except Exception as e:
         return f"Search Error: {e}"
+
+
+def web_search(
+    query: str = "",
+    queries: Optional[List[str]] = None,
+    max_results: int = 5,
+    api_key: Optional[str] = None,
+    limit: Optional[int] = None
+) -> str:
+    """Execute live web search using Tavily API. Supports single query or concurrent batch queries."""
+    if isinstance(max_results, str) and (max_results.startswith("tvly-") or len(max_results) > 20):
+        api_key, max_results = max_results, 5
+    if isinstance(api_key, int):
+        max_results, api_key = api_key, None
+    count = limit or max_results or 5
+    if not api_key:
+        api_key = _get_vault_secret("TAVILY_API_KEY")
+    if not api_key:
+        return "Error: Missing Tavily API key."
+
+    all_queries: List[str] = []
+    if queries and isinstance(queries, list):
+        all_queries.extend([str(q).strip() for q in queries if str(q).strip()])
+    if query and str(query).strip() and str(query).strip() not in all_queries:
+        all_queries.insert(0, str(query).strip())
+
+    if not all_queries:
+        return "Error: Missing query string or queries list."
+
+    if len(all_queries) == 1:
+        return _truncate_output(_single_web_search(all_queries[0], count, api_key))
+
+    import concurrent.futures
+    results_dict: Dict[int, Tuple[str, str]] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(all_queries), 6)) as pool:
+        future_to_idx = {
+            pool.submit(_single_web_search, q, count, api_key): (idx, q)
+            for idx, q in enumerate(all_queries)
+        }
+        for future in concurrent.futures.as_completed(future_to_idx):
+            idx, q = future_to_idx[future]
+            try:
+                res = future.result()
+            except Exception as ex:
+                res = f"Search Error: {ex}"
+            results_dict[idx] = (q, res)
+
+    formatted_batch = []
+    for idx in sorted(results_dict.keys()):
+        q, res = results_dict[idx]
+        formatted_batch.append(f"### [Query {idx+1}/{len(all_queries)}]: \"{q}\"\n{res}")
+
+    return _truncate_output("\n\n" + ("=" * 40) + "\n\n".join(formatted_batch))
 
 
 def clean_html(html_text: str) -> str:
@@ -139,8 +182,7 @@ def web_reader_dynamic(url: str, max_chars: int = 16000) -> str:
         return f"Dynamic Reader Error: {e}"
 
 
-def web_extract(url: str, max_chars: int = 5000) -> str:
-    """Fetch URL and extract readable plain text, falling back to dynamic headless reader if needed."""
+def _single_web_extract(url: str, max_chars: int) -> str:
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     req = urllib.request.Request(
@@ -154,7 +196,6 @@ def web_extract(url: str, max_chars: int = 5000) -> str:
             html_text = raw_bytes.decode(charset, errors="replace")
             cleaned = clean_html(html_text)
             if len(cleaned) < 150:
-                # Page might be client-rendered SPA / JavaScript; try dynamic reader
                 dyn = web_reader_dynamic(url, max_chars=max_chars)
                 if not dyn.startswith("Dynamic Reader Error") and len(dyn) > len(cleaned):
                     return dyn
@@ -162,11 +203,48 @@ def web_extract(url: str, max_chars: int = 5000) -> str:
                 return cleaned[:max_chars] + f"\n... [Truncated {len(cleaned) - max_chars} characters]"
             return cleaned or "Web page content was empty."
     except Exception as e:
-        # If blocked or network error, attempt dynamic headless reader fallback
         dyn = web_reader_dynamic(url, max_chars=max_chars)
         if not dyn.startswith("Dynamic Reader Error"):
             return dyn
         return f"Extract Error: {e}"
+
+
+def web_extract(url: str = "", urls: Optional[List[str]] = None, max_chars: int = 5000) -> str:
+    """Fetch URL and extract readable plain text. Supports single URL or concurrent batch URLs."""
+    all_urls: List[str] = []
+    if urls and isinstance(urls, list):
+        all_urls.extend([str(u).strip() for u in urls if str(u).strip()])
+    if url and str(url).strip() and str(url).strip() not in all_urls:
+        all_urls.insert(0, str(url).strip())
+
+    if not all_urls:
+        return "Error: Missing url or urls list."
+
+    if len(all_urls) == 1:
+        return _single_web_extract(all_urls[0], max_chars=max_chars)
+
+    import concurrent.futures
+    per_url_chars = max(1500, max_chars // len(all_urls)) if len(all_urls) > 3 else max_chars
+    results_dict: Dict[int, Tuple[str, str]] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(all_urls), 6)) as pool:
+        future_to_idx = {
+            pool.submit(_single_web_extract, u, per_url_chars): (idx, u)
+            for idx, u in enumerate(all_urls)
+        }
+        for future in concurrent.futures.as_completed(future_to_idx):
+            idx, u = future_to_idx[future]
+            try:
+                res = future.result()
+            except Exception as ex:
+                res = f"Extract Error: {ex}"
+            results_dict[idx] = (u, res)
+
+    formatted_batch = []
+    for idx in sorted(results_dict.keys()):
+        u, res = results_dict[idx]
+        formatted_batch.append(f"### [URL {idx+1}/{len(all_urls)}]: {u}\n{res}")
+
+    return _truncate_output("\n\n" + ("=" * 40) + "\n\n".join(formatted_batch))
 
 
 def wayback_extract(url: str, timestamp: str = "", target_date: str = "", max_chars: int = 5000) -> str:
