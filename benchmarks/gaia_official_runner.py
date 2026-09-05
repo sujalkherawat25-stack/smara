@@ -321,12 +321,8 @@ class GaiaOfficialBenchmark:
                 file_name, self.token, self.files_cache
             )
 
-        # Detect multimodal task to route to Gemma 4
-        is_multimodal = (
-            any(file_name.lower().endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp", ".mp3", ".mp4", ".wav", ".ogg", ".avi", ".m4a"])
-            or any(kw in question.lower() for kw in ["image", "photo", "picture", "audio", "sound", "video", "listen", "visual"])
-        )
-        self.agent.model = "gemma4" if is_multimodal else "glm5.2"
+        # Main agent reasoning engine is Sarvam GLM-5.2 for all tasks
+        self.agent.model = "glm5.2"
 
         # Execute genuine autonomous ReAct loop
         result = self.agent.run(
@@ -343,26 +339,36 @@ class GaiaOfficialBenchmark:
 
         return answer, tools
 
-    def evaluate_level(self, level: str = "1", max_tasks: Optional[int] = None) -> Dict[str, Any]:
-        tasks = [t for t in self.val_tasks if str(t.get("Level")) == str(level)]
-        if max_tasks is not None:
-            tasks = tasks[:max_tasks]
+    def evaluate_level(self, level: str = "1", start_idx: int = 0, max_tasks: Optional[int] = None) -> Dict[str, Any]:
+        all_tasks = [t for t in self.val_tasks if str(t.get("Level")) == str(level)]
+        end_idx = (start_idx + max_tasks) if max_tasks is not None else len(all_tasks)
+        tasks = all_tasks[start_idx:end_idx]
 
         print("=" * 75)
-        print(f"  OFFICIAL GAIA BENCHMARK - LEVEL {level} FULL EVALUATION ({len(tasks)} TASKS)")
+        print(f"  OFFICIAL GAIA BENCHMARK - LEVEL {level} EVALUATION (Tasks {start_idx} to {min(end_idx, len(all_tasks))} of {len(all_tasks)})")
         print("=" * 75)
+
+        json_path = self.reports_dir / f"gaia_official_level{level}_full_results.json"
+        existing_results: Dict[str, Dict[str, Any]] = {}
+        if json_path.exists():
+            try:
+                old_data = json.loads(json_path.read_text(encoding="utf-8"))
+                for r in old_data.get("results", []):
+                    existing_results[r["task_id"]] = r
+            except Exception:
+                pass
 
         results: List[GaiaEvalResult] = []
-        json_path = self.reports_dir / f"gaia_official_level{level}_full_results.json"
 
         for idx, task in enumerate(tasks):
+            actual_idx = start_idx + idx
             t0 = time.time()
             tid = task["task_id"]
             question = task["Question"]
             gt = str(task["Final answer"])
             fn = task.get("file_name") or ""
 
-            print(f"\n[TASK {idx+1}/{len(tasks)}] ID: {tid[:8]} | File: {fn or '(none)'}")
+            print(f"\n[TASK {actual_idx+1}/{len(all_tasks)}] ID: {tid[:8]} | File: {fn or '(none)'}")
             print(f"  Question:     {question.replace(chr(10), ' ')[:90]}...")
             print(f"  Ground Truth: {repr(gt)}")
 
@@ -386,21 +392,24 @@ class GaiaOfficialBenchmark:
                 file_name=fn,
             )
             results.append(res_obj)
+            existing_results[tid] = res_obj.to_dict()
 
+            all_res_list = list(existing_results.values())
             intermediate = {
                 "benchmark": f"Official GAIA - Level {level}",
-                "total_evaluated": len(results),
-                "correct": sum(1 for r in results if r.correct),
-                "incorrect": sum(1 for r in results if not r.correct),
-                "results": [r.to_dict() for r in results],
+                "total_evaluated": len(all_res_list),
+                "correct": sum(1 for r in all_res_list if r.get("correct")),
+                "incorrect": sum(1 for r in all_res_list if not r.get("correct")),
+                "results": all_res_list,
             }
             json_path.write_text(json.dumps(intermediate, indent=2), encoding="utf-8")
 
-        correct_count = sum(1 for r in results if r.correct)
-        incorrect_tasks = [r for r in results if not r.correct]
-        total = len(results)
+        all_res_list = list(existing_results.values())
+        correct_count = sum(1 for r in all_res_list if r.get("correct"))
+        incorrect_tasks = [r for r in all_res_list if not r.get("correct")]
+        total = len(all_res_list)
         acc = round((correct_count / total) * 100, 1) if total > 0 else 0.0
-        total_time = round(sum(r.duration_seconds for r in results), 2)
+        total_time = round(sum(r.get("duration_seconds", 0) for r in all_res_list), 2)
 
         summary = {
             "benchmark": f"Official GAIA (General AI Assistants) - Level {level}",
@@ -410,8 +419,8 @@ class GaiaOfficialBenchmark:
             "incorrect": len(incorrect_tasks),
             "accuracy_percent": acc,
             "total_duration_seconds": total_time,
-            "incorrect_tasks": [r.to_dict() for r in incorrect_tasks],
-            "results": [r.to_dict() for r in results],
+            "incorrect_tasks": incorrect_tasks,
+            "results": all_res_list,
         }
 
         self._compile_scorecard(summary, level=level)
@@ -471,12 +480,13 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--level", default="1", help="GAIA Level (1, 2, or 3)")
+    parser.add_argument("--start", type=int, default=0, help="Starting task index (default: 0)")
     parser.add_argument("--count", type=int, default=None, help="Number of tasks to evaluate (default: all)")
     args = parser.parse_args()
 
     token = os.environ.get("HF_TOKEN", "")
     runner = GaiaOfficialBenchmark(token=token)
-    summary = runner.evaluate_level(level=args.level, max_tasks=args.count)
+    summary = runner.evaluate_level(level=args.level, start_idx=args.start, max_tasks=args.count)
 
     print("\n" + "=" * 75)
     print(f"  EVALUATION COMPLETE: {summary['correct']}/{summary['total_evaluated']} ({summary['accuracy_percent']}%) in {summary['total_duration_seconds']}s")

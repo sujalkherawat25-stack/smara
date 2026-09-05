@@ -29,17 +29,45 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
+try:
+    import win32crypt
+except ImportError:
+    win32crypt = None
+
+
+def _get_vault_secret(alias: str) -> str:
+    key = os.getenv(alias, "")
+    if key:
+        return key
+    try:
+        cred_path = Path(r"C:\Users\sujal\AppData\Roaming\Smara\credentials.json")
+        if cred_path.exists() and win32crypt:
+            with open(cred_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            entry = data.get(alias, {})
+            protected = entry.get("protected")
+            if protected:
+                import base64
+                blob = base64.b64decode(protected)
+                _, decrypted = win32crypt.CryptUnprotectData(blob, None, None, None, 0)
+                return decrypted.decode("utf-8")
+    except Exception:
+        pass
+    return ""
+
+
+def _truncate_output(text: str, max_chars: int = 16000) -> str:
+    if len(text) > max_chars:
+        half = max_chars // 2
+        return text[:half] + f"\n\n... [Output truncated: {len(text)-max_chars} characters omitted to preserve context window] ...\n\n" + text[-half:]
+    return text
+
+
 def web_search(query: str, api_key: Optional[str] = None, max_results: int = 5, limit: Optional[int] = None) -> str:
     """Execute live web search using Tavily API."""
     count = limit or max_results or 5
     if not api_key:
-        api_key = os.getenv("TAVILY_API_KEY", "")
-        if not api_key:
-            try:
-                from benchmarks.gaia_official_runner import get_vault_secret
-                api_key = get_vault_secret("TAVILY_API_KEY")
-            except Exception:
-                pass
+        api_key = _get_vault_secret("TAVILY_API_KEY")
     if not api_key or not query.strip():
         return "Error: Missing Tavily API key or query."
     url = "https://api.tavily.com/search"
@@ -57,12 +85,12 @@ def web_search(query: str, api_key: Optional[str] = None, max_results: int = 5, 
             if not results:
                 return "No search results found."
             formatted = []
-            for idx, r in enumerate(results[:limit]):
+            for idx, r in enumerate(results[:count]):
                 title = r.get("title", "")
                 link = r.get("url", "")
                 snippet = r.get("content", "")
                 formatted.append(f"[{idx+1}] {title}\nURL: {link}\n{snippet}")
-            return "\n\n".join(formatted)
+            return _truncate_output("\n\n".join(formatted))
     except Exception as e:
         return f"Search Error: {e}"
 
@@ -145,8 +173,14 @@ def python_execute(code: str, timeout: int = 30) -> str:
         out = result.stdout.strip()
         err = result.stderr.strip()
         if result.returncode != 0:
-            return f"Process exited with code {result.returncode}:\n{err or out}"
-        return out or "(Script executed successfully with no stdout output)"
+            msg = f"Process exited with code {result.returncode}:\n{err or out}"
+            if len(msg) > 16000:
+                msg = msg[:8000] + f"\n\n... [Output truncated: {len(msg)-16000} characters omitted to preserve context window] ...\n\n" + msg[-8000:]
+            return msg
+        res = out or "(Script executed successfully with no stdout output)"
+        if len(res) > 16000:
+            res = res[:8000] + f"\n\n... [Output truncated: {len(res)-16000} characters omitted to preserve context window] ...\n\n" + res[-8000:]
+        return res
     except subprocess.TimeoutExpired:
         return f"Execution timed out after {timeout} seconds."
     except Exception as e:
@@ -166,10 +200,16 @@ def file_read(file_path: Path | str, max_chars: int = 6000) -> str:
 
     ext = p.suffix.lower()
 
+    if ext in [".png", ".jpg", ".jpeg", ".webp"]:
+        return image_inspect(str(p), prompt="Transcribe all visible text, numbers, labels, diagrams, and content in this image in detail.")
+
+    if ext in [".mp3", ".wav", ".m4a", ".ogg", ".flac"]:
+        return audio_transcribe(str(p))
+
     if ext in [".txt", ".csv", ".json", ".md", ".py"]:
         try:
             text = p.read_text(encoding="utf-8", errors="replace")
-            return text[:max_chars]
+            return _truncate_output(text, max_chars=max_chars)
         except Exception as e:
             return f"Error reading text file: {e}"
 
@@ -184,22 +224,34 @@ def file_read(file_path: Path | str, max_chars: int = 6000) -> str:
                     texts = [node.text for node in p_tag.iter() if node.text]
                     if texts:
                         paragraphs.append("".join(texts))
-            return "\n".join(paragraphs)[:max_chars]
+            return _truncate_output("\n".join(paragraphs), max_chars=max_chars)
         except Exception as e:
             return f"Error reading docx: {e}"
 
     if ext == ".xlsx":
         try:
             import openpyxl
-            wb = openpyxl.load_workbook(p, data_only=True)
+            wb = openpyxl.load_workbook(p, data_only=False)
             lines = []
-            for sheet in wb.sheetnames[:3]:
+            for sheet in wb.sheetnames[:4]:
                 ws = wb[sheet]
                 lines.append(f"--- Sheet: {sheet} ---")
-                for row in list(ws.iter_rows(values_only=True))[:100]:
-                    if any(v is not None for v in row):
-                        lines.append("\t".join(str(v) if v is not None else "" for v in row))
-            return "\n".join(lines)[:max_chars]
+                max_r = min(ws.max_row or 0, 120)
+                max_c = min(ws.max_column or 0, 40)
+                for r in range(1, max_r + 1):
+                    row_vals = []
+                    for c in range(1, max_c + 1):
+                        cell = ws.cell(row=r, column=c)
+                        val = cell.value
+                        if val is not None:
+                            val_str = str(val).strip()
+                            color = ""
+                            if cell.fill and cell.fill.start_color and cell.fill.start_color.rgb:
+                                color = f"[#{cell.fill.start_color.rgb}]"
+                            row_vals.append(f"({r},{c}):{val_str}{color}")
+                    if row_vals:
+                        lines.append(" | ".join(row_vals))
+            return _truncate_output("\n".join(lines), max_chars=max_chars)
         except Exception as e:
             return f"Error reading xlsx: {e}"
 
@@ -208,10 +260,10 @@ def file_read(file_path: Path | str, max_chars: int = 6000) -> str:
             import pypdf
             reader = pypdf.PdfReader(str(p))
             pages = []
-            for idx, page in enumerate(reader.pages[:10]):
+            for idx, page in enumerate(reader.pages[:20]):
                 txt = page.extract_text() or ""
                 pages.append(f"[Page {idx+1}]\n{txt}")
-            return "\n\n".join(pages)[:max_chars]
+            return _truncate_output("\n\n".join(pages), max_chars=max_chars)
         except Exception as e:
             return f"Error reading pdf: {e}"
 
@@ -220,7 +272,7 @@ def file_read(file_path: Path | str, max_chars: int = 6000) -> str:
             lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
             atom_lines = [l for l in lines if l.startswith(("ATOM", "HETATM"))]
             header = [l for l in lines if l.startswith(("HEADER", "TITLE", "COMPND"))]
-            summary = "\n".join(header + atom_lines[:30])
+            summary = "\n".join(header + atom_lines[:40])
             return f"PDB Structure ({len(atom_lines)} atoms total):\n{summary}"
         except Exception as e:
             return f"Error reading pdb: {e}"
@@ -228,29 +280,235 @@ def file_read(file_path: Path | str, max_chars: int = 6000) -> str:
     return f"Unsupported file extension: {ext}"
 
 
-def zip_extract_and_read(zip_path: Path | str, max_files: int = 25) -> str:
-    """Extract a ZIP archive and summarize/read text contents of files inside."""
+def zip_extract_and_read(zip_path: Path | str, target_file: Optional[str] = None, max_files: int = 25) -> str:
+    """Extract a ZIP archive and summarize or read specific target file inside."""
     p = Path(zip_path)
     if not p.exists():
-        return f"Error: File not found at {zip_path}"
+        # Fallback check in data/gaia_files
+        alt = Path("data/gaia_files") / p.name
+        if alt.exists():
+            p = alt
+        else:
+            return f"Error: File not found at {zip_path}"
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         try:
             with zipfile.ZipFile(p, "r") as zf:
                 zf.extractall(tmp_dir)
 
-            extracted_files = list(Path(tmp_dir).rglob("*"))
-            data_files = [f for f in extracted_files if f.is_file()]
-            output_parts = [f"ZIP Archive extracted {len(data_files)} files:"]
+            extracted_files = [f for f in Path(tmp_dir).rglob("*") if f.is_file()]
+            
+            # If target_file requested, find and return its content
+            if target_file and target_file.strip():
+                tf_clean = target_file.strip().lower()
+                matching = [f for f in extracted_files if tf_clean in f.name.lower() or tf_clean in str(f.relative_to(tmp_dir)).lower()]
+                if matching:
+                    target_match = matching[0]
+                    content = file_read(target_match, max_chars=12000)
+                    return f"=== File: {target_match.name} (from {p.name}) ===\n{content}"
+                else:
+                    avail = [str(f.relative_to(tmp_dir)) for f in extracted_files]
+                    return f"Target file '{target_file}' not found in archive. Available files: {avail}"
 
-            for f in data_files[:max_files]:
-                rel_name = f.relative_to(tmp_dir)
-                content = file_read(f, max_chars=1000)
-                output_parts.append(f"\n=== File: {rel_name} ===\n{content}")
+            # Default: summarize files inside archive
+            output_parts = [f"ZIP Archive '{p.name}' contains {len(extracted_files)} files:"]
+            for f in extracted_files[:max_files]:
+                rel_name = str(f.relative_to(tmp_dir))
+                content = file_read(f, max_chars=2000)
+                output_parts.append(f"\n=== File: {rel_name} ({f.stat().st_size} bytes) ===\n{content}")
 
-            return "\n".join(output_parts)
+            return _truncate_output("\n".join(output_parts))
         except Exception as e:
             return f"Error extracting zip: {e}"
+
+
+def audio_transcribe(file_path_or_url: str, model_size: str = "tiny.en") -> str:
+    """Transcribe audio files or online media to text using Whisper."""
+    p = Path(file_path_or_url)
+    if not p.exists():
+        alt = Path("data/gaia_files") / p.name
+        if alt.exists():
+            p = alt
+        elif file_path_or_url.startswith(("http://", "https://")):
+            # Download audio with yt-dlp
+            try:
+                import yt_dlp
+                tmp_audio = Path(tempfile.gettempdir()) / f"audio_{int(time.time())}.mp3"
+                ydl_opts = {
+                    "format": "bestaudio/best",
+                    "postprocessors": [{
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "192",
+                    }],
+                    "outtmpl": str(tmp_audio.with_suffix("")),
+                    "quiet": True,
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([file_path_or_url])
+                p = tmp_audio
+            except Exception as ex:
+                return f"Error downloading audio from {file_path_or_url}: {ex}"
+        else:
+            return f"Error: Audio file not found at {file_path_or_url}"
+
+    try:
+        from faster_whisper import WhisperModel
+        model = WhisperModel(model_size, device="cpu", compute_type="int8")
+        segments, info = model.transcribe(str(p))
+        transcription_lines = []
+        for seg in segments:
+            transcription_lines.append(f"[{seg.start:.1f}s - {seg.end:.1f}s] {seg.text.strip()}")
+        full_text = "\n".join(transcription_lines)
+        return _truncate_output(f"Audio Transcription ({info.duration:.1f}s, lang={info.language}):\n{full_text}")
+    except Exception as e:
+        return f"Audio transcription error: {e}"
+
+
+def image_inspect(image_path: str, prompt: str = "Describe this image in detail and transcribe all visible text.") -> str:
+    """Inspect local image or chart using Gemma 4 multimodal vision on Sarvam API."""
+    p = Path(image_path)
+    if not p.exists():
+        alt = Path("data/gaia_files") / p.name
+        if alt.exists():
+            p = alt
+        else:
+            return f"Error: Image not found at {image_path}"
+
+    try:
+        import base64
+        with open(p, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        ext = p.suffix.lower().replace(".", "")
+        mime = f"image/{ext}" if ext in ["png", "jpeg", "webp"] else "image/png"
+        api_key = _get_vault_secret("SMARA_MODEL_SARVAM_API_KEY")
+
+        url = "https://api.sarvam.ai/v2/chat/completions"
+        payload = {
+            "model": "gemma4",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
+                    ]
+                }
+            ],
+            "max_tokens": 1500,
+            "temperature": 0.0
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "api-subscription-key": api_key,
+                "Content-Type": "application/json"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=35) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            msg = data.get("choices", [{}])[0].get("message", {})
+            return msg.get("content") or "Vision model produced no text."
+    except Exception as e:
+        return f"Image inspection error: {e}"
+
+
+def video_inspect(
+    url_or_path: str,
+    action: str = "transcript",
+    timestamp_seconds: Optional[float] = None,
+    prompt: Optional[str] = None
+) -> str:
+    """Inspect video: fetch transcript, search metadata, or extract frame at timestamp for visual analysis."""
+    act = action.lower().strip()
+
+    # If action is transcript
+    if act in ["transcript", "subtitles"]:
+        # Try YouTubeTranscriptApi for YouTube URLs first
+        yt_id_match = re.search(r"(?:v=|youtu\.be/|shorts/)([a-zA-Z0-9_-]{11})", url_or_path)
+        if yt_id_match:
+            vid_id = yt_id_match.group(1)
+            try:
+                from youtube_transcript_api import YouTubeTranscriptApi
+                t = YouTubeTranscriptApi().fetch(vid_id)
+                lines = []
+                for seg in t:
+                    text = seg.text if hasattr(seg, 'text') else seg.get('text', '')
+                    start = seg.start if hasattr(seg, 'start') else seg.get('start', 0)
+                    lines.append(f"[{start:.1f}s] {text}")
+                return _truncate_output("\n".join(lines))
+            except Exception:
+                pass
+
+        # Fallback: transcribe audio using Whisper
+        return audio_transcribe(url_or_path)
+
+    # If action is metadata / info
+    if act in ["info", "metadata"]:
+        try:
+            import yt_dlp
+            ydl_opts = {"quiet": True, "noplaylist": True}
+            target = url_or_path if url_or_path.startswith(("http://", "https://")) else f"ytsearch1:{url_or_path}"
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(target, download=False)
+                if "entries" in info:
+                    info = info["entries"][0]
+                return (
+                    f"Title: {info.get('title')}\n"
+                    f"URL: {info.get('webpage_url')}\n"
+                    f"Uploader: {info.get('uploader')}\n"
+                    f"Upload Date: {info.get('upload_date')}\n"
+                    f"Duration: {info.get('duration')}s\n"
+                    f"Description:\n{str(info.get('description'))[:1000]}"
+                )
+        except Exception as e:
+            return f"Video info error: {e}"
+
+    # If action is frame extraction
+    if act in ["frame", "screenshot"]:
+        ts = timestamp_seconds or 0.0
+        try:
+            import cv2
+            import yt_dlp
+
+            # Download short 4s segment around timestamp
+            seg_start = max(0, int(ts) - 2)
+            seg_end = int(ts) + 2
+            out_file = Path(tempfile.gettempdir()) / f"frame_seg_{int(time.time())}.mp4"
+
+            ydl_opts = {
+                "quiet": True,
+                "format": "mp4[height<=480]/best[height<=480]",
+                "download_ranges": yt_dlp.utils.download_range_func(None, [(seg_start, seg_end)]),
+                "outtmpl": str(out_file.with_suffix("")),
+                "force_keyframes_at_cuts": True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url_or_path])
+
+            cap = cv2.VideoCapture(str(out_file))
+            ret, frame = cap.read()
+            cap.release()
+
+            try:
+                out_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+            if not ret:
+                return "Error: Could not extract frame at specified timestamp."
+
+            frame_path = Path(tempfile.gettempdir()) / f"extracted_frame_{int(ts)}s.png"
+            cv2.imwrite(str(frame_path), frame)
+
+            vision_prompt = prompt or f"Describe what is displayed on screen at timestamp {ts} seconds in detail, including all text, numbers, and UI elements."
+            return image_inspect(str(frame_path), prompt=vision_prompt)
+        except Exception as e:
+            return f"Video frame extraction error: {e}"
+
+    return f"Unknown video_inspect action: {action}. Available actions: transcript, info, frame"
 
 
 def calculate(expression: str) -> str:
