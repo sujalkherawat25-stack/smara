@@ -481,13 +481,13 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - **Ciphers & Decryption**: When decrypting Caesar ciphers or substitution ciphers, decrypt the exact characters strictly by shift offset using `python_execute`. You MUST output the exact decrypted characters produced by code VERBATIM. Do NOT alter, autocorrect, or "fix" any unusual spellings or names. Retain trailing punctuation (like periods '.') exactly as decrypted.
    - **Cross-Platform Scripting**: When writing Python scripts to download files or PDFs, use `tempfile.gettempdir()`, `io.BytesIO()`, or the current directory. NEVER use hardcoded Unix paths like `/tmp/` because they fail on Windows.
    - **String & Character Counting**: Always use Python code (`.count()`, `len()`) via `python_execute` to count letters, words, lines, or characters from text or image transcriptions to avoid manual counting mistakes.
-   - **Ancient & Positional Numeral Systems**: For Sumerian/Babylonian cuneiform, Roman numerals, sexagesimal (base-60), or obscure notations, write a Python script with `unicodedata.name()` to inspect the exact Unicode characters and calculate values mathematically. In sexagesimal positional systems: value = sum(d_i * 60**i).
-   - **Table Ranking & Extraction**: When comparing or ranking tabular data from websites (like box office rankings, population lists, sports statistics), fetch the table with `web_reader_dynamic` or `web_extract` and load it into a `pandas.DataFrame` or `BeautifulSoup` in `python_execute` to programmatically filter, sort, and slice rows rather than reading visual rankings manually.
+   - **Ancient & Positional Numeral Systems**: For ancient numerals, non-standard glyphs, or positional notations (such as sexagesimal or Roman numerals), write a Python script with `unicodedata.name()` to inspect the exact characters and calculate values mathematically using base expansion: value = sum(d_i * B**i).
+   - **Table Ranking & Extraction**: When comparing or ranking tabular data from websites (like charts, rankings, population lists, or statistics), fetch the table with `web_reader_dynamic` or `web_extract` and load it into a `pandas.DataFrame` or `BeautifulSoup` in `python_execute` to programmatically filter, sort, and slice rows rather than reading visual rankings manually.
    - **Large Document & PDF Deep Search**: When searching for specific citations, endnotes, or mentions across long PDFs (> 20 pages), use `pdf_search` with targeted keywords (e.g. author name, citation number, title phrase) or write a Python script with `pypdf` to scan all pages systematically.
    - **Algebraic Word Problems & Multi-Variable Systems**: Decompose complex multi-variable word problems into individual facts. Use web search or tools to independently verify each constant/variable, then invoke `sympy` or `scipy` in `python_execute` to solve the system of equations.
    - **Dynamic SPAs & JavaScript Web Pages**: For websites that use client-side rendering (SPA frameworks, interactive listings, dynamically loaded tables), use `web_reader_dynamic` which renders JavaScript via markdown reader endpoints.
    - **Video Inspection & Timestamps**: When asked about a specific visual detail at timestamp T, inspect frames across a short temporal window (T-1, T, T+1, T+2) using `video_inspect(action='frame')` to account for video keyframe cuts and transitions.
-   - **Holiday & Commuter Schedules**: When querying transit or event schedules on holidays (Memorial Day, Labor Day, etc.), verify if the agency operates on a Sunday/Holiday schedule rather than a regular weekday schedule.
+   - **Transit & Event Schedules**: When querying transit or institutional event schedules on holidays or weekends, verify whether Sunday or holiday timetables apply rather than standard weekday schedules.
    - **2D Geometry & Visual Dimension Decomposition**: For complex multi-segment 2D polygons or architectural layouts, partition the shape into disjoint bounding rectangles or triangles, determine the missing edge lengths using parallel edge arithmetic, and compute total area by summing sub-regions in `python_execute`.
 
 
@@ -495,16 +495,16 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - Never fabricate or guess facts, URLs, dates, or calculations.
    - Verify every intermediate step with real tool outputs.
 
-4. **Strict Final Answer Format (Official GAIA Standard)**:
+4. **Strict Final Answer Delivery Format**:
    - When verified, provide your definitive answer on the final line strictly as:
      FINAL ANSWER: <exact answer>
    - Provide ONLY the direct, concise answer value required by the question.
-   - Do NOT include conversational filler, explanations, justifications, or prefixes (such as 'the answer is', 'just the character:').
-   - For numerical questions with units (e.g. 'Report the answer in Angstroms...'), report ONLY the bare number in that requested unit without adding unit symbols or text (e.g. 1.456, NOT 1.456 Å or 146 pm).
-   - If asked for a character name, output ONLY the single character name (e.g. backtick).
+   - Do NOT include conversational filler, explanations, justifications, or prefixes (such as 'the answer is', 'the result is').
+   - For numerical questions with units (e.g. 'Report the answer in kilograms...'), report ONLY the bare number in that requested unit without adding unit symbols or text (e.g. 42.5, NOT 42.5 kg).
+   - If asked for a specific character, word, or name, output ONLY that exact element without decoration.
    - If asked for comma-separated or semicolon-separated items, list ONLY the items cleanly in the requested order.
    - When asked "how many percent above or below [standard]% is [actual]%", report the direct difference in percentage points (i.e. actual% - standard%, such as +4.6 or -2.1), not relative growth ((actual-standard)/standard*100).
-   - When asked "how many thousand X" or "how many million X", report the numerical quantity directly in that scaled unit (e.g. for 17,000 when asked "how many thousand hours", report 17, NOT 17000; for 5,000,000 when asked "how many million", report 5, NOT 5000000).
+   - When asked "how many thousand X" or "how many million X", report the numerical quantity directly in that scaled unit (e.g. for 25,000 when asked "how many thousand", report 25, NOT 25000; for 5,000,000 when asked "how many million", report 5, NOT 5000000).
 """
 
 
@@ -912,7 +912,7 @@ class SmaraAutonomousAgent:
 
     @staticmethod
     def _clean_final_answer(text: str) -> str:
-        """Extract exact answer adhering to GAIA evaluation formatting."""
+        """Extract exact concise answer adhering to standard question-answering formatting."""
         if not text:
             return ""
 
@@ -920,7 +920,7 @@ class SmaraAutonomousAgent:
         if fa_match:
             ans = fa_match.group(1).strip()
         else:
-            ans_match = re.search(r"(?:the answer is|the result is|the missing character is(?: a)?|the value is|the area is)\s*([^.\n\r]+)", text, re.IGNORECASE)
+            ans_match = re.search(r"(?:the answer is|the result is|the value is|therefore,?\s*(?:the answer is)?)\s*([^.\n\r]+)", text, re.IGNORECASE)
             if ans_match:
                 ans = ans_match.group(1).strip()
             else:
@@ -928,32 +928,32 @@ class SmaraAutonomousAgent:
                 ans = lines[-1] if lines else text.strip()
 
         ans = re.sub(
-            r"^(?:FINAL ANSWER|Final Answer|final answer|Answer|The answer is|The result is|It is|Just the character:?)\s*[:\-]?\s*",
+            r"^(?:FINAL ANSWER|Final Answer|final answer|Answer|The answer is|The result is|It is|Output:?)\s*[:\-]?\s*",
             "",
             ans,
             flags=re.IGNORECASE
         )
         ans = ans.strip("`*\"'").strip()
 
-        # If answer has trailing parenthetical notes, e.g. "142 (the beads are...)" or "backtick (grave...)"
+        # If answer has trailing parenthetical explanation, e.g. "42 (computed by...)", keep primary answer
         paren_m = re.match(r"^([^\(\)]+?)\s*\([^\)]*\)$", ans)
         if paren_m and paren_m.group(1).strip():
             ans = paren_m.group(1).strip()
 
-        # Strip trailing explanation phrases like 'based on the memory note'
+        # Strip trailing explanation phrases like 'based on the calculation'
         ans = re.split(r"\s+(?:based on|according to|from the)\b", ans, flags=re.IGNORECASE)[0].strip()
 
         # Strip currency symbols if followed by digits
         if ans.startswith("$") and len(ans) > 1 and ans[1].isdigit():
             ans = ans[1:].strip()
 
-        # If integer with commas (e.g. "736,455" or "900,000"), strip commas
+        # If integer with commas (e.g. "1,234,567"), strip commas
         if re.match(r"^\d{1,3}(?:,\d{3})+$", ans):
             ans = ans.replace(",", "")
 
-        # If answer is a number followed by unit text (e.g. "1.456 Å" or "41 papers"), keep the bare number
+        # If answer is a number followed by unit text (e.g. "42.5 kg" or "100 meters"), keep the bare number
         num_unit = re.match(
-            r"^([+-]?\d+(?:\.\d+)?)\s*(?:Å|pm|Angstroms?|meters?|km|kg|years?|papers?|percent|%)\b",
+            r"^([+-]?\d+(?:\.\d+)?)\s*(?:[a-zA-Z%°]+)\b",
             ans,
             flags=re.IGNORECASE
         )

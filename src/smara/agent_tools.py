@@ -356,9 +356,21 @@ def python_execute(code: str, timeout: int = 30) -> str:
             pass
 
 
+def _resolve_file_path(file_path: Path | str) -> Path:
+    p = Path(file_path)
+    if p.exists():
+        return p
+    # Search common workspace attachment directories
+    for search_dir in [Path("data"), Path("data/attachments"), Path("data/files"), Path("attachments"), Path("files"), Path("data/gaia_files")]:
+        candidate = search_dir / p.name
+        if candidate.exists():
+            return candidate
+    return p
+
+
 def file_read(file_path: Path | str, max_chars: int = 6000) -> str:
     """Extract content from various file formats (.txt, .pdf, .docx, .xlsx, .pdb, .csv)."""
-    p = Path(file_path)
+    p = _resolve_file_path(file_path)
     if not p.exists():
         return f"Error: File not found at {file_path}"
 
@@ -452,13 +464,9 @@ def pdf_search(
     max_matches: int = 10,
 ) -> str:
     """Search for keyword or phrase across all pages of a PDF document, returning matching page numbers and excerpts."""
-    p = Path(pdf_path)
+    p = _resolve_file_path(pdf_path)
     if not p.exists():
-        alt = Path("data/gaia_files") / p.name
-        if alt.exists():
-            p = alt
-        else:
-            return f"Error: PDF not found at {pdf_path}"
+        return f"Error: PDF not found at {pdf_path}"
 
     try:
         import pypdf
@@ -494,14 +502,9 @@ def pdf_search(
 
 def zip_extract_and_read(zip_path: Path | str, target_file: Optional[str] = None, max_files: int = 25) -> str:
     """Extract a ZIP archive and summarize or read specific target file inside."""
-    p = Path(zip_path)
+    p = _resolve_file_path(zip_path)
     if not p.exists():
-        # Fallback check in data/gaia_files
-        alt = Path("data/gaia_files") / p.name
-        if alt.exists():
-            p = alt
-        else:
-            return f"Error: File not found at {zip_path}"
+        return f"Error: File not found at {zip_path}"
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         try:
@@ -536,12 +539,9 @@ def zip_extract_and_read(zip_path: Path | str, target_file: Optional[str] = None
 
 def audio_transcribe(file_path_or_url: str, model_size: str = "tiny.en") -> str:
     """Transcribe audio files or online media to text using Whisper."""
-    p = Path(file_path_or_url)
+    p = _resolve_file_path(file_path_or_url)
     if not p.exists():
-        alt = Path("data/gaia_files") / p.name
-        if alt.exists():
-            p = alt
-        elif file_path_or_url.startswith(("http://", "https://")):
+        if file_path_or_url.startswith(("http://", "https://")):
             # Download audio with yt-dlp
             try:
                 import yt_dlp
@@ -579,13 +579,9 @@ def audio_transcribe(file_path_or_url: str, model_size: str = "tiny.en") -> str:
 
 def image_inspect(image_path: str, prompt: str = "Describe this image in detail and transcribe all visible text.") -> str:
     """Inspect local image or chart using Gemma 4 multimodal vision on Sarvam API."""
-    p = Path(image_path)
+    p = _resolve_file_path(image_path)
     if not p.exists():
-        alt = Path("data/gaia_files") / p.name
-        if alt.exists():
-            p = alt
-        else:
-            return f"Error: Image not found at {image_path}"
+        return f"Error: Image not found at {image_path}"
 
     try:
         import base64
