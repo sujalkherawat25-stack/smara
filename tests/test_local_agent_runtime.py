@@ -35,3 +35,33 @@ def test_agent_stops_repeated_local_action(tmp_path: Path):
     assert result["completed"] is False
     assert result["failure_reason"] == "repeated_action"
     assert len(result["steps"]) == 3
+
+
+def test_strip_thinking_removes_scratchpads():
+    from smara.local_agent_runtime import _strip_thinking
+    assert _strip_thinking("<think>Analyzing user query...</think>Final response") == "Final response"
+    assert _strip_thinking("<thinking>Step 1\nStep 2</thinking>Result") == "Result"
+    assert _strip_thinking("[THOUGHT]Internal thought[/THOUGHT]Clean output") == "Clean output"
+
+
+def test_parse_plan_dynamic_formats():
+    from smara.local_agent_runtime import _parse_plan
+    # Flexible action format
+    plan1 = _parse_plan('{"action": "local_python", "payload": {"code": "import urllib.request"}}')
+    assert plan1 is not None
+    assert plan1["kind"] == "local_action"
+    assert plan1["capability"] == "local_python"
+    assert plan1["payload"]["code"] == "import urllib.request"
+
+    # Embedded code format
+    plan2 = _parse_plan('{"action": "local_python", "code": "print(123)"}')
+    assert plan2 is not None
+    assert plan2["kind"] == "local_action"
+    assert plan2["capability"] == "local_python"
+    assert plan2["payload"]["code"] == "print(123)"
+
+    # Text embedded JSON with thinking
+    plan3 = _parse_plan('<think>Let me fetch the data</think>\n```json\n{"action": "local_python", "payload": {"code": "fetch()"}}\n```')
+    assert plan3 is not None
+    assert plan3["capability"] == "local_python"
+
