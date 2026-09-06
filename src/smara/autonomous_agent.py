@@ -775,6 +775,15 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
         return TOOL_SCHEMAS
     elif prof in ["coding", "swe"]:
         allowed = {"terminal", "file_write", "patch", "python_execute", "file_read", "todo", "delegate_task", "dag_flow"}
+    elif prof == "worker_coding":
+        # Isolated coder workers may change only their worktree; delegation and
+        # top-level DAG control stay unavailable to prevent recursive swarms.
+        allowed = {"terminal", "file_write", "patch", "python_execute", "file_read", "todo"}
+    elif prof == "worker_verification":
+        # Tester/auditor workers are read-only with respect to the repository.
+        # They can inspect files, run bounded checks, and gather evidence, but
+        # have no patch or file-write tool exposed.
+        allowed = {"terminal", "file_read", "python_execute", "calculate", "browser_action", "web_search", "todo"}
     elif prof in ["research", "web"]:
         allowed = {"browser_action", "web_search", "web_extract", "web_reader_dynamic", "wayback_extract", "wikipedia_page", "pdf_search", "calculate", "file_read", "todo"}
     elif prof in ["multimodal", "vision", "audio"]:
@@ -1496,4 +1505,3 @@ class SmaraAutonomousAgent:
         if _is_instruction_placeholder(ans):
             return ""
         return ans
-

@@ -61,138 +61,81 @@ class GoalSession:
 
 
 class GoalPlanner:
-    """Decomposes high-level objectives into ordered, dependency-tracked GoalSteps."""
+    """Validate a model-produced plan, with a transparent no-model fallback."""
 
-    @staticmethod
-    def plan(objective: str) -> list[GoalStep]:
-        obj_lower = objective.lower()
+    CAPABILITIES = frozenset({
+        "deep_research", "local_file_read", "local_file_write", "local_terminal",
+        "local_graph", "local_integration", "local_refactor", "local_test_fixer", "local_git",
+    })
 
-        # 1. Market Research & Deep Analysis Objective
-        if any(k in obj_lower for k in ["market", "research", "competitor", "pricing", "compute", "industry", "landscape"]):
-            return [
-                GoalStep(
-                    id="step_1",
-                    title="Multi-Vector Research Fan-Out",
-                    objective=f"Formulate orthogonal research vectors and queries for: {objective}",
-                    capability="deep_research",
-                    payload={"operation": "fan_out_queries", "topic": objective},
-                    dependencies=[],
-                ),
-                GoalStep(
-                    id="step_2",
-                    title="Multi-Source Neural Search & Retrieval",
-                    objective="Query live neural search engines and fetch primary industry reports",
-                    capability="deep_research",
-                    payload={"operation": "retrieve_sources", "topic": objective},
-                    dependencies=["step_1"],
-                ),
-                GoalStep(
-                    id="step_3",
-                    title="Primary Source Deep Scraping & Fact Triangulation",
-                    objective="Scrape key target web domains, documentation, and pricing sheets via Browser Engine",
-                    capability="deep_research",
-                    payload={"operation": "scrape_primary_evidence", "topic": objective},
-                    dependencies=["step_2"],
-                ),
-                GoalStep(
-                    id="step_4",
-                    title="Quantitative Market & Competitive Synthesis",
-                    objective="Synthesize competitive landscape, hardware supply chain, unit economics, and bottlenecks",
-                    capability="deep_research",
-                    payload={"operation": "synthesize_analysis", "topic": objective},
-                    dependencies=["step_3"],
-                ),
-                GoalStep(
-                    id="step_5",
-                    title="Executive Deliverable Compilation",
-                    objective="Compile full verified executive report and save artifact to reports/",
-                    capability="local_file_write",
-                    payload={"operation": "compile_report", "topic": objective},
-                    dependencies=["step_4"],
-                ),
-            ]
-
-        # 2. Code Engineering & Refactoring Objective
-        if any(k in obj_lower for k in ["refactor", "build", "implement", "fix", "test", "rewrite", "migrate"]):
-            return [
-                GoalStep(
-                    id="step_1",
-                    title="AST Blast Radius & Dependency Inspection",
-                    objective="Map affected symbols and call graphs before mutation",
-                    capability="local_graph",
-                    payload={"operation": "inspect_symbol", "symbol": "CodePropertyGraph"},
-                    dependencies=[],
-                ),
-                GoalStep(
-                    id="step_2",
-                    title="Pre-Flight Rollback Snapshot",
-                    objective="Capture pristine workspace snapshot in .smara/snapshots/",
-                    capability="local_refactor",
-                    payload={"operation": "snapshot", "description": objective[:50]},
-                    dependencies=["step_1"],
-                ),
-                GoalStep(
-                    id="step_3",
-                    title="Scoped Code Mutation & AST Verification",
-                    objective="Apply code mutations with syntax tree validation",
-                    capability="local_file_write",
-                    payload={"operation": "mutate_code", "objective": objective},
-                    dependencies=["step_2"],
-                ),
-                GoalStep(
-                    id="step_4",
-                    title="Test Suite Execution & Traceback Healing",
-                    objective="Run pytest test suite and auto-fix any failing assertions",
-                    capability="local_test_fixer",
-                    payload={"operation": "run_tests"},
-                    dependencies=["step_3"],
-                ),
-                GoalStep(
-                    id="step_5",
-                    title="Audit Signing & Semantic Commit",
-                    objective="Verify security bounds and generate AI conventional commit",
-                    capability="local_git",
-                    payload={"operation": "smart_commit", "message": f"feat: {objective[:60]}"},
-                    dependencies=["step_4"],
-                ),
-            ]
-
-        # 3. General Multi-Step Autonomous Workflow
+    @classmethod
+    def plan(cls, objective: str, model_reasoner: Callable[[str], Any] | None = None) -> list[GoalStep]:
+        if not str(objective).strip():
+            raise ValueError("Goal objective cannot be empty.")
+        if model_reasoner is not None:
+            proposed = model_reasoner(str(objective).strip())
+            validated = cls._validate_model_plan(proposed, str(objective).strip())
+            if validated:
+                return validated
+            raise ValueError("The goal planner returned no valid steps.")
+        # No keyword-driven fake specialization. Without a model, preserve the
+        # objective and create only a bounded inspect/act/verify scaffold.
         return [
-            GoalStep(
-                id="step_1",
-                title="Workspace & Resource Discovery",
-                objective=f"Analyze current state and gather initial context for: {objective}",
-                capability="local_file_read",
-                payload={"operation": "git_summary"},
-                dependencies=[],
-            ),
-            GoalStep(
-                id="step_2",
-                title="Action Plan Execution",
-                objective="Execute core actions to fulfill target goal",
-                capability="local_terminal",
-                payload={"command": "python -V"},
-                dependencies=["step_1"],
-            ),
-            GoalStep(
-                id="step_3",
-                title="Verification & Quality Audit",
-                objective="Validate deliverable criteria and record evidence",
-                capability="local_file_read",
-                payload={"operation": "workspace_snapshot"},
-                dependencies=["step_2"],
-            ),
+            GoalStep("step_1", "Inspect workspace", f"Inspect the workspace and gather evidence for: {objective}", "local_file_read", {"operation": "workspace_snapshot", "objective": objective}),
+            GoalStep("step_2", "Execute objective", f"Execute the approved actions required by: {objective}", "local_terminal", {"objective": objective}, ["step_1"]),
+            GoalStep("step_3", "Verify outcome", f"Verify the deliverables and evidence for: {objective}", "local_file_read", {"operation": "workspace_snapshot", "objective": objective}, ["step_2"]),
         ]
+
+    @classmethod
+    def _validate_model_plan(cls, proposed: Any, objective: str) -> list[GoalStep]:
+        if isinstance(proposed, dict):
+            proposed = proposed.get("steps")
+        if not isinstance(proposed, list):
+            return []
+        steps: list[GoalStep] = []
+        ids: set[str] = set()
+        for index, raw in enumerate(proposed, 1):
+            if not isinstance(raw, dict):
+                continue
+            step_id = str(raw.get("id") or f"step_{index}").strip()
+            capability = str(raw.get("capability") or "").strip()
+            title = str(raw.get("title") or raw.get("objective") or f"Step {index}").strip()
+            if not step_id or step_id in ids or capability not in cls.CAPABILITIES:
+                continue
+            deps = [str(dep).strip() for dep in raw.get("dependencies", []) if str(dep).strip()] if isinstance(raw.get("dependencies", []), list) else []
+            steps.append(GoalStep(step_id, title, str(raw.get("objective") or objective), capability, dict(raw.get("payload") or {}), deps))
+            ids.add(step_id)
+        if not steps:
+            return []
+        # Reject missing dependencies and cycles before persisting a session.
+        graph = {step.id: step.dependencies for step in steps}
+        if any(dep not in ids for deps in graph.values() for dep in deps):
+            raise ValueError("The goal planner returned an unknown dependency.")
+        visiting: set[str] = set()
+        visited: set[str] = set()
+        def visit(node: str) -> None:
+            if node in visiting:
+                raise ValueError("The goal planner returned a dependency cycle.")
+            if node in visited:
+                return
+            visiting.add(node)
+            for dep in graph[node]:
+                visit(dep)
+            visiting.remove(node)
+            visited.add(node)
+        for node in graph:
+            visit(node)
+        return steps
 
 
 class GoalRunner:
     """Manages stateful, resumable execution of long-horizon goals with step checkpointing."""
 
-    def __init__(self, workspace: Path | str | None = None):
+    def __init__(self, workspace: Path | str | None = None, planner: GoalPlanner | None = None):
         self.workspace = (Path(workspace) if workspace else Path.cwd()).resolve()
         self.goals_dir = self.workspace / ".smara" / "goals"
         self.goals_dir.mkdir(parents=True, exist_ok=True)
+        self.planner = planner or GoalPlanner()
 
     def _session_file(self, goal_id: str) -> Path:
         return self.goals_dir / f"{goal_id}.json"
@@ -236,6 +179,7 @@ class GoalRunner:
         executor_fn: Callable[[str, dict[str, Any], str], dict[str, Any]],
         on_event: Optional[Callable[[str, GoalStep, str], None]] = None,
         goal_id: Optional[str] = None,
+        model_reasoner: Callable[[str], Any] | None = None,
     ) -> GoalSession:
         """Run long-horizon goal loop with step checkpointing and dependency resolution."""
         gid = goal_id or f"goal_{int(time.time())}_{uuid.uuid4().hex[:6]}"
@@ -243,7 +187,7 @@ class GoalRunner:
         # Check if resuming existing session
         session = self.load_session(gid)
         if not session:
-            steps = GoalPlanner.plan(objective)
+            steps = self.planner.plan(objective, model_reasoner=model_reasoner)
             session = GoalSession(
                 goal_id=gid,
                 objective=objective,

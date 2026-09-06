@@ -1517,20 +1517,23 @@ def main(argv: list[str] | None = None) -> int:
         elif suite == "desktop":
             print(tui.paint("\n🖥️ Launching GAIA-Style Desktop Multi-Step Tasks...\n", "BOLD"))
             from benchmarks.gaia_desktop_runner import GaiaDesktopBenchmark
-            runner = GaiaDesktopBenchmark(workspace_root=engine.workspace)
-            summary = runner.run_all()
-            rate = summary.get("pass_rate_percent", summary.get("accuracy_percent", 100.0))
+            runner = GaiaDesktopBenchmark(
+                workspace_root=engine.workspace,
+                dataset_path=Path(dataset) if dataset else None,
+            )
+            summary = runner.run_all(level=level, max_tasks=count)
+            rate = summary.get("pass_rate_percent", summary.get("accuracy_percent", 0.0))
             passed = summary.get("passed", summary.get("passed_tasks", 0))
-            total = summary.get("total_tasks", 5)
+            total = summary.get("total_tasks", 0)
             color = "GREEN" if rate == 100.0 else "YELLOW"
-            print(tui.paint(f"\n✓ Desktop Tasks Complete: {passed}/{total} ({rate}%) in {summary.get('total_duration_seconds', 0)}s\n", color))
-            pdf_path = engine.workspace / "reports" / "gaia_benchmark_results.pdf"
-            if pdf_path.exists():
-                print(f"  📄 Official Scorecard PDF: {tui.paint(str(pdf_path), 'CYAN')}")
+            print(tui.paint(f"\n✓ Desktop Tasks Complete: {passed}/{total} scored ({rate}%). {summary.get('execution_errors', 0)} execution errors.\n", color))
+            report_path = summary.get("report_path")
+            if report_path:
+                print(f"  📄 Reproducible JSON report: {tui.paint(str(report_path), 'CYAN')}")
                 if auto_open:
                     import webbrowser
-                    webbrowser.open(str(pdf_path))
-            return 0
+                    webbrowser.open(str(report_path))
+            return 0 if not summary.get("execution_errors") else 2
 
         elif suite == "osworld":
             from benchmarks.osworld_readiness import OSWorldReadinessRunner

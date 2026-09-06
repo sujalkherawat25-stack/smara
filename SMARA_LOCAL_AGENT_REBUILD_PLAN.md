@@ -168,6 +168,30 @@ external action is attributable, bounded, and reviewable.
 5. 🟡 Run the native package against the broader corpus before adding more
    mutating workflows.
 
+## Phase 1 mock/shortcut purge (implemented)
+
+- ✅ SWE-bench runner delegates each repair to a real `SubagentWorker` in an
+  isolated Git worktree and records the actual diff/status; no string-replace
+  patch or fabricated verification remains.
+- ✅ GAIA Desktop compatibility now calls the strict shared-runtime runner and
+  emits only reproducible JSON evaluation reports; no pre-passing task or
+  pre-written PDF is generated.
+- ✅ Swarm architect/implementer/verifier/auditor roles use real workers,
+  workspace-scoped worktrees, and an in-process event queue. Success requires
+  worker evidence at every stage and no automatic commit is claimed.
+- ✅ Goal planning no longer branches on hard-coded keywords. Model-provided
+  plans are schema/dependency validated; the no-model path is an explicit
+  inspect/execute/verify scaffold rather than a fake specialized plan.
+- ✅ Desktop autonomous memory/resource paths no longer add artificial sleeps.
+  The Python bridge runs only from the configured Smara repository; stale
+  scratch-checkout fallbacks and synthetic report generation were removed.
+- ✅ Benchmark scorecards are loaded from actual report files and show `not_run`
+  when no report exists; static pass counts are not presented as results.
+
+🟡 This phase deliberately does not run live model-backed benchmarks. A score
+is valid only after the real dataset, provider, and attachments are available;
+the next phase is programmatic tool calling and persistent process control.
+
 ## Benchmark stack readiness slice (implemented)
 
 - ✅ GAIA evaluation now uses one shared local Desktop runtime and strict

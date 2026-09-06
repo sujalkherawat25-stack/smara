@@ -13,6 +13,7 @@ import enum
 import json
 import logging
 import os
+from pathlib import Path
 import sys
 import time
 from dataclasses import asdict, dataclass, field
@@ -66,6 +67,7 @@ class SubagentWorker:
         model: str = "glm5.2",
         max_iterations: int = 6,
         isolate_worktree: bool = False,
+        workspace_root: Optional[str | Path] = None,
     ):
         self.task_id = task_id
         self.role = role
@@ -74,10 +76,11 @@ class SubagentWorker:
         self.model = model
         self.max_iterations = max_iterations
         self.isolate_worktree = isolate_worktree or (role == SubagentRole.CODER)
+        self.workspace_root = Path(workspace_root).resolve() if workspace_root else None
 
     def run(self, goal: str, context: Optional[str] = None) -> DelegationResult:
         """Run isolated subagent loop on the delegated goal."""
-        from smara.autonomous_agent import SmaraAutonomousAgent, TOOL_SCHEMAS
+        from smara.autonomous_agent import SmaraAutonomousAgent
         from smara.subagent_worktree import (
             create_subagent_worktree,
             inspect_subagent_worktree,
@@ -85,31 +88,55 @@ class SubagentWorker:
         )
 
         t0 = time.time()
-        # Filter out blocked tools
-        safe_schemas = [
-            s for s in TOOL_SCHEMAS
-            if s.get("function", {}).get("name") not in DELEGATE_BLOCKED_TOOLS
-        ]
-
         worktree_info = None
         worktree_branch = None
         worktree_diff = None
         prev_cwd = os.getcwd()
+        execution_root = str(self.workspace_root or Path(prev_cwd).resolve())
 
         if self.isolate_worktree:
             try:
-                worktree_info = create_subagent_worktree(prev_cwd, self.task_id)
+                worktree_info = create_subagent_worktree(execution_root, self.task_id)
                 if worktree_info:
                     worktree_branch = worktree_info.get("branch")
                     os.chdir(worktree_info["path"])
+                else:
+                    # A coder must never silently edit the caller's checkout. If
+                    # isolation is unavailable, run read-only from the requested
+                    # workspace and let the worker report the inability to patch.
+                    os.chdir(execution_root)
             except Exception as wt_err:
                 logger.debug(f"Subagent worktree creation skipped: {wt_err}")
+                os.chdir(execution_root)
+            if worktree_info is None:
+                duration = int((time.time() - t0) * 1000)
+                if os.getcwd() != prev_cwd:
+                    os.chdir(prev_cwd)
+                return DelegationResult(
+                    task_id=self.task_id,
+                    goal=goal,
+                    status="FAILED",
+                    summary="Worker could not obtain an isolated Git worktree; no edit was attempted.",
+                    trace_steps=0,
+                    duration_ms=duration,
+                    tools_used=[],
+                    error="isolated_worktree_unavailable",
+                )
+        elif self.workspace_root:
+            os.chdir(execution_root)
 
         child_agent = SmaraAutonomousAgent(
             api_key=self.api_key,
             base_url=self.base_url,
             model=self.model,
-            max_iterations=self.max_iterations
+            max_iterations=self.max_iterations,
+            toolset=(
+                "worker_coding"
+                if self.role == SubagentRole.CODER
+                else "worker_verification"
+                if self.role in (SubagentRole.TESTER, SubagentRole.AUDITOR)
+                else "full"
+            ),
         )
 
         scoped_prompt = f"Delegated Goal for {self.role.value.upper()} worker:\n{goal}"
@@ -130,14 +157,18 @@ class SubagentWorker:
                     cleanup_subagent_worktree(worktree_info, force=True)
                     worktree_branch = None
 
+            answer = str(res.get("answer") or "").strip()
+            raw_answer = str(res.get("raw_answer") or "").strip()
+            failed = not answer or raw_answer.startswith("API_ERROR:")
             return DelegationResult(
                 task_id=self.task_id,
                 goal=goal,
-                status="SUCCESS",
+                status="FAILED" if failed else "SUCCESS",
                 summary=res.get("answer", ""),
                 trace_steps=len(res.get("trace", [])),
                 duration_ms=duration,
                 tools_used=res.get("tools_used", []),
+                error=(raw_answer or "Worker returned no answer") if failed else None,
                 worktree_branch=worktree_branch,
                 worktree_diff=worktree_diff,
             )
@@ -162,7 +193,7 @@ class SubagentWorker:
                 worktree_diff=None,
             )
         finally:
-            if worktree_info and os.getcwd() != prev_cwd:
+            if os.getcwd() != prev_cwd:
                 try:
                     os.chdir(prev_cwd)
                 except Exception:

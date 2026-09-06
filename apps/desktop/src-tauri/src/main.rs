@@ -408,9 +408,9 @@ fn command_hidden(command: &mut Command) {
 }
 
 fn executor_command(args: &[String]) -> Command {
-    // Prefer the bundled executor.  Older builds preferred a hard-coded
-    // Antigravity scratch checkout whenever `python.exe` was on PATH, which
-    // silently ran stale code instead of the executor bundled with this app.
+    // Prefer the bundled executor. Older builds could select an unrelated
+    // scratch checkout when `python.exe` was on PATH, silently running stale
+    // code instead of the executor bundled with this app.
     let direct_exe = executor_executable();
     if direct_exe.is_file() {
         let mut command = Command::new(direct_exe);
@@ -1883,10 +1883,8 @@ async fn try_autonomous_memory_action(app: &AppHandle, args: &ChatArgs) -> Resul
         if val.is_object() {
             let action = val.get("action").and_then(Value::as_str).unwrap_or("");
             let _ = app.emit("smara-chat-event", json!({"type": "thought", "text": "Updating durable local architectural memory ledger..."}));
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
             let _ = app.emit("smara-chat-event", json!({"type": "tool_call", "name": "local_memory_update", "preview": format!("Durable ledger operation: {action}")}));
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
             let _ = app.emit("smara-chat-event", json!({"type": "tool_result", "name": "local_memory_update", "ok": true, "preview": "Committed to SQLite and local JSON"}));
             let _ = app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"}));
@@ -1941,12 +1939,9 @@ async fn try_autonomous_resource_discovery(app: &AppHandle, args: &ChatArgs) -> 
             let target_name = val.get("folder_name").or_else(|| val.get("file_name")).and_then(Value::as_str).unwrap_or("Resource");
             let path_str = val.get("absolute_path").or_else(|| val.get("path")).and_then(Value::as_str).unwrap_or("");
             
-            // Codex/Antigravity style real-time execution streaming
             let _ = app.emit("smara-chat-event", json!({"type": "thought", "text": format!("Scanning system paths for '{target_name}'...")}));
-            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
 
             let _ = app.emit("smara-chat-event", json!({"type": "tool_call", "name": "local_file_read", "preview": format!("Discover & inspect {target_name} ({path_str})")}));
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
             let _ = app.emit("smara-chat-event", json!({"type": "tool_result", "name": "local_file_read", "ok": true, "preview": "100% complete"}));
             let _ = app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"}));
@@ -2103,42 +2098,9 @@ fn resolve_desktop_path(path_str: &str) -> PathBuf {
     }
 }
 
-fn auto_synthesize_report(target: &std::path::Path) -> bool {
-    let ext = target.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
-    if ext != "docx" && ext != "pdf" && ext != "md" {
-        return false;
-    }
-    let file_stem = target.file_stem().and_then(|s| s.to_str()).unwrap_or("report");
-    let title = file_stem.replace('_', " ").replace('-', " ");
-    let title_capitalized = title.split_whitespace().map(|w| {
-        let mut c = w.chars();
-        match c.next() {
-            None => String::new(),
-            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-        }
-    }).collect::<Vec<_>>().join(" ");
-
-    let target_str = target.to_string_lossy().replace('\\', "/");
-    let parent_str = target.parent().unwrap_or(target).to_string_lossy().replace('\\', "/");
-    let py_code = format!(
-        "import json\nfrom pathlib import Path\nfrom smara.desktop_executor import execute_step\nstate = {{'capabilities': ['local_file_write', 'local_file_read'], 'allowed_roots': [r'{}', r'{}']}}\ncontent = '# {}\\n\\n## Executive Summary\\nThis report was compiled autonomously by Smara Desktop.\\n\\n## Key Findings\\nAll automated checks and performance audits completed successfully.\\n\\n## Recommendations\\n1. Continuous operational monitoring.\\n2. Automated zero-friction verification.'\npayload = {{'required_capability': 'local_file_write', 'executor_payload': {{'operation': 'write', 'path': r'{}', 'content': content}}}}\ntry:\n    execute_step(payload, state)\nexcept Exception as e:\n    pass\n",
-        parent_str,
-        target_str,
-        title_capitalized,
-        target_str
-    );
-    let _ = run_python_bridge_code_sync(&py_code);
-    target.exists()
-}
-
 #[tauri::command]
 fn open_file_in_default_app(path: String) -> Result<(), String> {
     let resolved = resolve_desktop_path(&path);
-    if !resolved.exists() {
-        if path.contains("reports") || path.ends_with(".docx") || path.ends_with(".pdf") {
-            let _ = auto_synthesize_report(&resolved);
-        }
-    }
     if !resolved.exists() {
         return Err(format!("File does not exist: {}", resolved.display()));
     }
@@ -2148,11 +2110,6 @@ fn open_file_in_default_app(path: String) -> Result<(), String> {
 #[tauri::command]
 fn reveal_file_in_explorer(path: String) -> Result<(), String> {
     let resolved = resolve_desktop_path(&path);
-    if !resolved.exists() {
-        if path.contains("reports") || path.ends_with(".docx") || path.ends_with(".pdf") {
-            let _ = auto_synthesize_report(&resolved);
-        }
-    }
     if !resolved.exists() {
         if let Some(parent) = resolved.parent() {
             if parent.exists() {
@@ -2184,11 +2141,6 @@ fn reveal_file_in_explorer(path: String) -> Result<(), String> {
 #[tauri::command]
 fn read_file_preview(path: String) -> Result<Value, String> {
     let resolved = resolve_desktop_path(&path);
-    if !resolved.exists() {
-        if path.contains("reports") || path.ends_with(".docx") || path.ends_with(".pdf") {
-            let _ = auto_synthesize_report(&resolved);
-        }
-    }
     if !resolved.exists() {
         return Err(format!("File does not exist: {}", resolved.display()));
     }
@@ -2225,11 +2177,13 @@ fn run_python_bridge_code_sync(py_code: &str) -> Result<Value, String> {
         "C:\\Users\\sujal\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
     ];
 
-    let cwd = if Path::new(r"C:\Users\sujal\memoryos\smara").exists() {
-        Path::new(r"C:\Users\sujal\memoryos\smara")
-    } else {
-        Path::new(r"C:\Users\sujal\.gemini\antigravity\brain\9b6e09f1-dce7-4001-953e-163359a4335d\scratch\smara")
-    };
+    let configured_root = std::env::var_os("SMARA_REPO_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Users\sujal\memoryos\smara"));
+    if !configured_root.is_dir() {
+        return Err(format!("Smara repository was not found at {}", configured_root.display()));
+    }
+    let cwd = configured_root.as_path();
 
     let mut last_err = String::from("No Python executable succeeded");
 
@@ -2270,7 +2224,7 @@ async fn run_python_bridge_code(py_code: &str) -> Result<Value, String> {
 async fn inspect_ast_graph(symbol: String) -> Result<Value, String> {
     let sym_clean = symbol.trim().replace('"', "");
     let py_code = format!(
-        "import json\nfrom pathlib import Path\nfrom smara.code_graph import CodePropertyGraph\ncandidates = [Path.cwd(), Path(r'C:\\Users\\sujal\\.gemini\\antigravity\\brain\\9b6e09f1-dce7-4001-953e-163359a4335d\\scratch\\smara')]\ngraph = None\nfor c in candidates:\n    if c.exists():\n        g = CodePropertyGraph(c)\n        g.index()\n        if len(g.symbols) > 0:\n            graph = g\n            break\nif not graph:\n    graph = CodePropertyGraph(Path.cwd())\n    graph.index()\nsym_name = '{}'\nres = graph.inspect_symbol(sym_name)\nif res is None:\n    for k in graph.symbols:\n        if k.lower() == sym_name.lower():\n            res = graph.inspect_symbol(k)\n            sym_name = k\n            break\nif res:\n    res['blast_radius'] = graph.blast_radius(sym_name)\n    print(json.dumps(res))\nelse:\n    print(json.dumps({{'error': f'Symbol {{sym_name}} not found'}}))\n",
+        "import json\nfrom pathlib import Path\nfrom smara.code_graph import CodePropertyGraph\ngraph = CodePropertyGraph(Path.cwd())\ngraph.index()\nsym_name = '{}'\nres = graph.inspect_symbol(sym_name)\nif res is None:\n    for k in graph.symbols:\n        if k.lower() == sym_name.lower():\n            res = graph.inspect_symbol(k)\n            sym_name = k\n            break\nif res:\n    res['blast_radius'] = graph.blast_radius(sym_name)\n    print(json.dumps(res))\nelse:\n    print(json.dumps({{'error': f'Symbol {{sym_name}} not found'}}))\n",
         sym_clean
     );
     run_python_bridge_code(&py_code).await
@@ -2626,7 +2580,7 @@ async fn run_gaia_benchmark(level: Option<String>, count: Option<usize>) -> Resu
         None => "None".to_string(),
     };
     let py_code = format!(
-        "import json, os, sys\nsys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')\nfrom benchmarks.gaia_official_runner import GaiaOfficialBenchmark\ntoken = os.environ.get('HF_TOKEN', '')\nrunner = GaiaOfficialBenchmark(token=token)\nsummary = runner.evaluate_level(level='{}', max_tasks={})\nprint(json.dumps(summary))\n",
+        "import json, os, sys\nsys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')\nfrom pathlib import Path\nfrom benchmarks.gaia_fair_runner import GaiaFairBenchmark\ntoken = os.environ.get('HF_TOKEN', '')\ndataset = os.environ.get('SMARA_GAIA_DATASET')\nrunner = GaiaFairBenchmark(token=token, workspace_root=Path.cwd(), dataset_path=Path(dataset) if dataset else None)\nsummary = runner.evaluate_level(level='{}', max_tasks={})\nprint(json.dumps(summary))\n",
         lvl, cnt_str
     );
     run_python_bridge_code(&py_code).await
@@ -2638,47 +2592,59 @@ async fn run_swe_benchmark() -> Result<Value, String> {
     run_python_bridge_code(py_code).await
 }
 
+fn benchmark_scorecard(name: &str, path: &Path) -> Value {
+    let Some(report) = read_json(path) else {
+        return json!({
+            "name": name,
+            "status": "not_run",
+            "passed": Value::Null,
+            "total": Value::Null,
+            "accuracy_percent": Value::Null,
+            "execution_errors": Value::Null,
+            "report_path": path.display().to_string(),
+        });
+    };
+    let passed = report.get("correct")
+        .or_else(|| report.get("resolved"))
+        .or_else(|| report.get("passed"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let total = report.get("total_scored")
+        .or_else(|| report.get("total_tasks"))
+        .or_else(|| report.get("total"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let accuracy = report.get("accuracy_percent")
+        .or_else(|| report.get("resolution_rate_percent"))
+        .or_else(|| report.get("pass_rate_percent"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let errors = report.get("execution_errors")
+        .or_else(|| report.get("regressions_detected"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    json!({
+        "name": name,
+        "status": "completed",
+        "passed": passed,
+        "total": total,
+        "accuracy_percent": accuracy,
+        "execution_errors": errors,
+        "report_path": path.display().to_string(),
+        "details": report,
+    })
+}
+
 #[tauri::command]
 async fn get_benchmark_scorecards() -> Result<Value, String> {
-    use std::path::PathBuf;
-    let base = PathBuf::from(r"C:\Users\sujal\memoryos\smara");
-    let gaia_json_path = base.join("reports/gaia_official_level1_full_results.json");
-    let gaia_details = if gaia_json_path.exists() {
-        std::fs::read_to_string(&gaia_json_path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-            .unwrap_or(json!({}))
-    } else {
-        json!({})
-    };
-
-    let gaia_pdf = base.join("reports/gaia_official_level1_full_results.pdf");
-    let swe_pdf = base.join("reports/swe_bench_results.pdf");
-    let desktop_pdf = base.join("reports/gaia_benchmark_results.pdf");
-
+    let base = std::env::var_os("SMARA_REPO_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Users\sujal\memoryos\smara"));
+    let reports = base.join("reports");
     Ok(json!({
-        "gaia": {
-            "name": "GAIA Level 1 (Official)",
-            "passed": 53,
-            "total": 53,
-            "accuracy_percent": 100.0,
-            "pdf_path": gaia_pdf.display().to_string(),
-            "details": gaia_details
-        },
-        "swe_bench": {
-            "name": "SWE-bench Verified (Repo Auto-Repair)",
-            "passed": 4,
-            "total": 4,
-            "accuracy_percent": 100.0,
-            "pdf_path": swe_pdf.display().to_string()
-        },
-        "desktop": {
-            "name": "GAIA-Style Desktop Multi-Step Tasks",
-            "passed": 5,
-            "total": 5,
-            "accuracy_percent": 100.0,
-            "pdf_path": desktop_pdf.display().to_string()
-        }
+        "gaia": benchmark_scorecard("GAIA Level 1 (strict)", &reports.join("gaia_fair_level1_results.json")),
+        "swe_bench": benchmark_scorecard("SWE-bench style repo repair", &reports.join("swe_bench_results.json")),
+        "desktop": benchmark_scorecard("GAIA shared-runtime desktop evaluation", &reports.join("gaia_fair_level1_results.json")),
     }))
 }
 
@@ -2701,7 +2667,7 @@ fn open_benchmark_report(path: String) -> Result<bool, String> {
             }
         }
     };
-    open::that(&target).map_err(|e| format!("Could not open PDF report: {e}"))?;
+    open::that(&target).map_err(|e| format!("Could not open benchmark report: {e}"))?;
     Ok(true)
 }
 

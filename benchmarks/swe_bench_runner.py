@@ -10,20 +10,20 @@ and regression guard across 4 repository-level bug instances:
 from __future__ import annotations
 
 import datetime as dt
-import difflib
 import json
 import os
 import shutil
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List
 
 from smara.code_graph import CodeGraph
 from smara.desktop_executor import execute_step
-from smara.refactor import AtomicRefactorSession
-from smara.test_fixer import AutonomousTestFixer, PytestRunner
+from smara.test_fixer import PytestRunner
+from smara.subagent_orchestrator import SubagentRole, SubagentWorker
 
 
 @dataclass
@@ -66,245 +66,107 @@ class SweBenchRunner:
             "terminal_allowlist": ["python", "git", "pytest"],
         }
 
+        self.agent_api_key = os.getenv("SMARA_MODEL_SARVAM_API_KEY") or os.getenv("SARVAM_API_KEY") or None
+        self.agent_base_url = os.getenv("SMARA_AGENT_BASE_URL", "https://api.sarvam.ai/v2/chat/completions")
+        self.agent_model = os.getenv("SMARA_AGENT_MODEL", "glm5.2")
+
+    @contextmanager
+    def _workspace_cwd(self):
+        """Run a worker from the requested repository, never the caller's cwd."""
+        previous = Path.cwd()
+        os.chdir(self.workspace)
+        try:
+            yield
+        finally:
+            os.chdir(previous)
+
+    @staticmethod
+    def _files_from_diff(diff: str | None) -> list[str]:
+        files: list[str] = []
+        for line in (diff or "").splitlines():
+            if line.startswith("+++ b/"):
+                name = line.removeprefix("+++ b/").strip()
+                if name and name != "/dev/null" and name not in files:
+                    files.append(name)
+        return files
+
+    def _run_live_task(self, task_id: str, name: str, component: str, symbol: str, goal: str) -> SweTaskResult:
+        """Delegate a real repair/verification loop to an isolated coder worker."""
+        started = time.time()
+        worker = SubagentWorker(
+            task_id=f"swe-{task_id.lower()}",
+            role=SubagentRole.CODER,
+            api_key=self.agent_api_key,
+            base_url=self.agent_base_url,
+            model=self.agent_model,
+            max_iterations=12,
+            isolate_worktree=True,
+            workspace_root=self.workspace,
+        )
+        try:
+            with self._workspace_cwd():
+                result = worker.run(
+                    goal=(
+                        f"{goal}\n\nWork only inside the isolated Git worktree. Use Smara's typed local tools "
+                        "and agent_tools.py; inspect the real implementation before changing it. Reproduce the "
+                        "issue, make the smallest evidence-backed patch, run the focused verification, and report "
+                        "the exact commands and outcomes. Never claim success without tool evidence."
+                    ),
+                    context=f"Target component: {component}; likely symbol: {symbol}; repository: {self.workspace}",
+                )
+            files = self._files_from_diff(result.worktree_diff)
+            success = result.status == "SUCCESS"
+            return SweTaskResult(
+                task_id=task_id,
+                name=name,
+                component=component,
+                localized_symbol=symbol,
+                reproduced=success,
+                patched=bool(files),
+                verified=success,
+                regressions=0,
+                duration_seconds=round(time.time() - started, 2),
+                diff_patch=result.worktree_diff or "(Worker produced no patch.)",
+                error=result.error,
+            )
+        except Exception as exc:
+            return SweTaskResult(
+                task_id=task_id,
+                name=name,
+                component=component,
+                localized_symbol=symbol,
+                reproduced=False,
+                patched=False,
+                verified=False,
+                regressions=0,
+                duration_seconds=round(time.time() - started, 2),
+                diff_patch="(No patch produced.)",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+
     # =========================================================================
     # TASK SWE-01: Rate Limiter Zero Refill Rate Handling
     # =========================================================================
     def run_swe_01(self) -> SweTaskResult:
-        t0 = time.time()
-        task_id = "SWE-01"
-        name = "Rate Limiter Zero Refill Rate ZeroDivision / Integer Handling"
-        component = "rate_limiter/__init__.py"
-        target_file = self.workspace / "rate_limiter" / "__init__.py"
-
-        # 1. Localize symbol using CodeGraph
-        sym = self.code_graph.inspect_symbol("RateLimiter")
-        loc_sym = sym.get("name", "RateLimiter") if sym else "RateLimiter"
-
-        # 2. Reproduction Test
-        test_file = self.workspace / "tests" / "test_reproduce_swe01.py"
-        test_code = '''import pytest
-from rate_limiter import RateLimiter, RateLimitConfig
-
-def test_zero_refill_rate_does_not_crash():
-    # Hard-capped burst bucket with 0 sustained refill
-    config = RateLimitConfig(capacity=2.0, refill_rate=0.0)
-    limiter = RateLimiter(config)
-    
-    ok1, h1 = limiter.acquire("client-zero")
-    assert ok1 is True
-    ok2, h2 = limiter.acquire("client-zero")
-    assert ok2 is True
-    
-    # 3rd request should be safely rejected with integer Retry-After, no ZeroDivisionError
-    ok3, h3 = limiter.acquire("client-zero")
-    assert ok3 is False
-    assert "Retry-After" in h3
-    assert int(h3["Retry-After"]) >= 1
-'''
-        test_file.write_text(test_code, encoding="utf-8")
-
-        # Verify initial reproduction
-        initial_res = self.runner.run(str(test_file.relative_to(self.workspace)))
-        reproduced = True  # Verified via test suite run
-
-        # 3. Apply atomic patch if needed
-        original_content = target_file.read_text(encoding="utf-8")
-        patched_content = original_content
-
-        # Ensure refill_rate <= 0 is safely handled in acquire
-        if "max(0.001, self.config.refill_rate)" not in original_content:
-            patched_content = original_content.replace(
-                "self.config.refill_rate",
-                "max(0.001, self.config.refill_rate)"
-            )
-
-        # Pre-flight diff
-        diff_lines = list(difflib.unified_diff(
-            original_content.splitlines(),
-            patched_content.splitlines(),
-            fromfile="a/rate_limiter/__init__.py",
-            tofile="b/rate_limiter/__init__.py",
-            lineterm=""
-        ))
-        diff_patch = "\n".join(diff_lines) if diff_lines else "(No patch required: code already defensively handles zero refill rate)"
-
-        if patched_content != original_content:
-            target_file.write_text(patched_content, encoding="utf-8")
-            # Also sync to user documents
-            user_target = Path(r"C:\Users\sujal\Documents\rate_limiter\__init__.py")
-            if user_target.exists():
-                user_target.write_text(patched_content, encoding="utf-8")
-
-        # 4. Verify reproduction test passes
-        verify_res = self.runner.run(str(test_file.relative_to(self.workspace)))
-        verified = verify_res.success and verify_res.passed >= 1
-
-        # Clean up reproduction test
-        if test_file.exists():
-            test_file.unlink()
-
-        return SweTaskResult(
-            task_id=task_id,
-            name=name,
-            component=component,
-            localized_symbol=loc_sym,
-            reproduced=reproduced,
-            patched=True,
-            verified=verified,
-            regressions=0,
-            duration_seconds=round(time.time() - t0, 2),
-            diff_patch=diff_patch
-        )
+        return self._run_live_task("SWE-01", "Rate Limiter Zero Refill Rate Handling", "rate_limiter/__init__.py", "RateLimiter", "Investigate zero or negative refill-rate handling, reproduce the failure with a focused test, and repair it without changing normal rate limiting semantics.")
 
     # =========================================================================
     # TASK SWE-02: AST Code Property Graph Wildcard Import Resolution
     # =========================================================================
     def run_swe_02(self) -> SweTaskResult:
-        t0 = time.time()
-        task_id = "SWE-02"
-        name = "AST Code Property Graph Wildcard & Star Import Edge Resolution"
-        component = "src/smara/code_graph.py"
-        target_file = self.workspace / "src" / "smara" / "code_graph.py"
-
-        sym = self.code_graph.inspect_symbol("CodeGraph")
-        loc_sym = sym.get("name", "CodeGraph") if sym else "CodeGraph"
-
-        test_file = self.workspace / "tests" / "test_reproduce_swe02.py"
-        test_code = '''import ast
-from smara.code_graph import ASTVisitor
-
-def test_wildcard_import_does_not_corrupt_dependencies():
-    source = "from math import *\\n\\ndef calculate(x):\\n    return sqrt(x)\\n"
-    tree = ast.parse(source)
-    visitor = ASTVisitor("dummy.py")
-    visitor.visit(tree)
-    
-    assert "math.*" in visitor.imports or len(visitor.imports) >= 1
-    assert "calculate" in visitor.symbols
-'''
-        test_file.write_text(test_code, encoding="utf-8")
-
-        initial_res = self.runner.run(str(test_file.relative_to(self.workspace)))
-        verified = initial_res.success and initial_res.passed >= 1
-
-        original_content = target_file.read_text(encoding="utf-8")
-        diff_patch = "(Verified: visit_ImportFrom cleanly records alias names and star imports into graph dependencies)"
-
-        if test_file.exists():
-            test_file.unlink()
-
-        return SweTaskResult(
-            task_id=task_id,
-            name=name,
-            component=component,
-            localized_symbol=loc_sym,
-            reproduced=True,
-            patched=True,
-            verified=verified,
-            regressions=0,
-            duration_seconds=round(time.time() - t0, 2),
-            diff_patch=diff_patch
-        )
+        return self._run_live_task("SWE-02", "AST Code Property Graph Wildcard Import Resolution", "src/smara/code_graph.py", "CodeGraph", "Investigate wildcard and star-import dependency edges in the AST code graph, reproduce any incorrect graph output, and implement a minimal fix with focused verification.")
 
     # =========================================================================
     # TASK SWE-03: Dual-Plane Memory Duplicate Title Retention
     # =========================================================================
     def run_swe_03(self) -> SweTaskResult:
-        t0 = time.time()
-        task_id = "SWE-03"
-        name = "Dual-Plane Memory Versioned Fact Retention on Duplicate Title"
-        component = "src/smara/dual_plane_memory.py"
-        target_file = self.workspace / "src" / "smara" / "dual_plane_memory.py"
-
-        sym = self.code_graph.inspect_symbol("DualPlaneMemoryBridge")
-        loc_sym = sym.get("name", "DualPlaneMemoryBridge") if sym else "DualPlaneMemoryBridge"
-
-        test_file = self.workspace / "tests" / "test_reproduce_swe03.py"
-        test_code = '''from smara.dual_plane_memory import DualPlaneMemoryBridge
-
-def test_duplicate_fact_title_updates_safely():
-    bridge = DualPlaneMemoryBridge()
-    # Remember two facts with identical title
-    f1 = bridge.remember_fact("ApiEndpoint", "https://api.v1.domain", "config")
-    f2 = bridge.remember_fact("ApiEndpoint", "https://api.v2.domain", "config")
-    
-    assert f1 is not None
-    assert f2 is not None
-    # Latest fact must reflect updated value
-    facts = bridge.list_facts()
-    matching = [f for f in facts if f.get("title") == "ApiEndpoint"]
-    assert len(matching) >= 1
-    assert any("v2" in str(f.get("content", "")) for f in matching)
-'''
-        test_file.write_text(test_code, encoding="utf-8")
-
-        verify_res = self.runner.run(str(test_file.relative_to(self.workspace)))
-        verified = verify_res.success and verify_res.passed >= 1
-
-        diff_patch = "(Verified: DualPlaneMemoryBridge stores episodic facts idempotently with monotonic timestamping)"
-
-        if test_file.exists():
-            test_file.unlink()
-
-        return SweTaskResult(
-            task_id=task_id,
-            name=name,
-            component=component,
-            localized_symbol=loc_sym,
-            reproduced=True,
-            patched=True,
-            verified=verified,
-            regressions=0,
-            duration_seconds=round(time.time() - t0, 2),
-            diff_patch=diff_patch
-        )
+        return self._run_live_task("SWE-03", "Dual-Plane Memory Duplicate Fact Retention", "src/smara/dual_plane_memory.py", "DualPlaneMemoryBridge", "Investigate duplicate-title fact retention and supersession semantics in the dual-plane memory bridge, reproduce any data-loss issue, and repair it with focused verification.")
 
     # =========================================================================
     # TASK SWE-04: Test Fixer Windows CRLF Stack Trace Parser Resilience
     # =========================================================================
     def run_swe_04(self) -> SweTaskResult:
-        t0 = time.time()
-        task_id = "SWE-04"
-        name = "Autonomous Test Fixer Windows CRLF Stack Trace Parser"
-        component = "src/smara/test_fixer.py"
-        target_file = self.workspace / "src" / "smara" / "test_fixer.py"
-
-        sym = self.code_graph.inspect_symbol("AutonomousTestFixer")
-        loc_sym = sym.get("name", "AutonomousTestFixer") if sym else "AutonomousTestFixer"
-
-        test_file = self.workspace / "tests" / "test_reproduce_swe04.py"
-        test_code = '''from smara.test_fixer import PytestRunner
-
-def test_crlf_stack_trace_parser():
-    runner = PytestRunner()
-    raw_crlf = "FAILED tests/dummy.py::test_fail - AssertionError: expected 1\\r\\nE   assert 0 == 1\\r\\n"
-    parsed = runner._parse_output(raw_crlf, 0.5, False)
-    assert parsed.failed >= 1
-    assert len(parsed.failures) >= 1
-    assert "test_fail" in parsed.failures[0].test_id
-'''
-        test_file.write_text(test_code, encoding="utf-8")
-
-        verify_res = self.runner.run(str(test_file.relative_to(self.workspace)))
-        verified = verify_res.success and verify_res.passed >= 1
-
-        diff_patch = "(Verified: PytestRunner._parse_output splits on universal line boundaries with clean assertion extraction)"
-
-        if test_file.exists():
-            test_file.unlink()
-
-        return SweTaskResult(
-            task_id=task_id,
-            name=name,
-            component=component,
-            localized_symbol=loc_sym,
-            reproduced=True,
-            patched=True,
-            verified=verified,
-            regressions=0,
-            duration_seconds=round(time.time() - t0, 2),
-            diff_patch=diff_patch
-        )
+        return self._run_live_task("SWE-04", "Windows CRLF Stack Trace Parser", "src/smara/test_fixer.py", "PytestRunner", "Investigate Windows CRLF and mixed-newline traceback parsing in the test fixer, reproduce any parsing failure, and make a minimal verified repair.")
 
     # =========================================================================
     # Run Full SWE-bench Suite & Regression Guard
@@ -356,6 +218,11 @@ def test_crlf_stack_trace_parser():
             "results": [r.to_dict() for r in results],
         }
 
+        # Keep a machine-readable scorecard beside the PDF. Consumers must
+        # read this actual run output; no static pass counts are exposed.
+        (self.reports_dir / "swe_bench_results.json").write_text(
+            json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
         self._compile_scorecard_pdf(summary)
         return summary
 
@@ -369,7 +236,7 @@ def test_crlf_stack_trace_parser():
                 "paragraphs": [
                     f"Benchmark: SWE-bench Style Repo-Level Bug Localization & Code Repair.",
                     f"Overall Resolution Rate: {summary['resolution_rate_percent']}% ({summary['resolved']}/{summary['total_tasks']} Resolved).",
-                    f"Regression Guard: 0 Regressions Detected across workspace test suites.",
+                    f"Regression Guard: {summary['regressions_detected']} regressions detected across workspace test suites.",
                     f"Total Benchmark Duration: {summary['total_duration_seconds']} seconds.",
                     "Autonomous Capabilities: AST Code Property Graph symbol inspection, atomic pre-flight snapshot generation, unified diff patching, and automated pytest validation."
                 ]

@@ -38,13 +38,13 @@ const fallbackConnection: ConnectionState = {
 const starterPrompts = [
   {
     title: "🏆 Official GAIA Multimodal Benchmark",
-    desc: "Evaluate 53 multi-hop reasoning, PDF tables & audio tasks with 100% accuracy",
+    desc: "Run strict multi-hop reasoning, document, and audio tasks with reproducible scoring",
     prompt: "Run the official GAIA Level 1 benchmark evaluation and show detailed accuracy scorecards.",
   },
   {
     title: "📄 Multimodal Document QA & Analysis",
     desc: "Extract tables, text, and embedded figures from complex PDF & Office documents",
-    prompt: "Analyze the PDF document in reports/gaia_official_level1_full_results.pdf and summarize findings.",
+    prompt: "Inspect the latest recorded GAIA evaluation report and summarize the actual findings.",
   },
   {
     title: "🧪 SWE-bench Verified Bug Auto-Fixer",
@@ -4601,7 +4601,7 @@ function CloudTab({
 // BENCHMARKS TAB
 // -------------------------------------------------------------
 function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => void }) {
-  const [, setScorecards] = useState<any>(null);
+  const [scorecards, setScorecards] = useState<any>(null);
   const [runningSuite, setRunningSuite] = useState<string | null>(null);
   const [runLog, setRunLog] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<string>("all");
@@ -4622,11 +4622,11 @@ function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => voi
 
   async function handleRunGaia(count?: number) {
     setRunningSuite(count ? `gaia_${count}` : "gaia_all");
-    setRunLog(`Launching Official Meta GAIA Level 1 evaluation (${count || 53} tasks)...`);
+    setRunLog(`Launching strict GAIA Level 1 evaluation${count ? ` (up to ${count} selected tasks)` : ""}...`);
     try {
       const res = await desktop.runGaiaBenchmark("1", count);
       setRunLog(JSON.stringify(res, null, 2));
-      onSetNotice(`GAIA Level 1 finished: ${res.accuracy_percent || 100}% accuracy (${res.correct || 0}/${res.total_evaluated || 0} passed).`);
+      onSetNotice(`GAIA Level 1 finished: ${res.accuracy_percent ?? 0}% accuracy (${res.correct ?? 0}/${res.total_scored ?? 0} scored).`);
       await loadScorecards();
     } catch (e: any) {
       setRunLog(`Error running GAIA benchmark: ${e?.message || String(e)}`);
@@ -4642,7 +4642,7 @@ function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => voi
     try {
       const res = await desktop.runSweBenchmark();
       setRunLog(JSON.stringify(res, null, 2));
-      onSetNotice(`SWE-bench finished: ${res.resolution_rate_percent || 100}% resolution rate (${res.resolved_tasks || 0}/${res.total_tasks || 0} fixed).`);
+      onSetNotice(`SWE-bench finished: ${res.resolution_rate_percent ?? 0}% resolution rate (${res.resolved ?? 0}/${res.total_tasks ?? 0} resolved).`);
       await loadScorecards();
     } catch (e: any) {
       setRunLog(`Error running SWE-bench: ${e?.message || String(e)}`);
@@ -4654,7 +4654,7 @@ function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => voi
 
   async function handleRunDesktop() {
     setRunningSuite("desktop");
-    setRunLog("Launching Smara Desktop Suite (5 multi-step workflows)...");
+    setRunLog("Launching the strict shared-runtime desktop evaluation...");
     try {
       const res = await desktop.runTerminalCommand("python -m smara.cli benchmark --suite desktop");
       setRunLog(res.stdout || res.stderr || JSON.stringify(res));
@@ -4677,125 +4677,48 @@ function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => voi
     }
   }
 
-  const gaiaOfficialTasks = [
-    {
-      id: "e1fc63a2",
-      category: "calculator",
-      tool: "🧮 Calculator",
-      question: "If Eliud Kipchoge could maintain his record-making marathon pace indefinitely, how many thousand hours would it take him to run the distance between the Earth and the Moon at its closest approach?",
-      ground_truth: "17",
-      agent_output: "17",
-      status: "CORRECT",
-    },
-    {
-      id: "8e867cd7",
-      category: "browser",
-      tool: "🌐 Browser & Wiki",
-      question: "How many studio albums were published by Mercedes Sosa between 2000 and 2009 (included)? You can use the latest 2022 version of english wikipedia.",
-      ground_truth: "3",
-      agent_output: "3",
-      status: "CORRECT",
-    },
-    {
-      id: "ec09fa32",
-      category: "calculator",
-      tool: "🧮 Math Logic",
-      question: "You have been selected to play the final round of a hit new game show. There are two closed boxes with 50 and 70 keys... Expected prize calculation.",
-      ground_truth: "3",
-      agent_output: "3",
-      status: "CORRECT",
-    },
-    {
-      id: "5d0080cb",
-      category: "pdf",
-      tool: "📄 Multimodal PDF",
-      question: "What was the volume in m^3 of the fish bag that was calculated in the University of Leicester student paper titled 'Finding Nemo's Wallet'?",
-      ground_truth: "0.1777",
-      agent_output: "0.1777",
-      status: "CORRECT",
-    },
-    {
-      id: "a1e91b78",
-      category: "audio",
-      tool: "🎧 Video / Audio Transcription",
-      question: "In the YouTube video https://www.youtube.com/watch?v=L1vXCYZAYYM, what is the highest number of birds in the water at any one time?",
-      ground_truth: "3",
-      agent_output: "3",
-      status: "CORRECT",
-    },
-    {
-      id: "f391b10a",
-      category: "pdf",
-      tool: "📄 PDF Tables",
-      question: "In the United Nations World Population Prospects report table A.8, what was the median age of the population in Western Europe in 2020?",
-      ground_truth: "42.7",
-      agent_output: "42.7",
-      status: "CORRECT",
-    },
-    {
-      id: "1c29e644",
-      category: "calculator",
-      tool: "🧮 Compound Interest",
-      question: "Calculate the total compounded return of an investment portfolio with 7% annual yield over 15 years with monthly contributions.",
-      ground_truth: "128450",
-      agent_output: "128450",
-      status: "CORRECT",
-    },
-    {
-      id: "77d24a51",
-      category: "browser",
-      tool: "🌐 Web Search",
-      question: "Which astronomer first hypothesized the existence of the Oort cloud, and in what year was the hypothesis published in BAN?",
-      ground_truth: "Jan Oort, 1950",
-      agent_output: "Jan Oort, 1950",
-      status: "CORRECT",
-    },
-    {
-      id: "88ab00c3",
-      category: "audio",
-      tool: "🎧 Whisper Transcription",
-      question: "Listen to the recorded speech clip audio_sample_03.wav. What was the exact three-word phrase spoken by the narrator at timestamp 0:14?",
-      ground_truth: "across the divide",
-      agent_output: "across the divide",
-      status: "CORRECT",
-    },
-    {
-      id: "99c15d48",
-      category: "pdf",
-      tool: "📄 PyMuPDF Document QA",
-      question: "Extract the value in the row 'Operating Profit Margin' for Q3 2023 from the attached quarterly financial statement PDF.",
-      ground_truth: "18.4%",
-      agent_output: "18.4%",
-      status: "CORRECT",
-    },
-  ];
-
-  const filteredTasks = gaiaOfficialTasks.filter((t) => {
+  // Results come only from the latest recorded evaluation report. No
+  // pre-scripted questions or answers are embedded in the UI.
+  const actualTasks: any[] = Array.isArray(scorecards?.gaia?.details?.results)
+    ? scorecards.gaia.details.results.map((task: any, index: number) => ({
+      id: String(task.task_id || index + 1),
+      category: String(task.category || "other"),
+      tool: String(task.tool || task.category || "Evaluation task"),
+      question: String(task.question || ""),
+      ground_truth: String(task.expected_answer ?? ""),
+      agent_output: String(task.answer ?? ""),
+      status: task.outcome === "scored" ? (task.correct ? "CORRECT" : "INCORRECT") : String(task.outcome || "NOT RUN").toUpperCase(),
+    }))
+    : [];
+  const filteredTasks = actualTasks.filter((t: any) => {
     const matchesCat = activeFilter === "all" || t.category === activeFilter;
-    const matchesSearch =
-      !searchFilter.trim() ||
-      t.question.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      t.id.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      t.tool.toLowerCase().includes(searchFilter.toLowerCase());
+    const needle = searchFilter.trim().toLowerCase();
+    const matchesSearch = !needle || [t.question, t.id, t.tool].some((value: string) => value.toLowerCase().includes(needle));
     return matchesCat && matchesSearch;
   });
+  const gaiaScore = scorecards?.gaia;
+  const sweScore = scorecards?.swe_bench;
+  const desktopScore = scorecards?.desktop;
+  const scoreText = (card: any) => card?.status === "completed" ? `${card.passed ?? 0} / ${card.total ?? 0}` : "Not run";
+  const accuracyText = (card: any) => card?.status === "completed" && card.accuracy_percent != null ? `${card.accuracy_percent}%` : "No score yet";
+  const statusText = (card: any) => card?.status === "completed" ? "COMPLETED" : "NOT RUN";
 
   return (
     <div className="benchmarks-tab-container">
       {/* Friendly Hero Banner */}
       <div className="benchmarks-hero">
         <div className="benchmarks-hero-content">
-          <div className="hero-pill-badge">🏆 OFFICIAL EVALUATIONS & AUDIT SUITE</div>
+          <div className="hero-pill-badge">🏆 REPRODUCIBLE EVALUATIONS & AUDIT SUITE</div>
           <h2>Industry-Grade Autonomous Benchmarks</h2>
           <p>
-            Smara is verified on Meta GAIA (General AI Assistant), SWE-bench Verified (Real Open-Source Bug Repair),
-            and Smara Desktop Workflow Suites with 100% accuracy, zero hallucinated tool calls, and zero approval latency.
+            Run the strict local evaluation suites from this tab. Results and task traces are loaded from the latest
+            completed run; no score is shown until a real evaluation produces a report.
           </p>
           <div className="benchmarks-stat-pills">
-            <span className="stat-pill stat-pill-green">✓ Meta GAIA L1: 100% (53/53)</span>
-            <span className="stat-pill stat-pill-blue">✓ SWE-bench: 100% (4/4 Repos)</span>
-            <span className="stat-pill stat-pill-purple">✓ Desktop Agent: 100% (5/5 Flows)</span>
-            <span className="stat-pill stat-pill-cyan">⚡ 0 Approval Friction</span>
+            <span className="stat-pill stat-pill-green">GAIA L1: {scoreText(gaiaScore)} · {accuracyText(gaiaScore)}</span>
+            <span className="stat-pill stat-pill-blue">SWE-bench: {scoreText(sweScore)} · {accuracyText(sweScore)}</span>
+            <span className="stat-pill stat-pill-purple">Desktop: {scoreText(desktopScore)} · {accuracyText(desktopScore)}</span>
+            <span className="stat-pill stat-pill-cyan">Results are evidence-backed</span>
           </div>
         </div>
       </div>
@@ -4806,11 +4729,11 @@ function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => voi
         <div className="benchmark-card benchmark-card-gaia">
           <div className="card-top-row">
             <span className="card-icon">🧠</span>
-            <span className="card-pass-badge">100% PASS</span>
+            <span className="card-pass-badge">{statusText(gaiaScore)}</span>
           </div>
           <h3>Meta GAIA (Level 1)</h3>
-          <div className="card-score-metric">53 / 53</div>
-          <div className="card-score-sub">100.0% Accuracy • General AI Assistant</div>
+          <div className="card-score-metric">{scoreText(gaiaScore)}</div>
+          <div className="card-score-sub">{accuracyText(gaiaScore)} • General AI Assistant</div>
           <p className="card-description">
             Evaluates multi-hop reasoning, multimodal document reading (PDF tables, Word, Excel),
             audio transcription via Whisper, Wikipedia navigation, and precise calculations.
@@ -4832,17 +4755,17 @@ function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => voi
               </button>
               <button
                 className="bench-btn bench-btn-accent"
-                onClick={() => void handleRunGaia(53)}
+                onClick={() => void handleRunGaia()}
                 disabled={Boolean(runningSuite)}
               >
-                {runningSuite === "gaia_all" ? "Evaluating..." : "🚀 Run Full (53)"}
+                {runningSuite === "gaia_all" ? "Evaluating..." : "🚀 Run Full Level"}
               </button>
             </div>
             <button
               className="bench-btn bench-btn-outline"
-              onClick={() => void handleOpenPdf("reports/gaia_official_level1_full_results.pdf")}
+              onClick={() => void handleOpenPdf("reports/gaia_fair_level1_results.json")}
             >
-              📄 Open Official PDF Report
+              📄 Open Latest JSON Report
             </button>
           </div>
         </div>
@@ -4851,11 +4774,11 @@ function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => voi
         <div className="benchmark-card benchmark-card-swe">
           <div className="card-top-row">
             <span className="card-icon">🧪</span>
-            <span className="card-pass-badge">100% PASS</span>
+            <span className="card-pass-badge">{statusText(sweScore)}</span>
           </div>
           <h3>SWE-bench Verified</h3>
-          <div className="card-score-metric">4 / 4</div>
-          <div className="card-score-sub">100.0% Resolution • Bug Auto-Repair</div>
+          <div className="card-score-metric">{scoreText(sweScore)}</div>
+          <div className="card-score-sub">{accuracyText(sweScore)} • Bug Auto-Repair</div>
           <p className="card-description">
             Autonomous software engineering benchmark evaluating bug localization, AST Code Property
             Graph blast radius, surgical diff synthesis, and zero regression test suites.
@@ -4887,11 +4810,11 @@ function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => voi
         <div className="benchmark-card benchmark-card-desktop">
           <div className="card-top-row">
             <span className="card-icon">💻</span>
-            <span className="card-pass-badge">100% PASS</span>
+            <span className="card-pass-badge">{statusText(desktopScore)}</span>
           </div>
           <h3>Smara Desktop Suite</h3>
-          <div className="card-score-metric">5 / 5</div>
-          <div className="card-score-sub">100.0% Pass Rate • Local OS Workflows</div>
+          <div className="card-score-metric">{scoreText(desktopScore)}</div>
+          <div className="card-score-sub">{accuracyText(desktopScore)} • Local OS Workflows</div>
           <p className="card-description">
             Evaluates end-to-end desktop workflows: fail-closed Python execution, semantic code search,
             browser DOM scraping, dual-plane memory recalls, and AST symbol evolution.
@@ -4912,9 +4835,9 @@ function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => voi
             </button>
             <button
               className="bench-btn bench-btn-outline"
-              onClick={() => void handleOpenPdf("reports/gaia_benchmark_results.pdf")}
+              onClick={() => void handleOpenPdf("reports/gaia_fair_level1_results.json")}
             >
-              📄 Open Desktop PDF Report
+              📄 Open Latest Desktop Report
             </button>
           </div>
         </div>
@@ -4939,8 +4862,8 @@ function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => voi
       <div className="benchmark-audit-section">
         <div className="audit-header">
           <div>
-            <h3>GAIA Level 1 Task Audit (53 Tasks)</h3>
-            <p>Inspect evaluated tasks, extracted multi-modal inputs, verified ground truths, and tool traces.</p>
+            <h3>GAIA Level 1 Task Audit ({actualTasks.length} Recorded Tasks)</h3>
+            <p>Inspect tasks, answers, scoring, and tool traces from the latest real evaluation report.</p>
           </div>
           <div className="audit-controls">
             <input
@@ -4959,37 +4882,41 @@ function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => voi
             className={`filter-pill ${activeFilter === "all" ? "active" : ""}`}
             onClick={() => setActiveFilter("all")}
           >
-            All Evaluated (53)
+            All Recorded ({actualTasks.length})
           </button>
           <button
             className={`filter-pill ${activeFilter === "calculator" ? "active" : ""}`}
             onClick={() => setActiveFilter("calculator")}
           >
-            🧮 Calculator (21)
+            🧮 Calculator ({actualTasks.filter((t: any) => t.category === "calculator").length})
           </button>
           <button
             className={`filter-pill ${activeFilter === "pdf" ? "active" : ""}`}
             onClick={() => setActiveFilter("pdf")}
           >
-            📄 PDF & Documents (18)
+            📄 PDF & Documents ({actualTasks.filter((t: any) => t.category === "pdf").length})
           </button>
           <button
             className={`filter-pill ${activeFilter === "browser" ? "active" : ""}`}
             onClick={() => setActiveFilter("browser")}
           >
-            🌐 Web & Wiki (11)
+            🌐 Web & Wiki ({actualTasks.filter((t: any) => t.category === "browser").length})
           </button>
           <button
             className={`filter-pill ${activeFilter === "audio" ? "active" : ""}`}
             onClick={() => setActiveFilter("audio")}
           >
-            🎧 Audio & Video (3)
+            🎧 Audio & Video ({actualTasks.filter((t: any) => t.category === "audio").length})
           </button>
         </div>
 
         {/* Tasks List */}
         <div className="audit-task-cards-list">
-          {filteredTasks.map((t) => (
+          {filteredTasks.length === 0 ? (
+            <p style={{ color: "var(--text-muted)", padding: "1rem" }}>
+              No recorded tasks match this filter. Run a real evaluation to populate the audit.
+            </p>
+          ) : filteredTasks.map((t: any) => (
             <div key={t.id} className="audit-task-card">
               <div className="task-card-header">
                 <span className="task-id-badge">{t.id}</span>

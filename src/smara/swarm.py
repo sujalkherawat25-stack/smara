@@ -1,16 +1,19 @@
-"""Autonomous Multi-Agent Swarm for Smara.
+"""Real multi-agent orchestration for Smara.
 
-Orchestrates 4 specialized autonomous subagents:
-1. Lead Architect: Task decomposition, AST blast-radius calculation, ADR/convention recall.
-2. Implementer: Code mutations with atomic rollback snapshots.
-3. Verification & QA: Test execution, autonomous stack-trace healing, browser E2E checks.
-4. Security & Quality Auditor: Workspace boundary safety, convention audits, semantic git commits.
+Each role is a real :class:`SubagentWorker` backed by SmaraAutonomousAgent.
+Workers receive only the context needed for their role, and coder/tester/
+auditor work is isolated in disposable Git worktrees. This module deliberately
+does not invent files, test counts, patches, or commit messages.
 """
 from __future__ import annotations
 
 import datetime as dt
 import enum
+import hashlib
 import json
+import os
+import queue
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -19,9 +22,7 @@ from typing import Any, Callable, Optional
 from .code_graph import CodeGraph
 from .coding_memory import CodingMemoryEngine
 from .dual_plane_memory import DualPlaneMemoryBridge
-from .git_agent import GitWorkspaceManager
-from .refactor import AtomicRefactorSession, SnapshotManager
-from .test_fixer import AutonomousTestFixer, PytestRunner
+from .subagent_orchestrator import DelegationResult, SubagentRole, SubagentWorker
 
 
 class SwarmAgentRole(str, enum.Enum):
@@ -40,10 +41,10 @@ class SwarmMessage:
     timestamp: str = field(default_factory=lambda: dt.datetime.now(dt.timezone.utc).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
-        d = asdict(self)
-        d["from_role"] = self.from_role.value
-        d["to_role"] = self.to_role.value
-        return d
+        value = asdict(self)
+        value["from_role"] = self.from_role.value
+        value["to_role"] = self.to_role.value
+        return value
 
 
 @dataclass
@@ -54,7 +55,7 @@ class ArchitectPlan:
     adrs_consulted: list[str]
     conventions_noted: list[str]
     steps: list[str]
-    risk_level: str  # "LOW", "MEDIUM", "HIGH"
+    risk_level: str
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -64,7 +65,7 @@ class ArchitectPlan:
 class SwarmTaskResult:
     session_id: str
     objective: str
-    status: str  # "SUCCESS", "FAILED", "HEALED"
+    status: str
     duration_ms: int
     architect_plan: Optional[ArchitectPlan]
     files_modified: list[str]
@@ -76,15 +77,32 @@ class SwarmTaskResult:
     inter_agent_messages: list[SwarmMessage]
 
     def to_dict(self) -> dict[str, Any]:
-        d = asdict(self)
+        value = asdict(self)
         if self.architect_plan:
-            d["architect_plan"] = self.architect_plan.to_dict()
-        d["inter_agent_messages"] = [m.to_dict() for m in self.inter_agent_messages]
-        return d
+            value["architect_plan"] = self.architect_plan.to_dict()
+        value["inter_agent_messages"] = [message.to_dict() for message in self.inter_agent_messages]
+        return value
+
+
+def _worker_config() -> dict[str, str | None]:
+    return {
+        "api_key": os.getenv("SMARA_AGENT_API_KEY") or os.getenv("SMARA_MODEL_SARVAM_API_KEY") or os.getenv("SARVAM_API_KEY"),
+        "base_url": os.getenv("SMARA_AGENT_BASE_URL", "https://api.sarvam.ai/v2/chat/completions"),
+        "model": os.getenv("SMARA_AGENT_MODEL", "glm5.2"),
+    }
+
+
+def _files_from_diff(diff: str | None) -> list[str]:
+    files: list[str] = []
+    for line in (diff or "").splitlines():
+        match = re.match(r"\+\+\+ b/(.+)", line)
+        if match and match.group(1) not in files:
+            files.append(match.group(1).strip())
+    return files
 
 
 class LeadArchitectAgent:
-    """Specialized in system architecture, blast radius analysis, and memory recall."""
+    """Build a plan from real workspace graph and memory observations."""
 
     def __init__(self, workspace_root: Path):
         self.workspace = workspace_root
@@ -92,189 +110,154 @@ class LeadArchitectAgent:
         self.code_graph = CodeGraph(self.workspace)
 
     def plan_objective(self, objective: str) -> tuple[ArchitectPlan, list[SwarmMessage]]:
-        messages: list[SwarmMessage] = []
-        words = [w.strip() for w in objective.split() if len(w.strip()) > 3]
-
-        # 1. Recall Architectural Memory (ADRs & Conventions)
-        recall_res = self.memory_bridge.recall(objective, top_k=3)
-        adrs = [a.title for a in self.memory_bridge.coding_engine.adr_manager.list_adrs()[:2]]
-        conventions = self.memory_bridge.coding_engine.convention_learner.get_conventions()
-
-        # 2. Inspect AST Blast Radius
-        target_symbols: list[str] = []
+        self.code_graph.index()
+        tokens = [token for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", objective) if token in self.code_graph.symbols]
+        target_symbols = list(dict.fromkeys(tokens[:8]))
         blast_radius: list[str] = []
-        for w in words[:3]:
-            # Check if symbol exists in graph
-            if w in self.code_graph.symbols:
-                target_symbols.append(w)
-                blast = self.code_graph.calculate_blast_radius(w)
-                blast_radius.extend(blast.get("affected_symbols", []))
-
-        if not target_symbols:
-            target_symbols = ["DualPlaneMemoryBridge", "LocalAutonomousEngine"]
-            blast_radius = ["AgentRuntime", "PytestRunner"]
-
-        risk = "HIGH" if len(blast_radius) > 5 else "MEDIUM" if blast_radius else "LOW"
-
-        steps = [
-            f"1. Audit target symbols: {', '.join(target_symbols)}",
-            f"2. Validate blast radius impact across {len(blast_radius)} dependent components",
-            f"3. Enforce repository conventions (type hint coverage: {conventions.type_hint_coverage}%)",
-            "4. Execute safe file modifications with atomic rollback snapshots",
-            "5. Execute test suite and verify zero regressions",
-            "6. Security audit and conventional commit packaging",
-        ]
-
+        for symbol in target_symbols:
+            try:
+                blast_radius.extend(self.code_graph.calculate_blast_radius(symbol).get("affected_symbols", []))
+            except Exception:
+                continue
+        try:
+            self.memory_bridge.recall(objective, top_k=3)
+            adrs = [item.title for item in self.memory_bridge.coding_engine.adr_manager.list_adrs()[:3]]
+            conventions = self.memory_bridge.coding_engine.convention_learner.get_conventions()
+            convention_notes = conventions.key_patterns[:5]
+        except Exception:
+            adrs, convention_notes = [], []
+        risk = "HIGH" if len(set(blast_radius)) > 8 else "MEDIUM" if blast_radius else "LOW"
         plan = ArchitectPlan(
             objective=objective,
             target_symbols=target_symbols,
-            blast_radius=list(set(blast_radius)),
+            blast_radius=list(dict.fromkeys(blast_radius)),
             adrs_consulted=adrs,
-            conventions_noted=conventions.key_patterns[:3],
-            steps=steps,
+            conventions_noted=convention_notes,
+            steps=[
+                "Inspect the requested objective and relevant symbols with local tools.",
+                "Reproduce the observed behavior in the isolated worktree.",
+                "Apply the smallest evidence-backed change and capture a diff.",
+                "Run focused verification and report exact commands and outcomes.",
+                "Audit workspace boundaries, secrets, and regression evidence.",
+            ],
             risk_level=risk,
         )
-
-        messages.append(
-            SwarmMessage(
-                from_role=SwarmAgentRole.ARCHITECT,
-                to_role=SwarmAgentRole.IMPLEMENTER,
-                action="HANDOFF_PLAN",
-                payload={
-                    "plan": plan.to_dict(),
-                    "instructions": f"Implement changes satisfying objective '{objective}' with blast radius containment.",
-                },
-            )
-        )
-
-        return plan, messages
+        return plan, [SwarmMessage(SwarmAgentRole.ARCHITECT, SwarmAgentRole.IMPLEMENTER, "HANDOFF_PLAN", {"plan": plan.to_dict()})]
 
 
 class ImplementerAgent:
-    """Specialized in executing code edits with atomic snapshot backups."""
+    """Run a real coder worker in an isolated Git worktree."""
 
     def __init__(self, workspace_root: Path):
         self.workspace = workspace_root
-        self.snapshot_mgr = SnapshotManager(self.workspace)
 
-    def execute_plan(self, plan: ArchitectPlan) -> tuple[list[str], str, list[SwarmMessage]]:
-        messages: list[SwarmMessage] = []
-        # Create pre-flight rollback snapshot
-        snapshot_id = f"swarm_snap_{int(time.time())}"
-        self.snapshot_mgr.create_session_dir(snapshot_id)
-        
-        # Verify targeted files can be inspected and safely mutated
-        modified_files: list[str] = []
-        for sym in plan.target_symbols[:2]:
-            # Record that this symbol is scoped and guarded
-            modified_files.append(f"src/smara/{sym.lower()}.py")
-
-        messages.append(
-            SwarmMessage(
-                from_role=SwarmAgentRole.IMPLEMENTER,
-                to_role=SwarmAgentRole.VERIFIER,
-                action="HANDOFF_MUTATIONS",
-                payload={
-                    "snapshot_id": snapshot_id,
-                    "modified_files": modified_files,
-                    "target_symbols": plan.target_symbols,
-                    "status": "READY_FOR_VERIFICATION",
-                },
-            )
+    def execute_plan(self, plan: ArchitectPlan) -> tuple[list[str], DelegationResult, list[SwarmMessage]]:
+        config = _worker_config()
+        worker = SubagentWorker(
+            task_id=f"swarm-implementer-{int(time.time() * 1000)}",
+            role=SubagentRole.CODER,
+            api_key=config["api_key"],
+            base_url=str(config["base_url"]),
+            model=str(config["model"]),
+            max_iterations=12,
+            isolate_worktree=True,
+            workspace_root=self.workspace,
         )
-
-        return modified_files, snapshot_id, messages
+        result = worker.run(
+            goal=(
+                f"Implement and verify this objective: {plan.objective}\n"
+                "Use only Smara's typed local tools. Inspect before editing; reproduce the issue; make a minimal "
+                "patch; run focused checks; and return a precise summary. Do not claim a change without a real diff."
+            ),
+            context=json.dumps(plan.to_dict(), ensure_ascii=False),
+        )
+        files = _files_from_diff(result.worktree_diff)
+        message = SwarmMessage(
+            SwarmAgentRole.IMPLEMENTER,
+            SwarmAgentRole.VERIFIER,
+            "HANDOFF_IMPLEMENTATION",
+            {
+                "status": result.status,
+                "files_modified": files,
+                "worktree_branch": result.worktree_branch,
+                "diff_sha256": hashlib.sha256((result.worktree_diff or "").encode()).hexdigest(),
+                "error": result.error,
+            },
+        )
+        return files, result, [message]
 
 
 class VerificationAgent:
-    """Specialized in test execution, stack trace diagnosis, and autonomous healing."""
+    """Have an isolated tester worker verify the implementation evidence."""
 
     def __init__(self, workspace_root: Path):
         self.workspace = workspace_root
-        self.pytest_runner = PytestRunner(self.workspace)
-        self.test_fixer = AutonomousTestFixer(self.workspace)
 
-    def verify(self, plan: ArchitectPlan, files: list[str]) -> tuple[bool, int, int, bool, list[SwarmMessage]]:
-        messages: list[SwarmMessage] = []
-        # Run tests targeting changed components or fast subset
-        res = self.pytest_runner.run("tests/test_coding_memory.py")
-        
-        healing_applied = False
-        all_passed = res.failed == 0
-
-        if not all_passed:
-            # Autonomous healing attempt
-            heal_res = self.test_fixer.diagnose_and_heal("tests/test_coding_memory.py")
-            healing_applied = heal_res.healed
-            all_passed = heal_res.healed
-
-        messages.append(
-            SwarmMessage(
-                from_role=SwarmAgentRole.VERIFIER,
-                to_role=SwarmAgentRole.AUDITOR,
-                action="HANDOFF_VERIFICATION",
-                payload={
-                    "total_tests": res.total,
-                    "passed": res.passed,
-                    "failed": res.failed,
-                    "healing_applied": healing_applied,
-                    "all_passed": all_passed,
-                },
-            )
+    def verify(self, plan: ArchitectPlan, files: list[str], implementation: DelegationResult) -> tuple[bool, int, int, bool, DelegationResult, list[SwarmMessage]]:
+        config = _worker_config()
+        worker = SubagentWorker(
+            task_id=f"swarm-verifier-{int(time.time() * 1000)}",
+            role=SubagentRole.TESTER,
+            api_key=config["api_key"],
+            base_url=str(config["base_url"]),
+            model=str(config["model"]),
+            max_iterations=8,
+            isolate_worktree=True,
+            workspace_root=self.workspace,
         )
-
-        return all_passed, res.total, res.passed, healing_applied, messages
+        result = worker.run(
+            goal=(
+                f"Verify the proposed implementation for: {plan.objective}. Review the supplied diff, reproduce the "
+                "reported behavior in your isolated worktree when possible, and run focused tests or static checks. "
+                "This is verification only: do not edit production files and do not report success without evidence."
+            ),
+            context=json.dumps({"files": files, "implementation_summary": implementation.summary, "diff": implementation.worktree_diff or ""}, ensure_ascii=False),
+        )
+        passed = result.status == "SUCCESS"
+        message = SwarmMessage(
+            SwarmAgentRole.VERIFIER,
+            SwarmAgentRole.AUDITOR,
+            "HANDOFF_VERIFICATION",
+            {"status": result.status, "trace_steps": result.trace_steps, "passed": passed, "error": result.error},
+        )
+        # The worker reports trace steps, not a fabricated test count.
+        return passed, 0, 0, False, result, [message]
 
 
 class SecurityAuditorAgent:
-    """Specialized in sandbox path validation, convention auditing, and semantic commits."""
+    """Use an isolated auditor worker; never invent a commit or audit result."""
 
     def __init__(self, workspace_root: Path):
         self.workspace = workspace_root
-        self.git_manager = GitWorkspaceManager(self.workspace)
         self.coding_engine = CodingMemoryEngine(self.workspace)
 
-    def audit_and_sign(self, plan: ArchitectPlan, files: list[str], verified: bool) -> tuple[bool, str, list[SwarmMessage]]:
-        messages: list[SwarmMessage] = []
-        
-        # 1. Sandbox and path safety checks
-        for f in files:
-            p = (self.workspace / f).resolve()
-            if not str(p).startswith(str(self.workspace.resolve())):
-                messages.append(
-                    SwarmMessage(
-                        from_role=SwarmAgentRole.AUDITOR,
-                        to_role=SwarmAgentRole.ARCHITECT,
-                        action="SECURITY_ALERT",
-                        payload={"error": f"Path traversal detected: {f}"},
-                    )
-                )
-                return False, "", messages
-
-        # 2. Convention conformity check
-        conventions = self.coding_engine.convention_learner.get_conventions()
-
-        # 3. Generate Conventional Commit message
-        commit_msg = f"feat(swarm): {plan.objective.lower().rstrip('.')}\n\n- Scope: {', '.join(plan.target_symbols)}\n- Risk Level: {plan.risk_level}\n- Verified: Tests passing, conventions enforced"
-
-        messages.append(
-            SwarmMessage(
-                from_role=SwarmAgentRole.AUDITOR,
-                to_role=SwarmAgentRole.ARCHITECT,
-                action="AUDIT_PASSED",
-                payload={
-                    "commit_message": commit_msg,
-                    "conventions_verified": True,
-                    "sandbox_clean": True,
-                },
-            )
+    def audit_and_sign(self, plan: ArchitectPlan, files: list[str], verified: bool, evidence: DelegationResult) -> tuple[bool, str, list[SwarmMessage]]:
+        if not verified:
+            return False, "", [SwarmMessage(SwarmAgentRole.AUDITOR, SwarmAgentRole.ARCHITECT, "AUDIT_BLOCKED", {"reason": "verification_failed", "files_modified": files})]
+        config = _worker_config()
+        worker = SubagentWorker(
+            task_id=f"swarm-auditor-{int(time.time() * 1000)}",
+            role=SubagentRole.AUDITOR,
+            api_key=config["api_key"],
+            base_url=str(config["base_url"]),
+            model=str(config["model"]),
+            max_iterations=6,
+            isolate_worktree=True,
+            workspace_root=self.workspace,
         )
-
-        return True, commit_msg, messages
+        result = worker.run(
+            goal=(
+                f"Audit the proposed change for: {plan.objective}. Check path boundaries, secret leakage, unsafe "
+                "commands, and whether the verification evidence is sufficient. Return a review only; do not commit."
+            ),
+            context=json.dumps({"files": files, "verification": evidence.summary, "diff": evidence.worktree_diff or ""}, ensure_ascii=False),
+        )
+        passed = result.status == "SUCCESS"
+        return passed, "", [SwarmMessage(SwarmAgentRole.AUDITOR, SwarmAgentRole.ARCHITECT, "AUDIT_RESULT", {"status": result.status, "passed": passed, "review": result.summary, "error": result.error, "commit_created": False})]
 
 
 class SwarmOrchestrator:
-    """Orchestrates the entire multi-agent lifecycle with handoffs and safety gates."""
+    """Coordinate real role workers through an in-process event queue."""
 
     def __init__(self, workspace_root: Path | None = None):
         self.workspace = (workspace_root or Path.cwd()).resolve()
@@ -283,66 +266,63 @@ class SwarmOrchestrator:
         self.verifier = VerificationAgent(self.workspace)
         self.auditor = SecurityAuditorAgent(self.workspace)
         self.sessions_path = self.workspace / ".smara" / "swarm_sessions.json"
+        self.events: queue.Queue[SwarmMessage] = queue.Queue()
 
-    def run_swarm(
-        self,
-        objective: str,
-        on_event: Optional[Callable[[str, SwarmAgentRole, str], None]] = None,
-    ) -> SwarmTaskResult:
-        t0 = time.time()
+    def run_swarm(self, objective: str, on_event: Optional[Callable[[str, SwarmAgentRole, str], None]] = None) -> SwarmTaskResult:
+        started = time.time()
         session_id = f"swarm-{int(time.time())}"
         all_messages: list[SwarmMessage] = []
 
-        def notify(role: SwarmAgentRole, status: str, detail: str):
+        def publish(message: SwarmMessage) -> None:
+            self.events.put(message)
+            all_messages.append(message)
+
+        def notify(role: SwarmAgentRole, status: str, detail: str) -> None:
             if on_event:
                 try:
-                    on_event(role.value, role, detail)
+                    on_event(status, role, detail)
                 except Exception:
                     pass
 
-        # Phase 1: Lead Architect
-        notify(SwarmAgentRole.ARCHITECT, "THINKING", f"Decomposing objective: '{objective}'...")
-        plan, m1 = self.architect.plan_objective(objective)
-        all_messages.extend(m1)
-        notify(SwarmAgentRole.ARCHITECT, "COMPLETED", f"Plan created. Scoped symbols: {', '.join(plan.target_symbols)} (Risk: {plan.risk_level})")
+        notify(SwarmAgentRole.ARCHITECT, "THINKING", "Inspecting workspace graph and durable coding memory.")
+        plan, messages = self.architect.plan_objective(objective)
+        for message in messages:
+            publish(message)
+        notify(SwarmAgentRole.ARCHITECT, "COMPLETED", f"Plan created with {len(plan.target_symbols)} discovered symbols.")
 
-        # Phase 2: Implementer
-        notify(SwarmAgentRole.IMPLEMENTER, "WORKING", "Executing atomic pre-flight snapshot and scoped mutations...")
-        files, snapshot_id, m2 = self.implementer.execute_plan(plan)
-        all_messages.extend(m2)
-        notify(SwarmAgentRole.IMPLEMENTER, "COMPLETED", f"Scoped mutations prepared under snapshot: {snapshot_id}")
+        notify(SwarmAgentRole.IMPLEMENTER, "WORKING", "Running the real coder worker in an isolated Git worktree.")
+        files, implementation, messages = self.implementer.execute_plan(plan)
+        for message in messages:
+            publish(message)
+        notify(SwarmAgentRole.IMPLEMENTER, "COMPLETED", f"Worker returned {implementation.status} with {len(files)} changed files.")
 
-        # Phase 3: Verification
-        notify(SwarmAgentRole.VERIFIER, "WORKING", "Running pytest test suites & verifying blast radius...")
-        all_passed, tests_run, tests_passed, healed, m3 = self.verifier.verify(plan, files)
-        all_messages.extend(m3)
-        status_txt = "All tests passed cleanly." if all_passed else "Test failures encountered and auto-healed."
-        notify(SwarmAgentRole.VERIFIER, "COMPLETED", f"{status_txt} ({tests_passed}/{tests_run} passed)")
+        notify(SwarmAgentRole.VERIFIER, "WORKING", "Reviewing the implementation and running focused verification in isolation.")
+        verified, tests_run, tests_passed, healed, verification, messages = self.verifier.verify(plan, files, implementation)
+        for message in messages:
+            publish(message)
+        notify(SwarmAgentRole.VERIFIER, "COMPLETED", f"Verification worker returned {verification.status}.")
 
-        # Phase 4: Security & Quality Auditor
-        notify(SwarmAgentRole.AUDITOR, "WORKING", "Auditing workspace boundaries and formatting semantic commit...")
-        audit_ok, commit_msg, m4 = self.auditor.audit_and_sign(plan, files, all_passed)
-        all_messages.extend(m4)
-        notify(SwarmAgentRole.AUDITOR, "COMPLETED", "Audit passed. Deliverable signed and ready.")
+        notify(SwarmAgentRole.AUDITOR, "WORKING", "Auditing the proposed diff and evidence; no commit is created automatically.")
+        audit_ok, _, messages = self.auditor.audit_and_sign(plan, files, verified, verification)
+        for message in messages:
+            publish(message)
+        notify(SwarmAgentRole.AUDITOR, "COMPLETED", "Audit passed." if audit_ok else "Audit blocked the result.")
 
-        duration = int((time.time() - t0) * 1000)
-
+        status = "SUCCESS" if implementation.status == "SUCCESS" and verified and audit_ok else "FAILED"
         result = SwarmTaskResult(
             session_id=session_id,
             objective=objective,
-            status="SUCCESS" if (all_passed and audit_ok) else "HEALED" if healed else "FAILED",
-            duration_ms=duration,
+            status=status,
+            duration_ms=int((time.time() - started) * 1000),
             architect_plan=plan,
             files_modified=files,
             tests_run=tests_run,
             tests_passed=tests_passed,
             healing_applied=healed,
             audit_passed=audit_ok,
-            commit_message=commit_msg if audit_ok else None,
+            commit_message=None,
             inter_agent_messages=all_messages,
         )
-
-        # Record session history
         self._record_session(result)
         return result
 
@@ -355,10 +335,7 @@ class SwarmOrchestrator:
             except Exception:
                 history = []
         history.append(result.to_dict())
-        # Keep last 50 sessions
-        if len(history) > 50:
-            history = history[-50:]
-        self.sessions_path.write_text(json.dumps(history, indent=2), encoding="utf-8")
+        self.sessions_path.write_text(json.dumps(history[-50:], indent=2), encoding="utf-8")
 
     def get_session_history(self) -> list[dict[str, Any]]:
         if not self.sessions_path.exists():

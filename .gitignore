@@ -18,6 +18,7 @@ pytest-run-*/
 *.metadata.json
 *.log
 reports/gaia_readiness.json
+reports/osworld_readiness.json
 /*.pdf
 /*.pdb
 scratch/
