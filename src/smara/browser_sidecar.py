@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import base64
-import html
 import json
 import os
 import re
@@ -106,25 +105,18 @@ class BrowserSidecarEngine:
             except Exception as e:
                 pass
 
-        # Fallback synthetic SVG/PNG placeholder if external browser command fails
-        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
-            <rect width="1280" height="800" fill="#0f172a"/>
-            <rect x="40" y="40" width="1200" height="60" rx="8" fill="#1e293b"/>
-            <text x="70" y="78" fill="#38bdf8" font-family="monospace" font-size="20">🌐 {html.escape(url)}</text>
-            <rect x="40" y="130" width="800" height="500" rx="12" fill="#1e293b"/>
-            <text x="80" y="200" fill="#f8fafc" font-family="sans-serif" font-size="28" font-weight="bold">Browser Snapshot Rendered</text>
-            <text x="80" y="250" fill="#94a3b8" font-family="sans-serif" font-size="16">Autonomous Headless Sidecar active • Target: {html.escape(url)}</text>
-            <rect x="80" y="300" width="300" height="40" rx="6" fill="#6366f1"/>
-            <text x="130" y="326" fill="#ffffff" font-family="sans-serif" font-size="15" font-weight="bold">E2E Flow Ready</text>
-        </svg>"""
-        b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+        # A diagnostic illustration is not an observation.  In particular,
+        # never claim a capture exists when no browser backend produced PNG
+        # bytes at the requested target.
         return {
-            "ok": True,
-            "success": True,
+            "ok": False,
+            "success": False,
             "url": url,
-            "file_path": str(target_file),
-            "file_size": len(svg),
-            "data_url": f"data:image/svg+xml;base64,{b64}",
+            "file_path": None,
+            "file_size": 0,
+            "data_url": "data:application/x-smara-unavailable;base64,",
+            "error_kind": "screenshot_unavailable",
+            "error": "No browser backend produced a screenshot.",
         }
 
     def scrape_url(self, url: str) -> dict[str, Any]:
@@ -278,11 +270,13 @@ class BrowserSidecarEngine:
                         step_index=idx,
                         action="screenshot",
                         target=current_url,
-                        status="passed",
+                        status="passed" if shot.get("success") else "failed",
                         duration_ms=dt,
-                        details="High-res screenshot captured for visual replay",
+                        details=("High-res screenshot captured for visual replay" if shot.get("success") else shot.get("error", "Screenshot unavailable")),
                         screenshot_base64=shot.get("data_url"),
                     ))
+                    if not shot.get("success"):
+                        break
 
                 else:
                     dt = int((time.time() - t0) * 1000)
@@ -290,10 +284,11 @@ class BrowserSidecarEngine:
                         step_index=idx,
                         action=action,
                         target=target,
-                        status="passed",
+                        status="failed",
                         duration_ms=dt,
-                        details=f"Executed action '{action}' on target '{target}'",
+                        details=f"Unsupported browser action '{action}' was not executed.",
                     ))
+                    break
 
             except Exception as e:
                 dt = int((time.time() - t0) * 1000)

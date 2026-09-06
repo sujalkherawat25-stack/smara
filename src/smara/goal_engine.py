@@ -7,6 +7,7 @@ and stop condition evaluation.
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -144,7 +145,9 @@ class GoalRunner:
         """Durable checkpoint to disk after every step mutation."""
         session.updated_at = time.time()
         p = self._session_file(session.goal_id)
-        p.write_text(json.dumps(session.to_dict(), indent=2), encoding="utf-8")
+        temporary = p.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(session.to_dict(), indent=2), encoding="utf-8")
+        os.replace(temporary, p)
 
     def load_session(self, goal_id: str) -> Optional[GoalSession]:
         p = self._session_file(goal_id)
@@ -204,21 +207,21 @@ class GoalRunner:
 
         completed_step_ids = {s.id for s in session.steps if s.status == "completed"}
 
-        for step in session.steps:
-            # Skip already completed steps
-            if step.status == "completed":
-                continue
-
-            # Check dependencies
-            unresolved = [d for d in step.dependencies if d not in completed_step_ids]
-            if unresolved:
-                step.status = "failed"
-                step.error = f"Unresolved dependencies: {unresolved}"
-                self.save_checkpoint(session)
-                if on_event:
-                    on_event("step_failed", step, f"Missing prerequisite steps: {unresolved}")
+        while True:
+            pending = [step for step in session.steps if step.status != "completed"]
+            if not pending:
+                break
+            # A valid DAG may arrive in any order.  Execute only a ready node,
+            # preserving supplied order merely as the deterministic tie break.
+            step = next((item for item in pending if all(dep in completed_step_ids for dep in item.dependencies)), None)
+            if step is None:
+                for item in pending:
+                    item.status = "failed"
+                    item.error = f"Unresolved dependencies: {[d for d in item.dependencies if d not in completed_step_ids]}"
                 session.status = "failed"
                 self.save_checkpoint(session)
+                if on_event:
+                    on_event("step_failed", pending[0], pending[0].error or "No ready goal step")
                 return session
 
             # Run step
@@ -235,8 +238,18 @@ class GoalRunner:
 
                 # Verify result
                 is_failed = False
-                if isinstance(output, dict):
-                    if output.get("error") or output.get("status") == "failed":
+                if not isinstance(output, dict):
+                    is_failed = True
+                    step.error = "Step executor returned an invalid result (expected an object)."
+                else:
+                    exit_code = output.get("exit_code")
+                    if (
+                        output.get("ok") is False
+                        or output.get("success") is False
+                        or output.get("error")
+                        or output.get("status") in {"failed", "error", "denied", "cancelled", "tool_error"}
+                        or (isinstance(exit_code, int) and exit_code != 0)
+                    ):
                         is_failed = True
                         step.error = str(output.get("error") or output.get("message") or "Step execution failed")
 

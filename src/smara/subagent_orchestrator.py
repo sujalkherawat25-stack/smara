@@ -29,6 +29,11 @@ DELEGATE_BLOCKED_TOOLS = frozenset([
     "dag_flow",          # Prevent subagents from reconfiguring top-level DAG
 ])
 
+# Delegated workers use process-global cwd and do not yet carry an enforceable
+# capability grant or aggregate budget.  Keep the public API, but fail closed
+# until H6 supplies that policy boundary.
+DELEGATION_ENABLED = False
+
 
 class SubagentRole(str, enum.Enum):
     GENERALIST = "generalist"
@@ -223,6 +228,8 @@ class SubagentOrchestrator:
     ) -> DelegationResult:
         """Spawn a single worker subagent to execute a specific sub-task."""
         task_id = f"sub_{role.value}_{int(time.time() * 1000) % 100000}"
+        if not DELEGATION_ENABLED:
+            return DelegationResult(task_id=task_id, goal=goal, status="FAILED", summary="Delegation is disabled until worker policy is enforced.", trace_steps=0, duration_ms=0, tools_used=[], error="delegation_disabled")
         worker = SubagentWorker(
             task_id=task_id,
             role=role,
@@ -256,6 +263,8 @@ class SubagentOrchestrator:
         timeout: int = 120
     ) -> List[DelegationResult]:
         """Execute multiple subagent delegations concurrently and aggregate results."""
+        if not DELEGATION_ENABLED:
+            return [DelegationResult(task_id="disabled", goal=str(task.get("goal", "")), status="FAILED", summary="Delegation is disabled until worker policy is enforced.", trace_steps=0, duration_ms=0, tools_used=[], error="delegation_disabled") for task in tasks]
         results: List[DelegationResult] = []
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:

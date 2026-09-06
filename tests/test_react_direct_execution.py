@@ -25,18 +25,18 @@ def test_toolset_profiles():
 
 
 def test_agent_execute_tool_dispatch():
-    agent = SmaraAutonomousAgent(api_key="mock_key", model="mock_model")
-
-    # 1. Test todo tool dispatch through agent
-    todo_res = agent.execute_tool("todo", {
-        "todos": [{"id": "step1", "content": "Set up environment", "status": "in_progress"}]
-    })
-    todo_data = json.loads(todo_res)
-    assert todo_data["summary"]["in_progress"] == 1
-    assert agent.task_planner.has_items()
-
-    # 2. Test file_write and patch tool dispatch
     with tempfile.TemporaryDirectory() as tmpdir:
+        agent = SmaraAutonomousAgent(api_key="mock_key", model="mock_model", workspace_root=tmpdir)
+
+        # 1. Test todo tool dispatch through agent
+        todo_res = agent.execute_tool("todo", {
+            "todos": [{"id": "step1", "content": "Set up environment", "status": "in_progress"}]
+        })
+        todo_data = json.loads(todo_res)
+        assert todo_data["summary"]["in_progress"] == 1
+        assert agent.task_planner.has_items()
+
+        # 2. Test file_write and patch tool dispatch
         fpath = Path(tmpdir) / "script.py"
         write_res = agent.execute_tool("file_write", {
             "path": str(fpath),
@@ -53,7 +53,24 @@ def test_agent_execute_tool_dispatch():
         assert "Patch applied successfully" in patch_res
         assert "MSG = 'updated_value'" in fpath.read_text(encoding="utf-8")
 
-    # 3. Test terminal tool dispatch
-    term_res = agent.execute_tool("terminal", {"command": "echo SmaraAgentTerminal"})
-    assert "SmaraAgentTerminal" in term_res
-    assert "[Exit Code: 0]" in term_res
+        # 3. Test terminal tool dispatch
+        term_res = agent.execute_tool("terminal", {"command": "echo SmaraAgentTerminal"})
+        assert "SmaraAgentTerminal" in term_res
+        assert "[Exit Code: 0]" in term_res
+
+
+def test_tool_admission_and_workspace_boundary_are_enforced(tmp_path: Path):
+    agent = SmaraAutonomousAgent(api_key="mock_key", model="mock_model", profile="research", workspace_root=tmp_path)
+    assert "Denied" in agent.execute_tool("patch", {"path": "nope.py", "old_string": "a", "new_string": "b"})
+    assert "Denied" in agent.execute_tool("delegate_task", {"goal": "unsafe"})
+    full_agent = SmaraAutonomousAgent(api_key="mock_key", model="mock_model", workspace_root=tmp_path)
+    assert "outside the configured workspace" in full_agent.execute_tool(
+        "file_write", {"path": str(tmp_path.parent / "canary.txt"), "content": "no"}
+    )
+    assert not (tmp_path.parent / "canary.txt").exists()
+
+
+def test_unknown_tool_profile_is_rejected():
+    assert get_tool_schemas("not-a-profile") == []
+    with pytest.raises(ValueError, match="Unknown tool profile"):
+        SmaraAutonomousAgent(profile="not-a-profile")

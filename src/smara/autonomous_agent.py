@@ -18,7 +18,6 @@ import logging
 import os
 import re
 import collections
-import concurrent.futures
 import hashlib
 import sys
 import time
@@ -91,6 +90,25 @@ IDEMPOTENT_TOOLS = frozenset({
     "skills_list",
     "skill_view",
 })
+
+# H0 is deliberately conservative: delegation stays disabled until child
+# policy and process isolation are enforced by the broker work.
+DISABLED_TOOLS = frozenset({"delegate_task"})
+VALID_TOOLSETS = frozenset({"full", "coding", "swe", "worker", "worker_coding", "worker_verification", "research", "web", "multimodal", "vision", "audio"})
+
+
+def _tool_result_succeeded(observation: str) -> bool:
+    """Conservative legacy-result decoder; never infer success from prose."""
+    text = str(observation or "")
+    exit_match = re.search(r"\[Exit Code:\s*(-?\d+)\]", text)
+    if exit_match:
+        return int(exit_match.group(1)) == 0
+    if re.search(r"\b(error|failed|traceback|exception|timed out)\b", text, re.IGNORECASE):
+        return False
+    # Existing non-process tools have no typed receipt yet.  Do not use these
+    # observations as verification evidence; this only avoids mislabelling a
+    # plainly failed mutation as successful.
+    return True
 
 
 def _is_repetition_dominated(text: str, min_len: int = 400, window: int = 60, min_repeats: int = 5) -> bool:
@@ -941,8 +959,12 @@ TOOL_SCHEMAS = [
 def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
     """Return tool schemas filtered by profile to optimize token budget."""
     prof = (profile or "full").lower().strip()
+    if prof not in VALID_TOOLSETS:
+        # Schema callers can inspect an unsupported profile without falling
+        # back to full authority. Agent construction rejects it below.
+        return []
     if prof == "full":
-        return TOOL_SCHEMAS
+        return [s for s in TOOL_SCHEMAS if s.get("function", {}).get("name") not in DISABLED_TOOLS]
     elif prof in ["coding", "swe"]:
         allowed = {
             "terminal", "file_write", "patch", "python_execute", "file_read",
@@ -955,7 +977,7 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
             "list_directory", "search_files", "code_graph",
             "todo", "programmatic_tool_call"
         }
-    elif prof == "worker_verification":
+    elif prof in {"worker", "worker_verification"}:
         allowed = {
             "terminal", "file_read", "list_directory", "search_files", "code_graph",
             "python_execute", "calculate", "browser_action", "web_search",
@@ -969,9 +991,7 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
         }
     elif prof in ["multimodal", "vision", "audio"]:
         allowed = {"browser_action", "image_inspect", "audio_transcribe", "video_inspect", "file_read", "todo"}
-    else:
-        return TOOL_SCHEMAS
-    return [s for s in TOOL_SCHEMAS if s.get("function", {}).get("name") in allowed]
+    return [s for s in TOOL_SCHEMAS if s.get("function", {}).get("name") in allowed - DISABLED_TOOLS]
 
 
 BASE_SYSTEM_PROMPT = """You are Smara Autonomous Agent, an elite autonomous AI system.
@@ -1074,6 +1094,8 @@ class SmaraAutonomousAgent:
         self.auth_header = auth_header.lower().strip()
         self.max_iterations = max_iterations
         self.toolset = profile or toolset
+        if self.toolset not in VALID_TOOLSETS:
+            raise ValueError(f"Unknown tool profile '{self.toolset}'.")
         self.workspace_root = Path(workspace_root).resolve() if workspace_root else Path.cwd()
         self.on_progress = on_progress
         self.task_planner = SmaraTaskPlanner()
@@ -1109,6 +1131,21 @@ class SmaraAutonomousAgent:
             "file_write": self._dispatch_file_write,
             "browser_action": self._dispatch_browser_action,
         }
+        self._admitted_tool_names = {
+            schema["function"]["name"] for schema in get_tool_schemas(self.toolset)
+        }
+
+    def _workspace_path(self, raw_path: str, *, allow_missing: bool = True) -> Path:
+        """Resolve a legacy filesystem argument within this agent's workspace."""
+        candidate = Path(raw_path) if raw_path else self.workspace_root
+        resolved = (candidate if candidate.is_absolute() else self.workspace_root / candidate).resolve()
+        try:
+            resolved.relative_to(self.workspace_root)
+        except ValueError as exc:
+            raise ValueError("Path is outside the configured workspace.") from exc
+        if not allow_missing and not resolved.exists():
+            raise ValueError(f"Path does not exist: {raw_path}")
+        return resolved
 
     def _report_progress(self, event_type: str, data: Dict[str, Any]) -> None:
         if self.on_progress and callable(self.on_progress):
@@ -1138,24 +1175,24 @@ class SmaraAutonomousAgent:
         old_string = args.get("old_string") or args.get("old_str") or ""
         new_string = args.get("new_string") or args.get("new_str") or ""
         replace_all = args.get("replace_all", False)
-        return patch_file_tool(path=path, old_string=old_string, new_string=new_string, replace_all=replace_all)
+        return patch_file_tool(path=str(self._workspace_path(path)), old_string=old_string, new_string=new_string, replace_all=replace_all)
 
     def _dispatch_terminal(self, args: Dict[str, Any]) -> str:
         cmd = args.get("command") or args.get("cmd") or ""
-        cwd = args.get("cwd")
+        cwd = str(self._workspace_path(args.get("cwd") or "."))
         timeout = args.get("timeout", 45)
         return terminal_execute(command=cmd, cwd=cwd, timeout=timeout)
 
     def _dispatch_file_write(self, args: Dict[str, Any]) -> str:
         path = args.get("path") or args.get("file_path") or ""
         content = args.get("content", "")
-        return file_write(path=path, content=content)
+        return file_write(path=str(self._workspace_path(path)), content=content)
 
     def _dispatch_browser_action(self, args: Dict[str, Any]) -> str:
         act = args.get("action", "scrape")
         url = args.get("url") or ""
         out_p = args.get("output_path")
-        return browser_action_tool(action=act, url=url, output_path=out_p)
+        return browser_action_tool(action=act, url=url, output_path=str(self._workspace_path(out_p)) if out_p else None)
 
     def _dispatch_web_search(self, args: Dict[str, Any]) -> str:
         q = args.get("query") or args.get("q") or ""
@@ -1193,18 +1230,18 @@ class SmaraAutonomousAgent:
         offset = args.get("offset")
         limit = args.get("limit")
         max_chars = args.get("max_chars", 12000)
-        return file_read(fp, offset=offset, limit=limit, max_chars=max_chars)
+        return file_read(str(self._workspace_path(fp)), offset=offset, limit=limit, max_chars=max_chars)
 
     def _dispatch_list_directory(self, args: Dict[str, Any]) -> str:
         p = args.get("path") or "."
         d = int(args.get("max_depth") or 2)
-        return list_directory(p, max_depth=d)
+        return list_directory(str(self._workspace_path(p)), max_depth=d)
 
     def _dispatch_search_files(self, args: Dict[str, Any]) -> str:
         q = args.get("query") or ""
         p = args.get("path") or "."
         r = bool(args.get("is_regex", False))
-        return search_files(q, path=p, is_regex=r)
+        return search_files(q, path=str(self._workspace_path(p)), is_regex=r)
 
     def _dispatch_code_graph(self, args: Dict[str, Any]) -> str:
         op = args.get("operation") or "inspect_symbol"
@@ -1280,6 +1317,10 @@ class SmaraAutonomousAgent:
 
     def execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
         """Safely invoke registered tool handler."""
+        if tool_name in DISABLED_TOOLS:
+            return f"Denied: Tool '{tool_name}' is disabled pending enforced delegation policy."
+        if tool_name not in self._admitted_tool_names:
+            return f"Denied: Tool '{tool_name}' is not admitted for profile '{self.toolset}'."
         handler = self._tool_handlers.get(tool_name)
         if not handler:
             return f"Error: Tool '{tool_name}' is not recognized. Available tools: {list(self._tool_handlers.keys())}"
@@ -1414,7 +1455,45 @@ class SmaraAutonomousAgent:
 
         logger.info(f"Starting autonomous ReAct agent for task: {task[:90]}...")
 
-        touched_code_files: set[str] = set()
+        # Maps a changed source path to its revision at the time it was last
+        # changed.  A verification receipt is valid only after the most recent
+        # mutation; command names and model prose are not evidence.
+        pending_verification: dict[str, str | None] = {}
+        verification_failed = False
+
+        def _mark_mutation(args: Dict[str, Any]) -> None:
+            nonlocal verification_failed
+            path = str(args.get("path") or args.get("file_path") or "")
+            if path and any(path.lower().endswith(ext) for ext in [".py", ".js", ".ts", ".rs", ".go", ".c", ".cpp", ".sh"]):
+                try:
+                    candidate = self._workspace_path(path)
+                    revision = hashlib.sha256(candidate.read_bytes()).hexdigest() if candidate.exists() else None
+                except Exception:
+                    revision = None
+                pending_verification[path] = revision
+                # A subsequent edit creates a new candidate revision; failure
+                # evidence for the old revision remains in the trace but does
+                # not condemn a later repaired revision.
+                verification_failed = False
+
+        def _record_verification(tool: str, observation: str) -> None:
+            nonlocal verification_failed
+            if not pending_verification or tool not in {"terminal", "python_execute"}:
+                return
+            if not _tool_result_succeeded(observation):
+                verification_failed = True
+                return
+            # A successful actual execution result verifies the current edit
+            # revision, not an earlier state.  If a path cannot be read (for
+            # example a test double), retain the pending state conservatively.
+            for path, expected_revision in list(pending_verification.items()):
+                try:
+                    candidate = self._workspace_path(path)
+                    current_revision = hashlib.sha256(candidate.read_bytes()).hexdigest() if candidate.exists() else None
+                except Exception:
+                    current_revision = None
+                if current_revision == expected_revision and current_revision is not None:
+                    pending_verification.pop(path, None)
 
         max_loop_iterations = max_iterations or self.max_iterations
         iteration = 0
@@ -1428,15 +1507,10 @@ class SmaraAutonomousAgent:
 
             logger.info(f"Agent Loop Iteration {iteration}/{max_loop_iterations}")
 
-            # Keep tools available throughout the ReAct loop unless step limit is reached or stalled
+            # Keep tools available through the final iteration.  A budget limit
+            # is not permission to manufacture a final answer.
             is_final_step = (iteration == max_loop_iterations)
-            active_tools = None if (is_final_step or consecutive_no_tool >= 3) else get_tool_schemas(self.toolset)
-
-            if is_final_step:
-                messages.append({
-                    "role": "user",
-                    "content": "You have reached the final step. Synthesize all observations above and state your definitive FINAL ANSWER immediately without calling further tools."
-                })
+            active_tools = None if consecutive_no_tool >= 3 else get_tool_schemas(self.toolset)
 
             try:
                 resp = self._call_model_api(messages, tools=active_tools)
@@ -1522,31 +1596,21 @@ class SmaraAutonomousAgent:
                     if fn_name in IDEMPOTENT_TOOLS and call_count >= 2:
                         stall_note = f"[Stall Guard Notice: Tool '{fn_name}' has been called {call_count+1} times with identical arguments without advancing the state. Do not repeat this query. Try a different search angle or proceed to synthesize your answer from existing findings.]\n\n"
 
-                    if fn_name in ["patch", "file_write"]:
-                        p = str(parsed_args.get("path") or "")
-                        if p and any(p.lower().endswith(ext) for ext in [".py", ".js", ".ts", ".rs", ".go", ".c", ".cpp", ".sh"]):
-                            touched_code_files.add(p)
-                    elif fn_name in ["python_execute"]:
-                        touched_code_files.clear()
-                    elif fn_name == "terminal":
-                        cmd_str = str(parsed_args.get("command") or "").lower()
-                        if any(kw in cmd_str for kw in ["pytest", "test", "check", "cargo test", "npm test", "go test", "python -m pytest"]):
-                            touched_code_files.clear()
-
                     self._report_progress("tool_start", {"iteration": iteration, "tool": fn_name, "args": parsed_args})
                     logger.info(f"[Tool Call] {fn_name}({parsed_args})")
                     raw_obs = str(self.execute_tool(fn_name, parsed_args))
+                    if fn_name in {"patch", "file_write"} and _tool_result_succeeded(raw_obs):
+                        _mark_mutation(parsed_args)
+                    _record_verification(fn_name, raw_obs)
                     # Spill safety: offload massive results to disk cache
                     obs = stall_note + _offload_massive_result(raw_obs, call_id=call_id)
                     self._report_progress("tool_end", {"iteration": iteration, "tool": fn_name, "observation": obs})
                     return tc, fn_name, parsed_args, call_id, obs
 
-                # Concurrent dispatch when multiple tool calls are emitted in one turn
-                if len(parsed_calls) > 1:
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(parsed_calls), 4)) as pool:
-                        results = list(pool.map(_execute_single_call, parsed_calls))
-                else:
-                    results = [_execute_single_call(parsed_calls[0])]
+                # H0 serializes every batch.  This preserves write→read and
+                # patch→test ordering until a broker can prove read-only
+                # independence and reserve shared resources.
+                results = [_execute_single_call(item) for item in parsed_calls]
 
                 for tc, fn_name, parsed_args, call_id, obs in results:
                     tools_used.append(fn_name)
@@ -1575,18 +1639,11 @@ class SmaraAutonomousAgent:
                     self._report_progress("tool_start", {"iteration": iteration, "tool": fn_name, "args": fn_args})
                     logger.info(f"[Text Tool Call] {fn_name}({fn_args})")
                     obs = str(self.execute_tool(fn_name, fn_args))
+                    if fn_name in {"patch", "file_write"} and _tool_result_succeeded(obs):
+                        _mark_mutation(fn_args)
+                    _record_verification(fn_name, obs)
                     self._report_progress("tool_end", {"iteration": iteration, "tool": fn_name, "observation": obs})
                     tools_used.append(fn_name)
-                    if fn_name in ["patch", "file_write"]:
-                        p = str(fn_args.get("path") or "")
-                        if p and any(p.lower().endswith(ext) for ext in [".py", ".js", ".ts", ".rs", ".go", ".c", ".cpp", ".sh"]):
-                            touched_code_files.add(p)
-                    elif fn_name in ["python_execute"]:
-                        touched_code_files.clear()
-                    elif fn_name == "terminal":
-                        cmd_str = str(fn_args.get("command") or "").lower()
-                        if any(kw in cmd_str for kw in ["pytest", "test", "check", "cargo test", "npm test", "go test", "python -m pytest"]):
-                            touched_code_files.clear()
                     messages.append({"role": "assistant", "content": content or f"Tool call: {fn_name}"})
                     messages.append({
                         "role": "user",
@@ -1622,10 +1679,9 @@ class SmaraAutonomousAgent:
                     content = reasoning
 
             # Verification Gate: verify code modifications and calculations before confirming answer
-            if has_final_answer and not is_final_step:
-                if touched_code_files:
-                    unverified = list(touched_code_files)
-                    touched_code_files.clear()
+            if has_final_answer:
+                if pending_verification:
+                    unverified = list(pending_verification)
                     logger.info(f"Verification Gate: Prompting verification check for unverified code edits: {unverified}")
                     messages.append({"role": "assistant", "content": content or reasoning})
                     messages.append({
@@ -1658,7 +1714,7 @@ class SmaraAutonomousAgent:
                     })
                     continue
 
-            if has_final_answer or is_final_step:
+            if has_final_answer:
                 raw_concluding = (content.strip() or reasoning.strip())
                 logger.info(f"Agent concluded in iteration {iteration}: {raw_concluding[:120]}...")
                 trace.append({
@@ -1706,28 +1762,20 @@ class SmaraAutonomousAgent:
         if raw_concluding:
             final_answer = self._clean_final_answer(raw_concluding)
         
-        if not final_answer and trace:
-            for step in reversed(trace):
-                cand_thought = step.get("thought") or ""
-                if cand_thought:
-                    fa_cand = self._clean_final_answer(cand_thought)
-                    if fa_cand and not _is_instruction_placeholder(fa_cand):
-                        final_answer = fa_cand
-                        break
-                # Only check genuine tool output observations, never internal trace marker steps
-                if step.get("tool_name") is not None:
-                    cand_obs = step.get("observation") or ""
-                    if cand_obs and not cand_obs.startswith("Verification") and not cand_obs.startswith("Prompted"):
-                        fa_cand = self._clean_final_answer(cand_obs)
-                        if fa_cand and not _is_instruction_placeholder(fa_cand):
-                            final_answer = fa_cand
-                            break
+        status = "completed"
+        if verification_failed:
+            status = "tool_error"
+        elif pending_verification:
+            status = "budget_exhausted" if iteration >= max_loop_iterations else "unverified"
+        elif not final_answer:
+            status = "budget_exhausted" if iteration >= max_loop_iterations else "incomplete"
 
         self._report_progress("answer", {
             "answer": final_answer,
             "raw_answer": raw_concluding,
             "iterations": iteration,
             "tools_used": list(dict.fromkeys(tools_used)),
+            "status": status,
         })
 
         return {
@@ -1735,7 +1783,9 @@ class SmaraAutonomousAgent:
             "raw_answer": raw_concluding,
             "trace": trace,
             "tools_used": list(dict.fromkeys(tools_used)),
-            "iterations": iteration
+            "iterations": iteration,
+            "status": status,
+            "completed": status == "completed",
         }
 
     @staticmethod
@@ -1810,4 +1860,3 @@ class SmaraAutonomousAgent:
         return ans
 
     solve = run
-

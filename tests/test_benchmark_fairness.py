@@ -30,6 +30,28 @@ def test_gaia_runner_records_shared_runtime_trace_without_registry(tmp_path: Pat
     assert Path(report["report_path"]).exists()
 
 
+def test_gaia_default_runner_uses_cli_engine_and_fresh_workspace(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("SMARA_BENCHMARK_MODEL_ENDPOINT", "https://model.test/v1")
+    monkeypatch.setenv("SMARA_BENCHMARK_MODEL", "test-model")
+    tasks = [{"task_id": "task-1", "Level": "1", "Question": "What is two plus two?", "Final answer": "4", "file_name": ""}]
+    seen: dict[str, object] = {}
+
+    def fake_run(self, task, max_iterations):
+        seen["workspace"] = self.workspace_root
+        seen["profile"] = self.toolset
+        seen["iterations"] = max_iterations
+        return {"answer": "4", "raw_answer": "FINAL ANSWER: 4", "completed": True, "status": "completed", "trace": []}
+
+    monkeypatch.setattr("smara.autonomous_agent.SmaraAutonomousAgent.run", fake_run)
+    report = GaiaFairBenchmark(workspace_root=tmp_path, dataset_loader=lambda _token: tasks).evaluate_level("1")
+    assert report["correct"] == 1
+    assert report["runtime_contract"]["engine"] == "SmaraAutonomousAgent"
+    assert report["runtime_contract"]["tool_profile"] == "full"
+    assert seen["profile"] == "full"
+    assert seen["iterations"] == 25
+    assert Path(seen["workspace"]).parent != tmp_path
+
+
 def test_osworld_readiness_never_emits_a_fake_score(tmp_path: Path):
     report = OSWorldReadinessRunner(workspace_root=tmp_path).preflight()
     assert report["status"] == "not_ready"

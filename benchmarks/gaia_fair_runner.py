@@ -7,6 +7,9 @@ errors separately from scored wrong answers.
 from __future__ import annotations
 
 import os
+import hashlib
+import shutil
+import tempfile
 import time
 import urllib.request
 import csv
@@ -160,7 +163,7 @@ def _download_attachment(file_name: str, token: str, cache_root: Path) -> Path |
 class GaiaFairBenchmark:
     """Runs official GAIA dataset questions using the Desktop/CLI agent loop."""
 
-    runner_name = "gaia_shared_local_runtime_strict"
+    runner_name = "gaia_cli_engine_strict"
 
     def __init__(
         self,
@@ -235,13 +238,30 @@ class GaiaFairBenchmark:
         try:
             attachment = self._resolve_attachment(task, task_id, file_name)
             if self.turn_runner is None:
-                from smara.local_agent_runtime import run_shared_local_turn
-                result = run_shared_local_turn(
-                    prompt=self._prompt(question, attachment),
-                    state_path=self.state_path,
-                    config=config,
-                    max_steps=20,
-                )
+                # The benchmark deliberately invokes the same legacy ReAct
+                # engine selected by CLI, with a fresh task workspace rather
+                # than Desktop conversation state or shared memory.
+                from smara.autonomous_agent import SmaraAutonomousAgent, get_tool_schemas
+                with tempfile.TemporaryDirectory(prefix="smara-gaia-") as task_workspace:
+                    root = Path(task_workspace)
+                    local_attachment = None
+                    if attachment is not None:
+                        local_attachment = root / attachment.name
+                        shutil.copy2(attachment, local_attachment)
+                    agent = SmaraAutonomousAgent(
+                        api_key=config.api_key,
+                        base_url=config.base_url,
+                        model=config.model,
+                        auth_header=config.auth_header,
+                        profile="full",
+                        workspace_root=root,
+                    )
+                    result = agent.run(self._prompt(question, local_attachment), max_iterations=25)
+                    result["steps"] = result.get("trace", [])
+                    result["engine"] = "SmaraAutonomousAgent"
+                    result["tool_schema_sha256"] = hashlib.sha256(
+                        json.dumps(get_tool_schemas("full"), sort_keys=True).encode("utf-8")
+                    ).hexdigest()
             else:
                 result = self.turn_runner(
                     prompt=self._prompt(question, attachment), state_path=self.state_path, config=config, max_steps=20
@@ -299,6 +319,7 @@ class GaiaFairBenchmark:
         return _download_attachment(file_name, self.token, self.cache_dir / task_id)
 
     def evaluate_level(self, level: str = "1", start_idx: int = 0, max_tasks: int | None = None) -> dict[str, Any]:
+        from smara.autonomous_agent import get_tool_schemas
         validation = (
             _load_local_validation_split(self.dataset_path)
             if self.dataset_path is not None
@@ -323,7 +344,18 @@ class GaiaFairBenchmark:
             "execution_errors": sum(1 for item in results if item["outcome"] == "execution_error"),
             "correct": correct,
             "incorrect": len(scored) - correct,
-            "accuracy_percent": round((correct / len(scored)) * 100, 2) if scored else 0.0,
+            "accuracy_percent": round((correct / len(results)) * 100, 2) if results else 0.0,
+            "conditional_accuracy_percent": round((correct / len(scored)) * 100, 2) if scored else None,
+            "runtime_contract": {
+                "engine": "SmaraAutonomousAgent",
+                "tool_profile": "full",
+                "max_iterations": 25,
+                "fresh_task_workspace": True,
+                "tool_schema_sha256": hashlib.sha256(json.dumps(get_tool_schemas("full"), sort_keys=True).encode("utf-8")).hexdigest(),
+                "policy": "h0-serial-batches-no-delegation",
+                "model": config.model,
+                "base_url": config.base_url,
+            },
             "results": results,
         }
         report_path = write_report(self.report_dir / f"gaia_fair_level{level}_results.json", report)

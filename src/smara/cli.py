@@ -512,7 +512,9 @@ class LocalAutonomousEngine:
             api_key=api_key,
             model=str(profile.get("model") or "sarvam-2b"),
             base_url=str(profile.get("base_url") or "https://api.sarvam.ai/v1"),
-            profile="worker",
+            # The interactive CLI is the primary legacy engine.  "worker"
+            # was never an admitted profile and silently exposed every schema.
+            profile="full",
             auth_header=str(profile.get("auth_header") or "authorization"),
             workspace_root=self.workspace,
             on_progress=on_progress,
@@ -532,7 +534,8 @@ class LocalAutonomousEngine:
         clean = result.get("answer") or ""
         answer = raw.strip() if raw.strip() else clean.strip()
         if not answer:
-            answer = "The autonomous agent completed the task."
+            status = str(result.get("status") or "incomplete")
+            answer = f"The autonomous agent returned no final answer (status: {status})."
 
         answer = _strip_thinking(answer)
 
