@@ -822,6 +822,18 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--title", default="Smara task")
     run.add_argument("--workspace", default="default")
     run.add_argument("--no-approval", action="store_true")
+    run.add_argument("--prompt-file", help="Read a headless session prompt from a file")
+    run.add_argument("--json", action="store_true", help="Emit durable session result JSON")
+    run.add_argument("--budget-profile", default="short")
+    resume_cmd = subparsers.add_parser("resume", help="Inspect a durable local session result")
+    resume_cmd.add_argument("session_id")
+    resume_cmd.add_argument("--json", action="store_true")
+    cancel_cmd = subparsers.add_parser("cancel", help="Cancel a durable local session")
+    cancel_cmd.add_argument("session_id")
+    inspect_cmd = subparsers.add_parser("inspect", help="Inspect durable local session events")
+    inspect_cmd.add_argument("session_id")
+    inspect_cmd.add_argument("--events", action="store_true")
+    inspect_cmd.add_argument("--json", action="store_true")
 
     tasks = subparsers.add_parser("tasks", help="list durable tasks")
     tasks_sub = tasks.add_subparsers(dest="tasks_command")
@@ -944,7 +956,7 @@ def main(argv: list[str] | None = None) -> int:
         "graph", "search", "report", "test", "refactor", "git", "find",
         "index", "browse", "e2e", "memory", "swarm", "models", "chat", "login",
         "logout", "run", "research", "tasks", "tools", "plugins", "approvals",
-        "devices", "desktop", "tool", "dynamic-tool", "ask", "goal", "benchmark"
+        "devices", "desktop", "tool", "dynamic-tool", "ask", "goal", "benchmark", "resume", "cancel", "inspect"
     }
 
     # Extract top-level flags before checking for direct prompt
@@ -1003,6 +1015,28 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     cmd = getattr(parsed_args, "command", None) or getattr(parsed_args, "subcommand", None)
+
+    if cmd in {"resume", "cancel", "inspect"}:
+        from .harness import SessionEngine
+        session = SessionEngine(workspace, parsed_args.session_id)
+        if cmd == "cancel": session.cancel(); payload = session.inspect()
+        else: payload = session.inspect()
+        print(json.dumps(payload if getattr(parsed_args, "events", False) or getattr(parsed_args, "json", False) else payload["state"], indent=2))
+        return 0
+
+    if cmd == "run" and getattr(parsed_args, "json", False) and not getattr(parsed_args, "goal", False):
+        from .autonomous_agent import SmaraAutonomousAgent
+        from .harness import SessionEngine, ToolResult
+        prompt = Path(parsed_args.prompt_file).read_text(encoding="utf-8") if parsed_args.prompt_file else parsed_args.objective
+        session = SessionEngine(workspace)
+        agent_result: dict[str, Any] = {}
+        def run_agent(call):
+            nonlocal agent_result
+            agent_result = SmaraAutonomousAgent(workspace_root=workspace, profile="full").run(prompt, max_iterations=25)
+            return ToolResult(call["call_id"], "ok" if agent_result.get("completed") else "error", str(agent_result.get("answer") or ""))
+        payload = session.run(prompt, [{"name": "agent_turn"}], run_agent)
+        payload["answer"] = agent_result.get("answer", "")
+        print(json.dumps(payload, indent=2)); return 0 if payload["status"] == "completed" else 1
 
     # Handle subcommands
     if cmd == "ask":

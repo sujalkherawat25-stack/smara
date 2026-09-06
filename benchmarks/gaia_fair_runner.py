@@ -256,7 +256,18 @@ class GaiaFairBenchmark:
                         profile="full",
                         workspace_root=root,
                     )
-                    result = agent.run(self._prompt(question, local_attachment), max_iterations=25)
+                    from smara.harness import SessionEngine, ToolResult
+                    session = SessionEngine(root)
+                    agent_result: dict[str, Any] = {}
+                    def execute_turn(call: dict[str, Any]) -> ToolResult:
+                        nonlocal agent_result
+                        agent_result = agent.run(self._prompt(question, local_attachment), max_iterations=25)
+                        return ToolResult(call["call_id"], "ok" if agent_result.get("completed") else "error", str(agent_result.get("answer") or ""))
+                    session_result = session.run(self._prompt(question, local_attachment), [{"name": "agent_turn"}], execute_turn)
+                    session.close()
+                    result = dict(agent_result)
+                    result["completed"] = session_result["status"] == "completed" and bool(agent_result.get("completed"))
+                    result["session"] = session_result
                     result["steps"] = result.get("trace", [])
                     result["engine"] = "SmaraAutonomousAgent"
                     result["tool_schema_sha256"] = hashlib.sha256(

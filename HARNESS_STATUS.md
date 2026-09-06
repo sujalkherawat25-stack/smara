@@ -37,3 +37,13 @@ The supplied `C:\Users\sujal\memoryos\artifacts\smara-audit-20260906\reproduce.p
 - Verification parses legacy text receipts; H1 needs typed evidence, durable journal records and exact test scope rather than a compatibility decoder.
 - Sessions, budgets, cancellation and recovery are not durable/canonical. H1 must demonstrate an interrupted real edit/test run resuming with the same result/event schema through CLI and benchmark.
 - Browser actions remain inspection-only beyond H0 fail-closed behavior. No GAIA, SWE-bench, OSWorld, WebArena, or paid evaluation was run or claimed.
+
+## H1 completion evidence
+
+- Added `smara.harness.SessionEngine`: SQLite-backed event/state journal, content-hashed JSON receipts, per-session artifacts, explicit `completed`, `tool_error`, and `cancelled` results, resume token, inspect, and cancellation.
+- The headless `smara run --json [--prompt-file FILE]` path wraps the current CLI `SmaraAutonomousAgent` turn in that engine. `smara resume`, `smara cancel`, and `smara inspect --events --json` expose the same persisted session record.
+- The GAIA adapter now wraps its fresh-workspace CLI-agent turn in the same `SessionEngine`; it reports the shared engine contract without using Desktop state.
+- H1 regression: `tests/test_h1_session_engine.py::test_interrupted_edit_test_resumes_with_same_event_schema` writes a real file, interrupts before its test call, reopens the session, executes the test receipt, and asserts the persisted event schema/result.
+- Latest gate command: `PYTHONPATH=src .\\.venv\\Scripts\\python.exe -m pytest -q tests/test_h0_harness_regressions.py tests/test_react_direct_execution.py tests/test_autonomous_tools_surgical.py tests/test_terminal_and_file_tools.py tests/test_task_planner.py tests/test_benchmark_fairness.py tests/test_subagent_orchestrator.py tests/test_subagent_worktree.py tests/test_h1_session_engine.py` → **39 passed, 1 skipped in 4.41s**. `compileall` also passed.
+
+H2 remains responsible for an actual execution broker, capability grants, process-tree supervision, and OS/container isolation. H1's local journal intentionally does not claim those boundaries.
