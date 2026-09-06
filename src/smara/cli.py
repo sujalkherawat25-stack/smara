@@ -1164,19 +1164,51 @@ def main(argv: list[str] | None = None) -> int:
         "graph", "search", "report", "test", "refactor", "git", "find",
         "index", "browse", "e2e", "memory", "swarm", "models", "chat", "login",
         "logout", "run", "research", "tasks", "tools", "plugins", "approvals",
-        "devices", "desktop", "tool", "ask", "goal", "benchmark"
+        "devices", "desktop", "tool", "dynamic-tool", "ask", "goal", "benchmark"
     }
-    
-    parser = build_parser()
 
-    # Check if raw_args is a direct prompt
-    is_subcommand = raw_args and (raw_args[0] in subcommands or raw_args[0].startswith("-"))
+    # Extract top-level flags before checking for direct prompt
+    model_override = None
+    workspace_override = None
+    plain_override = False
+    cleaned_args = []
+    i = 0
+    while i < len(raw_args):
+        arg = raw_args[i]
+        if arg in ("-m", "--model") and i + 1 < len(raw_args):
+            model_override = raw_args[i + 1]
+            i += 2
+        elif arg.startswith("--model="):
+            model_override = arg.split("=", 1)[1]
+            i += 1
+        elif arg in ("-w", "--workspace") and i + 1 < len(raw_args):
+            workspace_override = raw_args[i + 1]
+            i += 2
+        elif arg.startswith("--workspace="):
+            workspace_override = arg.split("=", 1)[1]
+            i += 1
+        elif arg == "--plain":
+            plain_override = True
+            i += 1
+        else:
+            cleaned_args.append(arg)
+            i += 1
+
+    parser = build_parser()
     direct_prompt = None
-    if raw_args and not is_subcommand:
-        direct_prompt = " ".join(raw_args)
+
+    if cleaned_args and cleaned_args[0] not in subcommands and not cleaned_args[0].startswith("-"):
+        direct_prompt = " ".join(cleaned_args)
         parsed_args = parser.parse_args([])
     else:
         parsed_args = parser.parse_args(raw_args)
+
+    if model_override:
+        parsed_args.model = model_override
+    if workspace_override:
+        parsed_args.workspace = workspace_override
+    if plain_override:
+        parsed_args.plain = True
 
     tui = TerminalRenderer(plain=parsed_args.plain)
     ws_arg = getattr(parsed_args, "workspace", None)
