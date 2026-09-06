@@ -21,5 +21,6 @@ reports/gaia_readiness.json
 reports/osworld_readiness.json
 /*.pdf
 /*.pdb
+*.apk
 scratch/
 .worktrees/
