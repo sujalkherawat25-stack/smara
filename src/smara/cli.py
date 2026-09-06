@@ -163,6 +163,17 @@ def _load_local_profiles() -> tuple[list[dict[str, Any]], str, dict[str, str]]:
         except (OSError, ValueError):
             pass
 
+    ui_file = state_file.parent / "desktop-ui.json"
+    if ui_file.exists():
+        try:
+            ui_state = json.loads(ui_file.read_text(encoding="utf-8"))
+            if ui_state.get("local_model_profiles") and not profiles:
+                profiles = ui_state["local_model_profiles"]
+            if ui_state.get("model_profile"):
+                active_id = ui_state["model_profile"].removeprefix("local:")
+        except (OSError, ValueError):
+            pass
+
     if not profiles:
         profiles = [
             {"id": "grok", "label": "Grok-3 Mini", "base_url": "https://api.x.ai/v1", "model": "grok-3-mini", "auth_header": "authorization"},
@@ -174,7 +185,7 @@ def _load_local_profiles() -> tuple[list[dict[str, Any]], str, dict[str, str]]:
     return profiles, active_id, credentials
 
 
-def _resolve_profile_key(profile: dict[str, Any], credentials: dict[str, str]) -> str:
+def _resolve_profile_key(profile: dict[str, Any], credentials: dict[str, Any]) -> str:
     pid = profile.get("id", "").lower()
     env_keys = {
         "grok": ["SMARA_MODEL_GROK_API_KEY", "GROK_API_KEY", "XAI_API_KEY"],
@@ -187,11 +198,40 @@ def _resolve_profile_key(profile: dict[str, Any], credentials: dict[str, str]) -
         if val:
             return val
 
-    # Try credentials store
-    cred_keys = [f"model_api_key_{pid}", f"SMARA_MODEL_{pid.upper()}_API_KEY", f"{pid}_api_key"]
+    # Try protected credentials via desktop_executor first
+    cred_keys = [
+        f"SMARA_MODEL_{pid.upper()}_API_KEY",
+        f"model_api_key_{pid}",
+        f"{pid.upper()}_API_KEY",
+        f"{pid}_api_key",
+    ]
+    try:
+        from .desktop_executor import resolve_local_credential
+        for k in cred_keys:
+            try:
+                resolved = resolve_local_credential(k)
+                if resolved and isinstance(resolved, str):
+                    return resolved
+            except Exception:
+                pass
+    except ImportError:
+        pass
+
+    # Fallback to direct credentials store lookup
     for k in cred_keys:
-        if k in credentials and credentials[k]:
-            return credentials[k]
+        for lookup in (k, k.lower(), k.upper()):
+            if lookup in credentials:
+                val = credentials[lookup]
+                if isinstance(val, str) and val:
+                    return val
+                if isinstance(val, dict) and "protected" in val:
+                    try:
+                        from .desktop_executor import _unprotect_windows
+                        dec = _unprotect_windows(val["protected"])
+                        if dec:
+                            return dec
+                    except Exception:
+                        pass
 
     return "ollama-local" if pid == "ollama" else ""
 
