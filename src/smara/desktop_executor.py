@@ -2989,6 +2989,12 @@ def _run_shared_local_agent_turn(request: dict, state_path: Path) -> dict:
 
 
 def _main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
     parser = argparse.ArgumentParser(description="Smara's outbound-only local executor")
     parser.add_argument("--api", default=os.getenv("SMARA_API_URL", "http://127.0.0.1:8080"))
     parser.add_argument("--pair", help="one-time pairing code from Smara Web or CLI")
@@ -3076,11 +3082,21 @@ def _main(argv: list[str] | None = None) -> int:
         return 0
     if args.local_agent_turn:
         try:
-            request = json.load(sys.stdin)
+            if hasattr(sys.stdin, "buffer"):
+                raw_input = sys.stdin.buffer.read()
+                text_input = raw_input.decode("utf-8", errors="replace")
+            else:
+                text_input = sys.stdin.read()
+            request = json.loads(text_input)
             result = _run_shared_local_agent_turn(request, args.state)
         except (OSError, TypeError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
             raise SystemExit(f"Local autonomous turn failed: {exc}") from exc
-        print(json.dumps(result, ensure_ascii=False))
+        output_bytes = (json.dumps(result, ensure_ascii=False) + "\n").encode("utf-8", errors="replace")
+        if hasattr(sys.stdout, "buffer"):
+            sys.stdout.buffer.write(output_bytes)
+            sys.stdout.buffer.flush()
+        else:
+            sys.stdout.write(output_bytes.decode("utf-8", errors="replace"))
         return 0
     if args.skills:
         # Diagnostics must advertise the complete installed protocol.  The
@@ -3119,10 +3135,19 @@ def _main(argv: list[str] | None = None) -> int:
         return 0
     if args.credential_get:
         # Parent-process IPC only; do not send this through the rotating log.
-        print(resolve_local_credential(args.credential_get), end="")
+        cred = resolve_local_credential(args.credential_get)
+        if hasattr(sys.stdout, "buffer"):
+            sys.stdout.buffer.write(cred.encode("utf-8", errors="replace"))
+            sys.stdout.buffer.flush()
+        else:
+            print(cred, end="")
         return 0
     if args.credential_set:
-        save_local_credential(args.credential_set, sys.stdin.read().rstrip("\r\n"), args.credential_provider)
+        if hasattr(sys.stdin, "buffer"):
+            cred_val = sys.stdin.buffer.read().decode("utf-8", errors="replace").rstrip("\r\n")
+        else:
+            cred_val = sys.stdin.read().rstrip("\r\n")
+        save_local_credential(args.credential_set, cred_val, args.credential_provider)
         print(json.dumps({"ok": True, "name": args.credential_set.strip().upper()}))
         return 0
     if args.credential_delete:

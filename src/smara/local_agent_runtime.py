@@ -57,6 +57,17 @@ def _endpoint(base_url: str) -> str:
     return value if value.endswith("/chat/completions") else f"{value}/chat/completions"
 
 
+def _sanitize_surrogates(obj: Any) -> Any:
+    """Recursively clean surrogate characters to prevent UnicodeEncodeError in JSON/HTTP clients."""
+    if isinstance(obj, str):
+        return obj.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+    if isinstance(obj, dict):
+        return {k: _sanitize_surrogates(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_surrogates(v) for v in obj]
+    return obj
+
+
 def _strip_thinking(text: str) -> str:
     value = str(text or "")
     value = re.sub(r"<think>.*?</think>", "", value, flags=re.DOTALL | re.IGNORECASE)
@@ -298,6 +309,7 @@ class OpenAICompatiblePlanner:
             "max_tokens": max(512, min(int(self.config.max_tokens), 16_384)),
             "temperature": 0.1,
         }
+        payload = _sanitize_surrogates(payload)
         response = self.client.post(self.endpoint, headers=self._headers(), json=payload)
         if response.status_code in {400, 404, 422}:
             # Some local gateways do not implement function calling. Retry
@@ -318,6 +330,7 @@ class OpenAICompatiblePlanner:
                 "max_tokens": max(512, min(int(self.config.max_tokens), 16_384)),
                 "temperature": 0.1,
             }
+            fallback_payload = _sanitize_surrogates(fallback_payload)
             response = self.client.post(self.endpoint, headers=self._headers(), json=fallback_payload)
         if response.status_code in {401, 403}:
             raise RuntimeError(f"{self.config.label} rejected the local API key.")
@@ -401,10 +414,12 @@ def run_shared_local_turn(
             "content": "Cross-session local memory (bounded, may be incomplete; verify before acting):\n" + "\n".join(f"- {item}" for item in snippets),
         })
     merged_context = memory_context + list(context or [])
+    merged_context = _sanitize_surrogates(merged_context)
     planner = OpenAICompatiblePlanner(config)
     try:
         agent = LocalAutonomousAgent(state_path, max_steps=max(1, min(int(max_steps), 20)), action_executor=action_executor)
-        result = agent.run_turn(prompt, model_callable=planner, context=merged_context)
+        result = agent.run_turn(_sanitize_surrogates(prompt), model_callable=planner, context=merged_context)
+        result = _sanitize_surrogates(result)
         answer = str(result.get("answer") or "").strip()
         memory.append_exchange(
             conversation_id=conversation,

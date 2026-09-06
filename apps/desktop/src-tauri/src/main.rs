@@ -417,6 +417,9 @@ fn executor_command(args: &[String]) -> Command {
         let mut command = Command::new(direct_exe);
         command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         command.env("SMARA_DESKTOP_STATE", state_path());
+        command.env("PYTHONIOENCODING", "utf-8");
+        command.env("PYTHONUTF8", "1");
+        command.env("PYTHONLEGACYWINDOWSSTDIO", "0");
         command_hidden(&mut command);
         return command;
     }
@@ -453,6 +456,9 @@ fn executor_command(args: &[String]) -> Command {
             command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
             command.env("SMARA_DESKTOP_STATE", state_path());
             command.env("PYTHONPATH", root.join("src"));
+            command.env("PYTHONIOENCODING", "utf-8");
+            command.env("PYTHONUTF8", "1");
+            command.env("PYTHONLEGACYWINDOWSSTDIO", "0");
             command.current_dir(root);
             command_hidden(&mut command);
             return command;
@@ -467,6 +473,9 @@ fn executor_command(args: &[String]) -> Command {
         command.arg("-m").arg("smara.desktop_executor").args(args);
         command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         command.env("SMARA_DESKTOP_STATE", state_path());
+        command.env("PYTHONIOENCODING", "utf-8");
+        command.env("PYTHONUTF8", "1");
+        command.env("PYTHONLEGACYWINDOWSSTDIO", "0");
         command_hidden(&mut command);
         return command;
     }
@@ -474,6 +483,9 @@ fn executor_command(args: &[String]) -> Command {
     let mut command = Command::new("smara-desktop.exe");
     command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     command.env("SMARA_DESKTOP_STATE", state_path());
+    command.env("PYTHONIOENCODING", "utf-8");
+    command.env("PYTHONUTF8", "1");
+    command.env("PYTHONLEGACYWINDOWSSTDIO", "0");
     command_hidden(&mut command);
     command
 }
@@ -2181,7 +2193,10 @@ fn run_python_bridge_code_sync(py_code: &str) -> Result<Value, String> {
         let mut cmd = Command::new(py);
         cmd.arg("-c").arg(py_code);
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        cmd.env("PYTHONPATH", format!("src;{};{}\\src", cwd.display(), cwd.display()));
+        cmd.env("PYTHONPATH", format!("src;{};{}\\\\src", cwd.display(), cwd.display()));
+        cmd.env("PYTHONIOENCODING", "utf-8");
+        cmd.env("PYTHONUTF8", "1");
+        cmd.env("PYTHONLEGACYWINDOWSSTDIO", "0");
         cmd.current_dir(cwd);
         command_hidden(&mut cmd);
         
