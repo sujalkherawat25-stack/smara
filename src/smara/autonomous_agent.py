@@ -59,6 +59,7 @@ from smara.agent_tools import (
 )
 from smara.task_memory import get_default_memory_store
 from smara.task_planner import SmaraTaskPlanner
+from smara.ptc_kernel import PTC_SAFE_TOOLS, ProgrammaticToolKernel
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -75,6 +76,7 @@ if not logger.handlers:
 
 
 IDEMPOTENT_TOOLS = frozenset({
+    "programmatic_tool_call",
     "web_search",
     "web_extract",
     "web_reader_dynamic",
@@ -193,6 +195,42 @@ def _is_instruction_placeholder(text: str) -> bool:
 
 
 TOOL_SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "programmatic_tool_call",
+            "description": "Batch up to 8 independent read-only or calculation tools in one turn. This never runs shell commands, writes files, changes memory, uses credentials, delegates work, or controls a browser. Use it to gather several facts efficiently, then reason over the returned observations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "calls": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "description": "Safe tool calls to execute sequentially.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "enum": sorted(PTC_SAFE_TOOLS),
+                                },
+                                "args": {
+                                    "type": "object",
+                                    "description": "Arguments for the selected tool.",
+                                    "additionalProperties": True,
+                                },
+                            },
+                            "required": ["name", "args"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                "required": ["calls"],
+                "additionalProperties": False,
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -774,18 +812,18 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
     if prof == "full":
         return TOOL_SCHEMAS
     elif prof in ["coding", "swe"]:
-        allowed = {"terminal", "file_write", "patch", "python_execute", "file_read", "todo", "delegate_task", "dag_flow"}
+        allowed = {"terminal", "file_write", "patch", "python_execute", "file_read", "todo", "delegate_task", "dag_flow", "programmatic_tool_call"}
     elif prof == "worker_coding":
         # Isolated coder workers may change only their worktree; delegation and
         # top-level DAG control stay unavailable to prevent recursive swarms.
-        allowed = {"terminal", "file_write", "patch", "python_execute", "file_read", "todo"}
+        allowed = {"terminal", "file_write", "patch", "python_execute", "file_read", "todo", "programmatic_tool_call"}
     elif prof == "worker_verification":
         # Tester/auditor workers are read-only with respect to the repository.
         # They can inspect files, run bounded checks, and gather evidence, but
         # have no patch or file-write tool exposed.
-        allowed = {"terminal", "file_read", "python_execute", "calculate", "browser_action", "web_search", "todo"}
+        allowed = {"terminal", "file_read", "python_execute", "calculate", "browser_action", "web_search", "programmatic_tool_call", "todo"}
     elif prof in ["research", "web"]:
-        allowed = {"browser_action", "web_search", "web_extract", "web_reader_dynamic", "wayback_extract", "wikipedia_page", "pdf_search", "calculate", "file_read", "todo"}
+        allowed = {"browser_action", "web_search", "web_extract", "web_reader_dynamic", "wayback_extract", "wikipedia_page", "pdf_search", "calculate", "file_read", "programmatic_tool_call", "todo"}
     elif prof in ["multimodal", "vision", "audio"]:
         allowed = {"browser_action", "image_inspect", "audio_transcribe", "video_inspect", "file_read", "todo"}
     else:
@@ -805,6 +843,7 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - For headless browser actions, screenshots, or scraping, use `browser_action`.
    - Keep internal reasoning concise and focused (under 150 words) before executing tools or stating answers.
    - For factual web research, use `web_search` and `web_extract`.
+   - When two or more independent read-only facts are needed, use `programmatic_tool_call` to batch them in one turn. Its allowlist is strict: never use it for shell commands, writes, memory changes, credentials, delegation, or browser control.
    - For historical snapshots of web pages, use `wayback_extract`.
    - For current or historical Wikipedia articles, revision histories, or image counts, use `wikipedia_page`.
    - For arithmetic, statistical calculations, data processing, regex, geometry, or counting, ALWAYS execute Python code via `python_execute` or `calculate` instead of estimating.
@@ -892,6 +931,7 @@ class SmaraAutonomousAgent:
         self._seen_tool_signatures: Dict[str, int] = collections.defaultdict(int)
 
         self._tool_handlers = {
+            "programmatic_tool_call": self._dispatch_programmatic_tool_call,
             "web_search": self._dispatch_web_search,
             "web_extract": self._dispatch_web_extract,
             "web_reader_dynamic": self._dispatch_web_reader_dynamic,
@@ -916,6 +956,17 @@ class SmaraAutonomousAgent:
             "file_write": self._dispatch_file_write,
             "browser_action": self._dispatch_browser_action,
         }
+
+    def _dispatch_programmatic_tool_call(self, args: Dict[str, Any]) -> str:
+        """Run a bounded batch through the same registered tool dispatcher.
+
+        The kernel performs the security and size checks before invoking this
+        agent's normal handlers, so a model cannot smuggle a shell command,
+        mutation, credential access, or nested batch into one call.
+        """
+        calls = args.get("calls") if isinstance(args, dict) else None
+        kernel = ProgrammaticToolKernel(self.execute_tool)
+        return kernel.execute(calls).to_model_json()
 
     def _dispatch_todo(self, args: Dict[str, Any]) -> str:
         todos = args.get("todos")

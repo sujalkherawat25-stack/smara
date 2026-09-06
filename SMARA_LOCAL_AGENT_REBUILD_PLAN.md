@@ -192,6 +192,25 @@ external action is attributable, bounded, and reviewable.
 is valid only after the real dataset, provider, and attachments are available;
 the next phase is programmatic tool calling and persistent process control.
 
+## Phase 2 bounded programmatic tool calling (implemented)
+
+- ✅ Added an in-process `programmatic_tool_call` kernel for collapsing several
+  independent observations into one local-agent turn. It delegates through the
+  existing registered tool handlers, so there is no second execution path.
+- ✅ The kernel enforces a strict eight-call maximum, JSON argument-size limits,
+  bounded per-call and aggregate observations, truthful failure propagation,
+  and rejection of unknown fields or malformed calls.
+- ✅ Only retrieval/calculation tools are allowlisted (web/document reads,
+  archive inspection, skills metadata, and arithmetic). Shell commands,
+  Python execution, file writes/patches, memory mutation, credentials,
+  delegation, browser control, and nested batches are denied by construction.
+- ✅ The schema is exposed to the full, research, coding, and verification
+  profiles with `additionalProperties: false` at the batch and item levels;
+  focused tests cover ordering, denial, result bounds, and direct dispatch.
+- 🟡 Mutating programmatic batches are intentionally not enabled. If needed,
+  they must go through the Desktop approval broker as a separate reviewed
+  phase rather than broadening this safe read-only kernel.
+
 ## Benchmark stack readiness slice (implemented)
 
 - ✅ GAIA evaluation now uses one shared local Desktop runtime and strict
