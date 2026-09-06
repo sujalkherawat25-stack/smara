@@ -18,8 +18,14 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .local_agent import LOCAL_SKILLS
-from .skill_protocol import SKILL_MANIFEST_SCHEMA, validate_skill_manifest
+# The source/CLI imports this as ``smara.local_learning`` while the bundled
+# Desktop executor loads it as a top-level module from PyInstaller.
+try:
+    from .local_agent import LOCAL_SKILLS
+    from .skill_protocol import SKILL_MANIFEST_SCHEMA, validate_skill_manifest
+except ImportError:  # pragma: no cover - exercised by the packaged binary
+    from local_agent import LOCAL_SKILLS
+    from skill_protocol import SKILL_MANIFEST_SCHEMA, validate_skill_manifest
 
 
 MAX_TASK_RECORDS = 40

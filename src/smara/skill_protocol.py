@@ -20,7 +20,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .local_agent import LOCAL_SKILLS
+# ``desktop_executor`` is also shipped as a top-level PyInstaller module, so
+# keep the protocol importable both inside and outside the ``smara`` package.
+try:
+    from .local_agent import LOCAL_SKILLS
+except ImportError:  # pragma: no cover - exercised by the packaged binary
+    from local_agent import LOCAL_SKILLS
 
 
 SKILL_MANIFEST_SCHEMA = "smara.skill.v1"
