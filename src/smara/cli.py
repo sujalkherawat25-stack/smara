@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import time
@@ -834,6 +835,8 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_cmd.add_argument("session_id")
     inspect_cmd.add_argument("--events", action="store_true")
     inspect_cmd.add_argument("--json", action="store_true")
+    doctor_cmd = subparsers.add_parser("doctor", help="Check local harness prerequisites without revealing secrets")
+    doctor_cmd.add_argument("--json", action="store_true")
 
     tasks = subparsers.add_parser("tasks", help="list durable tasks")
     tasks_sub = tasks.add_subparsers(dest="tasks_command")
@@ -956,7 +959,7 @@ def main(argv: list[str] | None = None) -> int:
         "graph", "search", "report", "test", "refactor", "git", "find",
         "index", "browse", "e2e", "memory", "swarm", "models", "chat", "login",
         "logout", "run", "research", "tasks", "tools", "plugins", "approvals",
-        "devices", "desktop", "tool", "dynamic-tool", "ask", "goal", "benchmark", "resume", "cancel", "inspect"
+        "devices", "desktop", "tool", "dynamic-tool", "ask", "goal", "benchmark", "resume", "cancel", "inspect", "doctor"
     }
 
     # Extract top-level flags before checking for direct prompt
@@ -1016,26 +1019,58 @@ def main(argv: list[str] | None = None) -> int:
 
     cmd = getattr(parsed_args, "command", None) or getattr(parsed_args, "subcommand", None)
 
-    if cmd in {"resume", "cancel", "inspect"}:
+    if cmd == "doctor":
+        import shutil
         from .harness import SessionEngine
+        checks = {
+            "workspace": {"ok": workspace.is_dir(), "path": str(workspace)},
+            "workspace_writable": {"ok": os.access(workspace, os.W_OK)},
+            "shell": {"ok": bool(shutil.which("powershell.exe" if os.name == "nt" else "bash"))},
+            "sqlite_wal": {"ok": True, "version": sqlite3.sqlite_version},
+            "provider_key": {"ok": bool(os.getenv("SMARA_MODEL_SARVAM_API_KEY") or os.getenv("SARVAM_API_KEY")), "value": "configured" if (os.getenv("SMARA_MODEL_SARVAM_API_KEY") or os.getenv("SARVAM_API_KEY")) else "not configured"},
+            "browser_backend": {"ok": bool(shutil.which("chrome") or shutil.which("chromium") or shutil.which("msedge"))},
+            "desktop_backend": {"ok": False, "value": "not installed"},
+            "memory_provider": {"ok": True, "value": "optional"},
+            "engine": {"ok": True, "version": SessionEngine.VERSION},
+        }
+        payload = {"ok": all(item["ok"] for key, item in checks.items() if key not in {"provider_key", "browser_backend", "desktop_backend"}), "checks": checks}
+        print(json.dumps(payload, indent=2)); return 0 if payload["ok"] else 1
+
+    if cmd in {"resume", "cancel", "inspect"}:
+        from .harness import SessionEngine, ToolResult, workspace_revision
         session = SessionEngine(workspace, parsed_args.session_id)
         if cmd == "cancel": session.cancel(); payload = session.inspect()
+        elif cmd == "resume":
+            record = session.inspect(); prompt = str(record["state"].get("request") or "")
+            def resume_agent(call):
+                from .autonomous_agent import SmaraAutonomousAgent
+                before = workspace_revision(workspace)
+                result = SmaraAutonomousAgent(workspace_root=workspace, profile="full").run(prompt, max_iterations=25)
+                after = workspace_revision(workspace)
+                return ToolResult(call["call_id"], "ok" if result.get("completed") else "error", str(result.get("answer") or ""), before_revision=before, after_revision=after, error_kind=None if result.get("completed") else str(result.get("status") or "agent_error"), meta={"evidence_scope": "full" if before != after and result.get("completed") else "none"})
+            payload = session.resume(resume_agent)
         else: payload = session.inspect()
-        print(json.dumps(payload if getattr(parsed_args, "events", False) or getattr(parsed_args, "json", False) else payload["state"], indent=2))
-        return 0
+        compact = payload.get("state", payload) if cmd != "resume" else payload
+        print(json.dumps(payload if getattr(parsed_args, "events", False) or getattr(parsed_args, "json", False) else compact, indent=2))
+        return 0 if cmd != "resume" or payload.get("status") == "completed" else 1
 
     if cmd == "run" and getattr(parsed_args, "json", False) and not getattr(parsed_args, "goal", False):
         from .autonomous_agent import SmaraAutonomousAgent
-        from .harness import SessionEngine, ToolResult
+        from .harness import BUDGET_PROFILES, SessionEngine, ToolResult, workspace_revision
         prompt = Path(parsed_args.prompt_file).read_text(encoding="utf-8") if parsed_args.prompt_file else parsed_args.objective
-        session = SessionEngine(workspace)
+        if not prompt.strip():
+            print(json.dumps({"status": "needs_input", "answer": "", "unresolved_items": ["prompt is empty"]}, indent=2)); return 1
+        if parsed_args.budget_profile not in BUDGET_PROFILES:
+            print(json.dumps({"status": "denied", "answer": "", "unresolved_items": [f"unknown budget profile: {parsed_args.budget_profile}"]}, indent=2)); return 1
+        session = SessionEngine(workspace, budget=BUDGET_PROFILES[parsed_args.budget_profile])
         agent_result: dict[str, Any] = {}
         def run_agent(call):
             nonlocal agent_result
+            before = workspace_revision(workspace)
             agent_result = SmaraAutonomousAgent(workspace_root=workspace, profile="full").run(prompt, max_iterations=25)
-            return ToolResult(call["call_id"], "ok" if agent_result.get("completed") else "error", str(agent_result.get("answer") or ""))
+            after = workspace_revision(workspace)
+            return ToolResult(call["call_id"], "ok" if agent_result.get("completed") else "error", str(agent_result.get("answer") or ""), before_revision=before, after_revision=after, error_kind=None if agent_result.get("completed") else str(agent_result.get("status") or "agent_error"), meta={"evidence_scope": "full" if before != after and agent_result.get("completed") else "none"})
         payload = session.run(prompt, [{"name": "agent_turn"}], run_agent)
-        payload["answer"] = agent_result.get("answer", "")
         print(json.dumps(payload, indent=2)); return 0 if payload["status"] == "completed" else 1
 
     # Handle subcommands

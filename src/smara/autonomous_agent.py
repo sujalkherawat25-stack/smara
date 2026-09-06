@@ -20,6 +20,7 @@ import re
 import collections
 import hashlib
 import sys
+import uuid
 import time
 import urllib.request
 import urllib.error
@@ -1101,6 +1102,12 @@ class SmaraAutonomousAgent:
         self.task_planner = SmaraTaskPlanner()
         self.memory_store = get_default_memory_store()
         self._seen_tool_signatures: Dict[str, int] = collections.defaultdict(int)
+        from smara.harness import ToolBroker
+        self._execution_broker = ToolBroker(
+            self.workspace_root,
+            {"read_file", "write_file", "patch_file", "run_process"},
+            constrained=False,
+        )
 
         self._tool_handlers = {
             "programmatic_tool_call": self._dispatch_programmatic_tool_call,
@@ -1171,22 +1178,32 @@ class SmaraAutonomousAgent:
         return todo_tool(todos=todos, merge=merge, planner=self.task_planner)
 
     def _dispatch_patch(self, args: Dict[str, Any]) -> str:
+        from smara.harness import ToolCall
         path = args.get("path") or args.get("file_path") or ""
         old_string = args.get("old_string") or args.get("old_str") or ""
         new_string = args.get("new_string") or args.get("new_str") or ""
         replace_all = args.get("replace_all", False)
-        return patch_file_tool(path=str(self._workspace_path(path)), old_string=old_string, new_string=new_string, replace_all=replace_all)
+        result = self._execution_broker.dispatch(ToolCall(uuid.uuid4().hex, "patch_file", {"path": path, "old": old_string, "new": new_string, "replace_all": bool(replace_all)}, str(self.workspace_root)))
+        return f"Patch applied successfully: {result.text}" if result.ok else f"Patch Error: {result.error_kind}: {result.text}"
 
     def _dispatch_terminal(self, args: Dict[str, Any]) -> str:
+        from smara.harness import ToolCall
         cmd = args.get("command") or args.get("cmd") or ""
-        cwd = str(self._workspace_path(args.get("cwd") or "."))
         timeout = args.get("timeout", 45)
-        return terminal_execute(command=cmd, cwd=cwd, timeout=timeout)
+        argv = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", cmd] if sys.platform == "win32" else ["/bin/bash", "-c", cmd]
+        scope = "full" if re.search(r"(?:^|\s)(?:pytest|npm\s+test|cargo\s+test|go\s+test)(?:\s|$)", cmd, re.I) else "none"
+        result = self._execution_broker.dispatch(ToolCall(uuid.uuid4().hex, "run_process", {"argv": argv, "cwd": args.get("cwd") or ".", "timeout_seconds": timeout, "evidence_scope": scope}, str(self.workspace_root)))
+        return f"[Exit Code: {result.exit_code}]\n{result.text}" if result.exit_code is not None else f"Error: {result.error_kind}: {result.text}"
 
     def _dispatch_file_write(self, args: Dict[str, Any]) -> str:
+        from smara.harness import ToolCall
         path = args.get("path") or args.get("file_path") or ""
         content = args.get("content", "")
-        return file_write(path=str(self._workspace_path(path)), content=content)
+        result = self._execution_broker.dispatch(ToolCall(uuid.uuid4().hex, "write_file", {"path": path, "content": content}, str(self.workspace_root)))
+        if result.ok:
+            return f"File successfully written: {result.text}"
+        detail = "Path is outside the configured workspace." if result.error_kind == "policy_denied" else result.text
+        return f"File Write Error: {result.error_kind}: {detail}"
 
     def _dispatch_browser_action(self, args: Dict[str, Any]) -> str:
         act = args.get("action", "scrape")
@@ -1222,15 +1239,21 @@ class SmaraAutonomousAgent:
         return wikipedia_page(t, date_or_timestamp=d, action=a)
 
     def _dispatch_python_execute(self, args: Dict[str, Any]) -> str:
+        from smara.harness import ToolCall
         code = args.get("code") or args.get("script") or ""
-        return python_execute(code)
+        result = self._execution_broker.dispatch(ToolCall(uuid.uuid4().hex, "run_process", {"argv": [sys.executable, "-c", code], "cwd": ".", "timeout_seconds": 60, "evidence_scope": "none"}, str(self.workspace_root)))
+        return f"[Exit Code: {result.exit_code}]\n{result.text}" if result.exit_code is not None else f"Python execution error: {result.error_kind}: {result.text}"
 
     def _dispatch_file_read(self, args: Dict[str, Any]) -> str:
         fp = args.get("file_path") or args.get("path") or ""
         offset = args.get("offset")
         limit = args.get("limit")
         max_chars = args.get("max_chars", 12000)
-        return file_read(str(self._workspace_path(fp)), offset=offset, limit=limit, max_chars=max_chars)
+        try:
+            admitted = self._execution_broker.path(fp)
+        except Exception as exc:
+            return f"File Read Error: policy_denied: {exc}"
+        return file_read(str(admitted), offset=offset, limit=limit, max_chars=max_chars)
 
     def _dispatch_list_directory(self, args: Dict[str, Any]) -> str:
         p = args.get("path") or "."
@@ -1360,21 +1383,37 @@ class SmaraAutonomousAgent:
             headers=headers
         )
 
+        retry_deadline = time.monotonic() + 180.0
         for attempt in range(3):
             try:
-                with urllib.request.urlopen(req, timeout=90) as resp:
+                remaining = retry_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("model request retry deadline exhausted")
+                with urllib.request.urlopen(req, timeout=min(90.0, remaining)) as resp:
                     return json.loads(resp.read().decode("utf-8"))
             except urllib.error.HTTPError as he:
                 err_msg = he.read().decode("utf-8", errors="ignore")
                 logger.warning(f"Model API HTTPError (attempt {attempt+1}): {he.code} - {err_msg}")
-                if attempt == 2:
+                # Credentials, permissions, and invalid requests are permanent
+                # for this payload. Retrying them only burns budget and latency.
+                if he.code in {400, 401, 403, 404, 409, 422} or attempt == 2:
                     raise RuntimeError(f"Model API HTTP {he.code}: {err_msg}")
-                time.sleep(2)
+                if he.code != 429 and he.code not in {408, 425, 500, 502, 503, 504}:
+                    raise RuntimeError(f"Model API HTTP {he.code}: {err_msg}")
+                retry_after = he.headers.get("Retry-After") if he.headers else None
+                try: delay = max(0.0, min(float(retry_after), 10.0)) if retry_after is not None else min(0.5 * (2**attempt), 2.0)
+                except (TypeError, ValueError): delay = min(0.5 * (2**attempt), 2.0)
+                if time.monotonic() + delay >= retry_deadline:
+                    raise RuntimeError(f"Model API HTTP {he.code}: retry deadline exhausted")
+                time.sleep(delay)
             except Exception as e:
                 logger.warning(f"Model API Request Error (attempt {attempt+1}): {e}")
                 if attempt == 2:
                     raise
-                time.sleep(2)
+                delay = min(0.5 * (2**attempt), 2.0)
+                if time.monotonic() + delay >= retry_deadline:
+                    raise
+                time.sleep(delay)
 
         raise RuntimeError("Model API: Max retries exceeded")
 

@@ -46,4 +46,68 @@ The supplied `C:\Users\sujal\memoryos\artifacts\smara-audit-20260906\reproduce.p
 - H1 regression: `tests/test_h1_session_engine.py::test_interrupted_edit_test_resumes_with_same_event_schema` writes a real file, interrupts before its test call, reopens the session, executes the test receipt, and asserts the persisted event schema/result.
 - Latest gate command: `PYTHONPATH=src .\\.venv\\Scripts\\python.exe -m pytest -q tests/test_h0_harness_regressions.py tests/test_react_direct_execution.py tests/test_autonomous_tools_surgical.py tests/test_terminal_and_file_tools.py tests/test_task_planner.py tests/test_benchmark_fairness.py tests/test_subagent_orchestrator.py tests/test_subagent_worktree.py tests/test_h1_session_engine.py` → **39 passed, 1 skipped in 4.41s**. `compileall` also passed.
 
-H2 remains responsible for an actual execution broker, capability grants, process-tree supervision, and OS/container isolation. H1's local journal intentionally does not claim those boundaries.
+## H1/H2 repair and completion evidence (2026-09-06)
+
+The earlier H1 commit was not accepted as-is: its single-file mock had no schema
+validation, writer exclusion, aggregate budget enforcement, truthful mutation
+recovery, revision-bound evidence, or process supervision, and the CLI `resume`
+command only printed state. The repaired `SessionEngine` is now version
+`h2-local-2` and preserves the old constructor/run API for compatibility.
+
+- Added the audit's explicit `RunRequest`, `RunResult`, `ToolCall`, `ToolResult`,
+  `Evidence`, and `RunEvent` types and stable machine-readable run statuses.
+- SQLite journals use WAL, `synchronous=FULL`, schema versions/migrations,
+  append-only sequenced events, persisted calls and evidence, and a
+  cross-process single-writer lock. Admitted mutations without a journaled
+  result resume as `needs_input`/uncertain and are never blindly replayed.
+- Aggregate wall/tool-call budgets are persisted and exhausted runs retain a
+  resume token and pending calls. Content-addressed, atomically written receipt
+  artifacts retain raw tool results outside model context.
+- `ToolBroker` is the single admission point for the shipped coding mutation
+  and process primitives: strict schemas, explicit grants/workspace IDs,
+  canonical root checks (including Windows junctions), scoped environments,
+  hash-guarded atomic writes/patches, explicit cwd, and serialized mutations.
+- Constrained mode denies arbitrary host execution unless an external sandbox
+  is supplied. CLI local coding is explicitly unrestricted-local. The legacy
+  CLI's read/write/patch/terminal/Python routes now enter the broker while
+  retaining their public tool names and output compatibility.
+- Persistent process start/poll/stdin/cancel is brokered. On Windows, processes
+  are assigned to kill-on-close Job Objects, so cancellation terminates the
+  process tree; the delayed-canary regression proves no post-cancel mutation.
+- Verification evidence records scope and exact workspace revision. Nonzero
+  checks fail, later edits stale prior evidence, and syntax-only evidence cannot
+  certify a changed workspace as focused/full-test verified.
+- Provider retry policy now fails 400/401/403/404/409/422 immediately and honors
+  bounded `Retry-After` for 429/transient failures. CLI `doctor --json`, real
+  resume, empty-prompt rejection, and named budget-profile validation are live.
+
+Latest evidence from `C:\Users\sujal\smara` with `PYTHONPATH=src`:
+
+```text
+python -m pytest -q
+# 402 passed, 1 skipped in 45.96s
+
+# tests/test_h2_execution_broker.py repeated 10 times
+# 140/140 passed; each run 14 passed (about 5.3s)
+
+python -m pytest -q <H0/H1/H2 focused matrix>
+# 48 passed, 2 skipped in 7.27s (before two provider and two final H2 cases were added)
+
+python -m compileall -q src\smara benchmarks
+# passed
+
+python -m smara.cli doctor --json
+# ok=true; engine=h2-local-2; provider/browser/desktop availability reported separately
+```
+
+The two repository skips are pre-existing/conditional. The H2 junction escape
+case itself runs and passes on this Windows host (it falls back from symlink to
+an NTFS junction when Developer Mode is unavailable).
+
+## Honest boundary after H2
+
+H0-H2 now establish the durable single-agent coding/terminal foundation and
+the deterministic reliability behavior relevant to R01-R24. This does not
+claim the later H3 context/100-action gates, H4 research, H5 browser/desktop,
+H6 delegation, public benchmark scores, Linux matrix, or an installed external
+container sandbox. Constrained terminal mode therefore remains fail-closed.
