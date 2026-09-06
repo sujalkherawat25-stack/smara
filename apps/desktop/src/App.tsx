@@ -88,6 +88,216 @@ function splitLines(value: string) {
   return value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean);
 }
 
+function CodeCopyButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // ignore
+    }
+  };
+  return (
+    <button type="button" className="markdown-copy-btn" onClick={onCopy} title="Copy snippet">
+      {copied ? "✓ Copied" : "📋 Copy"}
+    </button>
+  );
+}
+
+function renderInlineMarkdown(text: string): (string | JSX.Element)[] {
+  const parts: (string | JSX.Element)[] = [];
+  const regex = /(\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g;
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      parts.push(text.slice(lastIdx, match.index));
+    }
+    const [full, , bold, italic, code, linkText, linkUrl] = match;
+    const key = `inline-${match.index}-${lastIdx}`;
+    if (bold) {
+      parts.push(<strong key={key} className="markdown-bold">{bold}</strong>);
+    } else if (italic) {
+      parts.push(<em key={key} className="markdown-italic">{italic}</em>);
+    } else if (code) {
+      parts.push(<code key={key} className="markdown-inline-code">{code}</code>);
+    } else if (linkText && linkUrl) {
+      parts.push(
+        <a key={key} href={linkUrl} target="_blank" rel="noreferrer" className="markdown-link">
+          {linkText}
+        </a>
+      );
+    } else {
+      parts.push(full);
+    }
+    lastIdx = regex.lastIndex;
+  }
+  if (lastIdx < text.length) {
+    parts.push(text.slice(lastIdx));
+  }
+  return parts.length > 0 ? parts : [text];
+}
+
+function MarkdownTextBlock({ content, blockKey }: { content: string; blockKey: string }) {
+  const lines = content.split("\n");
+  const elements: JSX.Element[] = [];
+  let inList = false;
+  let listItems: JSX.Element[] = [];
+  let listOrdered = false;
+
+  const flushList = (k: string) => {
+    if (inList && listItems.length > 0) {
+      if (listOrdered) {
+        elements.push(<ol key={`ol-${k}`} className="markdown-ol">{listItems}</ol>);
+      } else {
+        elements.push(<ul key={`ul-${k}`} className="markdown-ul">{listItems}</ul>);
+      }
+      listItems = [];
+      inList = false;
+    }
+  };
+
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+    const lk = `${blockKey}-l${idx}`;
+
+    if (!trimmed) {
+      flushList(lk);
+      return;
+    }
+
+    if (trimmed.startsWith("# ")) {
+      flushList(lk);
+      elements.push(<h1 key={lk} className="markdown-h1">{renderInlineMarkdown(trimmed.slice(2))}</h1>);
+      return;
+    }
+    if (trimmed.startsWith("## ")) {
+      flushList(lk);
+      elements.push(<h2 key={lk} className="markdown-h2">{renderInlineMarkdown(trimmed.slice(3))}</h2>);
+      return;
+    }
+    if (trimmed.startsWith("### ")) {
+      flushList(lk);
+      elements.push(<h3 key={lk} className="markdown-h3">{renderInlineMarkdown(trimmed.slice(4))}</h3>);
+      return;
+    }
+    if (trimmed.startsWith("#### ")) {
+      flushList(lk);
+      elements.push(<h4 key={lk} className="markdown-h4">{renderInlineMarkdown(trimmed.slice(5))}</h4>);
+      return;
+    }
+
+    if (trimmed.startsWith("> ")) {
+      flushList(lk);
+      elements.push(
+        <blockquote key={lk} className="markdown-blockquote">
+          {renderInlineMarkdown(trimmed.slice(2))}
+        </blockquote>
+      );
+      return;
+    }
+
+    if (/^(---|___|\*\*\*)$/.test(trimmed)) {
+      flushList(lk);
+      elements.push(<hr key={lk} className="markdown-hr" />);
+      return;
+    }
+
+    const ulMatch = /^[*-]\s+(.+)/.exec(trimmed);
+    if (ulMatch) {
+      if (inList && listOrdered) flushList(lk);
+      inList = true;
+      listOrdered = false;
+      listItems.push(
+        <li key={lk} className="markdown-li">
+          {renderInlineMarkdown(ulMatch[1])}
+        </li>
+      );
+      return;
+    }
+
+    const olMatch = /^(\d+)\.\s+(.+)/.exec(trimmed);
+    if (olMatch) {
+      if (inList && !listOrdered) flushList(lk);
+      inList = true;
+      listOrdered = true;
+      listItems.push(
+        <li key={lk} className="markdown-li">
+          {renderInlineMarkdown(olMatch[2])}
+        </li>
+      );
+      return;
+    }
+
+    flushList(lk);
+    elements.push(
+      <p key={lk} className="markdown-p">
+        {renderInlineMarkdown(trimmed)}
+      </p>
+    );
+  });
+
+  flushList(`${blockKey}-end`);
+
+  return <div className="markdown-text-chunk">{elements}</div>;
+}
+
+function renderMarkdownContent(rawText: string): JSX.Element {
+  if (!rawText) return <span />;
+
+  const clean = rawText
+    .replace(/<think[\s\S]*?<\/think>/gi, "")
+    .replace(/<thinking[\s\S]*?<\/thinking>/gi, "")
+    .replace(/\[THOUGHT\][\s\S]*?\[\/THOUGHT\]/gi, "")
+    .replace(/\[THINKING\][\s\S]*?\[\/THINKING\]/gi, "")
+    .trim();
+
+  const codeBlockRegex = /```([a-zA-Z0-9_-]*)\r?\n([\s\S]*?)```/g;
+  const blocks: JSX.Element[] = [];
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+  let counter = 0;
+
+  while ((match = codeBlockRegex.exec(clean)) !== null) {
+    if (match.index > lastIdx) {
+      const textPart = clean.slice(lastIdx, match.index).trim();
+      if (textPart) {
+        blocks.push(<MarkdownTextBlock key={`txt-${counter++}`} content={textPart} blockKey={`b-${counter}`} />);
+      }
+    }
+
+    const lang = match[1]?.trim() || "code";
+    const code = match[2]?.replace(/\r\n/g, "\n").replace(/\r/g, "\n") || "";
+    const codeKey = `code-${counter++}`;
+
+    blocks.push(
+      <div key={codeKey} className="markdown-code-card">
+        <div className="markdown-code-header">
+          <span className="markdown-code-lang">{lang.toUpperCase()}</span>
+          <CodeCopyButton code={code} />
+        </div>
+        <pre className="markdown-pre">
+          <code>{code}</code>
+        </pre>
+      </div>
+    );
+
+    lastIdx = codeBlockRegex.lastIndex;
+  }
+
+  if (lastIdx < clean.length) {
+    const trailingText = clean.slice(lastIdx).trim();
+    if (trailingText) {
+      blocks.push(<MarkdownTextBlock key={`txt-${counter++}`} content={trailingText} blockKey={`b-${counter}`} />);
+    }
+  }
+
+  return <div className="markdown-rendered-body">{blocks.length > 0 ? blocks : renderInlineMarkdown(clean)}</div>;
+}
+
 export default function App() {
   const [tab, setTab] = useState<NavTab>("chat");
   const [connection, setConnection] = useState<ConnectionState>(fallbackConnection);
@@ -953,7 +1163,9 @@ function ChatTab({
                   <div className="msg-header">
                     <span className="msg-author">{m.role === "user" ? "You" : "Smara Agent"}</span>
                   </div>
-                  <div className="msg-text">{m.text}</div>
+                  <div className="msg-text">
+                    {m.role === "assistant" ? renderMarkdownContent(m.text) : m.text}
+                  </div>
                   {detected.length > 0 && (
                     <div className="file-action-cards-container">
                       {detected.map((f, i) => (

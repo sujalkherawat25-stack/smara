@@ -5479,6 +5479,176 @@ body {
   background: rgba(16, 185, 129, 0.12);
 }
 
+/* -------------------------------------------------------------
+   RICH MARKDOWN RENDERING STYLES (Clean & Readable)
+------------------------------------------------------------- */
+.markdown-rendered-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #e2e8f0;
+  font-size: 13.5px;
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+.markdown-text-chunk {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.markdown-h1 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #f8fafc;
+  margin: 10px 0 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.markdown-h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin: 8px 0 4px;
+}
+
+.markdown-h3 {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin: 6px 0 2px;
+}
+
+.markdown-h4 {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #94a3b8;
+  margin: 4px 0 2px;
+}
+
+.markdown-p {
+  margin: 2px 0;
+  color: #e2e8f0;
+  line-height: 1.6;
+}
+
+.markdown-ul,
+.markdown-ol {
+  margin: 4px 0 6px;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.markdown-li {
+  color: #cbd5e1;
+  line-height: 1.55;
+}
+
+.markdown-bold {
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.markdown-italic {
+  font-style: italic;
+  color: #94a3b8;
+}
+
+.markdown-inline-code {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 0.88em;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #38bdf8;
+  padding: 1.5px 5px;
+  border-radius: 4px;
+}
+
+.markdown-code-card {
+  margin: 10px 0;
+  background: #090d16;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.markdown-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.markdown-code-lang {
+  font-size: 11px;
+  font-weight: 700;
+  color: #818cf8;
+  letter-spacing: 0.6px;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.markdown-copy-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #cbd5e1;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.markdown-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.markdown-pre {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #e2e8f0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.markdown-blockquote {
+  border-left: 3px solid #6366f1;
+  padding: 4px 12px;
+  margin: 6px 0;
+  background: rgba(99, 102, 241, 0.06);
+  border-radius: 0 6px 6px 0;
+  color: #a5b4fc;
+}
+
+.markdown-hr {
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 12px 0;
+}
+
+.markdown-link {
+  color: #38bdf8;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.markdown-link:hover {
+  color: #7dd3fc;
+}
+
+
 
 
 

@@ -58,40 +58,86 @@ def _endpoint(base_url: str) -> str:
 
 
 def _strip_thinking(text: str) -> str:
-    value = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL | re.IGNORECASE)
+    value = str(text or "")
+    value = re.sub(r"<think>.*?</think>", "", value, flags=re.DOTALL | re.IGNORECASE)
     value = re.sub(r"^<think>.*", "", value, flags=re.DOTALL | re.IGNORECASE)
+    value = re.sub(r"<thinking>.*?</thinking>", "", value, flags=re.DOTALL | re.IGNORECASE)
+    value = re.sub(r"^<thinking>.*", "", value, flags=re.DOTALL | re.IGNORECASE)
+    value = re.sub(r"\[THOUGHT\].*?\[/THOUGHT\]", "", value, flags=re.DOTALL | re.IGNORECASE)
+    value = re.sub(r"```thought.*?```", "", value, flags=re.DOTALL | re.IGNORECASE)
     return value.strip()
 
 
 def _parse_plan(text: str) -> dict[str, Any] | None:
-    """Parse a strict local action/answer object from model content."""
-    body = (text or "").strip()
+    """Parse a strict or flexible local action/answer object from model content."""
+    body = _strip_thinking(text or "").strip()
+    if not body:
+        return None
     if body.startswith("```"):
-        body = re.sub(r"^```(?:json)?\s*", "", body, flags=re.IGNORECASE)
+        body = re.sub(r"^```(?:json|python)?\s*", "", body, flags=re.IGNORECASE)
         body = re.sub(r"\s*```$", "", body).strip()
+
+    json_candidate = body
+    if not (body.startswith("{") and body.endswith("}")):
+        match = re.search(r"\{[\s\S]*\}", body)
+        if match:
+            json_candidate = match.group(0)
+
     try:
-        value = json.loads(body)
+        value = json.loads(json_candidate)
     except (TypeError, ValueError):
-        return None
-    if not isinstance(value, dict):
-        return None
-    kind = value.get("kind")
-    if kind == "answer" and isinstance(value.get("answer"), str):
-        return {"kind": "answer", "answer": _strip_thinking(value["answer"])}
-    if (
-        kind == "local_action"
-        and isinstance(value.get("title"), str)
-        and isinstance(value.get("objective"), str)
-        and isinstance(value.get("capability"), str)
-        and isinstance(value.get("payload"), dict)
-    ):
+        value = None
+
+    if isinstance(value, dict):
+        kind = value.get("kind")
+        if kind == "answer" and isinstance(value.get("answer"), str):
+            return {"kind": "answer", "answer": _strip_thinking(value["answer"])}
+
+        if kind == "local_action":
+            cap = value.get("capability") or value.get("action") or "local_terminal"
+            payload = value.get("payload") if isinstance(value.get("payload"), dict) else {}
+            title = str(value.get("title") or f"Execute {cap}")[:160]
+            obj = str(value.get("objective") or f"Execute {cap}")[:8_000]
+            return {
+                "kind": "local_action",
+                "title": title,
+                "objective": obj,
+                "capability": str(cap),
+                "payload": payload,
+            }
+
+        action_name = value.get("action") or value.get("capability") or value.get("tool")
+        if isinstance(action_name, str) and action_name.strip():
+            payload = value.get("payload")
+            if not isinstance(payload, dict):
+                if "code" in value and isinstance(value["code"], str):
+                    payload = {"code": value["code"]}
+                elif "command" in value and isinstance(value["command"], str):
+                    payload = {"command": value["command"]}
+                elif "arguments" in value and isinstance(value["arguments"], dict):
+                    payload = value["arguments"]
+                else:
+                    payload = {k: v for k, v in value.items() if k not in {"action", "capability", "tool", "title", "objective"}}
+
+            title = str(value.get("title") or f"Execute {action_name}")[:160]
+            obj = str(value.get("objective") or f"Execute {action_name}")[:8_000]
+            return {
+                "kind": "local_action",
+                "title": title,
+                "objective": obj,
+                "capability": action_name.strip(),
+                "payload": payload,
+            }
+
+    if (body.startswith("import ") or body.startswith("from ") or body.startswith("def ") or "urllib.request" in body or "requests." in body) and "\n" in body:
         return {
             "kind": "local_action",
-            "title": value["title"][:160],
-            "objective": value["objective"][:8_000],
-            "capability": value["capability"],
-            "payload": value["payload"],
+            "title": "Run Python script",
+            "objective": "Execute code to fetch data or compute result",
+            "capability": "local_python",
+            "payload": {"code": body},
         }
+
     return None
 
 

@@ -1255,7 +1255,7 @@ async fn load_task_details(task_id: String) -> Result<Value, String> {
             "result": object.get("result").cloned().unwrap_or(Value::Null),
             "error": object.get("error").cloned().unwrap_or(Value::Null),
         });
-        let mut wrapped = object.clone();
+                let mut wrapped = object.clone();
         wrapped.insert("task".to_owned(), task);
         return Ok(Value::Object(wrapped));
     }
@@ -1277,7 +1277,7 @@ async fn load_task_details(task_id: String) -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn decide_local_task(task_id: String, approved: bool) -> Result<(), String> {
+async fn decide_local_task(task_id: String, approved: bool) -> Result<(), String> {
     if task_id.trim().is_empty() || task_id.len() > 160 || !task_id.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-')) {
         return Err("Task id is invalid.".to_owned());
     }
@@ -1342,12 +1342,14 @@ fn local_chat_endpoint(base_url: &str) -> String {
 
 fn strip_thinking_tags(text: &str) -> String {
     let mut result = text.to_owned();
-    while let Some(start) = result.find("<think>") {
-        if let Some(end) = result[start..].find("</think>") {
-            result.replace_range(start..start + end + 8, "");
-        } else {
-            result.replace_range(start.., "");
-            break;
+    for (start_tag, end_tag) in [("<think>", "</think>"), ("<thinking>", "</thinking>"), ("[THOUGHT]", "[/THOUGHT]"), ("[THINKING]", "[/THINKING]")] {
+        while let Some(start) = result.to_lowercase().find(start_tag) {
+            if let Some(end) = result[start..].to_lowercase().find(end_tag) {
+                result.replace_range(start..start + end + end_tag.len(), "");
+            } else {
+                result.replace_range(start.., "");
+                break;
+            }
         }
     }
     result.trim().to_owned()
@@ -1362,16 +1364,10 @@ fn local_delta_text(value: &Value) -> Option<String> {
         if let Some(text) = delta.get("text").and_then(Value::as_str) {
             if !text.is_empty() { return Some(text.to_owned()); }
         }
-        if let Some(reasoning) = delta.get("reasoning_content").and_then(Value::as_str) {
-            if !reasoning.is_empty() { return Some(reasoning.to_owned()); }
-        }
     }
     if let Some(message) = first.get("message") {
         if let Some(content) = message.get("content").and_then(Value::as_str) {
             if !content.is_empty() { return Some(content.to_owned()); }
-        }
-        if let Some(reasoning) = message.get("reasoning_content").and_then(Value::as_str) {
-            if !reasoning.is_empty() { return Some(reasoning.to_owned()); }
         }
     }
     first.get("text").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned)
@@ -1382,9 +1378,6 @@ fn local_event_payload(line: &str) -> Option<&str> {
     if trimmed.is_empty() || trimmed.starts_with(':') {
         return None;
     }
-    // Accept both standard SSE frames and a plain JSON line. Some
-    // OpenAI-compatible gateways ignore stream=true and return one JSON
-    // object (often followed by a newline) instead of `data:` frames.
     trimmed.strip_prefix("data:").map(str::trim).or_else(|| trimmed.starts_with('{').then_some(trimmed))
 }
 
@@ -1469,10 +1462,6 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
         "local_file_read" => "- local_file_read: read file or search workspace. payload: {\"operation\": \"read_file\"|\"list_tree\"|\"search_text\", \"path\": \"...\", \"query\": \"...\"}",
         "local_file_write" => "- local_file_write: write files or generate documents (PDF, DOCX, XLSX, PPTX). For PDF: {\"operation\": \"create_pdf\", \"path\": \"reports/report.pdf\", \"title\": \"Title\", \"sections\": [{\"heading\": \"Sec 1\", \"paragraphs\": [\"...\"]}]}. For files: {\"operation\": \"write\", \"path\": \"...\", \"content\": \"...\"}",
         "local_terminal" => "- local_terminal: run an allowlisted command or use a bounded persistent process session. One-shot payload: {\"command\": \"pytest -q\"}; session payload: {\"session_action\":\"start\"|\"poll\"|\"cancel\"|\"list\", \"session_id\":\"term_...\"}",
-        "local_browser" => "- local_browser: inspect or scrape web page, capture screenshot, or run E2E flow. payload: {\"operation\": \"open\"|\"scrape\"|\"screenshot\"|\"e2e_flow\", \"url\": \"...\"}",
-        "local_integration" => "- local_integration: Live web search (Tavily or Exa). payload: {\"provider\": \"tavily\"|\"exa\", \"operation\": \"search\", \"query\": \"keywords\", \"max_results\": 5}",
-        "local_graph" => "- local_graph: AST code property graph analysis & blast radius. payload: {\"operation\": \"inspect_symbol\"|\"blast_radius\"|\"find_references\", \"symbol\": \"SymbolName\"}",
-        "local_python" => "- local_python: execute Python in sandbox. payload: {\"code\": \"python code\"}",
         "local_calculate" => "- local_calculate: exact calculation. payload: {\"expression\": \"math expression\"}",
         "local_semantic_search" => "- local_semantic_search: query offline local SQLite semantic vector embeddings. payload: {\"query\": \"natural language code intent or symbol\", \"limit\": 5}",
         "local_git" => "- local_git: autonomous Git workspace actions. payload: {\"operation\": \"status\"|\"branches\"|\"smart_commit\"|\"commit\"|\"log\"|\"conflicts\", \"message\": \"...\"}",
