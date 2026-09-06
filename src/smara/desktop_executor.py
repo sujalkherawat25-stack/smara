@@ -2939,10 +2939,25 @@ def _run_shared_local_agent_turn(request: dict, state_path: Path) -> dict:
         if any(candidate == root or root in candidate.parents for root in roots):
             workspace = candidate
     model = request.get("model")
+    # ``/learn`` is a local control command and can synthesize a playbook from
+    # the last completed run without contacting a model. Keep it usable when
+    # the Desktop has no provider configured; normal turns still require a
+    # complete model profile below.
+    learn_command = False
+    try:
+        from smara.local_learning import is_learn_command
+    except ImportError:  # pragma: no cover - bundled executor layout
+        from local_learning import is_learn_command
+    learn_command = is_learn_command(prompt)
     if not isinstance(model, dict):
-        raise RuntimeError("Local agent model configuration is missing.")
+        if not learn_command:
+            raise RuntimeError("Local agent model configuration is missing.")
+        model = {}
     base_url = model.get("base_url")
     model_name = model.get("model")
+    if learn_command and (not isinstance(base_url, str) or not base_url.strip() or not isinstance(model_name, str) or not model_name.strip()):
+        base_url = "http://127.0.0.1"
+        model_name = "local-skill-learning"
     if not isinstance(base_url, str) or not base_url.strip() or not isinstance(model_name, str) or not model_name.strip():
         raise RuntimeError("Local agent model endpoint or model name is missing.")
     api_key = model.get("api_key") if isinstance(model.get("api_key"), str) else ""
