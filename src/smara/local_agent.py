@@ -121,7 +121,7 @@ LOCAL_SKILLS: dict[str, LocalSkillSpec] = {
         result_schema={"type": "object", "required": ["action"]},
     ),
     "local_semantic_search": LocalSkillSpec(
-        "local_semantic_search", "Query local offline SQLite semantic vector database using natural language intent.", _ANY_OBJECT,
+        "local_semantic_search", "Query local offline SQLite code index or cross-session FTS5 conversation memory.", _ANY_OBJECT,
         timeout_seconds=15, max_output_bytes=64_000, side_effecting=False,
         result_schema={"type": "object", "required": ["action"]},
     ),

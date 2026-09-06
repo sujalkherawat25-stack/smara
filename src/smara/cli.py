@@ -445,6 +445,8 @@ class LocalAutonomousEngine:
             context=self.history[-16:],
             max_steps=20,
             action_executor=execute,
+            conversation_id="cli-local",
+            workspace_id=str(self.workspace),
         )
         answer = str(result.get("answer") or "The local agent completed its bounded run.").strip()
         if not answer:
@@ -458,6 +460,29 @@ class LocalAutonomousEngine:
 
     def run_turn(self, user_prompt: str) -> str:
         """Run a full autonomous turn with tool calling and final response streaming."""
+        # Skill learning is a local control command, not a model request. It
+        # remains available even when no provider key is configured.
+        from .local_learning import handle_learn_command, is_learn_command
+        if is_learn_command(user_prompt):
+            result = handle_learn_command(
+                user_prompt,
+                workspace_root=self.workspace,
+                state_path=_desktop_state_path(),
+                conversation_id="cli-local",
+            )
+            answer = str(result.get("answer") or "").strip()
+            from .local_conversation_memory import SQLiteConversationMemory
+            SQLiteConversationMemory.for_state(_desktop_state_path()).append_exchange(
+                conversation_id="cli-local",
+                workspace_id=str(self.workspace),
+                user_message=user_prompt,
+                assistant_message=answer,
+            )
+            self.tui.print_assistant_header("Smara")
+            self.tui.stream_markdown_chunk(answer)
+            self.history.append({"role": "user", "content": user_prompt})
+            self.history.append({"role": "assistant", "content": answer})
+            return answer
         profile = self.active_profile
         api_key = _resolve_profile_key(profile, self.credentials)
         # Keep CLI execution on the same bounded multi-step runtime as the

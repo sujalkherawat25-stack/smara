@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -28,8 +29,12 @@ MAX_LOCAL_TOOL_OBSERVATION_CHARS = 24_000
 # Python package context.
 try:
     from .local_agent import LocalAutonomousAgent, local_skill_catalog
+    from .local_conversation_memory import SQLiteConversationMemory
+    from .local_learning import LocalSkillLearningEngine, handle_learn_command, is_learn_command
 except ImportError:  # pragma: no cover - exercised by the packaged binary
     from local_agent import LocalAutonomousAgent, local_skill_catalog
+    from local_conversation_memory import SQLiteConversationMemory
+    from local_learning import LocalSkillLearningEngine, handle_learn_command, is_learn_command
 
 
 @dataclass(frozen=True)
@@ -163,7 +168,7 @@ def _messages_from_history(history: list[dict[str, Any]]) -> list[dict[str, str]
             # Ollama, Sarvam, GLM, and other compatible gateways all accept it.
             name = str(item.get("name") or "local tool")
             messages.append({"role": "user", "content": f"[Result from {name}]\n{content[:MAX_LOCAL_TOOL_OBSERVATION_CHARS]}"})
-        elif role in {"user", "assistant"}:
+        elif role in {"user", "assistant", "system"}:
             messages.append({"role": role, "content": content[:MAX_LOCAL_TOOL_OBSERVATION_CHARS]})
     return messages
 
@@ -216,6 +221,10 @@ class OpenAICompatiblePlanner:
             "missing, say what is missing rather than guessing. Do not repeat an "
             "identical tool call after an error; repair the plan or stop clearly. "
             "Use local_media for approved images, audio, archives, and rich documents.\n\n"
+            "Cross-session local memory is supplied as a bounded system note when "
+            "relevant; treat it as a hint and verify it. The user can issue `/learn "
+            "<name>` after a successful workflow to save a tested declarative "
+            "SKILL.md playbook under the workspace .smara/skills directory.\n\n"
             "Installed capabilities:\n" + capability_lines
         )
 
@@ -308,11 +317,66 @@ def run_shared_local_turn(
     context: list[dict[str, Any]] | None = None,
     max_steps: int = 20,
     action_executor: Any | None = None,
+    conversation_id: str | None = None,
+    workspace_id: str = "default",
 ) -> dict[str, Any]:
-    """Run the shared agent loop and always close the provider client."""
+    """Run the shared agent loop with local cross-session memory.
+
+    The memory lookup happens before planning and the exchange is persisted
+    after the answer.  ``/learn`` is handled locally, so a model outage cannot
+    prevent a previously completed workflow from becoming a tested playbook.
+    """
+    conversation = str(conversation_id or "local-default")[:240]
+    memory = SQLiteConversationMemory.for_state(state_path)
+    if is_learn_command(prompt):
+        learned = handle_learn_command(
+            prompt,
+            workspace_root=Path(workspace_id) if Path(workspace_id).is_dir() else Path.cwd(),
+            state_path=state_path,
+            conversation_id=conversation,
+        )
+        memory.append_exchange(
+            conversation_id=conversation,
+            workspace_id=workspace_id,
+            user_message=prompt,
+            assistant_message=str(learned.get("answer") or ""),
+        )
+        return learned
+
+    memory_hits = memory.search(prompt, workspace_id=workspace_id, limit=6)
+    memory_context: list[dict[str, str]] = []
+    if memory_hits:
+        snippets = [
+            f"[{hit.get('role', 'turn')}] {str(hit.get('content') or '')[:2_000]}"
+            for hit in memory_hits
+        ]
+        memory_context.append({
+            "role": "system",
+            "content": "Cross-session local memory (bounded, may be incomplete; verify before acting):\n" + "\n".join(f"- {item}" for item in snippets),
+        })
+    merged_context = memory_context + list(context or [])
     planner = OpenAICompatiblePlanner(config)
     try:
         agent = LocalAutonomousAgent(state_path, max_steps=max(1, min(int(max_steps), 20)), action_executor=action_executor)
-        return agent.run_turn(prompt, model_callable=planner, context=context)
+        result = agent.run_turn(prompt, model_callable=planner, context=merged_context)
+        answer = str(result.get("answer") or "").strip()
+        memory.append_exchange(
+            conversation_id=conversation,
+            workspace_id=workspace_id,
+            user_message=prompt,
+            assistant_message=answer,
+        )
+        try:
+            learning_workspace = Path(workspace_id) if Path(workspace_id).is_dir() else Path.cwd()
+            LocalSkillLearningEngine(learning_workspace, state_path=state_path).record_task(
+                prompt=prompt, result=result, conversation_id=conversation,
+            )
+        except (OSError, TypeError, ValueError):
+            # Learning is best-effort telemetry; it must never make a valid
+            # local answer fail because the optional journal is unavailable.
+            pass
+        result["local_memory_hits"] = len(memory_hits)
+        result["local_memory_indexed"] = True
+        return result
     finally:
         planner.close()

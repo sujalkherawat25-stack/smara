@@ -2523,16 +2523,29 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
         except Exception as exc:
             raise RuntimeError(str(exc)) from exc
     elif capability == "local_semantic_search":
-        try:
-            from smara.semantic_search import SemanticCodeSearcher
-        except ImportError:
-            from semantic_search import SemanticCodeSearcher
         query = str(payload.get("query") or "")
         limit = int(payload.get("limit") or 6)
         ws = roots[0] if roots else Path.cwd()
-        searcher = SemanticCodeSearcher(ws)
-        res = [r.to_dict() for r in searcher.search(query, limit=limit)]
-        result = json.dumps({"action": "local_semantic_search", "query": query, "results": res}, ensure_ascii=False)
+        operation = str(payload.get("operation") or "code_search").strip().lower()
+        if operation in {"conversation_search", "history_search", "memory_search"}:
+            try:
+                from smara.local_conversation_memory import SQLiteConversationMemory
+            except ImportError:  # pragma: no cover - bundled executor layout
+                from local_conversation_memory import SQLiteConversationMemory
+            state_path = state.get("_state_path") if isinstance(state, dict) else None
+            if not isinstance(state_path, str) or not state_path.strip():
+                raise RuntimeError("Local conversation memory requires a Desktop state path.")
+            memory = SQLiteConversationMemory.for_state(state_path)
+            res = memory.search(query, workspace_id=str(payload.get("workspace_id") or ws), limit=limit)
+            result = json.dumps({"action": "local_semantic_search", "operation": operation, "query": query, "results": res}, ensure_ascii=False)
+        else:
+            try:
+                from smara.semantic_search import SemanticCodeSearcher
+            except ImportError:
+                from semantic_search import SemanticCodeSearcher
+            searcher = SemanticCodeSearcher(ws)
+            res = [r.to_dict() for r in searcher.search(query, limit=limit)]
+            result = json.dumps({"action": "local_semantic_search", "operation": "code_search", "query": query, "results": res}, ensure_ascii=False)
     elif capability == "local_git":
         try:
             from smara.git_agent import GitWorkspaceManager
@@ -2952,6 +2965,8 @@ def _run_shared_local_agent_turn(request: dict, state_path: Path) -> dict:
         ),
         context=bounded_context,
         max_steps=20,
+        conversation_id=str(request.get("conversation_id") or "local-default"),
+        workspace_id=str(workspace),
     )
     result["workspace"] = str(workspace)
     result["capabilities"] = list(state.get("capabilities") or [])

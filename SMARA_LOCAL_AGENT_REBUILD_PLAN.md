@@ -229,6 +229,33 @@ the next phase is programmatic tool calling and persistent process control.
 - ✅ Desktop terminal guidance, local skill metadata, and regression tests now
   document and exercise the persistent protocol.
 
+## Phase 4 autonomous skill learning (implemented)
+
+- ✅ Added a local learning journal that records bounded evidence from each
+  completed shared-agent turn without uploading it to Hosted Smara.
+- ✅ `/learn <name> [description]` is handled locally, including when the
+  configured model is unavailable. It converts the latest completed workflow
+  into a declarative capability graph and never persists shell, Python, code,
+  credentials, or executable downloads.
+- ✅ Every learned workflow passes the existing manifest validator plus a
+  deterministic structural smoke test before `.smara/skills/<name>/SKILL.md`
+  and its safe manifest/test record are written atomically.
+- ✅ Playbooks are discoverable by the existing `SkillsRegistry`; risk tiers,
+  capability allowlists, source run IDs, and test IDs remain visible for review.
+
+## Phase 5 cross-session SQLite FTS5 memory (implemented)
+
+- ✅ Added a private `conversation-memory.sqlite3` beside the Desktop state
+  file with WAL mode, busy-timeout handling, bounded turn sizes, and FTS5
+  indexing for user/assistant/tool/system turns.
+- ✅ Shared Desktop and CLI turns search prior conversations before planning and
+  persist the resulting exchange after the answer. Search hints are bounded,
+  explicitly marked as possibly incomplete, and scoped to the active workspace.
+- ✅ Added a `local_semantic_search` conversation/history operation for direct
+  local recall while retaining the existing code-index search operation.
+- ✅ Reopening the app or creating a new runtime instance reuses the same local
+  index; workspace filters prevent cross-workspace recall.
+
 ## Benchmark stack readiness slice (implemented)
 
 - ✅ GAIA evaluation now uses one shared local Desktop runtime and strict
