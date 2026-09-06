@@ -20,69 +20,7 @@ export function DAGFlowTab({ onSetNotice }: { onSetNotice: (msg: string) => void
         const wf = await desktop.getDagWorkflow();
         setWorkflow(wf);
       } else {
-        const mockWf: DAGWorkflowData = {
-          id: "smara_verification_flow",
-          title: "Smara Autonomous Verification Pipeline",
-          is_paused: false,
-          nodes: [
-            {
-              id: "inspect_env",
-              title: "Inspect Environment & Working Tree",
-              capability: "local_terminal",
-              payload: { command: "git status" },
-              depends_on: [],
-              status: "READY",
-              duration_ms: 0,
-              retries: 0,
-              max_retries: 2,
-            },
-            {
-              id: "run_tests",
-              title: "Pytest Verification Suite",
-              capability: "test_suite",
-              payload: {},
-              depends_on: ["inspect_env"],
-              status: "PENDING",
-              duration_ms: 0,
-              retries: 0,
-              max_retries: 2,
-            },
-            {
-              id: "ast_analysis",
-              title: "AST Blast Radius & Symbol Check",
-              capability: "ast_graph",
-              payload: {},
-              depends_on: ["inspect_env"],
-              status: "PENDING",
-              duration_ms: 0,
-              retries: 0,
-              max_retries: 2,
-            },
-            {
-              id: "security_audit",
-              title: "Sanitize Injections & Coding Conventions",
-              capability: "security_audit",
-              payload: {},
-              depends_on: ["run_tests", "ast_analysis"],
-              status: "PENDING",
-              duration_ms: 0,
-              retries: 0,
-              max_retries: 2,
-            },
-            {
-              id: "synthesis_report",
-              title: "Synthesize Deployment Scorecard",
-              capability: "report",
-              payload: {},
-              depends_on: ["security_audit"],
-              status: "PENDING",
-              duration_ms: 0,
-              retries: 0,
-              max_retries: 2,
-            },
-          ],
-        };
-        setWorkflow(mockWf);
+        setWorkflow(null);
       }
     } catch (err: any) {
       onSetNotice(`Error loading DAG: ${err?.message || String(err)}`);
@@ -99,31 +37,12 @@ export function DAGFlowTab({ onSetNotice }: { onSetNotice: (msg: string) => void
     if (!workflow || stepping) return;
     setStepping(true);
     try {
-      if (isNativeDesktop) {
-        const next = await desktop.stepDagWorkflow(workflow);
-        setWorkflow(next);
-        onSetNotice("✓ Executed READY DAG nodes in current topological wave.");
-      } else {
-        // Mock step: find ready nodes, mark completed, update dependencies
-        const updated = { ...workflow };
-        const ready = updated.nodes.filter((n) => n.status === "READY");
-        ready.forEach((n) => {
-          n.status = "COMPLETED";
-          n.duration_ms = 45;
-          n.result = `Successfully executed: ${n.title}`;
-        });
-        // check next ready
-        updated.nodes.forEach((n) => {
-          if (n.status === "PENDING") {
-            const deps = updated.nodes.filter((d) => n.depends_on.includes(d.id));
-            if (deps.length > 0 && deps.every((d) => d.status === "COMPLETED")) {
-              n.status = "READY";
-            }
-          }
-        });
-        setWorkflow(updated);
-        onSetNotice("✓ Stepped mock DAG flow.");
+      if (!isNativeDesktop) {
+        throw new Error("DAG flow execution requires running inside the Smara Desktop native application.");
       }
+      const next = await desktop.stepDagWorkflow(workflow);
+      setWorkflow(next);
+      onSetNotice("✓ Executed READY DAG nodes in current topological wave.");
     } catch (err: any) {
       onSetNotice(`Step error: ${err?.message || String(err)}`);
     } finally {
@@ -135,20 +54,12 @@ export function DAGFlowTab({ onSetNotice }: { onSetNotice: (msg: string) => void
     if (!workflow || stepping) return;
     setStepping(true);
     try {
-      if (isNativeDesktop) {
-        const next = await desktop.runDagWorkflow(workflow);
-        setWorkflow(next);
-        onSetNotice("✓ Ran full DAG workflow to completion.");
-      } else {
-        const updated = { ...workflow };
-        updated.nodes.forEach((n) => {
-          n.status = "COMPLETED";
-          n.duration_ms = 50;
-          n.result = `Executed: ${n.title}`;
-        });
-        setWorkflow(updated);
-        onSetNotice("✓ Ran mock DAG to completion.");
+      if (!isNativeDesktop) {
+        throw new Error("DAG flow execution requires running inside the Smara Desktop native application.");
       }
+      const next = await desktop.runDagWorkflow(workflow);
+      setWorkflow(next);
+      onSetNotice("✓ Ran full DAG workflow to completion.");
     } catch (err: any) {
       onSetNotice(`Run error: ${err?.message || String(err)}`);
     } finally {
@@ -159,20 +70,12 @@ export function DAGFlowTab({ onSetNotice }: { onSetNotice: (msg: string) => void
   const handleRetryNode = async (nodeId: string) => {
     if (!workflow) return;
     try {
-      if (isNativeDesktop) {
-        const next = await desktop.retryDagNode(workflow, nodeId);
-        setWorkflow(next);
-        onSetNotice(`✓ Reset node '${nodeId}' and downstream dependents.`);
-      } else {
-        const updated = { ...workflow };
-        const target = updated.nodes.find((n) => n.id === nodeId);
-        if (target) {
-          target.status = "READY";
-          target.result = null;
-        }
-        setWorkflow(updated);
-        onSetNotice(`✓ Reset node '${nodeId}'.`);
+      if (!isNativeDesktop) {
+        throw new Error("DAG flow retry requires running inside the Smara Desktop native application.");
       }
+      const next = await desktop.retryDagNode(workflow, nodeId);
+      setWorkflow(next);
+      onSetNotice(`✓ Reset node '${nodeId}' and downstream dependents.`);
     } catch (err: any) {
       onSetNotice(`Retry error: ${err?.message || String(err)}`);
     }
@@ -193,21 +96,17 @@ export function DAGFlowTab({ onSetNotice }: { onSetNotice: (msg: string) => void
     };
 
     try {
-      if (isNativeDesktop) {
-        const next = await desktop.injectDagNode(
-          workflow,
-          newNode,
-          injectAfter || undefined,
-          injectBefore || undefined
-        );
-        setWorkflow(next);
-        onSetNotice(`✓ Injected dynamic node '${injectTitle.trim()}' into DAG.`);
-      } else {
-        const updated = { ...workflow };
-        updated.nodes.push(newNode as DAGNodeData);
-        setWorkflow(updated);
-        onSetNotice(`✓ Injected mock node '${injectTitle.trim()}'.`);
+      if (!isNativeDesktop) {
+        throw new Error("DAG node injection requires running inside the Smara Desktop native application.");
       }
+      const next = await desktop.injectDagNode(
+        workflow,
+        newNode,
+        injectAfter || undefined,
+        injectBefore || undefined
+      );
+      setWorkflow(next);
+      onSetNotice(`✓ Injected dynamic node '${injectTitle.trim()}' into DAG.`);
       setShowInjectModal(false);
       setInjectTitle("");
       setInjectAfter("");

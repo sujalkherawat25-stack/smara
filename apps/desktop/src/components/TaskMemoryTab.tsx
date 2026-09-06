@@ -25,19 +25,7 @@ export function TaskMemoryTab({ onSetNotice }: { onSetNotice: (msg: string) => v
         const res = await desktop.listTaskMemory(target);
         setEntries(res?.entries || []);
       } else {
-        setEntries(
-          target === "memory"
-            ? [
-                "Testing modernized Smara agent architecture.",
-                "Fast local AST graph parsing with blast-radius containment.",
-                "Pytest suite runs with auto-healing and zero regressions.",
-              ]
-            : [
-                "Prefers concise answers and zero verbose filler.",
-                "Enforce strict type annotations across codebase.",
-                "Never run dangerous scripts without sandbox approval.",
-              ]
-        );
+        setEntries([]);
       }
     } catch (err: any) {
       onSetNotice(`Error reading memory: ${err?.message || String(err)}`);
@@ -52,9 +40,7 @@ export function TaskMemoryTab({ onSetNotice }: { onSetNotice: (msg: string) => v
         const snap = await desktop.getMemorySnapshot(12000);
         setSnapshot(snap?.snapshot || "No memory snapshot available.");
       } else {
-        setSnapshot(
-          "### User Preferences & Context:\n- Prefers concise answers\n- Enforce strict typing\n\n### Curated Project Notes:\n- Modernized Smara agent architecture\n- AST blast-radius containment"
-        );
+        setSnapshot("No native memory snapshot available in preview mode.");
       }
       setShowSnapshotModal(true);
     } catch (err: any) {
@@ -69,17 +55,15 @@ export function TaskMemoryTab({ onSetNotice }: { onSetNotice: (msg: string) => v
   const handleAdd = async () => {
     if (!newContent.trim()) return;
     try {
-      if (isNativeDesktop) {
-        const res = await desktop.addTaskMemoryEntry(newContent.trim(), activeTarget);
-        if (res.status === "error") {
-          onSetNotice(`⚠️ ${res.message}`);
-          return;
-        }
-        onSetNotice(`✓ Added entry to ${activeTarget === "memory" ? "MEMORY.md" : "USER.md"}`);
-      } else {
-        setEntries((prev) => [...prev, newContent.trim()]);
-        onSetNotice(`✓ Added mock entry to ${activeTarget}`);
+      if (!isNativeDesktop) {
+        throw new Error("Memory actions require running inside the Smara Desktop native application.");
       }
+      const res = await desktop.addTaskMemoryEntry(newContent.trim(), activeTarget);
+      if (res.status === "error") {
+        onSetNotice(`⚠️ ${res.message}`);
+        return;
+      }
+      onSetNotice(`✓ Added entry to ${activeTarget === "memory" ? "MEMORY.md" : "USER.md"}`);
       setNewContent("");
       setShowAddModal(false);
       await refreshEntries(activeTarget);
@@ -91,17 +75,15 @@ export function TaskMemoryTab({ onSetNotice }: { onSetNotice: (msg: string) => v
   const handleReplace = async () => {
     if (!replaceOld.trim() || !replaceNew.trim()) return;
     try {
-      if (isNativeDesktop) {
-        const res = await desktop.replaceTaskMemoryEntry(replaceOld.trim(), replaceNew.trim(), activeTarget);
-        if (res.status === "error") {
-          onSetNotice(`⚠️ ${res.message}`);
-          return;
-        }
-        onSetNotice(`✓ Updated memory entry.`);
-      } else {
-        setEntries((prev) => prev.map((e) => (e.includes(replaceOld) ? replaceNew : e)));
-        onSetNotice(`✓ Updated mock entry.`);
+      if (!isNativeDesktop) {
+        throw new Error("Memory actions require running inside the Smara Desktop native application.");
       }
+      const res = await desktop.replaceTaskMemoryEntry(replaceOld.trim(), replaceNew.trim(), activeTarget);
+      if (res.status === "error") {
+        onSetNotice(`⚠️ ${res.message}`);
+        return;
+      }
+      onSetNotice(`✓ Updated memory entry.`);
       setReplaceOld("");
       setReplaceNew("");
       setShowReplaceModal(false);
@@ -114,17 +96,15 @@ export function TaskMemoryTab({ onSetNotice }: { onSetNotice: (msg: string) => v
   const handleRemove = async (content: string) => {
     const sub = content.slice(0, 30);
     try {
-      if (isNativeDesktop) {
-        const res = await desktop.removeTaskMemoryEntry(sub, activeTarget);
-        if (res.status === "error") {
-          onSetNotice(`⚠️ ${res.message}`);
-          return;
-        }
-        onSetNotice(`✓ Removed entry from memory.`);
-      } else {
-        setEntries((prev) => prev.filter((e) => e !== content));
-        onSetNotice(`✓ Removed mock entry.`);
+      if (!isNativeDesktop) {
+        throw new Error("Memory actions require running inside the Smara Desktop native application.");
       }
+      const res = await desktop.removeTaskMemoryEntry(sub, activeTarget);
+      if (res.status === "error") {
+        onSetNotice(`⚠️ ${res.message}`);
+        return;
+      }
+      onSetNotice(`✓ Removed entry from memory.`);
       await refreshEntries(activeTarget);
     } catch (err: any) {
       onSetNotice(`Remove error: ${err?.message || String(err)}`);
@@ -135,15 +115,11 @@ export function TaskMemoryTab({ onSetNotice }: { onSetNotice: (msg: string) => v
     if (!searchQuery.trim()) return;
     setSearching(true);
     try {
-      if (isNativeDesktop) {
-        const results = await desktop.searchTaskMemory(searchQuery.trim());
-        setSearchResults(results || []);
-      } else {
-        setSearchResults([
-          { store: "memory", content: "Fast local AST graph parsing with blast-radius containment.", relevance: 2 },
-          { store: "user", content: "Never run dangerous scripts without sandbox approval.", relevance: 1 },
-        ]);
+      if (!isNativeDesktop) {
+        throw new Error("Memory search requires running inside the Smara Desktop native application.");
       }
+      const results = await desktop.searchTaskMemory(searchQuery.trim());
+      setSearchResults(results || []);
     } catch (err: any) {
       onSetNotice(`Search error: ${err?.message || String(err)}`);
     } finally {

@@ -52,23 +52,12 @@ export function SubagentSwarmTab({ onSetNotice }: { onSetNotice: (msg: string) =
     if (!goal.trim() || delegating) return;
     setDelegating(true);
     try {
-      if (isNativeDesktop) {
-        const res = await desktop.runSubagentDelegation(goal.trim(), selectedRole, context.trim() || undefined);
-        setDelegationHistory((prev) => [res, ...prev]);
-        onSetNotice(`✓ Delegated task '${res.task_id}' completed with status ${res.status}`);
-      } else {
-        const mockRes: SubagentDelegationData = {
-          task_id: `sub_${selectedRole}_${Date.now() % 10000}`,
-          goal: goal.trim(),
-          status: "SUCCESS",
-          summary: `Successfully completed research and execution for: ${goal.trim()}. Verified AST invariants and clean isolation.`,
-          trace_steps: 3,
-          duration_ms: 1150,
-          tools_used: ["ast_search", "file_read", "pytest_runner"],
-        };
-        setDelegationHistory((prev) => [mockRes, ...prev]);
-        onSetNotice(`✓ Delegated mock task '${mockRes.task_id}' completed.`);
+      if (!isNativeDesktop) {
+        throw new Error("Subagent delegation requires running inside the Smara Desktop native application.");
       }
+      const res = await desktop.runSubagentDelegation(goal.trim(), selectedRole, context.trim() || undefined);
+      setDelegationHistory((prev) => [res, ...prev]);
+      onSetNotice(`✓ Delegated task '${res.task_id}' completed with status ${res.status}`);
       setGoal("");
       setContext("");
     } catch (err: any) {
@@ -89,51 +78,18 @@ export function SubagentSwarmTab({ onSetNotice }: { onSetNotice: (msg: string) =
     });
 
     try {
-      if (isNativeDesktop) {
-        const res = await desktop.runSwarmTask(swarmObjective.trim());
-        setSwarmResult(res);
-        setAgentStates({
-          architect: "completed",
-          implementer: "completed",
-          verifier: "completed",
-          auditor: "completed",
-        });
-        onSetNotice(`✓ Swarm completed: ${res.status} in ${res.duration_ms}ms`);
-      } else {
-        setTimeout(() => setAgentStates((prev) => ({ ...prev, architect: "completed", implementer: "working" })), 600);
-        setTimeout(() => setAgentStates((prev) => ({ ...prev, implementer: "completed", verifier: "working" })), 1200);
-        setTimeout(() => {
-          setAgentStates({
-            architect: "completed",
-            implementer: "completed",
-            verifier: "completed",
-            auditor: "completed",
-          });
-          setSwarmResult({
-            session_id: "swarm-session-1",
-            objective: swarmObjective.trim(),
-            status: "SUCCESS",
-            duration_ms: 1850,
-            architect_plan: {
-              objective: swarmObjective.trim(),
-              target_symbols: ["SmaraAutonomousAgent", "SubagentOrchestrator"],
-              blast_radius: ["TaskMemoryStore"],
-              adrs_consulted: ["Dual-Plane Memory Architecture"],
-              conventions_noted: ["Strict type annotation coverage (100%)"],
-              steps: ["1. Task decomposition", "2. AST mutation with pre-flight snapshot", "3. Test verification", "4. Auditor review"],
-              risk_level: "LOW",
-            },
-            files_modified: ["src/smara/subagent_orchestrator.py"],
-            tests_run: 5,
-            tests_passed: 5,
-            healing_applied: false,
-            audit_passed: true,
-            commit_message: `feat(swarm): ${swarmObjective.trim().toLowerCase()}`,
-            inter_agent_messages: [],
-          });
-          onSetNotice("✓ Swarm completed: SUCCESS");
-        }, 1800);
+      if (!isNativeDesktop) {
+        throw new Error("Swarm orchestration requires running inside the Smara Desktop native application.");
       }
+      const res = await desktop.runSwarmTask(swarmObjective.trim());
+      setSwarmResult(res);
+      setAgentStates({
+        architect: "completed",
+        implementer: "completed",
+        verifier: "completed",
+        auditor: "completed",
+      });
+      onSetNotice(`✓ Swarm completed: ${res.status} in ${res.duration_ms}ms`);
     } catch (err: any) {
       onSetNotice(`Swarm error: ${err?.message || String(err)}`);
     } finally {

@@ -28,36 +28,7 @@ export function ProgressiveSkillsTab({ onSetNotice }: { onSetNotice: (msg: strin
           void loadSkillDetail(data[0].name);
         }
       } else {
-        const mockSkills: ProgressiveSkillItem[] = [
-          {
-            name: "gaia-multimodal-reasoning",
-            description: "Official GAIA benchmark multi-hop reasoning, table and audio analysis with 100% precision",
-            version: "1.0.0",
-            tags: ["gaia", "multimodal", "reasoning", "tables"],
-            source: "workspace",
-            skill_dir: ".smara/skills/gaia-multimodal-reasoning",
-          },
-          {
-            name: "ast-blast-radius",
-            description: "Compute symbol hierarchy, callers, and blast radius before modifying code",
-            version: "1.0.0",
-            tags: ["ast", "graph", "refactor"],
-            source: "builtin",
-            skill_dir: "builtin/skills/ast-blast-radius",
-          },
-          {
-            name: "pytest-self-healing",
-            description: "Pytest runner with stack trace parsing and dynamic patch synthesis",
-            version: "1.0.0",
-            tags: ["testing", "pytest", "healing"],
-            source: "workspace",
-            skill_dir: ".smara/skills/pytest-self-healing",
-          },
-        ];
-        setSkills(mockSkills);
-        if (!selectedSkillName) {
-          void loadSkillDetail(mockSkills[0].name);
-        }
+        setSkills([]);
       }
     } catch (err: any) {
       onSetNotice(`Error listing skills: ${err?.message || String(err)}`);
@@ -76,19 +47,7 @@ export function ProgressiveSkillsTab({ onSetNotice }: { onSetNotice: (msg: strin
         const detail = await desktop.viewSkillV2(skillName);
         setSkillDetail(detail);
       } else {
-        setSkillDetail({
-          status: "success",
-          skill: skillName,
-          metadata: {
-            name: skillName,
-            description: "Precision procedures and reasoning templates.",
-            version: "1.0.0",
-            tags: ["automation", "testing"],
-            source: "workspace",
-          },
-          instructions: `# Instructions for ${skillName}\n\n1. Inspect target workspace files\n2. Run automated validation checks\n3. Synthesize structured report`,
-          available_assets: ["references/guidelines.md", "examples/sample_run.json"],
-        });
+        setSkillDetail(null);
       }
     } catch (err: any) {
       onSetNotice(`Error viewing skill: ${err?.message || String(err)}`);
@@ -105,7 +64,7 @@ export function ProgressiveSkillsTab({ onSetNotice }: { onSetNotice: (msg: strin
         const res = await desktop.viewSkillV2(selectedSkillName, assetPath);
         setAssetContent(res?.content || "No content returned.");
       } else {
-        setAssetContent(`# Asset Content: ${assetPath}\n\nSupporting reference document for ${selectedSkillName}.`);
+        setAssetContent(null);
       }
     } catch (err: any) {
       onSetNotice(`Error loading asset: ${err?.message || String(err)}`);
@@ -120,16 +79,15 @@ export function ProgressiveSkillsTab({ onSetNotice }: { onSetNotice: (msg: strin
     if (!newName.trim() || !newDesc.trim() || !newInstructions.trim()) return;
     try {
       const tagsList = newTags.split(",").map((t) => t.trim()).filter(Boolean);
-      if (isNativeDesktop) {
-        const res = await desktop.createSkillV2(newName.trim(), newDesc.trim(), tagsList, newInstructions.trim());
-        if (res.status === "error") {
-          onSetNotice(`⚠️ ${res.message}`);
-          return;
-        }
-        onSetNotice(`✓ Created progressive skill '${newName.trim()}' with SKILL.md`);
-      } else {
-        onSetNotice(`✓ Created mock skill '${newName.trim()}'`);
+      if (!isNativeDesktop) {
+        throw new Error("Skill creation requires running inside the Smara Desktop native application.");
       }
+      const res = await desktop.createSkillV2(newName.trim(), newDesc.trim(), tagsList, newInstructions.trim());
+      if (res.status === "error") {
+        onSetNotice(`⚠️ ${res.message}`);
+        return;
+      }
+      onSetNotice(`✓ Created progressive skill '${newName.trim()}' with SKILL.md`);
       setShowCreateModal(false);
       setNewName("");
       setNewDesc("");
