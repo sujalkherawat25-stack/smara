@@ -56,6 +56,9 @@ from smara.agent_tools import (
     terminal_execute,
     file_write,
     browser_action_tool,
+    list_directory,
+    search_files,
+    code_graph_tool,
 )
 from smara.task_memory import get_default_memory_store
 from smara.task_planner import SmaraTaskPlanner
@@ -112,6 +115,53 @@ def _is_repetition_dominated(text: str, min_len: int = 400, window: int = 60, mi
         if wcounts[frag] >= needed:
             return True
     return False
+
+
+def _extract_text_tool_calls(text: str) -> List[Tuple[str, Dict[str, Any]]]:
+    """Extract tool calls from text whether formatted as JSON blocks or XML tags."""
+    calls: List[Tuple[str, Dict[str, Any]]] = []
+    if not isinstance(text, str) or not text.strip():
+        return calls
+
+    # Pattern 1: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+    for m in re.finditer(r"<tool_call>\s*({[\s\S]*?})\s*</tool_call>", text):
+        try:
+            obj = json.loads(m.group(1))
+            name = obj.get("name") or obj.get("function") or obj.get("tool")
+            args = obj.get("arguments") or obj.get("parameters") or {}
+            if name:
+                calls.append((name, args if isinstance(args, dict) else {"query": str(args)}))
+        except Exception:
+            pass
+
+    if calls:
+        return calls
+
+    # Pattern 2: <tool_call>...<(function|name|tool_name)>...</>...<(arguments|parameters)>...</>...</tool_call>
+    for m in re.finditer(r"<tool_call>[\s\S]*?<(?:function|name|tool_name)>(\w+)</(?:function|name|tool_name)>[\s\S]*?<(?:arguments|parameters)>([\s\S]*?)</(?:arguments|parameters)>[\s\S]*?</tool_call>", text):
+        name = m.group(1).strip()
+        raw_args = m.group(2).strip()
+        try:
+            args = json.loads(raw_args)
+        except Exception:
+            args = {"command": raw_args} if name in ("terminal", "bash") else {"query": raw_args}
+        calls.append((name, args))
+
+    if calls:
+        return calls
+
+    # Pattern 3: ```json {"name": "...", "arguments": {...}} ```
+    for m in re.finditer(r"```(?:json)?\s*({[\s\S]*?})\s*```", text):
+        try:
+            obj = json.loads(m.group(1))
+            name = obj.get("name") or obj.get("function") or obj.get("tool")
+            args = obj.get("arguments") or obj.get("parameters") or {}
+            if name and isinstance(name, str):
+                calls.append((name, args if isinstance(args, dict) else {"query": str(args)}))
+        except Exception:
+            pass
+
+    return calls
 
 
 def _compact_conversation_history(
@@ -374,18 +424,28 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "file_read",
-            "description": "Read contents of a local file (.txt, .json, .csv, .py, .md, .html, etc.).",
+            "description": "Read contents of a file with line numbers and optional line-range windowing. Supports all code and text formats (.py, .rs, .ts, .txt, .json, .csv, .md, etc.) as well as PDF, DOCX, XLSX.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "file_path": {
                         "type": "string",
-                        "description": "Absolute or relative path to the file to inspect."
+                        "description": "Path to the file to inspect."
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Optional starting line number (1-indexed) for windowed reading.",
+                        "default": 1
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Optional maximum number of lines to return from offset (default: 100).",
+                        "default": 100
                     },
                     "max_chars": {
                         "type": "integer",
-                        "description": "Maximum characters to return (default 8000).",
-                        "default": 8000
+                        "description": "Maximum characters to return (default 12000).",
+                        "default": 12000
                     }
                 },
                 "required": ["file_path"]
@@ -802,6 +862,78 @@ TOOL_SCHEMAS = [
                 "required": ["url"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_directory",
+            "description": "List directory contents in a compact, structured tree format. Use to discover project layouts, locate source files, and explore directory structures.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory path to list (default: current directory '.').",
+                        "default": "."
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "Maximum directory traversal depth (default: 2).",
+                        "default": 2
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_files",
+            "description": "Search file contents across a codebase or directory using ripgrep or regex. Returns filename:line_number: match snippets.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search string or regex pattern."
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Directory or file to search in (default: '.').",
+                        "default": "."
+                    },
+                    "is_regex": {
+                        "type": "boolean",
+                        "description": "Whether query should be treated as regex (default: false).",
+                        "default": False
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "code_graph",
+            "description": "Query the AST Code Property Graph for instant symbol definition, callers, references, or blast radius across the codebase.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "enum": ["inspect_symbol", "blast_radius", "find_references"],
+                        "description": "Operation to perform.",
+                        "default": "inspect_symbol"
+                    },
+                    "symbol": {
+                        "type": "string",
+                        "description": "Function, class, method, or symbol name to inspect."
+                    }
+                },
+                "required": ["symbol"]
+            }
+        }
     }
 ]
 
@@ -812,18 +944,29 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
     if prof == "full":
         return TOOL_SCHEMAS
     elif prof in ["coding", "swe"]:
-        allowed = {"terminal", "file_write", "patch", "python_execute", "file_read", "todo", "delegate_task", "dag_flow", "programmatic_tool_call"}
+        allowed = {
+            "terminal", "file_write", "patch", "python_execute", "file_read",
+            "list_directory", "search_files", "code_graph",
+            "todo", "delegate_task", "dag_flow", "programmatic_tool_call"
+        }
     elif prof == "worker_coding":
-        # Isolated coder workers may change only their worktree; delegation and
-        # top-level DAG control stay unavailable to prevent recursive swarms.
-        allowed = {"terminal", "file_write", "patch", "python_execute", "file_read", "todo", "programmatic_tool_call"}
+        allowed = {
+            "terminal", "file_write", "patch", "python_execute", "file_read",
+            "list_directory", "search_files", "code_graph",
+            "todo", "programmatic_tool_call"
+        }
     elif prof == "worker_verification":
-        # Tester/auditor workers are read-only with respect to the repository.
-        # They can inspect files, run bounded checks, and gather evidence, but
-        # have no patch or file-write tool exposed.
-        allowed = {"terminal", "file_read", "python_execute", "calculate", "browser_action", "web_search", "programmatic_tool_call", "todo"}
+        allowed = {
+            "terminal", "file_read", "list_directory", "search_files", "code_graph",
+            "python_execute", "calculate", "browser_action", "web_search",
+            "programmatic_tool_call", "todo"
+        }
     elif prof in ["research", "web"]:
-        allowed = {"browser_action", "web_search", "web_extract", "web_reader_dynamic", "wayback_extract", "wikipedia_page", "pdf_search", "calculate", "file_read", "programmatic_tool_call", "todo"}
+        allowed = {
+            "browser_action", "web_search", "web_extract", "web_reader_dynamic",
+            "wayback_extract", "wikipedia_page", "pdf_search", "calculate",
+            "file_read", "list_directory", "programmatic_tool_call", "todo"
+        }
     elif prof in ["multimodal", "vision", "audio"]:
         allowed = {"browser_action", "image_inspect", "audio_transcribe", "video_inspect", "file_read", "todo"}
     else:
@@ -911,21 +1054,28 @@ def _get_api_key_from_vault_or_env() -> str:
 
 
 class SmaraAutonomousAgent:
-    """Autonomous ReAct agent interacting with Sarvam LLM via multi-turn tool-calling loops."""
+    """Autonomous ReAct agent interacting with LLM models via multi-turn tool-calling loops."""
 
     def __init__(
         self,
         api_key: Optional[str] = None,
         base_url: str = "https://api.sarvam.ai/v2/chat/completions",
         model: str = "glm5.2",
-        max_iterations: int = 20,
+        auth_header: str = "authorization",
+        max_iterations: int = 25,
         toolset: str = "full",
+        profile: Optional[str] = None,
+        workspace_root: Optional[Path | str] = None,
+        on_progress: Optional[Any] = None,
     ):
         self.api_key = api_key or _get_api_key_from_vault_or_env()
         self.base_url = base_url
         self.model = model
+        self.auth_header = auth_header.lower().strip()
         self.max_iterations = max_iterations
-        self.toolset = toolset
+        self.toolset = profile or toolset
+        self.workspace_root = Path(workspace_root).resolve() if workspace_root else Path.cwd()
+        self.on_progress = on_progress
         self.task_planner = SmaraTaskPlanner()
         self.memory_store = get_default_memory_store()
         self._seen_tool_signatures: Dict[str, int] = collections.defaultdict(int)
@@ -939,6 +1089,9 @@ class SmaraAutonomousAgent:
             "wikipedia_page": self._dispatch_wikipedia_page,
             "python_execute": self._dispatch_python_execute,
             "file_read": self._dispatch_file_read,
+            "list_directory": self._dispatch_list_directory,
+            "search_files": self._dispatch_search_files,
+            "code_graph": self._dispatch_code_graph,
             "pdf_search": self._dispatch_pdf_search,
             "zip_extract_and_read": self._dispatch_zip_extract,
             "calculate": self._dispatch_calculate,
@@ -956,6 +1109,13 @@ class SmaraAutonomousAgent:
             "file_write": self._dispatch_file_write,
             "browser_action": self._dispatch_browser_action,
         }
+
+    def _report_progress(self, event_type: str, data: Dict[str, Any]) -> None:
+        if self.on_progress and callable(self.on_progress):
+            try:
+                self.on_progress(event_type, data)
+            except Exception:
+                pass
 
     def _dispatch_programmatic_tool_call(self, args: Dict[str, Any]) -> str:
         """Run a bounded batch through the same registered tool dispatcher.
@@ -1030,7 +1190,27 @@ class SmaraAutonomousAgent:
 
     def _dispatch_file_read(self, args: Dict[str, Any]) -> str:
         fp = args.get("file_path") or args.get("path") or ""
-        return file_read(fp, max_chars=args.get("max_chars", 8000))
+        offset = args.get("offset")
+        limit = args.get("limit")
+        max_chars = args.get("max_chars", 12000)
+        return file_read(fp, offset=offset, limit=limit, max_chars=max_chars)
+
+    def _dispatch_list_directory(self, args: Dict[str, Any]) -> str:
+        p = args.get("path") or "."
+        d = int(args.get("max_depth") or 2)
+        return list_directory(p, max_depth=d)
+
+    def _dispatch_search_files(self, args: Dict[str, Any]) -> str:
+        q = args.get("query") or ""
+        p = args.get("path") or "."
+        r = bool(args.get("is_regex", False))
+        return search_files(q, path=p, is_regex=r)
+
+    def _dispatch_code_graph(self, args: Dict[str, Any]) -> str:
+        op = args.get("operation") or "inspect_symbol"
+        sym = args.get("symbol") or ""
+        ws = str(self.workspace_root) if self.workspace_root else None
+        return code_graph_tool(op, sym, workspace_root=ws)
 
     def _dispatch_pdf_search(self, args: Dict[str, Any]) -> str:
         p = args.get("pdf_path") or args.get("path") or ""
@@ -1109,9 +1289,8 @@ class SmaraAutonomousAgent:
             logger.error(f"Error executing tool {tool_name} with args {tool_args}: {e}")
             return f"Error executing tool {tool_name}: {e}"
 
-    def _call_sarvam_api(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, max_tokens: int = 16384) -> Dict[str, Any]:
-        """Perform HTTP POST request to Sarvam /v2/chat/completions with Three-Zone Context Compaction."""
-        # Active Three-Zone Context Compaction: protects Head/Tail, compresses middle steps, preserves active todos
+    def _call_model_api(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, max_tokens: int = 16384) -> Dict[str, Any]:
+        """Perform HTTP POST request to OpenAI-compatible chat completions with Three-Zone Context Compaction."""
         compacted_messages = _compact_conversation_history(messages, max_chars=35000, planner=self.task_planner)
 
         payload: Dict[str, Any] = {
@@ -1124,13 +1303,20 @@ class SmaraAutonomousAgent:
             payload["tools"] = tools
 
         data = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.auth_header == "api-subscription-key":
+            headers["api-subscription-key"] = self.api_key
+        elif self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        endpoint = self.base_url.rstrip("/")
+        if not endpoint.endswith("/chat/completions"):
+            endpoint = f"{endpoint}/chat/completions"
+
         req = urllib.request.Request(
-            self.base_url,
+            endpoint,
             data=data,
-            headers={
-                "Content-Type": "application/json",
-                "api-subscription-key": self.api_key,
-            }
+            headers=headers
         )
 
         for attempt in range(3):
@@ -1139,23 +1325,59 @@ class SmaraAutonomousAgent:
                     return json.loads(resp.read().decode("utf-8"))
             except urllib.error.HTTPError as he:
                 err_msg = he.read().decode("utf-8", errors="ignore")
-                logger.warning(f"Sarvam HTTPError (attempt {attempt+1}): {he.code} - {err_msg}")
+                logger.warning(f"Model API HTTPError (attempt {attempt+1}): {he.code} - {err_msg}")
                 if attempt == 2:
-                    raise RuntimeError(f"Sarvam API HTTP {he.code}: {err_msg}")
+                    raise RuntimeError(f"Model API HTTP {he.code}: {err_msg}")
                 time.sleep(2)
             except Exception as e:
-                logger.warning(f"Sarvam Request Error (attempt {attempt+1}): {e}")
+                logger.warning(f"Model API Request Error (attempt {attempt+1}): {e}")
                 if attempt == 2:
                     raise
                 time.sleep(2)
 
-        raise RuntimeError("Sarvam API: Max retries exceeded")
+        raise RuntimeError("Model API: Max retries exceeded")
+
+    _call_sarvam_api = _call_model_api
+
+    def _build_dynamic_context(self) -> str:
+        """Inject spatial and environment context into system prompt for real-world awareness."""
+        cwd = self.workspace_root
+        os_info = "Windows (PowerShell)" if sys.platform == "win32" else "Linux/Unix (Bash)"
+
+        git_info = "Not a git repository"
+        try:
+            res = subprocess.run(["git", "branch", "--show-current"], cwd=str(cwd), capture_output=True, text=True, timeout=5)
+            if res.returncode == 0:
+                branch = res.stdout.strip() or "detached"
+                res_status = subprocess.run(["git", "status", "--short"], cwd=str(cwd), capture_output=True, text=True, timeout=5)
+                dirty = "clean" if not res_status.stdout.strip() else f"{len(res_status.stdout.strip().splitlines())} modified files"
+                git_info = f"Branch: {branch} ({dirty})"
+        except Exception:
+            pass
+
+        ignored = {".git", "node_modules", "__pycache__", ".pytest_cache", ".venv", "target", "build", "dist", ".gradle"}
+        try:
+            top_items = [p.name + ("/" if p.is_dir() else "") for p in sorted(cwd.iterdir()) if p.name not in ignored and not p.name.startswith(".pytest-")][:30]
+            layout_str = ", ".join(top_items)
+        except Exception:
+            layout_str = "Unavailable"
+
+        return (
+            f"\n\n### Current Execution Environment:\n"
+            f"- Host OS / Shell: {os_info}\n"
+            f"- Workspace Root (cwd): {cwd}\n"
+            f"- Git State: {git_info}\n"
+            f"- Project Layout: {layout_str}\n"
+            f"- Active Model: {self.model}\n"
+        )
 
     def run(
         self,
         task: str,
         file_path: Optional[str] = None,
         file_content: Optional[str] = None,
+        max_iterations: Optional[int] = None,
+        context_history: Optional[List[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
         """
         Execute autonomous ReAct loop to solve the given task.
@@ -1168,14 +1390,21 @@ class SmaraAutonomousAgent:
 
         # Render frozen memory snapshot for system prompt caching
         memory_snapshot = self.memory_store.render_frozen_snapshot()
-        system_content = BASE_SYSTEM_PROMPT
+        system_content = BASE_SYSTEM_PROMPT + self._build_dynamic_context()
         if memory_snapshot.strip():
             system_content += f"\n\n### Active Local Memory Snapshot:\n{memory_snapshot}"
 
         messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": user_prompt}
+            {"role": "system", "content": system_content}
         ]
+        if context_history:
+            for item in context_history[-10:]:
+                r = item.get("role")
+                c = item.get("content")
+                if r in ("user", "assistant") and c:
+                    messages.append({"role": r, "content": c})
+
+        messages.append({"role": "user", "content": user_prompt})
 
         trace: List[Dict[str, Any]] = []
         tools_used: List[str] = []
@@ -1187,7 +1416,7 @@ class SmaraAutonomousAgent:
 
         touched_code_files: set[str] = set()
 
-        max_loop_iterations = self.max_iterations
+        max_loop_iterations = max_iterations or self.max_iterations
         iteration = 0
         while iteration < max_loop_iterations:
             iteration += 1
@@ -1199,9 +1428,9 @@ class SmaraAutonomousAgent:
 
             logger.info(f"Agent Loop Iteration {iteration}/{max_loop_iterations}")
 
-            # If agent has already observed tool outputs or reached final iteration, disable tools to force clean synthesis
+            # Keep tools available throughout the ReAct loop unless step limit is reached or stalled
             is_final_step = (iteration == max_loop_iterations)
-            active_tools = None if (is_final_step or consecutive_no_tool >= 1) else get_tool_schemas(self.toolset)
+            active_tools = None if (is_final_step or consecutive_no_tool >= 3) else get_tool_schemas(self.toolset)
 
             if is_final_step:
                 messages.append({
@@ -1210,9 +1439,9 @@ class SmaraAutonomousAgent:
                 })
 
             try:
-                resp = self._call_sarvam_api(messages, tools=active_tools)
+                resp = self._call_model_api(messages, tools=active_tools)
             except Exception as e:
-                logger.error(f"Failed calling Sarvam API: {e}")
+                logger.error(f"Failed calling Model API: {e}")
                 raw_concluding = f"API_ERROR: {e}"
                 final_answer = ""
                 break
@@ -1223,6 +1452,9 @@ class SmaraAutonomousAgent:
             content = msg.get("content") or ""
             reasoning = msg.get("reasoning_content") or ""
             tool_calls = msg.get("tool_calls") or []
+
+            if reasoning or content:
+                self._report_progress("thought", {"iteration": iteration, "thought": reasoning or content})
 
             logger.info(f"Iter {iteration} resp: finish_reason={finish_reason}, content_len={len(content)}, reasoning_len={len(reasoning)}, tool_calls={len(tool_calls)}")
             if not tool_calls:
@@ -1301,10 +1533,12 @@ class SmaraAutonomousAgent:
                         if any(kw in cmd_str for kw in ["pytest", "test", "check", "cargo test", "npm test", "go test", "python -m pytest"]):
                             touched_code_files.clear()
 
+                    self._report_progress("tool_start", {"iteration": iteration, "tool": fn_name, "args": parsed_args})
                     logger.info(f"[Tool Call] {fn_name}({parsed_args})")
                     raw_obs = str(self.execute_tool(fn_name, parsed_args))
                     # Spill safety: offload massive results to disk cache
                     obs = stall_note + _offload_massive_result(raw_obs, call_id=call_id)
+                    self._report_progress("tool_end", {"iteration": iteration, "tool": fn_name, "observation": obs})
                     return tc, fn_name, parsed_args, call_id, obs
 
                 # Concurrent dispatch when multiple tool calls are emitted in one turn
@@ -1335,13 +1569,13 @@ class SmaraAutonomousAgent:
 
             # Check if model formatted tool calls inside text or reasoning
             text_to_check = (content or "") + "\n" + (reasoning or "")
-            xml_match = re.search(r"<tool_call>\s*({.*?})\s*</tool_call>", text_to_check, re.DOTALL)
-            if xml_match:
-                try:
-                    call_obj = json.loads(xml_match.group(1))
-                    fn_name = call_obj.get("name")
-                    fn_args = call_obj.get("arguments", {})
+            text_calls = _extract_text_tool_calls(text_to_check)
+            if text_calls:
+                for fn_name, fn_args in text_calls:
+                    self._report_progress("tool_start", {"iteration": iteration, "tool": fn_name, "args": fn_args})
+                    logger.info(f"[Text Tool Call] {fn_name}({fn_args})")
                     obs = str(self.execute_tool(fn_name, fn_args))
+                    self._report_progress("tool_end", {"iteration": iteration, "tool": fn_name, "observation": obs})
                     tools_used.append(fn_name)
                     if fn_name in ["patch", "file_write"]:
                         p = str(fn_args.get("path") or "")
@@ -1356,7 +1590,7 @@ class SmaraAutonomousAgent:
                     messages.append({"role": "assistant", "content": content or f"Tool call: {fn_name}"})
                     messages.append({
                         "role": "user",
-                        "content": f"Tool '{fn_name}' returned:\n{obs}\n\nReview the observation carefully. If you now have the solution, provide your definitive answer on the final line strictly as:\nFINAL ANSWER: <exact answer>\n(Note: When quoting or returning a decrypted string or code result, copy the exact characters and punctuation from the tool output verbatim without altering any spelling)."
+                        "content": f"Tool '{fn_name}' returned:\n{obs}\n\nReview the observation carefully. If you now have the solution, provide your definitive answer on the final line strictly as:\nFINAL ANSWER: <exact answer>"
                     })
                     trace.append({
                         "iteration": iteration,
@@ -1365,10 +1599,8 @@ class SmaraAutonomousAgent:
                         "tool_args": fn_args,
                         "observation": obs[:300]
                     })
-                    consecutive_no_tool = 0
-                    continue
-                except Exception as ex:
-                    logger.warning(f"Error parsing text tool call: {ex}")
+                consecutive_no_tool = 0
+                continue
 
             # Check if model has provided the definitive final answer
             has_final_answer = False
@@ -1444,16 +1676,29 @@ class SmaraAutonomousAgent:
             logger.info(f"Iteration {iteration}: Model responded without tool call or FINAL ANSWER (consecutive={consecutive_no_tool}). Prompting to proceed.")
             assistant_content = content.strip() or (f"Previous calculation: {reasoning[-400:]}" if reasoning else "Thinking...")
             messages.append({"role": "assistant", "content": assistant_content})
+
+            if not tools_used:
+                prompt_content = (
+                    "Please take concrete action by calling one of the available tools (e.g. file_read, bash, list_directory, "
+                    "search_files, python_execute, etc.) to inspect files, execute commands, or gather the required information. "
+                    "If you already have the complete answer and no tool execution is required, provide your final response directly."
+                )
+            else:
+                prompt_content = (
+                    "If you need to perform additional actions or verify, call the appropriate tool. "
+                    "If you have completed the task and verified the result, synthesize your final response. "
+                    "For benchmark evaluation tasks, output strictly on a single line as:\nFINAL ANSWER: <exact answer>"
+                )
             messages.append({
                 "role": "user",
-                "content": "You have gathered the necessary observations. Synthesize your final result and output strictly on a single line as:\nFINAL ANSWER: <exact answer>"
+                "content": prompt_content
             })
             trace.append({
                 "iteration": iteration,
                 "thought": reasoning or content,
                 "tool_name": None,
                 "tool_args": None,
-                "observation": "Prompted agent to synthesize final answer"
+                "observation": f"Prompted agent to proceed (tools_used={bool(tools_used)})"
             })
             continue
 
@@ -1477,6 +1722,13 @@ class SmaraAutonomousAgent:
                         if fa_cand and not _is_instruction_placeholder(fa_cand):
                             final_answer = fa_cand
                             break
+
+        self._report_progress("answer", {
+            "answer": final_answer,
+            "raw_answer": raw_concluding,
+            "iterations": iteration,
+            "tools_used": list(dict.fromkeys(tools_used)),
+        })
 
         return {
             "answer": final_answer,
@@ -1556,3 +1808,6 @@ class SmaraAutonomousAgent:
         if _is_instruction_placeholder(ans):
             return ""
         return ans
+
+    solve = run
+

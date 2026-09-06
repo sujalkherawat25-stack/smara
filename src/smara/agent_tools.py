@@ -16,6 +16,7 @@ import logging
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -455,8 +456,8 @@ def _resolve_file_path(file_path: Path | str) -> Path:
     return p
 
 
-def file_read(file_path: Path | str, max_chars: int = 6000) -> str:
-    """Extract content from various file formats (.txt, .pdf, .docx, .xlsx, .pdb, .csv)."""
+def file_read(file_path: Path | str, offset: Optional[int] = None, limit: Optional[int] = None, max_chars: int = 12000) -> str:
+    """Extract content from files. Supports line-range windowing for code/text files, and multi-format document parsing."""
     p = _resolve_file_path(file_path)
     if not p.exists():
         return f"Error: File not found at {file_path}"
@@ -468,13 +469,6 @@ def file_read(file_path: Path | str, max_chars: int = 6000) -> str:
 
     if ext in [".mp3", ".wav", ".m4a", ".ogg", ".flac"]:
         return audio_transcribe(str(p))
-
-    if ext in [".txt", ".csv", ".json", ".md", ".py"]:
-        try:
-            text = p.read_text(encoding="utf-8", errors="replace")
-            return _truncate_output(text, max_chars=max_chars)
-        except Exception as e:
-            return f"Error reading text file: {e}"
 
     if ext == ".docx":
         try:
@@ -544,7 +538,26 @@ def file_read(file_path: Path | str, max_chars: int = 6000) -> str:
         except Exception as e:
             return f"Error reading pdb: {e}"
 
-    return f"Unsupported file extension: {ext}"
+    # General text and code file handling with line numbers and offset/limit support
+    try:
+        content = p.read_text(encoding="utf-8", errors="replace")
+        lines = content.splitlines()
+        total_lines = len(lines)
+        if offset is not None or limit is not None:
+            start_idx = max(0, (offset or 1) - 1)
+            num_lines = limit if limit is not None else 100
+            end_idx = min(total_lines, start_idx + num_lines)
+            selected = lines[start_idx:end_idx]
+            numbered = [f"{start_idx + i + 1:4d} | {line}" for i, line in enumerate(selected)]
+            header = f"[File: {p.name} ({total_lines} lines total) - Showing lines {start_idx + 1} to {end_idx}]\n"
+            return header + "\n".join(numbered)
+        else:
+            if total_lines <= 250:
+                numbered = [f"{i + 1:4d} | {line}" for i, line in enumerate(lines)]
+                return f"[File: {p.name} ({total_lines} lines total)]\n" + "\n".join(numbered)
+            return _truncate_output(content, max_chars=max_chars)
+    except Exception as e:
+        return f"Error reading text file: {e}"
 
 
 def pdf_search(
@@ -1112,5 +1125,122 @@ def browser_action_tool(action: str, url: str, output_path: Optional[str] = None
             return f"Unknown browser action '{action}'. Available actions: scrape, navigate, screenshot, dom_snapshot"
     except Exception as e:
         return f"Browser action error: {e}"
+
+
+def list_directory(path: str = ".", max_depth: int = 2) -> str:
+    """List directory contents as a compact, structured tree."""
+    root = Path(path).resolve()
+    if not root.exists():
+        return f"Error: Directory not found: {path}"
+    if not root.is_dir():
+        return f"Error: Path is not a directory: {path}"
+
+    ignored = {".git", "node_modules", "__pycache__", ".pytest_cache", ".venv", "target", "build", "dist", ".gradle", ".idea"}
+    lines = [f"[Directory: {root.name}]"]
+
+    def _walk(curr: Path, depth: int, prefix: str):
+        if depth > max_depth:
+            return
+        try:
+            items = sorted(curr.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
+        except PermissionError:
+            lines.append(f"{prefix}[Permission Denied]")
+            return
+        filtered = [it for it in items if it.name not in ignored and not it.name.startswith(".pytest-")]
+        for idx, item in enumerate(filtered[:150]):
+            is_last = (idx == len(filtered[:150]) - 1 and len(filtered) <= 150)
+            connector = "└── " if is_last else "├── "
+            child_prefix = "    " if is_last else "│   "
+            if item.is_dir():
+                lines.append(f"{prefix}{connector}📁 {item.name}/")
+                _walk(item, depth + 1, prefix + child_prefix)
+            else:
+                size = item.stat().st_size if item.exists() else 0
+                lines.append(f"{prefix}{connector}📄 {item.name} ({size} B)")
+        if len(filtered) > 150:
+            lines.append(f"{prefix}    ... [{len(filtered) - 150} more items omitted] ...")
+
+    _walk(root, 1, "")
+    return "\n".join(lines)
+
+
+def search_files(query: str, path: str = ".", is_regex: bool = False, max_matches: int = 50) -> str:
+    """Search for matching text across files in a directory using ripgrep or Python regex."""
+    root = Path(path).resolve()
+    if not root.exists():
+        return f"Error: Path not found: {path}"
+
+    rg_path = shutil.which("rg")
+    if rg_path:
+        cmd = [rg_path, "--line-number", "--no-heading", "--color=never", "--max-count", str(max_matches)]
+        if not is_regex:
+            cmd.append("--fixed-strings")
+        cmd.extend([query, str(root)])
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=15, encoding="utf-8", errors="replace")
+            if res.returncode in (0, 1):
+                out = res.stdout.strip()
+                if out:
+                    return _truncate_output(out, max_chars=12000)
+                return f"No matches found for '{query}' in {path}"
+        except Exception:
+            pass
+
+    pattern = re.compile(query if is_regex else re.escape(query), re.IGNORECASE)
+    matches = []
+    ignored = {".git", "node_modules", "__pycache__", ".pytest_cache", ".venv", "target", "build", "dist", ".gradle"}
+    for curr_root, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in ignored and not d.startswith(".pytest-")]
+        for fname in files:
+            fpath = Path(curr_root) / fname
+            if fpath.suffix.lower() in [".png", ".jpg", ".exe", ".bin", ".pyc", ".apk", ".jar", ".zip", ".tar", ".gz"]:
+                continue
+            try:
+                text = fpath.read_text(encoding="utf-8", errors="ignore")
+                for line_idx, line in enumerate(text.splitlines(), start=1):
+                    if pattern.search(line):
+                        rel = fpath.relative_to(root)
+                        matches.append(f"{rel}:{line_idx}: {line.strip()[:160]}")
+                        if len(matches) >= max_matches:
+                            break
+            except Exception:
+                pass
+            if len(matches) >= max_matches:
+                break
+        if len(matches) >= max_matches:
+            break
+
+    if not matches:
+        return f"No matches found for '{query}' in {path}"
+    return "\n".join(matches)
+
+
+def code_graph_tool(operation: str, symbol: str, workspace_root: Optional[str] = None) -> str:
+    """Query AST Code Property Graph for symbol definitions, callers, references, or blast radius."""
+    from smara.code_graph import CodePropertyGraph
+    ws = Path(workspace_root).resolve() if workspace_root else Path.cwd()
+    graph = CodePropertyGraph(ws)
+    graph.index()
+    if len(graph.symbols) == 0 and (ws.parent / "src").exists():
+        graph = CodePropertyGraph(ws.parent)
+        graph.index()
+
+    op = (operation or "inspect_symbol").lower().strip()
+    if op in ["inspect", "inspect_symbol", "symbol"]:
+        res = graph.inspect_symbol(symbol)
+        if not res:
+            return f"Symbol '{symbol}' not found in AST index ({len(graph.symbols)} total symbols)."
+        blast = graph.blast_radius(symbol)
+        res["blast_radius"] = blast
+        return json.dumps(res, indent=2, default=str)
+    elif op in ["blast_radius", "blast"]:
+        blast = graph.blast_radius(symbol)
+        return json.dumps(blast, indent=2, default=str)
+    elif op in ["references", "find_references"]:
+        refs = graph.find_references(symbol)
+        return json.dumps(refs, indent=2, default=str)
+    else:
+        return f"Unknown code graph operation: {op}. Valid operations: 'inspect_symbol', 'blast_radius', 'find_references'."
+
 
 

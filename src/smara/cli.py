@@ -460,48 +460,105 @@ class LocalAutonomousEngine:
         return res
 
     def _run_shared_local_turn(self, user_prompt: str, profile: dict[str, Any], api_key: str) -> str:
-        """Use the shared 20-step ReAct runtime used by Smara Desktop."""
-        from .local_agent_runtime import LocalModelConfig, run_shared_local_turn
+        """Execute autonomous turn with surgical tools, AST intelligence, and live TUI rendering."""
+        from .autonomous_agent import SmaraAutonomousAgent
         started_at = time.time()
 
-        def execute(capability: str, payload: dict[str, Any]) -> dict[str, Any]:
-            result = self.execute_capability(capability, payload, title=capability.replace("_", " ").title())
-            if isinstance(result, dict) and result.get("error"):
-                raise RuntimeError(str(result["error"]))
-            return result
+        def on_progress(event_type: str, data: dict[str, Any]) -> None:
+            if event_type == "thought":
+                thought = data.get("thought", "").strip()
+                if thought:
+                    clean_th = _strip_thinking(thought)
+                    if clean_th:
+                        first_thought = clean_th.split("\n\n")[0][:220]
+                        self.tui.print_thought(first_thought)
+            elif event_type == "tool_start":
+                tool = data.get("tool", "")
+                args = data.get("args", {})
+                target_path = args.get("path") or args.get("file_path") or ""
+                if tool == "file_read":
+                    offset = args.get("offset", 1)
+                    limit = args.get("limit", 100)
+                    detail = f"{target_path} (L{offset}-{offset + limit})"
+                elif tool in ("file_write", "file_edit"):
+                    detail = target_path
+                elif tool == "bash":
+                    cmd = args.get("command", "")
+                    detail = f"{cmd[:60]}..." if len(cmd) > 60 else cmd
+                elif tool == "list_directory":
+                    detail = f"{args.get('path', '.')}"
+                elif tool == "search_files":
+                    detail = f"query='{args.get('query', '')}'"
+                elif tool == "code_graph":
+                    detail = f"{args.get('operation', '')} symbol='{args.get('symbol', '')}'"
+                elif tool in ("web_search", "deep_research"):
+                    detail = f"query='{args.get('query', '')}'"
+                elif tool == "python_execute":
+                    code = args.get("code", "")
+                    detail = f"{code[:50]}..." if len(code) > 50 else code
+                else:
+                    detail = str(args)[:60]
+                self.tui.print_tool_start(tool, detail)
+            elif event_type == "tool_end":
+                tool = data.get("tool", "")
+                obs = data.get("observation", "")
+                ok = not ("Error" in obs or "Failed" in obs or "Traceback" in obs)
+                first_line = obs.strip().splitlines()[0] if obs.strip() else "Done"
+                if len(first_line) > 100:
+                    first_line = first_line[:97] + "..."
+                self.tui.print_tool_result(tool, ok, first_line)
 
-        result = run_shared_local_turn(
-            prompt=user_prompt,
-            state_path=_desktop_state_path(),
-            config=LocalModelConfig(
-                base_url=str(profile.get("base_url") or ""),
-                model=str(profile.get("model") or ""),
-                api_key=api_key,
-                auth_header=str(profile.get("auth_header") or "authorization"),
-                label=str(profile.get("label") or profile.get("id") or "private model"),
-                timeout_seconds=300.0,
-                max_tokens=16_384,
-            ),
-            context=self.history[-16:],
-            max_steps=20,
-            action_executor=execute,
-            conversation_id="cli-local",
-            workspace_id=str(self.workspace),
+        agent = SmaraAutonomousAgent(
+            api_key=api_key,
+            model=str(profile.get("model") or "sarvam-2b"),
+            base_url=str(profile.get("base_url") or "https://api.sarvam.ai/v1"),
+            profile="worker",
+            auth_header=str(profile.get("auth_header") or "authorization"),
+            workspace_root=self.workspace,
+            on_progress=on_progress,
         )
-        answer = str(result.get("answer") or "The local agent completed its bounded run.").strip()
+
+        try:
+            result = agent.run(
+                task=user_prompt,
+                max_iterations=25,
+                context_history=self.history[-16:],
+            )
+        except Exception as exc:
+            self.tui.print_error(f"Execution failed: {exc}")
+            return f"Error: {exc}"
+
+        raw = result.get("raw_answer") or ""
+        clean = result.get("answer") or ""
+        answer = raw.strip() if raw.strip() else clean.strip()
         if not answer:
-            answer = "The local agent completed without a visible answer."
-        self.tui.print_assistant_header("Smara")
-        self.tui.stream_markdown_chunk(answer)
-        self.tui.print_stats(time.time() - started_at, len(result.get("steps") or []))
+            answer = "The autonomous agent completed the task."
+
+        answer = _strip_thinking(answer)
+
+        self.tui.print_assistant_header(profile.get("label") or "Smara")
+        self.tui.stream_markdown_chunk(answer + "\n")
+        self.tui.print_stats(time.time() - started_at, len(result.get("tools_used") or []))
+
         self.history.append({"role": "user", "content": user_prompt})
         self.history.append({"role": "assistant", "content": answer})
+
+        try:
+            from .local_conversation_memory import SQLiteConversationMemory
+            SQLiteConversationMemory.for_state(_desktop_state_path()).append_exchange(
+                conversation_id="cli-local",
+                workspace_id=str(self.workspace),
+                user_message=user_prompt,
+                assistant_message=answer,
+            )
+        except Exception:
+            pass
+
         return answer
 
     def run_turn(self, user_prompt: str) -> str:
         """Run a full autonomous turn with tool calling and final response streaming."""
-        # Skill learning is a local control command, not a model request. It
-        # remains available even when no provider key is configured.
+        # Skill learning is a local control command, not a model request.
         from .local_learning import handle_learn_command, is_learn_command
         if is_learn_command(user_prompt):
             result = handle_learn_command(
@@ -523,298 +580,18 @@ class LocalAutonomousEngine:
             self.history.append({"role": "user", "content": user_prompt})
             self.history.append({"role": "assistant", "content": answer})
             return answer
+
         profile = self.active_profile
         api_key = _resolve_profile_key(profile, self.credentials)
-        # Keep CLI execution on the same bounded multi-step runtime as the
-        # Desktop.  The legacy one-shot path remains below only for a
-        # credential-less development profile that cannot call a model.
         if api_key:
             return self._run_shared_local_turn(user_prompt, profile, api_key)
-        endpoint = profile["base_url"].rstrip("/")
-        if not endpoint.endswith("/chat/completions"):
-            endpoint = f"{endpoint}/chat/completions"
 
-        headers = {"Content-Type": "application/json"}
-        if profile.get("auth_header") == "api-subscription-key":
-            headers["api-subscription-key"] = api_key
-        else:
-            headers["Authorization"] = f"Bearer {api_key}"
-
-        system_prompt = (
-            "You are Smara Autonomous Developer Agent running in the terminal. "
-            "You have direct access to local tools for inspecting AST code graphs, searching the web, "
-            "reading whole files, discovering folders across the system, and running tests. "
-            "Invoke the request_local_action tool when needed. "
-            "When answering, be concise, direct, and professional with clean Markdown formatting."
+        self.tui.print_error(
+            f"No API key configured for active model profile '{profile.get('label', self.active_id)}'.\n"
+            f"Set the environment variable or credential (e.g. SMARA_MODEL_{profile.get('id', '').upper()}_API_KEY or SARVAM_API_KEY / GROK_API_KEY).\n"
+            f"Run 'smara models' to view available profiles or 'smara /model <name>' to switch."
         )
-
-        tool_spec = {
-            "type": "function",
-            "function": {
-                "name": "request_local_action",
-                "description": "Execute one safe local capability on this desktop without requiring manual user approval.",
-                "parameters": {
-                    "type": "object",
-                    "required": ["title", "objective", "capability", "payload"],
-                    "properties": {
-                        "title": {"type": "string"},
-                        "objective": {"type": "string"},
-                        "capability": {
-                            "type": "string",
-                            "enum": ["local_graph", "local_integration", "local_file_write", "local_file_read", "local_terminal"],
-                        },
-                        "payload": {
-                            "type": "object",
-                            "description": "Capability payload. Web search: {'provider':'tavily'|'exa', 'operation':'search', 'query':string, 'max_results':5}. Graph: {'operation':'inspect_symbol'|'blast_radius', 'symbol':string}. Document: {'path':'reports/audit.pdf', 'title':string, 'sections':[...]}.",
-                        },
-                    },
-                },
-            },
-        }
-
-        # Intent detection fast-path for direct developer queries
-        lower_prompt = user_prompt.lower()
-        forced_tool: dict[str, Any] | None = None
-
-        # Check for autonomous folder / file discovery intent (e.g. "memoryos is folder find it read it")
-        folder_match = None
-        if any(k in lower_prompt for k in ["folder", "directory", "find", "read", "locate", "path"]):
-            from .path_resolver import locate_resource
-            path_candidates = re.findall(r"[a-zA-Z0-9_\-\.\/\\]+", user_prompt)
-            for cand in path_candidates:
-                if ("/" in cand or "\\" in cand or (cand.count(".") == 1 and not cand.endswith("."))) and cand.lower() not in {"...", ".", "./"}:
-                    loc = locate_resource(cand, [self.workspace])
-                    if loc is not None:
-                        folder_match = (cand, loc)
-                        break
-            if not folder_match:
-                words = re.findall(r"\b[a-zA-Z0-9_\-\.]+\b", user_prompt)
-                for w in words:
-                    if w.lower() in {"is", "folder", "find", "it", "read", "and", "the", "a", "an", "directory", "in", "to", "me", "show", "what", "how", "why", "who", "when", "tell", "like", "so", "u", "can", "yourself"}:
-                        continue
-                    loc = locate_resource(w, [self.workspace])
-                    if loc is not None:
-                        folder_match = (w, loc)
-                        break
-
-        if folder_match:
-            name, path = folder_match
-            self.tui.print_thought(f"Scanning system paths and user workspace for '{name}'...")
-            self.tui.print_progress(f"Discovered: {path} (Type: {'Directory' if path.is_dir() else 'File'})")
-            forced_tool = {
-                "capability": "local_file_read",
-                "title": f"Discover & inspect {name}",
-                "payload": {"operation": "locate_and_read", "path": str(path)},
-            }
-        elif "graph" in lower_prompt or "inspect" in lower_prompt or "ast" in lower_prompt or "blast radius" in lower_prompt:
-            sym = "LocalTaskStore"
-            for candidate in ["LocalTaskStore", "LocalRunner", "CodePropertyGraph", "TerminalRenderer"]:
-                if candidate.lower() in lower_prompt:
-                    sym = candidate
-                    break
-            forced_tool = {
-                "capability": "local_graph",
-                "title": f"Inspect {sym}",
-                "payload": {"operation": "inspect_symbol", "symbol": sym},
-            }
-        elif not api_key and ("generate report" in lower_prompt or "create report" in lower_prompt or "generate pdf" in lower_prompt or "create docx" in lower_prompt):
-            is_pdf = "pdf" in lower_prompt or "docx" not in lower_prompt
-            fmt = "pdf" if is_pdf else "docx"
-            topic = "Executive Technical Report"
-            m_topic = re.search(r'(?:report\s+(?:on|about|titled)|titled)\s+["\']?([^"\']+)["\']?', user_prompt, re.IGNORECASE)
-            if m_topic:
-                topic = m_topic.group(1).strip()
-            clean_filename = re.sub(r'[^a-zA-Z0-9_]', '_', topic.lower()[:30]).strip('_') or "executive_report"
-            forced_tool = {
-                "capability": "local_file_write",
-                "title": f"Generate {fmt.upper()} report: {topic[:40]}",
-                "payload": {
-                    "path": f"reports/{clean_filename}.{fmt}",
-                    "title": topic,
-                    "content": f"# {topic}\n\n## Executive Summary\nStructured autonomous report on {topic}.\n\n## Key Findings & Strategic Dynamics\nAnalysis of performance indicators, industry trajectory, and execution priorities.\n\n## Architecture & Operating Model\nScalable pipeline implementation with atomic safety bounds.\n\n## Strategic Recommendations\n1. Prioritize durable unit economics and sustainable operational cadence.\n2. Leverage automated testing and AST property graph indexing for zero regression.",
-                },
-            }
-        elif any(k in lower_prompt for k in ["delete", "remove", "del"]) and any(ext in lower_prompt for ext in [".pdf", ".docx", ".xlsx", ".txt", ".json"]):
-            m_file = re.search(r'([a-zA-Z0-9_\-\.\/\\]+\.(?:pdf|docx|xlsx|txt|json|py|ts))', user_prompt, re.IGNORECASE)
-            if m_file:
-                target_f = m_file.group(1).strip()
-                forced_tool = {
-                    "capability": "local_file_write",
-                    "title": f"Delete {target_f}",
-                    "payload": {"operation": "delete", "path": target_f},
-                }
-        elif "search" in lower_prompt or "research" in lower_prompt or "tavily" in lower_prompt or "exa" in lower_prompt:
-            q = user_prompt
-            for prefix in ["search for", "research and explain", "search", "research"]:
-                if lower_prompt.startswith(prefix):
-                    q = user_prompt[len(prefix):].strip()
-                    break
-            forced_tool = {
-                "capability": "local_integration",
-                "title": f"Live Search: {q[:50]}",
-                "payload": {"provider": "tavily", "operation": "search", "query": q, "max_results": 5},
-            }
-
-        start_time = time.time()
-        tools_used = 0
-        tool_evidence = ""
-
-        # Step 1: Tool Execution if forced or model decides
-        if forced_tool:
-            tool_res = self.execute_capability(forced_tool["capability"], forced_tool["payload"], forced_tool["title"])
-            tool_evidence = json.dumps(tool_res, indent=2)
-            tools_used += 1
-        elif api_key:
-            messages = [{"role": "system", "content": system_prompt}]
-            messages.extend(self.history[-6:])
-            messages.append({"role": "user", "content": user_prompt})
-            
-            try:
-                with httpx.Client(timeout=60.0) as client:
-                    resp = client.post(
-                        endpoint,
-                        headers=headers,
-                        json={
-                            "model": profile["model"],
-                            "messages": messages,
-                            "tools": [tool_spec],
-                            "tool_choice": "auto",
-                            "temperature": 0.1,
-                        },
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        choice = data.get("choices", [{}])[0].get("message", {})
-                        t_calls = choice.get("tool_calls", [])
-                        if t_calls:
-                            fn = t_calls[0].get("function", {})
-                            args = json.loads(fn.get("arguments", "{}"))
-                            tool_res = self.execute_capability(args.get("capability", "local_action"), args.get("payload", {}), args.get("title", ""))
-                            tool_evidence = json.dumps(tool_res, indent=2)
-                            tools_used += 1
-            except Exception:
-                pass
-
-        # Step 2: Response Synthesis & Streaming
-        self.tui.print_assistant_header("Smara")
-        final_answer = ""
-
-        turn2_prompt = user_prompt
-        if tool_evidence:
-            turn2_prompt = (
-                f"{user_prompt}\n\n[Local Tool Evidence]:\n{tool_evidence}\n\n"
-                f"Deliver a clear, direct, professional response with markdown formatting. "
-                f"Do NOT include internal reasoning or thinking monologue."
-            )
-
-        messages = [
-            {"role": "system", "content": "You are Smara Autonomous Developer Agent. Deliver the clean final answer in markdown."},
-        ]
-        messages.extend(self.history[-4:])
-        messages.append({"role": "user", "content": turn2_prompt})
-
-        if api_key:
-            try:
-                with httpx.Client(timeout=120.0) as client:
-                    with client.stream(
-                        "POST",
-                        endpoint,
-                        headers=headers,
-                        json={
-                            "model": profile["model"],
-                            "messages": messages,
-                            "stream": True,
-                            "max_tokens": 4096,
-                            "temperature": 0.2,
-                        },
-                    ) as response:
-                        if response.status_code == 200:
-                            for line in response.iter_lines():
-                                if not line or not line.startswith("data:"):
-                                    continue
-                                raw = line[5:].strip()
-                                if raw == "[DONE]":
-                                    break
-                                try:
-                                    chunk = json.loads(raw)
-                                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                    content = delta.get("content")
-                                    if content:
-                                        self.tui.stream_markdown_chunk(content)
-                                        final_answer += content
-                                except json.JSONDecodeError:
-                                    continue
-            except Exception as exc:
-                final_answer = f"Error during model stream: {exc}"
-                self.tui.stream_markdown_chunk(final_answer)
-
-        if not final_answer.strip():
-            if tool_evidence:
-                try:
-                    parsed = json.loads(tool_evidence)
-                    if parsed.get("action") == "local_file_write":
-                        fname = parsed.get("file_name", "document")
-                        fmt = parsed.get("document", {}).get("format", "file").upper()
-                        final_answer = f"### ✅ {fmt} Generated Successfully\n\n- **File**: `reports/{fname}`\n- **Status**: Saved in your workspace.\n"
-                    elif parsed.get("action") == "local_graph":
-                        res = parsed.get("result", {})
-                        name = res.get("name", "Symbol")
-                        file_loc = res.get("file", "")
-                        methods = res.get("defined_methods", [])
-                        callers = res.get("called_by", [])
-                        final_answer = f"### AST Code Graph: `{name}`\n\n- **Location**: `{file_loc}`\n- **Defined Methods**: {len(methods)}\n- **Callers**: {len(callers)}\n"
-                    elif parsed.get("action") == "local_file_read":
-                        if "folder_name" in parsed:
-                            f_name = parsed.get("folder_name", "Folder")
-                            f_path = parsed.get("absolute_path", "")
-                            tot = parsed.get("total_items", 0)
-                            readme = parsed.get("readme_content") or ""
-                            md = f"### 📂 Discovered Folder: `{f_name}`\n\n- **Location**: `{f_path}`\n- **Total Items**: {tot}\n"
-                            if readme:
-                                md += f"\n#### 📄 README ({len(readme)} bytes read in full):\n\n{readme[:2000]}...\n"
-                            items = parsed.get("items", [])
-                            if items:
-                                md += f"\n**Directory Contents ({min(len(items), 15)} items)**:\n"
-                                for item in items[:15]:
-                                    icon = "📁" if item.get("type") == "directory" else "📄"
-                                    sz = f" ({item.get('size')} bytes)" if item.get("size") else ""
-                                    md += f"- {icon} `{item.get('name')}`{sz}\n"
-                            final_answer = md
-                        elif "file_name" in parsed:
-                            fname = parsed.get("file_name", "file")
-                            path_s = parsed.get("path", "")
-                            lines_cnt = parsed.get("total_lines", 0)
-                            bytes_r = parsed.get("bytes_read", 0)
-                            content = parsed.get("content", "")
-                            md = f"### 📖 Whole-File Inspection: `{fname}`\n\n- **Path**: `{path_s}`\n- **Size**: {bytes_r} bytes\n- **Total Lines**: {lines_cnt} (100% read)\n\n```\n{content[:2500]}\n```\n"
-                            final_answer = md
-                        else:
-                            final_answer = tool_evidence
-                    elif parsed.get("action") == "local_integration" or "results" in parsed:
-                        results = parsed.get("results", [])
-                        md = "### Research Findings\n\n"
-                        for r in results:
-                            title_s = r.get("title", "Source")
-                            url_s = r.get("url", "")
-                            snip_s = r.get("snippet", "")
-                            md += f"- **[{title_s}]({url_s})**\n  {snip_s}\n\n"
-                        final_answer = md
-                    else:
-                        final_answer = tool_evidence
-                except Exception:
-                    final_answer = tool_evidence
-            else:
-                final_answer = "Task executed successfully."
-            self.tui.stream_markdown_chunk(final_answer)
-
-        clean_ans = _strip_thinking(final_answer)
-        self.history.append({"role": "user", "content": user_prompt})
-        self.history.append({"role": "assistant", "content": clean_ans})
-
-        print()
-        duration = time.time() - start_time
-        self.tui.print_stats(duration, tools_used)
-        return clean_ans
+        return "No model API key configured."
 
 
 # ============================================================================

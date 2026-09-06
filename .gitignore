@@ -24,3 +24,4 @@ reports/osworld_readiness.json
 *.apk
 scratch/
 .worktrees/
+pytest-tmp/
