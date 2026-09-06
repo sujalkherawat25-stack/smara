@@ -1467,7 +1467,7 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
     let capability_descriptions = connection.capabilities.iter().map(|capability| match capability.as_str() {
         "local_file_read" => "- local_file_read: read file or search workspace. payload: {\"operation\": \"read_file\"|\"list_tree\"|\"search_text\", \"path\": \"...\", \"query\": \"...\"}",
         "local_file_write" => "- local_file_write: write files or generate documents (PDF, DOCX, XLSX, PPTX). For PDF: {\"operation\": \"create_pdf\", \"path\": \"reports/report.pdf\", \"title\": \"Title\", \"sections\": [{\"heading\": \"Sec 1\", \"paragraphs\": [\"...\"]}]}. For files: {\"operation\": \"write\", \"path\": \"...\", \"content\": \"...\"}",
-        "local_terminal" => "- local_terminal: run allowlisted command (python, git, mkdir, pytest). payload: {\"command\": \"pytest -q\"}",
+        "local_terminal" => "- local_terminal: run an allowlisted command or use a bounded persistent process session. One-shot payload: {\"command\": \"pytest -q\"}; session payload: {\"session_action\":\"start\"|\"poll\"|\"cancel\"|\"list\", \"session_id\":\"term_...\"}",
         "local_browser" => "- local_browser: inspect or scrape web page, capture screenshot, or run E2E flow. payload: {\"operation\": \"open\"|\"scrape\"|\"screenshot\"|\"e2e_flow\", \"url\": \"...\"}",
         "local_integration" => "- local_integration: Live web search (Tavily or Exa). payload: {\"provider\": \"tavily\"|\"exa\", \"operation\": \"search\", \"query\": \"keywords\", \"max_results\": 5}",
         "local_graph" => "- local_graph: AST code property graph analysis & blast radius. payload: {\"operation\": \"inspect_symbol\"|\"blast_radius\"|\"find_references\", \"symbol\": \"SymbolName\"}",

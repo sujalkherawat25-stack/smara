@@ -363,6 +363,102 @@ def test_desktop_terminal_observes_cancellation_before_completion(tmp_path: Path
     assert progress == ["Terminal started: python"]
 
 
+def test_persistent_terminal_session_can_poll_after_manager_recreation(tmp_path: Path):
+    import sys
+    import time
+
+    state = {
+        "capabilities": ["local_terminal"],
+        "allowed_roots": [str(tmp_path)],
+        "terminal_allowlist": [Path(sys.executable).name],
+        "_state_path": str(tmp_path / "desktop.json"),
+    }
+    started = json.loads(execute_step({
+        "required_capability": "local_terminal",
+        "executor_payload": {
+            "session_action": "start",
+            "argv": [sys.executable, "-u", "-c", "import time; print('session-started', flush=True); time.sleep(0.7); print('session-finished', flush=True)"],
+            "cwd": str(tmp_path),
+            "max_seconds": 10,
+        },
+    }, state))
+    session_id = started["session_id"]
+    assert started["action"] == "local_terminal_session"
+    assert started["status"] == "running"
+
+    # Each execute_step constructs a fresh store, modeling an executor/UI
+    # restart while the child process continues under its durable PID/log.
+    observed = ""
+    final = None
+    for _ in range(20):
+        polled = json.loads(execute_step({
+            "required_capability": "local_terminal",
+            "executor_payload": {"session_action": "poll", "session_id": session_id, "max_chars": 2_000},
+        }, state))
+        observed += polled["output"]
+        final = polled
+        if polled["done"]:
+            break
+        time.sleep(0.1)
+    assert final is not None and final["status"] == "completed"
+    assert "session-started" in observed
+    assert "session-finished" in observed
+
+
+def test_persistent_terminal_session_cancellation_is_tree_safe_and_visible(tmp_path: Path):
+    import sys
+
+    state = {
+        "capabilities": ["local_terminal"],
+        "allowed_roots": [str(tmp_path)],
+        "terminal_allowlist": [Path(sys.executable).name],
+        "_state_path": str(tmp_path / "desktop.json"),
+    }
+    started = json.loads(execute_step({
+        "required_capability": "local_terminal",
+        "executor_payload": {
+            "session_action": "start",
+            "argv": [sys.executable, "-u", "-c", "import time; print('before-cancel', flush=True); time.sleep(30)"],
+            "cwd": str(tmp_path),
+            "max_seconds": 30,
+        },
+    }, state))
+    cancelled = json.loads(execute_step({
+        "required_capability": "local_terminal",
+        "executor_payload": {"session_action": "cancel", "session_id": started["session_id"], "reason": "test cancellation"},
+    }, state))
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["done"] is True
+    assert "before-cancel" in cancelled["output"]
+
+
+def test_persistent_terminal_rejects_credentials_and_lists_sessions(tmp_path: Path):
+    import sys
+
+    state = {
+        "capabilities": ["local_terminal"],
+        "allowed_roots": [str(tmp_path)],
+        "terminal_allowlist": [Path(sys.executable).name],
+        "_state_path": str(tmp_path / "desktop.json"),
+    }
+    with pytest.raises(RuntimeError, match="credential aliases"):
+        execute_step({
+            "required_capability": "local_terminal",
+            "executor_payload": {
+                "session_action": "start",
+                "argv": [sys.executable, "-c", "print('no')"],
+                "cwd": str(tmp_path),
+                "credential_env": ["TAVILY_API_KEY"],
+            },
+        }, state)
+    listed = json.loads(execute_step({
+        "required_capability": "local_terminal",
+        "executor_payload": {"session_action": "list"},
+    }, state))
+    assert listed["action"] == "local_terminal_session_list"
+    assert listed["sessions"] == []
+
+
 def test_local_credential_vault_injects_only_requested_alias_and_redacts_output(monkeypatch, tmp_path: Path):
     vault = tmp_path / "credentials.json"
     monkeypatch.setenv("SMARA_DESKTOP_CREDENTIALS", str(vault))

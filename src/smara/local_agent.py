@@ -84,7 +84,7 @@ LOCAL_SKILLS: dict[str, LocalSkillSpec] = {
         artifact_schema={"type": "object", "properties": {"undo_id": {"type": "string"}}},
     ),
     "local_terminal": LocalSkillSpec(
-        "local_terminal", "Run one allowlisted command or deterministic recipe.", _ANY_OBJECT,
+        "local_terminal", "Run one allowlisted command or deterministic recipe, or start/poll/cancel a bounded persistent terminal session.", _ANY_OBJECT,
         timeout_seconds=60, max_output_bytes=32_000,
         result_schema={"type": "object", "required": ["action", "exit_code"]},
         artifact_schema={"type": "array", "items": {"type": "object"}},

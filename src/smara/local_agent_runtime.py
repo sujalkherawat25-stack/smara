@@ -178,6 +178,9 @@ def _tool_schema() -> dict[str, Any]:
                 "Run exactly one local capability, then wait for its result. "
                 "Use this for files, terminal, browser inspection, research, "
                 "Git, code graphs, calculations, documents, and tests."
+                " For long-running local work, use local_terminal with session_action=start "
+                "and later session_action=poll or cancel plus the returned session_id; "
+                "persistent sessions are bounded, workspace-scoped, and cannot receive credentials."
             ),
             "parameters": {
                 "type": "object",

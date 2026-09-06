@@ -211,6 +211,24 @@ the next phase is programmatic tool calling and persistent process control.
   they must go through the Desktop approval broker as a separate reviewed
   phase rather than broadening this safe read-only kernel.
 
+## Phase 3 persistent terminal/process control (implemented)
+
+- ✅ Added a local-only terminal session store with durable process IDs,
+  append-only bounded logs, atomic metadata, and explicit `start`, `poll`,
+  `cancel`, and `list` actions through `local_terminal`.
+- ✅ Persistent sessions use argv-only launches, the existing Desktop
+  executable allowlist, approved workspace roots, new process groups, and
+  bounded lifetime/output budgets. One active session is allowed per
+  workspace to prevent competing writes.
+- ✅ Polling works across fresh manager instances and reports incremental
+  output, liveness, exit status when known, timeout/output-limit cancellation,
+  and an honest `finished` state when a restart hides the exit code.
+- ✅ Credential aliases are rejected for persistent sessions; the process log
+  and metadata contain no implicit hosted upload path. Existing one-shot
+  terminal behavior and cooperative task cancellation remain unchanged.
+- ✅ Desktop terminal guidance, local skill metadata, and regression tests now
+  document and exercise the persistent protocol.
+
 ## Benchmark stack readiness slice (implemented)
 
 - ✅ GAIA evaluation now uses one shared local Desktop runtime and strict

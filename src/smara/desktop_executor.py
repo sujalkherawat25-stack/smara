@@ -46,12 +46,14 @@ try:
     from .local_agent_runtime import LocalModelConfig, run_shared_local_turn
     from .local_documents import build_document, is_document_operation
     from .workspace_contract import WorkspaceJobSpec, build_stage_result, validate_workspace_job, workspace_job_summary
+    from .persistent_terminal import PersistentTerminalStore
 except ImportError:  # pragma: no cover - exercised by the packaged binary
     from desktop_integrations import LocalIntegrationCancelled, execute_local_integration, local_connector_catalog
     from local_agent import LocalTaskJournal, LocalTaskStore, decorate_local_result, journal_path, local_skill_catalog, local_tasks_path, skill_spec, validate_local_step, workspace_lock
     from local_agent_runtime import LocalModelConfig, run_shared_local_turn
     from local_documents import build_document, is_document_operation
     from workspace_contract import WorkspaceJobSpec, build_stage_result, validate_workspace_job, workspace_job_summary
+    from persistent_terminal import PersistentTerminalStore
 
 
 MAX_FILE_BYTES = 32 * 1024 * 1024
@@ -1819,7 +1821,8 @@ def _collect_artifacts(payload: dict, cwd: Path, roots: list[Path]) -> list[dict
     return artifacts
 
 
-def _terminal_unlocked(payload: dict, roots: list[Path], state: dict, *, checkpoint=None, progress_hook=None) -> str:
+def _terminal_launch_context(payload: dict, roots: list[Path], state: dict) -> tuple[list[str], str | None, Path, dict[str, str], dict[str, str], dict[str, str] | None]:
+    """Validate one terminal launch and build a secret-filtered environment."""
     argv, recipe = _recipe_argv(payload)
     if not argv:
         raise RuntimeError("local_terminal received an empty command.")
@@ -1833,10 +1836,22 @@ def _terminal_unlocked(payload: dict, roots: list[Path], state: dict, *, checkpo
     cwd = _target(cwd_value, roots, must_exist=True)
     if not cwd.is_dir():
         raise RuntimeError("Terminal working directory is not an approved folder.")
-    before_files = _git_status_files(cwd, state)
-    safe_env = {key: value for key, value in os.environ.items() if not any(marker in key.upper() for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD"))}
     injected = _resolved_credentials(payload.get("credential_env"))
+    safe_env = {
+        key: value for key, value in os.environ.items()
+        if not any(marker in key.upper() for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD"))
+    }
     safe_env.update(injected)
+    before_files = _git_status_files(cwd, state)
+    return argv, recipe, cwd, safe_env, injected, before_files
+
+
+def _terminal_unlocked(payload: dict, roots: list[Path], state: dict, *, checkpoint=None, progress_hook=None) -> str:
+    argv, recipe, cwd, safe_env, injected, before_files = _terminal_launch_context(payload, roots, state)
+    executable = Path(argv[0]).name.lower()
+    process_store = _persistent_terminal_store(state, roots)
+    if process_store.has_active(cwd):
+        raise RuntimeError("A persistent terminal session is already running in this workspace; poll or cancel it first.")
     _emit_progress(progress_hook, f"{recipe or 'Terminal'} started: {executable}")
     process = subprocess.Popen(
         argv, cwd=cwd, env=safe_env, shell=False,
@@ -1915,7 +1930,48 @@ def _terminal_unlocked(payload: dict, roots: list[Path], state: dict, *, checkpo
     return json.dumps(result, ensure_ascii=False)
 
 
+def _persistent_terminal_store(state: dict, roots: list[Path]) -> PersistentTerminalStore:
+    configured = state.get("_state_path") if isinstance(state, dict) else None
+    state_path = Path(configured).expanduser().resolve() if isinstance(configured, str) and configured.strip() else None
+    state_dir = state_path.parent if state_path is not None else (roots[0] / ".smara")
+    return PersistentTerminalStore(state_dir, allowed_roots=roots)
+
+
+def _persistent_terminal(payload: dict, roots: list[Path], state: dict, *, progress_hook=None) -> str:
+    """Start, inspect, or cancel one restart-survivable local process."""
+    action = str(payload.get("session_action") or payload.get("process_action") or "").strip().lower()
+    if action not in {"start", "poll", "cancel", "list"}:
+        raise RuntimeError("Persistent terminal requires session_action=start, poll, cancel, or list.")
+    store = _persistent_terminal_store(state, roots)
+    if action == "list":
+        return json.dumps({"action": "local_terminal_session_list", "sessions": store.list()}, ensure_ascii=False)
+    if action == "poll":
+        session_id = payload.get("session_id")
+        result = store.poll(session_id, max_chars=payload.get("max_chars", 16_000))
+        _emit_progress(progress_hook, f"Terminal session {session_id} is {result.get('status')}")
+        return json.dumps(result, ensure_ascii=False)
+    if action == "cancel":
+        session_id = payload.get("session_id")
+        result = store.cancel(session_id, reason=str(payload.get("reason") or "cancelled on Desktop"))
+        _emit_progress(progress_hook, f"Terminal session {session_id} cancelled")
+        return json.dumps(result, ensure_ascii=False)
+
+    if payload.get("credential_env"):
+        raise RuntimeError("Persistent terminal sessions cannot receive credential aliases; use a bounded one-shot command instead.")
+    argv, recipe, cwd, safe_env, _injected, _before_files = _terminal_launch_context(payload, roots, state)
+    if store.has_active(cwd):
+        raise RuntimeError("A persistent terminal session is already running in this workspace; poll or cancel it first.")
+    max_seconds = payload.get("max_seconds", payload.get("timeout_seconds", 900))
+    if not isinstance(max_seconds, int) or isinstance(max_seconds, bool):
+        raise RuntimeError("max_seconds must be an integer.")
+    result = store.start(argv, cwd=cwd, env=safe_env, executable=recipe or Path(argv[0]).name, max_seconds=max_seconds)
+    _emit_progress(progress_hook, f"Persistent terminal session started: {result.get('session_id')}")
+    return json.dumps(result, ensure_ascii=False)
+
+
 def _terminal(payload: dict, roots: list[Path], state: dict, *, checkpoint=None, progress_hook=None) -> str:
+    if payload.get("session_action") is not None or payload.get("process_action") is not None:
+        return _persistent_terminal(payload, roots, state, progress_hook=progress_hook)
     cwd_value = payload.get("cwd") or str(roots[0])
     cwd = _target(cwd_value, roots, must_exist=True)
     root = _workspace_for_target(cwd, roots)
