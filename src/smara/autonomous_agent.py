@@ -194,12 +194,18 @@ def _compact_conversation_history(
     Zone 3: Middle Turns (compact large observations to preserve attention and token budget)
     Also preserves active task checklist from SmaraTaskPlanner across compaction.
     """
+    # Characters are only an approximation, but this legacy adapter must at
+    # least enforce a hard packed-request budget. Tool call/result pairs are
+    # retained together; raw oversized observations remain in artifacts.
     total_chars = sum(len(str(m.get("content") or "")) for m in messages)
-    if total_chars <= max_chars or len(messages) <= 6:
+    if total_chars <= max_chars:
         return messages
 
     head_count = 2
     tail_count = min(4, len(messages) - head_count)
+    # Never start the protected tail with a tool result without its call.
+    if len(messages) - tail_count > head_count and messages[len(messages) - tail_count].get("role") == "tool":
+        tail_count += 1
     middle_messages = messages[head_count : len(messages) - tail_count]
 
     compacted_middle: List[Dict[str, Any]] = []
@@ -226,7 +232,32 @@ def _compact_conversation_history(
                 "content": active_snapshot,
             })
 
-    return messages[:head_count] + compacted_middle + messages[len(messages) - tail_count:]
+    packed = messages[:head_count] + compacted_middle + messages[len(messages) - tail_count:]
+    # Drop oldest middle messages first, never the original task/system or
+    # protected tail. A tool result is removed with its immediately preceding
+    # assistant call so the provider never receives an orphaned exchange.
+    while sum(len(str(m.get("content") or "")) for m in packed) > max_chars and len(packed) > head_count + tail_count + 1:
+        index = head_count
+        if packed[index].get("role") == "tool" and index > head_count:
+            packed.pop(index - 1)
+            index -= 1
+        packed.pop(index)
+    # Extremely large pinned content is clipped as a final compatibility
+    # fallback; the task itself is retained and the raw source remains local.
+    overflow = sum(len(str(m.get("content") or "")) for m in packed) - max_chars
+    if overflow > 0:
+        for message in packed:
+            content = str(message.get("content") or "")
+            if overflow <= 0: break
+            if len(content) > 256:
+                remove = min(overflow, len(content) - 256)
+                message["content"] = content[:len(content) - remove]
+                overflow -= remove
+    if planner is not None and getattr(planner, "has_items", lambda: False)():
+        snapshot = planner.format_for_injection()
+        if snapshot and not any(snapshot in str(item.get("content") or "") for item in packed):
+            packed.insert(head_count, {"role": "user", "content": snapshot})
+    return packed
 
 
 def _offload_massive_result(content: str, call_id: str, max_chars: int = 14000) -> str:
@@ -1088,6 +1119,7 @@ class SmaraAutonomousAgent:
         profile: Optional[str] = None,
         workspace_root: Optional[Path | str] = None,
         on_progress: Optional[Any] = None,
+        session_engine: Optional[Any] = None,
     ):
         self.api_key = api_key or _get_api_key_from_vault_or_env()
         self.base_url = base_url
@@ -1099,6 +1131,7 @@ class SmaraAutonomousAgent:
             raise ValueError(f"Unknown tool profile '{self.toolset}'.")
         self.workspace_root = Path(workspace_root).resolve() if workspace_root else Path.cwd()
         self.on_progress = on_progress
+        self.session_engine = session_engine
         self.task_planner = SmaraTaskPlanner()
         self.memory_store = get_default_memory_store()
         self._seen_tool_signatures: Dict[str, int] = collections.defaultdict(int)
@@ -1338,7 +1371,7 @@ class SmaraAutonomousAgent:
         )
 
 
-    def execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
+    def execute_tool(self, tool_name: str, tool_args: Dict[str, Any], call_id: Optional[str] = None) -> str:
         """Safely invoke registered tool handler."""
         if tool_name in DISABLED_TOOLS:
             return f"Denied: Tool '{tool_name}' is disabled pending enforced delegation policy."
@@ -1348,14 +1381,36 @@ class SmaraAutonomousAgent:
         if not handler:
             return f"Error: Tool '{tool_name}' is not recognized. Available tools: {list(self._tool_handlers.keys())}"
         try:
-            return handler(tool_args)
+            if self.session_engine is None:
+                return handler(tool_args)
+            from smara.harness import ToolCall, ToolResult, workspace_revision
+            durable_id = call_id or f"tool_{uuid.uuid4().hex}"
+            before = workspace_revision(self.workspace_root)
+            def execute(raw: Dict[str, Any]) -> ToolResult:
+                output = str(handler(tool_args)); after = workspace_revision(self.workspace_root)
+                success = _tool_result_succeeded(output)
+                exit_match = re.search(r"\[Exit Code:\s*(-?\d+)\]", output)
+                exit_code = int(exit_match.group(1)) if exit_match else None
+                scope = "none"
+                if tool_name == "terminal" and re.search(r"(?:^|\s)(?:pytest|npm\s+test|cargo\s+test|go\s+test)(?:\s|$)", str(tool_args.get("command") or tool_args.get("cmd") or ""), re.I): scope = "full"
+                return ToolResult(durable_id,"ok" if success else "error",output,exit_code=exit_code,before_revision=before,after_revision=after,error_kind=None if success else "tool_error",meta={"evidence_scope":scope})
+            result = self.session_engine.execute_incremental(ToolCall(durable_id,tool_name,tool_args,str(self.workspace_root)),execute)
+            return result.text
         except Exception as e:
             logger.error(f"Error executing tool {tool_name} with args {tool_args}: {e}")
             return f"Error executing tool {tool_name}: {e}"
 
     def _call_model_api(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, max_tokens: int = 16384) -> Dict[str, Any]:
         """Perform HTTP POST request to OpenAI-compatible chat completions with Three-Zone Context Compaction."""
-        compacted_messages = _compact_conversation_history(messages, max_chars=35000, planner=self.task_planner)
+        from smara.context_packing import ModelContextProfile, pack_messages
+        profile = ModelContextProfile(
+            tokenizer_id=f"unknown:{self.model}",
+            input_capacity=int(os.getenv("SMARA_MODEL_CONTEXT_TOKENS", "65536")),
+            output_reserve=max_tokens,
+        )
+        packed = pack_messages(messages, profile, tools=tools or ())
+        compacted_messages = list(packed.messages)
+        self._report_progress("context_packed", {"input_tokens": packed.input_tokens, "accounting_quality": packed.accounting_quality, "omitted_messages": packed.omitted_messages})
 
         payload: Dict[str, Any] = {
             "model": self.model,
@@ -1383,36 +1438,57 @@ class SmaraAutonomousAgent:
             headers=headers
         )
 
+        reservation_id = None
+        if self.session_engine is not None:
+            # H3.1 replaces this provider-agnostic estimate with model-specific
+            # complete-request tokenization. Until then reserve the full output
+            # plus a conservative four-byte input estimate and mark it as such.
+            reservation_id = self.session_engine.reserve_model_call((len(data) + 3) // 4 + max_tokens)
         retry_deadline = time.monotonic() + 180.0
+        retries = 0
         for attempt in range(3):
             try:
                 remaining = retry_deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError("model request retry deadline exhausted")
                 with urllib.request.urlopen(req, timeout=min(90.0, remaining)) as resp:
-                    return json.loads(resp.read().decode("utf-8"))
+                    response = json.loads(resp.read().decode("utf-8"))
+                    if self.session_engine is not None:
+                        usage = response.get("usage") or {}; actual = usage.get("total_tokens")
+                        self.session_engine.reconcile_model_call(reservation_id,actual_tokens=int(actual) if actual is not None else None,provider_request_id=resp.headers.get("x-request-id") if getattr(resp,"headers",None) else None,status="ok",retries=retries)
+                    return response
             except urllib.error.HTTPError as he:
                 err_msg = he.read().decode("utf-8", errors="ignore")
                 logger.warning(f"Model API HTTPError (attempt {attempt+1}): {he.code} - {err_msg}")
+                retries = attempt + 1
                 # Credentials, permissions, and invalid requests are permanent
                 # for this payload. Retrying them only burns budget and latency.
                 if he.code in {400, 401, 403, 404, 409, 422} or attempt == 2:
+                    if self.session_engine is not None: self.session_engine.reconcile_model_call(reservation_id,actual_tokens=None,provider_request_id=None,status=f"http_{he.code}",retries=retries)
                     raise RuntimeError(f"Model API HTTP {he.code}: {err_msg}")
                 if he.code != 429 and he.code not in {408, 425, 500, 502, 503, 504}:
+                    if self.session_engine is not None: self.session_engine.reconcile_model_call(reservation_id,actual_tokens=None,provider_request_id=None,status=f"http_{he.code}",retries=retries)
                     raise RuntimeError(f"Model API HTTP {he.code}: {err_msg}")
                 retry_after = he.headers.get("Retry-After") if he.headers else None
                 try: delay = max(0.0, min(float(retry_after), 10.0)) if retry_after is not None else min(0.5 * (2**attempt), 2.0)
                 except (TypeError, ValueError): delay = min(0.5 * (2**attempt), 2.0)
                 if time.monotonic() + delay >= retry_deadline:
+                    if self.session_engine is not None: self.session_engine.reconcile_model_call(reservation_id,actual_tokens=None,provider_request_id=None,status="retry_deadline",retries=retries)
                     raise RuntimeError(f"Model API HTTP {he.code}: retry deadline exhausted")
+                if self.session_engine is not None:
+                    self.session_engine.reserve_model_retry(reservation_id)
                 time.sleep(delay)
             except Exception as e:
                 logger.warning(f"Model API Request Error (attempt {attempt+1}): {e}")
+                retries = attempt + 1
                 if attempt == 2:
+                    if self.session_engine is not None: self.session_engine.reconcile_model_call(reservation_id,actual_tokens=None,provider_request_id=None,status=type(e).__name__,retries=retries)
                     raise
                 delay = min(0.5 * (2**attempt), 2.0)
                 if time.monotonic() + delay >= retry_deadline:
                     raise
+                if self.session_engine is not None:
+                    self.session_engine.reserve_model_retry(reservation_id)
                 time.sleep(delay)
 
         raise RuntimeError("Model API: Max retries exceeded")
@@ -1485,6 +1561,13 @@ class SmaraAutonomousAgent:
                     messages.append({"role": r, "content": c})
 
         messages.append({"role": "user", "content": user_prompt})
+        if self.session_engine is not None:
+            self.session_engine.begin_incremental(task)
+            saved_messages = self.session_engine.get("agent_messages")
+            if isinstance(saved_messages, list) and saved_messages:
+                messages = saved_messages
+            else:
+                self.session_engine.checkpoint(messages, {"phase": "model", "iteration": 0})
 
         trace: List[Dict[str, Any]] = []
         tools_used: List[str] = []
@@ -1499,6 +1582,7 @@ class SmaraAutonomousAgent:
         # mutation; command names and model prose are not evidence.
         pending_verification: dict[str, str | None] = {}
         verification_failed = False
+        provider_budget_exhausted = False
 
         def _mark_mutation(args: Dict[str, Any]) -> None:
             nonlocal verification_failed
@@ -1557,6 +1641,7 @@ class SmaraAutonomousAgent:
                 logger.error(f"Failed calling Model API: {e}")
                 raw_concluding = f"API_ERROR: {e}"
                 final_answer = ""
+                provider_budget_exhausted = type(e).__name__ == "BudgetExceeded"
                 break
 
             choice = resp.get("choices", [{}])[0]
@@ -1637,7 +1722,7 @@ class SmaraAutonomousAgent:
 
                     self._report_progress("tool_start", {"iteration": iteration, "tool": fn_name, "args": parsed_args})
                     logger.info(f"[Tool Call] {fn_name}({parsed_args})")
-                    raw_obs = str(self.execute_tool(fn_name, parsed_args))
+                    raw_obs = str(self.execute_tool(fn_name, parsed_args, call_id=call_id))
                     if fn_name in {"patch", "file_write"} and _tool_result_succeeded(raw_obs):
                         _mark_mutation(parsed_args)
                     _record_verification(fn_name, raw_obs)
@@ -1667,7 +1752,12 @@ class SmaraAutonomousAgent:
                         "content": str(obs)
                     })
 
+                if self.session_engine is not None:
+                    self.session_engine.checkpoint(messages, {"phase": "model", "iteration": iteration, "tools_used": tools_used, "pending_verification": pending_verification})
+
                 consecutive_no_tool = 0
+                if self.session_engine is not None:
+                    self.session_engine.checkpoint(messages, {"phase": "model", "iteration": iteration, "tools_used": tools_used, "pending_verification": pending_verification})
                 continue
 
             # Check if model formatted tool calls inside text or reasoning
@@ -1677,7 +1767,8 @@ class SmaraAutonomousAgent:
                 for fn_name, fn_args in text_calls:
                     self._report_progress("tool_start", {"iteration": iteration, "tool": fn_name, "args": fn_args})
                     logger.info(f"[Text Tool Call] {fn_name}({fn_args})")
-                    obs = str(self.execute_tool(fn_name, fn_args))
+                    text_call_id = f"text_{iteration}_{uuid.uuid4().hex[:12]}"
+                    obs = str(self.execute_tool(fn_name, fn_args, call_id=text_call_id))
                     if fn_name in {"patch", "file_write"} and _tool_result_succeeded(obs):
                         _mark_mutation(fn_args)
                     _record_verification(fn_name, obs)
@@ -1802,7 +1893,9 @@ class SmaraAutonomousAgent:
             final_answer = self._clean_final_answer(raw_concluding)
         
         status = "completed"
-        if verification_failed:
+        if provider_budget_exhausted:
+            status = "budget_exhausted"
+        elif verification_failed:
             status = "tool_error"
         elif pending_verification:
             status = "budget_exhausted" if iteration >= max_loop_iterations else "unverified"
@@ -1817,6 +1910,11 @@ class SmaraAutonomousAgent:
             "status": status,
         })
 
+        session_result = None
+        if self.session_engine is not None:
+            unresolved = ["provider/model budget exhausted"] if status == "budget_exhausted" else []
+            session_result = self.session_engine.finish_incremental(status if status in {"completed","budget_exhausted","tool_error"} else "needs_input", final_answer, unresolved)
+            status = session_result["status"]
         return {
             "answer": final_answer,
             "raw_answer": raw_concluding,
@@ -1825,6 +1923,7 @@ class SmaraAutonomousAgent:
             "iterations": iteration,
             "status": status,
             "completed": status == "completed",
+            "session": session_result,
         }
 
     @staticmethod

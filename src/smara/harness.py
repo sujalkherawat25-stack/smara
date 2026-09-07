@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import contextlib, hashlib, json, os, re, signal, sqlite3, subprocess, tempfile, threading, time, uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
@@ -10,6 +10,7 @@ from typing import Any, Callable, Iterable, Mapping
 RUN_STATUSES = {"completed", "needs_input", "denied", "cancelled", "budget_exhausted", "provider_error", "tool_error", "interrupted"}
 MUTATING_TOOLS = {"write_file", "patch_file", "run_process", "process_start", "process_write"}
 VERIFY_SCOPES = {"syntax", "focused", "full"}
+REUSABLE_READ_TOOLS = {"read_file", "file_read", "list_directory", "search_files", "code_graph", "pdf_search", "skills_list", "skill_view"}
 _LIVE_PROCESSES: dict[str, subprocess.Popen] = {}
 _LIVE_PROCESS_LOGS: dict[str, Any] = {}
 _LIVE_PROCESS_JOBS: dict[str, Any] = {}
@@ -305,7 +306,8 @@ class SessionEngine:
     def inspect(self):
         state={k:json.loads(v) for k,v in self.db.execute("SELECT key,value FROM state")}; events=[{"version":1,"session_id":self.session_id,"sequence":r[0],"type":r[1],"timestamp":r[3],"payload":json.loads(r[2])} for r in self.db.execute("SELECT sequence,type,payload,created_at FROM events ORDER BY sequence")]
         calls=[{"call_id":r[0],"position":r[1],"name":r[2],"arguments":json.loads(r[3]),"workspace_id":r[4],"mutating":bool(r[5]),"state":r[6],"result":json.loads(r[7]) if r[7] else None,"before_revision":r[8],"after_revision":r[9]} for r in self.db.execute("SELECT call_id,position,name,arguments,workspace_id,mutating,state,result,before_revision,after_revision FROM calls ORDER BY position")]
-        return {"engine_version":self.VERSION,"session_id":self.session_id,"workspace":str(self.workspace),"state":state,"events":events,"calls":calls}
+        evidence=[{"id":r[0],"call_id":r[1],"kind":r[2],"scope":r[3],"subject_revision":r[4],"passed":bool(r[5]),"source_artifact_id":r[6],"created_at":r[7]} for r in self.db.execute("SELECT id,call_id,kind,scope,subject_revision,passed,source_artifact_id,created_at FROM evidence ORDER BY created_at")]
+        return {"engine_version":self.VERSION,"session_id":self.session_id,"workspace":str(self.workspace),"state":state,"events":events,"calls":calls,"evidence":evidence}
     def cancel(self):
         # Cancellation is the one permitted concurrent writer: requiring the
         # run lock here would make it impossible to cancel an active session.
@@ -328,6 +330,123 @@ class SessionEngine:
         with _SessionLock(self.lock_path): self.store_plan(request,calls,resume); return self.continue_run(executor)
     def resume(self,executor=None):
         with _SessionLock(self.lock_path): return self.continue_run(executor)
+    def begin_incremental(self, request: str) -> None:
+        """Initialize a step-wise agent session without an opaque agent_turn."""
+        with _SessionLock(self.lock_path):
+            if self.get("request") is None:
+                self.set("request",request); self.set("started_wall",time.time()); self.set("usage",{"tool_calls":0,"model_calls":0,"billed_tokens":0,"dollars":0}); self.set("budget",asdict(self.budget)); self.event("started",{"request":request,"engine_version":self.VERSION,"mode":"incremental"})
+            elif self.get("request") != request:
+                raise ValueError("session objective does not match persisted request")
+    def reserve_model_call(self, estimated_tokens: int, estimated_dollars: float=0.0) -> str:
+        """Atomically reserve aggregate model budget before provider dispatch."""
+        with _SessionLock(self.lock_path):
+            budget=Budget(**self.get("budget",asdict(self.budget))); usage=self.get("usage",{}); started=float(self.get("started_wall",time.time()))
+            if self.get("cancelled",False): raise BudgetExceeded("cancelled")
+            if time.time()-started >= budget.wall_seconds: raise BudgetExceeded("wall_seconds")
+            if int(usage.get("model_calls",0))+1 > budget.model_calls: raise BudgetExceeded("model_calls")
+            conservative=max(1,int(estimated_tokens))
+            if int(usage.get("billed_tokens",0))+conservative > budget.billed_tokens: raise BudgetExceeded("billed_tokens")
+            if float(usage.get("dollars",0))+estimated_dollars > budget.dollars: raise BudgetExceeded("dollars")
+            reservation=uuid.uuid4().hex; usage["model_calls"]=int(usage.get("model_calls",0))+1; usage["billed_tokens"]=int(usage.get("billed_tokens",0))+conservative; usage["dollars"]=float(usage.get("dollars",0))+estimated_dollars; self.set("usage",usage); reservations=self.get("model_reservations",{}); reservations[reservation]={"estimated_tokens":conservative,"estimated_dollars":estimated_dollars,"attempts":1}; self.set("model_reservations",reservations)
+            self.event("provider_request",{"reservation_id":reservation,"estimated_tokens":conservative,"accounting_quality":"conservative"}); return reservation
+    def reserve_child_budget(self, allocation: Budget, *, depth: int, max_depth: int=1, max_fanout: int=4) -> str:
+        with _SessionLock(self.lock_path):
+            if depth>max_depth: raise BudgetExceeded("child_depth")
+            root=Budget(**self.get("budget",asdict(self.budget))); used=self.get("usage",{}); reservations=self.get("child_reservations",{})
+            active=[item for item in reservations.values() if item.get("status")=="reserved"]
+            if len(active)>=max_fanout: raise BudgetExceeded("child_fanout")
+            reserved_tools=sum(item["budget"]["tool_calls"] for item in active); reserved_models=sum(item["budget"]["model_calls"] for item in active); reserved_tokens=sum(item["budget"]["billed_tokens"] for item in active); reserved_dollars=sum(item["budget"]["dollars"] for item in active)
+            if int(used.get("tool_calls",0))+reserved_tools+allocation.tool_calls>root.tool_calls: raise BudgetExceeded("child_tool_calls")
+            if int(used.get("model_calls",0))+reserved_models+allocation.model_calls>root.model_calls: raise BudgetExceeded("child_model_calls")
+            if int(used.get("billed_tokens",0))+reserved_tokens+allocation.billed_tokens>root.billed_tokens: raise BudgetExceeded("child_tokens")
+            if float(used.get("dollars",0))+reserved_dollars+allocation.dollars>root.dollars: raise BudgetExceeded("child_dollars")
+            ident=f"child_{uuid.uuid4().hex}"; reservations[ident]={"budget":asdict(allocation),"depth":depth,"status":"reserved"}; self.set("child_reservations",reservations); self.event("child_budget_reserved",{"reservation_id":ident,"budget":asdict(allocation),"depth":depth}); return ident
+    def reconcile_child_budget(self,reservation_id: str,usage: Mapping[str,Any]) -> None:
+        with _SessionLock(self.lock_path):
+            reservations=self.get("child_reservations",{}); item=reservations.get(reservation_id)
+            if not item or item.get("status")!="reserved": raise ValueError("invalid child reservation")
+            limits=item["budget"]
+            for key in ("tool_calls","model_calls","billed_tokens","dollars"):
+                if float(usage.get(key,0))>float(limits[key]): raise BudgetExceeded(f"child_{key}")
+            root_usage=self.get("usage",{})
+            for key in ("tool_calls","model_calls","billed_tokens","dollars"): root_usage[key]=root_usage.get(key,0)+usage.get(key,0)
+            item["status"]="reconciled"; item["usage"]=dict(usage); self.set("usage",root_usage); self.set("child_reservations",reservations); self.event("child_budget_reconciled",{"reservation_id":reservation_id,"usage":dict(usage)})
+    def reserve_model_retry(self,reservation_id: str) -> None:
+        with _SessionLock(self.lock_path):
+            reservations=self.get("model_reservations",{}); reservation=reservations.get(reservation_id)
+            if not reservation: raise BudgetExceeded("missing_retry_reservation")
+            budget=Budget(**self.get("budget",asdict(self.budget))); usage=self.get("usage",{}); estimate=int(reservation["estimated_tokens"])
+            if int(usage.get("model_calls",0))+1>budget.model_calls: raise BudgetExceeded("model_calls")
+            if int(usage.get("billed_tokens",0))+estimate>budget.billed_tokens: raise BudgetExceeded("billed_tokens")
+            usage["model_calls"]+=1; usage["billed_tokens"]+=estimate; reservation["attempts"]+=1; self.set("usage",usage); self.set("model_reservations",reservations); self.event("provider_retry_reserved",{"reservation_id":reservation_id,"attempt":reservation["attempts"]})
+    def reconcile_model_call(self,reservation_id: str,*,actual_tokens: int|None,provider_request_id: str|None,status: str,retries: int=0) -> None:
+        # Unknown provider usage remains charged at the conservative reservation.
+        with _SessionLock(self.lock_path):
+            reservations=self.get("model_reservations",{}); reservation=reservations.get(reservation_id)
+            if reservation and actual_tokens is not None:
+                usage=self.get("usage",{}); usage["billed_tokens"]=max(0,int(usage.get("billed_tokens",0))-int(reservation["estimated_tokens"])+int(actual_tokens)); self.set("usage",usage)
+            self.event("provider_response",{"reservation_id":reservation_id,"provider_request_id":provider_request_id,"status":status,"actual_tokens":actual_tokens,"usage_known":actual_tokens is not None,"retries":retries})
+    def checkpoint(self, messages: list[dict[str,Any]], state: Mapping[str,Any]) -> None:
+        with _SessionLock(self.lock_path):
+            from smara.continuation import ContinuationState
+            self.set("agent_messages",messages); self.set("agent_state",dict(state))
+            evidence=list(self.db.execute("SELECT id,passed FROM evidence ORDER BY created_at")); calls=self.inspect()["calls"]
+            continuation=ContinuationState(objective=str(self.get("request", "")),changed_paths=tuple(sorted({path for call in calls for path in ((call.get("result") or {}).get("changed_paths") or [])})),workspace_revision=workspace_revision(self.workspace),failed_evidence_ids=tuple(row[0] for row in evidence if not row[1]),passing_evidence_ids=tuple(row[0] for row in evidence if row[1]),pending_call_ids=tuple(call["call_id"] for call in calls if call["state"]=="pending"),uncertain_call_ids=tuple(call["call_id"] for call in calls if call["state"]=="admitted" and call["mutating"]),usage=self.get("usage",{}),next_action=str(state.get("phase") or "model"),parent_checkpoint_id=self.get("continuation_artifact_id"))
+            artifact_id,_=self.artifact_store.put_json(continuation.to_dict()); self.set("continuation_artifact_id",artifact_id); self.event("checkpoint",{"message_count":len(messages),"state_sha256":_sha(_json(state).encode()),"continuation_artifact_id":artifact_id,"parent_checkpoint_id":continuation.parent_checkpoint_id})
+    def resolve_artifact(self,artifact_id: str) -> bytes:
+        matches=list(self.artifacts.glob(f"{artifact_id}.*"))
+        if len(matches)!=1: raise FileNotFoundError(artifact_id)
+        data=matches[0].read_bytes()
+        if _sha(data)!=artifact_id: raise ValueError("artifact hash mismatch")
+        return data
+    def execute_incremental(self,call: ToolCall,executor: Callable[[dict[str,Any]],ToolResult]) -> ToolResult:
+        """Journal one real model-emitted call before executing it."""
+        with _SessionLock(self.lock_path):
+            from smara.progress import ProgressRecord, classify, fingerprint, result_hash
+            current_revision=workspace_revision(self.workspace); fp=fingerprint(call.name,call.arguments,current_revision)
+            cache=self.get("receipt_cache",{})
+            if call.name in REUSABLE_READ_TOOLS and fp in cache:
+                cached={k:v for k,v in cache[fp].items() if k!="artifact_id"}; cached["call_id"]=call.call_id
+                existing=self.db.execute("SELECT state FROM calls WHERE call_id=?",(call.call_id,)).fetchone()
+                if not existing:
+                    pos=self.db.execute("SELECT COALESCE(MAX(position),-1)+1 FROM calls").fetchone()[0]
+                    receipt={**cached,"artifact_id":cache[fp].get("artifact_id"),"reused":True}
+                    self.db.execute("INSERT INTO calls VALUES(?,?,?,?,?,?,?,NULL,?,?)",(call.call_id,pos,call.name,_json(call.arguments),call.workspace_id,0,"completed",current_revision,_json(receipt)))
+                reuse_counts=self.get("receipt_reuse_counts",{}); count=int(reuse_counts.get(fp,0))+1; reuse_counts[fp]=count; self.set("receipt_reuse_counts",reuse_counts)
+                action="strategy_change" if count==2 else "stop" if count>=3 else "cached_result"
+                self.event("tool_result_reused",{"call_id":call.call_id,"source_call_id":cache[fp].get("call_id"),"fingerprint":fp,"reuse_count":count,"action":action})
+                if action in {"strategy_change","stop"}: self.event("stall",{"call_id":call.call_id,"action":action,"reason":"repeated_cached_read"})
+                result=ToolResult(**cached)
+                if action=="strategy_change": return replace(result,text=result.text+"\n[SMARA: cached observation repeated; choose a materially different strategy.]")
+                if action=="stop": return replace(result,status="error",text="Repeated unchanged read stopped after bounded recovery.",error_kind="stall_detected")
+                return result
+            existing=self.db.execute("SELECT state,result,mutating FROM calls WHERE call_id=?",(call.call_id,)).fetchone()
+            if existing:
+                if existing[0]=="completed": return ToolResult(**{k:v for k,v in json.loads(existing[1]).items() if k!="artifact_id"})
+                if existing[0]=="admitted" and existing[2]: raise RuntimeError(f"uncertain mutation: {call.call_id}")
+            else:
+                pos=self.db.execute("SELECT COALESCE(MAX(position),-1)+1 FROM calls").fetchone()[0]; self.db.execute("INSERT INTO calls VALUES(?,?,?,?,?,?,?,NULL,NULL,NULL)",(call.call_id,pos,call.name,_json(call.arguments),call.workspace_id,int(call.name in MUTATING_TOOLS or call.name in {"patch","file_write","terminal","python_execute"}),"pending"))
+            budget=Budget(**self.get("budget",asdict(self.budget))); usage=self.get("usage",{})
+            if int(usage.get("tool_calls",0))+1>budget.tool_calls: raise BudgetExceeded("tool_calls")
+            usage["tool_calls"]=int(usage.get("tool_calls",0))+1; self.set("usage",usage); before=workspace_revision(self.workspace); self.db.execute("UPDATE calls SET state='admitted',before_revision=? WHERE call_id=?",(before,call.call_id)); self.event("tool_admitted",{"call_id":call.call_id,"name":call.name,"arguments_sha256":_sha(_json(call.arguments).encode())})
+            result=executor({"call_id":call.call_id,"name":call.name,"arguments":dict(call.arguments),**dict(call.arguments)})
+            if not isinstance(result,ToolResult) or result.call_id!=call.call_id: result=ToolResult(call.call_id,"error","invalid executor result",error_kind="invalid_result")
+            receipt=asdict(result); aid,_=self.artifact_store.put_json(receipt); receipt["artifact_id"]=aid; after=result.after_revision or workspace_revision(self.workspace); self.db.execute("UPDATE calls SET state='completed',result=?,after_revision=? WHERE call_id=?",(_json(receipt),after,call.call_id)); self.event("tool_result",{**receipt,"source_artifact_id":aid})
+            scope=str(result.meta.get("evidence_scope","none"))
+            if scope in VERIFY_SCOPES:
+                ev=Evidence(uuid.uuid4().hex,call.call_id,"test",scope,after,result.ok,aid,_now()); self.db.execute("INSERT INTO evidence VALUES(?,?,?,?,?,?,?,?)",(ev.id,ev.call_id,ev.kind,ev.scope,ev.subject_revision,int(ev.passed),ev.source_artifact_id,ev.created_at)); self.event("evidence",asdict(ev))
+            if call.name in REUSABLE_READ_TOOLS and result.ok: cache[fp]=receipt; self.set("receipt_cache",cache)
+            window=self.get("progress_window",[]); record=ProgressRecord(fp,call.call_id,call.name,after,result_hash(result.text),result.ok,before!=after or scope in VERIFY_SCOPES,"revision_changed" if before!=after else "evidence" if scope in VERIFY_SCOPES else "observation")
+            action,reason=classify(window,record); window=([*window,asdict(record)])[-12:]; self.set("progress_window",window); self.event("progress",{**asdict(record),"action":action,"stall_reason":reason})
+            if action:self.event("stall",{"call_id":call.call_id,"action":action,"reason":reason})
+            if action=="recover": return replace(result,text=result.text+"\n[SMARA: progress stalled; make one bounded, materially different recovery attempt.]")
+            if action=="stop": return replace(result,status="error",text="Repeated identical failure stopped.",error_kind="stall_detected")
+            return result
+    def finish_incremental(self,status: str,answer: str,unresolved: Iterable[str]=()) -> dict[str,Any]:
+        with _SessionLock(self.lock_path):
+            revision=workspace_revision(self.workspace); mutated=self.db.execute("SELECT COUNT(*) FROM calls WHERE mutating=1 AND state='completed' AND COALESCE(before_revision,'')<>COALESCE(after_revision,'')").fetchone()[0]>0; verified=self.db.execute("SELECT COUNT(*) FROM evidence WHERE passed=1 AND subject_revision=? AND scope IN ('focused','full')",(revision,)).fetchone()[0]>0
+            if status=="completed" and mutated and not verified: status="needs_input"; unresolved=tuple(unresolved)+("workspace changes are unverified at current revision",)
+            receipts=[r[0] for r in self.db.execute("SELECT result FROM calls WHERE result IS NOT NULL ORDER BY position")]; verification=tuple(json.loads(item) for item in receipts); result=RunResult(status,answer,(),verification,self.get("usage",{}),tuple(unresolved),self.session_id,self.session_id,self.VERSION).to_dict(); self.set("result",result); self.event("finished",{"status":status,"unresolved_items":list(unresolved)}); return result
     def continue_run(self,executor):
         if self.get("cancelled",False): return self.finish("cancelled",(),("cancelled by user",))
         budget=Budget(**self.get("budget",asdict(self.budget))); usage=self.get("usage",{}); deadline=float(self.get("started_wall",time.time()))+budget.wall_seconds; receipts=[]

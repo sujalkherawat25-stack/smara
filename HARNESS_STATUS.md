@@ -111,3 +111,24 @@ the deterministic reliability behavior relevant to R01-R24. This does not
 claim the later H3 context/100-action gates, H4 research, H5 browser/desktop,
 H6 delegation, public benchmark scores, Linux matrix, or an installed external
 container sandbox. Constrained terminal mode therefore remains fail-closed.
+
+## H3-H7 implementation update (2026-09-07)
+
+The actual autonomous loop now uses incremental SessionEngine model/tool
+steps, conservative full-request context packing, hash-verified continuation
+checkpoints, durable progress/stall recovery, and revision-bound verifier
+evidence. Research emits a persisted question graph and typed evidence index.
+A managed real Chromium backend, fail-closed isolated-VM desktop contract,
+bounded process delegation core, quarantined skill candidates, and an
+authenticated/idempotent local command transport are implemented.
+
+Latest full source gate: **474 passed, 1 skipped, 2 existing JWT-key warnings
+in 90.05s**. The managed-browser suite passed three clean repetitions of 25
+tests. The final Windows wheel SHA-256 is
+`9072f2a7cf12d541128483b36bea39018e342a7a8a4ae5e9f6059c75955f45b9`;
+it installed and completed a canonical engine task from a Unicode/space path.
+
+The detailed evidence and honest blocked boundary are in
+`release/H3_H7_GATE_REPORT.md`. Real disposable-VM D01-D20 execution and Linux
+installation are blocked by missing environments. Official external benchmark
+scores and the delegation ablation remain unmeasured, so none are promoted.

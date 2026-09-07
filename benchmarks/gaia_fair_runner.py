@@ -248,6 +248,8 @@ class GaiaFairBenchmark:
                     if attachment is not None:
                         local_attachment = root / attachment.name
                         shutil.copy2(attachment, local_attachment)
+                    from smara.harness import BUDGET_PROFILES, SessionEngine
+                    session = SessionEngine(root, budget=BUDGET_PROFILES["gaia"])
                     agent = SmaraAutonomousAgent(
                         api_key=config.api_key,
                         base_url=config.base_url,
@@ -255,15 +257,15 @@ class GaiaFairBenchmark:
                         auth_header=config.auth_header,
                         profile="full",
                         workspace_root=root,
+                        session_engine=session,
                     )
-                    from smara.harness import SessionEngine, ToolResult
-                    session = SessionEngine(root)
-                    agent_result: dict[str, Any] = {}
-                    def execute_turn(call: dict[str, Any]) -> ToolResult:
-                        nonlocal agent_result
-                        agent_result = agent.run(self._prompt(question, local_attachment), max_iterations=25)
-                        return ToolResult(call["call_id"], "ok" if agent_result.get("completed") else "error", str(agent_result.get("answer") or ""))
-                    session_result = session.run(self._prompt(question, local_attachment), [{"name": "agent_turn"}], execute_turn)
+                    agent_result = agent.run(self._prompt(question, local_attachment), max_iterations=25)
+                    session_result = agent_result.get("session") or session.inspect().get("state", {}).get("result")
+                    if session_result is None:
+                        # Compatibility for injected/offline providers that
+                        # replace the loop but still use the canonical result.
+                        session.begin_incremental(self._prompt(question, local_attachment))
+                        session_result = session.finish_incremental("completed" if agent_result.get("completed") else "provider_error", str(agent_result.get("answer") or ""))
                     session.close()
                     result = dict(agent_result)
                     result["completed"] = session_result["status"] == "completed" and bool(agent_result.get("completed"))

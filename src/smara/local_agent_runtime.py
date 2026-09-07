@@ -153,60 +153,11 @@ def _parse_plan(text: str) -> dict[str, Any] | None:
 
 
 def _compact_history(history: list[dict[str, Any]], *, max_chars: int = MAX_LOCAL_HISTORY_CHARS) -> list[dict[str, Any]]:
-    """Keep the objective and recent evidence within a provider-safe budget.
-
-    This is intentionally deterministic: it never asks a second model to
-    summarize sensitive local output.  Old tool observations retain an
-    explicit truncation marker, so the planner can request a bounded reread
-    instead of treating omitted text as evidence.
-    """
+    """Pack complete protocol groups within a conservative local budget."""
     items = [dict(item) for item in history if isinstance(item, dict) and isinstance(item.get("content"), str)]
-    if sum(len(str(item.get("content") or "")) for item in items) <= max_chars:
-        return items
-
-    # Preserve the original user objective and the latest evidence/actions.
-    head = items[:1] if items and items[0].get("role") == "user" else []
-    tail = items[-8:]
-    protected_ids = {id(item) for item in head + tail}
-    compacted: list[dict[str, Any]] = []
-    for item in items:
-        content = str(item.get("content") or "")
-        if id(item) in protected_ids:
-            compacted.append(item)
-            continue
-        reduced = dict(item)
-        if item.get("role") == "tool":
-            reduced["content"] = content[:600] + "\n[Earlier tool output omitted; request a bounded reread if needed.]"
-        else:
-            reduced["content"] = content[:400] + "\n[Earlier turn compacted.]"
-        compacted.append(reduced)
-
-    total = sum(len(str(item.get("content") or "")) for item in compacted)
-    if total <= max_chars:
-        return compacted
-    # As a final deterministic guard, keep the first objective plus newest
-    # turns only.  This must not silently exceed the caller-selected model.
-    result = [dict(item) for item in head]
-    if result and len(str(result[0].get("content") or "")) > max_chars:
-        result[0]["content"] = str(result[0].get("content") or "")[:max_chars]
-    remaining = max_chars - sum(len(str(item.get("content") or "")) for item in result)
-    selected_tail: list[dict[str, Any]] = []
-    for item in reversed(tail):
-        if id(item) in {id(entry) for entry in head} or remaining <= 0:
-            continue
-        content = str(item.get("content") or "")[:min(MAX_LOCAL_TOOL_OBSERVATION_CHARS, remaining)]
-        if not content:
-            continue
-        copy = dict(item)
-        copy["content"] = content
-        selected_tail.append(copy)
-        remaining -= len(content)
-        if remaining <= 0:
-            break
-    # We choose the newest turns first to fit the budget, then restore their
-    # chronological order before sending the transcript to the model.
-    result.extend(reversed(selected_tail))
-    return result
+    from .context_packing import ModelContextProfile, pack_messages
+    profile = ModelContextProfile("unknown:local", max_chars + 64, 0, safety_margin=32, protocol_overhead=32)
+    return list(pack_messages(items, profile).messages)
 
 
 def _messages_from_history(history: list[dict[str, Any]]) -> list[dict[str, str]]:

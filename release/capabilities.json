@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "capabilities": {
+    "durable_local_coding": {"status":"verified","suite":"tests/test_h3_durable_agent_integration.py"},
+    "context_continuation": {"status":"verified","suite":"tests/evals/local_execution/manifest.json"},
+    "adaptive_research_core": {"status":"experimental","suite":"tests/test_h4_research_graph.py"},
+    "stateful_browser": {"status":"experimental","suite":"tests/test_h5_managed_browser.py"},
+    "local_transport": {"status":"verified","suite":"tests/test_h7_release_boundary.py"},
+    "isolated_desktop": {"status":"unavailable","contract_suite":"tests/test_h5_isolated_desktop_contract.py","blocker":"disposable VM transport not configured"},
+    "delegation": {"status":"experimental_opt_in","blocker":"matched-budget positive ablation not executed"},
+    "official_gaia": {"status":"unmeasured"},
+    "official_swe_bench_verified": {"status":"unmeasured"}
+  }
+}

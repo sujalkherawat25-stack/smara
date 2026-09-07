@@ -8,15 +8,21 @@ changed without changing tasks, workers, or the Web/CLI clients.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass
+from dataclasses import asdict
+from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
 
 from .config import settings
 from .research import RetrievedSource, canonical_source_url, fetch_public_source, source_quality
+from .evidence_index import EvidenceIndex
+from .research_graph import ResearchGraph, ResearchNode
 
 
 class ResearchToolError(RuntimeError):
@@ -188,6 +194,8 @@ class ResearchPass:
     sources: int
     fetched: int
     failed: int
+    evidence: list[dict]
+    graph: dict
 
 
 class DeepResearchTool:
@@ -205,8 +213,20 @@ class DeepResearchTool:
     max_sources = 6
     total_chars = 16_000
 
-    def __init__(self, http_client: httpx.AsyncClient | None = None):
+    def __init__(self, http_client: httpx.AsyncClient | None = None, state_path: str | Path | None = None):
         self._http = http_client
+        self._state_path = Path(state_path) if state_path else None
+
+    def _load_state(self) -> tuple[ResearchGraph,EvidenceIndex]:
+        if not self._state_path or not self._state_path.exists(): return ResearchGraph(),EvidenceIndex()
+        value=json.loads(self._state_path.read_text(encoding="utf-8"))
+        return ResearchGraph.from_dict(value["graph"]),EvidenceIndex.from_dict(value["evidence"])
+
+    def _save_state(self,graph: ResearchGraph,index: EvidenceIndex) -> None:
+        if not self._state_path:return
+        self._state_path.parent.mkdir(parents=True,exist_ok=True); temporary=self._state_path.with_suffix(self._state_path.suffix+".tmp")
+        temporary.write_text(json.dumps({"version":1,"graph":graph.to_dict(),"evidence":index.to_dict()},sort_keys=True),encoding="utf-8")
+        os.replace(temporary,self._state_path)
 
     @staticmethod
     def _search_topic(query: str) -> str:
@@ -286,6 +306,9 @@ class DeepResearchTool:
             raise ResearchToolError("Research needs a non-empty question.")
         max_sources = max(2, min(self.max_sources, int(max_sources)))
         search_topic = self._search_topic(query)
+        graph,evidence_index=self._load_state()
+        node_id="q-"+hashlib.sha256(search_topic.encode()).hexdigest()[:16]
+        if node_id not in graph.nodes: graph.add(ResearchNode(node_id,search_topic))
         queries: list[str] = [search_topic]
         for candidate in subqueries or []:
             value = str(candidate).strip()
@@ -341,9 +364,10 @@ class DeepResearchTool:
             )
             blocks: list[str] = []
             citations: list[str] = []
+            evidence_ids: list[str] = []
             fetched_count = 0
             failed_count = 0
-            for index, (hit, result) in enumerate(zip(selected, fetched), start=1):
+            for source_number, (hit, result) in enumerate(zip(selected, fetched), start=1):
                 url = hit.url
                 citations.append(url)
                 if isinstance(result, RetrievedSource):
@@ -357,20 +381,24 @@ class DeepResearchTool:
                     per_source_budget = max(1_200, (self.total_chars - 2_000) // max(1, len(selected)))
                     excerpt = result.excerpt[:per_source_budget]
                     blocks.append(
-                        f"[{index}] {title}\nURL: {url}\nSOURCE TYPE: fetched page\n"
+                        f"[{source_number}] {title}\nURL: {url}\nSOURCE TYPE: fetched page\n"
                         f"EVIDENCE:\n{excerpt}"
                     )
+                    evidence_record=evidence_index.add(kind="fetched_passage",url=url,content=result.excerpt.encode(),text=excerpt,start=0,end=len(excerpt))
                 else:
                     failed_count += 1
                     blocks.append(
-                        f"[{index}] {hit.title or url}\nURL: {url}\nSOURCE TYPE: search snippet only\n"
+                        f"[{source_number}] {hit.title or url}\nURL: {url}\nSOURCE TYPE: search snippet only\n"
                         f"EVIDENCE:\n{hit.snippet[:1200]}\nLIMITATION: page fetch failed or was blocked; do not treat this as verified page text."
                     )
+                    evidence_record=evidence_index.add(kind="search_snippet",url=url,content=hit.snippet.encode(),text=hit.snippet[:1200])
+                evidence_ids.append(evidence_record.id)
             packed = "\n\n---\n\n".join(blocks)
             if len(packed) > self.total_chars:
                 packed = packed[: self.total_chars] + "\n\n[…additional source text omitted by Smara’s context limit]"
             if not packed:
                 raise ResearchToolError("Sources were found, but none contained readable evidence.")
+            graph.resolve(node_id,"supported" if fetched_count else "blocked",evidence_ids); self._save_state(graph,evidence_index)
             return ResearchPass(
                 content=(
                     "[RESEARCH_CONTEXT]\n"
@@ -388,6 +416,8 @@ class DeepResearchTool:
                 sources=len(selected),
                 fetched=fetched_count,
                 failed=failed_count,
+                evidence=[asdict(evidence_index.records[item]) for item in evidence_ids],
+                graph=graph.to_dict(),
             )
         finally:
             if owns_client:

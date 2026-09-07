@@ -1037,18 +1037,14 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, indent=2)); return 0 if payload["ok"] else 1
 
     if cmd in {"resume", "cancel", "inspect"}:
-        from .harness import SessionEngine, ToolResult, workspace_revision
+        from .harness import SessionEngine
         session = SessionEngine(workspace, parsed_args.session_id)
         if cmd == "cancel": session.cancel(); payload = session.inspect()
         elif cmd == "resume":
             record = session.inspect(); prompt = str(record["state"].get("request") or "")
-            def resume_agent(call):
-                from .autonomous_agent import SmaraAutonomousAgent
-                before = workspace_revision(workspace)
-                result = SmaraAutonomousAgent(workspace_root=workspace, profile="full").run(prompt, max_iterations=25)
-                after = workspace_revision(workspace)
-                return ToolResult(call["call_id"], "ok" if result.get("completed") else "error", str(result.get("answer") or ""), before_revision=before, after_revision=after, error_kind=None if result.get("completed") else str(result.get("status") or "agent_error"), meta={"evidence_scope": "full" if before != after and result.get("completed") else "none"})
-            payload = session.resume(resume_agent)
+            from .autonomous_agent import SmaraAutonomousAgent
+            agent_result = SmaraAutonomousAgent(workspace_root=workspace, profile="full", session_engine=session).run(prompt, max_iterations=25)
+            payload = agent_result.get("session") or session.inspect().get("state", {}).get("result") or session.inspect()
         else: payload = session.inspect()
         compact = payload.get("state", payload) if cmd != "resume" else payload
         print(json.dumps(payload if getattr(parsed_args, "events", False) or getattr(parsed_args, "json", False) else compact, indent=2))
@@ -1056,21 +1052,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if cmd == "run" and getattr(parsed_args, "json", False) and not getattr(parsed_args, "goal", False):
         from .autonomous_agent import SmaraAutonomousAgent
-        from .harness import BUDGET_PROFILES, SessionEngine, ToolResult, workspace_revision
+        from .harness import BUDGET_PROFILES, SessionEngine
         prompt = Path(parsed_args.prompt_file).read_text(encoding="utf-8") if parsed_args.prompt_file else parsed_args.objective
         if not prompt.strip():
             print(json.dumps({"status": "needs_input", "answer": "", "unresolved_items": ["prompt is empty"]}, indent=2)); return 1
         if parsed_args.budget_profile not in BUDGET_PROFILES:
             print(json.dumps({"status": "denied", "answer": "", "unresolved_items": [f"unknown budget profile: {parsed_args.budget_profile}"]}, indent=2)); return 1
         session = SessionEngine(workspace, budget=BUDGET_PROFILES[parsed_args.budget_profile])
-        agent_result: dict[str, Any] = {}
-        def run_agent(call):
-            nonlocal agent_result
-            before = workspace_revision(workspace)
-            agent_result = SmaraAutonomousAgent(workspace_root=workspace, profile="full").run(prompt, max_iterations=25)
-            after = workspace_revision(workspace)
-            return ToolResult(call["call_id"], "ok" if agent_result.get("completed") else "error", str(agent_result.get("answer") or ""), before_revision=before, after_revision=after, error_kind=None if agent_result.get("completed") else str(agent_result.get("status") or "agent_error"), meta={"evidence_scope": "full" if before != after and agent_result.get("completed") else "none"})
-        payload = session.run(prompt, [{"name": "agent_turn"}], run_agent)
+        agent_result = SmaraAutonomousAgent(workspace_root=workspace, profile="full", session_engine=session).run(prompt, max_iterations=25)
+        payload = agent_result.get("session") or session.inspect().get("state", {}).get("result") or session.inspect()
         print(json.dumps(payload, indent=2)); return 0 if payload["status"] == "completed" else 1
 
     # Handle subcommands

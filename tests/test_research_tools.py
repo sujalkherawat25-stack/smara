@@ -200,7 +200,7 @@ def test_deep_research_ranks_sources_against_the_search_topic():
     assert selected[0].url == "https://relevant.example"
 
 
-def test_deep_research_preserves_evidence_for_each_selected_source(monkeypatch):
+def test_deep_research_preserves_evidence_for_each_selected_source(monkeypatch, tmp_path):
     monkeypatch.setattr(
         research_tools,
         "settings",
@@ -215,15 +215,21 @@ def test_deep_research_preserves_evidence_for_each_selected_source(monkeypatch):
         if request.url.host == "search.test":
             suffix = request.url.params["q"][-1]
             return httpx.Response(200, json={"web": {"results": [
-                {"url": f"https://source{suffix}.example/report", "title": f"Source {suffix}", "description": "Evidence"},
+                {"url": f"https://example.com/source{suffix}/report", "title": f"Source {suffix}", "description": "Evidence"},
             ]}})
         return httpx.Response(200, headers={"content-type": "text/html"}, text="<title>Source</title><p>" + ("Evidence. " * 2_000) + "</p>")
 
     async def execute():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            result = await research_tools.DeepResearchTool(client).run("agent source 1", subqueries=["agent source 2", "agent source 3"], max_sources=3)
+            state_path=tmp_path/"research-state.json"
+            result = await research_tools.DeepResearchTool(client,state_path).run("agent source 1", subqueries=["agent source 2", "agent source 3"], max_sources=3)
             assert result.sources == 3
             assert all(f"[{index}]" in result.content for index in range(1, 4))
+            assert len(result.evidence)==3 and all(item["kind"]=="fetched_passage" for item in result.evidence)
+            assert result.graph["nodes"][0]["state"]=="supported"
+            restored=research_tools.DeepResearchTool(client,state_path)
+            graph,evidence=restored._load_state()
+            assert graph.nodes and len(evidence.records)==3
 
     asyncio.run(execute())
 

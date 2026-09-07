@@ -1,0 +1,43 @@
+"""Typed research evidence with deterministic provenance validation."""
+from __future__ import annotations
+import hashlib
+from dataclasses import asdict, dataclass
+from datetime import datetime,timezone
+from typing import Literal
+from urllib.parse import urljoin
+from .research import canonical_source_url
+
+EvidenceKind=Literal["search_snippet","fetched_passage","pdf_page","pdf_table","image_ocr"]
+
+@dataclass(frozen=True)
+class EvidenceRecord:
+    id:str; kind:EvidenceKind; canonical_url:str; redirect_chain:tuple[str,...]; retrieved_at:str; content_sha256:str; extraction_version:str; text:str; start:int|None=None; end:int|None=None; page:int|None=None; bbox:tuple[float,float,float,float]|None=None; row:int|None=None; column:int|None=None; confidence:float=1.0
+
+class EvidenceIndex:
+    def __init__(self): self.records={}; self.content_publications={}
+    def add(self,*,kind:EvidenceKind,url:str,content:bytes,text:str,redirect_chain=(),extraction_version="text-v1",**location):
+        if kind not in {"search_snippet","fetched_passage","pdf_page","pdf_table","image_ocr"}: raise ValueError("unknown evidence kind")
+        canonical=canonical_source_url(url); digest=hashlib.sha256(content).hexdigest(); ident=hashlib.sha256(f"{kind}:{canonical}:{digest}:{location}".encode()).hexdigest()
+        record=EvidenceRecord(ident,kind,canonical,tuple(canonical_source_url(item) for item in redirect_chain),datetime.now(timezone.utc).isoformat(),digest,extraction_version,text,**location)
+        self.records.setdefault(ident,record); self.content_publications.setdefault(digest,set()).add(canonical); return self.records[ident]
+    def support(self,evidence_id:str,claim_text:str,*,require_fetched=True):
+        record=self.records[evidence_id]
+        if require_fetched and record.kind=="search_snippet": return False,"snippet_is_discovery_only"
+        if not record.text.strip(): return False,"empty_evidence"
+        if record.kind=="image_ocr" and record.confidence<0.8:return False,"uncertain_ocr"
+        terms={item.lower() for item in claim_text.split() if len(item)>3}; source=record.text.lower(); missing=[term for term in terms if term not in source]
+        return (not missing,"supported" if not missing else f"missing_terms:{','.join(missing[:5])}")
+    def validate_location(self,evidence_id:str,original:bytes):
+        record=self.records[evidence_id]
+        if hashlib.sha256(original).hexdigest()!=record.content_sha256:return False
+        if record.start is not None and record.end is not None:return original.decode("utf-8",errors="replace")[record.start:record.end]==record.text
+        return bool(record.text)
+    def to_dict(self): return {"version":1,"records":[asdict(item) for item in self.records.values()]}
+    @classmethod
+    def from_dict(cls,value):
+        if int(value.get("version",0))!=1: raise ValueError("unsupported evidence index version")
+        index=cls()
+        for item in value.get("records",[]):
+            record=EvidenceRecord(**{**item,"redirect_chain":tuple(item.get("redirect_chain",())),"bbox":tuple(item["bbox"]) if item.get("bbox") else None})
+            index.records[record.id]=record; index.content_publications.setdefault(record.content_sha256,set()).add(record.canonical_url)
+        return index

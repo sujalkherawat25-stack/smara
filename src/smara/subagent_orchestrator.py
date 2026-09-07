@@ -8,12 +8,13 @@ Enables multi-agent task decomposition and isolated delegation:
 """
 
 from __future__ import annotations
-import concurrent.futures
+import contextlib
 import enum
 import json
 import logging
-import os
+import multiprocessing
 from pathlib import Path
+import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
@@ -29,9 +30,7 @@ DELEGATE_BLOCKED_TOOLS = frozenset([
     "dag_flow",          # Prevent subagents from reconfiguring top-level DAG
 ])
 
-# Delegated workers use process-global cwd and do not yet carry an enforceable
-# capability grant or aggregate budget.  Keep the public API, but fail closed
-# until H6 supplies that policy boundary.
+# Delegation stays opt-in until a matched-budget ablation demonstrates value.
 DELEGATION_ENABLED = False
 
 
@@ -55,6 +54,10 @@ class DelegationResult:
     error: Optional[str] = None
     worktree_branch: Optional[str] = None
     worktree_diff: Optional[str] = None
+    usage: Dict[str, Any] = field(default_factory=dict)
+    evidence_ids: List[str] = field(default_factory=list)
+    base_revision: Optional[str] = None
+    patch_validated: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -73,6 +76,7 @@ class SubagentWorker:
         max_iterations: int = 6,
         isolate_worktree: bool = False,
         workspace_root: Optional[str | Path] = None,
+        budget=None,
     ):
         self.task_id = task_id
         self.role = role
@@ -82,6 +86,7 @@ class SubagentWorker:
         self.max_iterations = max_iterations
         self.isolate_worktree = isolate_worktree or (role == SubagentRole.CODER)
         self.workspace_root = Path(workspace_root).resolve() if workspace_root else None
+        self.budget = budget
 
     def run(self, goal: str, context: Optional[str] = None) -> DelegationResult:
         """Run isolated subagent loop on the delegated goal."""
@@ -96,27 +101,24 @@ class SubagentWorker:
         worktree_info = None
         worktree_branch = None
         worktree_diff = None
-        prev_cwd = os.getcwd()
-        execution_root = str(self.workspace_root or Path(prev_cwd).resolve())
+        execution_root = str(self.workspace_root or Path.cwd().resolve())
 
         if self.isolate_worktree:
             try:
                 worktree_info = create_subagent_worktree(execution_root, self.task_id)
                 if worktree_info:
                     worktree_branch = worktree_info.get("branch")
-                    os.chdir(worktree_info["path"])
+                    execution_root = worktree_info["path"]
                 else:
                     # A coder must never silently edit the caller's checkout. If
                     # isolation is unavailable, run read-only from the requested
                     # workspace and let the worker report the inability to patch.
-                    os.chdir(execution_root)
+                    pass
             except Exception as wt_err:
                 logger.debug(f"Subagent worktree creation skipped: {wt_err}")
-                os.chdir(execution_root)
+                pass
             if worktree_info is None:
                 duration = int((time.time() - t0) * 1000)
-                if os.getcwd() != prev_cwd:
-                    os.chdir(prev_cwd)
                 return DelegationResult(
                     task_id=self.task_id,
                     goal=goal,
@@ -128,8 +130,12 @@ class SubagentWorker:
                     error="isolated_worktree_unavailable",
                 )
         elif self.workspace_root:
-            os.chdir(execution_root)
+            execution_root = str(self.workspace_root)
 
+        from smara.harness import Budget, SessionEngine, workspace_revision
+        child_budget = self.budget or Budget(wall_seconds=max(1, self.max_iterations * 30), tool_calls=max(1, self.max_iterations * 3), model_calls=max(1, self.max_iterations), billed_tokens=max(20_000, self.max_iterations * 20_000), dollars=max(0.1, self.max_iterations * 0.1))
+        base_revision=workspace_revision(Path(execution_root))
+        child_session = SessionEngine(execution_root, f"worker_{self.task_id}", budget=child_budget, constrained=False)
         child_agent = SmaraAutonomousAgent(
             api_key=self.api_key,
             base_url=self.base_url,
@@ -142,6 +148,8 @@ class SubagentWorker:
                 if self.role in (SubagentRole.TESTER, SubagentRole.AUDITOR)
                 else "full"
             ),
+            workspace_root=execution_root,
+            session_engine=child_session,
         )
 
         scoped_prompt = f"Delegated Goal for {self.role.value.upper()} worker:\n{goal}"
@@ -164,7 +172,9 @@ class SubagentWorker:
 
             answer = str(res.get("answer") or "").strip()
             raw_answer = str(res.get("raw_answer") or "").strip()
-            failed = not answer or raw_answer.startswith("API_ERROR:")
+            canonical = res.get("session") or {}
+            inspected=child_session.inspect()
+            failed = canonical.get("status") != "completed"
             return DelegationResult(
                 task_id=self.task_id,
                 goal=goal,
@@ -173,9 +183,12 @@ class SubagentWorker:
                 trace_steps=len(res.get("trace", [])),
                 duration_ms=duration,
                 tools_used=res.get("tools_used", []),
-                error=(raw_answer or "Worker returned no answer") if failed else None,
+                error=(str(canonical.get("unresolved_items") or raw_answer or "Worker did not produce verified completion")) if failed else None,
                 worktree_branch=worktree_branch,
                 worktree_diff=worktree_diff,
+                usage=dict(canonical.get("usage") or {}),
+                evidence_ids=[item["id"] for item in inspected.get("evidence",[])],
+                base_revision=base_revision,
             )
         except Exception as e:
             logger.error(f"Subagent '{self.task_id}' failed: {e}")
@@ -198,11 +211,12 @@ class SubagentWorker:
                 worktree_diff=None,
             )
         finally:
-            if os.getcwd() != prev_cwd:
-                try:
-                    os.chdir(prev_cwd)
-                except Exception:
-                    pass
+            with contextlib.suppress(Exception):
+                child_session.close()
+
+def _worker_process_entry(worker: SubagentWorker, goal: str, context: Optional[str], output) -> None:
+    try: output.put(worker.run(goal, context).to_dict())
+    except BaseException as exc: output.put({"task_id":worker.task_id,"goal":goal,"status":"FAILED","summary":"worker process failed","trace_steps":0,"duration_ms":0,"tools_used":[],"error":f"{type(exc).__name__}: {exc}"})
 
 
 class SubagentOrchestrator:
@@ -212,11 +226,15 @@ class SubagentOrchestrator:
         self,
         api_key: Optional[str] = None,
         base_url: str = "https://api.sarvam.ai/v2/chat/completions",
-        default_model: str = "glm5.2"
+        default_model: str = "glm5.2",
+        workspace_root: Optional[str | Path] = None,
+        root_session=None,
     ):
         self.api_key = api_key
         self.base_url = base_url
         self.default_model = default_model
+        self.workspace_root=Path(workspace_root).resolve() if workspace_root else None
+        self.root_session=root_session
 
     def delegate(
         self,
@@ -230,31 +248,38 @@ class SubagentOrchestrator:
         task_id = f"sub_{role.value}_{int(time.time() * 1000) % 100000}"
         if not DELEGATION_ENABLED:
             return DelegationResult(task_id=task_id, goal=goal, status="FAILED", summary="Delegation is disabled until worker policy is enforced.", trace_steps=0, duration_ms=0, tools_used=[], error="delegation_disabled")
+        from smara.harness import Budget, BudgetExceeded
+        child_budget=Budget(wall_seconds=max(1,timeout),tool_calls=max(1,max_iterations*3),model_calls=max(1,max_iterations),billed_tokens=max(20_000,max_iterations*20_000),dollars=max(.1,max_iterations*.1))
+        reservation_id=None
+        if self.root_session is not None:
+            try: reservation_id=self.root_session.reserve_child_budget(child_budget,depth=1)
+            except BudgetExceeded as exc:return DelegationResult(task_id=task_id,goal=goal,status="FAILED",summary="Root budget denied delegation.",trace_steps=0,duration_ms=0,tools_used=[],error=str(exc))
         worker = SubagentWorker(
             task_id=task_id,
             role=role,
             api_key=self.api_key,
             base_url=self.base_url,
             model=self.default_model,
-            max_iterations=max_iterations
+            max_iterations=max_iterations,
+            workspace_root=self.workspace_root,
+            budget=child_budget,
         )
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(worker.run, goal, context)
-            try:
-                return future.result(timeout=timeout)
-            except concurrent.futures.TimeoutError:
-                logger.warning(f"Subagent {task_id} timed out after {timeout}s.")
-                return DelegationResult(
-                    task_id=task_id,
-                    goal=goal,
-                    status="TIMEOUT",
-                    summary=f"Worker timed out after {timeout} seconds.",
-                    trace_steps=0,
-                    duration_ms=timeout * 1000,
-                    tools_used=[],
-                    error="TimeoutError"
-                )
+        process_context=multiprocessing.get_context("spawn"); output=process_context.Queue(maxsize=1); process=process_context.Process(target=_worker_process_entry,args=(worker,goal,context,output),daemon=False); process.start(); process.join(timeout)
+        if process.is_alive():
+            process.terminate(); process.join(10)
+            if process.is_alive(): process.kill(); process.join(5)
+            result=DelegationResult(task_id=task_id,goal=goal,status="TIMEOUT",summary=f"Worker timed out after {timeout} seconds.",trace_steps=0,duration_ms=timeout*1000,tools_used=[],error="TimeoutError")
+        else:
+            try: result=DelegationResult(**output.get(timeout=2))
+            except Exception: result=DelegationResult(task_id=task_id,goal=goal,status="FAILED",summary="Worker exited without a structured result.",trace_steps=0,duration_ms=0,tools_used=[],error=f"worker_exit_{process.exitcode}")
+        if reservation_id is not None:
+            with contextlib.suppress(Exception): self.root_session.reconcile_child_budget(reservation_id,result.usage)
+        if result.worktree_diff and self.workspace_root:
+            checked=subprocess.run(["git","apply","--check","-"],cwd=self.workspace_root,input=result.worktree_diff,text=True,capture_output=True)
+            result.patch_validated=checked.returncode==0
+            if not result.patch_validated and result.status=="SUCCESS": result.status="FAILED"; result.error="integration_patch_validation_failed"
+        return result
 
     def delegate_batch(
         self,
@@ -265,48 +290,14 @@ class SubagentOrchestrator:
         """Execute multiple subagent delegations concurrently and aggregate results."""
         if not DELEGATION_ENABLED:
             return [DelegationResult(task_id="disabled", goal=str(task.get("goal", "")), status="FAILED", summary="Delegation is disabled until worker policy is enforced.", trace_steps=0, duration_ms=0, tools_used=[], error="delegation_disabled") for task in tasks]
-        results: List[DelegationResult] = []
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_task = {}
-            for t in tasks:
-                goal = t.get("goal", "")
-                context = t.get("context")
-                role_str = t.get("role", "generalist").lower()
-                try:
-                    role = SubagentRole(role_str)
-                except ValueError:
-                    role = SubagentRole.GENERALIST
-
-                task_id = f"sub_{role.value}_{int(time.time() * 1000) % 100000}"
-                worker = SubagentWorker(
-                    task_id=task_id,
-                    role=role,
-                    api_key=self.api_key,
-                    base_url=self.base_url,
-                    model=self.default_model,
-                    max_iterations=t.get("max_iterations", 6)
-                )
-                fut = executor.submit(worker.run, goal, context)
-                future_to_task[fut] = goal
-
-            for fut in concurrent.futures.as_completed(future_to_task, timeout=timeout):
-                try:
-                    res = fut.result()
-                    results.append(res)
-                except Exception as e:
-                    goal = future_to_task[fut]
-                    results.append(DelegationResult(
-                        task_id="err",
-                        goal=goal,
-                        status="FAILED",
-                        summary=str(e),
-                        trace_steps=0,
-                        duration_ms=0,
-                        tools_used=[],
-                        error=str(e)
-                    ))
-
+        # Default remains disabled pending a positive matched-budget ablation.
+        # When explicitly enabled, isolated processes are run in bounded waves;
+        # no worker ever shares cwd or an in-process agent object.
+        results=[]
+        for task in tasks:
+            try: role=SubagentRole(str(task.get("role","generalist")))
+            except ValueError: role=SubagentRole.GENERALIST
+            results.append(self.delegate(str(task.get("goal", "")),task.get("context"),role,int(task.get("max_iterations",6)),timeout))
         return results
 
 
