@@ -647,9 +647,12 @@ def _clear_token() -> None:
         pass
 
 
-def _interactive_repl(engine: LocalAutonomousEngine) -> None:
+def _interactive_repl(engine: LocalAutonomousEngine, canonical_runner=None) -> None:
     """Claude Code inspired interactive terminal REPL."""
     tui = engine.tui
+    def execute(prompt: str) -> None:
+        if canonical_runner is None:engine.run_turn(prompt);return
+        agent_result,payload=canonical_runner(prompt);print(str(payload.get("answer") or agent_result.get("answer") or ""))
     tui.print_banner(
         model_label=engine.active_profile.get("label", engine.active_id),
         workspace_path=str(engine.workspace),
@@ -703,25 +706,25 @@ def _interactive_repl(engine: LocalAutonomousEngine) -> None:
         if line.startswith("/graph"):
             parts = line.split(maxsplit=1)
             sym = parts[1].strip() if len(parts) > 1 else "LocalTaskStore"
-            engine.run_turn(f"Inspect the Code Property Graph for the symbol '{sym}' in our codebase and report its defined methods, callers, and blast radius.")
+            execute(f"Inspect the Code Property Graph for the symbol '{sym}' in our codebase and report its defined methods, callers, and blast radius.")
             continue
 
         if line.startswith("/search"):
             parts = line.split(maxsplit=1)
             query = parts[1].strip() if len(parts) > 1 else "AI agent architectures 2026"
-            engine.run_turn(f"Research and explain {query}. Cite sources.")
+            execute(f"Research and explain {query}. Cite sources.")
             continue
 
         if line.startswith("/pdf"):
             parts = line.split(maxsplit=1)
             title = parts[1].strip() if len(parts) > 1 else "Agent Performance Audit 2026"
-            engine.run_turn(f"Create an executive PDF report titled '{title}' saved to reports/audit_summary.pdf.")
+            execute(f"Create an executive PDF report titled '{title}' saved to reports/audit_summary.pdf.")
             continue
 
         if line.startswith("/docx"):
             parts = line.split(maxsplit=1)
             title = parts[1].strip() if len(parts) > 1 else "Agent Performance Audit 2026"
-            engine.run_turn(f"Create an executive Word DOCX report titled '{title}' saved to reports/audit_summary.docx.")
+            execute(f"Create an executive Word DOCX report titled '{title}' saved to reports/audit_summary.docx.")
             continue
 
         if line.startswith("/workspace"):
@@ -735,7 +738,7 @@ def _interactive_repl(engine: LocalAutonomousEngine) -> None:
 
         # Normal prompt execution
         try:
-            engine.run_turn(line)
+            execute(line)
         except Exception as exc:
             tui.print_error(str(exc))
 
@@ -1013,9 +1016,27 @@ def main(argv: list[str] | None = None) -> int:
     if parsed_args.model:
         engine.set_active_model(parsed_args.model)
 
+    def run_canonical(prompt: str, session=None, budget=None):
+        """Run every autonomous CLI surface through the durable engine."""
+        from .autonomous_agent import SmaraAutonomousAgent
+        from .harness import Budget, SessionEngine
+        active_workspace=engine.workspace
+        session=session or SessionEngine(active_workspace,budget=budget or Budget())
+        model_config=session.get("model_config")
+        if model_config is None:
+            profile=engine.active_profile
+            model_config={"profile_id":profile.get("id","default"),"base_url":profile.get("base_url","https://api.sarvam.ai/v2"),"model":profile.get("model","glm5.2"),"auth_header":profile.get("auth_header","authorization")}
+            session.set("model_config",model_config)
+        profile=next((item for item in engine.profiles if item.get("id")==model_config.get("profile_id")),model_config)
+        agent=SmaraAutonomousAgent(api_key=_resolve_profile_key(profile,engine.credentials),base_url=model_config["base_url"],model=model_config["model"],auth_header=model_config.get("auth_header","authorization"),workspace_root=active_workspace,profile="full",session_engine=session)
+        agent_result=agent.run(prompt,max_iterations=25)
+        payload=agent_result.get("session") or session.inspect().get("state",{}).get("result") or session.inspect()
+        return agent_result,payload
+
     if direct_prompt:
-        engine.run_turn(direct_prompt)
-        return 0
+        agent_result,payload=run_canonical(direct_prompt)
+        print(str(payload.get("answer") or agent_result.get("answer") or ""))
+        return 0 if payload.get("status")=="completed" else 1
 
     cmd = getattr(parsed_args, "command", None) or getattr(parsed_args, "subcommand", None)
 
@@ -1042,16 +1063,13 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "cancel": session.cancel(); payload = session.inspect()
         elif cmd == "resume":
             record = session.inspect(); prompt = str(record["state"].get("request") or "")
-            from .autonomous_agent import SmaraAutonomousAgent
-            agent_result = SmaraAutonomousAgent(workspace_root=workspace, profile="full", session_engine=session).run(prompt, max_iterations=25)
-            payload = agent_result.get("session") or session.inspect().get("state", {}).get("result") or session.inspect()
+            _,payload=run_canonical(prompt,session=session)
         else: payload = session.inspect()
         compact = payload.get("state", payload) if cmd != "resume" else payload
         print(json.dumps(payload if getattr(parsed_args, "events", False) or getattr(parsed_args, "json", False) else compact, indent=2))
         return 0 if cmd != "resume" or payload.get("status") == "completed" else 1
 
     if cmd == "run" and getattr(parsed_args, "json", False) and not getattr(parsed_args, "goal", False):
-        from .autonomous_agent import SmaraAutonomousAgent
         from .harness import BUDGET_PROFILES, SessionEngine
         prompt = Path(parsed_args.prompt_file).read_text(encoding="utf-8") if parsed_args.prompt_file else parsed_args.objective
         if not prompt.strip():
@@ -1059,16 +1077,16 @@ def main(argv: list[str] | None = None) -> int:
         if parsed_args.budget_profile not in BUDGET_PROFILES:
             print(json.dumps({"status": "denied", "answer": "", "unresolved_items": [f"unknown budget profile: {parsed_args.budget_profile}"]}, indent=2)); return 1
         session = SessionEngine(workspace, budget=BUDGET_PROFILES[parsed_args.budget_profile])
-        agent_result = SmaraAutonomousAgent(workspace_root=workspace, profile="full", session_engine=session).run(prompt, max_iterations=25)
-        payload = agent_result.get("session") or session.inspect().get("state", {}).get("result") or session.inspect()
+        _,payload=run_canonical(prompt,session=session)
         print(json.dumps(payload, indent=2)); return 0 if payload["status"] == "completed" else 1
 
     # Handle subcommands
     if cmd == "ask":
         msg = getattr(parsed_args, "message", "")
         if msg:
-            engine.run_turn(msg)
-            return 0
+            agent_result,payload=run_canonical(msg)
+            print(str(payload.get("answer") or agent_result.get("answer") or ""))
+            return 0 if payload.get("status")=="completed" else 1
         print(tui.paint("Error: Message cannot be empty for 'ask'.", "RED"))
         return 1
 
@@ -1636,23 +1654,19 @@ def main(argv: list[str] | None = None) -> int:
 
     if cmd == "refactor":
         instructions = " ".join(parsed_args.instructions)
-        engine.run_turn(f"Perform atomic multi-file refactoring: {instructions}. Ensure all changes pass syntax and tests.")
-        return 0
+        _,payload=run_canonical(f"Perform atomic multi-file refactoring: {instructions}. Ensure all changes pass syntax and tests.");print(payload.get("answer", ""));return 0 if payload.get("status")=="completed" else 1
 
     if cmd == "graph":
-        engine.run_turn(f"Inspect the Code Property Graph for the symbol '{parsed_args.symbol}' in our codebase and report its defined methods, callers, and blast radius.")
-        return 0
+        _,payload=run_canonical(f"Inspect the Code Property Graph for the symbol '{parsed_args.symbol}' in our codebase and report its defined methods, callers, and blast radius.");print(payload.get("answer", ""));return 0 if payload.get("status")=="completed" else 1
 
     if cmd == "search":
         q = " ".join(parsed_args.query)
-        engine.run_turn(f"Research and explain {q}. Cite all primary source links.")
-        return 0
+        _,payload=run_canonical(f"Research and explain {q}. Cite all primary source links.");print(payload.get("answer", ""));return 0 if payload.get("status")=="completed" else 1
 
     if cmd == "report":
         title = " ".join(parsed_args.title)
         fmt = getattr(parsed_args, "format", "pdf")
-        engine.run_turn(f"Create an executive {fmt.upper()} report titled '{title}' saved to reports/audit_summary.{fmt}.")
-        return 0
+        _,payload=run_canonical(f"Create an executive {fmt.upper()} report titled '{title}' saved to reports/audit_summary.{fmt}.");print(payload.get("answer", ""));return 0 if payload.get("status")=="completed" else 1
 
     if cmd == "models":
         print(tui.paint("\nConfigured Model Profiles:", "BOLD"))
@@ -1663,7 +1677,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # Default to Interactive Claude Code REPL
-    _interactive_repl(engine)
+    _interactive_repl(engine,run_canonical)
     return 0
 
 

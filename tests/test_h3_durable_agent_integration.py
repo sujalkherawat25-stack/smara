@@ -1,6 +1,9 @@
 import json
 import sys
+import urllib.error
 from pathlib import Path
+
+import pytest
 
 from smara.autonomous_agent import SmaraAutonomousAgent
 from smara.harness import Budget, SessionEngine, ToolCall, ToolResult
@@ -79,3 +82,15 @@ def test_persisted_tool_result_is_replayed_without_duplicate_mutation(tmp_path: 
     assert replayed.ok
     assert executions == [1]
     assert (tmp_path / "x.txt").read_text() == "one"
+
+
+def test_cancellation_during_provider_retry_prevents_next_dispatch(tmp_path: Path,monkeypatch):
+    from smara.harness import BudgetExceeded
+    session=SessionEngine(tmp_path,"provider-cancel",budget=Budget(60,2,3,500_000,1));session.begin_incremental("cancel")
+    calls=[]
+    def urlopen(*args,**kwargs):
+        calls.append(1);session.cancel();raise urllib.error.URLError("transient")
+    monkeypatch.setattr("urllib.request.urlopen",urlopen)
+    agent=SmaraAutonomousAgent(api_key="fake",workspace_root=tmp_path,session_engine=session)
+    with pytest.raises(BudgetExceeded,match="cancelled"):agent._call_model_api([{"role":"user","content":"x"}],max_tokens=32)
+    assert calls==[1]

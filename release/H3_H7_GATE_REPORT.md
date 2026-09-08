@@ -1,8 +1,8 @@
 # H3-H7 implementation gate report — 2026-09-07
 
-Implementation base: `17ec93eca8840c8d3945234afd8b6de14fe18935` plus tracked diff hash
-`42d0034d38cdebc69ffc69a932f0c4ab049b49b8` and the new files listed by
-`git status`. Environment: Windows, Python 3.14.0, Playwright 1.62.0.
+Implementation base: `17ec93eca8840c8d3945234afd8b6de14fe18935`, foundation
+commit `a4837c3`, and the scoped hardening commit recorded in repository history.
+Environment: Windows, Python 3.14.0, Playwright 1.62.0.
 
 ## Verified locally
 
@@ -11,25 +11,34 @@ Implementation base: `17ec93eca8840c8d3945234afd8b6de14fe18935` plus tracked dif
   budget denial, conservative context packing, hash-verified continuation
   lineage, durable progress records and bounded stall recovery.
 - H3 fixture inventory: R25-R32 definitions are versioned and carry a checked
-  SHA-256 over each ID/fixture/validator definition. Manifest SHA-256:
-  `f8e7121046d166157e229482f636c6b2389c1ac9cd349aed31b4756f986b0d26`.
+  SHA-256 over each ID/fixture/validator definition and executable fixture.
+  Manifest SHA-256:
+  `06f9f45a1571f04a5b8552b3b7586d7f26861630497121999c5b91f70d30f3b5`.
 - H4 core: bounded dependency graph, persisted typed evidence index, discovery-
   only snippet handling, exact offsets/content hashes, OCR uncertainty and
-  duplicate-publication retention. The live-web and sealed multimodal corpus
-  scorecards remain separate gates.
-- H5a implementation: owned isolated Chromium contexts/tabs, popups, frames,
+  duplicate-publication retention. A sealed deterministic corpus now covers
+  multi-hop dependency ordering, contradictions, duplicates, unavailable
+  retrieval, PDF-table coordinates, uncertain OCR, and separate evidence
+  precision/coverage. Provider-driven live-web accuracy remains a separate tier.
+- H5a verified locally: owned isolated Chromium contexts/tabs, popups, frames,
   dialogs, grounded observed references, stale-reference rejection, forms,
   uploads/downloads, SPA/delayed state, screenshots, scrolling, navigation
-  failure, cancellation and restart invalidation. The real Chromium suite ran
-  three times: `25 passed` in 46.06s, 46.42s and 47.05s.
+  failure, cancellation and restart invalidation. B01-B20 now execute distinct
+  state validators from clean contexts. The real Chromium suite passed three
+  post-hardening runs, including the successful full-suite run; retained JUnit
+  evidence is `artifacts/h5-browser-strengthened-repeat3.xml`.
 - H6 policy core: spawned-process worker boundary, explicit workspace, parent
   budget reservation/reconciliation, timeout termination, canonical child
-  status/evidence/usage, patch validation, quarantined skill candidates. It
-  remains opt-in until the predeclared matched-budget ablation is positive.
+  status/evidence/usage, patch validation, quarantined skill candidates, and
+  filtered worker environments. Root cancellation terminates/reconciles a real
+  spawned child, and the legacy swarm can no longer bypass the parent ledger.
+  Delegation remains opt-in until the predeclared matched-budget ablation is positive.
 - H7 core: authenticated/scoped run, inspect, resume and cancel operations,
   idempotent command IDs, versioned event replay cursors and explicit event-gap
-  rejection. The final wheel installed into a disposable Windows virtualenv
-  and completed an engine task in a Unicode/space path.
+  rejection over a loopback-only HTTP server. CLI prompt/ask/JSON/resume/GAIA
+  paths have semantic-event parity, and the desktop Rust goal bridge calls the
+  canonical app adapter. The final wheel installed into a disposable Windows
+  virtualenv and completed an engine task in a Unicode/space path.
 
 ## Commands and results
 
@@ -38,14 +47,17 @@ PYTHONPATH=src .venv/Scripts/python.exe -m compileall -q src/smara benchmarks
 # passed
 
 PYTHONPATH=src .venv/Scripts/python.exe -m pytest -q
-# 474 passed, 1 skipped, 2 warnings in 90.05s
+# 495 passed, 1 skipped, 2 warnings in 100.62s
 
-# tests/test_h5_managed_browser.py repeated three times against installed Chrome
-# 25 passed in 46.06s; 25 passed in 46.42s; 25 passed in 47.05s
+# strengthened tests/test_h5_managed_browser.py against installed Chrome
+# 25 passed in 60.33s; 25 passed in successful full gate; 25 passed in 63.25s
+
+CARGO_TARGET_DIR=artifacts/cargo-h7-check cargo check --locked
+# passed in 1m38s
 
 .venv/Scripts/python.exe -m pip wheel . --no-deps --wheel-dir artifacts/final-wheels
 # smara-0.1.0-py3-none-any.whl
-# SHA-256 9072f2a7cf12d541128483b36bea39018e342a7a8a4ae5e9f6059c75955f45b9
+# SHA-256 ee3c79ec6b45317e4174d04dd250adb0a36cc917fd062426fd28db43f3f659cd
 
 artifacts/h7-smoke-venv/Scripts/smara.exe --workspace "artifacts/Unicode Workspace Ω" doctor --json
 # ok=true; workspace writable; SQLite WAL and engine checks pass
@@ -68,5 +80,7 @@ reported by pytest and is not counted as passed.
   long-run scores are **unmeasured**.
 - Delegation stays `experimental_opt_in`; no positive matched-model,
   matched-budget latency/cost/quality ablation was fabricated.
-- Research and browser remain experimental in the release manifest pending the
-  sealed-corpus and complete named-fixture scorecards required for promotion.
+- Research remains experimental pending provider/model-driven accuracy runs;
+  its deterministic sealed-corpus provenance gate now exists. Browser is
+  promoted only as verified on the deterministic local Chromium tier, not as
+  WebArena or live-web performance.

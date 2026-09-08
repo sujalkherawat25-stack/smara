@@ -52,6 +52,12 @@ def test_alternating_loop_and_todo_churn_are_not_progress():
     assert classify(todos,rec("4","todo"))[1]=="todo_churn"
 
 
+def test_edit_revert_cycle_is_not_material_progress():
+    revisions=("a","b","a","b")
+    records=[ProgressRecord(str(i),str(i),"patch",revision,"h",True,True,"revision_changed") for i,revision in enumerate(revisions)]
+    assert classify([item.__dict__ for item in records[:-1]],records[-1])==("recover","edit_revert_cycle")
+
+
 def test_advancing_poll_is_not_reusable_read():
     from smara.harness import REUSABLE_READ_TOOLS
     assert "process_poll" not in REUSABLE_READ_TOOLS

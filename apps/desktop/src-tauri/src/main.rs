@@ -2471,9 +2471,9 @@ async fn synthesize_dynamic_tool(name: String, description: String, code: String
 
 #[tauri::command]
 async fn run_goal_task(objective: String) -> Result<Value, String> {
-    let clean = objective.trim().replace('"', "\\\"");
+    let objective_json = serde_json::to_string(objective.trim()).map_err(|error| error.to_string())?;
     let py_code = format!(
-        "import json\nfrom smara.goal_engine import GoalRunner\nfrom smara.cli import LocalAutonomousEngine\neng = LocalAutonomousEngine()\nrunner = GoalRunner()\nsess = runner.execute_goal(\"{clean}\", eng.execute_capability)\nprint(json.dumps(sess.to_dict()))\n"
+        "import json\nfrom smara.app_adapter import run_canonical_task\nresult = run_canonical_task({objective_json})\nprint(json.dumps(result))\n"
     );
     run_python_bridge_code(&py_code).await
 }

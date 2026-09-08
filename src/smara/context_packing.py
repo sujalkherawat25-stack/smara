@@ -47,6 +47,15 @@ def _groups(messages: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     return groups
 
 
+def _protocol_complete(group: list[dict[str,Any]]) -> bool:
+    first=group[0]
+    if first.get("role")=="tool":return False
+    if first.get("role")!="assistant" or not first.get("tool_calls"):return not any(item.get("role")=="tool" for item in group)
+    expected={item.get("id") for item in first.get("tool_calls",[]) if item.get("id")}
+    actual={item.get("tool_call_id") for item in group[1:] if item.get("role")=="tool"}
+    return bool(expected) and expected==actual and len(group)==1+len(expected)
+
+
 def pack_messages(messages: Iterable[dict[str, Any]], profile: ModelContextProfile, *, tools: Any=(), attachments: Any=(), tokenizer: Callable[[str], int] | None=None) -> PackedContext:
     source = [dict(item) for item in messages]
     count = (lambda value: tokenizer(json.dumps(value, ensure_ascii=False, separators=(",", ":")))) if tokenizer else conservative_tokens
@@ -58,9 +67,10 @@ def pack_messages(messages: Iterable[dict[str, Any]], profile: ModelContextProfi
     mandatory_indices = {0, len(groups)-1} if groups else set()
     for index, group in enumerate(groups):
         if any(item.get("_smara_mandatory") for item in group): mandatory_indices.add(index)
+    if any(not _protocol_complete(groups[index]) for index in mandatory_indices):raise ContextOverflow("mandatory tool protocol group is incomplete")
     selected_indices = set(mandatory_indices)
     if overhead + count([groups[index] for index in sorted(selected_indices)]) > available: raise ContextOverflow("mandatory task state does not fit the selected model context")
-    remaining = [index for index in range(len(groups)) if index not in mandatory_indices]
+    remaining = [index for index in range(len(groups)) if index not in mandatory_indices and _protocol_complete(groups[index])]
     for index in reversed(remaining):
         candidate = [groups[i] for i in sorted(selected_indices | {index})]
         if overhead + count(candidate) <= available: selected_indices.add(index)

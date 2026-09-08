@@ -154,7 +154,13 @@ def _parse_plan(text: str) -> dict[str, Any] | None:
 
 def _compact_history(history: list[dict[str, Any]], *, max_chars: int = MAX_LOCAL_HISTORY_CHARS) -> list[dict[str, Any]]:
     """Pack complete protocol groups within a conservative local budget."""
-    items = [dict(item) for item in history if isinstance(item, dict) and isinstance(item.get("content"), str)]
+    items = []
+    for item in history:
+        if not isinstance(item,dict) or not isinstance(item.get("content"),str):continue
+        normalized=dict(item)
+        if normalized.get("role")=="tool" and not normalized.get("tool_call_id"):
+            normalized["role"]="user";normalized["_smara_local_tool"]=True
+        items.append(normalized)
     from .context_packing import ModelContextProfile, pack_messages
     profile = ModelContextProfile("unknown:local", max_chars + 64, 0, safety_margin=32, protocol_overhead=32)
     return list(pack_messages(items, profile).messages)
@@ -170,7 +176,7 @@ def _messages_from_history(history: list[dict[str, Any]]) -> list[dict[str, str]
         content = item.get("content")
         if not isinstance(content, str) or not content.strip():
             continue
-        if role == "tool":
+        if role == "tool" or item.get("_smara_local_tool"):
             # The shared loop intentionally does not retain provider-specific
             # tool-call IDs. Present results as a bounded user-visible turn so
             # Ollama, Sarvam, GLM, and other compatible gateways all accept it.

@@ -22,6 +22,7 @@ class ContinuationState:
     uncertain_call_ids: tuple[str, ...] = ()
     active_handles: tuple[Mapping[str, Any], ...] = ()
     usage: Mapping[str, Any] = field(default_factory=dict)
+    remaining_budget: Mapping[str, Any] = field(default_factory=dict)
     next_action: str = ""
     parent_checkpoint_id: str | None = None
 

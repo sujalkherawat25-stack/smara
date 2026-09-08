@@ -13,6 +13,7 @@ import enum
 import json
 import logging
 import multiprocessing
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -215,6 +216,9 @@ class SubagentWorker:
                 child_session.close()
 
 def _worker_process_entry(worker: SubagentWorker, goal: str, context: Optional[str], output) -> None:
+    allowed={"PATH","SYSTEMROOT","WINDIR","TEMP","TMP","PATHEXT","COMSPEC","LANG","LC_ALL","SSL_CERT_FILE","REQUESTS_CA_BUNDLE"}
+    environment={key:value for key,value in os.environ.items() if key.upper() in allowed}
+    os.environ.clear();os.environ.update(environment)
     try: output.put(worker.run(goal, context).to_dict())
     except BaseException as exc: output.put({"task_id":worker.task_id,"goal":goal,"status":"FAILED","summary":"worker process failed","trace_steps":0,"duration_ms":0,"tools_used":[],"error":f"{type(exc).__name__}: {exc}"})
 
@@ -265,11 +269,14 @@ class SubagentOrchestrator:
             budget=child_budget,
         )
 
-        process_context=multiprocessing.get_context("spawn"); output=process_context.Queue(maxsize=1); process=process_context.Process(target=_worker_process_entry,args=(worker,goal,context,output),daemon=False); process.start(); process.join(timeout)
+        process_context=multiprocessing.get_context("spawn"); output=process_context.Queue(maxsize=1); process=process_context.Process(target=_worker_process_entry,args=(worker,goal,context,output),daemon=False); process.start();deadline=time.monotonic()+timeout;cancelled=False
+        while process.is_alive() and time.monotonic()<deadline:
+            process.join(.1)
+            if self.root_session is not None and self.root_session.get("cancelled",False):cancelled=True;break
         if process.is_alive():
             process.terminate(); process.join(10)
             if process.is_alive(): process.kill(); process.join(5)
-            result=DelegationResult(task_id=task_id,goal=goal,status="TIMEOUT",summary=f"Worker timed out after {timeout} seconds.",trace_steps=0,duration_ms=timeout*1000,tools_used=[],error="TimeoutError")
+            result=DelegationResult(task_id=task_id,goal=goal,status="FAILED" if cancelled else "TIMEOUT",summary="Worker cancelled by root session." if cancelled else f"Worker timed out after {timeout} seconds.",trace_steps=0,duration_ms=int((timeout if not cancelled else max(0,timeout-(deadline-time.monotonic())))*1000),tools_used=[],error="cancelled" if cancelled else "TimeoutError")
         else:
             try: result=DelegationResult(**output.get(timeout=2))
             except Exception: result=DelegationResult(task_id=task_id,goal=goal,status="FAILED",summary="Worker exited without a structured result.",trace_steps=0,duration_ms=0,tools_used=[],error=f"worker_exit_{process.exitcode}")

@@ -303,6 +303,18 @@ class SessionEngine:
     def set(self,key,value): self.db.execute("INSERT INTO state VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(key,_json(value)))
     def get(self,key,default=None):
         row=self.db.execute("SELECT value FROM state WHERE key=?",(key,)).fetchone(); return json.loads(row[0]) if row else default
+    def _elapsed_wall(self,now: float|None=None) -> float:
+        current=time.time() if now is None else now; started=float(self.get("started_wall",current)); paused=float(self.get("paused_seconds",0.0)); paused_at=self.get("paused_at")
+        end=float(paused_at) if paused_at is not None else current
+        return max(0.0,end-started-paused)
+    def pause(self) -> None:
+        with _SessionLock(self.lock_path):
+            if self.get("paused_at") is None:self.set("paused_at",time.time());self.event("paused",{"elapsed_wall":self._elapsed_wall()})
+    def resume_clock(self) -> None:
+        with _SessionLock(self.lock_path):
+            paused_at=self.get("paused_at")
+            if paused_at is not None:
+                self.set("paused_seconds",float(self.get("paused_seconds",0.0))+max(0.0,time.time()-float(paused_at)));self.set("paused_at",None);self.event("resumed",{"elapsed_wall":self._elapsed_wall()})
     def inspect(self):
         state={k:json.loads(v) for k,v in self.db.execute("SELECT key,value FROM state")}; events=[{"version":1,"session_id":self.session_id,"sequence":r[0],"type":r[1],"timestamp":r[3],"payload":json.loads(r[2])} for r in self.db.execute("SELECT sequence,type,payload,created_at FROM events ORDER BY sequence")]
         calls=[{"call_id":r[0],"position":r[1],"name":r[2],"arguments":json.loads(r[3]),"workspace_id":r[4],"mutating":bool(r[5]),"state":r[6],"result":json.loads(r[7]) if r[7] else None,"before_revision":r[8],"after_revision":r[9]} for r in self.db.execute("SELECT call_id,position,name,arguments,workspace_id,mutating,state,result,before_revision,after_revision FROM calls ORDER BY position")]
@@ -322,7 +334,7 @@ class SessionEngine:
             if self.get("request") is None: raise ValueError("uninitialized session")
             return
         if self.inspect()["calls"]: raise ValueError("session exists; resume it")
-        self.set("request",request); self.set("started_wall",time.time()); self.set("usage",{"tool_calls":0,"model_calls":0,"billed_tokens":0,"dollars":0}); self.set("budget",asdict(self.budget)); self.event("started",{"request":request,"engine_version":self.VERSION})
+        self.set("request",request); self.set("started_wall",time.time()); self.set("paused_seconds",0.0); self.set("paused_at",None); self.set("usage",{"tool_calls":0,"model_calls":0,"billed_tokens":0,"dollars":0}); self.set("budget",asdict(self.budget)); self.event("started",{"request":request,"engine_version":self.VERSION})
         for pos,raw in enumerate(calls):
             cid=str(raw.get("call_id") or f"{self.session_id}-{pos}"); name=str(raw.get("name") or ""); args=raw.get("arguments",raw.get("args",{})); args=args if isinstance(args,dict) else {"__invalid__":args}; wid=str(raw.get("workspace_id") or self.workspace)
             self.db.execute("INSERT INTO calls VALUES(?,?,?,?,?,?,?,NULL,NULL,NULL)",(cid,pos,name,_json(args),wid,int(name in MUTATING_TOOLS or name=="agent_turn"),"pending"))
@@ -334,15 +346,16 @@ class SessionEngine:
         """Initialize a step-wise agent session without an opaque agent_turn."""
         with _SessionLock(self.lock_path):
             if self.get("request") is None:
-                self.set("request",request); self.set("started_wall",time.time()); self.set("usage",{"tool_calls":0,"model_calls":0,"billed_tokens":0,"dollars":0}); self.set("budget",asdict(self.budget)); self.event("started",{"request":request,"engine_version":self.VERSION,"mode":"incremental"})
+                self.set("request",request); self.set("started_wall",time.time()); self.set("paused_seconds",0.0); self.set("paused_at",None); self.set("usage",{"tool_calls":0,"model_calls":0,"billed_tokens":0,"dollars":0}); self.set("budget",asdict(self.budget)); self.event("started",{"request":request,"engine_version":self.VERSION,"mode":"incremental"})
             elif self.get("request") != request:
                 raise ValueError("session objective does not match persisted request")
     def reserve_model_call(self, estimated_tokens: int, estimated_dollars: float=0.0) -> str:
         """Atomically reserve aggregate model budget before provider dispatch."""
         with _SessionLock(self.lock_path):
-            budget=Budget(**self.get("budget",asdict(self.budget))); usage=self.get("usage",{}); started=float(self.get("started_wall",time.time()))
+            budget=Budget(**self.get("budget",asdict(self.budget))); usage=self.get("usage",{})
             if self.get("cancelled",False): raise BudgetExceeded("cancelled")
-            if time.time()-started >= budget.wall_seconds: raise BudgetExceeded("wall_seconds")
+            if self.get("paused_at") is not None: raise BudgetExceeded("paused")
+            if self._elapsed_wall() >= budget.wall_seconds: raise BudgetExceeded("wall_seconds")
             if int(usage.get("model_calls",0))+1 > budget.model_calls: raise BudgetExceeded("model_calls")
             conservative=max(1,int(estimated_tokens))
             if int(usage.get("billed_tokens",0))+conservative > budget.billed_tokens: raise BudgetExceeded("billed_tokens")
@@ -351,6 +364,8 @@ class SessionEngine:
             self.event("provider_request",{"reservation_id":reservation,"estimated_tokens":conservative,"accounting_quality":"conservative"}); return reservation
     def reserve_child_budget(self, allocation: Budget, *, depth: int, max_depth: int=1, max_fanout: int=4) -> str:
         with _SessionLock(self.lock_path):
+            if self.get("cancelled",False):raise BudgetExceeded("cancelled")
+            if self.get("paused_at") is not None:raise BudgetExceeded("paused")
             if depth>max_depth: raise BudgetExceeded("child_depth")
             root=Budget(**self.get("budget",asdict(self.budget))); used=self.get("usage",{}); reservations=self.get("child_reservations",{})
             active=[item for item in reservations.values() if item.get("status")=="reserved"]
@@ -376,6 +391,9 @@ class SessionEngine:
             reservations=self.get("model_reservations",{}); reservation=reservations.get(reservation_id)
             if not reservation: raise BudgetExceeded("missing_retry_reservation")
             budget=Budget(**self.get("budget",asdict(self.budget))); usage=self.get("usage",{}); estimate=int(reservation["estimated_tokens"])
+            if self.get("cancelled",False):raise BudgetExceeded("cancelled")
+            if self.get("paused_at") is not None:raise BudgetExceeded("paused")
+            if self._elapsed_wall()>=budget.wall_seconds:raise BudgetExceeded("wall_seconds")
             if int(usage.get("model_calls",0))+1>budget.model_calls: raise BudgetExceeded("model_calls")
             if int(usage.get("billed_tokens",0))+estimate>budget.billed_tokens: raise BudgetExceeded("billed_tokens")
             usage["model_calls"]+=1; usage["billed_tokens"]+=estimate; reservation["attempts"]+=1; self.set("usage",usage); self.set("model_reservations",reservations); self.event("provider_retry_reserved",{"reservation_id":reservation_id,"attempt":reservation["attempts"]})
@@ -391,7 +409,15 @@ class SessionEngine:
             from smara.continuation import ContinuationState
             self.set("agent_messages",messages); self.set("agent_state",dict(state))
             evidence=list(self.db.execute("SELECT id,passed FROM evidence ORDER BY created_at")); calls=self.inspect()["calls"]
-            continuation=ContinuationState(objective=str(self.get("request", "")),changed_paths=tuple(sorted({path for call in calls for path in ((call.get("result") or {}).get("changed_paths") or [])})),workspace_revision=workspace_revision(self.workspace),failed_evidence_ids=tuple(row[0] for row in evidence if not row[1]),passing_evidence_ids=tuple(row[0] for row in evidence if row[1]),pending_call_ids=tuple(call["call_id"] for call in calls if call["state"]=="pending"),uncertain_call_ids=tuple(call["call_id"] for call in calls if call["state"]=="admitted" and call["mutating"]),usage=self.get("usage",{}),next_action=str(state.get("phase") or "model"),parent_checkpoint_id=self.get("continuation_artifact_id"))
+            usage=self.get("usage",{});budget=Budget(**self.get("budget",asdict(self.budget)));remaining={"wall_seconds":max(0,budget.wall_seconds-self._elapsed_wall()),"tool_calls":max(0,budget.tool_calls-int(usage.get("tool_calls",0))),"model_calls":max(0,budget.model_calls-int(usage.get("model_calls",0))),"billed_tokens":max(0,budget.billed_tokens-int(usage.get("billed_tokens",0))),"dollars":max(0,budget.dollars-float(usage.get("dollars",0)))}
+            process_handles={}
+            for item in calls:
+                result=item.get("result") or {};meta=result.get("meta") or {};process_id=meta.get("process_id")
+                if process_id:
+                    if item["name"]=="process_cancel" or result.get("exit_code") is not None:process_handles.pop(process_id,None)
+                    else:process_handles[process_id]={"kind":"process","process_id":process_id,"call_id":item["call_id"]}
+            supplied_handles=[dict(item) for item in state.get("active_handles",()) if isinstance(item,Mapping)]
+            continuation=ContinuationState(objective=str(self.get("request", "")),constraints=tuple(state.get("constraints",())),acceptance_criteria=tuple(state.get("acceptance_criteria",())),tasks=tuple(state.get("tasks",())),decisions=tuple(state.get("decisions",())),unresolved_questions=tuple(state.get("unresolved_questions",())),changed_paths=tuple(sorted({path for call in calls for path in ((call.get("result") or {}).get("changed_paths") or [])})),workspace_revision=workspace_revision(self.workspace),failed_evidence_ids=tuple(row[0] for row in evidence if not row[1]),passing_evidence_ids=tuple(row[0] for row in evidence if row[1]),pending_call_ids=tuple(call["call_id"] for call in calls if call["state"]=="pending"),uncertain_call_ids=tuple(call["call_id"] for call in calls if call["state"]=="admitted" and call["mutating"]),active_handles=tuple([*process_handles.values(),*supplied_handles]),usage=usage,remaining_budget=remaining,next_action=str(state.get("next_action") or state.get("phase") or "model"),parent_checkpoint_id=self.get("continuation_artifact_id"))
             artifact_id,_=self.artifact_store.put_json(continuation.to_dict()); self.set("continuation_artifact_id",artifact_id); self.event("checkpoint",{"message_count":len(messages),"state_sha256":_sha(_json(state).encode()),"continuation_artifact_id":artifact_id,"parent_checkpoint_id":continuation.parent_checkpoint_id})
     def resolve_artifact(self,artifact_id: str) -> bytes:
         matches=list(self.artifacts.glob(f"{artifact_id}.*"))
@@ -403,6 +429,10 @@ class SessionEngine:
         """Journal one real model-emitted call before executing it."""
         with _SessionLock(self.lock_path):
             from smara.progress import ProgressRecord, classify, fingerprint, result_hash
+            if self.get("cancelled",False):raise BudgetExceeded("cancelled")
+            if self.get("paused_at") is not None:raise BudgetExceeded("paused")
+            budget=Budget(**self.get("budget",asdict(self.budget)))
+            if self._elapsed_wall()>=budget.wall_seconds:raise BudgetExceeded("wall_seconds")
             current_revision=workspace_revision(self.workspace); fp=fingerprint(call.name,call.arguments,current_revision)
             cache=self.get("receipt_cache",{})
             if call.name in REUSABLE_READ_TOOLS and fp in cache:
@@ -426,7 +456,7 @@ class SessionEngine:
                 if existing[0]=="admitted" and existing[2]: raise RuntimeError(f"uncertain mutation: {call.call_id}")
             else:
                 pos=self.db.execute("SELECT COALESCE(MAX(position),-1)+1 FROM calls").fetchone()[0]; self.db.execute("INSERT INTO calls VALUES(?,?,?,?,?,?,?,NULL,NULL,NULL)",(call.call_id,pos,call.name,_json(call.arguments),call.workspace_id,int(call.name in MUTATING_TOOLS or call.name in {"patch","file_write","terminal","python_execute"}),"pending"))
-            budget=Budget(**self.get("budget",asdict(self.budget))); usage=self.get("usage",{})
+            usage=self.get("usage",{})
             if int(usage.get("tool_calls",0))+1>budget.tool_calls: raise BudgetExceeded("tool_calls")
             usage["tool_calls"]=int(usage.get("tool_calls",0))+1; self.set("usage",usage); before=workspace_revision(self.workspace); self.db.execute("UPDATE calls SET state='admitted',before_revision=? WHERE call_id=?",(before,call.call_id)); self.event("tool_admitted",{"call_id":call.call_id,"name":call.name,"arguments_sha256":_sha(_json(call.arguments).encode())})
             result=executor({"call_id":call.call_id,"name":call.name,"arguments":dict(call.arguments),**dict(call.arguments)})
@@ -449,7 +479,7 @@ class SessionEngine:
             receipts=[r[0] for r in self.db.execute("SELECT result FROM calls WHERE result IS NOT NULL ORDER BY position")]; verification=tuple(json.loads(item) for item in receipts); result=RunResult(status,answer,(),verification,self.get("usage",{}),tuple(unresolved),self.session_id,self.session_id,self.VERSION).to_dict(); self.set("result",result); self.event("finished",{"status":status,"unresolved_items":list(unresolved)}); return result
     def continue_run(self,executor):
         if self.get("cancelled",False): return self.finish("cancelled",(),("cancelled by user",))
-        budget=Budget(**self.get("budget",asdict(self.budget))); usage=self.get("usage",{}); deadline=float(self.get("started_wall",time.time()))+budget.wall_seconds; receipts=[]
+        budget=Budget(**self.get("budget",asdict(self.budget))); usage=self.get("usage",{}); receipts=[]
         for rec in self.inspect()["calls"]:
             if rec["state"]=="completed":
                 if rec["result"]: receipts.append(rec["result"])
@@ -458,7 +488,8 @@ class SessionEngine:
                 if rec["mutating"]: return self.finish("needs_input",receipts,(f"uncertain mutation: {rec['call_id']}",))
                 self.db.execute("UPDATE calls SET state='pending' WHERE call_id=?",(rec["call_id"],))
             if self.get("cancelled",False): return self.finish("cancelled",receipts,("cancelled by user",))
-            if time.time()>=deadline or int(usage.get("tool_calls",0))>=budget.tool_calls: self.event("budget_exhausted",{}); return self.finish("budget_exhausted",receipts,("budget exhausted",))
+            if self.get("paused_at") is not None:return self.finish("interrupted",receipts,("session is paused",))
+            if self._elapsed_wall()>=budget.wall_seconds or int(usage.get("tool_calls",0))>=budget.tool_calls: self.event("budget_exhausted",{}); return self.finish("budget_exhausted",receipts,("budget exhausted",))
             usage["tool_calls"]=int(usage.get("tool_calls",0))+1; self.set("usage",usage); before=workspace_revision(self.workspace)
             self.db.execute("UPDATE calls SET state='admitted',before_revision=? WHERE call_id=?",(before,rec["call_id"])); self.event("tool_admitted",{"call_id":rec["call_id"],"name":rec["name"],"arguments_sha256":_sha(_json(rec["arguments"]).encode())})
             call=ToolCall(rec["call_id"],rec["name"],rec["arguments"],rec["workspace_id"])

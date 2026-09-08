@@ -1,10 +1,11 @@
 {
   "version": 1,
+  "inventory": {"path":"tests/evals/inventory.json","sha256":"3cee07ed249992a642943ab598056861edf4fe4ae0f883134ff12d3eb545003b"},
   "capabilities": {
     "durable_local_coding": {"status":"verified","suite":"tests/test_h3_durable_agent_integration.py"},
     "context_continuation": {"status":"verified","suite":"tests/evals/local_execution/manifest.json"},
     "adaptive_research_core": {"status":"experimental","suite":"tests/test_h4_research_graph.py"},
-    "stateful_browser": {"status":"experimental","suite":"tests/test_h5_managed_browser.py"},
+    "stateful_browser": {"status":"verified_local","suite":"tests/test_h5_managed_browser.py","scorecard":"artifacts/h5-browser-strengthened-repeat3.xml"},
     "local_transport": {"status":"verified","suite":"tests/test_h7_release_boundary.py"},
     "isolated_desktop": {"status":"unavailable","contract_suite":"tests/test_h5_isolated_desktop_contract.py","blocker":"disposable VM transport not configured"},
     "delegation": {"status":"experimental_opt_in","blocker":"matched-budget positive ablation not executed"},

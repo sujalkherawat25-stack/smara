@@ -27,6 +27,14 @@ def test_mandatory_state_overflow_is_recoverable_error():
     with pytest.raises(ContextOverflow): pack_messages([{"role":"user","content":"x"*100,"_smara_mandatory":True}],profile)
 
 
+def test_incomplete_or_orphan_tool_protocol_is_never_submitted():
+    profile=ModelContextProfile("bound",1000,100)
+    with pytest.raises(ContextOverflow,match="protocol"):
+        pack_messages([{"role":"user","content":"x"},{"role":"assistant","content":"","tool_calls":[{"id":"missing"}]}],profile)
+    with pytest.raises(ContextOverflow,match="protocol"):
+        pack_messages([{"role":"user","content":"x"},{"role":"tool","tool_call_id":"orphan","content":"bad"}],profile)
+
+
 def test_continuation_round_trip_preserves_evidence_and_budget():
     state=ContinuationState(objective="repair",constraints=("keep api",),passing_evidence_ids=("sha",),usage={"tool_calls":3},next_action="test")
     restored=ContinuationState.from_dict(json.loads(json.dumps(state.to_dict())))
@@ -61,3 +69,6 @@ def test_h3_fixture_manifest_definitions_are_tamper_evident():
     for case in manifest["cases"]:
         definition="|".join((case["id"],case["fixture"],case["validator"])).encode()
         assert hashlib.sha256(definition).hexdigest()==case["definition_sha256"]
+        fixture_path=Path(__file__).parent/case["test"].split("::",1)[0].removeprefix("tests/")
+        assert hashlib.sha256(fixture_path.read_bytes()).hexdigest()==case["fixture_sha256"]
+        assert case["test"].split("::",1)[1].startswith("test_"+case["id"].lower())

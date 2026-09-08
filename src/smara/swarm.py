@@ -22,7 +22,7 @@ from typing import Any, Callable, Optional
 from .code_graph import CodeGraph
 from .coding_memory import CodingMemoryEngine
 from .dual_plane_memory import DualPlaneMemoryBridge
-from .subagent_orchestrator import DelegationResult, SubagentRole, SubagentWorker
+from .subagent_orchestrator import DelegationResult, SubagentOrchestrator, SubagentRole
 
 
 class SwarmAgentRole(str, enum.Enum):
@@ -151,25 +151,17 @@ class ImplementerAgent:
     def __init__(self, workspace_root: Path):
         self.workspace = workspace_root
 
-    def execute_plan(self, plan: ArchitectPlan) -> tuple[list[str], DelegationResult, list[SwarmMessage]]:
-        config = _worker_config()
-        worker = SubagentWorker(
-            task_id=f"swarm-implementer-{int(time.time() * 1000)}",
-            role=SubagentRole.CODER,
-            api_key=config["api_key"],
-            base_url=str(config["base_url"]),
-            model=str(config["model"]),
-            max_iterations=12,
-            isolate_worktree=True,
-            workspace_root=self.workspace,
-        )
-        result = worker.run(
+    def execute_plan(self, plan: ArchitectPlan, orchestrator: SubagentOrchestrator) -> tuple[list[str], DelegationResult, list[SwarmMessage]]:
+        result = orchestrator.delegate(
             goal=(
                 f"Implement and verify this objective: {plan.objective}\n"
                 "Use only Smara's typed local tools. Inspect before editing; reproduce the issue; make a minimal "
                 "patch; run focused checks; and return a precise summary. Do not claim a change without a real diff."
             ),
             context=json.dumps(plan.to_dict(), ensure_ascii=False),
+            role=SubagentRole.CODER,
+            max_iterations=12,
+            timeout=360,
         )
         files = _files_from_diff(result.worktree_diff)
         message = SwarmMessage(
@@ -193,25 +185,17 @@ class VerificationAgent:
     def __init__(self, workspace_root: Path):
         self.workspace = workspace_root
 
-    def verify(self, plan: ArchitectPlan, files: list[str], implementation: DelegationResult) -> tuple[bool, int, int, bool, DelegationResult, list[SwarmMessage]]:
-        config = _worker_config()
-        worker = SubagentWorker(
-            task_id=f"swarm-verifier-{int(time.time() * 1000)}",
-            role=SubagentRole.TESTER,
-            api_key=config["api_key"],
-            base_url=str(config["base_url"]),
-            model=str(config["model"]),
-            max_iterations=8,
-            isolate_worktree=True,
-            workspace_root=self.workspace,
-        )
-        result = worker.run(
+    def verify(self, plan: ArchitectPlan, files: list[str], implementation: DelegationResult, orchestrator: SubagentOrchestrator) -> tuple[bool, int, int, bool, DelegationResult, list[SwarmMessage]]:
+        result = orchestrator.delegate(
             goal=(
                 f"Verify the proposed implementation for: {plan.objective}. Review the supplied diff, reproduce the "
                 "reported behavior in your isolated worktree when possible, and run focused tests or static checks. "
                 "This is verification only: do not edit production files and do not report success without evidence."
             ),
             context=json.dumps({"files": files, "implementation_summary": implementation.summary, "diff": implementation.worktree_diff or ""}, ensure_ascii=False),
+            role=SubagentRole.TESTER,
+            max_iterations=8,
+            timeout=240,
         )
         passed = result.status == "SUCCESS"
         message = SwarmMessage(
@@ -231,26 +215,18 @@ class SecurityAuditorAgent:
         self.workspace = workspace_root
         self.coding_engine = CodingMemoryEngine(self.workspace)
 
-    def audit_and_sign(self, plan: ArchitectPlan, files: list[str], verified: bool, evidence: DelegationResult) -> tuple[bool, str, list[SwarmMessage]]:
+    def audit_and_sign(self, plan: ArchitectPlan, files: list[str], verified: bool, evidence: DelegationResult, orchestrator: SubagentOrchestrator) -> tuple[bool, str, list[SwarmMessage]]:
         if not verified:
             return False, "", [SwarmMessage(SwarmAgentRole.AUDITOR, SwarmAgentRole.ARCHITECT, "AUDIT_BLOCKED", {"reason": "verification_failed", "files_modified": files})]
-        config = _worker_config()
-        worker = SubagentWorker(
-            task_id=f"swarm-auditor-{int(time.time() * 1000)}",
-            role=SubagentRole.AUDITOR,
-            api_key=config["api_key"],
-            base_url=str(config["base_url"]),
-            model=str(config["model"]),
-            max_iterations=6,
-            isolate_worktree=True,
-            workspace_root=self.workspace,
-        )
-        result = worker.run(
+        result = orchestrator.delegate(
             goal=(
                 f"Audit the proposed change for: {plan.objective}. Check path boundaries, secret leakage, unsafe "
                 "commands, and whether the verification evidence is sufficient. Return a review only; do not commit."
             ),
             context=json.dumps({"files": files, "verification": evidence.summary, "diff": evidence.worktree_diff or ""}, ensure_ascii=False),
+            role=SubagentRole.AUDITOR,
+            max_iterations=6,
+            timeout=180,
         )
         passed = result.status == "SUCCESS"
         return passed, "", [SwarmMessage(SwarmAgentRole.AUDITOR, SwarmAgentRole.ARCHITECT, "AUDIT_RESULT", {"status": result.status, "passed": passed, "review": result.summary, "error": result.error, "commit_created": False})]
@@ -270,8 +246,16 @@ class SwarmOrchestrator:
 
     def run_swarm(self, objective: str, on_event: Optional[Callable[[str, SwarmAgentRole, str], None]] = None) -> SwarmTaskResult:
         started = time.time()
-        session_id = f"swarm-{int(time.time())}"
+        session_id = f"swarm-{time.time_ns()}"
         all_messages: list[SwarmMessage] = []
+
+        from . import subagent_orchestrator as delegation_policy
+        if not delegation_policy.DELEGATION_ENABLED:
+            result=SwarmTaskResult(session_id,objective,"FAILED",int((time.time()-started)*1000),None,[],0,0,False,False,None,[])
+            self._record_session(result);return result
+        from .harness import BUDGET_PROFILES,SessionEngine
+        config=_worker_config();root_session=SessionEngine(self.workspace,session_id,budget=BUDGET_PROFILES["long"],constrained=False)
+        orchestrator=SubagentOrchestrator(api_key=config["api_key"],base_url=str(config["base_url"]),default_model=str(config["model"]),workspace_root=self.workspace,root_session=root_session)
 
         def publish(message: SwarmMessage) -> None:
             self.events.put(message)
@@ -284,47 +268,27 @@ class SwarmOrchestrator:
                 except Exception:
                     pass
 
-        notify(SwarmAgentRole.ARCHITECT, "THINKING", "Inspecting workspace graph and durable coding memory.")
-        plan, messages = self.architect.plan_objective(objective)
-        for message in messages:
-            publish(message)
-        notify(SwarmAgentRole.ARCHITECT, "COMPLETED", f"Plan created with {len(plan.target_symbols)} discovered symbols.")
-
-        notify(SwarmAgentRole.IMPLEMENTER, "WORKING", "Running the real coder worker in an isolated Git worktree.")
-        files, implementation, messages = self.implementer.execute_plan(plan)
-        for message in messages:
-            publish(message)
-        notify(SwarmAgentRole.IMPLEMENTER, "COMPLETED", f"Worker returned {implementation.status} with {len(files)} changed files.")
-
-        notify(SwarmAgentRole.VERIFIER, "WORKING", "Reviewing the implementation and running focused verification in isolation.")
-        verified, tests_run, tests_passed, healed, verification, messages = self.verifier.verify(plan, files, implementation)
-        for message in messages:
-            publish(message)
-        notify(SwarmAgentRole.VERIFIER, "COMPLETED", f"Verification worker returned {verification.status}.")
-
-        notify(SwarmAgentRole.AUDITOR, "WORKING", "Auditing the proposed diff and evidence; no commit is created automatically.")
-        audit_ok, _, messages = self.auditor.audit_and_sign(plan, files, verified, verification)
-        for message in messages:
-            publish(message)
-        notify(SwarmAgentRole.AUDITOR, "COMPLETED", "Audit passed." if audit_ok else "Audit blocked the result.")
-
-        status = "SUCCESS" if implementation.status == "SUCCESS" and verified and audit_ok else "FAILED"
-        result = SwarmTaskResult(
-            session_id=session_id,
-            objective=objective,
-            status=status,
-            duration_ms=int((time.time() - started) * 1000),
-            architect_plan=plan,
-            files_modified=files,
-            tests_run=tests_run,
-            tests_passed=tests_passed,
-            healing_applied=healed,
-            audit_passed=audit_ok,
-            commit_message=None,
-            inter_agent_messages=all_messages,
-        )
-        self._record_session(result)
-        return result
+        try:
+            notify(SwarmAgentRole.ARCHITECT, "THINKING", "Inspecting workspace graph and durable coding memory.")
+            plan, messages = self.architect.plan_objective(objective)
+            for message in messages:publish(message)
+            notify(SwarmAgentRole.ARCHITECT, "COMPLETED", f"Plan created with {len(plan.target_symbols)} discovered symbols.")
+            notify(SwarmAgentRole.IMPLEMENTER, "WORKING", "Running the real coder worker in an isolated Git worktree.")
+            files, implementation, messages = self.implementer.execute_plan(plan,orchestrator)
+            for message in messages:publish(message)
+            notify(SwarmAgentRole.IMPLEMENTER, "COMPLETED", f"Worker returned {implementation.status} with {len(files)} changed files.")
+            notify(SwarmAgentRole.VERIFIER, "WORKING", "Reviewing the implementation and running focused verification in isolation.")
+            verified, tests_run, tests_passed, healed, verification, messages = self.verifier.verify(plan, files, implementation,orchestrator)
+            for message in messages:publish(message)
+            notify(SwarmAgentRole.VERIFIER, "COMPLETED", f"Verification worker returned {verification.status}.")
+            notify(SwarmAgentRole.AUDITOR, "WORKING", "Auditing the proposed diff and evidence; no commit is created automatically.")
+            audit_ok, _, messages = self.auditor.audit_and_sign(plan, files, verified, verification,orchestrator)
+            for message in messages:publish(message)
+            notify(SwarmAgentRole.AUDITOR, "COMPLETED", "Audit passed." if audit_ok else "Audit blocked the result.")
+            status = "SUCCESS" if implementation.status == "SUCCESS" and verified and audit_ok else "FAILED"
+            result = SwarmTaskResult(session_id,objective,status,int((time.time()-started)*1000),plan,files,tests_run,tests_passed,healed,audit_ok,None,all_messages)
+            self._record_session(result);return result
+        finally:root_session.close()
 
     def _record_session(self, result: SwarmTaskResult) -> None:
         self.sessions_path.parent.mkdir(parents=True, exist_ok=True)

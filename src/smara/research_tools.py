@@ -196,6 +196,7 @@ class ResearchPass:
     failed: int
     evidence: list[dict]
     graph: dict
+    retrieval_failures: list[dict]
 
 
 class DeepResearchTool:
@@ -392,6 +393,7 @@ class DeepResearchTool:
                         f"EVIDENCE:\n{hit.snippet[:1200]}\nLIMITATION: page fetch failed or was blocked; do not treat this as verified page text."
                     )
                     evidence_record=evidence_index.add(kind="search_snippet",url=url,content=hit.snippet.encode(),text=hit.snippet[:1200])
+                    evidence_index.record_failure(url,f"{type(result).__name__}: {result}")
                 evidence_ids.append(evidence_record.id)
             packed = "\n\n---\n\n".join(blocks)
             if len(packed) > self.total_chars:
@@ -418,6 +420,7 @@ class DeepResearchTool:
                 failed=failed_count,
                 evidence=[asdict(evidence_index.records[item]) for item in evidence_ids],
                 graph=graph.to_dict(),
+                retrieval_failures=list(evidence_index.failures),
             )
         finally:
             if owns_client:

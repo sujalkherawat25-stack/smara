@@ -1440,10 +1440,16 @@ class SmaraAutonomousAgent:
 
         reservation_id = None
         if self.session_engine is not None:
-            # H3.1 replaces this provider-agnostic estimate with model-specific
-            # complete-request tokenization. Until then reserve the full output
-            # plus a conservative four-byte input estimate and mark it as such.
-            reservation_id = self.session_engine.reserve_model_call((len(data) + 3) // 4 + max_tokens)
+            reservation_id = self.session_engine.reserve_model_call(packed.input_tokens + max_tokens)
+        def retry_wait(delay: float) -> None:
+            if self.session_engine is None:
+                time.sleep(delay);return
+            deadline=time.monotonic()+delay
+            while time.monotonic()<deadline:
+                if self.session_engine is not None and self.session_engine.get("cancelled",False):
+                    from smara.harness import BudgetExceeded
+                    raise BudgetExceeded("cancelled")
+                time.sleep(min(.05,max(0.0,deadline-time.monotonic())))
         retry_deadline = time.monotonic() + 180.0
         retries = 0
         for attempt in range(3):
@@ -1454,6 +1460,9 @@ class SmaraAutonomousAgent:
                 with urllib.request.urlopen(req, timeout=min(90.0, remaining)) as resp:
                     response = json.loads(resp.read().decode("utf-8"))
                     if self.session_engine is not None:
+                        if self.session_engine.get("cancelled",False):
+                            from smara.harness import BudgetExceeded
+                            raise BudgetExceeded("cancelled")
                         usage = response.get("usage") or {}; actual = usage.get("total_tokens")
                         self.session_engine.reconcile_model_call(reservation_id,actual_tokens=int(actual) if actual is not None else None,provider_request_id=resp.headers.get("x-request-id") if getattr(resp,"headers",None) else None,status="ok",retries=retries)
                     return response
@@ -1475,9 +1484,8 @@ class SmaraAutonomousAgent:
                 if time.monotonic() + delay >= retry_deadline:
                     if self.session_engine is not None: self.session_engine.reconcile_model_call(reservation_id,actual_tokens=None,provider_request_id=None,status="retry_deadline",retries=retries)
                     raise RuntimeError(f"Model API HTTP {he.code}: retry deadline exhausted")
-                if self.session_engine is not None:
-                    self.session_engine.reserve_model_retry(reservation_id)
-                time.sleep(delay)
+                retry_wait(delay)
+                if self.session_engine is not None:self.session_engine.reserve_model_retry(reservation_id)
             except Exception as e:
                 logger.warning(f"Model API Request Error (attempt {attempt+1}): {e}")
                 retries = attempt + 1
@@ -1487,9 +1495,8 @@ class SmaraAutonomousAgent:
                 delay = min(0.5 * (2**attempt), 2.0)
                 if time.monotonic() + delay >= retry_deadline:
                     raise
-                if self.session_engine is not None:
-                    self.session_engine.reserve_model_retry(reservation_id)
-                time.sleep(delay)
+                retry_wait(delay)
+                if self.session_engine is not None:self.session_engine.reserve_model_retry(reservation_id)
 
         raise RuntimeError("Model API: Max retries exceeded")
 
@@ -1693,6 +1700,7 @@ class SmaraAutonomousAgent:
             # If tool calls were generated
             if tool_calls:
                 clean_msg = dict(msg)
+                clean_msg.setdefault("role", "assistant")
                 if clean_msg.get("content") is None:
                     clean_msg["content"] = ""
                 messages.append(clean_msg)
@@ -1751,9 +1759,6 @@ class SmaraAutonomousAgent:
                         "name": fn_name,
                         "content": str(obs)
                     })
-
-                if self.session_engine is not None:
-                    self.session_engine.checkpoint(messages, {"phase": "model", "iteration": iteration, "tools_used": tools_used, "pending_verification": pending_verification})
 
                 consecutive_no_tool = 0
                 if self.session_engine is not None:

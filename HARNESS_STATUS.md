@@ -122,10 +122,11 @@ A managed real Chromium backend, fail-closed isolated-VM desktop contract,
 bounded process delegation core, quarantined skill candidates, and an
 authenticated/idempotent local command transport are implemented.
 
-Latest full source gate: **474 passed, 1 skipped, 2 existing JWT-key warnings
-in 90.05s**. The managed-browser suite passed three clean repetitions of 25
-tests. The final Windows wheel SHA-256 is
-`9072f2a7cf12d541128483b36bea39018e342a7a8a4ae5e9f6059c75955f45b9`;
+Latest full source gate: **495 passed, 1 skipped, 2 existing JWT-key warnings
+in 100.62s**. The strengthened managed-browser B01-B20 suite passed three
+clean-context repetitions. The desktop Rust bridge also passed a clean-target
+`cargo check --locked`. The final Windows wheel SHA-256 is
+`ee3c79ec6b45317e4174d04dd250adb0a36cc917fd062426fd28db43f3f659cd`;
 it installed and completed a canonical engine task from a Unicode/space path.
 
 The detailed evidence and honest blocked boundary are in
