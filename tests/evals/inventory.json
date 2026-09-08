@@ -4,7 +4,7 @@
   "historical_172_cases_recovered": false,
   "total_declared_cases": 69,
   "categories": [
-    {"id":"h3_reliability","owner":"harness","count":8,"status":"verified","manifest":"tests/evals/local_execution/manifest.json","manifest_sha256":"06f9f45a1571f04a5b8552b3b7586d7f26861630497121999c5b91f70d30f3b5","fixture":"tests/test_h3_reliability_cases.py","fixture_sha256":"1a65ec420928413b15bd29052bdf5f1d110f47940933f6d655c927a49c40025a"},
+    {"id":"h3_reliability","owner":"harness","count":8,"status":"verified","manifest":"tests/evals/local_execution/manifest.json","manifest_sha256":"474aced0805eac42138ee79ab77fd33c3b536f4e3241c446a1f421479fdb0c41","fixture":"tests/test_h3_reliability_cases.py","fixture_sha256":"9a7c7b08b801bdc9bc4f949e91d1269c6fc2bebfbb1470db7d58b249c53f0b1b"},
     {"id":"h4_research_core","owner":"research","count":7,"status":"experimental","fixture":"tests/test_h4_research_graph.py","fixture_sha256":"455555ecc36657f08e1a6d156ea937754ce4ad37cd948efabf00df046ee92fbc"},
     {"id":"h5_browser_b01_b20","owner":"browser","count":20,"status":"verified_local_chromium","fixture":"tests/test_h5_managed_browser.py","fixture_sha256":"ef756cac1f5b1cb96b6ebf7eaafd04a0f89b3edf9266af8c519627c747e57fe8"},
     {"id":"h5_desktop_d01_d20","owner":"desktop-vm","count":20,"status":"contract_only_blocked_real_vm","fixture":"tests/test_h5_isolated_desktop_contract.py","fixture_sha256":"707638d2b4522df7bf60556aa3d8383e7dcf61df64ac01d1e58a8b75f4c6dd40"},

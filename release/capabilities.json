@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "inventory": {"path":"tests/evals/inventory.json","sha256":"3cee07ed249992a642943ab598056861edf4fe4ae0f883134ff12d3eb545003b"},
+  "inventory": {"path":"tests/evals/inventory.json","sha256":"c65a8366b493bb19dfa93f45a797a88c8ca4afad95dae8b48b439ebcb2ce5b52"},
   "capabilities": {
     "durable_local_coding": {"status":"verified","suite":"tests/test_h3_durable_agent_integration.py"},
     "context_continuation": {"status":"verified","suite":"tests/evals/local_execution/manifest.json"},

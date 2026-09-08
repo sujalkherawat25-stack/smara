@@ -349,6 +349,26 @@ class SessionEngine:
                 self.set("request",request); self.set("started_wall",time.time()); self.set("paused_seconds",0.0); self.set("paused_at",None); self.set("usage",{"tool_calls":0,"model_calls":0,"billed_tokens":0,"dollars":0}); self.set("budget",asdict(self.budget)); self.event("started",{"request":request,"engine_version":self.VERSION,"mode":"incremental"})
             elif self.get("request") != request:
                 raise ValueError("session objective does not match persisted request")
+    def begin_request(self,request:RunRequest) -> None:
+        if request.session_id!=self.session_id:raise ValueError("request session_id does not match engine")
+        requested_workspace=Path(request.workspace_id).resolve()
+        if requested_workspace!=self.workspace:raise ValueError("request workspace_id does not match engine")
+        self.budget=request.budget;self.broker=ToolBroker(self.workspace,request.capability_grant or TOOL_SCHEMAS.keys(),constrained=self.broker.constrained,process_root=self.root/self.session_id/"processes")
+        self.begin_incremental(request.user_message);self.set("attachments",list(request.attachments));self.set("output_contract",dict(request.output_contract));self.set("model_profile",request.model_profile)
+    @staticmethod
+    def _output_contract_errors(answer:str,contract:Mapping[str,Any]) -> list[str]:
+        errors=[]
+        if contract.get("required") and not answer.strip():errors.append("answer is required")
+        if "min_length" in contract and len(answer)<int(contract["min_length"]):errors.append("answer is shorter than min_length")
+        if "max_length" in contract and len(answer)>int(contract["max_length"]):errors.append("answer exceeds max_length")
+        if contract.get("required_pattern") and not re.search(str(contract["required_pattern"]),answer):errors.append("answer does not match required_pattern")
+        if contract.get("format")=="json":
+            try:value=json.loads(answer)
+            except (TypeError,ValueError):errors.append("answer is not valid JSON");value=None
+            if isinstance(value,dict):
+                missing=[str(key) for key in contract.get("required_fields",()) if key not in value]
+                if missing:errors.append("answer JSON is missing fields: "+", ".join(missing))
+        return errors
     def reserve_model_call(self, estimated_tokens: int, estimated_dollars: float=0.0) -> str:
         """Atomically reserve aggregate model budget before provider dispatch."""
         with _SessionLock(self.lock_path):
@@ -390,13 +410,14 @@ class SessionEngine:
         with _SessionLock(self.lock_path):
             reservations=self.get("model_reservations",{}); reservation=reservations.get(reservation_id)
             if not reservation: raise BudgetExceeded("missing_retry_reservation")
-            budget=Budget(**self.get("budget",asdict(self.budget))); usage=self.get("usage",{}); estimate=int(reservation["estimated_tokens"])
+            budget=Budget(**self.get("budget",asdict(self.budget))); usage=self.get("usage",{}); estimate=int(reservation["estimated_tokens"]);estimated_dollars=float(reservation.get("estimated_dollars",0.0))
             if self.get("cancelled",False):raise BudgetExceeded("cancelled")
             if self.get("paused_at") is not None:raise BudgetExceeded("paused")
             if self._elapsed_wall()>=budget.wall_seconds:raise BudgetExceeded("wall_seconds")
             if int(usage.get("model_calls",0))+1>budget.model_calls: raise BudgetExceeded("model_calls")
             if int(usage.get("billed_tokens",0))+estimate>budget.billed_tokens: raise BudgetExceeded("billed_tokens")
-            usage["model_calls"]+=1; usage["billed_tokens"]+=estimate; reservation["attempts"]+=1; self.set("usage",usage); self.set("model_reservations",reservations); self.event("provider_retry_reserved",{"reservation_id":reservation_id,"attempt":reservation["attempts"]})
+            if float(usage.get("dollars",0))+estimated_dollars>budget.dollars:raise BudgetExceeded("dollars")
+            usage["model_calls"]+=1; usage["billed_tokens"]+=estimate;usage["dollars"]=float(usage.get("dollars",0))+estimated_dollars; reservation["attempts"]+=1; self.set("usage",usage); self.set("model_reservations",reservations); self.event("provider_retry_reserved",{"reservation_id":reservation_id,"attempt":reservation["attempts"],"estimated_dollars":estimated_dollars})
     def reconcile_model_call(self,reservation_id: str,*,actual_tokens: int|None,provider_request_id: str|None,status: str,retries: int=0) -> None:
         # Unknown provider usage remains charged at the conservative reservation.
         with _SessionLock(self.lock_path):
@@ -476,6 +497,8 @@ class SessionEngine:
         with _SessionLock(self.lock_path):
             revision=workspace_revision(self.workspace); mutated=self.db.execute("SELECT COUNT(*) FROM calls WHERE mutating=1 AND state='completed' AND COALESCE(before_revision,'')<>COALESCE(after_revision,'')").fetchone()[0]>0; verified=self.db.execute("SELECT COUNT(*) FROM evidence WHERE passed=1 AND subject_revision=? AND scope IN ('focused','full')",(revision,)).fetchone()[0]>0
             if status=="completed" and mutated and not verified: status="needs_input"; unresolved=tuple(unresolved)+("workspace changes are unverified at current revision",)
+            contract_errors=self._output_contract_errors(answer,self.get("output_contract",{}))
+            if status=="completed" and contract_errors:status="needs_input";unresolved=tuple(unresolved)+tuple(contract_errors)
             receipts=[r[0] for r in self.db.execute("SELECT result FROM calls WHERE result IS NOT NULL ORDER BY position")]; verification=tuple(json.loads(item) for item in receipts); result=RunResult(status,answer,(),verification,self.get("usage",{}),tuple(unresolved),self.session_id,self.session_id,self.VERSION).to_dict(); self.set("result",result); self.event("finished",{"status":status,"unresolved_items":list(unresolved)}); return result
     def continue_run(self,executor):
         if self.get("cancelled",False): return self.finish("cancelled",(),("cancelled by user",))

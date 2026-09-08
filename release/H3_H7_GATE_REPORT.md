@@ -13,7 +13,7 @@ Environment: Windows, Python 3.14.0, Playwright 1.62.0.
 - H3 fixture inventory: R25-R32 definitions are versioned and carry a checked
   SHA-256 over each ID/fixture/validator definition and executable fixture.
   Manifest SHA-256:
-  `06f9f45a1571f04a5b8552b3b7586d7f26861630497121999c5b91f70d30f3b5`.
+  `474aced0805eac42138ee79ab77fd33c3b536f4e3241c446a1f421479fdb0c41`.
 - H4 core: bounded dependency graph, persisted typed evidence index, discovery-
   only snippet handling, exact offsets/content hashes, OCR uncertainty and
   duplicate-publication retention. A sealed deterministic corpus now covers
@@ -47,7 +47,7 @@ PYTHONPATH=src .venv/Scripts/python.exe -m compileall -q src/smara benchmarks
 # passed
 
 PYTHONPATH=src .venv/Scripts/python.exe -m pytest -q
-# 495 passed, 1 skipped, 2 warnings in 100.62s
+# 497 passed, 1 skipped, 2 warnings in 97.31s
 
 # strengthened tests/test_h5_managed_browser.py against installed Chrome
 # 25 passed in 60.33s; 25 passed in successful full gate; 25 passed in 63.25s
@@ -57,7 +57,7 @@ CARGO_TARGET_DIR=artifacts/cargo-h7-check cargo check --locked
 
 .venv/Scripts/python.exe -m pip wheel . --no-deps --wheel-dir artifacts/final-wheels
 # smara-0.1.0-py3-none-any.whl
-# SHA-256 ee3c79ec6b45317e4174d04dd250adb0a36cc917fd062426fd28db43f3f659cd
+# SHA-256 d712bea624a2a352e8fe4e9adf48c8fa80735b16039101592bf7bd7346206bbb
 
 artifacts/h7-smoke-venv/Scripts/smara.exe --workspace "artifacts/Unicode Workspace Ω" doctor --json
 # ok=true; workspace writable; SQLite WAL and engine checks pass

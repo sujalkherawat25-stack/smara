@@ -1440,7 +1440,8 @@ class SmaraAutonomousAgent:
 
         reservation_id = None
         if self.session_engine is not None:
-            reservation_id = self.session_engine.reserve_model_call(packed.input_tokens + max_tokens)
+            conservative_cost=max(0.000001,float(os.getenv("SMARA_MODEL_ESTIMATED_CALL_DOLLARS","0.01")))
+            reservation_id = self.session_engine.reserve_model_call(packed.input_tokens + max_tokens,conservative_cost)
         def retry_wait(delay: float) -> None:
             if self.session_engine is None:
                 time.sleep(delay);return

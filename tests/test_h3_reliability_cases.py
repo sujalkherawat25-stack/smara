@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from smara.context_packing import ModelContextProfile, pack_messages
-from smara.harness import Budget, BudgetExceeded, SessionEngine, ToolCall, ToolResult
+from smara.harness import Budget, BudgetExceeded, RunRequest, SessionEngine, ToolCall, ToolResult
 from smara.progress import ProgressRecord, classify
 
 
@@ -94,3 +94,9 @@ def test_r32_pause_budget_and_cancel_survive_restart(tmp_path: Path):
     with pytest.raises(BudgetExceeded,match="cancelled"):reopened.execute_incremental(call(tmp_path,"after","file_read",file_path="x"),lambda raw:executed.append(1))
     with pytest.raises(BudgetExceeded,match="cancelled"):reopened.reserve_model_call(1)
     assert not executed
+
+
+def test_non_coding_output_contract_is_independently_enforced(tmp_path: Path):
+    request=RunRequest("contract",str(tmp_path.resolve()),"return JSON",output_contract={"format":"json","required_fields":["answer"]})
+    session=SessionEngine(tmp_path,"contract");session.begin_request(request)
+    rejected=session.finish_incremental("completed","not json");assert rejected["status"]=="needs_input" and "valid JSON" in rejected["unresolved_items"][0]

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from smara.autonomous_agent import SmaraAutonomousAgent
-from smara.harness import Budget, SessionEngine, ToolCall, ToolResult
+from smara.harness import Budget, BudgetExceeded, SessionEngine, ToolCall, ToolResult
 
 
 class Response:
@@ -85,7 +85,6 @@ def test_persisted_tool_result_is_replayed_without_duplicate_mutation(tmp_path: 
 
 
 def test_cancellation_during_provider_retry_prevents_next_dispatch(tmp_path: Path,monkeypatch):
-    from smara.harness import BudgetExceeded
     session=SessionEngine(tmp_path,"provider-cancel",budget=Budget(60,2,3,500_000,1));session.begin_incremental("cancel")
     calls=[]
     def urlopen(*args,**kwargs):
@@ -94,3 +93,14 @@ def test_cancellation_during_provider_retry_prevents_next_dispatch(tmp_path: Pat
     agent=SmaraAutonomousAgent(api_key="fake",workspace_root=tmp_path,session_engine=session)
     with pytest.raises(BudgetExceeded,match="cancelled"):agent._call_model_api([{"role":"user","content":"x"}],max_tokens=32)
     assert calls==[1]
+
+
+def test_retry_reserves_cost_before_second_provider_dispatch(tmp_path: Path,monkeypatch):
+    import io
+    session=SessionEngine(tmp_path,"provider-cost",budget=Budget(60,2,3,500_000,.015));session.begin_incremental("cost")
+    calls=[]
+    def urlopen(*args,**kwargs):
+        calls.append(1);raise urllib.error.HTTPError("https://provider",429,"limited",{"Retry-After":"0"},io.BytesIO(b"limited"))
+    monkeypatch.setattr("urllib.request.urlopen",urlopen);agent=SmaraAutonomousAgent(api_key="fake",workspace_root=tmp_path,session_engine=session)
+    with pytest.raises(BudgetExceeded,match="dollars"):agent._call_model_api([{"role":"user","content":"x"}],max_tokens=32)
+    assert calls==[1] and session.get("usage")["dollars"]==pytest.approx(.01)
