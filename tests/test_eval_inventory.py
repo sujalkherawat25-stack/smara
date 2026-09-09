@@ -5,7 +5,7 @@ from pathlib import Path
 
 def test_eval_inventory_counts_hashes_and_blocked_denominators():
     root=Path(__file__).parents[1];inventory=json.loads((root/"tests/evals/inventory.json").read_text(encoding="utf-8"));categories=inventory["categories"]
-    assert inventory["total_declared_cases"]==sum(item["count"] for item in categories)==112
+    assert inventory["total_declared_cases"]==sum(item["count"] for item in categories)==118
     assert inventory["historical_172_cases_recovered"] is False
     for item in categories:
         fixture=root/item["fixture"];assert fixture.is_file()

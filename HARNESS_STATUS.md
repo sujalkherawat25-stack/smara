@@ -168,3 +168,12 @@ compaction recovery. The eight-journey gate plus H2/context regressions passed
 remain separate release measurements; see `release/W3_EXECUTION_GATE_REPORT.md`.
 The W3 full regression result is **541 passed, 1 skipped, 2 existing JWT-key
 warnings in 145.47 seconds**.
+
+## W4 Windows package update (2026-09-09)
+
+Functional capability discovery, explicit research/local profiles, and canonical
+application envelope parity are implemented. The final wheel was installed outside
+the source tree and passed doctor plus research/browser/file/terminal smokes from a
+Unicode/space workspace without `PYTHONPATH`. See
+`release/W4_WINDOWS_PACKAGE_REPORT.md`. Provider-backed quality, OCR, Linux and VM
+desktop remain unmeasured/unavailable and are not promoted.

@@ -1041,20 +1041,8 @@ def main(argv: list[str] | None = None) -> int:
     cmd = getattr(parsed_args, "command", None) or getattr(parsed_args, "subcommand", None)
 
     if cmd == "doctor":
-        import shutil
-        from .harness import SessionEngine
-        checks = {
-            "workspace": {"ok": workspace.is_dir(), "path": str(workspace)},
-            "workspace_writable": {"ok": os.access(workspace, os.W_OK)},
-            "shell": {"ok": bool(shutil.which("powershell.exe" if os.name == "nt" else "bash"))},
-            "sqlite_wal": {"ok": True, "version": sqlite3.sqlite_version},
-            "provider_key": {"ok": bool(os.getenv("SMARA_MODEL_SARVAM_API_KEY") or os.getenv("SARVAM_API_KEY")), "value": "configured" if (os.getenv("SMARA_MODEL_SARVAM_API_KEY") or os.getenv("SARVAM_API_KEY")) else "not configured"},
-            "browser_backend": {"ok": bool(shutil.which("chrome") or shutil.which("chromium") or shutil.which("msedge"))},
-            "desktop_backend": {"ok": False, "value": "not installed"},
-            "memory_provider": {"ok": True, "value": "optional"},
-            "engine": {"ok": True, "version": SessionEngine.VERSION},
-        }
-        payload = {"ok": all(item["ok"] for key, item in checks.items() if key not in {"provider_key", "browser_backend", "desktop_backend"}), "checks": checks}
+        from .doctor import diagnose
+        payload=diagnose(workspace)
         print(json.dumps(payload, indent=2)); return 0 if payload["ok"] else 1
 
     if cmd in {"resume", "cancel", "inspect"}:

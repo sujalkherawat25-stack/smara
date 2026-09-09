@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "inventory": {"path":"tests/evals/inventory.json","sha256":"d10728d8074528e8ca673f0e3be5a0a4c574040a2d90c72c9d4b9d358b4e915d"},
+  "inventory": {"path":"tests/evals/inventory.json","sha256":"390c14a4bd91c9e1d075fdce291d475bc158aa16c663b91fb9070b74e865fa63"},
   "capabilities": {
     "durable_local_coding": {"status":"verified","suite":"tests/test_h3_durable_agent_integration.py"},
     "context_continuation": {"status":"verified","suite":"tests/evals/local_execution/manifest.json"},
@@ -9,6 +9,7 @@
     "research_ocr": {"status":"unavailable","blocker":"pytesseract OCR extractor is not installed; unresolved scans fail closed"},
     "stateful_browser": {"status":"verified_deterministic_agent_loop","suite":"tests/evals/windows_browser/manifest.json","component_suite":"tests/test_h5_managed_browser.py","scope":"local Chromium fixture; live-site and authenticated-profile quality remain unmeasured"},
     "local_transport": {"status":"verified","suite":"tests/test_h7_release_boundary.py"},
+    "windows_installed_package": {"status":"verified","suite":"tests/evals/windows_package/manifest.json","wheel_sha256":"bf400683db637b0c04d6e512e9a541a581007acc20aede34e2bbf2a01fa68884","scope":"doctor plus deterministic research/browser/file/terminal smokes outside source tree"},
     "isolated_desktop": {"status":"unavailable","contract_suite":"tests/test_h5_isolated_desktop_contract.py","blocker":"disposable VM transport not configured"},
     "delegation": {"status":"experimental_opt_in","blocker":"matched-budget positive ablation not executed"},
     "official_gaia": {"status":"unmeasured"},

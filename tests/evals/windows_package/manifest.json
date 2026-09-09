@@ -1,0 +1,8 @@
+{"version":1,"suite":"w4-windows-package-and-discovery","cases":[
+  {"id":"W4-01","journey":"functional_doctor"},
+  {"id":"W4-02","journey":"application_transport_parity"},
+  {"id":"W4-03","journey":"installed_cli_doctor"},
+  {"id":"W4-04","journey":"installed_browser_smoke"},
+  {"id":"W4-05","journey":"installed_file_terminal_smoke"},
+  {"id":"W4-06","journey":"installed_research_claim_smoke"}
+]}
