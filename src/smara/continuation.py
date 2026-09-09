@@ -33,4 +33,7 @@ class ContinuationState:
     def from_dict(cls, value: Mapping[str, Any]) -> "ContinuationState":
         if int(value.get("version", 0)) != 1: raise ValueError("unsupported continuation version")
         fields = cls.__dataclass_fields__
-        return cls(**{key: value[key] for key in fields if key in value})
+        data={key:value[key] for key in fields if key in value}
+        for key in ("constraints","acceptance_criteria","tasks","decisions","unresolved_questions","changed_paths","failed_evidence_ids","passing_evidence_ids","research_artifact_ids","pending_call_ids","uncertain_call_ids","active_handles"):
+            if key in data:data[key]=tuple(data[key])
+        return cls(**data)

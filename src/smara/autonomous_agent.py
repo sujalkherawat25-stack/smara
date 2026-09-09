@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import collections
+import contextlib
 import hashlib
 import sys
 import uuid
@@ -999,6 +1000,12 @@ TOOL_SCHEMAS.extend([
     {"type":"function","function":{"name":"research_validate","description":"Validate the final required claim/evidence map; unsupported claims prevent completion.","parameters":{"type":"object","additionalProperties":False,"required":["claims"],"properties":{"claims":{"type":"array","maxItems":40,"items":{"type":"object","additionalProperties":False,"required":["claim","evidence_ids"],"properties":{"claim":{"type":"string"},"evidence_ids":{"type":"array","maxItems":20,"items":{"type":"string"}}}}},"require_complete":{"type":"boolean"}}}}},
 ])
 TOOL_SCHEMAS.extend([
+    {"type":"function","function":{"name":"process_start","description":"Start a durable session-owned process. Starting is not task completion; poll and independently validate its effects.","parameters":{"type":"object","additionalProperties":False,"required":["argv","cwd"],"properties":{"argv":{"type":"array","maxItems":64,"items":{"type":"string"}},"cwd":{"type":"string"},"timeout_seconds":{"type":"number"},"env":{"type":"object"}}}}},
+    {"type":"function","function":{"name":"process_poll","description":"Read one bounded process-log chunk from a cursor and inspect terminal state.","parameters":{"type":"object","additionalProperties":False,"required":["process_id"],"properties":{"process_id":{"type":"string"},"cursor":{"type":"integer"},"max_chars":{"type":"integer"}}}}},
+    {"type":"function","function":{"name":"process_stdin","description":"Write text to a running session-owned interactive process.","parameters":{"type":"object","additionalProperties":False,"required":["process_id","text"],"properties":{"process_id":{"type":"string"},"text":{"type":"string"}}}}},
+    {"type":"function","function":{"name":"process_cancel","description":"Cancel a session-owned process tree and return its terminal receipt.","parameters":{"type":"object","additionalProperties":False,"required":["process_id"],"properties":{"process_id":{"type":"string"}}}}},
+])
+TOOL_SCHEMAS.extend([
     {"type":"function","function":{"name":"browser_open","description":"Open a fresh isolated managed-browser context and navigate to a scoped URL.","parameters":{"type":"object","additionalProperties":False,"properties":{"url":{"type":"string"}}}}},
     {"type":"function","function":{"name":"browser_observe","description":"Capture current DOM-grounded element references, text and screenshot artifact.","parameters":{"type":"object","additionalProperties":False,"properties":{}}}},
     {"type":"function","function":{"name":"browser_navigate","description":"Navigate the owned browser to an HTTP(S), about, data, or workspace file URL.","parameters":{"type":"object","additionalProperties":False,"required":["url"],"properties":{"url":{"type":"string"}}}}},
@@ -1024,13 +1031,13 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
         allowed = {
             "terminal", "file_write", "patch", "python_execute", "file_read",
             "list_directory", "search_files", "code_graph",
-            "todo", "delegate_task", "dag_flow", "programmatic_tool_call"
+            "todo", "delegate_task", "dag_flow", "programmatic_tool_call", "process_start", "process_poll", "process_stdin", "process_cancel"
         }
     elif prof == "worker_coding":
         allowed = {
             "terminal", "file_write", "patch", "python_execute", "file_read",
             "list_directory", "search_files", "code_graph",
-            "todo", "programmatic_tool_call"
+            "todo", "programmatic_tool_call", "process_start", "process_poll", "process_stdin", "process_cancel"
         }
     elif prof in {"worker", "worker_verification"}:
         allowed = {
@@ -1045,6 +1052,7 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
             "research_plan", "research_search", "research_fetch", "research_inspect",
             "research_ingest_file", "research_resolve", "research_validate"
             ,"browser_open","browser_observe","browser_navigate","browser_act","browser_tabs","browser_switch","browser_scroll","browser_download","browser_close"
+            ,"process_start","process_poll","process_stdin","process_cancel"
         }
     elif prof == "web":
         allowed = {"browser_action","web_search","web_extract","web_reader_dynamic","wayback_extract","wikipedia_page","pdf_search","calculate","file_read","list_directory","programmatic_tool_call","todo"}
@@ -1163,11 +1171,15 @@ class SmaraAutonomousAgent:
         self.memory_store = get_default_memory_store()
         self._seen_tool_signatures: Dict[str, int] = collections.defaultdict(int)
         from smara.harness import ToolBroker
+        process_root=(session_engine.root/session_engine.session_id/"processes") if session_engine is not None else None
         self._execution_broker = ToolBroker(
             self.workspace_root,
-            {"read_file", "write_file", "patch_file", "run_process"},
+            {"read_file", "write_file", "patch_file", "run_process", "process_start", "process_poll", "process_write", "process_cancel"},
             constrained=False,
+            process_root=process_root,
         )
+        if session_engine is not None:
+            session_engine.register_canceller(self._cancel_owned_processes)
         from smara.research_session import CanonicalResearchSession
         research_state_path=self.workspace_root/".smara"/"research"/f"agent-{uuid.uuid4().hex}.json" if session_engine is None else None
         self._research=CanonicalResearchSession(session_engine=session_engine,state_path=research_state_path)
@@ -1218,10 +1230,18 @@ class SmaraAutonomousAgent:
             "research_inspect": self._dispatch_research_inspect,
             "research_resolve": self._dispatch_research_resolve,
             "research_validate": self._dispatch_research_validate,
+            "process_start": self._dispatch_process_start,
+            "process_poll": self._dispatch_process_poll,
+            "process_stdin": self._dispatch_process_stdin,
+            "process_cancel": self._dispatch_process_cancel,
         }
         self._admitted_tool_names = {
             schema["function"]["name"] for schema in get_tool_schemas(self.toolset)
         }
+
+    def _cancel_owned_processes(self):
+        for process_id in list(self._execution_broker.processes.processes):
+            with contextlib.suppress(Exception):self._execution_broker.processes.cancel(process_id)
 
     def _workspace_path(self, raw_path: str, *, allow_missing: bool = True) -> Path:
         """Resolve a legacy filesystem argument within this agent's workspace."""
@@ -1275,6 +1295,18 @@ class SmaraAutonomousAgent:
         scope = "full" if re.search(r"(?:^|\s)(?:pytest|npm\s+test|cargo\s+test|go\s+test)(?:\s|$)", cmd, re.I) else "none"
         result = self._execution_broker.dispatch(ToolCall(uuid.uuid4().hex, "run_process", {"argv": argv, "cwd": args.get("cwd") or ".", "timeout_seconds": timeout, "evidence_scope": scope}, str(self.workspace_root)))
         return f"[Exit Code: {result.exit_code}]\n{result.text}" if result.exit_code is not None else f"Error: {result.error_kind}: {result.text}"
+
+    def _process_result(self,name,args):
+        from smara.harness import ToolCall
+        broker=self._execution_broker
+        mapped="process_write" if name=="process_stdin" else name
+        result=broker.dispatch(ToolCall(uuid.uuid4().hex,mapped,args,str(self.workspace_root)))
+        return json.dumps({"status":result.status,"output":result.text,"exit_code":result.exit_code,"error_kind":result.error_kind,"meta":result.meta},sort_keys=True,default=str)
+
+    def _dispatch_process_start(self,args):return self._process_result("process_start",args)
+    def _dispatch_process_poll(self,args):return self._process_result("process_poll",args)
+    def _dispatch_process_stdin(self,args):return self._process_result("process_stdin",args)
+    def _dispatch_process_cancel(self,args):return self._process_result("process_cancel",args)
 
     def _dispatch_file_write(self, args: Dict[str, Any]) -> str:
         from smara.harness import ToolCall

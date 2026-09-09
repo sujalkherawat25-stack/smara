@@ -1,9 +1,10 @@
 {
   "version": 1,
-  "inventory": {"path":"tests/evals/inventory.json","sha256":"c5962bdff9563a4dd519c041062a78cf2d1959b24c69d75438093cf066f2be63"},
+  "inventory": {"path":"tests/evals/inventory.json","sha256":"d10728d8074528e8ca673f0e3be5a0a4c574040a2d90c72c9d4b9d358b4e915d"},
   "capabilities": {
     "durable_local_coding": {"status":"verified","suite":"tests/test_h3_durable_agent_integration.py"},
     "context_continuation": {"status":"verified","suite":"tests/evals/local_execution/manifest.json"},
+    "durable_process_tools": {"status":"verified_deterministic","suite":"tests/evals/windows_execution/manifest.json","restart_semantics":"runtime loss is interrupted_uncertain; no automatic mutation replay or false reattachment"},
     "adaptive_research_core": {"status":"verified_deterministic_agent_loop","suite":"tests/evals/windows_research/manifest.json","scope":"scripted model responses and sealed local fixtures; live-web/model quality remains unmeasured"},
     "research_ocr": {"status":"unavailable","blocker":"pytesseract OCR extractor is not installed; unresolved scans fail closed"},
     "stateful_browser": {"status":"verified_deterministic_agent_loop","suite":"tests/evals/windows_browser/manifest.json","component_suite":"tests/test_h5_managed_browser.py","scope":"local Chromium fixture; live-site and authenticated-profile quality remain unmeasured"},

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "suite": "w3-dependable-terminal-files-continuation",
+  "cases": [
+    {"id":"W3-01","journey":"inspect_patch_test_repair","validator":"expected JSON content"},
+    {"id":"W3-02","journey":"failed_process","validator":"nonzero terminal status"},
+    {"id":"W3-03","journey":"user_edit_conflict","validator":"hash guard and unchanged bytes"},
+    {"id":"W3-04","journey":"unicode_space_paths","validator":"exact CSV content"},
+    {"id":"W3-05","journey":"interactive_stdin","validator":"cursor-composed stdout"},
+    {"id":"W3-06","journey":"cancellation_canary","validator":"no delayed file"},
+    {"id":"W3-07","journey":"real_runtime_restart","validator":"interrupted_uncertain and not reconnectable"},
+    {"id":"W3-08","journey":"three_compaction_long_work","validator":"constraint, evidence and report content"}
+  ]
+}

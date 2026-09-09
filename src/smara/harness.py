@@ -148,7 +148,7 @@ TOOL_SCHEMAS={
  "patch_file":{"type":"object","additionalProperties":False,"required":["path","old","new"],"properties":{"path":{"type":"string"},"old":{"type":"string","minLength":1},"new":{"type":"string"},"expected_sha256":{"type":"string"},"replace_all":{"type":"boolean"}}},
  "run_process":{"type":"object","additionalProperties":False,"required":["argv"],"properties":{"argv":{"type":"array","maxItems":64,"items":{"type":"string","minLength":1,"maxLength":4000}},"cwd":{"type":"string"},"timeout_seconds":{"type":"number"},"evidence_scope":{"type":"string","enum":["none","syntax","focused","full"]},"env":{"type":"object"}}},
  "process_start":{"type":"object","additionalProperties":False,"required":["argv"],"properties":{"argv":{"type":"array","maxItems":64,"items":{"type":"string","minLength":1}},"cwd":{"type":"string"},"timeout_seconds":{"type":"number"},"env":{"type":"object"}}},
- "process_poll":{"type":"object","additionalProperties":False,"required":["process_id"],"properties":{"process_id":{"type":"string"}}},
+ "process_poll":{"type":"object","additionalProperties":False,"required":["process_id"],"properties":{"process_id":{"type":"string"},"cursor":{"type":"integer"},"max_chars":{"type":"integer"}}},
  "process_write":{"type":"object","additionalProperties":False,"required":["process_id","text"],"properties":{"process_id":{"type":"string"},"text":{"type":"string"}}},
  "process_cancel":{"type":"object","additionalProperties":False,"required":["process_id"],"properties":{"process_id":{"type":"string"}}},
  "browser_open":{"type":"object"},"browser_observe":{"type":"object"},"browser_navigate":{"type":"object"},"browser_act":{"type":"object"},"browser_tabs":{"type":"object"},"browser_switch":{"type":"object"},"browser_scroll":{"type":"object"},"browser_download":{"type":"object"},"browser_close":{"type":"object"},
@@ -168,14 +168,19 @@ class ProcessSupervisor:
         self.processes[ident]=proc; self.logs[ident]=handle
         meta={"process_id":ident,"pid":proc.pid,"cwd":str(cwd),"argv":argv,"started_at":_now(),"timeout_seconds":timeout,"log_path":str(log)}
         (self.root/f"{ident}.json").write_text(_json(meta),encoding="utf-8"); return meta
-    def poll(self,ident):
+    def poll(self,ident,cursor=0,max_chars=16000):
         meta_path=self.root/f"{ident}.json"
         if not meta_path.exists(): raise KeyError(ident)
         meta=json.loads(meta_path.read_text()); proc=self.processes.get(ident); log=Path(meta["log_path"])
-        if proc is None: return {**meta,"status":"lost","done":True,"exit_code":None,"output":log.read_text(errors="replace")[-16000:] if log.exists() else ""}
+        raw=log.read_bytes() if log.exists() else b""; cursor=max(0,min(int(cursor),len(raw))); limit=max(1,min(int(max_chars),16000)); chunk=raw[cursor:cursor+limit].decode(errors="replace"); next_cursor=min(len(raw),cursor+limit)
+        if proc is None: return {**meta,"status":"interrupted_uncertain","done":True,"exit_code":None,"output":chunk,"cursor":next_cursor,"log_size":len(raw),"reconnectable":False}
         code=proc.poll()
+        started=datetime.fromisoformat(meta["started_at"]); expired=code is None and (datetime.now(timezone.utc)-started).total_seconds()>float(meta["timeout_seconds"])
+        if expired:
+            self.kill(proc);code=proc.poll();meta["timed_out"]=True
         if code is not None: self.logs[ident].flush()
-        return {**meta,"status":"running" if code is None else "completed" if code==0 else "failed","done":code is not None,"exit_code":code,"output":log.read_text(errors="replace")[-16000:] if log.exists() else ""}
+        raw=log.read_bytes() if log.exists() else raw; chunk=raw[cursor:cursor+limit].decode(errors="replace"); next_cursor=min(len(raw),cursor+limit)
+        return {**meta,"status":"running" if code is None else "timed_out" if expired else "completed" if code==0 else "failed","done":code is not None,"exit_code":code,"output":chunk,"cursor":next_cursor,"log_size":len(raw),"reconnectable":True}
     def write(self,ident,text):
         proc=self.processes.get(ident)
         if proc is None or proc.poll() is not None or proc.stdin is None: raise RuntimeError("process is not running")
@@ -284,7 +289,7 @@ class ToolBroker:
     def do_process_start(self,a):
         argv,cwd,env,timeout=self.process_args(a); meta=self.processes.start(argv,cwd,env,timeout); return {"text":_json(meta),"meta":meta}
     def do_process_poll(self,a):
-        state=self.processes.poll(a["process_id"]); return {"status":"ok" if state.get("exit_code") in (None,0) else "error","text":state.pop("output",""),"exit_code":state.get("exit_code"),"meta":state}
+        state=self.processes.poll(a["process_id"],a.get("cursor",0),a.get("max_chars",16000)); return {"status":"ok" if state.get("exit_code") in (None,0) else "error","text":state.pop("output",""),"exit_code":state.get("exit_code"),"meta":state}
     def do_process_write(self,a):
         state=self.processes.write(a["process_id"],a["text"]); return {"text":state.pop("output",""),"exit_code":state.get("exit_code"),"meta":state}
     def do_process_cancel(self,a):

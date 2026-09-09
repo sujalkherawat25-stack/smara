@@ -157,3 +157,14 @@ All five required agent-loop journeys passed three clean-context repetitions
 (**15 passed in 31.05 seconds**). See `release/W2_BROWSER_GATE_REPORT.md`.
 This does not promote live-site quality, authenticated profiles, desktop/VM
 control, or overall Windows readiness; W3-W5 remain active.
+
+## W3 dependable execution update (2026-09-09)
+
+Canonical sessions now expose typed durable process start/poll/stdin/cancel,
+bounded cursor logs, explicit non-reattachable restart state, concurrent-edit
+hash guards, content-aware CSV/JSON/report validation, and tested three-stage
+compaction recovery. The eight-journey gate plus H2/context regressions passed
+**29 tests in 9.24 seconds**. The 30-minute soak and provider-driven long task
+remain separate release measurements; see `release/W3_EXECUTION_GATE_REPORT.md`.
+The W3 full regression result is **541 passed, 1 skipped, 2 existing JWT-key
+warnings in 145.47 seconds**.
