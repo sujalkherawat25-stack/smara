@@ -127,21 +127,30 @@ class EvidenceIndex:
     def _artifact_bytes(self,artifact_id:str|None) -> bytes|None:
         if not artifact_id or self.artifact_store is None:return None
         matches=list(Path(self.artifact_store.root).glob(f"{artifact_id}.*"))
-        if len(matches)!=1:return None
-        try:return matches[0].read_bytes()
+        if not matches:return None
+        try:
+            values=[item.read_bytes() for item in matches]
+            return values[0] if all(hashlib.sha256(item).hexdigest()==artifact_id and item==values[0] for item in values) else None
         except OSError:return None
     def validate_artifact(self,evidence_id:str) -> tuple[bool,str]:
         record=self.records.get(evidence_id)
         if record is None:return False,"missing_evidence"
         if not record.source_artifact_id:return False,"missing_source_artifact"
         if self.artifact_store is None:return False,"artifact_store_unavailable"
-        data=self._artifact_bytes(record.source_artifact_id)
-        if data is None:return False,"missing_source_artifact"
-        if hashlib.sha256(data).hexdigest()!=record.source_artifact_id:return False,"stale_source_artifact"
+        source_matches=list(Path(self.artifact_store.root).glob(f"{record.source_artifact_id}.*"))
+        if not source_matches:return False,"missing_source_artifact"
+        try:source_values=[item.read_bytes() for item in source_matches]
+        except OSError:return False,"unreadable_source_artifact"
+        if any(hashlib.sha256(item).hexdigest()!=record.source_artifact_id or item!=source_values[0] for item in source_values):return False,"stale_source_artifact"
+        data=source_values[0]
         if hashlib.sha256(data).hexdigest()!=record.content_sha256:return False,"content_hash_mismatch"
-        extracted=self._artifact_bytes(record.extraction_artifact_id)
-        if record.extraction_artifact_id and extracted is None:return False,"missing_extraction_artifact"
-        if extracted is not None and hashlib.sha256(extracted).hexdigest()!=record.extraction_sha256:return False,"stale_extraction_artifact"
+        extraction_matches=list(Path(self.artifact_store.root).glob(f"{record.extraction_artifact_id}.*")) if record.extraction_artifact_id else []
+        if record.extraction_artifact_id and not extraction_matches:return False,"missing_extraction_artifact"
+        try:extraction_values=[item.read_bytes() for item in extraction_matches]
+        except OSError:return False,"unreadable_extraction_artifact"
+        if any(hashlib.sha256(item).hexdigest()!=record.extraction_artifact_id or item!=extraction_values[0] for item in extraction_values):return False,"stale_extraction_artifact"
+        extracted=extraction_values[0] if extraction_values else None
+        if extracted is not None and hashlib.sha256(extracted).hexdigest()!=record.extraction_sha256:return False,"extraction_hash_mismatch"
         location_source=extracted if extracted is not None else data
         if not self.validate_location(evidence_id,data,extracted=location_source):return False,"invalid_passage_location"
         return True,"valid"

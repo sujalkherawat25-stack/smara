@@ -998,6 +998,17 @@ TOOL_SCHEMAS.extend([
     {"type":"function","function":{"name":"research_resolve","description":"Resolve a question only through conservative claim/evidence judgments.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","claim","evidence_ids"],"properties":{"node_id":{"type":"string"},"claim":{"type":"string"},"evidence_ids":{"type":"array","maxItems":20,"items":{"type":"string"}}}}}},
     {"type":"function","function":{"name":"research_validate","description":"Validate the final required claim/evidence map; unsupported claims prevent completion.","parameters":{"type":"object","additionalProperties":False,"required":["claims"],"properties":{"claims":{"type":"array","maxItems":40,"items":{"type":"object","additionalProperties":False,"required":["claim","evidence_ids"],"properties":{"claim":{"type":"string"},"evidence_ids":{"type":"array","maxItems":20,"items":{"type":"string"}}}}},"require_complete":{"type":"boolean"}}}}},
 ])
+TOOL_SCHEMAS.extend([
+    {"type":"function","function":{"name":"browser_open","description":"Open a fresh isolated managed-browser context and navigate to a scoped URL.","parameters":{"type":"object","additionalProperties":False,"properties":{"url":{"type":"string"}}}}},
+    {"type":"function","function":{"name":"browser_observe","description":"Capture current DOM-grounded element references, text and screenshot artifact.","parameters":{"type":"object","additionalProperties":False,"properties":{}}}},
+    {"type":"function","function":{"name":"browser_navigate","description":"Navigate the owned browser to an HTTP(S), about, data, or workspace file URL.","parameters":{"type":"object","additionalProperties":False,"required":["url"],"properties":{"url":{"type":"string"}}}}},
+    {"type":"function","function":{"name":"browser_act","description":"Act on a current observed element reference.","parameters":{"type":"object","additionalProperties":False,"required":["observation_id","ref","action"],"properties":{"observation_id":{"type":"string"},"ref":{"type":"string"},"action":{"type":"string","enum":["click","fill","select","check","upload"]},"value":{}}}}},
+    {"type":"function","function":{"name":"browser_tabs","description":"List stable tabs in the owned browser session.","parameters":{"type":"object","additionalProperties":False,"properties":{}}}},
+    {"type":"function","function":{"name":"browser_switch","description":"Switch to an owned stable tab ID and observe it.","parameters":{"type":"object","additionalProperties":False,"required":["tab_id"],"properties":{"tab_id":{"type":"string"}}}}},
+    {"type":"function","function":{"name":"browser_scroll","description":"Scroll the current page and return a fresh observation.","parameters":{"type":"object","additionalProperties":False,"properties":{"dy":{"type":"integer"}}}}},
+    {"type":"function","function":{"name":"browser_download","description":"Download from an observed link to a validated workspace-relative destination.","parameters":{"type":"object","additionalProperties":False,"required":["observation_id","ref","destination"],"properties":{"observation_id":{"type":"string"},"ref":{"type":"string"},"destination":{"type":"string"}}}}},
+    {"type":"function","function":{"name":"browser_close","description":"Close the owned managed-browser context.","parameters":{"type":"object","additionalProperties":False,"properties":{}}}},
+])
 
 
 def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
@@ -1033,6 +1044,7 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
             "file_read", "list_directory", "programmatic_tool_call", "todo",
             "research_plan", "research_search", "research_fetch", "research_inspect",
             "research_ingest_file", "research_resolve", "research_validate"
+            ,"browser_open","browser_observe","browser_navigate","browser_act","browser_tabs","browser_switch","browser_scroll","browser_download","browser_close"
         }
     elif prof == "web":
         allowed = {"browser_action","web_search","web_extract","web_reader_dynamic","wayback_extract","wikipedia_page","pdf_search","calculate","file_read","list_directory","programmatic_tool_call","todo"}
@@ -1159,6 +1171,8 @@ class SmaraAutonomousAgent:
         from smara.research_session import CanonicalResearchSession
         research_state_path=self.workspace_root/".smara"/"research"/f"agent-{uuid.uuid4().hex}.json" if session_engine is None else None
         self._research=CanonicalResearchSession(session_engine=session_engine,state_path=research_state_path)
+        from smara.browser_session import CanonicalBrowserSession
+        self._browser=CanonicalBrowserSession(self.workspace_root,session_engine=session_engine)
 
         self._tool_handlers = {
             "programmatic_tool_call": self._dispatch_programmatic_tool_call,
@@ -1188,6 +1202,15 @@ class SmaraAutonomousAgent:
             "terminal": self._dispatch_terminal,
             "file_write": self._dispatch_file_write,
             "browser_action": self._dispatch_browser_action,
+            "browser_open": self._dispatch_browser_open,
+            "browser_observe": self._dispatch_browser_observe,
+            "browser_navigate": self._dispatch_browser_navigate,
+            "browser_act": self._dispatch_browser_act,
+            "browser_tabs": self._dispatch_browser_tabs,
+            "browser_switch": self._dispatch_browser_switch,
+            "browser_scroll": self._dispatch_browser_scroll,
+            "browser_download": self._dispatch_browser_download,
+            "browser_close": self._dispatch_browser_close,
             "research_plan": self._dispatch_research_plan,
             "research_search": self._dispatch_research_search,
             "research_fetch": self._dispatch_research_fetch,
@@ -1267,7 +1290,21 @@ class SmaraAutonomousAgent:
         act = args.get("action", "scrape")
         url = args.get("url") or ""
         out_p = args.get("output_path")
-        return browser_action_tool(action=act, url=url, output_path=str(self._workspace_path(out_p)) if out_p else None)
+        if act in {"scrape","screenshot","dom_snapshot"}:
+            value=self._browser.open(url) if not self._browser.browser_session_id else self._browser.navigate(url) if url else self._browser.observe()
+            return json.dumps(value,sort_keys=True,default=str)
+        return json.dumps({"status":"error","reason":"unsupported legacy browser action; use typed managed-browser tools"},sort_keys=True)
+
+    def _browser_result(self,value:Any) -> str:return json.dumps(value,sort_keys=True,default=str)
+    def _dispatch_browser_open(self,args):return self._browser_result(self._browser.open(str(args.get("url") or "about:blank")))
+    def _dispatch_browser_observe(self,args):return self._browser_result(self._browser.observe())
+    def _dispatch_browser_navigate(self,args):return self._browser_result(self._browser.navigate(str(args.get("url") or "")))
+    def _dispatch_browser_act(self,args):return self._browser_result(self._browser.act(str(args.get("observation_id") or ""),str(args.get("ref") or ""),str(args.get("action") or ""),args.get("value")))
+    def _dispatch_browser_tabs(self,args):return self._browser_result(self._browser.tabs())
+    def _dispatch_browser_switch(self,args):return self._browser_result(self._browser.switch(str(args.get("tab_id") or "")))
+    def _dispatch_browser_scroll(self,args):return self._browser_result(self._browser.scroll(int(args.get("dy") or 600)))
+    def _dispatch_browser_download(self,args):return self._browser_result(self._browser.download(str(args.get("observation_id") or ""),str(args.get("ref") or ""),str(args.get("destination") or "")))
+    def _dispatch_browser_close(self,args):return self._browser_result(self._browser.close())
 
     def _dispatch_web_search(self, args: Dict[str, Any]) -> str:
         q = args.get("query") or args.get("q") or ""
@@ -1427,6 +1464,8 @@ class SmaraAutonomousAgent:
             return f"Denied: Tool '{tool_name}' is disabled pending enforced delegation policy."
         if tool_name not in self._admitted_tool_names:
             return f"Denied: Tool '{tool_name}' is not admitted for profile '{self.toolset}'."
+        if self.session_engine is not None and self.session_engine.broker.constrained and (tool_name.startswith("browser_") or tool_name.startswith("research_")) and tool_name not in self.session_engine.broker.grant:
+            return f"Denied: Tool '{tool_name}' is not present in the durable session capability grant."
         handler = self._tool_handlers.get(tool_name)
         if not handler:
             return f"Error: Tool '{tool_name}' is not recognized. Available tools: {list(self._tool_handlers.keys())}"

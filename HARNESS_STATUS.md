@@ -146,3 +146,14 @@ is **518 passed, 1 skipped, 2 existing JWT-key warnings in 120.70 seconds**.
 Detailed scope and limitations are in `release/W1_RESEARCH_GATE_REPORT.md`.
 Live-model/live-web quality remains unmeasured and OCR is explicitly
 unavailable on this installation, so neither is promoted.
+
+## W2 canonical browser update (2026-09-09)
+
+The stateful Chromium backend is now part of canonical autonomous sessions via
+typed, capability-checked tools. Observations and screenshots are persisted,
+browser handles are checkpointed but invalidated after backend loss, downloads
+remain workspace-scoped, and session cancellation closes owned browser work.
+All five required agent-loop journeys passed three clean-context repetitions
+(**15 passed in 31.05 seconds**). See `release/W2_BROWSER_GATE_REPORT.md`.
+This does not promote live-site quality, authenticated profiles, desktop/VM
+control, or overall Windows readiness; W3-W5 remain active.

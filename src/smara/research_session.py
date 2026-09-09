@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import re
 from dataclasses import asdict
@@ -24,7 +25,11 @@ def _run(coro):
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
-    raise ResearchStateError("research provider actions require the synchronous agent owner")
+    # Playwright's synchronous facade owns an event loop on this thread.  Run
+    # unrelated async provider I/O in one bounded helper thread; browser
+    # objects remain on their original stable owner thread.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1,thread_name_prefix="smara-research-io") as pool:
+        return pool.submit(asyncio.run,coro).result()
 
 
 class CanonicalResearchSession:

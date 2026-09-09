@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "suite": "w2-canonical-browser-agent-loop",
+  "environment": "Windows local Chromium fixture, fresh browser context per run",
+  "cases": [
+    {"id":"W2-B21-R1","journey":"search_open_cite","repeat":1},
+    {"id":"W2-B21-R2","journey":"search_open_cite","repeat":2},
+    {"id":"W2-B21-R3","journey":"search_open_cite","repeat":3},
+    {"id":"W2-B22-R1","journey":"multi_tab_compare_switch","repeat":1},
+    {"id":"W2-B22-R2","journey":"multi_tab_compare_switch","repeat":2},
+    {"id":"W2-B22-R3","journey":"multi_tab_compare_switch","repeat":3},
+    {"id":"W2-B23-R1","journey":"form_edit_submit_independent_state","repeat":1},
+    {"id":"W2-B23-R2","journey":"form_edit_submit_independent_state","repeat":2},
+    {"id":"W2-B23-R3","journey":"form_edit_submit_independent_state","repeat":3},
+    {"id":"W2-B24-R1","journey":"download_local_analysis","repeat":1},
+    {"id":"W2-B24-R2","journey":"download_local_analysis","repeat":2},
+    {"id":"W2-B24-R3","journey":"download_local_analysis","repeat":3},
+    {"id":"W2-B25-R1","journey":"backend_loss_recovery_cancel","repeat":1},
+    {"id":"W2-B25-R2","journey":"backend_loss_recovery_cancel","repeat":2},
+    {"id":"W2-B25-R3","journey":"backend_loss_recovery_cancel","repeat":3}
+  ]
+}

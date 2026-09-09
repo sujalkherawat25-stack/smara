@@ -109,7 +109,12 @@ class _SessionLock:
 class ArtifactStore:
     def __init__(self, root): self.root=Path(root); self.root.mkdir(parents=True,exist_ok=True)
     def put(self, data: bytes, suffix=".bin"):
-        ident=_sha(data); path=self.root/f"{ident}{suffix}"
+        ident=_sha(data); existing=sorted(self.root.glob(f"{ident}.*"))
+        if existing:
+            valid=[item for item in existing if _file_sha(item)==ident]
+            if valid:return ident,valid[0]
+            raise ValueError("artifact hash collision or corruption")
+        path=self.root/f"{ident}{suffix}"
         if not path.exists():
             fd,tmp=tempfile.mkstemp(prefix="artifact-",dir=self.root)
             try:
@@ -146,6 +151,8 @@ TOOL_SCHEMAS={
  "process_poll":{"type":"object","additionalProperties":False,"required":["process_id"],"properties":{"process_id":{"type":"string"}}},
  "process_write":{"type":"object","additionalProperties":False,"required":["process_id","text"],"properties":{"process_id":{"type":"string"},"text":{"type":"string"}}},
  "process_cancel":{"type":"object","additionalProperties":False,"required":["process_id"],"properties":{"process_id":{"type":"string"}}},
+ "browser_open":{"type":"object"},"browser_observe":{"type":"object"},"browser_navigate":{"type":"object"},"browser_act":{"type":"object"},"browser_tabs":{"type":"object"},"browser_switch":{"type":"object"},"browser_scroll":{"type":"object"},"browser_download":{"type":"object"},"browser_close":{"type":"object"},
+ "research_plan":{"type":"object"},"research_search":{"type":"object"},"research_fetch":{"type":"object"},"research_ingest_file":{"type":"object"},"research_inspect":{"type":"object"},"research_resolve":{"type":"object"},"research_validate":{"type":"object"},
 }
 
 class ProcessSupervisor:
@@ -295,6 +302,9 @@ class SessionEngine:
         self.db=sqlite3.connect(self.db_path,timeout=1,isolation_level=None,check_same_thread=False); self._db=self.db
         self.db.execute("PRAGMA journal_mode=WAL"); self.db.execute("PRAGMA synchronous=FULL"); self.migrate()
         self.budget=budget or Budget(); self.broker=ToolBroker(self.workspace,capability_grant or TOOL_SCHEMAS.keys(),constrained=constrained,process_root=self.root/self.session_id/"processes")
+        self._runtime_cancellers=[]
+    def register_canceller(self,callback):
+        if callback not in self._runtime_cancellers:self._runtime_cancellers.append(callback)
     def migrate(self):
         version=self.db.execute("PRAGMA user_version").fetchone()[0]
         if version>self.SCHEMA_VERSION: raise RuntimeError("journal is newer than runtime")
@@ -328,6 +338,8 @@ class SessionEngine:
             result=record.get("result") or {}; process_id=(result.get("meta") or {}).get("process_id")
             if process_id:
                 with contextlib.suppress(Exception): self.broker.processes.cancel(process_id)
+        for callback in tuple(self._runtime_cancellers):
+            with contextlib.suppress(Exception):callback()
     def close(self): self.db.close()
     def store_plan(self,request,calls,resume):
         if resume:
@@ -438,15 +450,18 @@ class SessionEngine:
                     if item["name"]=="process_cancel" or result.get("exit_code") is not None:process_handles.pop(process_id,None)
                     else:process_handles[process_id]={"kind":"process","process_id":process_id,"call_id":item["call_id"]}
             supplied_handles=[dict(item) for item in state.get("active_handles",()) if isinstance(item,Mapping)]
+            browser_handle=self.get("browser_handle")
+            if isinstance(browser_handle,Mapping):supplied_handles.append(dict(browser_handle))
             supplied_research=state.get("research_artifact_ids",())
             research_ids=tuple(dict.fromkeys([*[str(item) for item in supplied_research],*([str(self.get("research_state_artifact_id"))] if self.get("research_state_artifact_id") else [])]))
             continuation=ContinuationState(objective=str(self.get("request", "")),constraints=tuple(state.get("constraints",())),acceptance_criteria=tuple(state.get("acceptance_criteria",())),tasks=tuple(state.get("tasks",())),decisions=tuple(state.get("decisions",())),unresolved_questions=tuple(state.get("unresolved_questions",())),changed_paths=tuple(sorted({path for call in calls for path in ((call.get("result") or {}).get("changed_paths") or [])})),workspace_revision=workspace_revision(self.workspace),failed_evidence_ids=tuple(row[0] for row in evidence if not row[1]),passing_evidence_ids=tuple(row[0] for row in evidence if row[1]),research_artifact_ids=research_ids,pending_call_ids=tuple(call["call_id"] for call in calls if call["state"]=="pending"),uncertain_call_ids=tuple(call["call_id"] for call in calls if call["state"]=="admitted" and call["mutating"]),active_handles=tuple([*process_handles.values(),*supplied_handles]),usage=usage,remaining_budget=remaining,next_action=str(state.get("next_action") or state.get("phase") or "model"),parent_checkpoint_id=self.get("continuation_artifact_id"))
             artifact_id,_=self.artifact_store.put_json(continuation.to_dict()); self.set("continuation_artifact_id",artifact_id); self.event("checkpoint",{"message_count":len(messages),"state_sha256":_sha(_json(state).encode()),"continuation_artifact_id":artifact_id,"parent_checkpoint_id":continuation.parent_checkpoint_id})
     def resolve_artifact(self,artifact_id: str) -> bytes:
         matches=list(self.artifacts.glob(f"{artifact_id}.*"))
-        if len(matches)!=1: raise FileNotFoundError(artifact_id)
-        data=matches[0].read_bytes()
-        if _sha(data)!=artifact_id: raise ValueError("artifact hash mismatch")
+        if not matches: raise FileNotFoundError(artifact_id)
+        values=[item.read_bytes() for item in matches]
+        if any(_sha(data)!=artifact_id for data in values) or any(data!=values[0] for data in values[1:]): raise ValueError("artifact hash mismatch")
+        data=values[0]
         return data
     def execute_incremental(self,call: ToolCall,executor: Callable[[dict[str,Any]],ToolResult]) -> ToolResult:
         """Journal one real model-emitted call before executing it."""

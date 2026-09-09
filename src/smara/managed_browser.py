@@ -38,7 +38,8 @@ class ManagedBrowser:
             for index in range(min(elements.count(),200-len(refs))):
                 locator=elements.nth(index); ref=f"e{ref_index}"; ref_index+=1; locator.evaluate("(el,ref)=>el.setAttribute('data-smara-ref',ref)",ref); refs[ref]={"selector":f'[data-smara-ref="{ref}"]',"frame_index":frame_index,"tag":locator.evaluate("el=>el.tagName.toLowerCase()"),"text":locator.inner_text()[:200] if locator.evaluate("el=>!['INPUT','TEXTAREA'].includes(el.tagName)") else ""}
         ident=f"obs_{uuid.uuid4().hex[:20]}"; screenshot=self.root/f"{ident}.png"; page.screenshot(path=str(screenshot),full_page=False)
-        observation={"observation_id":ident,"session_id":session_id,"tab_id":session.active_tab,"url":page.url,"title":page.title(),"timestamp":time.time(),"generation":session.generation,"elements":refs,"screenshot":str(screenshot),"screenshot_sha256":hashlib.sha256(screenshot.read_bytes()).hexdigest()}; session.observations[ident]=observation; return observation
+        body_text=page.locator("body").inner_text()[:16000] if page.locator("body").count() else ""
+        observation={"observation_id":ident,"session_id":session_id,"tab_id":session.active_tab,"url":page.url,"title":page.title(),"timestamp":time.time(),"generation":session.generation,"elements":refs,"body_text":body_text,"screenshot":str(screenshot),"screenshot_sha256":hashlib.sha256(screenshot.read_bytes()).hexdigest()}; session.observations[ident]=observation; return observation
     def _ground(self,session,observation,ref):
         if ref not in observation["elements"]:raise ValueError("unknown observed element")
         item=observation["elements"][ref]; frames=self.page(session).frames
