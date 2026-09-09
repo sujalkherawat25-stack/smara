@@ -239,6 +239,10 @@ class RetrievedSource:
     content_sha256: str
     retrieved_at: str
     published_at: str | None = None
+    raw_content: bytes = b""
+    final_url: str = ""
+    redirect_chain: tuple[str, ...] = ()
+    content_type: str = ""
 
 
 def _domain_policy(url: str) -> str:
@@ -275,6 +279,7 @@ def _agreement_counts(items: list[dict]) -> dict[str, int]:
 async def fetch_public_source(client: httpx.AsyncClient, initial_url: str) -> RetrievedSource:
     """Read one public HTML/text source with redirect and size limits."""
     current_url = initial_url
+    redirect_chain: list[str] = []
     for _ in range(5):
         if not _is_public_http_url(current_url):
             raise ValueError("Source URL or redirect target is not publicly routable HTTP(S).")
@@ -284,6 +289,7 @@ async def fetch_public_source(client: httpx.AsyncClient, initial_url: str) -> Re
             if not location:
                 raise ValueError("Source returned a redirect without a location.")
             current_url = urljoin(current_url, location)
+            redirect_chain.append(current_url)
             continue
         response.raise_for_status()
         content_type = response.headers.get("content-type", "").lower()
@@ -298,7 +304,7 @@ async def fetch_public_source(client: httpx.AsyncClient, initial_url: str) -> Re
         if len(excerpt) < 80:
             raise ValueError("Source did not contain enough readable text to cite.")
         title = extracted.title.strip()[:500] or urlparse(str(response.url)).hostname or initial_url
-        return RetrievedSource(title, excerpt, hashlib.sha256(raw).hexdigest(), _now(), extracted.published_at)
+        return RetrievedSource(title, excerpt, hashlib.sha256(raw).hexdigest(), _now(), extracted.published_at, raw, str(response.url), tuple(redirect_chain), content_type)
     raise ValueError("Source exceeded the redirect limit.")
 
 

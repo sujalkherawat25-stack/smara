@@ -214,14 +214,15 @@ class DeepResearchTool:
     max_sources = 6
     total_chars = 16_000
 
-    def __init__(self, http_client: httpx.AsyncClient | None = None, state_path: str | Path | None = None):
+    def __init__(self, http_client: httpx.AsyncClient | None = None, state_path: str | Path | None = None, artifact_store=None):
         self._http = http_client
         self._state_path = Path(state_path) if state_path else None
+        self._artifact_store = artifact_store
 
     def _load_state(self) -> tuple[ResearchGraph,EvidenceIndex]:
-        if not self._state_path or not self._state_path.exists(): return ResearchGraph(),EvidenceIndex()
+        if not self._state_path or not self._state_path.exists(): return ResearchGraph(),EvidenceIndex(self._artifact_store)
         value=json.loads(self._state_path.read_text(encoding="utf-8"))
-        return ResearchGraph.from_dict(value["graph"]),EvidenceIndex.from_dict(value["evidence"])
+        return ResearchGraph.from_dict(value["graph"]),EvidenceIndex.from_dict(value["evidence"],self._artifact_store)
 
     def _save_state(self,graph: ResearchGraph,index: EvidenceIndex) -> None:
         if not self._state_path:return
@@ -385,7 +386,8 @@ class DeepResearchTool:
                         f"[{source_number}] {title}\nURL: {url}\nSOURCE TYPE: fetched page\n"
                         f"EVIDENCE:\n{excerpt}"
                     )
-                    evidence_record=evidence_index.add(kind="fetched_passage",url=url,content=result.excerpt.encode(),text=excerpt,start=0,end=len(excerpt))
+                    raw_content=result.raw_content or result.excerpt.encode()
+                    evidence_record=evidence_index.add(kind="fetched_passage",url=result.final_url or url,redirect_chain=result.redirect_chain,content=raw_content,extracted_content=result.excerpt.encode(),text=excerpt,start=0,end=len(excerpt),extraction_version="html-text-v1")
                 else:
                     failed_count += 1
                     blocks.append(
@@ -400,13 +402,18 @@ class DeepResearchTool:
                 packed = packed[: self.total_chars] + "\n\n[…additional source text omitted by Smara’s context limit]"
             if not packed:
                 raise ResearchToolError("Sources were found, but none contained readable evidence.")
-            graph.resolve(node_id,"supported" if fetched_count else "blocked",evidence_ids); self._save_state(graph,evidence_index)
+            # Retrieval is not semantic resolution.  Preserve the evidence on
+            # the node, but leave it unresolved until a claim/evidence check
+            # has established support or refutation.
+            graph.nodes[node_id].evidence_ids=list(dict.fromkeys(evidence_ids))
+            if not fetched_count:graph.resolve(node_id,"blocked",evidence_ids)
+            self._save_state(graph,evidence_index)
             return ResearchPass(
                 content=(
                     "[RESEARCH_CONTEXT]\n"
                     f"Research question: {query}\n"
                     f"Search topic: {search_topic}\n"
-                    f"PASS COMPLETE: checked {len(queries)} distinct search angles and selected {len(selected)} diverse sources. "
+                    f"RETRIEVAL PASS COMPLETE: checked {len(queries)} distinct search angles and selected {len(selected)} diverse sources. "
                     f"Fetched {fetched_count} page(s); {failed_count} remain snippet-only.\n"
                     "Use only the labelled evidence below. Cite factual claims with the matching labels [1], [2], etc. "
                     "Separate direct facts from interpretation and state limitations when evidence is snippet-only.\n\n"

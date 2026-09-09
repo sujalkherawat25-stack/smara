@@ -987,6 +987,18 @@ TOOL_SCHEMAS = [
     }
 ]
 
+# Canonical research actions keep planning, retrieval, provenance and claim
+# acceptance inside the same durable session as every other model/tool step.
+TOOL_SCHEMAS.extend([
+    {"type":"function","function":{"name":"research_plan","description":"Create a dependency-aware research question graph before retrieval.","parameters":{"type":"object","additionalProperties":False,"required":["question","nodes"],"properties":{"question":{"type":"string"},"nodes":{"type":"array","maxItems":24,"items":{"type":"object","additionalProperties":False,"required":["id","question"],"properties":{"id":{"type":"string"},"question":{"type":"string"},"dependencies":{"type":"array","items":{"type":"string"}},"stopping_criterion":{"type":"string"}}}}}}}},
+    {"type":"function","function":{"name":"research_search","description":"Search leads for one ready research node. Snippets are discovery-only.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","query"],"properties":{"node_id":{"type":"string"},"query":{"type":"string"},"max_results":{"type":"integer"}}}}},
+    {"type":"function","function":{"name":"research_fetch","description":"Fetch a lead and preserve original response bytes plus extracted passage provenance.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","url"],"properties":{"node_id":{"type":"string"},"url":{"type":"string"}}}}},
+    {"type":"function","function":{"name":"research_ingest_file","description":"Extract a PDF table cell or image OCR evidence from a workspace file, preserving the original artifact.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","path"],"properties":{"node_id":{"type":"string"},"path":{"type":"string"},"page":{"type":"integer"},"row":{"type":"integer"},"column":{"type":"integer"}}}}},
+    {"type":"function","function":{"name":"research_inspect","description":"Inspect an evidence passage and verify its recoverable source artifact.","parameters":{"type":"object","additionalProperties":False,"required":["evidence_id"],"properties":{"evidence_id":{"type":"string"},"max_chars":{"type":"integer"}}}}},
+    {"type":"function","function":{"name":"research_resolve","description":"Resolve a question only through conservative claim/evidence judgments.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","claim","evidence_ids"],"properties":{"node_id":{"type":"string"},"claim":{"type":"string"},"evidence_ids":{"type":"array","maxItems":20,"items":{"type":"string"}}}}}},
+    {"type":"function","function":{"name":"research_validate","description":"Validate the final required claim/evidence map; unsupported claims prevent completion.","parameters":{"type":"object","additionalProperties":False,"required":["claims"],"properties":{"claims":{"type":"array","maxItems":40,"items":{"type":"object","additionalProperties":False,"required":["claim","evidence_ids"],"properties":{"claim":{"type":"string"},"evidence_ids":{"type":"array","maxItems":20,"items":{"type":"string"}}}}},"require_complete":{"type":"boolean"}}}}},
+])
+
 
 def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
     """Return tool schemas filtered by profile to optimize token budget."""
@@ -1015,12 +1027,15 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
             "python_execute", "calculate", "browser_action", "web_search",
             "programmatic_tool_call", "todo"
         }
-    elif prof in ["research", "web"]:
+    elif prof == "research":
         allowed = {
-            "browser_action", "web_search", "web_extract", "web_reader_dynamic",
-            "wayback_extract", "wikipedia_page", "pdf_search", "calculate",
-            "file_read", "list_directory", "programmatic_tool_call", "todo"
+            "browser_action", "pdf_search", "calculate",
+            "file_read", "list_directory", "programmatic_tool_call", "todo",
+            "research_plan", "research_search", "research_fetch", "research_inspect",
+            "research_ingest_file", "research_resolve", "research_validate"
         }
+    elif prof == "web":
+        allowed = {"browser_action","web_search","web_extract","web_reader_dynamic","wayback_extract","wikipedia_page","pdf_search","calculate","file_read","list_directory","programmatic_tool_call","todo"}
     elif prof in ["multimodal", "vision", "audio"]:
         allowed = {"browser_action", "image_inspect", "audio_transcribe", "video_inspect", "file_read", "todo"}
     return [s for s in TOOL_SCHEMAS if s.get("function", {}).get("name") in allowed - DISABLED_TOOLS]
@@ -1141,6 +1156,9 @@ class SmaraAutonomousAgent:
             {"read_file", "write_file", "patch_file", "run_process"},
             constrained=False,
         )
+        from smara.research_session import CanonicalResearchSession
+        research_state_path=self.workspace_root/".smara"/"research"/f"agent-{uuid.uuid4().hex}.json" if session_engine is None else None
+        self._research=CanonicalResearchSession(session_engine=session_engine,state_path=research_state_path)
 
         self._tool_handlers = {
             "programmatic_tool_call": self._dispatch_programmatic_tool_call,
@@ -1170,6 +1188,13 @@ class SmaraAutonomousAgent:
             "terminal": self._dispatch_terminal,
             "file_write": self._dispatch_file_write,
             "browser_action": self._dispatch_browser_action,
+            "research_plan": self._dispatch_research_plan,
+            "research_search": self._dispatch_research_search,
+            "research_fetch": self._dispatch_research_fetch,
+            "research_ingest_file": self._dispatch_research_ingest_file,
+            "research_inspect": self._dispatch_research_inspect,
+            "research_resolve": self._dispatch_research_resolve,
+            "research_validate": self._dispatch_research_validate,
         }
         self._admitted_tool_names = {
             schema["function"]["name"] for schema in get_tool_schemas(self.toolset)
@@ -1254,6 +1279,31 @@ class SmaraAutonomousAgent:
         us = args.get("urls")
         mc = args.get("max_chars", 5000)
         return web_extract(url=u, urls=us, max_chars=mc)
+
+    def _research_result(self,value:Any) -> str:
+        if self.session_engine is not None:self.session_engine.set("research_required",True)
+        return json.dumps(value,sort_keys=True,default=str)
+
+    def _dispatch_research_plan(self,args:Dict[str,Any]) -> str:
+        return self._research_result(self._research.plan(args.get("question", ""),args.get("nodes") or []))
+
+    def _dispatch_research_search(self,args:Dict[str,Any]) -> str:
+        return self._research_result(self._research.search(str(args.get("node_id") or ""),str(args.get("query") or ""),int(args.get("max_results") or 5)))
+
+    def _dispatch_research_fetch(self,args:Dict[str,Any]) -> str:
+        return self._research_result(self._research.fetch(str(args.get("node_id") or ""),str(args.get("url") or "")))
+
+    def _dispatch_research_ingest_file(self,args:Dict[str,Any]) -> str:
+        return self._research_result(self._research.ingest_file(str(args.get("node_id") or ""),str(args.get("path") or ""),page=int(args.get("page") or 1),row=int(args.get("row") or 1),column=int(args.get("column") or 1)))
+
+    def _dispatch_research_inspect(self,args:Dict[str,Any]) -> str:
+        return self._research_result(self._research.inspect(str(args.get("evidence_id") or ""),int(args.get("max_chars") or 4000)))
+
+    def _dispatch_research_resolve(self,args:Dict[str,Any]) -> str:
+        return self._research_result(self._research.resolve(str(args.get("node_id") or ""),str(args.get("claim") or ""),args.get("evidence_ids") or []))
+
+    def _dispatch_research_validate(self,args:Dict[str,Any]) -> str:
+        return self._research_result(self._research.validate(args.get("claims") or [],require_complete=bool(args.get("require_complete",True))))
 
     def _dispatch_web_reader_dynamic(self, args: Dict[str, Any]) -> str:
         u = args.get("url") or ""
@@ -1571,6 +1621,7 @@ class SmaraAutonomousAgent:
         messages.append({"role": "user", "content": user_prompt})
         if self.session_engine is not None:
             self.session_engine.begin_incremental(task)
+            if self.toolset=="research":self.session_engine.set("research_required",True)
             saved_messages = self.session_engine.get("agent_messages")
             if isinstance(saved_messages, list) and saved_messages:
                 messages = saved_messages
@@ -1816,6 +1867,14 @@ class SmaraAutonomousAgent:
 
             # Verification Gate: verify code modifications and calculations before confirming answer
             if has_final_answer:
+                if self.session_engine is not None and self.session_engine.get("research_required",False):
+                    research_ok,research_reason=self._research.can_finalize(content or reasoning)
+                    if not research_ok:
+                        logger.info("Research completion gate rejected final answer: %s",research_reason)
+                        messages.append({"role":"assistant","content":content or reasoning})
+                        messages.append({"role":"user","content":f"Research verification gate: {research_reason}. Resolve ready research nodes and call research_validate with every required claim and its fetched evidence before finalizing."})
+                        trace.append({"iteration":iteration,"thought":reasoning or content,"tool_name":None,"tool_args":None,"observation":f"Research completion rejected: {research_reason}"})
+                        continue
                 if pending_verification:
                     unverified = list(pending_verification)
                     logger.info(f"Verification Gate: Prompting verification check for unverified code edits: {unverified}")
@@ -1896,7 +1955,11 @@ class SmaraAutonomousAgent:
 
         # Extract concise final answer
         if raw_concluding:
-            final_answer = self._clean_final_answer(raw_concluding)
+            if self.session_engine is not None and self.session_engine.get("research_required",False):
+                research_match=re.search(r"(?:FINAL ANSWER|Final Answer|final answer):\s*(.+)",raw_concluding,re.IGNORECASE|re.DOTALL)
+                final_answer=(research_match.group(1) if research_match else raw_concluding).strip()
+            else:
+                final_answer = self._clean_final_answer(raw_concluding)
         
         status = "completed"
         if provider_budget_exhausted:

@@ -18,6 +18,7 @@ class ContinuationState:
     workspace_revision: str = ""
     failed_evidence_ids: tuple[str, ...] = ()
     passing_evidence_ids: tuple[str, ...] = ()
+    research_artifact_ids: tuple[str, ...] = ()
     pending_call_ids: tuple[str, ...] = ()
     uncertain_call_ids: tuple[str, ...] = ()
     active_handles: tuple[Mapping[str, Any], ...] = ()

@@ -25,6 +25,30 @@ def test_snippet_cannot_support_fetched_claim_and_offsets_are_verified():
     assert index.validate_location(passage.id,raw)
     assert not index.validate_location(passage.id,b"changed")
 
+def test_claim_checker_rejects_wrong_number_and_opposite_polarity():
+    index=EvidenceIndex();raw=b"The value is 42 kilograms."
+    record=index.add(kind="fetched_passage",url="https://facts.test/value",content=raw,text=raw.decode(),start=0,end=len(raw))
+    assert index.judge(record.id,"The value is 42 kilograms.").state=="supported"
+    assert index.judge(record.id,"The value is 99 kilograms.").state=="refuted"
+    assert index.judge(record.id,"The value is not 42 kilograms.").state=="refuted"
+    assert index.judge(record.id,"42").state=="insufficient"
+
+def test_claim_checker_preserves_entities_dates_units_and_causal_relations():
+    index=EvidenceIndex();raw=b"On 2026-09-08, Alice measured the sample at 42 kilograms. Rain and low output were also observed."
+    record=index.add(kind="fetched_passage",url="https://facts.test/report",content=raw,text=raw.decode(),start=0,end=len(raw))
+    assert index.judge(record.id,"On 2026-09-08 Alice measured the sample at 42000 grams.").state=="supported"
+    assert index.judge(record.id,"On 2025-09-08 Alice measured the sample at 42 kilograms.").state=="refuted"
+    assert index.judge(record.id,"Bob measured the sample at 42 kilograms.").state=="insufficient"
+    assert index.judge(record.id,"Rain caused low output.").state=="insufficient"
+
+def test_claim_checker_requires_current_recoverable_original_artifact(tmp_path):
+    store=ArtifactStore(tmp_path/"artifacts");index=EvidenceIndex(store);raw=b"The value is 42 kilograms."
+    record=index.add(kind="fetched_passage",url="https://facts.test/value",content=raw,text=raw.decode(),start=0,end=len(raw))
+    assert index.validate_artifact(record.id)==(True,"valid")
+    source=next(store.root.glob(f"{record.source_artifact_id}.*"));source.write_bytes(b"tampered")
+    assert index.validate_artifact(record.id)==(False,"stale_source_artifact")
+    assert index.validate_artifact("missing")==(False,"missing_evidence")
+
 def test_low_confidence_ocr_is_uncertain_and_duplicate_content_keeps_publications():
     index=EvidenceIndex(); raw=b"table value 9"
     ocr=index.add(kind="image_ocr",url="https://a.test/img",content=raw,text="table value 9",confidence=.5)

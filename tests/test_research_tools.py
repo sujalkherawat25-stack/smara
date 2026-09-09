@@ -226,7 +226,7 @@ def test_deep_research_preserves_evidence_for_each_selected_source(monkeypatch, 
             assert result.sources == 3
             assert all(f"[{index}]" in result.content for index in range(1, 4))
             assert len(result.evidence)==3 and all(item["kind"]=="fetched_passage" for item in result.evidence)
-            assert result.graph["nodes"][0]["state"]=="supported"
+            assert result.graph["nodes"][0]["state"]=="unresolved"
             restored=research_tools.DeepResearchTool(client,state_path)
             graph,evidence=restored._load_state()
             assert graph.nodes and len(evidence.records)==3

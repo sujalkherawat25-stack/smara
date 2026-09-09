@@ -133,3 +133,16 @@ The detailed evidence and honest blocked boundary are in
 `release/H3_H7_GATE_REPORT.md`. Real disposable-VM D01-D20 execution and Linux
 installation are blocked by missing environments. Official external benchmark
 scores and the delegation ablation remain unmeasured, so none are promoted.
+
+## W1 canonical research update (2026-09-09)
+
+The revised Windows-readiness plan's W1 slice now passes its deterministic
+agent-loop gate. Research-profile runs use session-scoped plan, search, fetch,
+inspect, resolve and validate actions; retain original and extracted artifacts;
+and reject unsupported numbers, negation, dates, entities, causal claims,
+snippets, stale state and immediate-final bypasses. The versioned 17-case
+manifest is `tests/evals/windows_research/manifest.json`. The full suite result
+is **518 passed, 1 skipped, 2 existing JWT-key warnings in 120.70 seconds**.
+Detailed scope and limitations are in `release/W1_RESEARCH_GATE_REPORT.md`.
+Live-model/live-web quality remains unmeasured and OCR is explicitly
+unavailable on this installation, so neither is promoted.

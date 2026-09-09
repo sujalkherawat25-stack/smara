@@ -20,7 +20,8 @@ def test_toolset_profiles():
     assert "audio_transcribe" not in coding_names
 
     # Verify research profile includes web & document tools
-    assert {"browser_action", "web_search", "web_extract", "pdf_search", "todo"}.issubset(research_names)
+    assert {"browser_action", "research_plan", "research_search", "research_fetch", "research_resolve", "research_validate", "pdf_search", "todo"}.issubset(research_names)
+    assert "web_search" not in research_names and "web_extract" not in research_names
     assert "patch" not in research_names
 
 
