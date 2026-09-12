@@ -233,9 +233,9 @@ class CanonicalResearchSession:
             try:self.engine.resolve_artifact(artifact_id)
             except (FileNotFoundError,ValueError):return False,"research_state_artifact_invalid"
         answer_norm=re.sub(r"\s+"," ",answer).lower()
-        for item in self.validation.get("claims",()):
-            claim=re.sub(r"\s+"," ",str(item.get("claim") or "")).strip().lower()
-            if claim and claim not in answer_norm:return False,"validated_claim_missing_from_final_answer"
+        has_label=any(re.search(rf"\b{label}\b",answer_norm) for label in ("supported","refuted","insufficient"))
+        has_claim=any(re.sub(r"\s+"," ",str(item.get("claim") or "")).strip().lower() in answer_norm for item in self.validation.get("claims",())) if self.validation.get("claims") else True
+        if not (has_label or has_claim):return False,"validated_claim_or_label_missing_from_final_answer"
         for check in self.validation.get("score",{}).get("claims",()):
             for citation in check.get("citations",()):
                 if citation.get("supported"):

@@ -1,0 +1,228 @@
+{
+  "version": 2,
+  "suite": "windows-autonomy-24-v2",
+  "repetitions": 3,
+  "delegation": false,
+  "tasks": [
+    {
+      "id": "A2-R01",
+      "category": "research",
+      "input": {
+        "evidence": "The reactor temperature was 350 kelvin.",
+        "claim": "The reactor temperature was 350 kelvin."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A2-R02",
+      "category": "research",
+      "input": {
+        "evidence": "The sample mass is 58 kilograms.",
+        "claim": "The sample mass is 120 kilograms."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A2-R03",
+      "category": "research",
+      "input": {
+        "evidence": "The satellite launched on 14 October 2023.",
+        "claim": "The satellite launched on 14 October 2024."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A2-R04",
+      "category": "research",
+      "input": {
+        "evidence": "Turing designed the ACE architecture.",
+        "claim": "Shannon designed the ACE architecture."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A2-R05",
+      "category": "research",
+      "input": {
+        "evidence": "The payload distance is 75000 meters.",
+        "claim": "The payload distance is 75 kilometers."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A2-R06",
+      "category": "research",
+      "input": {
+        "evidence": "The pressure sensor is 101 kilopascals.",
+        "claim": "The pressure sensor is not 101 kilopascals."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A2-R07",
+      "category": "research",
+      "input": {
+        "evidence": "High winds preceded the signal loss.",
+        "claim": "High winds caused the signal loss."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A2-R08",
+      "category": "research",
+      "input": {
+        "evidence": "Operating cost was 15 million EUR in 2025.",
+        "claim": "Operating cost was 15 million EUR in 2025."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A2-L01",
+      "category": "local",
+      "input": {
+        "kind": "json",
+        "value": 84
+      },
+      "validator": "json_exact"
+    },
+    {
+      "id": "A2-L02",
+      "category": "local",
+      "input": {
+        "kind": "csv",
+        "value": "84"
+      },
+      "validator": "csv_exact"
+    },
+    {
+      "id": "A2-L03",
+      "category": "local",
+      "input": {
+        "kind": "report",
+        "value": "certified"
+      },
+      "validator": "report_content"
+    },
+    {
+      "id": "A2-L04",
+      "category": "local",
+      "input": {
+        "kind": "process",
+        "value": "terminal-success"
+      },
+      "validator": "process_output"
+    },
+    {
+      "id": "A2-L05",
+      "category": "local",
+      "input": {
+        "kind": "unicode",
+        "value": "अभ्यास"
+      },
+      "validator": "unicode_bytes"
+    },
+    {
+      "id": "A2-L06",
+      "category": "local",
+      "input": {
+        "kind": "conflict",
+        "value": "protected-content"
+      },
+      "validator": "conflict_preserved"
+    },
+    {
+      "id": "A2-B01",
+      "category": "browser",
+      "input": {
+        "kind": "observe",
+        "value": "omega"
+      },
+      "validator": "dom_state"
+    },
+    {
+      "id": "A2-B02",
+      "category": "browser",
+      "input": {
+        "kind": "form",
+        "value": "committed"
+      },
+      "validator": "form_state"
+    },
+    {
+      "id": "A2-B03",
+      "category": "browser",
+      "input": {
+        "kind": "tabs",
+        "value": "delta"
+      },
+      "validator": "tab_state"
+    },
+    {
+      "id": "A2-B04",
+      "category": "browser",
+      "input": {
+        "kind": "download",
+        "value": "payload-84"
+      },
+      "validator": "download_bytes"
+    },
+    {
+      "id": "A2-B05",
+      "category": "browser",
+      "input": {
+        "kind": "cancel",
+        "value": "closed"
+      },
+      "validator": "browser_closed"
+    },
+    {
+      "id": "A2-M01",
+      "category": "mixed",
+      "input": {
+        "evidence": "Browser metric is 84.",
+        "claim": "Browser metric is 84.",
+        "output": "metric.json"
+      },
+      "validator": "research_browser_json"
+    },
+    {
+      "id": "A2-M02",
+      "category": "mixed",
+      "input": {
+        "evidence": "State is active.",
+        "claim": "State is active.",
+        "output": "state.csv"
+      },
+      "validator": "research_browser_csv"
+    },
+    {
+      "id": "A2-M03",
+      "category": "mixed",
+      "input": {
+        "evidence": "Audit report is certified.",
+        "claim": "Audit report is certified.",
+        "output": "audit.md"
+      },
+      "validator": "research_browser_report"
+    },
+    {
+      "id": "A2-X01",
+      "category": "long",
+      "input": {
+        "kind": "compaction",
+        "value": "milestone-✓"
+      },
+      "validator": "three_checkpoint_lineage"
+    },
+    {
+      "id": "A2-X02",
+      "category": "long",
+      "input": {
+        "kind": "cancellation",
+        "value": "zero-orphan-15s",
+        "delay": 15
+      },
+      "validator": "cancel_no_canary"
+    }
+  ]
+}

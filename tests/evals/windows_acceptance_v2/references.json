@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "answers": {
+    "A2-R01": "supported",
+    "A2-R02": "refuted",
+    "A2-R03": "refuted",
+    "A2-R04": "insufficient",
+    "A2-R05": "supported",
+    "A2-R06": "refuted",
+    "A2-R07": "insufficient",
+    "A2-R08": "supported",
+    "A2-L01": true,
+    "A2-L02": true,
+    "A2-L03": true,
+    "A2-L04": true,
+    "A2-L05": true,
+    "A2-L06": true,
+    "A2-B01": true,
+    "A2-B02": true,
+    "A2-B03": true,
+    "A2-B04": true,
+    "A2-B05": true,
+    "A2-M01": true,
+    "A2-M02": true,
+    "A2-M03": true,
+    "A2-X01": true,
+    "A2-X02": true
+  }
+}

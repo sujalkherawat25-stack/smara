@@ -1,4 +1,4 @@
-"""Shared contracts for safe local Smara skills and task state.
+﻿"""Shared contracts for safe local Smara skills and task state.
 
 The Desktop supports a local-first runtime as well as the hosted coordinator.
 This module keeps bounded, private task/session state on the user's machine
@@ -322,7 +322,14 @@ class LocalTaskJournal:
             with contextlib.suppress(OSError):
                 os.fsync(handle.fileno())
         try:
-            os.replace(temporary, self.path)
+            for attempt in range(6):
+                try:
+                    os.replace(temporary, self.path)
+                    break
+                except PermissionError:
+                    if attempt == 5:
+                        raise
+                    time.sleep(0.02 * (attempt + 1))
         finally:
             temporary.unlink(missing_ok=True)
 
@@ -423,7 +430,14 @@ class LocalTaskStore:
             with contextlib.suppress(OSError):
                 os.fsync(handle.fileno())
         try:
-            os.replace(temporary, self.path)
+            for attempt in range(6):
+                try:
+                    os.replace(temporary, self.path)
+                    break
+                except PermissionError:
+                    if attempt == 5:
+                        raise
+                    time.sleep(0.02 * (attempt + 1))
         finally:
             temporary.unlink(missing_ok=True)
 
@@ -684,12 +698,12 @@ class LocalTaskStore:
                 "name": file_name[:240], "sha256": value.get("sha256"),
                 "created_at": _timestamp(),
             })
-            summary += f" · {file_name}"
+            summary += f" Â· {file_name}"
         proof = value.get("proof")
         if isinstance(proof, dict):
             digest = proof.get("content_sha256") or proof.get("result_sha256")
             if isinstance(digest, str) and digest:
-                summary += f" · proof {digest[:12]}"
+                summary += f" Â· proof {digest[:12]}"
         return summary[:2_000], artifacts[:20]
 
     def complete(self, task_id: str, result: str) -> dict[str, Any]:
@@ -793,7 +807,7 @@ def local_tasks_path(state_path: Path) -> Path:
 @dataclass
 class LocalAutonomousAgent:
     """Multi-step autonomous local agent engine for Smara Desktop.
-    
+
     Orchestrates ReAct loops across all local capabilities:
     - local_file_read (line-slice, regex search, tree, git)
     - local_file_write (atomic write, patch, delete with approval, document studio)
@@ -957,4 +971,3 @@ class LocalAutonomousAgent:
             "iterations": self.max_steps,
             "failure_reason": "step_limit",
         }
-

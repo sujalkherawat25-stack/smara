@@ -165,59 +165,108 @@ class ProcessSupervisor:
         if not (self.root/f"{ident}.json").is_file():
             raise PolicyDenied("process belongs to another session or is unknown")
     def start(self,argv,cwd,env,timeout):
-        ident=f"proc_{uuid.uuid4().hex[:24]}"; log=self.root/f"{ident}.log"; handle=log.open("w+b"); flags,preexec=self.creation()
-        proc=subprocess.Popen(argv,cwd=str(cwd),env=env,stdin=subprocess.PIPE,stdout=handle,stderr=subprocess.STDOUT,shell=False,creationflags=flags,preexec_fn=preexec)
-        if os.name=="nt":
-            job=self._windows_job(proc)
-            if job:self.jobs[ident]=job
-        self.processes[ident]=proc; self.logs[ident]=handle
-        meta={"process_id":ident,"pid":proc.pid,"cwd":str(cwd),"argv":argv,"started_at":_now(),"timeout_seconds":timeout,"log_path":str(log)}
-        (self.root/f"{ident}.json").write_text(_json(meta),encoding="utf-8")
-        def enforce_deadline():
-            try: proc.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                (self.root/f"{ident}.timeout").touch()
-                self.cancel(ident)
-        threading.Thread(target=enforce_deadline,name=f"deadline-{ident}",daemon=True).start()
-        return meta
+        with self.lock:
+            ident=f"proc_{uuid.uuid4().hex[:24]}"; log=self.root/f"{ident}.log"; handle=log.open("w+b"); flags,preexec=self.creation()
+            proc=subprocess.Popen(argv,cwd=str(cwd),env=env,stdin=subprocess.PIPE,stdout=handle,stderr=subprocess.STDOUT,shell=False,creationflags=flags,preexec_fn=preexec)
+            if os.name=="nt":
+                job=self._windows_job(proc)
+                if job:self.jobs[ident]=job
+            self.processes[ident]=proc; self.logs[ident]=handle
+            meta={"process_id":ident,"pid":proc.pid,"cwd":str(cwd),"argv":argv,"started_at":_now(),"timeout_seconds":timeout,"log_path":str(log),"status":"running","cancellation_status":None}
+            (self.root/f"{ident}.json").write_text(_json(meta),encoding="utf-8")
+            def enforce_deadline():
+                try: proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    (self.root/f"{ident}.timeout").touch()
+                    self.cancel(ident)
+            threading.Thread(target=enforce_deadline,name=f"deadline-{ident}",daemon=True).start()
+            return meta
     def poll(self,ident,cursor=0,max_chars=16000):
-        self.require_owned(ident)
-        meta_path=self.root/f"{ident}.json"
-        if not meta_path.exists(): raise KeyError(ident)
-        meta=json.loads(meta_path.read_text()); proc=self.processes.get(ident); log=Path(meta["log_path"])
-        raw=log.read_bytes() if log.exists() else b""; cursor=max(0,min(int(cursor),len(raw))); limit=max(1,min(int(max_chars),16000)); chunk=raw[cursor:cursor+limit].decode(errors="replace"); next_cursor=min(len(raw),cursor+limit)
-        if proc is None: return {**meta,"status":"interrupted_uncertain","done":True,"exit_code":None,"output":chunk,"cursor":next_cursor,"log_size":len(raw),"reconnectable":False}
-        code=proc.poll()
-        expired=(self.root/f"{ident}.timeout").exists()
-        if expired:
-            self.kill(proc);code=proc.poll();meta["timed_out"]=True
-        if code is not None: self.logs[ident].flush()
-        raw=log.read_bytes() if log.exists() else raw; chunk=raw[cursor:cursor+limit].decode(errors="replace"); next_cursor=min(len(raw),cursor+limit)
-        return {**meta,"status":"running" if code is None else "timed_out" if expired else "completed" if code==0 else "failed","done":code is not None,"exit_code":code,"output":chunk,"cursor":next_cursor,"log_size":len(raw),"reconnectable":True}
+        with self.lock:
+            self.require_owned(ident)
+            meta_path=self.root/f"{ident}.json"
+            if not meta_path.exists(): raise KeyError(ident)
+            meta=json.loads(meta_path.read_text(encoding="utf-8")); proc=self.processes.get(ident); log=Path(meta["log_path"])
+            raw=log.read_bytes() if log.exists() else b""; cursor=max(0,min(int(cursor),len(raw))); limit=max(1,min(int(max_chars),16000)); chunk=raw[cursor:cursor+limit].decode(errors="replace"); next_cursor=min(len(raw),cursor+limit)
+            if proc is None:
+                stored_status=meta.get("status","interrupted_uncertain")
+                if stored_status=="running": stored_status="interrupted_uncertain"
+                return {**meta,"status":stored_status,"done":stored_status in ("completed","failed","cancelled","already_completed","timed_out"),"exit_code":meta.get("exit_code"),"output":chunk,"cursor":next_cursor,"log_size":len(raw),"reconnectable":False}
+            code=proc.poll()
+            expired=(self.root/f"{ident}.timeout").exists()
+            if expired and code is None:
+                self.kill(proc);code=proc.poll();meta["timed_out"]=True
+            if code is not None and ident in self.logs:
+                with contextlib.suppress(Exception):self.logs[ident].flush()
+            raw=log.read_bytes() if log.exists() else raw; chunk=raw[cursor:cursor+limit].decode(errors="replace"); next_cursor=min(len(raw),cursor+limit)
+
+            stored_cancel=meta.get("cancellation_status")
+            if expired: current_status="timed_out"
+            elif stored_cancel=="already_completed": current_status="already_completed"
+            elif stored_cancel=="confirmed_cancelled": current_status="cancelled"
+            elif stored_cancel=="cancellation_uncertain": current_status="cancellation_uncertain"
+            elif code is None: current_status="running"
+            elif code==0: current_status="completed"
+            else: current_status="failed"
+
+            meta["status"]=current_status; meta["exit_code"]=code; meta["done"]=code is not None or current_status in ("completed","failed","cancelled","already_completed","timed_out")
+            return {**meta,"status":current_status,"done":meta["done"],"exit_code":code,"output":chunk,"cursor":next_cursor,"log_size":len(raw),"reconnectable":True}
     def write(self,ident,text):
-        self.require_owned(ident)
-        proc=self.processes.get(ident)
-        if proc is None or proc.poll() is not None or proc.stdin is None: raise RuntimeError("process is not running")
-        proc.stdin.write(text.encode()); proc.stdin.flush(); return self.poll(ident)
-    @staticmethod
-    def kill(proc):
+        with self.lock:
+            self.require_owned(ident)
+            proc=self.processes.get(ident)
+            if proc is None or proc.poll() is not None or proc.stdin is None: raise RuntimeError("process is not running")
+            proc.stdin.write(text.encode()); proc.stdin.flush(); return self.poll(ident)
+    @classmethod
+    def kill(cls,proc):
         if proc.poll() is not None:return
         if os.name=="nt": subprocess.run(["taskkill","/PID",str(proc.pid),"/T","/F"],capture_output=True,check=False)
         else:
-            with contextlib.suppress(OSError): os.killpg(proc.pid,signal.SIGTERM)
+            with contextlib.suppress(OSError): os.killpg(proc.pid,signal.SIGKILL if hasattr(signal,"SIGKILL") else signal.SIGTERM)
         with contextlib.suppress(subprocess.TimeoutExpired): proc.wait(timeout=5)
-        if proc.poll() is None: proc.kill()
+        if proc.poll() is None:
+            with contextlib.suppress(Exception): proc.kill()
     def cancel(self,ident):
-        self.require_owned(ident)
-        proc=self.processes.get(ident)
-        if proc is None: return {**self.poll(ident),"status":"cancelled"}
-        job=self.jobs.pop(ident,None)
-        if job:
-            import ctypes
-            ctypes.windll.kernel32.CloseHandle(job)
+        with self.lock:
+            self.require_owned(ident)
+            meta_path=self.root/f"{ident}.json"
+            meta=json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+            expired=(self.root/f"{ident}.timeout").exists()
+
+            if meta.get("cancellation_status") in ("already_completed","confirmed_cancelled","timed_out"):
+                polled=self.poll(ident)
+                return {**polled,"status":meta.get("status","timed_out" if expired else "cancelled"),"done":True,"cancellation_status":meta["cancellation_status"],"termination_attempted":meta.get("termination_attempted",False),"tree_terminated":meta.get("tree_terminated",True),"observed_exit_code":meta.get("exit_code")}
+
+            proc=self.processes.get(ident)
+            if proc is None:
+                meta["status"]="cancellation_uncertain"; meta["done"]=False; meta["cancellation_status"]="cancellation_uncertain"
+                meta_path.write_text(_json(meta),encoding="utf-8")
+                return {**self.poll(ident),"status":"cancellation_uncertain","done":False,"cancellation_status":"cancellation_uncertain","termination_attempted":False,"tree_terminated":False,"observed_exit_code":None}
+
+            poll_before=proc.poll()
+            if poll_before is not None and not expired:
+                meta["status"]="already_completed"; meta["done"]=True; meta["exit_code"]=poll_before; meta["cancellation_status"]="already_completed"; meta["termination_attempted"]=False; meta["tree_terminated"]=False; meta["observed_exit_code"]=poll_before
+                meta_path.write_text(_json(meta),encoding="utf-8")
+                return {**self.poll(ident),"status":"already_completed","done":True,"exit_code":poll_before,"cancellation_status":"already_completed","termination_attempted":False,"tree_terminated":False,"observed_exit_code":poll_before}
+
+            termination_attempted=True
+            job=self.jobs.pop(ident,None)
+            if job and os.name=="nt":
+                import ctypes
+                with contextlib.suppress(Exception):
+                    ctypes.windll.kernel32.TerminateJobObject(job,1)
+                    ctypes.windll.kernel32.CloseHandle(job)
+            self.kill(proc)
             with contextlib.suppress(subprocess.TimeoutExpired): proc.wait(timeout=5)
-        else:self.kill(proc)
-        return {**self.poll(ident),"status":"cancelled","done":True}
+            poll_after=proc.poll()
+            if poll_after is not None:
+                tree_terminated=True; status="timed_out" if expired else "cancelled"; cancel_status="timed_out" if expired else "confirmed_cancelled"
+            else:
+                tree_terminated=False; status="cancellation_uncertain"; cancel_status="cancellation_uncertain"
+
+            meta["status"]=status; meta["done"]=(poll_after is not None); meta["exit_code"]=poll_after; meta["cancellation_status"]=cancel_status; meta["termination_attempted"]=termination_attempted; meta["tree_terminated"]=tree_terminated; meta["observed_exit_code"]=poll_after
+            meta_path.write_text(_json(meta),encoding="utf-8")
+            return {**self.poll(ident),"status":status,"done":meta["done"],"exit_code":poll_after,"cancellation_status":cancel_status,"termination_attempted":termination_attempted,"tree_terminated":tree_terminated,"observed_exit_code":poll_after}
     @staticmethod
     def _windows_job(proc):
         """Put the process in a kill-on-close Job Object (descendants inherit it)."""
@@ -234,6 +283,7 @@ class ProcessSupervisor:
         kernel.SetInformationJobObject.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD]
         kernel.AssignProcessToJobObject.argtypes=[wintypes.HANDLE,wintypes.HANDLE]
         kernel.CloseHandle.argtypes=[wintypes.HANDLE]
+        kernel.TerminateJobObject.argtypes=[wintypes.HANDLE,wintypes.UINT]
         job=kernel.CreateJobObjectW(None,None)
         if not job:return None
         info=EXTENDED(); info.BasicLimitInformation.LimitFlags=0x2000
@@ -308,7 +358,7 @@ class ToolBroker:
     def do_process_write(self,a):
         state=self.processes.write(a["process_id"],a["text"]); return {"text":state.pop("output",""),"exit_code":state.get("exit_code"),"meta":state}
     def do_process_cancel(self,a):
-        state=self.processes.cancel(a["process_id"]); return {"status":"cancelled","text":state.pop("output",""),"exit_code":state.get("exit_code"),"meta":state}
+        state=self.processes.cancel(a["process_id"]); return {"status":state.get("status","cancelled"),"text":state.pop("output",""),"exit_code":state.get("exit_code"),"meta":state}
 
 class SessionEngine:
     VERSION="h2-local-2"; SCHEMA_VERSION=2
@@ -536,7 +586,7 @@ class SessionEngine:
             if status=="completed":
                 for metadata in self.broker.processes.root.glob("proc_*.json"):
                     process=self.broker.processes.poll(metadata.stem)
-                    if process["status"]!="completed":
+                    if process["status"] not in ("completed","cancelled","already_completed"):
                         process_errors.append(f"process {metadata.stem} is {process['status']}; reconcile before completion")
                 if process_errors:
                     status="needs_input";unresolved=tuple(unresolved)+tuple(process_errors)

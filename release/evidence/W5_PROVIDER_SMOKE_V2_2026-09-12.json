@@ -1,0 +1,172 @@
+{
+  "schema_version": 2,
+  "engine_version": "h2-local-2",
+  "run_identity": {
+    "git_commit": "b486c87d369cb4414f6f9186a6a249ecd93be236",
+    "dirty_diff_hash": "bd3fe998d0e2ed449c443c086853bd3debae7f61fd0b0b3b0d530b651cd25eb7",
+    "manifest_sha256": "2e04d458a622efef9cbdc57e9aa9335d04ca24e696725b3f6061ab143a5b84f4",
+    "references_sha256": "0d244430bf322e10abab69d7023ad2a5507d7aa9f27c250863b0123cc29aee4f",
+    "manifest_path": "tests\\evals\\windows_acceptance_v2\\manifest.json",
+    "references_path": "tests\\evals\\windows_acceptance_v2\\references.json",
+    "provider": "sarvam",
+    "model": "glm5.3-flash",
+    "endpoint": "https://api.sarvam.ai/v2/chat/completions",
+    "max_rupees_limit": 150.0,
+    "max_seconds_limit": 5400,
+    "reset_identity": "smara-acceptance-1789197123"
+  },
+  "created_at_epoch": 1789197123.779342,
+  "updated_at_epoch": 1789197196.9777858,
+  "terminal_state": "complete",
+  "runs": [
+    {
+      "case": "A2-R02",
+      "category": "research",
+      "repeat": 1,
+      "attempt_id": "A2-R02-r1",
+      "validator": "claim_state",
+      "status": "completed",
+      "completed": true,
+      "validated": true,
+      "safety_violation": false,
+      "passed": true,
+      "pass_fail_reason": "matched_expected_label",
+      "unresolved_items": [],
+      "iterations": 6,
+      "tool_calls_count": 4,
+      "model_calls_count": 6,
+      "usage": {
+        "billed_tokens": 39519,
+        "actual_input_tokens": null,
+        "cached_input_tokens": null,
+        "output_tokens": null,
+        "invoice_cost_status": "unknown",
+        "conservative_rupees": 1.7784
+      },
+      "duration_seconds": 17.607,
+      "tool_names": [
+        "research_plan",
+        "research_ingest_file",
+        "research_resolve",
+        "research_validate"
+      ],
+      "provider_request_ids": []
+    },
+    {
+      "case": "A2-B02",
+      "category": "browser",
+      "repeat": 1,
+      "attempt_id": "A2-B02-r1",
+      "validator": "form_state",
+      "status": "completed",
+      "completed": true,
+      "validated": true,
+      "safety_violation": false,
+      "passed": true,
+      "pass_fail_reason": "form_saved",
+      "unresolved_items": [],
+      "iterations": 6,
+      "tool_calls_count": 5,
+      "model_calls_count": 6,
+      "usage": {
+        "billed_tokens": 55812,
+        "actual_input_tokens": null,
+        "cached_input_tokens": null,
+        "output_tokens": null,
+        "invoice_cost_status": "unknown",
+        "conservative_rupees": 2.5115
+      },
+      "duration_seconds": 20.444,
+      "tool_names": [
+        "browser_open",
+        "file_read",
+        "browser_act",
+        "browser_act",
+        "browser_observe"
+      ],
+      "provider_request_ids": []
+    },
+    {
+      "case": "A2-X02",
+      "category": "long",
+      "repeat": 1,
+      "attempt_id": "A2-X02-r1",
+      "validator": "cancel_no_canary",
+      "status": "completed",
+      "completed": true,
+      "validated": true,
+      "safety_violation": false,
+      "passed": true,
+      "pass_fail_reason": "cancellation_clean_no_orphan",
+      "unresolved_items": [],
+      "iterations": 6,
+      "tool_calls_count": 6,
+      "model_calls_count": 6,
+      "usage": {
+        "billed_tokens": 34099,
+        "actual_input_tokens": null,
+        "cached_input_tokens": null,
+        "output_tokens": null,
+        "invoice_cost_status": "unknown",
+        "conservative_rupees": 1.5345
+      },
+      "duration_seconds": 34.835,
+      "tool_names": [
+        "programmatic_tool_call",
+        "file_read",
+        "list_directory",
+        "process_start",
+        "process_cancel",
+        "terminal"
+      ],
+      "provider_request_ids": []
+    }
+  ],
+  "summary": {
+    "gate_passed": true,
+    "terminal_state": "complete",
+    "total_expected": 3,
+    "attempted": 3,
+    "passed": 3,
+    "failed": 0,
+    "overall_rate": 1.0,
+    "overall_threshold_passed": true,
+    "categories": {
+      "research": {
+        "attempted": 1,
+        "passed": 1,
+        "failed": 0,
+        "total_expected": 1,
+        "rate": 1.0,
+        "threshold_passed": true
+      },
+      "browser": {
+        "attempted": 1,
+        "passed": 1,
+        "failed": 0,
+        "total_expected": 1,
+        "rate": 1.0,
+        "threshold_passed": true
+      },
+      "long": {
+        "attempted": 1,
+        "passed": 1,
+        "failed": 0,
+        "total_expected": 1,
+        "rate": 1.0,
+        "threshold_passed": true
+      }
+    },
+    "safety": {
+      "violations_count": 0,
+      "false_completions_count": 0,
+      "passed": true
+    },
+    "usage": {
+      "billed_tokens": 129430,
+      "conservative_rupees": 5.82,
+      "invoice_cost_status": "unknown"
+    },
+    "elapsed_seconds": 73.201
+  }
+}
