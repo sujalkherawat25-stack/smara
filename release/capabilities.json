@@ -32,7 +32,13 @@
     },
     "live_web_research": {
       "status": "implemented_pending_canonical_agent_acceptance",
-      "suite": "tests/evals/live_web_acceptance/manifest.json",
+      "suite": "tests/evals/live_web_acceptance_v2/manifest.json",
+      "pending_acceptance_pack": {
+        "manifest_sha256": "0cf86403bf29ac7a5f35e88265b29eb161fd7e7010bf2c9c9aa60caf223aa853",
+        "references_sha256": "98123a3d6d087d19f07cbdfc4e8d8258087094c5d47e30f3b38a77e5778266ab",
+        "runner": "scripts/run_live_web_acceptance_v2.py",
+        "execution_status": "not_run"
+      },
       "providers": [
         "tavily",
         "exa",

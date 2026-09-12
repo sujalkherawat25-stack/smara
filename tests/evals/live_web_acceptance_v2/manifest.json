@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "suite": "smara-live-web-canonical-agent-20-v2",
+  "canonical_agent": true,
+  "repetitions": 3,
+  "reference_access": "validator_only",
+  "tasks": [
+    {"id":"LW2-F01","category":"current_factual","as_of":"2026-09-12","question":"What PEP number and title specify making CPython's GIL optional?"},
+    {"id":"LW2-F02","category":"current_factual","as_of":"2026-09-12","question":"Which RFC replaced RFC 7231 as the HTTP Semantics specification, and what is its title?"},
+    {"id":"LW2-F03","category":"current_factual","as_of":"2026-09-12","question":"Which Rust edition follows Rust 2021 according to the official Edition Guide?"},
+    {"id":"LW2-F04","category":"current_factual","as_of":"2026-09-12","question":"Under which open-source license is FastAPI distributed according to its official repository?"},
+    {"id":"LW2-D01","category":"breaking_news_or_dated","as_of":"2026-09-12","question":"On what date did OpenAI announce GPT-5?"},
+    {"id":"LW2-D02","category":"breaking_news_or_dated","as_of":"2026-09-12","question":"On what date was Python 3.14.0 officially released?"},
+    {"id":"LW2-D03","category":"breaking_news_or_dated","as_of":"2026-09-12","question":"What is the Node.js 24 release codename and its LTS status according to the official release schedule?"},
+    {"id":"LW2-D04","category":"breaking_news_or_dated","as_of":"2026-09-12","question":"On what date was Git 2.51.0 released according to the official Git site?"},
+    {"id":"LW2-C01","category":"contradiction_changed_fact","as_of":"2026-09-12","question":"What is Twitter's current company/product name after its 2023 rebrand?"},
+    {"id":"LW2-C02","category":"contradiction_changed_fact","as_of":"2026-09-12","question":"When did CentOS Linux 8 reach end of life?"},
+    {"id":"LW2-C03","category":"contradiction_changed_fact","as_of":"2026-09-12","question":"In which Python version was the distutils package removed from the standard library?"},
+    {"id":"LW2-C04","category":"contradiction_changed_fact","as_of":"2026-09-12","question":"Does RFC 7231 remain the current HTTP Semantics standard, or which RFC obsoleted it?"},
+    {"id":"LW2-S01","category":"source_quality","as_of":"2026-09-12","question":"What license does the official React repository declare?"},
+    {"id":"LW2-S02","category":"source_quality","as_of":"2026-09-12","question":"What copyright status does the official SQLite copyright page state for SQLite source code?"},
+    {"id":"LW2-S03","category":"source_quality","as_of":"2026-09-12","question":"What license identifier is declared in the official Linux kernel COPYING file?"},
+    {"id":"LW2-S04","category":"source_quality","as_of":"2026-09-12","question":"Which license does the official Kubernetes repository use?"},
+    {"id":"LW2-Q01","category":"quantitative_analysis","question":"What is the arithmetic mean of the X column across all rows in the live Anscombe CSV?","live_data_url":"https://raw.githubusercontent.com/mwaskom/seaborn-data/master/anscombe.csv"},
+    {"id":"LW2-Q02","category":"quantitative_analysis","question":"What is the maximum passenger count in the live flights CSV?","live_data_url":"https://raw.githubusercontent.com/mwaskom/seaborn-data/master/flights.csv"},
+    {"id":"LW2-Q03","category":"quantitative_analysis","question":"What is the arithmetic mean of sepal_length across all rows in the live iris CSV?","live_data_url":"https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv"},
+    {"id":"LW2-Q04","category":"quantitative_analysis","question":"What is the sum of every monthly passenger count across the 1958, 1959, and 1960 columns in the live airtravel CSV?","live_data_url":"https://people.sc.fsu.edu/~jburkardt/data/csv/airtravel.csv"}
+  ]
+}

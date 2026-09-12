@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "suite": "smara-live-web-canonical-agent-20-v2",
+  "sealed": true,
+  "references": {
+    "LW2-F01":{"expected_answer":"PEP 703 — Making the Global Interpreter Lock Optional in CPython","required_claims":[{"any_of":["PEP 703"]},{"any_of":["Making the Global Interpreter Lock Optional in CPython"]}],"allowed_domains":["peps.python.org"]},
+    "LW2-F02":{"expected_answer":"RFC 9110 — HTTP Semantics","required_claims":[{"any_of":["RFC 9110"]},{"any_of":["HTTP Semantics"]}],"allowed_domains":["rfc-editor.org","ietf.org"]},
+    "LW2-F03":{"expected_answer":"Rust 2024","required_claims":[{"any_of":["Rust 2024","2024 Edition"]}],"allowed_domains":["doc.rust-lang.org","rust-lang.org"]},
+    "LW2-F04":{"expected_answer":"MIT License","required_claims":[{"any_of":["MIT License","MIT"]}],"allowed_domains":["github.com"]},
+    "LW2-D01":{"expected_answer":"August 7, 2025","required_claims":[{"any_of":["August 7, 2025","7 August 2025","2025-08-07"]}],"allowed_domains":["openai.com"]},
+    "LW2-D02":{"expected_answer":"October 7, 2025","required_claims":[{"any_of":["October 7, 2025","7 October 2025","2025-10-07"]}],"allowed_domains":["python.org"]},
+    "LW2-D03":{"expected_answer":"Node.js 24, Krypton, Active LTS","required_claims":[{"any_of":["Krypton"]},{"any_of":["Active LTS","LTS"]}],"allowed_domains":["nodejs.org","github.com"]},
+    "LW2-D04":{"expected_answer":"August 18, 2025","required_claims":[{"any_of":["August 18, 2025","18 August 2025","2025-08-18"]}],"allowed_domains":["git-scm.com"]},
+    "LW2-C01":{"expected_answer":"X","required_claims":[{"any_of":["X"]},{"any_of":["Twitter"]}],"allowed_domains":["x.com","about.x.com"]},
+    "LW2-C02":{"expected_answer":"December 31, 2021","required_claims":[{"any_of":["December 31, 2021","31 December 2021","2021-12-31"]}],"allowed_domains":["centos.org"]},
+    "LW2-C03":{"expected_answer":"Python 3.12","required_claims":[{"any_of":["Python 3.12","3.12"]}],"allowed_domains":["python.org","docs.python.org"]},
+    "LW2-C04":{"expected_answer":"RFC 9110 obsoleted RFC 7231","required_claims":[{"any_of":["RFC 9110"]},{"any_of":["RFC 7231"]}],"allowed_domains":["rfc-editor.org","ietf.org"]},
+    "LW2-S01":{"expected_answer":"MIT License","required_claims":[{"any_of":["MIT License","MIT"]}],"allowed_domains":["github.com"]},
+    "LW2-S02":{"expected_answer":"Public domain","required_claims":[{"any_of":["public domain"]}],"allowed_domains":["sqlite.org"]},
+    "LW2-S03":{"expected_answer":"GPL-2.0","required_claims":[{"any_of":["GPL-2.0","GNU General Public License version 2"]}],"allowed_domains":["github.com","kernel.org"]},
+    "LW2-S04":{"expected_answer":"Apache License 2.0","required_claims":[{"any_of":["Apache License 2.0","Apache-2.0"]}],"allowed_domains":["github.com","kubernetes.io"]},
+    "LW2-Q01":{"numeric":{"operation":"mean","column":"x","tolerance":0.0001}},
+    "LW2-Q02":{"numeric":{"operation":"max","column":"passengers","tolerance":0.0001}},
+    "LW2-Q03":{"numeric":{"operation":"mean","column":"sepal_length","tolerance":0.0001}},
+    "LW2-Q04":{"numeric":{"operation":"sum","column":"1958","additional_columns":["1959","1960"],"tolerance":0.0001}}
+  }
+}

@@ -2,7 +2,7 @@
 
 Updated: 2026-09-12
 
-Status: **implemented; canonical-agent live acceptance pending**. The retained
+Status: **canonical-agent v2 gate implemented; live execution pending**. The retained
 20×3 result passed its component checks 60/60, but is not an end-to-end autonomy
 gate.
 
@@ -68,19 +68,22 @@ answer against an independently sealed answer. Its quantitative cases used
 generated local fixtures rather than live datasets. The runner now fails closed
 on this pack so it cannot create another promotion artifact.
 
-## Next promotion gate
+## Implemented v2 promotion gate
 
-1. Seal a v2 pack whose factual references contain `expected_answer`,
+1. The v2 pack is sealed in `tests/evals/live_web_acceptance_v2/`. Its factual references contain `expected_answer`,
    `required_claims`, and an `as_of` date for time-sensitive questions. Each
    quantitative task must declare a public `live_data_url` and independently
-   recomputable expected results.
-2. Execute every task through `SmaraAutonomousAgent`. Do not expose the reference
+   recomputable expected results. Manifest SHA-256:
+   `0cf86403bf29ac7a5f35e88265b29eb161fd7e7010bf2c9c9aa60caf223aa853`;
+   references SHA-256:
+   `98123a3d6d087d19f07cbdfc4e8d8258087094c5d47e30f3b38a77e5778266ab`.
+2. `scripts/run_live_web_acceptance_v2.py` executes every task through `SmaraAutonomousAgent`. It does not expose the reference
    file or expected answers to the agent workspace, planner, retrieval, or
    evidence-selection code.
-3. Score only the final answer and declared artifacts with an independent
+3. It scores only the final answer and research evidence with an independent
    validator. Require cited passages to entail each required claim and recompute
    every numerical result from the fetched dataset bytes.
-4. Run a small live smoke, inspect failures, reseal fresh held-out tasks, then run
+4. Remaining: run a small live smoke, inspect failures, reseal fresh held-out tasks if the implementation changes, then run
    20 tasks x 3 repetitions with the declared cost/time ceilings. Promote only
    if the existing overall/category, false-completion, safety, and citation
    thresholds pass.
