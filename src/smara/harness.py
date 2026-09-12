@@ -541,9 +541,9 @@ class SessionEngine:
                 if process_errors:
                     status="needs_input";unresolved=tuple(unresolved)+tuple(process_errors)
             revision=workspace_revision(self.workspace); mutated=self.db.execute("SELECT COUNT(*) FROM calls WHERE mutating=1 AND state='completed' AND COALESCE(before_revision,'')<>COALESCE(after_revision,'')").fetchone()[0]>0; verified=self.db.execute("SELECT COUNT(*) FROM evidence WHERE passed=1 AND subject_revision=? AND scope IN ('focused','full')",(revision,)).fetchone()[0]>0
-            if status=="completed" and mutated and not verified: status="needs_input"; unresolved=tuple(unresolved)+("workspace changes are unverified at current revision",)
             contract=self.get("output_contract",{})
             contract_errors=self._output_contract_errors(answer,contract)
+            artifact_verified=False
             from .output_validation import validate_json,validate_csv,validate_report
             validators={"json":validate_json,"csv":validate_csv,"report":validate_report}
             for specification in contract.get("artifacts",[]):
@@ -555,10 +555,12 @@ class SessionEngine:
                     receipt={"path":specification["path"],"sha256":before_hash,**asdict(validation)}
                     artifact_id,_=self.artifact_store.put_json(receipt)
                     self.event("artifact_validation",{**receipt,"artifact_id":artifact_id})
-                    if not validation.passed:contract_errors.append(f"artifact {specification['path']}: {validation.reason}")
+                    if validation.passed:artifact_verified=True
+                    else:contract_errors.append(f"artifact {specification['path']}: {validation.reason}")
                 except Exception as exc:
                     contract_errors.append(f"artifact validation failed: {exc}")
             if status=="completed" and contract_errors:status="needs_input";unresolved=tuple(unresolved)+tuple(contract_errors)
+            if status=="completed" and mutated and not (verified or artifact_verified):status="needs_input";unresolved=tuple(unresolved)+("workspace changes are unverified at current revision",)
             research_validation=self.get("research_validation",{})
             if status=="completed" and self.get("research_required",False):
                 research_artifact=self.get("research_state_artifact_id");validated_artifact=self.get("research_validated_state_artifact_id");research_valid=bool(research_validation.get("passed",False) and research_artifact and research_artifact==validated_artifact and not self.get("research_state_invalid"))

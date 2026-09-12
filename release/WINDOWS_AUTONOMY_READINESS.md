@@ -22,8 +22,8 @@ place:
 - doctor resolves the active saved credential without printing it, tests the real
   browser backend, and reports the configured context capacity.
 
-Verification on this checkout: **622 passed, 1 skipped, 2 existing short test-key
-warnings in 183.96 seconds**. The focused W3/W4/adapter matrix passed 21 tests and
+Verification after the provider-smoke fixes: **624 passed, 1 skipped, 2 existing
+short test-key warnings in 173.74 seconds**. The focused W3/W4/adapter matrix passed 21 tests and
 the Desktop TypeScript check passed. A clean virtual environment with system site
 packages disabled installed the rebuilt wheel plus its browser extra. Installed
 doctor and content-checked browser/file/terminal/persistence smoke tests passed from
@@ -31,12 +31,22 @@ a separate Unicode/space workspace without `PYTHONPATH`. Final wheel SHA-256:
 `03cd171eb15165f60404c72e6e2bc20185bfc3ae4ef2b7a624035160f84e7573`.
 
 The code implementation and deterministic local verification are complete for the
-active Windows research/browser/file/terminal scope. The provider-backed W5 score
-is still unmeasured: the saved `sarvam`, `sarvam-gemma` and `grok` profiles all
-resolve to no usable credential. Consequently the overall promotion remains
-`experimental_provider_unmeasured`; a paid/intended-model 24×3 result cannot be
-truthfully produced from this environment. The older 72-run component pack below
-remains regression evidence and is not described as autonomous acceptance.
+active Windows research/browser/file/terminal scope. On 2026-09-12 a temporary
+credential was used without persisting it to run a bounded canonical-agent smoke
+against Sarvam `glm5.3-flash`: research claim evaluation, a JSON artifact task and
+a real managed-browser form task all completed and passed independent state/content
+validators (**3/3**). The runs used 15 model calls, 11 tool calls and 104,944 billed
+tokens; Smara's conservative reservation accounting was $0.15, which is not a
+provider invoice. Evidence is in `release/evidence/W5_PROVIDER_SMOKE_2026-09-12.json`.
+Its SHA-256 is `b291250ee7a7f373a25ddee58e5cce2c078e0e172fb928c0c949be153ef109af`.
+
+The smoke exposed and drove fixes for two real defects: UTF-8 text/Markdown/CSV/JSON
+could not enter the artifact-backed research evidence path, and a passing declared
+artifact validator was evaluated too late to satisfy the current-revision
+verification gate. Both now have regressions. The overall capability is
+`experimental_provider_smoke_verified`, not promoted: the intended-model 24×3 W5
+acceptance matrix is still unmeasured, and the older 72-run component pack below
+remains regression evidence rather than autonomous acceptance.
 
 ## Corrected gate assessment — 2026-09-10
 

@@ -135,7 +135,22 @@ class CanonicalResearchSession:
         if candidate!=self.engine.workspace and self.engine.workspace not in candidate.parents:raise ResearchStateError("evidence path escapes workspace")
         if not candidate.is_file():raise ResearchStateError("evidence file is missing")
         raw=candidate.read_bytes();suffix=candidate.suffix.lower();source_url=candidate.as_uri()
-        if suffix==".pdf":
+        if suffix in {".txt", ".md", ".csv", ".json"}:
+            # Plain-text fixtures and user-authored notes are first-class local
+            # evidence. Preserve the original bytes and exact character offsets
+            # so the same artifact-backed provenance checks apply.
+            text=raw.decode("utf-8-sig",errors="strict")
+            record=self.index.add(
+                kind="fetched_passage",
+                url=source_url,
+                content=raw,
+                extracted_content=text.encode("utf-8"),
+                text=text,
+                start=0,
+                end=len(text),
+                extraction_version=f"local-{suffix.removeprefix('.')}-utf8-v1",
+            )
+        elif suffix==".pdf":
             try:
                 import pypdf
             except ImportError:

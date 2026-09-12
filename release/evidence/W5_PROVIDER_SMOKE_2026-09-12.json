@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-12",
+  "provider": "sarvam",
+  "endpoint": "https://api.sarvam.ai/v2/chat/completions",
+  "model": "glm5.3-flash",
+  "credential_persisted": false,
+  "scope": "bounded canonical-agent smoke; not the 24-task x 3 acceptance matrix",
+  "delegation": false,
+  "outcomes": [
+    {"case":"research-claim","category":"research","status":"completed","validated":true,"iterations":7,"model_calls":7,"tool_calls":5,"billed_tokens":47389,"estimated_dollars":0.07},
+    {"case":"local-json","category":"local","status":"completed","validated":true,"iterations":3,"model_calls":3,"tool_calls":2,"billed_tokens":13041,"estimated_dollars":0.03},
+    {"case":"browser-form","category":"browser","status":"completed","validated":true,"iterations":5,"model_calls":5,"tool_calls":4,"billed_tokens":44514,"estimated_dollars":0.05}
+  ],
+  "totals": {"passed":3,"attempted":3,"model_calls":15,"tool_calls":11,"billed_tokens":104944,"estimated_dollars":0.15},
+  "cost_note": "estimated_dollars is Smara's conservative reservation accounting, not a provider invoice"
+}
