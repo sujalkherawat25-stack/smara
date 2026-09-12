@@ -1669,6 +1669,15 @@ class SmaraAutonomousAgent:
         except Exception:
             layout_str = "Unavailable"
 
+        rules_section = ""
+        try:
+            from .workspace_rules import discover_workspace_rules, format_rules_for_prompt
+            rules = discover_workspace_rules(cwd)
+            if rules.get("found"):
+                rules_section = format_rules_for_prompt(rules)
+        except Exception:
+            pass
+
         return (
             f"\n\n### Current Execution Environment:\n"
             f"- Host OS / Shell: {os_info}\n"
@@ -1676,6 +1685,7 @@ class SmaraAutonomousAgent:
             f"- Git State: {git_info}\n"
             f"- Project Layout: {layout_str}\n"
             f"- Active Model: {self.model}\n"
+            f"{rules_section}"
         )
 
     def run(

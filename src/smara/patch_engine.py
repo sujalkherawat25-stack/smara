@@ -262,6 +262,26 @@ class SmaraPatchEngine:
         }
 
 
+def compute_unified_diff(
+    path: str,
+    old_content: str,
+    new_content: str,
+    context_lines: int = 3,
+) -> str:
+    """Compute unified diff between old_content and new_content."""
+    name = Path(path).name
+    diff_lines = list(
+        difflib.unified_diff(
+            old_content.splitlines(keepends=True),
+            new_content.splitlines(keepends=True),
+            fromfile=f"a/{name}",
+            tofile=f"b/{name}",
+            n=context_lines,
+        )
+    )
+    return "".join(diff_lines)
+
+
 def patch_file(
     path: str,
     old_string: str,

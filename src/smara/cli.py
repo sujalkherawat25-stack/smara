@@ -650,19 +650,34 @@ def _clear_token() -> None:
 def _interactive_repl(engine: LocalAutonomousEngine, canonical_runner=None) -> None:
     """Claude Code inspired interactive terminal REPL."""
     tui = engine.tui
+    approval_mode = "auto"
+    
+    try:
+        from .prompt_editor import SmaraPromptSession
+        prompt_session = SmaraPromptSession(engine.workspace)
+    except Exception:
+        prompt_session = None
+
     def execute(prompt: str) -> None:
-        if canonical_runner is None:engine.run_turn(prompt);return
-        agent_result,payload=canonical_runner(prompt);print(str(payload.get("answer") or agent_result.get("answer") or ""))
+        if canonical_runner is None:
+            engine.run_turn(prompt)
+            return
+        agent_result, payload = canonical_runner(prompt)
+        print(str(payload.get("answer") or agent_result.get("answer") or ""))
+
     tui.print_banner(
         model_label=engine.active_profile.get("label", engine.active_id),
         workspace_path=str(engine.workspace),
-        zero_friction=True,
+        zero_friction=(approval_mode == "auto"),
     )
 
     while True:
         try:
-            tui.print_prompt()
-            line = input().strip()
+            if prompt_session:
+                line = prompt_session.prompt("you")
+            else:
+                tui.print_prompt()
+                line = input().strip()
         except (EOFError, KeyboardInterrupt):
             print("\nExiting Smara.")
             return
@@ -684,8 +699,66 @@ def _interactive_repl(engine: LocalAutonomousEngine, canonical_runner=None) -> N
             tui.print_banner(
                 model_label=engine.active_profile.get("label", engine.active_id),
                 workspace_path=str(engine.workspace),
-                zero_friction=True,
+                zero_friction=(approval_mode == "auto"),
             )
+            continue
+
+        if line.startswith("/rules"):
+            from .workspace_rules import discover_workspace_rules
+            rules = discover_workspace_rules(engine.workspace)
+            if rules.get("found"):
+                print(tui.paint(f"\nDiscovered rules from {rules['filename']}:", "BOLD"))
+                print(rules["content"])
+            else:
+                print(tui.paint("\nNo project rule file found (.smararules, SMARA.md, CLAUDE.md).", "YELLOW"))
+            continue
+
+        if line.startswith("/mcp"):
+            from .mcp_client import MCPManager
+            mgr = MCPManager(engine.workspace)
+            servers = mgr.discover_and_load()
+            if servers:
+                print(tui.paint(f"\nConnected MCP Servers ({len(servers)}):", "BOLD"))
+                for s_name, s_proc in servers.items():
+                    print(f"  ● {tui.paint(s_name, 'CYAN')} ({len(s_proc.tools)} tools)")
+                    for t in s_proc.tools:
+                        print(f"      - {t.get('name')}: {t.get('description', '')[:60]}")
+            else:
+                print(tui.paint("\nNo MCP servers configured (create mcp.json or .mcp/servers.json).", "YELLOW"))
+            continue
+
+        if line.startswith("/diff"):
+            try:
+                diff_proc = subprocess.run(["git", "diff", "HEAD"], cwd=str(engine.workspace), capture_output=True, text=True, timeout=5)
+                diff_out = diff_proc.stdout.strip()
+                if diff_out:
+                    tui.render_diff(diff_out, "Working Tree Diffs")
+                else:
+                    print(tui.paint("\nWorking tree is clean (no uncommitted diffs).", "GREEN"))
+            except Exception as e:
+                tui.print_error(f"Git diff error: {e}")
+            continue
+
+        if line.startswith("/tree"):
+            parts = line.split(maxsplit=1)
+            depth = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 2
+            tui.print_tree(engine.workspace, max_depth=depth)
+            continue
+
+        if line.startswith("/approval"):
+            parts = line.split(maxsplit=1)
+            if len(parts) > 1 and parts[1].lower() in ("auto", "interactive"):
+                approval_mode = parts[1].lower()
+                print(tui.paint(f"Permission mode set to: {approval_mode}", "GREEN"))
+            else:
+                print(f"Current permission mode: {tui.paint(approval_mode, 'BOLD')} (options: auto, interactive)")
+            continue
+
+        if line.startswith("/test"):
+            parts = line.split(maxsplit=1)
+            filt = parts[1].strip() if len(parts) > 1 else ""
+            cmd = f"pytest -q {filt}".strip()
+            execute(f"Run tests with `{cmd}` and summarize passing/failing tests.")
             continue
 
         if line.startswith("/model"):
@@ -731,6 +804,8 @@ def _interactive_repl(engine: LocalAutonomousEngine, canonical_runner=None) -> N
             parts = line.split(maxsplit=1)
             if len(parts) > 1:
                 engine.workspace = Path(parts[1].strip()).resolve()
+                if prompt_session:
+                    prompt_session = SmaraPromptSession(engine.workspace)
                 print(tui.paint(f"Workspace set to {engine.workspace}", "GREEN"))
             else:
                 print(f"Active workspace: {engine.workspace}")

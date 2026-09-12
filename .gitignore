@@ -22,6 +22,10 @@ reports/osworld_readiness.json
 /*.pdf
 /*.pdb
 *.apk
+dist/
+artifacts/
+.pytest_tmp/
+pytest-tmp/
 scratch/
 .worktrees/
-pytest-tmp/
+

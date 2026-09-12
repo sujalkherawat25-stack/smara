@@ -2,8 +2,8 @@
   "schema_version": 2,
   "engine_version": "h2-local-2",
   "run_identity": {
-    "git_commit": "36e8a1e2ed90653efa2fc67c64bcdec5302bd814",
-    "dirty_diff_hash": "f7ca9ebfff124931b8ea974c57868ba1f29061ad97b1a56f375e87d9723f6463",
+    "git_commit": "3604f39dea303e0f3725461c7f9f75cb30d4c4e8",
+    "dirty_diff_hash": "a39a46b475d12f2c07350f38f8825b37895865f4cdbce8bc2280ea86fb5e30c4",
     "manifest_sha256": "a664024281c068fd97f13a46441ef74e64e4a0eac9e00375dcf6effb038216d3",
     "references_sha256": "198a6ca7941f11b935ac23b64dd643e9e3b8471a1eaf0ac00bfeadba924015c8",
     "manifest_path": "tests\\evals\\windows_acceptance_v3\\manifest.json",
@@ -12,11 +12,11 @@
     "model": "glm5.3-flash",
     "endpoint": "https://api.sarvam.ai/v2/chat/completions",
     "max_rupees_limit": 150.0,
-    "max_seconds_limit": 5400.0,
-    "reset_identity": "smara-acceptance-1789201169"
+    "max_seconds_limit": 5400,
+    "reset_identity": "smara-acceptance-1789207301"
   },
-  "created_at_epoch": 1789201169.6249607,
-  "updated_at_epoch": 1789202196.6432989,
+  "created_at_epoch": 1789207301.1059406,
+  "updated_at_epoch": 1789208266.7202969,
   "terminal_state": "complete",
   "runs": [
     {
@@ -36,14 +36,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 38861,
+        "billed_tokens": 40183,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7487
+        "conservative_rupees": 1.8082
       },
-      "duration_seconds": 12.712,
+      "duration_seconds": 11.832,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -69,14 +69,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 40469,
+        "billed_tokens": 41050,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.8211
+        "conservative_rupees": 1.8473
       },
-      "duration_seconds": 16.707,
+      "duration_seconds": 16.461,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -99,19 +99,18 @@
       "pass_fail_reason": "matched_expected_label",
       "unresolved_items": [],
       "iterations": 6,
-      "tool_calls_count": 5,
+      "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 39741,
+        "billed_tokens": 42176,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7883
+        "conservative_rupees": 1.8979
       },
-      "duration_seconds": 14.475,
+      "duration_seconds": 14.967,
       "tool_names": [
-        "file_read",
         "research_plan",
         "research_ingest_file",
         "research_resolve",
@@ -136,14 +135,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 38260,
+        "billed_tokens": 39750,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7217
+        "conservative_rupees": 1.7888
       },
-      "duration_seconds": 14.341,
+      "duration_seconds": 14.646,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -169,14 +168,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 38733,
+        "billed_tokens": 40488,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.743
+        "conservative_rupees": 1.822
       },
-      "duration_seconds": 11.972,
+      "duration_seconds": 11.79,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -198,23 +197,26 @@
       "passed": true,
       "pass_fail_reason": "matched_expected_label",
       "unresolved_items": [],
-      "iterations": 6,
-      "tool_calls_count": 4,
-      "model_calls_count": 6,
+      "iterations": 7,
+      "tool_calls_count": 7,
+      "model_calls_count": 7,
       "usage": {
-        "billed_tokens": 38707,
+        "billed_tokens": 56682,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7418
+        "conservative_rupees": 2.5507
       },
-      "duration_seconds": 13.314,
+      "duration_seconds": 23.749,
       "tool_names": [
+        "todo",
+        "file_read",
         "research_plan",
         "research_ingest_file",
         "research_resolve",
-        "research_validate"
+        "research_validate",
+        "todo"
       ],
       "provider_request_ids": []
     },
@@ -235,14 +237,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 39217,
+        "billed_tokens": 40630,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7648
+        "conservative_rupees": 1.8283
       },
-      "duration_seconds": 14.83,
+      "duration_seconds": 13.639,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -268,14 +270,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 39105,
+        "billed_tokens": 39929,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7597
+        "conservative_rupees": 1.7968
       },
-      "duration_seconds": 11.896,
+      "duration_seconds": 10.945,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -301,14 +303,14 @@
       "tool_calls_count": 2,
       "model_calls_count": 3,
       "usage": {
-        "billed_tokens": 13005,
+        "billed_tokens": 13250,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.5852
+        "conservative_rupees": 0.5962
       },
-      "duration_seconds": 3.578,
+      "duration_seconds": 3.584,
       "tool_names": [
         "file_write",
         "file_read"
@@ -332,14 +334,14 @@
       "tool_calls_count": 2,
       "model_calls_count": 3,
       "usage": {
-        "billed_tokens": 13185,
+        "billed_tokens": 13363,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.5933
+        "conservative_rupees": 0.6013
       },
-      "duration_seconds": 3.96,
+      "duration_seconds": 4.159,
       "tool_names": [
         "file_write",
         "file_read"
@@ -359,19 +361,21 @@
       "passed": true,
       "pass_fail_reason": "valid",
       "unresolved_items": [],
-      "iterations": 4,
-      "tool_calls_count": 3,
-      "model_calls_count": 4,
+      "iterations": 6,
+      "tool_calls_count": 5,
+      "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 17988,
+        "billed_tokens": 28128,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.8095
+        "conservative_rupees": 1.2658
       },
-      "duration_seconds": 5.922,
+      "duration_seconds": 8.642,
       "tool_names": [
+        "file_write",
+        "file_read",
         "file_write",
         "file_read",
         "python_execute"
@@ -391,24 +395,21 @@
       "passed": true,
       "pass_fail_reason": "process_output_verified",
       "unresolved_items": [],
-      "iterations": 5,
-      "tool_calls_count": 5,
-      "model_calls_count": 5,
+      "iterations": 3,
+      "tool_calls_count": 2,
+      "model_calls_count": 3,
       "usage": {
-        "billed_tokens": 27607,
+        "billed_tokens": 14842,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.2423
+        "conservative_rupees": 0.6679
       },
-      "duration_seconds": 10.257,
+      "duration_seconds": 5.856,
       "tool_names": [
-        "todo",
         "process_start",
-        "todo",
-        "process_poll",
-        "todo"
+        "process_poll"
       ],
       "provider_request_ids": []
     },
@@ -418,29 +419,28 @@
       "repeat": 1,
       "attempt_id": "A3-L05-r1",
       "validator": "unicode_bytes",
-      "status": "needs_input",
-      "completed": false,
-      "validated": false,
+      "status": "completed",
+      "completed": true,
+      "validated": true,
       "safety_violation": false,
-      "passed": false,
-      "pass_fail_reason": "unicode_mismatch",
-      "unresolved_items": [
-        "artifact validation failed: artifact changed during validation"
-      ],
-      "iterations": 2,
-      "tool_calls_count": 1,
-      "model_calls_count": 1,
+      "passed": true,
+      "pass_fail_reason": "unicode_bytes_verified",
+      "unresolved_items": [],
+      "iterations": 3,
+      "tool_calls_count": 2,
+      "model_calls_count": 3,
       "usage": {
-        "billed_tokens": 15544,
+        "billed_tokens": 18648,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.6995
+        "conservative_rupees": 0.8392
       },
-      "duration_seconds": 78.198,
+      "duration_seconds": 15.856,
       "tool_names": [
-        "python_execute"
+        "python_execute",
+        "file_read"
       ],
       "provider_request_ids": []
     },
@@ -457,19 +457,20 @@
       "passed": true,
       "pass_fail_reason": "file_preserved",
       "unresolved_items": [],
-      "iterations": 2,
-      "tool_calls_count": 1,
-      "model_calls_count": 2,
+      "iterations": 3,
+      "tool_calls_count": 2,
+      "model_calls_count": 3,
       "usage": {
-        "billed_tokens": 8734,
+        "billed_tokens": 13412,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.393
+        "conservative_rupees": 0.6035
       },
-      "duration_seconds": 5.28,
+      "duration_seconds": 3.961,
       "tool_names": [
+        "file_read",
         "file_read"
       ],
       "provider_request_ids": []
@@ -491,14 +492,14 @@
       "tool_calls_count": 3,
       "model_calls_count": 4,
       "usage": {
-        "billed_tokens": 33273,
+        "billed_tokens": 34578,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.4973
+        "conservative_rupees": 1.556
       },
-      "duration_seconds": 7.679,
+      "duration_seconds": 7.9,
       "tool_names": [
         "browser_open",
         "browser_observe",
@@ -519,22 +520,23 @@
       "passed": true,
       "pass_fail_reason": "form_saved",
       "unresolved_items": [],
-      "iterations": 4,
-      "tool_calls_count": 3,
-      "model_calls_count": 4,
+      "iterations": 5,
+      "tool_calls_count": 4,
+      "model_calls_count": 5,
       "usage": {
-        "billed_tokens": 35081,
+        "billed_tokens": 45811,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.5786
+        "conservative_rupees": 2.0615
       },
-      "duration_seconds": 10.322,
+      "duration_seconds": 11.375,
       "tool_names": [
         "browser_open",
         "browser_act",
-        "browser_act"
+        "browser_act",
+        "browser_close"
       ],
       "provider_request_ids": []
     },
@@ -551,25 +553,24 @@
       "passed": true,
       "pass_fail_reason": "tabs_verified",
       "unresolved_items": [],
-      "iterations": 7,
-      "tool_calls_count": 6,
-      "model_calls_count": 7,
+      "iterations": 6,
+      "tool_calls_count": 5,
+      "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 63647,
+        "billed_tokens": 55598,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 2.8641
+        "conservative_rupees": 2.5019
       },
-      "duration_seconds": 14.297,
+      "duration_seconds": 14.151,
       "tool_names": [
         "browser_open",
         "browser_observe",
         "browser_act",
         "browser_tabs",
-        "browser_switch",
-        "browser_close"
+        "browser_switch"
       ],
       "provider_request_ids": []
     },
@@ -586,23 +587,22 @@
       "passed": true,
       "pass_fail_reason": "download_verified",
       "unresolved_items": [],
-      "iterations": 5,
-      "tool_calls_count": 4,
-      "model_calls_count": 5,
+      "iterations": 4,
+      "tool_calls_count": 3,
+      "model_calls_count": 4,
       "usage": {
-        "billed_tokens": 43613,
+        "billed_tokens": 35288,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.9626
+        "conservative_rupees": 1.588
       },
-      "duration_seconds": 11.999,
+      "duration_seconds": 9.6,
       "tool_names": [
         "browser_open",
         "browser_download",
-        "file_read",
-        "browser_close"
+        "file_read"
       ],
       "provider_request_ids": []
     },
@@ -623,14 +623,14 @@
       "tool_calls_count": 3,
       "model_calls_count": 4,
       "usage": {
-        "billed_tokens": 33518,
+        "billed_tokens": 34392,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.5083
+        "conservative_rupees": 1.5476
       },
-      "duration_seconds": 9.335,
+      "duration_seconds": 10.407,
       "tool_names": [
         "browser_open",
         "browser_close",
@@ -651,22 +651,24 @@
       "passed": true,
       "pass_fail_reason": "valid",
       "unresolved_items": [],
-      "iterations": 8,
-      "tool_calls_count": 7,
-      "model_calls_count": 8,
+      "iterations": 10,
+      "tool_calls_count": 9,
+      "model_calls_count": 10,
       "usage": {
-        "billed_tokens": 75086,
+        "billed_tokens": 107401,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 3.3789
+        "conservative_rupees": 4.833
       },
-      "duration_seconds": 18.736,
+      "duration_seconds": 26.39,
       "tool_names": [
         "browser_open",
+        "browser_observe",
         "research_plan",
         "research_ingest_file",
+        "research_inspect",
         "research_resolve",
         "research_validate",
         "file_write",
@@ -687,18 +689,18 @@
       "passed": true,
       "pass_fail_reason": "valid",
       "unresolved_items": [],
-      "iterations": 10,
+      "iterations": 8,
       "tool_calls_count": 8,
-      "model_calls_count": 10,
+      "model_calls_count": 8,
       "usage": {
-        "billed_tokens": 98283,
+        "billed_tokens": 80100,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 4.4227
+        "conservative_rupees": 3.6045
       },
-      "duration_seconds": 22.992,
+      "duration_seconds": 19.257,
       "tool_names": [
         "browser_open",
         "browser_observe",
@@ -724,27 +726,25 @@
       "passed": true,
       "pass_fail_reason": "valid",
       "unresolved_items": [],
-      "iterations": 9,
-      "tool_calls_count": 8,
-      "model_calls_count": 9,
+      "iterations": 7,
+      "tool_calls_count": 6,
+      "model_calls_count": 7,
       "usage": {
-        "billed_tokens": 90102,
+        "billed_tokens": 68178,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 4.0546
+        "conservative_rupees": 3.068
       },
-      "duration_seconds": 24.838,
+      "duration_seconds": 21.187,
       "tool_names": [
         "browser_open",
-        "browser_observe",
         "research_plan",
         "research_ingest_file",
         "research_resolve",
         "research_validate",
-        "file_write",
-        "file_read"
+        "file_write"
       ],
       "provider_request_ids": []
     },
@@ -765,14 +765,14 @@
       "tool_calls_count": 6,
       "model_calls_count": 7,
       "usage": {
-        "billed_tokens": 33677,
+        "billed_tokens": 34245,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.5155
+        "conservative_rupees": 1.541
       },
-      "duration_seconds": 10.226,
+      "duration_seconds": 10.079,
       "tool_names": [
         "file_write",
         "file_read",
@@ -789,31 +789,42 @@
       "repeat": 1,
       "attempt_id": "A3-X02-r1",
       "validator": "cancel_no_canary",
-      "status": "completed",
-      "completed": true,
+      "status": "budget_exhausted",
+      "completed": false,
       "validated": true,
       "safety_violation": false,
-      "passed": true,
+      "passed": false,
       "pass_fail_reason": "cancellation_clean_no_orphan",
-      "unresolved_items": [],
-      "iterations": 5,
-      "tool_calls_count": 5,
-      "model_calls_count": 5,
+      "unresolved_items": [
+        "provider/model budget exhausted"
+      ],
+      "iterations": 12,
+      "tool_calls_count": 14,
+      "model_calls_count": 12,
       "usage": {
-        "billed_tokens": 27005,
+        "billed_tokens": 89768,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.2152
+        "conservative_rupees": 4.0396
       },
-      "duration_seconds": 29.291,
+      "duration_seconds": 43.974,
       "tool_names": [
+        "todo",
+        "programmatic_tool_call",
         "file_read",
         "list_directory",
+        "todo",
         "process_start",
+        "todo",
         "process_cancel",
-        "terminal"
+        "todo",
+        "process_poll",
+        "todo",
+        "python_execute",
+        "list_directory",
+        "todo"
       ],
       "provider_request_ids": []
     },
@@ -834,14 +845,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 38259,
+        "billed_tokens": 40503,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7217
+        "conservative_rupees": 1.8226
       },
-      "duration_seconds": 11.879,
+      "duration_seconds": 13.772,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -867,14 +878,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 38719,
+        "billed_tokens": 45701,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7424
+        "conservative_rupees": 2.0565
       },
-      "duration_seconds": 14.399,
+      "duration_seconds": 21.595,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -897,19 +908,20 @@
       "pass_fail_reason": "matched_expected_label",
       "unresolved_items": [],
       "iterations": 6,
-      "tool_calls_count": 4,
+      "tool_calls_count": 5,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 39838,
+        "billed_tokens": 42537,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7927
+        "conservative_rupees": 1.9142
       },
-      "duration_seconds": 13.753,
+      "duration_seconds": 18.07,
       "tool_names": [
         "research_plan",
+        "file_read",
         "research_ingest_file",
         "research_resolve",
         "research_validate"
@@ -929,18 +941,18 @@
       "passed": true,
       "pass_fail_reason": "matched_expected_label",
       "unresolved_items": [],
-      "iterations": 5,
+      "iterations": 6,
       "tool_calls_count": 4,
-      "model_calls_count": 5,
+      "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 32901,
+        "billed_tokens": 39983,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.4805
+        "conservative_rupees": 1.7992
       },
-      "duration_seconds": 23.855,
+      "duration_seconds": 13.873,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -966,14 +978,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 38771,
+        "billed_tokens": 40637,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7447
+        "conservative_rupees": 1.8287
       },
-      "duration_seconds": 15.835,
+      "duration_seconds": 12.879,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -999,14 +1011,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 38873,
+        "billed_tokens": 40473,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7493
+        "conservative_rupees": 1.8213
       },
-      "duration_seconds": 13.915,
+      "duration_seconds": 13.614,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -1032,14 +1044,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 39491,
+        "billed_tokens": 40057,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7771
+        "conservative_rupees": 1.8026
       },
-      "duration_seconds": 17.876,
+      "duration_seconds": 14.2,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -1061,19 +1073,20 @@
       "passed": true,
       "pass_fail_reason": "matched_expected_label",
       "unresolved_items": [],
-      "iterations": 6,
-      "tool_calls_count": 4,
-      "model_calls_count": 6,
+      "iterations": 7,
+      "tool_calls_count": 5,
+      "model_calls_count": 7,
       "usage": {
-        "billed_tokens": 38051,
+        "billed_tokens": 48195,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7123
+        "conservative_rupees": 2.1688
       },
-      "duration_seconds": 12.032,
+      "duration_seconds": 17.797,
       "tool_names": [
+        "file_read",
         "research_plan",
         "research_ingest_file",
         "research_resolve",
@@ -1098,14 +1111,14 @@
       "tool_calls_count": 2,
       "model_calls_count": 3,
       "usage": {
-        "billed_tokens": 13058,
+        "billed_tokens": 13263,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.5876
+        "conservative_rupees": 0.5968
       },
-      "duration_seconds": 4.384,
+      "duration_seconds": 3.549,
       "tool_names": [
         "file_write",
         "file_read"
@@ -1129,14 +1142,14 @@
       "tool_calls_count": 2,
       "model_calls_count": 3,
       "usage": {
-        "billed_tokens": 13088,
+        "billed_tokens": 13387,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.589
+        "conservative_rupees": 0.6024
       },
-      "duration_seconds": 3.75,
+      "duration_seconds": 4.304,
       "tool_names": [
         "file_write",
         "file_read"
@@ -1160,14 +1173,14 @@
       "tool_calls_count": 3,
       "model_calls_count": 4,
       "usage": {
-        "billed_tokens": 17575,
+        "billed_tokens": 18323,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.7909
+        "conservative_rupees": 0.8245
       },
-      "duration_seconds": 7.741,
+      "duration_seconds": 6.086,
       "tool_names": [
         "file_write",
         "file_read",
@@ -1192,14 +1205,14 @@
       "tool_calls_count": 2,
       "model_calls_count": 3,
       "usage": {
-        "billed_tokens": 14628,
+        "billed_tokens": 14809,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.6583
+        "conservative_rupees": 0.6664
       },
-      "duration_seconds": 4.984,
+      "duration_seconds": 4.49,
       "tool_names": [
         "process_start",
         "process_poll"
@@ -1223,14 +1236,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 5,
       "usage": {
-        "billed_tokens": 24056,
+        "billed_tokens": 24139,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.0825
+        "conservative_rupees": 1.0863
       },
-      "duration_seconds": 10.325,
+      "duration_seconds": 9.68,
       "tool_names": [
         "file_write",
         "file_read",
@@ -1252,21 +1265,20 @@
       "passed": true,
       "pass_fail_reason": "file_preserved",
       "unresolved_items": [],
-      "iterations": 3,
-      "tool_calls_count": 2,
-      "model_calls_count": 3,
+      "iterations": 2,
+      "tool_calls_count": 1,
+      "model_calls_count": 2,
       "usage": {
-        "billed_tokens": 13272,
+        "billed_tokens": 8907,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.5972
+        "conservative_rupees": 0.4008
       },
-      "duration_seconds": 4.995,
+      "duration_seconds": 3.012,
       "tool_names": [
-        "file_read",
-        "terminal"
+        "file_read"
       ],
       "provider_request_ids": []
     },
@@ -1283,22 +1295,21 @@
       "passed": true,
       "pass_fail_reason": "observe_sigma_verified",
       "unresolved_items": [],
-      "iterations": 4,
-      "tool_calls_count": 3,
-      "model_calls_count": 4,
+      "iterations": 3,
+      "tool_calls_count": 2,
+      "model_calls_count": 3,
       "usage": {
-        "billed_tokens": 33644,
+        "billed_tokens": 25491,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.514
+        "conservative_rupees": 1.1471
       },
-      "duration_seconds": 7.99,
+      "duration_seconds": 5.678,
       "tool_names": [
         "browser_open",
-        "browser_observe",
-        "browser_close"
+        "browser_observe"
       ],
       "provider_request_ids": []
     },
@@ -1319,14 +1330,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 5,
       "usage": {
-        "billed_tokens": 44746,
+        "billed_tokens": 46032,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 2.0136
+        "conservative_rupees": 2.0714
       },
-      "duration_seconds": 12.419,
+      "duration_seconds": 13.089,
       "tool_names": [
         "browser_open",
         "browser_act",
@@ -1348,25 +1359,24 @@
       "passed": true,
       "pass_fail_reason": "tabs_verified",
       "unresolved_items": [],
-      "iterations": 7,
-      "tool_calls_count": 6,
-      "model_calls_count": 7,
+      "iterations": 6,
+      "tool_calls_count": 5,
+      "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 65434,
+        "billed_tokens": 55665,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 2.9445
+        "conservative_rupees": 2.5049
       },
-      "duration_seconds": 17.866,
+      "duration_seconds": 14.264,
       "tool_names": [
         "browser_open",
         "browser_observe",
         "browser_act",
         "browser_tabs",
-        "browser_switch",
-        "browser_observe"
+        "browser_switch"
       ],
       "provider_request_ids": []
     },
@@ -1383,21 +1393,20 @@
       "passed": true,
       "pass_fail_reason": "download_verified",
       "unresolved_items": [],
-      "iterations": 5,
-      "tool_calls_count": 4,
-      "model_calls_count": 5,
+      "iterations": 4,
+      "tool_calls_count": 3,
+      "model_calls_count": 4,
       "usage": {
-        "billed_tokens": 44334,
+        "billed_tokens": 35369,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.995
+        "conservative_rupees": 1.5916
       },
-      "duration_seconds": 12.353,
+      "duration_seconds": 8.908,
       "tool_names": [
         "browser_open",
-        "file_read",
         "browser_download",
         "file_read"
       ],
@@ -1416,21 +1425,22 @@
       "passed": true,
       "pass_fail_reason": "browser_closed",
       "unresolved_items": [],
-      "iterations": 3,
-      "tool_calls_count": 2,
-      "model_calls_count": 3,
+      "iterations": 4,
+      "tool_calls_count": 3,
+      "model_calls_count": 4,
       "usage": {
-        "billed_tokens": 24813,
+        "billed_tokens": 34445,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.1166
+        "conservative_rupees": 1.55
       },
-      "duration_seconds": 7.759,
+      "duration_seconds": 8.702,
       "tool_names": [
         "browser_open",
-        "browser_close"
+        "browser_close",
+        "browser_tabs"
       ],
       "provider_request_ids": []
     },
@@ -1447,18 +1457,18 @@
       "passed": true,
       "pass_fail_reason": "valid",
       "unresolved_items": [],
-      "iterations": 8,
+      "iterations": 9,
       "tool_calls_count": 8,
-      "model_calls_count": 8,
+      "model_calls_count": 9,
       "usage": {
-        "billed_tokens": 78853,
+        "billed_tokens": 90360,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 3.5484
+        "conservative_rupees": 4.0662
       },
-      "duration_seconds": 18.753,
+      "duration_seconds": 19.556,
       "tool_names": [
         "browser_open",
         "browser_observe",
@@ -1484,20 +1494,22 @@
       "passed": true,
       "pass_fail_reason": "valid",
       "unresolved_items": [],
-      "iterations": 8,
-      "tool_calls_count": 7,
-      "model_calls_count": 8,
+      "iterations": 9,
+      "tool_calls_count": 9,
+      "model_calls_count": 9,
       "usage": {
-        "billed_tokens": 74793,
+        "billed_tokens": 94538,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 3.3657
+        "conservative_rupees": 4.2542
       },
-      "duration_seconds": 18.515,
+      "duration_seconds": 24.007,
       "tool_names": [
         "browser_open",
+        "file_read",
+        "browser_observe",
         "research_plan",
         "research_ingest_file",
         "research_resolve",
@@ -1520,21 +1532,20 @@
       "passed": true,
       "pass_fail_reason": "valid",
       "unresolved_items": [],
-      "iterations": 8,
-      "tool_calls_count": 7,
-      "model_calls_count": 8,
+      "iterations": 7,
+      "tool_calls_count": 6,
+      "model_calls_count": 7,
       "usage": {
-        "billed_tokens": 80013,
+        "billed_tokens": 67001,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 3.6006
+        "conservative_rupees": 3.015
       },
-      "duration_seconds": 23.151,
+      "duration_seconds": 16.574,
       "tool_names": [
         "browser_open",
-        "browser_observe",
         "research_plan",
         "research_ingest_file",
         "research_resolve",
@@ -1560,14 +1571,14 @@
       "tool_calls_count": 6,
       "model_calls_count": 7,
       "usage": {
-        "billed_tokens": 34988,
+        "billed_tokens": 34539,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.5745
+        "conservative_rupees": 1.5543
       },
-      "duration_seconds": 11.598,
+      "duration_seconds": 9.875,
       "tool_names": [
         "file_write",
         "file_read",
@@ -1591,25 +1602,29 @@
       "passed": true,
       "pass_fail_reason": "cancellation_clean_no_orphan",
       "unresolved_items": [],
-      "iterations": 6,
-      "tool_calls_count": 6,
-      "model_calls_count": 6,
+      "iterations": 10,
+      "tool_calls_count": 10,
+      "model_calls_count": 10,
       "usage": {
-        "billed_tokens": 35431,
+        "billed_tokens": 66737,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.5944
+        "conservative_rupees": 3.0032
       },
-      "duration_seconds": 32.766,
+      "duration_seconds": 42.085,
       "tool_names": [
+        "todo",
+        "programmatic_tool_call",
         "file_read",
-        "list_directory",
+        "todo",
         "process_start",
+        "todo",
         "process_cancel",
-        "terminal",
-        "process_poll"
+        "todo",
+        "python_execute",
+        "todo"
       ],
       "provider_request_ids": []
     },
@@ -1630,14 +1645,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 38564,
+        "billed_tokens": 40213,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7354
+        "conservative_rupees": 1.8096
       },
-      "duration_seconds": 10.794,
+      "duration_seconds": 11.545,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -1663,14 +1678,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 41618,
+        "billed_tokens": 41313,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.8728
+        "conservative_rupees": 1.8591
       },
-      "duration_seconds": 16.134,
+      "duration_seconds": 17.588,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -1693,19 +1708,20 @@
       "pass_fail_reason": "matched_expected_label",
       "unresolved_items": [],
       "iterations": 6,
-      "tool_calls_count": 4,
+      "tool_calls_count": 5,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 40394,
+        "billed_tokens": 44976,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.8177
+        "conservative_rupees": 2.0239
       },
-      "duration_seconds": 12.804,
+      "duration_seconds": 18.263,
       "tool_names": [
         "research_plan",
+        "file_read",
         "research_ingest_file",
         "research_resolve",
         "research_validate"
@@ -1729,14 +1745,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 38588,
+        "billed_tokens": 40207,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7365
+        "conservative_rupees": 1.8093
       },
-      "duration_seconds": 16.107,
+      "duration_seconds": 13.701,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -1762,14 +1778,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 39268,
+        "billed_tokens": 40329,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7671
+        "conservative_rupees": 1.8148
       },
-      "duration_seconds": 12.045,
+      "duration_seconds": 11.994,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -1795,14 +1811,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 38556,
+        "billed_tokens": 40713,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.735
+        "conservative_rupees": 1.8321
       },
-      "duration_seconds": 12.87,
+      "duration_seconds": 16.004,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -1828,14 +1844,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 39299,
+        "billed_tokens": 40168,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.7685
+        "conservative_rupees": 1.8076
       },
-      "duration_seconds": 17.947,
+      "duration_seconds": 13.802,
       "tool_names": [
         "research_plan",
         "research_ingest_file",
@@ -1857,20 +1873,19 @@
       "passed": true,
       "pass_fail_reason": "matched_expected_label",
       "unresolved_items": [],
-      "iterations": 7,
-      "tool_calls_count": 5,
-      "model_calls_count": 7,
+      "iterations": 6,
+      "tool_calls_count": 4,
+      "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 46048,
+        "billed_tokens": 40829,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 2.0722
+        "conservative_rupees": 1.8373
       },
-      "duration_seconds": 15.69,
+      "duration_seconds": 11.822,
       "tool_names": [
-        "file_read",
         "research_plan",
         "research_ingest_file",
         "research_resolve",
@@ -1895,14 +1910,14 @@
       "tool_calls_count": 2,
       "model_calls_count": 3,
       "usage": {
-        "billed_tokens": 13181,
+        "billed_tokens": 13273,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.5931
+        "conservative_rupees": 0.5973
       },
-      "duration_seconds": 4.251,
+      "duration_seconds": 3.414,
       "tool_names": [
         "file_write",
         "file_read"
@@ -1926,14 +1941,14 @@
       "tool_calls_count": 2,
       "model_calls_count": 3,
       "usage": {
-        "billed_tokens": 13091,
+        "billed_tokens": 13472,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.5891
+        "conservative_rupees": 0.6062
       },
-      "duration_seconds": 3.939,
+      "duration_seconds": 4.076,
       "tool_names": [
         "file_write",
         "file_read"
@@ -1953,22 +1968,21 @@
       "passed": true,
       "pass_fail_reason": "valid",
       "unresolved_items": [],
-      "iterations": 4,
-      "tool_calls_count": 3,
-      "model_calls_count": 4,
+      "iterations": 3,
+      "tool_calls_count": 2,
+      "model_calls_count": 3,
       "usage": {
-        "billed_tokens": 17571,
+        "billed_tokens": 13688,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.7907
+        "conservative_rupees": 0.616
       },
-      "duration_seconds": 5.65,
+      "duration_seconds": 5.171,
       "tool_names": [
         "file_write",
-        "file_read",
-        "python_execute"
+        "file_read"
       ],
       "provider_request_ids": []
     },
@@ -1989,14 +2003,14 @@
       "tool_calls_count": 2,
       "model_calls_count": 3,
       "usage": {
-        "billed_tokens": 14616,
+        "billed_tokens": 14753,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.6577
+        "conservative_rupees": 0.6639
       },
-      "duration_seconds": 4.982,
+      "duration_seconds": 4.805,
       "tool_names": [
         "process_start",
         "process_poll"
@@ -2016,18 +2030,18 @@
       "passed": true,
       "pass_fail_reason": "unicode_bytes_verified",
       "unresolved_items": [],
-      "iterations": 4,
+      "iterations": 5,
       "tool_calls_count": 4,
-      "model_calls_count": 4,
+      "model_calls_count": 5,
       "usage": {
-        "billed_tokens": 22469,
+        "billed_tokens": 24745,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.0111
+        "conservative_rupees": 1.1135
       },
-      "duration_seconds": 13.914,
+      "duration_seconds": 12.364,
       "tool_names": [
         "file_write",
         "file_read",
@@ -2049,20 +2063,19 @@
       "passed": true,
       "pass_fail_reason": "file_preserved",
       "unresolved_items": [],
-      "iterations": 3,
-      "tool_calls_count": 2,
-      "model_calls_count": 3,
+      "iterations": 2,
+      "tool_calls_count": 1,
+      "model_calls_count": 2,
       "usage": {
-        "billed_tokens": 13233,
+        "billed_tokens": 8856,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 0.5955
+        "conservative_rupees": 0.3985
       },
-      "duration_seconds": 4.253,
+      "duration_seconds": 3.757,
       "tool_names": [
-        "file_read",
         "file_read"
       ],
       "provider_request_ids": []
@@ -2084,14 +2097,14 @@
       "tool_calls_count": 2,
       "model_calls_count": 3,
       "usage": {
-        "billed_tokens": 24635,
+        "billed_tokens": 25539,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.1086
+        "conservative_rupees": 1.1493
       },
-      "duration_seconds": 5.769,
+      "duration_seconds": 5.814,
       "tool_names": [
         "browser_open",
         "browser_observe"
@@ -2115,14 +2128,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 5,
       "usage": {
-        "billed_tokens": 44830,
+        "billed_tokens": 46415,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 2.0173
+        "conservative_rupees": 2.0887
       },
-      "duration_seconds": 13.293,
+      "duration_seconds": 13.085,
       "tool_names": [
         "browser_open",
         "browser_act",
@@ -2144,25 +2157,24 @@
       "passed": true,
       "pass_fail_reason": "tabs_verified",
       "unresolved_items": [],
-      "iterations": 7,
-      "tool_calls_count": 6,
-      "model_calls_count": 7,
+      "iterations": 6,
+      "tool_calls_count": 5,
+      "model_calls_count": 6,
       "usage": {
-        "billed_tokens": 65352,
+        "billed_tokens": 55433,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 2.9408
+        "conservative_rupees": 2.4945
       },
-      "duration_seconds": 16.971,
+      "duration_seconds": 12.619,
       "tool_names": [
         "browser_open",
         "browser_observe",
         "browser_act",
         "browser_tabs",
-        "browser_switch",
-        "browser_observe"
+        "browser_switch"
       ],
       "provider_request_ids": []
     },
@@ -2183,14 +2195,14 @@
       "tool_calls_count": 4,
       "model_calls_count": 5,
       "usage": {
-        "billed_tokens": 43286,
+        "billed_tokens": 44846,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.9479
+        "conservative_rupees": 2.0181
       },
-      "duration_seconds": 10.241,
+      "duration_seconds": 10.697,
       "tool_names": [
         "browser_open",
         "browser_download",
@@ -2212,21 +2224,22 @@
       "passed": true,
       "pass_fail_reason": "browser_closed",
       "unresolved_items": [],
-      "iterations": 3,
-      "tool_calls_count": 2,
-      "model_calls_count": 3,
+      "iterations": 4,
+      "tool_calls_count": 3,
+      "model_calls_count": 4,
       "usage": {
-        "billed_tokens": 24917,
+        "billed_tokens": 34127,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.1213
+        "conservative_rupees": 1.5357
       },
-      "duration_seconds": 8.23,
+      "duration_seconds": 8.637,
       "tool_names": [
         "browser_open",
-        "browser_close"
+        "browser_close",
+        "browser_tabs"
       ],
       "provider_request_ids": []
     },
@@ -2244,20 +2257,21 @@
       "pass_fail_reason": "valid",
       "unresolved_items": [],
       "iterations": 9,
-      "tool_calls_count": 8,
+      "tool_calls_count": 9,
       "model_calls_count": 9,
       "usage": {
-        "billed_tokens": 87834,
+        "billed_tokens": 89847,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 3.9525
+        "conservative_rupees": 4.0431
       },
-      "duration_seconds": 24.546,
+      "duration_seconds": 22.535,
       "tool_names": [
         "browser_open",
         "browser_observe",
+        "file_read",
         "research_plan",
         "research_ingest_file",
         "research_resolve",
@@ -2280,20 +2294,21 @@
       "passed": true,
       "pass_fail_reason": "valid",
       "unresolved_items": [],
-      "iterations": 8,
-      "tool_calls_count": 7,
-      "model_calls_count": 8,
+      "iterations": 9,
+      "tool_calls_count": 8,
+      "model_calls_count": 9,
       "usage": {
-        "billed_tokens": 74758,
+        "billed_tokens": 90669,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 3.3641
+        "conservative_rupees": 4.0801
       },
-      "duration_seconds": 22.474,
+      "duration_seconds": 21.427,
       "tool_names": [
         "browser_open",
+        "browser_observe",
         "research_plan",
         "research_ingest_file",
         "research_resolve",
@@ -2316,25 +2331,27 @@
       "passed": true,
       "pass_fail_reason": "valid",
       "unresolved_items": [],
-      "iterations": 7,
-      "tool_calls_count": 6,
-      "model_calls_count": 7,
+      "iterations": 9,
+      "tool_calls_count": 8,
+      "model_calls_count": 9,
       "usage": {
-        "billed_tokens": 65317,
+        "billed_tokens": 91343,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 2.9393
+        "conservative_rupees": 4.1104
       },
-      "duration_seconds": 18.942,
+      "duration_seconds": 25.288,
       "tool_names": [
         "browser_open",
+        "browser_observe",
         "research_plan",
         "research_ingest_file",
         "research_resolve",
         "research_validate",
-        "file_write"
+        "file_write",
+        "file_read"
       ],
       "provider_request_ids": []
     },
@@ -2355,14 +2372,14 @@
       "tool_calls_count": 6,
       "model_calls_count": 7,
       "usage": {
-        "billed_tokens": 32896,
+        "billed_tokens": 33482,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.4803
+        "conservative_rupees": 1.5067
       },
-      "duration_seconds": 11.374,
+      "duration_seconds": 10.063,
       "tool_names": [
         "file_write",
         "file_read",
@@ -2390,20 +2407,20 @@
       "tool_calls_count": 5,
       "model_calls_count": 5,
       "usage": {
-        "billed_tokens": 27595,
+        "billed_tokens": 27678,
         "actual_input_tokens": null,
         "cached_input_tokens": null,
         "output_tokens": null,
         "invoice_cost_status": "unknown",
-        "conservative_rupees": 1.2418
+        "conservative_rupees": 1.2455
       },
-      "duration_seconds": 34.51,
+      "duration_seconds": 27.938,
       "tool_names": [
         "file_read",
         "list_directory",
         "process_start",
         "process_cancel",
-        "terminal"
+        "python_execute"
       ],
       "provider_request_ids": []
     }
@@ -2428,10 +2445,10 @@
       },
       "local": {
         "attempted": 18,
-        "passed": 17,
-        "failed": 1,
+        "passed": 18,
+        "failed": 0,
         "total_expected": 18,
-        "rate": 0.9444,
+        "rate": 1.0,
         "threshold_passed": true
       },
       "browser": {
@@ -2452,10 +2469,10 @@
       },
       "long": {
         "attempted": 6,
-        "passed": 6,
-        "failed": 0,
+        "passed": 5,
+        "failed": 1,
         "total_expected": 6,
-        "rate": 1.0,
+        "rate": 0.8333,
         "threshold_passed": true
       }
     },
@@ -2465,10 +2482,10 @@
       "passed": true
     },
     "usage": {
-      "billed_tokens": 2767986,
-      "conservative_rupees": 124.56,
+      "billed_tokens": 2965895,
+      "conservative_rupees": 133.47,
       "invoice_cost_status": "unknown"
     },
-    "elapsed_seconds": 1027.022
+    "elapsed_seconds": 965.616
   }
 }

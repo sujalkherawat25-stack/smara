@@ -27,6 +27,7 @@ dependencies = [
   "openpyxl>=3.1,<4",
   "python-pptx>=1.0,<2",
   "reportlab>=4.2,<5",
+  "prompt-toolkit>=3.0.40,<4",
 ]
 
 [project.optional-dependencies]

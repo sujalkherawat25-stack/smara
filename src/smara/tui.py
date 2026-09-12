@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import re
 import sys
 import time
@@ -56,13 +57,13 @@ class Glyphs:
 class TerminalRenderer:
     """Fast, dependency-free Claude Code inspired terminal renderer."""
 
-    def __init__(self, *, plain: bool = False):
+    def __init__(self, *, plain: bool | None = None):
         if hasattr(sys.stdout, "reconfigure"):
             try:
                 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
             except Exception:
                 pass
-        self.plain = plain or not sys.stdout.isatty()
+        self.plain = (not sys.stdout.isatty()) if plain is None else plain
         encoding = (getattr(sys.stdout, "encoding", "") or "").lower()
         self.utf8 = "utf" in encoding or os.name != "nt"
         self.glyphs = Glyphs(utf8=self.utf8)
@@ -148,6 +149,98 @@ class TerminalRenderer:
         msg = self.paint(summary or ("Completed" if ok else "Failed"), status_color)
         print(f"{icon}{msg}")
 
+    def render_diff(self, diff_text: str, title: str = "") -> None:
+        """Render a colorized unified diff with visual chunk demarcation."""
+        if not diff_text or not diff_text.strip():
+            return
+
+        if title:
+            banner = self.paint(f"  {self.glyphs.dash*2} {title} {self.glyphs.dash*20}", "BOLD")
+            print(banner)
+
+        for line in diff_text.splitlines():
+            if line.startswith("---") or line.startswith("+++"):
+                print(self.paint(f"  {line}", "BOLD"))
+            elif line.startswith("@@"):
+                print(self.paint(f"  {line}", "CYAN"))
+            elif line.startswith("+"):
+                print(self.paint(f"  {line}", "GREEN"))
+            elif line.startswith("-"):
+                print(self.paint(f"  {line}", "RED"))
+            elif line.startswith(" "):
+                print(self.paint(f"  {line}", "GRAY"))
+            else:
+                print(f"  {line}")
+        print()
+
+    def confirm_action(self, action_description: str, default: str = "y") -> str:
+        """Interactive approval prompt: [Y] Approve, [N] Deny, [A] Always, [E] Edit."""
+        if self.plain or not sys.stdin.isatty():
+            return default
+
+        prompt = (
+            f"\n{self.paint('?', 'YELLOW')} "
+            f"{self.paint(action_description, 'BOLD')}\n"
+            f"  {self.paint('[Y]', 'GREEN')} Approve  "
+            f"{self.paint('[N]', 'RED')} Deny  "
+            f"{self.paint('[A]', 'CYAN')} Always allow  "
+            f"{self.paint('[E]', 'PURPLE')} Edit prompt ❯ "
+        )
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
+
+        choice = ""
+        if os.name == "nt":
+            try:
+                import msvcrt
+                ch = msvcrt.getch()
+                if isinstance(ch, bytes):
+                    ch = ch.decode("utf-8", errors="ignore")
+                choice = ch.lower().strip()
+                print(choice)
+            except Exception:
+                choice = input().lower().strip()
+        else:
+            try:
+                choice = input().lower().strip()
+            except Exception:
+                choice = default
+
+        if not choice:
+            choice = default
+        return choice[0] if choice else default
+
+    def print_tree(self, root_path: str | Path, max_depth: int = 2) -> None:
+        """Visual tree renderer for repository structure."""
+        p = Path(root_path).resolve()
+        if not p.exists():
+            print(self.paint(f"Path does not exist: {p}", "RED"))
+            return
+
+        ignored = {".git", "node_modules", "__pycache__", ".venv", ".pytest_cache", "dist", "build"}
+        print(self.paint(f"📁 {p.name}/", "BOLD"))
+
+        def _walk(curr: Path, depth: int, prefix: str):
+            if depth > max_depth:
+                return
+            try:
+                entries = sorted(curr.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
+            except Exception:
+                return
+            entries = [e for e in entries if e.name not in ignored and not e.name.startswith(".pytest-")]
+            for idx, entry in enumerate(entries):
+                is_last = idx == len(entries) - 1
+                connector = "└── " if is_last else "├── "
+                sub_prefix = "    " if is_last else "│   "
+                if entry.is_dir():
+                    print(f"{prefix}{connector}{self.paint(entry.name + '/', 'CYAN')}")
+                    _walk(entry, depth + 1, prefix + sub_prefix)
+                else:
+                    print(f"{prefix}{connector}{self.paint(entry.name, 'WHITE')}")
+
+        _walk(p, 1, "")
+        print()
+
     def print_stats(self, duration_sec: float, tools_count: int = 0) -> None:
         parts = [f"{duration_sec:.2f}s"]
         if tools_count > 0:
@@ -164,12 +257,15 @@ class TerminalRenderer:
         commands = [
             ("/model [NAME]", "Switch or view active LLM (grok, sarvam, ollama, openrouter)"),
             ("/graph <SYMBOL>", "Inspect AST Code Graph & compute blast radius"),
+            ("/rules", "View or reload workspace coding rules (.smararules / SMARA.md)"),
+            ("/mcp", "List connected MCP servers and available tools"),
+            ("/diff", "View working tree diffs of changes made in this session"),
             ("/search <QUERY>", "Run live multi-source web search (Tavily/Exa)"),
+            ("/test [FILTER]", "Run pytest test suite autonomously and diagnose failures"),
             ("/pdf <TITLE>", "Compile an executive PDF report into reports/"),
             ("/docx <TITLE>", "Compile an executive Word DOCX report into reports/"),
-            ("/test [FILTER]", "Run pytest test suite autonomously and summarize"),
             ("/workspace [PATH]", "Show or switch active workspace directory"),
-            ("/history", "View recent turns in this session"),
+            ("/approval [MODE]", "Set permission mode (auto or interactive)"),
             ("/clear", "Clear terminal screen and reset conversation context"),
             ("/exit", "Exit Smara CLI"),
         ]
