@@ -34,6 +34,31 @@ REF_PATH = ROOT / "tests/evals/live_web_acceptance/references.json"
 EVIDENCE_PATH = ROOT / "release/evidence/LIVE_WEB_ACCEPTANCE_2026-09-12.json"
 
 
+def validate_acceptance_contract(manifest: dict[str, Any], references: dict[str, Any]) -> list[str]:
+    """Reject component smokes that are labelled as end-to-end acceptance."""
+    errors: list[str] = []
+    if manifest.get("canonical_agent") is not True:
+        errors.append("manifest must declare canonical_agent=true")
+    tasks = manifest.get("tasks") or []
+    for task in tasks:
+        task_id = str(task.get("id") or "")
+        ref = references.get(task_id) or {}
+        category = task.get("category")
+        if category in {"current_factual", "breaking_news_or_dated", "contradiction_changed_fact", "source_quality"}:
+            if not str(ref.get("expected_answer") or "").strip():
+                errors.append(f"{task_id}: expected_answer is required")
+            if not ref.get("required_claims"):
+                errors.append(f"{task_id}: required_claims are required")
+            if category in {"current_factual", "breaking_news_or_dated"} and not task.get("as_of"):
+                errors.append(f"{task_id}: as_of timestamp is required")
+        if category == "quantitative_analysis" and not str(task.get("live_data_url") or "").strip():
+            errors.append(f"{task_id}: live_data_url is required for live-data promotion")
+    missing = sorted({str(task.get("id") or "") for task in tasks} - set(references))
+    if missing:
+        errors.append(f"missing references: {', '.join(missing)}")
+    return errors
+
+
 def compute_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else ""
 
@@ -470,6 +495,13 @@ async def main():
     manifest = json.loads(PACK_PATH.read_text(encoding="utf-8"))
     references = json.loads(REF_PATH.read_text(encoding="utf-8")).get("references", {})
     tasks = manifest.get("tasks", [])
+    contract_errors = validate_acceptance_contract(manifest, references)
+    if contract_errors:
+        print("ERROR: sealed acceptance contract is not valid:", file=sys.stderr)
+        for error in contract_errors:
+            print(f"- {error}", file=sys.stderr)
+        print("This pack may be retained as retrieval/component smoke evidence, but cannot promote live-web autonomy.", file=sys.stderr)
+        sys.exit(2)
 
     ws_root = ROOT / "scratch/live_acceptance_workspace"
     shutil.rmtree(ws_root, ignore_errors=True)

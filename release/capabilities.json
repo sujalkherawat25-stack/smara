@@ -31,7 +31,7 @@
       "scope": "scripted model responses and sealed local fixtures; live-web/model quality remains unmeasured"
     },
     "live_web_research": {
-      "status": "verified_live_web",
+      "status": "implemented_pending_canonical_agent_acceptance",
       "suite": "tests/evals/live_web_acceptance/manifest.json",
       "providers": [
         "tavily",
@@ -39,7 +39,7 @@
         "brave",
         "serper"
       ],
-      "live_acceptance": {
+      "live_retrieval_component_smoke": {
         "path": "release/evidence/LIVE_WEB_ACCEPTANCE_2026-09-12.json",
         "sha256": "77d9c238ed4e3c358bff27effcce82dacf906d0347bd03a76d1ab2b04ceedcf0",
         "score": "60/60",
@@ -55,22 +55,23 @@
         "numerical_recomputation_match": 1.0,
         "elapsed_seconds": 70.09
       },
-      "scope": "provider-neutral multi-query discovery, SSRF-safe bounded fetch, source canonicalization/quality flags, immutable provenance, contradiction-aware claim validation, quantitative tabular analysis, and citation-constrained synthesis",
-      "limitation": "authenticated/paywalled websites, OCR extraction, and causal inference require separately configured tools"
+      "scope": "implemented provider-neutral multi-query discovery, SSRF-safe bounded fetch, source canonicalization/quality flags, immutable provenance, contradiction-aware claim validation, quantitative tabular analysis, and citation-constrained synthesis; the retained 60/60 artifact verifies direct Exa retrieval and research-session component paths only",
+      "limitation": "canonical autonomous-agent execution and independent expected-answer scoring remain unmeasured; the v1 references influenced passage selection, and its quantitative cases used generated local fixtures"
     },
     "research_data_analysis": {
-      "status": "verified_live_web_and_deterministic",
+      "status": "verified_deterministic",
       "suite": "tests/test_research_analysis.py",
-      "live_acceptance_suite": "tests/evals/live_web_acceptance/manifest.json",
+      "component_smoke_suite": "tests/evals/live_web_acceptance/manifest.json",
       "scope": "provenance-bound JSON/CSV/tabular analysis with dataset hashes, missingness, descriptive statistics, grouped aggregates, Pearson correlations, time change and bounded IQR outliers",
-      "limitation": "causal inference, forecasting and domain-specific statistical tests require separately declared methods and validation"
+      "limitation": "live-dataset ingestion through the canonical agent remains unmeasured; causal inference, forecasting and domain-specific statistical tests require separately declared methods and validation"
     },
     "research_ocr": {
-      "status": "verified_provider_and_local",
+      "status": "implemented_provider_adapter_contract_verified",
       "suite": "tests/test_sarvam_ocr.py",
       "provider": "sarvam",
       "model": "sarvam-vision-v1",
-      "scope": "Sarvam Cloud OCR (/job/digitise) and local pytesseract fallback for PDFs and images (.png, .jpg, .jpeg, .webp), returning content-addressed extracted Markdown/text, page counts, and immutable cryptographic digests",
+      "scope": "Sarvam Cloud OCR (/job/digitise) adapter and local pytesseract image fallback (.png, .jpg, .jpeg, .webp), returning content-addressed extracted Markdown/text, page counts, and immutable cryptographic digests",
+      "limitation": "Sarvam behavior is verified with mocked HTTP only; no sealed live-provider evidence exists, and the local fallback does not support PDF OCR",
       "cli_command": "smara ocr <file> [--lang en-IN] [--format md|txt] [--output out.md]"
     },
     "stateful_browser": {

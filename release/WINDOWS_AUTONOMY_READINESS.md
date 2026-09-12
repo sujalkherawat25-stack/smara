@@ -175,7 +175,18 @@ structured test fixtures:
 - **Manifest SHA-256**: `c1b6784bfb7c2761027713119e38df8f6860955c2ae8d86b1e079aba310e77d9`
 - **References SHA-256**: `0f7d04d957a87b8596313380b9c5f0dd29048cf795d5fecb8ddda8f42fae5d35`
 
-**Decision:** `live_web_research` is promoted to **`verified_live_web`** and `research_data_analysis` is promoted to **`verified_live_web_and_deterministic`**.
+**Corrected decision (audit 2026-09-12):** this artifact is retained as a
+**60/60 live-retrieval and research-session component smoke**, but it does not
+promote autonomous live-web research. The runner invoked
+`CanonicalResearchSession` components directly instead of
+`SmaraAutonomousAgent`, used reference key terms during passage selection, and
+validated a fetched passage as its own claim. The reference file did not contain
+sealed expected answers or required claims. Quantitative cases used generated
+local fixtures, not live datasets. `live_web_research` is therefore
+`implemented_pending_canonical_agent_acceptance`, while
+`research_data_analysis` remains `verified_deterministic`. The runner now rejects
+the v1 contract for promotion; the immutable evidence and hashes above remain
+unchanged.
 
 ### Sarvam OCR & Document Digitization Integration — 2026-09-12
 
@@ -184,7 +195,9 @@ Smara integrates native document and image OCR via Sarvam's `/job/digitise` asyn
 - **Formats Supported**: `.pdf`, `.png`, `.jpg`, `.jpeg`, `.webp` (up to 20 MB).
 - **Evidence Binding**: Generates SHA-256 digests over raw bytes and extracted Markdown/Text, automatically binding digitized documents into the canonical research ledger.
 - **Diagnostics**: `smara doctor` reports `ocr_extraction` availability based on Desktop-vault/env credentials or local OCR engine.
-- **Verification**: `tests/test_sarvam_ocr.py` passed (4/4 tests).
+- **Verification**: `tests/test_sarvam_ocr.py` covers the adapter contract with
+  mocked HTTP and the research/CLI wiring. This is not live Sarvam-provider
+  evidence. The local pytesseract fallback supports images, not PDFs.
 
 ## Corrected gate assessment — 2026-09-10
 
