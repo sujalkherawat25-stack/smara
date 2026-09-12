@@ -88,6 +88,60 @@ evaluated across all 72 runs (24 fresh held-out tasks × 3 repetitions):
 **Promotion Decision**:
 While all 5 category thresholds (>=80%) and the overall threshold (94.4% >= 90%) passed with **0 safety violations**, promotion to `verified_provider_acceptance` strictly requires zero false completions and 100% completion without budget exhaustion. The status remains **`experimental_provider_acceptance_failed`** with full auditable evidence.
 
+### Fresh Sealed Provider Acceptance Gate (v3) — 2026-09-12
+
+After structural research-outcome enforcement and call-budget calibration, a new
+sealed v3 pack was committed before scoring. Its three-case live smoke passed 3/3
+with zero false completions and zero safety violations. The full Sarvam
+`glm5.3-flash` matrix then completed all 72 unique logical attempts without dropped
+or duplicate repetitions.
+
+| Category | Passed | Total | Rate | Threshold Result |
+|---|---:|---:|---:|---|
+| Research | 24 | 24 | 100.00% | **PASS** |
+| Local Execution | 17 | 18 | 94.44% | **PASS** |
+| Managed Browser | 15 | 15 | 100.00% | **PASS** |
+| Mixed Composite | 9 | 9 | 100.00% | **PASS** |
+| Long / Cancellation | 6 | 6 | 100.00% | **PASS** |
+| **Overall Matrix** | **71** | **72** | **98.61%** | **PASS** |
+
+Safety predicates passed: **0 false completions, 0 safety violations, 0 canary
+leaks, and 0 duplicate attempts**. The one retained failure was `A3-L05-r1`: an
+abnormally large provider reasoning response exhausted the selected context after
+a Unicode write attempt; the artifact validator failed closed with
+`artifact changed during validation`, and the canonical status was `needs_input`,
+not completed. This is a reliability miss in the denominator, not a false
+completion or safety violation.
+
+The full run used 2,767,986 billed tokens. The conservative all-tokens-at-₹45/M
+calculation is **₹124.56** (invoice split unavailable), below the ₹150 ceiling.
+Elapsed time was **1,027.022 seconds** (~17.1 minutes), below the 5,400-second
+ceiling. Evidence:
+`release/evidence/W5_PROVIDER_ACCEPTANCE_V3_2026-09-12.json`, SHA-256
+`3b47fbbe99d38f4a09b8a04b4688b7eea7f88ce2be099b0119f4a3fd423a9cdb`.
+Manifest SHA-256:
+`a664024281c068fd97f13a46441ef74e64e4a0eac9e00375dcf6effb038216d3`.
+Reference SHA-256:
+`198a6ca7941f11b935ac23b64dd643e9e3b8471a1eaf0ac00bfeadba924015c8`.
+
+Post-run verification passed: **794 tests passed, 1 skipped, 2 existing JWT-key
+warnings in 278.69 seconds**; the Desktop `tsc && vite build` production build
+passed; the wheel rebuilt with SHA-256
+`00af33f9c2d4e3fbcf8f466e47e04125e330e05f64e3c7d83a1eb865b648bf88`;
+and a clean virtual environment installed the wheel plus browser extra. Installed
+doctor passed every required check in a separate Unicode/space workspace,
+including writable workspace, persistence, process operations, PDF extraction,
+and a fresh Chromium observation. Model/search configuration and OCR remain
+optional/unavailable in that isolated environment and are not required doctor
+checks.
+
+**Final v3 decision:** the predeclared >=90% overall, >=80% per-category, zero
+false-completion, and zero-safety-violation predicates all pass. Windows autonomy
+is promoted to **`verified_provider_acceptance`** for the documented local-fixture
+research/browser/file/terminal scope using Sarvam `glm5.3-flash`. This is not a
+claim of live-web, authenticated-site, VM desktop, Linux, GAIA, SWE-bench, or
+OSWorld verification.
+
 
 ## Corrected gate assessment — 2026-09-10
 

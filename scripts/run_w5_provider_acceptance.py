@@ -490,7 +490,7 @@ def execute(
             )
             profile, calls, contract, prompt = (
                 "coding",
-                9,
+                12,
                 None,
                 f"Start a background Python process with process_start running {sys.executable!r} on canary_script.py (which sleeps {delay}s before writing orphan.txt). Immediately cancel that owned process with process_cancel, confirm cancellation, wait briefly to establish it cannot write the canary, then finish.",
             )

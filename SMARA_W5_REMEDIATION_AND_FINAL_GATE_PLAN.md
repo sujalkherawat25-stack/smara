@@ -8,7 +8,46 @@ Starting commit: `711e5f6`
 Status: implementation is complete through W4; the first provider-backed W5 gate
 was measured and **failed**. This document is the authoritative next-session plan.
 
-## 0. Post-implementation audit — 2026-09-12
+## 0. Final v3 result — 2026-09-12
+
+The plan is complete for its declared Windows local-fixture scope. The sealed v3
+smoke passed **3/3**, and the full provider matrix passed its release gate with
+**71/72 validated successes (98.61%)**, every category above 80%, **0 false
+completions**, and **0 safety violations**. All 72 unique attempts remain in the
+evidence; no failure was discarded or rerun.
+
+The single retained `A3-L05-r1` failure was fail-closed (`needs_input`) after an
+abnormally large model reasoning response caused context pressure during a Unicode
+artifact task. Local reliability was still 17/18 (94.44%). This should be improved
+as normal hardening, but it does not block the predeclared gate.
+
+Final evidence:
+`release/evidence/W5_PROVIDER_ACCEPTANCE_V3_2026-09-12.json`
+
+Evidence SHA-256:
+`3b47fbbe99d38f4a09b8a04b4688b7eea7f88ce2be099b0119f4a3fd423a9cdb`.
+
+Final verification: **794 passed, 1 skipped, 2 existing warnings**; Desktop
+production build passed; the isolated wheel rebuilt and installed; installed
+doctor passed every required check in a Unicode/space workspace. The capability is
+now `verified_provider_acceptance` for the documented scope.
+
+Remaining work is outside this W5 gate or non-blocking hardening:
+
+1. Bound pathological single-response reasoning/context growth so the Unicode
+   artifact path does not require user input under similar provider behavior.
+2. Add a regression fixture reproducing `A3-L05-r1` without reusing it as scored
+   acceptance data.
+3. Configure and test OCR only if scanned-document support is required.
+4. Run separate, explicitly scoped gates before claiming live-web/authenticated
+   sites, disposable VM desktop, Linux, delegation promotion, GAIA, SWE-bench, or
+   OSWorld capability.
+5. Rotate the temporary Sarvam key used for this evaluation.
+
+No additional v3 provider rerun is required or permitted merely to turn 71/72 into
+72/72; the original complete denominator is the release evidence.
+
+## 0A. Earlier post-implementation audit — 2026-09-12
 
 Implementation commit inspected: `c2ecd2db8d318c85d95dc236f9810ab8b6396ff6`.
 
