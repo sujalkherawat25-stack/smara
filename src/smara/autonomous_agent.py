@@ -1298,7 +1298,7 @@ class SmaraAutonomousAgent:
 
     def _process_result(self,name,args):
         from smara.harness import ToolCall
-        broker=self._execution_broker
+        broker=self.session_engine.broker if self.session_engine is not None else self._execution_broker
         mapped="process_write" if name=="process_stdin" else name
         result=broker.dispatch(ToolCall(uuid.uuid4().hex,mapped,args,str(self.workspace_root)))
         return json.dumps({"status":result.status,"output":result.text,"exit_code":result.exit_code,"error_kind":result.error_kind,"meta":result.meta},sort_keys=True,default=str)
@@ -1514,7 +1514,12 @@ class SmaraAutonomousAgent:
                 exit_code = int(exit_match.group(1)) if exit_match else None
                 scope = "none"
                 if tool_name == "terminal" and re.search(r"(?:^|\s)(?:pytest|npm\s+test|cargo\s+test|go\s+test)(?:\s|$)", str(tool_args.get("command") or tool_args.get("cmd") or ""), re.I): scope = "full"
-                return ToolResult(durable_id,"ok" if success else "error",output,exit_code=exit_code,before_revision=before,after_revision=after,error_kind=None if success else "tool_error",meta={"evidence_scope":scope})
+                meta={"evidence_scope":scope}
+                if tool_name.startswith("process_"):
+                    process_result=json.loads(output)
+                    meta.update(process_result.get("meta",{}))
+                    exit_code=process_result.get("exit_code")
+                return ToolResult(durable_id,"ok" if success else "error",output,exit_code=exit_code,before_revision=before,after_revision=after,error_kind=None if success else "tool_error",meta=meta)
             result = self.session_engine.execute_incremental(ToolCall(durable_id,tool_name,tool_args,str(self.workspace_root)),execute)
             return result.text
         except Exception as e:

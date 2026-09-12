@@ -30,14 +30,17 @@ def diagnose(workspace:Path,*,test_browser:bool=True)->dict[str,Any]:
             checks["process_operations"]=_entry(True,process_ok,True,f"exit_code={result.exit_code}")
     except Exception as exc:
         checks["session_persistence"]=_entry(True,False,False,type(exc).__name__);checks["process_operations"]=_entry(True,False,False,type(exc).__name__)
-    provider=bool(os.getenv("SMARA_MODEL_SARVAM_API_KEY") or os.getenv("SARVAM_API_KEY"))
+    from .cli import _load_local_profiles,_resolve_profile_key
+    profiles,active_id,credentials=_load_local_profiles()
+    active=next((item for item in profiles if item.get("id")==active_id),profiles[0])
+    provider=bool(_resolve_profile_key(active,credentials))
     checks["model_provider"]=_entry(provider,provider,False,"configured credential present" if provider else "no configured credential")
     search=bool(os.getenv("TAVILY_API_KEY") or os.getenv("EXA_API_KEY"))
     checks["search_provider"]=_entry(search,search,False,"configured provider present" if search else "no configured provider")
     pdf=importlib.util.find_spec("pypdf") is not None;ocr=importlib.util.find_spec("pytesseract") is not None
     checks["pdf_extraction"]=_entry(True,pdf,pdf,"pypdf import")
     checks["ocr_extraction"]=_entry(False,ocr,False,"pytesseract import" if ocr else "install OCR dependency and engine")
-    browser_available=importlib.util.find_spec("playwright.sync_api") is not None;browser_tested=False;detail="playwright import unavailable"
+    browser_available=importlib.util.find_spec("playwright") is not None;browser_tested=False;detail="install smara[browser], then python -m playwright install chromium"
     if browser_available and test_browser:
         try:
             with tempfile.TemporaryDirectory(prefix="smara-browser-doctor-") as raw:
@@ -48,5 +51,5 @@ def diagnose(workspace:Path,*,test_browser:bool=True)->dict[str,Any]:
     required=("workspace_writable","session_persistence","process_operations","pdf_extraction","browser_backend")
     from .autonomous_agent import get_tool_schemas
     from .harness import BUDGET_PROFILES
-    def profile(name,budget):return {"id":name,"capabilities":[item["function"]["name"] for item in get_tool_schemas(name)],"model_context":{"accounting":"conservative_utf8_upper_bound","input_capacity":114688,"output_reserve":16384},"budget":BUDGET_PROFILES[budget].__dict__,"output_contract":"validated_result"}
+    def profile(name,budget):return {"id":name,"capabilities":[item["function"]["name"] for item in get_tool_schemas(name)],"model_context":{"accounting":"conservative_utf8_upper_bound","input_capacity":int(os.getenv("SMARA_MODEL_CONTEXT_TOKENS","65536")),"output_reserve":16384},"budget":BUDGET_PROFILES[budget].__dict__,"output_contract":"validated_result"}
     return {"version":1,"ok":all(checks[name]["tested"] for name in required),"checks":checks,"required":list(required),"profiles":{"research":profile("research","long"),"local_execution":profile("coding","coding")}}

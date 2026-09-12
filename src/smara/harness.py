@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 RUN_STATUSES = {"completed", "needs_input", "denied", "cancelled", "budget_exhausted", "provider_error", "tool_error", "interrupted"}
-MUTATING_TOOLS = {"write_file", "patch_file", "run_process", "process_start", "process_write"}
+MUTATING_TOOLS = {"write_file", "patch_file", "run_process", "process_start", "process_write", "process_stdin"}
 VERIFY_SCOPES = {"syntax", "focused", "full"}
 REUSABLE_READ_TOOLS = {"read_file", "file_read", "list_directory", "search_files", "code_graph", "pdf_search", "skills_list", "skill_view"}
 _LIVE_PROCESSES: dict[str, subprocess.Popen] = {}
@@ -159,6 +159,11 @@ class ProcessSupervisor:
     def __init__(self,root): self.root=Path(root); self.root.mkdir(parents=True,exist_ok=True); self.processes=_LIVE_PROCESSES; self.logs=_LIVE_PROCESS_LOGS; self.jobs=_LIVE_PROCESS_JOBS; self.lock=threading.RLock()
     @staticmethod
     def creation(): return ((getattr(subprocess,"CREATE_NEW_PROCESS_GROUP",0)|getattr(subprocess,"CREATE_NO_WINDOW",0),None) if os.name=="nt" else (0,os.setsid))
+    def require_owned(self,ident):
+        if not isinstance(ident,str) or not re.fullmatch(r"proc_[0-9a-f]{24}",ident):
+            raise PolicyDenied("invalid process handle")
+        if not (self.root/f"{ident}.json").is_file():
+            raise PolicyDenied("process belongs to another session or is unknown")
     def start(self,argv,cwd,env,timeout):
         ident=f"proc_{uuid.uuid4().hex[:24]}"; log=self.root/f"{ident}.log"; handle=log.open("w+b"); flags,preexec=self.creation()
         proc=subprocess.Popen(argv,cwd=str(cwd),env=env,stdin=subprocess.PIPE,stdout=handle,stderr=subprocess.STDOUT,shell=False,creationflags=flags,preexec_fn=preexec)
@@ -167,21 +172,30 @@ class ProcessSupervisor:
             if job:self.jobs[ident]=job
         self.processes[ident]=proc; self.logs[ident]=handle
         meta={"process_id":ident,"pid":proc.pid,"cwd":str(cwd),"argv":argv,"started_at":_now(),"timeout_seconds":timeout,"log_path":str(log)}
-        (self.root/f"{ident}.json").write_text(_json(meta),encoding="utf-8"); return meta
+        (self.root/f"{ident}.json").write_text(_json(meta),encoding="utf-8")
+        def enforce_deadline():
+            try: proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                (self.root/f"{ident}.timeout").touch()
+                self.cancel(ident)
+        threading.Thread(target=enforce_deadline,name=f"deadline-{ident}",daemon=True).start()
+        return meta
     def poll(self,ident,cursor=0,max_chars=16000):
+        self.require_owned(ident)
         meta_path=self.root/f"{ident}.json"
         if not meta_path.exists(): raise KeyError(ident)
         meta=json.loads(meta_path.read_text()); proc=self.processes.get(ident); log=Path(meta["log_path"])
         raw=log.read_bytes() if log.exists() else b""; cursor=max(0,min(int(cursor),len(raw))); limit=max(1,min(int(max_chars),16000)); chunk=raw[cursor:cursor+limit].decode(errors="replace"); next_cursor=min(len(raw),cursor+limit)
         if proc is None: return {**meta,"status":"interrupted_uncertain","done":True,"exit_code":None,"output":chunk,"cursor":next_cursor,"log_size":len(raw),"reconnectable":False}
         code=proc.poll()
-        started=datetime.fromisoformat(meta["started_at"]); expired=code is None and (datetime.now(timezone.utc)-started).total_seconds()>float(meta["timeout_seconds"])
+        expired=(self.root/f"{ident}.timeout").exists()
         if expired:
             self.kill(proc);code=proc.poll();meta["timed_out"]=True
         if code is not None: self.logs[ident].flush()
         raw=log.read_bytes() if log.exists() else raw; chunk=raw[cursor:cursor+limit].decode(errors="replace"); next_cursor=min(len(raw),cursor+limit)
         return {**meta,"status":"running" if code is None else "timed_out" if expired else "completed" if code==0 else "failed","done":code is not None,"exit_code":code,"output":chunk,"cursor":next_cursor,"log_size":len(raw),"reconnectable":True}
     def write(self,ident,text):
+        self.require_owned(ident)
         proc=self.processes.get(ident)
         if proc is None or proc.poll() is not None or proc.stdin is None: raise RuntimeError("process is not running")
         proc.stdin.write(text.encode()); proc.stdin.flush(); return self.poll(ident)
@@ -194,6 +208,7 @@ class ProcessSupervisor:
         with contextlib.suppress(subprocess.TimeoutExpired): proc.wait(timeout=5)
         if proc.poll() is None: proc.kill()
     def cancel(self,ident):
+        self.require_owned(ident)
         proc=self.processes.get(ident)
         if proc is None: return {**self.poll(ident),"status":"cancelled"}
         job=self.jobs.pop(ident,None)
@@ -517,9 +532,32 @@ class SessionEngine:
             return result
     def finish_incremental(self,status: str,answer: str,unresolved: Iterable[str]=()) -> dict[str,Any]:
         with _SessionLock(self.lock_path):
+            process_errors=[]
+            if status=="completed":
+                for metadata in self.broker.processes.root.glob("proc_*.json"):
+                    process=self.broker.processes.poll(metadata.stem)
+                    if process["status"]!="completed":
+                        process_errors.append(f"process {metadata.stem} is {process['status']}; reconcile before completion")
+                if process_errors:
+                    status="needs_input";unresolved=tuple(unresolved)+tuple(process_errors)
             revision=workspace_revision(self.workspace); mutated=self.db.execute("SELECT COUNT(*) FROM calls WHERE mutating=1 AND state='completed' AND COALESCE(before_revision,'')<>COALESCE(after_revision,'')").fetchone()[0]>0; verified=self.db.execute("SELECT COUNT(*) FROM evidence WHERE passed=1 AND subject_revision=? AND scope IN ('focused','full')",(revision,)).fetchone()[0]>0
             if status=="completed" and mutated and not verified: status="needs_input"; unresolved=tuple(unresolved)+("workspace changes are unverified at current revision",)
-            contract_errors=self._output_contract_errors(answer,self.get("output_contract",{}))
+            contract=self.get("output_contract",{})
+            contract_errors=self._output_contract_errors(answer,contract)
+            from .output_validation import validate_json,validate_csv,validate_report
+            validators={"json":validate_json,"csv":validate_csv,"report":validate_report}
+            for specification in contract.get("artifacts",[]):
+                try:
+                    path=self.broker.path(specification["path"])
+                    before_hash=_file_sha(path)
+                    validation=validators[specification["kind"]](path,**specification.get("checks",{}))
+                    if before_hash is None or before_hash!=_file_sha(path):raise ValueError("artifact changed during validation")
+                    receipt={"path":specification["path"],"sha256":before_hash,**asdict(validation)}
+                    artifact_id,_=self.artifact_store.put_json(receipt)
+                    self.event("artifact_validation",{**receipt,"artifact_id":artifact_id})
+                    if not validation.passed:contract_errors.append(f"artifact {specification['path']}: {validation.reason}")
+                except Exception as exc:
+                    contract_errors.append(f"artifact validation failed: {exc}")
             if status=="completed" and contract_errors:status="needs_input";unresolved=tuple(unresolved)+tuple(contract_errors)
             research_validation=self.get("research_validation",{})
             if status=="completed" and self.get("research_required",False):

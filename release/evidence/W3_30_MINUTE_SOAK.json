@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "duration_seconds": 3728.282,
+  "requested_seconds": 1800,
+  "actions": 226,
+  "forced_reopens": 226,
+  "max_live_processes": 0,
+  "orphan_processes": [],
+  "passed": true
+}

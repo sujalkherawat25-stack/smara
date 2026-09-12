@@ -3164,7 +3164,7 @@ function GoalsTab({ onSetNotice }: { onSetNotice: (msg: string) => void }) {
     try {
       const res = await desktop.runGoalTask(toRun);
       setActiveSession(res);
-      onSetNotice(`✓ Autonomous goal execution completed: ${res.completed_steps || 0}/${res.total_steps || 0} steps finished.`);
+      onSetNotice(`Task ${res.session_id || ""}: ${res.status || "unknown"}`);
       await refreshSessions();
     } catch (err: any) {
       onSetNotice(`Goal execution error: ${err?.message || String(err)}`);
@@ -3246,7 +3246,7 @@ function GoalsTab({ onSetNotice }: { onSetNotice: (msg: string) => void }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
             <div>
               <h3 style={{ color: "#38bdf8", margin: 0 }}>
-                {running ? "⏳ Executing Goal Pipeline..." : "✓ Goal Execution Completed"}
+                {running ? "Executing task…" : `Task ${activeSession.status || "unknown"}`}
               </h3>
               <span style={{ fontSize: "12px", color: "#94a3b8" }}>
                 Session ID: <strong style={{ color: "#f8fafc" }}>{activeSession.goal_id || activeSession.session_id}</strong> • Steps: <strong style={{ color: "#4ade80" }}>{activeSession.steps?.length || activeSession.total_steps || 0}</strong>
@@ -3260,11 +3260,17 @@ function GoalsTab({ onSetNotice }: { onSetNotice: (msg: string) => void }) {
               fontSize: "12px",
               fontWeight: "bold",
             }}>
-              {activeSession.status?.toUpperCase() || "COMPLETED"}
+              {activeSession.status?.toUpperCase() || "UNKNOWN"}
             </span>
           </div>
 
           {/* Steps Pipeline */}
+          <p>{activeSession.answer}</p>
+          <p>Remaining budget: {JSON.stringify(activeSession.remaining_budget || {})}</p>
+          {(activeSession.unresolved_work || []).map((item: string, i: number) => <p key={`unresolved-${i}`}>{item}</p>)}
+          {(activeSession.artifact_locations || []).map((path: string) => <p key={path}>{path}</p>)}
+          {activeSession.resume?.command && <p>Resume: <code>{activeSession.resume.command}</code></p>}
+          <details><summary>Session progress</summary><pre>{JSON.stringify(activeSession.progress || [], null, 2)}</pre></details>
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             {(activeSession.steps || []).map((step: any, idx: number) => {
               const isDone = step.status === "completed" || step.status === "success";

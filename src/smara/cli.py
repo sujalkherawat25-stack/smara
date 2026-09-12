@@ -829,6 +829,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--prompt-file", help="Read a headless session prompt from a file")
     run.add_argument("--json", action="store_true", help="Emit durable session result JSON")
     run.add_argument("--budget-profile", default="short")
+    run.add_argument("--tool-profile", choices=["full","research","coding"], default="full")
     resume_cmd = subparsers.add_parser("resume", help="Inspect a durable local session result")
     resume_cmd.add_argument("session_id")
     resume_cmd.add_argument("--json", action="store_true")
@@ -1028,9 +1029,13 @@ def main(argv: list[str] | None = None) -> int:
             model_config={"profile_id":profile.get("id","default"),"base_url":profile.get("base_url","https://api.sarvam.ai/v2"),"model":profile.get("model","glm5.2"),"auth_header":profile.get("auth_header","authorization")}
             session.set("model_config",model_config)
         profile=next((item for item in engine.profiles if item.get("id")==model_config.get("profile_id")),model_config)
-        agent=SmaraAutonomousAgent(api_key=_resolve_profile_key(profile,engine.credentials),base_url=model_config["base_url"],model=model_config["model"],auth_header=model_config.get("auth_header","authorization"),workspace_root=active_workspace,profile="full",session_engine=session)
+        tool_profile=session.get("tool_profile") or getattr(parsed_args,"tool_profile","full")
+        session.set("tool_profile",tool_profile)
+        agent=SmaraAutonomousAgent(api_key=_resolve_profile_key(profile,engine.credentials),base_url=model_config["base_url"],model=model_config["model"],auth_header=model_config.get("auth_header","authorization"),workspace_root=active_workspace,profile=tool_profile,session_engine=session)
         agent_result=agent.run(prompt,max_iterations=25)
         payload=agent_result.get("session") or session.inspect().get("state",{}).get("result") or session.inspect()
+        from .app_adapter import application_envelope
+        payload={**payload,**application_envelope(session,payload)}
         return agent_result,payload
 
     if direct_prompt:

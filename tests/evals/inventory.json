@@ -2,7 +2,7 @@
   "version": 1,
   "inventory_id": "smara-windows-readiness-2026-09-09",
   "historical_172_cases_recovered": false,
-  "total_declared_cases": 118,
+  "total_declared_cases": 142,
   "categories": [
     {"id":"h3_reliability","owner":"harness","count":8,"status":"verified","manifest":"tests/evals/local_execution/manifest.json","manifest_sha256":"474aced0805eac42138ee79ab77fd33c3b536f4e3241c446a1f421479fdb0c41","fixture":"tests/test_h3_reliability_cases.py","fixture_sha256":"9a7c7b08b801bdc9bc4f949e91d1269c6fc2bebfbb1470db7d58b249c53f0b1b"},
     {"id":"h4_research_core","owner":"research","count":10,"status":"verified_deterministic","fixture":"tests/test_h4_research_graph.py","fixture_sha256":"ead5ec06e52d06c1d5a05f59364ab2682a4b034a3216f06aa3a0e8053c8fa2ed"},
@@ -11,6 +11,7 @@
     {"id":"w2_canonical_browser","owner":"browser","count":15,"status":"verified_deterministic_agent_loop","manifest":"tests/evals/windows_browser/manifest.json","manifest_sha256":"f5ea25576e2597e58215151b5deb9a8250ffd64089fa5b761c326c7ca92dac41","fixture":"tests/test_w2_browser_agent_integration.py","fixture_sha256":"282639486c8545fbc06bbd22357b3fd15e781e7217b8982cd2ebcf336ca4408e"},
     {"id":"w3_windows_execution","owner":"harness","count":8,"status":"verified_deterministic","manifest":"tests/evals/windows_execution/manifest.json","manifest_sha256":"4abab72bdf0c7da1a2c7068772b925c90be1c7af3e7655fd202210efa6eff8fc","fixture":"tests/test_w3_dependable_execution.py","fixture_sha256":"c2700ac49783278462b7b3aaf5d511b84004d439f866c7e2a3472e1a929a993f"},
     {"id":"w4_windows_package","owner":"release","count":6,"status":"verified_windows","manifest":"tests/evals/windows_package/manifest.json","manifest_sha256":"9fb74f8f126a27f18089dc1fc19abed9e161875519e44d887c6a02363d4099ac","fixture":"tests/test_w4_windows_readiness.py","fixture_sha256":"95568ff63862e240bf258bd7271f8c8d2e54289c1c163234df6c95b507db9fae"},
+    {"id":"w5_windows_acceptance","owner":"release","count":24,"status":"verified_deterministic_provider_unmeasured","manifest":"tests/evals/windows_acceptance/manifest.json","manifest_sha256":"76b0949fda5f530e377ffbe00509e99d4d69ffb5d8348b3616d61b8143b80836","fixture":"tests/test_w5_windows_acceptance.py","fixture_sha256":"4efd92be58705320b2a332830eecbda1468b2d5ef9d204e24d1a4b31db6480d2","references":"tests/evals/windows_acceptance/references.json","references_sha256":"ba1f29d834c7c8cdfb7077be9872ed92a669e048030fb04b8f06d09aaa3e3c18"},
     {"id":"h5_desktop_d01_d20","owner":"desktop-vm","count":20,"status":"contract_only_blocked_real_vm","fixture":"tests/test_h5_isolated_desktop_contract.py","fixture_sha256":"707638d2b4522df7bf60556aa3d8383e7dcf61df64ac01d1e58a8b75f4c6dd40"},
     {"id":"h6_delegation_core","owner":"orchestration","count":9,"status":"experimental_opt_in","fixture":"tests/test_h6_bounded_delegation.py","supporting_fixture":"tests/test_subagent_orchestrator.py"},
     {"id":"h7_transport_release_core","owner":"release","count":5,"status":"verified_windows","fixture":"tests/test_h7_release_boundary.py"}

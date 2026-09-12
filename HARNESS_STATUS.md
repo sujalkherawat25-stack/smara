@@ -1,5 +1,25 @@
 # Smara harness status
 
+## Current implementation — 2026-09-12
+
+The remaining local W3/W4 implementation is complete: session-owned process
+control, no-poll deadlines, process reconciliation at finalization, hash-bound
+artifact validators, persistent CLI tool profiles, shared CLI/Desktop model profile
+resolution, canonical application outcome fields, and truthful Desktop rendering.
+The full suite passes **622 tests with 1 conditional skip**; Desktop type checking
+passes. The rebuilt wheel passes an isolated install and installed browser,
+file, terminal, persistence and doctor smoke. Provider-backed W5 acceptance remains
+unmeasured because no configured profile resolves to a credential; see
+`release/WINDOWS_AUTONOMY_READINESS.md`.
+
+## Current correction — 2026-09-10
+
+W3–W5 are incomplete. Earlier completion wording below is historical and
+superseded by `release/WINDOWS_AUTONOMY_READINESS.md`'s corrected assessment.
+The W5 pack is a component regression suite; the soak is same-process SQLite
+reopen evidence. Neither establishes autonomous acceptance or crash recovery.
+Process ownership is now checked before poll/write/cancel; 24 focused tests pass.
+
 - Base and current implementation commit before this H0 change: `08b943374151ba0f4af762e23e2a5a665e916b79`.
 - Package: H0 — trustworthy legacy CLI baseline.
 - Scope: legacy ReAct CLI/agent, browser sidecar, interim goals, delegation admission, and GAIA adapter only.
@@ -177,3 +197,13 @@ the source tree and passed doctor plus research/browser/file/terminal smokes fro
 Unicode/space workspace without `PYTHONPATH`. See
 `release/W4_WINDOWS_PACKAGE_REPORT.md`. Provider-backed quality, OCR, Linux and VM
 desktop remain unmeasured/unavailable and are not promoted.
+
+## W5 deterministic acceptance update (2026-09-09)
+
+The sealed 24-task Windows pack passed all **72/72** clean task repetitions and
+its integrity check (**73 passed in 30.61 seconds**), with 100% in each category
+and no false completion or orphan work. Because no intended model/search provider
+is configured, the provider-driven 24×3 trial is unmeasured and overall Windows
+autonomy remains experimental. See `release/WINDOWS_AUTONOMY_READINESS.md`.
+The separate W3 soak also passed: **3,728.282 seconds, 226 forced reopens, zero
+orphan processes**.

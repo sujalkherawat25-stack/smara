@@ -1,5 +1,16 @@
 # W4 Windows setup and discovery gate
 
+## Final rerun — 2026-09-12
+
+The wheel was rebuilt after the final process, validator, profile, adapter and UI
+changes. SHA-256:
+`03cd171eb15165f60404c72e6e2bc20185bfc3ae4ef2b7a624035160f84e7573`.
+It was installed with the `browser` extra into a new virtual environment created
+without system site packages. From a separate Unicode/space workspace and without
+`PYTHONPATH`, installed doctor and browser/file/terminal/persistence smokes passed.
+The Desktop TypeScript check and the 21-test W3/W4/adapter matrix passed. The full
+source suite passed 622 tests with one conditional skip.
+
 Date: 2026-09-09.
 
 `smara doctor --json` now reports configured, available, tested and unavailable

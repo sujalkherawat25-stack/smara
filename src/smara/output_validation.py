@@ -33,7 +33,7 @@ def validate_csv(path:Path,*,required_columns:Sequence[str]=(),expected_rows:Seq
     missing=[column for column in required_columns if column not in columns]
     if missing:return ValidationResult(False,"missing_columns",{"columns":missing})
     expected=[dict(row) for row in expected_rows or ()]
-    if expected and rows!=expected:return ValidationResult(False,"wrong_rows",{"expected":expected,"actual":rows})
+    if expected_rows is not None and rows!=expected:return ValidationResult(False,"wrong_rows",{"expected":expected,"actual":rows})
     return ValidationResult(True,"valid",{"columns":columns,"row_count":len(rows)})
 
 
