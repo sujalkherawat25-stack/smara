@@ -8,6 +8,106 @@ Starting commit: `711e5f6`
 Status: implementation is complete through W4; the first provider-backed W5 gate
 was measured and **failed**. This document is the authoritative next-session plan.
 
+## 0. Post-implementation audit — 2026-09-12
+
+Implementation commit inspected: `c2ecd2db8d318c85d95dc236f9810ab8b6396ff6`.
+
+The remediation session completed the major implementation work and ran a fresh
+sealed v2 provider matrix, but the final release gate is **not complete**. The
+current capability declaration and readiness report correctly remain
+`experimental_provider_acceptance_failed`.
+
+Verified in this audit:
+
+- Phase A — **implemented**: the runner now records versioned identities,
+  append-only logical attempts, validator reasons, sanitized tool metadata,
+  category arithmetic, safety predicates, terminal state, unknown invoice usage,
+  and resumable missing-pair behavior. Its focused tests pass.
+- Phase B — **implemented and verified**: process cancellation distinguishes
+  confirmed cancellation, natural completion, and uncertain cancellation. The v2
+  provider run had zero canary leaks, zero recorded orphan processes, and zero
+  safety violations.
+- Phase C — **partially complete**: the earlier refutation-budget failure was
+  improved, but one research run still falsely completed without the required
+  final outcome label.
+- Phase D — **partially complete**: browser correctness exceeded its category
+  threshold, but two tab-workflow repetitions validated the state and then
+  exhausted budget before valid completion.
+- Phase E source tests — **pass**: focused remediation tests passed **121/121**;
+  the full source suite passed **713 tests, 1 skipped, 2 existing JWT-key warnings
+  in 206.90 seconds**. In this checkout, use `PYTHONPATH=src` unless testing an
+  installed wheel.
+- Phase E packaging/Desktop refresh — **not reverified by this audit for commit
+  `c2ecd2d`**. The readiness report contains earlier wheel and Desktop evidence,
+  but the changed source must receive a fresh wheel/install smoke and Desktop
+  typecheck before final promotion.
+- Phase F v2 — **executed but failed**: 68/72 passed (94.44%), every category met
+  80%, safety violations were zero, and the conservative cost was ₹129.81, but one
+  false completion and three budget exhaustions violate the zero-failure release
+  predicates.
+
+### Exact remaining failures
+
+| Attempt(s) | Observed state | Why it still fails |
+|---|---|---|
+| `A2-R04-r2` | `completed=true`, validator failed | Answer omitted the required `FINAL LABEL: insufficient`; this is one false completion. |
+| `A2-B03-r1` | Tab state independently validated | The agent used 8 model calls/8 tools and returned `budget_exhausted` instead of completing. |
+| `A2-B03-r2` | Tab state independently validated | Repeated `todo` calls consumed the allowance; status was `budget_exhausted`. |
+| `A2-X02-r3` | Cancellation independently validated; no orphan | Repeated planning plus an unnecessary terminal call exhausted budget before completion. |
+
+Current v2 evidence:
+`release/evidence/W5_PROVIDER_ACCEPTANCE_V2_2026-09-12.json`
+
+SHA-256:
+`43411c1b0c035aa254d00aa2fce81413925802b3c1e2f8c5549273cad37d2328`.
+
+### What must happen next
+
+Do these steps in order; do not rerun only the four failed v2 attempts:
+
+1. **Make research completion structural.** Derive the final research outcome from
+   the persisted `research_resolve`/`research_validate` receipt and require the
+   canonical result envelope to contain that outcome. Do not rely on the model
+   remembering a text suffix. A missing/mismatched outcome must prevent
+   `completed=true`. Add development tests for supported/refuted/insufficient
+   outcomes and an omitted-label model response.
+2. **Prevent planning tools from consuming execution to exhaustion.** For lean
+   browser and cancellation workflows, either omit `todo` from the applicable
+   profile or make repeated todo-only turns count as no progress and trigger the
+   existing bounded recovery. Do not make todo free and do not reset usage.
+3. **Calibrate, then predeclare call budgets.** Run new development equivalents of
+   multi-tab navigation and cancellation at least 20 times. Choose one documented
+   allowance that covers the necessary observe/act/validate/finalize sequence with
+   bounded recovery. Apply it uniformly before scoring; never increase it during a
+   scored run.
+4. **Add completion-after-validation tests.** Independently validated tab or
+   cancellation state must still produce a canonical completed envelope within
+   budget. Conversely, validation alone must not rewrite a genuinely exhausted
+   run as completed after the fact.
+5. **Repeat deterministic gates.** Run focused tests, the full suite with
+   `PYTHONPATH=src`, cancellation/browser 20× stress, Desktop TypeScript check,
+   rebuilt-wheel isolated install, and installed doctor/file/browser/process/
+   persistence smoke. Record new hashes and exact results.
+6. **Commit implementation before scoring.** Preserve unrelated files and create a
+   scoped remediation commit.
+7. **Create a fresh sealed v3 pack.** Replace the affected research, multi-tab, and
+   cancellation cases with unseen equivalents. Hash and commit manifest/references
+   before provider calls. Do not relabel v2 or reuse its failed attempts as v3.
+8. **Run a three-case v3 smoke** covering insufficient research, multi-tab
+   completion, and cancellation completion. Stop on any failure.
+9. **Request explicit user approval** for the new 72-run paid ceiling after giving
+   the current price/time estimate. The prior ₹150 authorization was consumed by
+   v2 and is not reusable.
+10. **Run the full v3 24×3 gate** with clean workspaces, delegation disabled,
+    append-only evidence, and failures retained. Promote only if every predicate in
+    Phase F passes; otherwise remain experimental and report the complete
+    denominator.
+
+The immediate next coding target is therefore not process-tree cancellation—it is
+canonical research outcome enforcement plus no-progress/budget handling for
+multi-step browser and cancellation workflows. No additional provider spending is
+needed until those changes and all deterministic gates pass.
+
 ## 1. Current measured state
 
 The canonical 24-task × 3-repetition run used Sarvam `glm5.3-flash` through
