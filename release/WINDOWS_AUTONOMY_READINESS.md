@@ -44,9 +44,26 @@ The smoke exposed and drove fixes for two real defects: UTF-8 text/Markdown/CSV/
 could not enter the artifact-backed research evidence path, and a passing declared
 artifact validator was evaluated too late to satisfy the current-revision
 verification gate. Both now have regressions. The overall capability is
-`experimental_provider_smoke_verified`, not promoted: the intended-model 24×3 W5
-acceptance matrix is still unmeasured, and the older 72-run component pack below
-remains regression evidence rather than autonomous acceptance.
+`experimental_provider_acceptance_failed`, not promoted.
+
+The full canonical-agent W5 matrix was subsequently run against the same Sarvam
+`glm5.3-flash` endpoint: **66/72 independently validated (91.7%)** in 836.59
+seconds. Category results were research **23/24**, local **18/18**, browser
+**13/15**, mixed **9/9**, and long work **3/6**. Although the overall score and
+four categories meet the proposed reliability thresholds, long work is only 50%
+and therefore misses its 80% threshold. More importantly, the cancellation canary
+was present in all three A-X02 repetitions despite the workflow reporting a
+successful cancellation; this violates the zero-orphan and zero-cancellation-
+violation requirements. Other
+failures were one research budget exhaustion and two browser validator failures.
+Failed runs remain in the denominator.
+
+The 72 runs used 2,817,119 billed tokens. Using the predeclared conservative bound
+that prices every token at the ₹45/M output rate gives **₹126.77**, below the ₹150
+ceiling; this is a conservative calculation rather than a provider invoice. The
+credential was entered interactively and was not persisted. Evidence:
+`release/evidence/W5_PROVIDER_ACCEPTANCE_2026-09-12.json`, SHA-256
+`c011f325aa5b514f2d03f35c3ed4808612e5e2ce92d5f1f63a8ccee91d757c17`.
 
 ## Corrected gate assessment — 2026-09-10
 
@@ -110,15 +127,16 @@ Linux container and passed content-checked file/read/process execution
 (`LINUX_WHEEL_SMOKE_OK`). This is useful portability evidence but does not replace
 the deferred Linux dependency/browser/upgrade matrix and does not promote Linux.
 
-## Release boundary
+## Earlier release boundary (superseded 2026-09-12)
 
-No model/search provider credential is configured in this environment. Therefore
-the mandated intended-model 24×3 trial and bounded provider smoke slice were not
-run, and no model success/cost score is claimed. The capability remains
-`experimental_provider_unmeasured`; deterministic research, browser, files,
-terminal, persistence, packaging and adapter behaviors are verified at their
-documented scopes. OCR is unavailable. Linux, VM desktop, OSWorld, official GAIA
-and official SWE-bench Verified remain deferred or unmeasured.
+At the time of the 2026-09-09 decision, no usable model/search provider credential
+was configured, so provider acceptance was unmeasured. The 2026-09-12 smoke and
+24×3 result above supersede that provider statement. Deterministic research,
+browser, files, terminal, persistence, packaging and adapter behaviors remain
+verified at their documented scopes, but the provider-backed capability is not
+promoted because its cancellation-safety and long-work gates failed. OCR is
+unavailable. Linux, VM desktop, OSWorld, official GAIA and official SWE-bench
+Verified remain deferred or unmeasured.
 
 The 30-minute deterministic W3 soak passed and is recorded separately at
 `release/evidence/W3_30_MINUTE_SOAK.json`: 3,728.282 elapsed seconds, 226 forced
