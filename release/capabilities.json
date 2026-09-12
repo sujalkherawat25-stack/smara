@@ -66,8 +66,12 @@
       "limitation": "causal inference, forecasting and domain-specific statistical tests require separately declared methods and validation"
     },
     "research_ocr": {
-      "status": "unavailable",
-      "blocker": "pytesseract OCR extractor is not installed; unresolved scans fail closed"
+      "status": "verified_provider_and_local",
+      "suite": "tests/test_sarvam_ocr.py",
+      "provider": "sarvam",
+      "model": "sarvam-vision-v1",
+      "scope": "Sarvam Cloud OCR (/job/digitise) and local pytesseract fallback for PDFs and images (.png, .jpg, .jpeg, .webp), returning content-addressed extracted Markdown/text, page counts, and immutable cryptographic digests",
+      "cli_command": "smara ocr <file> [--lang en-IN] [--format md|txt] [--output out.md]"
     },
     "stateful_browser": {
       "status": "verified_deterministic_agent_loop",

@@ -1022,6 +1022,12 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("models", help="List and configure model profiles")
     subparsers.add_parser("chat", help="Launch interactive Claude Code TUI")
 
+    p_ocr = subparsers.add_parser("ocr", help="Digitize and extract text/markdown from documents or images using Sarvam OCR")
+    p_ocr.add_argument("file", help="Path to PDF document or image file (.pdf, .png, .jpg, .webp)")
+    p_ocr.add_argument("--lang", default="en-IN", help="Language code (default: en-IN)")
+    p_ocr.add_argument("--format", default="md", choices=["md", "txt"], help="Output format (default: md)")
+    p_ocr.add_argument("--output", "-o", default=None, help="Save extracted text to a file path")
+
     return parser
 
 
@@ -1038,7 +1044,7 @@ def main(argv: list[str] | None = None) -> int:
         "graph", "search", "report", "test", "refactor", "git", "find",
         "index", "browse", "e2e", "memory", "swarm", "models", "chat", "login",
         "logout", "run", "research", "tasks", "tools", "plugins", "approvals",
-        "devices", "desktop", "tool", "dynamic-tool", "ask", "goal", "benchmark", "resume", "cancel", "inspect", "doctor"
+        "devices", "desktop", "tool", "dynamic-tool", "ask", "goal", "benchmark", "resume", "cancel", "inspect", "doctor", "ocr"
     }
 
     # Extract top-level flags before checking for direct prompt
@@ -1736,13 +1742,33 @@ def main(argv: list[str] | None = None) -> int:
         fmt = getattr(parsed_args, "format", "pdf")
         _,payload=run_canonical(f"Create an executive {fmt.upper()} report titled '{title}' saved to reports/audit_summary.{fmt}.");print(payload.get("answer", ""));return 0 if payload.get("status")=="completed" else 1
 
-    if cmd == "models":
-        print(tui.paint("\nConfigured Model Profiles:", "BOLD"))
-        for p in engine.profiles:
-            active = "* [ACTIVE]" if p["id"] == engine.active_id else "o"
-            print(f"  {active} {p['id'].ljust(12)} : {p['label']} ({p['model']}) @ {p['base_url']}")
-        print()
-        return 0
+    if cmd == "ocr":
+        import asyncio
+        from .ocr_service import SarvamOCRClient, OCRError
+        target_file = Path(parsed_args.file).resolve()
+        if not target_file.is_file():
+            print(tui.paint(f"Error: File not found: {target_file}", "RED"))
+            return 1
+
+        tui.print_tool_start("ocr_digitize", f"Digitizing document '{target_file.name}'...")
+        client = SarvamOCRClient()
+        try:
+            res = asyncio.run(client.digitize(target_file, language=parsed_args.lang, output_format=parsed_args.format))
+            tui.print_tool_result("ocr_digitize", True, f"Extracted {res.character_count} chars ({res.pages} page(s), provider={res.provider})")
+
+            print(tui.paint(f"\n✓ Digitization Complete ({res.provider.upper()} OCR):\n", "GREEN"))
+            print(res.text)
+            print()
+            if parsed_args.output:
+                out_path = Path(parsed_args.output).resolve()
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_text(res.text, encoding="utf-8")
+                print(tui.paint(f"📄 Saved digitized text to: {out_path}\n", "CYAN"))
+            return 0
+        except Exception as exc:
+            tui.print_tool_result("ocr_digitize", False, str(exc))
+            print(tui.paint(f"\n✗ OCR extraction failed: {exc}\n", "RED"))
+            return 1
 
     # Default to Interactive Claude Code REPL
     _interactive_repl(engine,run_canonical)

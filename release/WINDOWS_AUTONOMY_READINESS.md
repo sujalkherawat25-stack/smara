@@ -177,6 +177,15 @@ structured test fixtures:
 
 **Decision:** `live_web_research` is promoted to **`verified_live_web`** and `research_data_analysis` is promoted to **`verified_live_web_and_deterministic`**.
 
+### Sarvam OCR & Document Digitization Integration — 2026-09-12
+
+Smara integrates native document and image OCR via Sarvam's `/job/digitise` asynchronous endpoint (`sarvam-vision-v1`) alongside local `pytesseract` fallback:
+- **CLI Subcommand**: `smara ocr <file> [--lang en-IN] [--format md|txt] [--output out.md]`
+- **Formats Supported**: `.pdf`, `.png`, `.jpg`, `.jpeg`, `.webp` (up to 20 MB).
+- **Evidence Binding**: Generates SHA-256 digests over raw bytes and extracted Markdown/Text, automatically binding digitized documents into the canonical research ledger.
+- **Diagnostics**: `smara doctor` reports `ocr_extraction` availability based on Desktop-vault/env credentials or local OCR engine.
+- **Verification**: `tests/test_sarvam_ocr.py` passed (4/4 tests).
+
 ## Corrected gate assessment — 2026-09-10
 
 This assessment supersedes the promotion claims below. Windows readiness is

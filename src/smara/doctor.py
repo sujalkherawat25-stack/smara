@@ -43,9 +43,14 @@ def diagnose(workspace:Path,*,test_browser:bool=True)->dict[str,Any]:
         except Exception:
             search=False
     checks["search_provider"]=_entry(search,search,False,"configured provider present" if search else "no configured provider")
-    pdf=importlib.util.find_spec("pypdf") is not None;ocr=importlib.util.find_spec("pytesseract") is not None
+    pdf=importlib.util.find_spec("pypdf") is not None
+    from .ocr_service import resolve_ocr_credentials
+    _, ocr_key, _ = resolve_ocr_credentials()
+    ocr_lib = importlib.util.find_spec("pytesseract") is not None
+    ocr_available = bool(ocr_key) or ocr_lib
+    ocr_detail = "Sarvam OCR API configured" if ocr_key else ("pytesseract import" if ocr_lib else "configure Sarvam key or install pytesseract")
     checks["pdf_extraction"]=_entry(True,pdf,pdf,"pypdf import")
-    checks["ocr_extraction"]=_entry(False,ocr,False,"pytesseract import" if ocr else "install OCR dependency and engine")
+    checks["ocr_extraction"]=_entry(bool(ocr_key),ocr_available,False,ocr_detail)
     browser_available=importlib.util.find_spec("playwright") is not None;browser_tested=False;detail="install smara[browser], then python -m playwright install chromium"
     if browser_available and test_browser:
         try:

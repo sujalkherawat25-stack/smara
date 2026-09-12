@@ -262,18 +262,33 @@ class CanonicalResearchSession:
                 extraction_version=f"pypdf-{pypdf.__version__}",
             )
         elif suffix in {".png", ".jpg", ".jpeg", ".webp"}:
-            try:
-                import pytesseract
-                from PIL import Image
-            except ImportError:
-                self.index.record_failure(source_url, "OCR extractor unavailable")
-                self._save("research_extraction_unavailable", {"node_id": node_id, "capability": "ocr", "path": candidate.name})
-                return {"status": "unavailable", "capability": "ocr", "reason": "pytesseract is not installed", "node_id": node_id}
-            data = pytesseract.image_to_data(Image.open(candidate), output_type=pytesseract.Output.DICT)
-            words = [str(item).strip() for item in data.get("text", ()) if str(item).strip()]
-            confidences = [float(item) for item in data.get("conf", ()) if str(item).replace(".", "", 1).lstrip("-").isdigit() and float(item) >= 0]
-            text = " ".join(words)
-            confidence = (sum(confidences) / len(confidences) / 100) if confidences else 0.0
+            from .ocr_service import SarvamOCRClient, OCRError
+            ocr_client = SarvamOCRClient()
+            if ocr_client.api_key:
+                try:
+                    ocr_res = _run(ocr_client.digitize(candidate))
+                    text = ocr_res.text
+                    confidence = 1.0
+                    extraction_version = f"sarvam-ocr-{ocr_res.model}"
+                except Exception as exc:
+                    self.index.record_failure(source_url, f"Sarvam OCR failed: {exc}")
+                    self._save("research_extraction_failed", {"node_id": node_id, "capability": "ocr", "path": candidate.name, "error": str(exc)})
+                    return {"status": "error", "capability": "ocr", "error": str(exc), "node_id": node_id}
+            else:
+                try:
+                    import pytesseract
+                    from PIL import Image
+                except ImportError:
+                    self.index.record_failure(source_url, "OCR extractor unavailable")
+                    self._save("research_extraction_unavailable", {"node_id": node_id, "capability": "ocr", "path": candidate.name})
+                    return {"status": "unavailable", "capability": "ocr", "reason": "pytesseract is not installed", "node_id": node_id}
+                data = pytesseract.image_to_data(Image.open(candidate), output_type=pytesseract.Output.DICT)
+                words = [str(item).strip() for item in data.get("text", ()) if str(item).strip()]
+                confidences = [float(item) for item in data.get("conf", ()) if str(item).replace(".", "", 1).lstrip("-").isdigit() and float(item) >= 0]
+                text = " ".join(words)
+                confidence = (sum(confidences) / len(confidences) / 100) if confidences else 0.0
+                extraction_version = f"pytesseract-{getattr(pytesseract, '__version__', 'unknown')}"
+
             if not text:
                 self.index.record_failure(source_url, "OCR returned no text")
             record = self.index.add(
@@ -284,7 +299,7 @@ class CanonicalResearchSession:
                 text=text,
                 bbox=(0, 0, 1, 1),
                 confidence=confidence,
-                extraction_version=f"pytesseract-{getattr(pytesseract, '__version__', 'unknown')}",
+                extraction_version=extraction_version,
             )
         else:
             raise ResearchStateError("unsupported local research evidence type")
