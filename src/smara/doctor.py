@@ -36,6 +36,12 @@ def diagnose(workspace:Path,*,test_browser:bool=True)->dict[str,Any]:
     provider=bool(_resolve_profile_key(active,credentials))
     checks["model_provider"]=_entry(provider,provider,False,"configured credential present" if provider else "no configured credential")
     search=bool(os.getenv("TAVILY_API_KEY") or os.getenv("EXA_API_KEY"))
+    if not search:
+        try:
+            from .desktop_executor import resolve_local_credential
+            search=any(bool(resolve_local_credential(alias)) for alias in ("TAVILY_API_KEY","EXA_API_KEY","BRAVE_SEARCH_API_KEY","SERPER_API_KEY"))
+        except Exception:
+            search=False
     checks["search_provider"]=_entry(search,search,False,"configured provider present" if search else "no configured provider")
     pdf=importlib.util.find_spec("pypdf") is not None;ocr=importlib.util.find_spec("pytesseract") is not None
     checks["pdf_extraction"]=_entry(True,pdf,pdf,"pypdf import")

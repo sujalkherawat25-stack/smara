@@ -54,6 +54,20 @@ class WebSearchTool:
     def __init__(self, http_client: httpx.AsyncClient | None = None):
         self._http = http_client
 
+    @staticmethod
+    def _local_key(provider: str) -> str:
+        aliases={"brave":"BRAVE_SEARCH_API_KEY","serper":"SERPER_API_KEY","tavily":"TAVILY_API_KEY","exa":"EXA_API_KEY"}
+        alias=aliases.get(provider,"")
+        if not alias:return ""
+        direct=os.getenv(alias,"")
+        if direct:return direct
+        try:
+            from .desktop_executor import resolve_local_credential
+            value=resolve_local_credential(alias)
+            return value if isinstance(value,str) else ""
+        except Exception:
+            return ""
+
     async def search(
         self,
         query: str,
@@ -68,7 +82,7 @@ class WebSearchTool:
         if not query:
             raise ResearchToolError("Research search needs a non-empty question.")
         provider = (provider_override or settings.search_provider).strip().lower()
-        api_key = api_key_override if api_key_override is not None else settings.search_api_key
+        api_key = api_key_override if api_key_override is not None else settings.search_api_key or self._local_key(provider)
         if not api_key:
             raise ResearchToolError("Smara web-search provider is not configured.")
 

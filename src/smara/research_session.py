@@ -45,6 +45,7 @@ class CanonicalResearchSession:
         self.leads:dict[str,list[dict[str,Any]]]={}
         self.claims:list[dict[str,Any]]=[]
         self.validation:dict[str,Any]={}
+        self.analyses:list[dict[str,Any]]=[]
         self._load()
 
     def _load(self) -> None:
@@ -64,9 +65,10 @@ class CanonicalResearchSession:
         self.leads={str(k):list(v) for k,v in value.get("leads",{}).items()}
         self.claims=list(value.get("claims",()))
         self.validation=dict(value.get("validation",{}))
+        self.analyses=list(value.get("analyses",()))
 
     def snapshot(self) -> dict[str,Any]:
-        return {"version":self.VERSION,"graph":self.graph.to_dict(),"evidence":self.index.to_dict(),"leads":self.leads,"claims":self.claims,"validation":self.validation}
+        return {"version":self.VERSION,"graph":self.graph.to_dict(),"evidence":self.index.to_dict(),"leads":self.leads,"claims":self.claims,"validation":self.validation,"analyses":self.analyses}
 
     def _save(self,event_type:str,payload:Mapping[str,Any]) -> str|None:
         value=self.snapshot();artifact_id=None
@@ -190,6 +192,23 @@ class CanonicalResearchSession:
         if record is None:raise ResearchStateError("missing evidence")
         provenance=self.index.validate_artifact(evidence_id) if record.source_artifact_id else (False,"missing_source_artifact")
         return {"status":"ok","evidence":{**asdict(record),"text":record.text[:max(1,min(int(max_chars),16000))]},"provenance":{"valid":provenance[0],"reason":provenance[1]}}
+
+    def analyze(self,rows:Iterable[Mapping[str,Any]],numeric_columns:Iterable[str],*,evidence_ids:Iterable[str],group_by:str|None=None,time_column:str|None=None) -> dict[str,Any]:
+        from .research_analysis import ResearchAnalysisError,analyze_tabular
+        ids=list(dict.fromkeys(str(item) for item in evidence_ids))
+        if not ids:raise ResearchStateError("analysis requires source evidence IDs")
+        invalid=[]
+        for ident in ids:
+            valid,reason=self.index.validate_artifact(ident)
+            if not valid:invalid.append({"evidence_id":ident,"reason":reason})
+        if invalid:raise ResearchStateError(f"analysis evidence is invalid: {invalid}")
+        try:result=analyze_tabular(rows,numeric_columns=numeric_columns,group_by=group_by,time_column=time_column,evidence_ids=ids)
+        except ResearchAnalysisError as exc:raise ResearchStateError(str(exc)) from exc
+        artifact_id=None
+        if self.engine is not None:artifact_id,_=self.engine.artifact_store.put_json(result)
+        record={"analysis_artifact_id":artifact_id,**result};self.analyses.append(record);self.validation={}
+        state_id=self._save("research_analyzed",{"analysis_artifact_id":artifact_id,"dataset_sha256":result["dataset_sha256"],"row_count":result["row_count"],"evidence_ids":ids})
+        return {"status":"ok","research_state_artifact_id":state_id,**record}
 
     def resolve(self,node_id:str,claim:str,evidence_ids:Iterable[str]) -> dict[str,Any]:
         node=self.graph.nodes.get(node_id)

@@ -996,6 +996,7 @@ TOOL_SCHEMAS.extend([
     {"type":"function","function":{"name":"research_fetch","description":"Fetch a lead and preserve original response bytes plus extracted passage provenance.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","url"],"properties":{"node_id":{"type":"string"},"url":{"type":"string"}}}}},
     {"type":"function","function":{"name":"research_ingest_file","description":"Ingest UTF-8 text/Markdown/CSV/JSON, extract a PDF table cell, or extract image OCR evidence from a workspace file while preserving the original artifact.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","path"],"properties":{"node_id":{"type":"string"},"path":{"type":"string"},"page":{"type":"integer"},"row":{"type":"integer"},"column":{"type":"integer"}}}}},
     {"type":"function","function":{"name":"research_inspect","description":"Inspect an evidence passage and verify its recoverable source artifact.","parameters":{"type":"object","additionalProperties":False,"required":["evidence_id"],"properties":{"evidence_id":{"type":"string"},"max_chars":{"type":"integer"}}}}},
+    {"type":"function","function":{"name":"research_analyze","description":"Compute provenance-bound descriptive statistics, grouped metrics, correlations, time changes, and IQR outliers from structured rows. Results are deterministic and stored as an immutable artifact; missing values are never imputed.","parameters":{"type":"object","additionalProperties":False,"required":["rows","numeric_columns","evidence_ids"],"properties":{"rows":{"type":"array","maxItems":10000,"items":{"type":"object"}},"numeric_columns":{"type":"array","maxItems":20,"items":{"type":"string"}},"evidence_ids":{"type":"array","minItems":1,"maxItems":20,"items":{"type":"string"}},"group_by":{"type":"string"},"time_column":{"type":"string"}}}}},
     {"type":"function","function":{"name":"research_resolve","description":"Resolve a question only through conservative claim/evidence judgments.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","claim","evidence_ids"],"properties":{"node_id":{"type":"string"},"claim":{"type":"string"},"evidence_ids":{"type":"array","maxItems":20,"items":{"type":"string"}}}}}},
     {"type":"function","function":{"name":"research_validate","description":"Validate the final required claim/evidence map; unsupported claims prevent completion.","parameters":{"type":"object","additionalProperties":False,"required":["claims"],"properties":{"claims":{"type":"array","maxItems":40,"items":{"type":"object","additionalProperties":False,"required":["claim","evidence_ids"],"properties":{"claim":{"type":"string"},"evidence_ids":{"type":"array","maxItems":20,"items":{"type":"string"}}}}},"require_complete":{"type":"boolean"}}}}},
 ])
@@ -1050,7 +1051,7 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
             "browser_action", "pdf_search", "calculate",
             "file_read", "list_directory", "programmatic_tool_call", "todo",
             "research_plan", "research_search", "research_fetch", "research_inspect",
-            "research_ingest_file", "research_resolve", "research_validate"
+            "research_ingest_file", "research_analyze", "research_resolve", "research_validate"
             ,"browser_open","browser_observe","browser_navigate","browser_act","browser_tabs","browser_switch","browser_scroll","browser_download","browser_close"
             ,"process_start","process_poll","process_stdin","process_cancel"
         }
@@ -1072,7 +1073,8 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - For running terminal commands, test suites, builds, or git, use `terminal`.
    - For headless browser actions, screenshots, or scraping, use `browser_action`.
    - Keep internal reasoning concise and focused (under 150 words) before executing tools or stating answers.
-   - For factual web research, use `web_search` and `web_extract`.
+   - For quick factual web lookup, use `web_search` and `web_extract`. For evidence-backed research, use the canonical `research_plan` -> `research_search` -> `research_fetch` -> `research_resolve` -> `research_validate` path so snippets cannot become proof.
+   - For quantitative claims from fetched CSV/JSON/table data, use `research_analyze`; cite its source evidence IDs and report missingness, units, time range, and method. Never estimate statistics manually or treat correlation as causation.
    - When two or more independent read-only facts are needed, use `programmatic_tool_call` to batch them in one turn. Its allowlist is strict: never use it for shell commands, writes, memory changes, credentials, delegation, or browser control.
    - For historical snapshots of web pages, use `wayback_extract`.
    - For current or historical Wikipedia articles, revision histories, or image counts, use `wikipedia_page`.
@@ -1228,6 +1230,7 @@ class SmaraAutonomousAgent:
             "research_fetch": self._dispatch_research_fetch,
             "research_ingest_file": self._dispatch_research_ingest_file,
             "research_inspect": self._dispatch_research_inspect,
+            "research_analyze": self._dispatch_research_analyze,
             "research_resolve": self._dispatch_research_resolve,
             "research_validate": self._dispatch_research_validate,
             "process_start": self._dispatch_process_start,
@@ -1367,6 +1370,9 @@ class SmaraAutonomousAgent:
 
     def _dispatch_research_inspect(self,args:Dict[str,Any]) -> str:
         return self._research_result(self._research.inspect(str(args.get("evidence_id") or ""),int(args.get("max_chars") or 4000)))
+
+    def _dispatch_research_analyze(self,args:Dict[str,Any]) -> str:
+        return self._research_result(self._research.analyze(args.get("rows") or [],args.get("numeric_columns") or [],evidence_ids=args.get("evidence_ids") or [],group_by=args.get("group_by"),time_column=args.get("time_column")))
 
     def _dispatch_research_resolve(self,args:Dict[str,Any]) -> str:
         return self._research_result(self._research.resolve(str(args.get("node_id") or ""),str(args.get("claim") or ""),args.get("evidence_ids") or []))

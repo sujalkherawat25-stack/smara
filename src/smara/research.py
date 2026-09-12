@@ -296,12 +296,18 @@ async def fetch_public_source(client: httpx.AsyncClient, initial_url: str) -> Re
         raw = response.content[:MAX_SOURCE_BYTES]
         if len(response.content) > MAX_SOURCE_BYTES:
             raise ValueError("Source exceeded the 1 MB retrieval limit.")
-        if "html" not in content_type and not content_type.startswith("text/plain"):
+        structured = any(kind in content_type for kind in ("application/json", "text/csv", "application/csv"))
+        if "html" not in content_type and not content_type.startswith("text/plain") and not structured:
             raise ValueError(f"Unsupported source content type: {content_type or 'unknown'}")
         extracted = _TextExtractor()
-        extracted.feed(raw.decode(response.encoding or "utf-8", errors="replace"))
-        excerpt = re.sub(r"\s+", " ", html.unescape(" ".join(extracted.parts))).strip()[:MAX_EXCERPT_CHARS]
-        if len(excerpt) < 80:
+        decoded = raw.decode(response.encoding or "utf-8", errors="replace")
+        if structured:
+            excerpt = decoded.strip()[:MAX_EXCERPT_CHARS]
+        else:
+            extracted.feed(decoded)
+            excerpt = re.sub(r"\s+", " ", html.unescape(" ".join(extracted.parts))).strip()[:MAX_EXCERPT_CHARS]
+        minimum_chars = 2 if structured else 80
+        if len(excerpt) < minimum_chars:
             raise ValueError("Source did not contain enough readable text to cite.")
         title = extracted.title.strip()[:500] or urlparse(str(response.url)).hostname or initial_url
         return RetrievedSource(title, excerpt, hashlib.sha256(raw).hexdigest(), _now(), extracted.published_at, raw, str(response.url), tuple(redirect_chain), content_type)

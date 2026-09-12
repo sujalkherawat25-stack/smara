@@ -152,7 +152,7 @@ TOOL_SCHEMAS={
  "process_write":{"type":"object","additionalProperties":False,"required":["process_id","text"],"properties":{"process_id":{"type":"string"},"text":{"type":"string"}}},
  "process_cancel":{"type":"object","additionalProperties":False,"required":["process_id"],"properties":{"process_id":{"type":"string"}}},
  "browser_open":{"type":"object"},"browser_observe":{"type":"object"},"browser_navigate":{"type":"object"},"browser_act":{"type":"object"},"browser_tabs":{"type":"object"},"browser_switch":{"type":"object"},"browser_scroll":{"type":"object"},"browser_download":{"type":"object"},"browser_close":{"type":"object"},
- "research_plan":{"type":"object"},"research_search":{"type":"object"},"research_fetch":{"type":"object"},"research_ingest_file":{"type":"object"},"research_inspect":{"type":"object"},"research_resolve":{"type":"object"},"research_validate":{"type":"object"},
+ "research_plan":{"type":"object"},"research_search":{"type":"object"},"research_fetch":{"type":"object"},"research_ingest_file":{"type":"object"},"research_inspect":{"type":"object"},"research_analyze":{"type":"object"},"research_resolve":{"type":"object"},"research_validate":{"type":"object"},
 }
 
 class ProcessSupervisor:

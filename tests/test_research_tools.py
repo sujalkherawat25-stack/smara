@@ -55,6 +55,23 @@ def test_search_without_provider_key_is_explicit(monkeypatch):
         raise AssertionError("missing search configuration must not silently return empty evidence")
 
 
+def test_search_resolves_matching_desktop_credential_without_exposing_it(monkeypatch):
+    monkeypatch.setattr(
+        research_tools,
+        "settings",
+        SimpleNamespace(search_api_key="",search_provider="tavily",search_url="",search_timeout_seconds=2,search_depth="advanced"),
+    )
+    monkeypatch.setattr(research_tools.WebSearchTool,"_local_key",staticmethod(lambda provider:"desktop-secret" if provider=="tavily" else ""))
+    def handler(request:httpx.Request)->httpx.Response:
+        assert b'"api_key":"desktop-secret"' in request.content
+        return httpx.Response(200,json={"results":[{"url":"https://example.com/report","title":"Report","content":"Evidence"}]})
+    async def execute():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await research_tools.WebSearchTool(client).search("current figures")
+    hits=asyncio.run(execute())
+    assert hits[0].provider=="tavily" and "desktop-secret" not in repr(hits)
+
+
 def test_tavily_search_adapter_keeps_key_server_side(monkeypatch):
     monkeypatch.setattr(
         research_tools,
