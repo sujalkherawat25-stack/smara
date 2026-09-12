@@ -27,6 +27,10 @@ PACK_PATH_V2 = ROOT / "tests/evals/windows_acceptance_v2/manifest.json"
 REF_PATH_V2 = ROOT / "tests/evals/windows_acceptance_v2/references.json"
 EVIDENCE_PATH_V2 = ROOT / "release/evidence/W5_PROVIDER_ACCEPTANCE_V2_2026-09-12.json"
 
+PACK_PATH_V3 = ROOT / "tests/evals/windows_acceptance_v3/manifest.json"
+REF_PATH_V3 = ROOT / "tests/evals/windows_acceptance_v3/references.json"
+EVIDENCE_PATH_V3 = ROOT / "release/evidence/W5_PROVIDER_ACCEPTANCE_V3_2026-09-12.json"
+
 BASE_URL = "https://api.sarvam.ai/v2"
 MODEL = "glm5.3-flash"
 MAX_RUPEES = 150.0
@@ -310,11 +314,11 @@ def browser_setup(root: Path, item: dict):
     download_val = f"payload-{val}" if str(val).isdigit() or "84" in str(val) else "payload-42"
     base = f"Open {page.as_uri()} with browser_open. "
     if kind == "observe":
-        return 6, None, base + f"Observe and confirm {val} is visible, then finish."
+        return 7, None, base + f"Observe and confirm {val} is visible, then finish."
     if kind == "form":
-        return 8, None, base + f"Fill the input with {val}, click Save using fresh DOM references, observe Saved: {val}, then finish."
+        return 9, None, base + f"Fill the input with {val}, click Save using fresh DOM references, observe Saved: {val}, then finish."
     if kind == "tabs":
-        return 8, None, base + f"Click Tab using a fresh reference, list tabs, switch to the new tab, observe {tab_val}, then finish."
+        return 10, None, base + f"Click Tab using a fresh reference, list tabs with browser_tabs, switch to the new tab with browser_switch, observe {tab_val}, then finish."
     if kind == "download":
         return 8, {"artifacts": [{"path": "download.txt", "kind": "report", "checks": {"required_phrases": [download_val], "minimum_words": 1}}]}, base + f"Download the Download link to download.txt, read it back, confirm {download_val}, then finish."
     return 7, None, base + "Confirm the page opened, close the owned browser with browser_close, confirm it closed, then finish."
@@ -486,7 +490,7 @@ def execute(
             )
             profile, calls, contract, prompt = (
                 "coding",
-                8,
+                9,
                 None,
                 f"Start a background Python process with process_start running {sys.executable!r} on canary_script.py (which sleeps {delay}s before writing orphan.txt). Immediately cancel that owned process with process_cancel, confirm cancellation, wait briefly to establish it cannot write the canary, then finish.",
             )
@@ -551,9 +555,9 @@ def execute(
 
 def run_acceptance(
     key: str,
-    pack_path: Path = PACK_PATH_V2,
-    ref_path: Path = REF_PATH_V2,
-    evidence_path: Path = EVIDENCE_PATH_V2,
+    pack_path: Path = PACK_PATH_V3,
+    ref_path: Path = REF_PATH_V3,
+    evidence_path: Path = EVIDENCE_PATH_V3,
     resume: bool = False,
     smoke: bool = False,
     base_url: str = BASE_URL,
@@ -566,10 +570,10 @@ def run_acceptance(
     refs = json.loads(ref_path.read_text(encoding="utf-8"))["answers"]
 
     if smoke:
-        # Run 3 smoke cases (research refuted, form state, cancellation canary) with 1 repeat
-        smoke_ids = {"A2-R02", "A2-B02", "A2-X02", "A-R02", "A-B02", "A-X02"}
+        # Run 3 smoke cases (research insufficient, tabs, cancellation canary) with 1 repeat
+        smoke_ids = {"A3-R04", "A3-B03", "A3-X02", "A2-R02", "A2-B02", "A2-X02", "A-R02", "A-B02", "A-X02"}
         pack = {
-            "version": pack.get("version", 2),
+            "version": pack.get("version", 3),
             "suite": f"{pack.get('suite', 'acceptance')}-smoke",
             "repetitions": 1,
             "delegation": False,
@@ -644,6 +648,7 @@ def main() -> int:
     parser.add_argument("--resume", action="store_true", help="Resume from existing evidence file")
     parser.add_argument("--smoke", action="store_true", help="Run 3 smoke tasks")
     parser.add_argument("--v1", action="store_true", help="Use v1 acceptance pack")
+    parser.add_argument("--v2", action="store_true", help="Use v2 acceptance pack")
     parser.add_argument("--pack", type=str, help="Custom manifest path")
     parser.add_argument("--refs", type=str, help="Custom references path")
     parser.add_argument("--evidence", type=str, help="Custom evidence output path")
@@ -653,17 +658,34 @@ def main() -> int:
     parser.add_argument("--api-key", type=str, default=None, help="API key (optional flag; otherwise prompted)")
     args = parser.parse_args()
 
-    pack_path = Path(args.pack) if args.pack else (PACK_PATH_V1 if args.v1 else PACK_PATH_V2)
-    ref_path = Path(args.refs) if args.refs else (REF_PATH_V1 if args.v1 else REF_PATH_V2)
+    if args.pack:
+        pack_path = Path(args.pack)
+    elif args.v1:
+        pack_path = PACK_PATH_V1
+    elif args.v2:
+        pack_path = PACK_PATH_V2
+    else:
+        pack_path = PACK_PATH_V3
+
+    if args.refs:
+        ref_path = Path(args.refs)
+    elif args.v1:
+        ref_path = REF_PATH_V1
+    elif args.v2:
+        ref_path = REF_PATH_V2
+    else:
+        ref_path = REF_PATH_V3
 
     if args.evidence:
         evidence_path = Path(args.evidence)
     elif args.smoke:
-        evidence_path = ROOT / ("release/evidence/W5_PROVIDER_SMOKE_V2_2026-09-12.json" if not args.v1 else "release/evidence/W5_PROVIDER_SMOKE_2026-09-12.json")
+        evidence_path = ROOT / ("release/evidence/W5_PROVIDER_SMOKE_V3_2026-09-12.json" if not (args.v1 or args.v2) else "release/evidence/W5_PROVIDER_SMOKE_V2_2026-09-12.json" if args.v2 else "release/evidence/W5_PROVIDER_SMOKE_2026-09-12.json")
     elif args.v1:
         evidence_path = EVIDENCE_PATH_V1
-    else:
+    elif args.v2:
         evidence_path = EVIDENCE_PATH_V2
+    else:
+        evidence_path = EVIDENCE_PATH_V3
 
     from smara.autonomous_agent import _get_api_key_from_vault_or_env
     key = args.api_key or os.environ.get("SARVAM_API_KEY") or os.environ.get("SMARA_MODEL_SARVAM_API_KEY") or _get_api_key_from_vault_or_env()

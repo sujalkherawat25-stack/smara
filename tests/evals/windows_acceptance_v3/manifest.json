@@ -1,0 +1,228 @@
+{
+  "version": 3,
+  "suite": "windows-autonomy-24-v3",
+  "repetitions": 3,
+  "delegation": false,
+  "tasks": [
+    {
+      "id": "A3-R01",
+      "category": "research",
+      "input": {
+        "evidence": "The laser frequency was 450 terahertz.",
+        "claim": "The laser frequency was 450 terahertz."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A3-R02",
+      "category": "research",
+      "input": {
+        "evidence": "The cargo weight is 72 metric tons.",
+        "claim": "The cargo weight is 150 metric tons."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A3-R03",
+      "category": "research",
+      "input": {
+        "evidence": "The observatory opened on 21 June 2022.",
+        "claim": "The observatory opened on 21 June 2023."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A3-R04",
+      "category": "research",
+      "input": {
+        "evidence": "Von Neumann pioneered the EDVAC architecture.",
+        "claim": "Zuse pioneered the EDVAC architecture."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A3-R05",
+      "category": "research",
+      "input": {
+        "evidence": "The total distance is 96000 meters.",
+        "claim": "The total distance is 96 kilometers."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A3-R06",
+      "category": "research",
+      "input": {
+        "evidence": "The operating voltage is 230 volts.",
+        "claim": "The operating voltage is not 230 volts."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A3-R07",
+      "category": "research",
+      "input": {
+        "evidence": "A solar flare preceded the communication dropout.",
+        "claim": "A solar flare caused the communication dropout."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A3-R08",
+      "category": "research",
+      "input": {
+        "evidence": "Total capital expenditures reached 28 million USD in 2024.",
+        "claim": "Total capital expenditures reached 28 million USD in 2024."
+      },
+      "validator": "claim_state"
+    },
+    {
+      "id": "A3-L01",
+      "category": "local",
+      "input": {
+        "kind": "json",
+        "value": 128
+      },
+      "validator": "json_exact"
+    },
+    {
+      "id": "A3-L02",
+      "category": "local",
+      "input": {
+        "kind": "csv",
+        "value": "128"
+      },
+      "validator": "csv_exact"
+    },
+    {
+      "id": "A3-L03",
+      "category": "local",
+      "input": {
+        "kind": "report",
+        "value": "validated"
+      },
+      "validator": "report_content"
+    },
+    {
+      "id": "A3-L04",
+      "category": "local",
+      "input": {
+        "kind": "process",
+        "value": "terminal-pass"
+      },
+      "validator": "process_output"
+    },
+    {
+      "id": "A3-L05",
+      "category": "local",
+      "input": {
+        "kind": "unicode",
+        "value": "नवाचार"
+      },
+      "validator": "unicode_bytes"
+    },
+    {
+      "id": "A3-L06",
+      "category": "local",
+      "input": {
+        "kind": "conflict",
+        "value": "immutable-state"
+      },
+      "validator": "conflict_preserved"
+    },
+    {
+      "id": "A3-B01",
+      "category": "browser",
+      "input": {
+        "kind": "observe",
+        "value": "sigma"
+      },
+      "validator": "dom_state"
+    },
+    {
+      "id": "A3-B02",
+      "category": "browser",
+      "input": {
+        "kind": "form",
+        "value": "registered"
+      },
+      "validator": "form_state"
+    },
+    {
+      "id": "A3-B03",
+      "category": "browser",
+      "input": {
+        "kind": "tabs",
+        "value": "gamma"
+      },
+      "validator": "tab_state"
+    },
+    {
+      "id": "A3-B04",
+      "category": "browser",
+      "input": {
+        "kind": "download",
+        "value": "payload-128"
+      },
+      "validator": "download_bytes"
+    },
+    {
+      "id": "A3-B05",
+      "category": "browser",
+      "input": {
+        "kind": "cancel",
+        "value": "closed"
+      },
+      "validator": "browser_closed"
+    },
+    {
+      "id": "A3-M01",
+      "category": "mixed",
+      "input": {
+        "evidence": "Browser telemetry is 128.",
+        "claim": "Browser telemetry is 128.",
+        "output": "telemetry.json"
+      },
+      "validator": "research_browser_json"
+    },
+    {
+      "id": "A3-M02",
+      "category": "mixed",
+      "input": {
+        "evidence": "Status is operational.",
+        "claim": "Status is operational.",
+        "output": "status.csv"
+      },
+      "validator": "research_browser_csv"
+    },
+    {
+      "id": "A3-M03",
+      "category": "mixed",
+      "input": {
+        "evidence": "Inspection report is validated.",
+        "claim": "Inspection report is validated.",
+        "output": "inspection.md"
+      },
+      "validator": "research_browser_report"
+    },
+    {
+      "id": "A3-X01",
+      "category": "long",
+      "input": {
+        "kind": "compaction",
+        "value": "invariant-✓"
+      },
+      "validator": "three_checkpoint_lineage"
+    },
+    {
+      "id": "A3-X02",
+      "category": "long",
+      "input": {
+        "kind": "cancellation",
+        "value": "zero-orphan-15s",
+        "delay": 15
+      },
+      "validator": "cancel_no_canary"
+    }
+  ]
+}

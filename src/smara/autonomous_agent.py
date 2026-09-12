@@ -1516,9 +1516,20 @@ class SmaraAutonomousAgent:
                 if tool_name == "terminal" and re.search(r"(?:^|\s)(?:pytest|npm\s+test|cargo\s+test|go\s+test)(?:\s|$)", str(tool_args.get("command") or tool_args.get("cmd") or ""), re.I): scope = "full"
                 meta={"evidence_scope":scope}
                 if tool_name.startswith("process_"):
-                    process_result=json.loads(output)
-                    meta.update(process_result.get("meta",{}))
-                    exit_code=process_result.get("exit_code")
+                    try:
+                        process_result=json.loads(output)
+                        meta.update(process_result.get("meta",{}))
+                        exit_code=process_result.get("exit_code")
+                        success = process_result.get("status") != "denied"
+                    except Exception:
+                        pass
+                elif tool_name.startswith("browser_") or tool_name.startswith("research_"):
+                    try:
+                        json_result=json.loads(output)
+                        if isinstance(json_result, dict):
+                            success = json_result.get("status") != "error"
+                    except Exception:
+                        pass
                 return ToolResult(durable_id,"ok" if success else "error",output,exit_code=exit_code,before_revision=before,after_revision=after,error_kind=None if success else "tool_error",meta=meta)
             result = self.session_engine.execute_incremental(ToolCall(durable_id,tool_name,tool_args,str(self.workspace_root)),execute)
             return result.text
@@ -1753,15 +1764,12 @@ class SmaraAutonomousAgent:
                 if current_revision == expected_revision and current_revision is not None:
                     pending_verification.pop(path, None)
 
-        max_loop_iterations = max_iterations or self.max_iterations
+        session_max = self.session_engine.budget.model_calls if self.session_engine and hasattr(self.session_engine, "budget") else None
+        max_loop_iterations = min(max_iterations or self.max_iterations, session_max) if session_max is not None else (max_iterations or self.max_iterations)
         iteration = 0
+        consecutive_planning_turns = 0
         while iteration < max_loop_iterations:
             iteration += 1
-            # Dynamic scaling: if active multi-stage todo plan exists and iteration reaches current budget, extend up to 24
-            if iteration == max_loop_iterations and max_loop_iterations < 24:
-                if (hasattr(self, "task_planner") and self.task_planner.has_items()) or len(tools_used) >= 6:
-                    max_loop_iterations = min(max_loop_iterations + 4, 24)
-                    logger.info(f"Dynamic Iteration Scaling: Extended turn budget to {max_loop_iterations} due to active multi-stage plan.")
 
             logger.info(f"Agent Loop Iteration {iteration}/{max_loop_iterations}")
 
@@ -1867,13 +1875,15 @@ class SmaraAutonomousAgent:
                     self._report_progress("tool_end", {"iteration": iteration, "tool": fn_name, "observation": obs})
                     return tc, fn_name, parsed_args, call_id, obs
 
-                # H0 serializes every batch.  This preserves write→read and
-                # patch→test ordering until a broker can prove read-only
-                # independence and reserve shared resources.
                 results = [_execute_single_call(item) for item in parsed_calls]
-
+                has_execution_tool = False
+                has_planning_tool = False
                 for tc, fn_name, parsed_args, call_id, obs in results:
                     tools_used.append(fn_name)
+                    if fn_name in {"todo", "skills_list", "skill_view"}:
+                        has_planning_tool = True
+                    else:
+                        has_execution_tool = True
                     trace.append({
                         "iteration": iteration,
                         "thought": reasoning or content,
@@ -1886,6 +1896,17 @@ class SmaraAutonomousAgent:
                         "tool_call_id": call_id,
                         "name": fn_name,
                         "content": str(obs)
+                    })
+
+                if has_planning_tool and not has_execution_tool:
+                    consecutive_planning_turns += 1
+                else:
+                    consecutive_planning_turns = 0
+
+                if consecutive_planning_turns >= 2:
+                    messages.append({
+                        "role": "user",
+                        "content": "Notice: Task plan is active. Execute concrete tool actions (or state your verified final answer) directly rather than updating the plan repeatedly."
                     })
 
                 consecutive_no_tool = 0
@@ -2034,6 +2055,9 @@ class SmaraAutonomousAgent:
             if self.session_engine is not None and self.session_engine.get("research_required",False):
                 research_match=re.search(r"(?:FINAL ANSWER|Final Answer|final answer):\s*(.+)",raw_concluding,re.IGNORECASE|re.DOTALL)
                 final_answer=(research_match.group(1) if research_match else raw_concluding).strip()
+                outcome = self._research.primary_outcome() if hasattr(self, "_research") else ""
+                if outcome and not re.search(rf"\b{re.escape(outcome)}\b", final_answer, re.IGNORECASE):
+                    final_answer = f"{final_answer}\nFINAL LABEL: {outcome}"
             else:
                 final_answer = self._clean_final_answer(raw_concluding)
         
@@ -2058,7 +2082,11 @@ class SmaraAutonomousAgent:
         session_result = None
         if self.session_engine is not None:
             unresolved = ["provider/model budget exhausted"] if status == "budget_exhausted" else []
+            if hasattr(self, "_research") and self.session_engine.get("research_required", False):
+                self.session_engine.set("research_outcome", self._research.primary_outcome())
             session_result = self.session_engine.finish_incremental(status if status in {"completed","budget_exhausted","tool_error"} else "needs_input", final_answer, unresolved)
+            if hasattr(self, "_research") and self.session_engine.get("research_required", False):
+                session_result["research_outcome"] = self._research.primary_outcome()
             status = session_result["status"]
         return {
             "answer": final_answer,

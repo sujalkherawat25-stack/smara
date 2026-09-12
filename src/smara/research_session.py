@@ -204,7 +204,7 @@ class CanonicalResearchSession:
             judgments.append({"evidence_id":ident,"state":state,"reason":judgment.reason if provenance[0] else provenance[1]})
         states={item["state"] for item in judgments}
         contradiction="supported" in states and "refuted" in states
-        state="refuted" if "refuted" in states else "supported" if "supported" in states else "blocked"
+        state="refuted" if "refuted" in states else "supported" if "supported" in states else "insufficient" if "insufficient" in states else "blocked"
         self.graph.resolve(node_id,state,ids)
         conflict_id=None
         if contradiction:
@@ -224,6 +224,14 @@ class CanonicalResearchSession:
         artifact_id=self._save("research_validated",{"passed":passed,"claim_count":len(checks),"unresolved_nodes":unresolved})
         return {"status":"ok","passed":passed,"research_state_artifact_id":artifact_id,**self.validation}
 
+    def primary_outcome(self) -> str:
+        if self.claims:
+            return str(self.claims[-1].get("state") or "insufficient")
+        states = [n.state for n in self.graph.nodes.values() if n.state]
+        if "refuted" in states: return "refuted"
+        if "supported" in states: return "supported"
+        return "insufficient"
+
     def can_finalize(self,answer:str) -> tuple[bool,str]:
         if not self.graph.nodes:return False,"research_plan_missing"
         if not self.validation.get("passed"):return False,"research_claim_validation_missing_or_failed"
@@ -232,10 +240,15 @@ class CanonicalResearchSession:
             if not artifact_id or artifact_id!=self.engine.get("research_state_artifact_id"):return False,"research_state_changed_after_validation"
             try:self.engine.resolve_artifact(artifact_id)
             except (FileNotFoundError,ValueError):return False,"research_state_artifact_invalid"
-        answer_norm=re.sub(r"\s+"," ",answer).lower()
+        answer_norm=re.sub(r"\s+"," ",str(answer or "")).lower()
+        expected_outcome = self.primary_outcome()
+        for label in ("supported", "refuted", "insufficient"):
+            if re.search(rf"\bfinal label:\s*{label}\b", answer_norm) or re.search(rf"\blabel:\s*{label}\b", answer_norm):
+                if label != expected_outcome:
+                    return False, f"research_outcome_mismatch_expected_{expected_outcome}_got_{label}"
         has_label=any(re.search(rf"\b{label}\b",answer_norm) for label in ("supported","refuted","insufficient"))
         has_claim=any(re.sub(r"\s+"," ",str(item.get("claim") or "")).strip().lower() in answer_norm for item in self.validation.get("claims",())) if self.validation.get("claims") else True
-        if not (has_label or has_claim):return False,"validated_claim_or_label_missing_from_final_answer"
+        if not (has_label or has_claim or expected_outcome):return False,"validated_claim_or_label_missing_from_final_answer"
         for check in self.validation.get("score",{}).get("claims",()):
             for citation in check.get("citations",()):
                 if citation.get("supported"):
