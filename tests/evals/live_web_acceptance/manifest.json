@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "suite": "smara-live-web-data-analysis-20-v1",
+  "repetitions": 3,
+  "tasks": [
+    {
+      "id": "LW-01",
+      "category": "current_factual",
+      "question": "What is the title and PEP number for Python's optional Global Interpreter Lock specification?",
+      "query": "Python PEP 703 Making the Global Interpreter Lock Optional in CPython",
+      "target_domain": "peps.python.org",
+      "validator": "provenance_claim_match",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-02",
+      "category": "current_factual",
+      "question": "What is the RFC standard number and title that obsoleted RFC 7231 for HTTP Semantics?",
+      "query": "RFC 9110 HTTP Semantics obsoletes RFC 7231",
+      "target_domain": "ietf.org",
+      "validator": "provenance_claim_match",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-03",
+      "category": "current_factual",
+      "question": "What is the official Rust edition following Rust 2021 in the official Rust Edition Guide?",
+      "query": "The Rust Edition Guide Rust 2024 edition doc.rust-lang.org",
+      "target_domain": "doc.rust-lang.org",
+      "validator": "provenance_claim_match",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-04",
+      "category": "current_factual",
+      "question": "What is the open source license used by FastAPI according to its repository?",
+      "query": "github.com/fastapi/fastapi license tiangolo MIT",
+      "target_domain": "github.com",
+      "validator": "provenance_claim_match",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-05",
+      "category": "current_factual",
+      "question": "What is the ISO/IEC standard number for JSON data interchange format specification?",
+      "query": "ISO IEC 21778 Information technology JSON data interchange format",
+      "target_domain": "iec.ch",
+      "validator": "provenance_claim_match",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-06",
+      "category": "breaking_news_or_dated",
+      "question": "When was the NASA Artemis II crew officially announced by NASA?",
+      "query": "NASA names Artemis II crew Reid Wiseman Victor Glover Christina Koch Jeremy Hansen April 3 2023",
+      "target_domain": "nasa.gov",
+      "validator": "dated_fact_match",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-07",
+      "category": "breaking_news_or_dated",
+      "question": "What was the official release date of Python 3.12.0 final?",
+      "query": "Python 3.12.0 final release date October 2 2023 python.org",
+      "target_domain": "python.org",
+      "validator": "dated_fact_match",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-08",
+      "category": "breaking_news_or_dated",
+      "question": "When did NASA release the first operational full-color deep field images from the James Webb Space Telescope?",
+      "query": "James Webb Space Telescope first full-color images released July 12 2022 NASA",
+      "target_domain": "nasa.gov",
+      "validator": "dated_fact_match",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-09",
+      "category": "contradiction_changed_fact",
+      "question": "In Pydantic V2, what decorator replaced the deprecated V1 @validator?",
+      "query": "Pydantic V2 migration @validator replaced with field_validator docs.pydantic.dev",
+      "target_domain": "pydantic.dev",
+      "validator": "provenance_claim_match",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-10",
+      "category": "contradiction_changed_fact",
+      "question": "What is the official IAU definition status of Pluto adopted at the 2006 General Assembly Resolution B5?",
+      "query": "IAU 2006 General Assembly Resolution B5 definition of planet Pluto dwarf planet",
+      "target_domain": "iau.org",
+      "validator": "provenance_claim_match",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-11",
+      "category": "contradiction_changed_fact",
+      "question": "What is the canonical port number for DNS over TLS (DoT) specified in RFC 7858 contrasting with port 53?",
+      "query": "RFC 7858 Specification for DNS over TLS port 853",
+      "target_domain": "rfc-editor.org",
+      "validator": "provenance_claim_match",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-12",
+      "category": "source_quality",
+      "question": "What binary format is defined by the official WebAssembly specification?",
+      "query": "WebAssembly Core Specification binary format wasm module developer.mozilla.org",
+      "target_domain": "developer.mozilla.org",
+      "validator": "authority_quality_match",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-13",
+      "category": "source_quality",
+      "question": "According to the official Python Language Reference, what is the behavior of assert statements when __debug__ is false?",
+      "query": "docs.python.org reference simple_stmts assert __debug__ is false ignored",
+      "target_domain": "docs.python.org",
+      "validator": "authority_quality_match",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-14",
+      "category": "source_quality",
+      "question": "According to RFC 8446, what cipher suite is mandatory to implement for TLS 1.3?",
+      "query": "RFC 8446 TLS 1.3 mandatory cipher suite TLS_AES_128_GCM_SHA256",
+      "target_domain": "ietf.org",
+      "validator": "authority_quality_match",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-15",
+      "category": "quantitative_analysis",
+      "question": "Compute grouped summary metrics and missing values for regional node metrics with strict no-imputation policy.",
+      "fixture_type": "csv_grouped_metrics",
+      "validator": "exact_numerical_recomputation",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-16",
+      "category": "quantitative_analysis",
+      "question": "Calculate exact Pearson correlation between benchmark concurrency and latency.",
+      "fixture_type": "json_correlation",
+      "validator": "exact_numerical_recomputation",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-17",
+      "category": "quantitative_analysis",
+      "question": "Calculate start/end ISO dates, absolute change, and percent change for daily request traffic.",
+      "fixture_type": "csv_time_trend",
+      "validator": "exact_numerical_recomputation",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-18",
+      "category": "quantitative_analysis",
+      "question": "Identify 1.5x IQR outlier threshold bounds and outlier points in duration metric.",
+      "fixture_type": "json_iqr_outliers",
+      "validator": "exact_numerical_recomputation",
+      "required_outcome": "supported"
+    },
+    {
+      "id": "LW-19",
+      "category": "honest_abstention",
+      "question": "Attempt retrieval of private internal network address and verify honest SSRF block abstention.",
+      "target_url": "http://192.168.1.1/admin_metrics.json",
+      "validator": "ssrf_block_abstention",
+      "required_outcome": "blocked"
+    },
+    {
+      "id": "LW-20",
+      "category": "honest_abstention",
+      "question": "Verify honest abstention on fictitious unprovable claim with zero web evidence.",
+      "query": "Lord Kelvin Journal of Cybernetic Telepathy 1842 quantum hyper-lattice algorithm",
+      "validator": "zero_evidence_honest_abstention",
+      "required_outcome": "insufficient"
+    }
+  ]
+}

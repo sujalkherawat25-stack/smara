@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-09-12T17:25:00+05:30",
+  "provider": "exa",
+  "passed_cases": 3,
+  "total_cases": 3,
+  "elapsed_seconds": 3.646857738494873,
+  "results": [
+    {
+      "case": 1,
+      "name": "Current Primary-Source Fact",
+      "passed": true,
+      "provider": "exa",
+      "target_url": "https://developers.openai.com/api/docs/guides/agents-api/overview",
+      "evidence_id": "d54b2ec1076c072624643173474e634063dff7612b6207fa54298009474e370d",
+      "precision": 1.0
+    },
+    {
+      "case": 2,
+      "name": "Multi-Source Live Discovery & Provenance",
+      "passed": true,
+      "sources_fetched": [
+        "https://arxiv.org/abs/2608.30661",
+        "https://arxiv.org/abs/2607.27942"
+      ]
+    },
+    {
+      "case": 3,
+      "name": "Quantitative Data Analysis",
+      "passed": true,
+      "dataset_sha256": "ac4ae6f4c13eb446baf4bb59cd1e677945aa39f685607f734befa9ae922610d1",
+      "analysis_artifact_id": "fdde5735dba04631dec1755a820af39adf83bf2cf5261df760537966ac40debb"
+    }
+  ]
+}

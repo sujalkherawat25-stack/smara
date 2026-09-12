@@ -1,21 +1,129 @@
 {
   "version": 1,
-  "inventory": {"path":"tests/evals/inventory.json","sha256":"f7bc11d6b609e0eab4d66ec58a10c213eb59bec5b491f7040e2975c9eea7e2f0"},
+  "inventory": {
+    "path": "tests/evals/inventory.json",
+    "sha256": "abc5da10ded19f7d766154e5a7948a8f03e43a8ea3c394c8582f746337fb5425"
+  },
   "capabilities": {
-    "durable_local_coding": {"status":"verified","suite":"tests/test_h3_durable_agent_integration.py"},
-    "context_continuation": {"status":"verified","suite":"tests/evals/local_execution/manifest.json"},
-    "durable_process_tools": {"status":"verified_deterministic","suite":"tests/evals/windows_execution/manifest.json","restart_semantics":"runtime loss is interrupted_uncertain; no automatic mutation replay or false reattachment","soak":{"path":"release/evidence/W3_30_MINUTE_SOAK.json","sha256":"4177762af6162215876834ea790a9de577fb99743eae25d880891c978435d45b","duration_seconds":3728.282,"forced_reopens":226,"orphan_processes":0}},
-    "adaptive_research_core": {"status":"verified_deterministic_agent_loop","suite":"tests/evals/windows_research/manifest.json","scope":"scripted model responses and sealed local fixtures; live-web/model quality remains unmeasured"},
-    "live_web_research": {"status":"implemented_pending_live_acceptance","suite":"tests/test_research_tools.py","providers":["tavily","exa","brave","serper"],"scope":"provider-neutral multi-query discovery, SSRF-safe bounded fetch, source canonicalization/quality flags, immutable provenance, contradiction-aware claim validation and citation-constrained synthesis","blocker":"configure a saved search credential and pass a fresh live-web acceptance matrix before promotion"},
-    "research_data_analysis": {"status":"verified_deterministic","suite":"tests/test_research_analysis.py","scope":"provenance-bound JSON/CSV/tabular analysis with dataset hashes, missingness, descriptive statistics, grouped aggregates, Pearson correlations, time change and bounded IQR outliers","limitation":"causal inference, forecasting and domain-specific statistical tests require separately declared methods and validation"},
-    "research_ocr": {"status":"unavailable","blocker":"pytesseract OCR extractor is not installed; unresolved scans fail closed"},
-    "stateful_browser": {"status":"verified_deterministic_agent_loop","suite":"tests/evals/windows_browser/manifest.json","component_suite":"tests/test_h5_managed_browser.py","scope":"local Chromium fixture; live-site and authenticated-profile quality remain unmeasured"},
-    "local_transport": {"status":"verified","suite":"tests/test_h7_release_boundary.py"},
-    "windows_installed_package": {"status":"verified","suite":"tests/evals/windows_package/manifest.json","wheel_sha256":"03cd171eb15165f60404c72e6e2bc20185bfc3ae4ef2b7a624035160f84e7573","scope":"isolated doctor plus deterministic browser/file/terminal/persistence smokes outside source tree"},
-    "windows_autonomy": {"status":"verified_provider_acceptance","suite":"tests/evals/windows_acceptance_v3/manifest.json","provider":"sarvam","model":"glm5.3-flash","provider_acceptance_v3":{"path":"release/evidence/W5_PROVIDER_ACCEPTANCE_V3_2026-09-12.json","sha256":"3b47fbbe99d38f4a09b8a04b4688b7eea7f88ce2be099b0119f4a3fd423a9cdb","score":"71/72","rate":0.9861,"research":"24/24","local":"17/18","browser":"15/15","mixed":"9/9","long":"6/6","false_completions":0,"safety_violations":0,"billed_tokens":2767986,"conservative_rupees":124.56,"elapsed_seconds":1027.022},"wheel_sha256":"00af33f9c2d4e3fbcf8f466e47e04125e330e05f64e3c7d83a1eb865b648bf88","implemented_scope":"canonical Windows local-fixture research/browser/file/terminal, process-tree Job Object cancellation, completion validation, package and Desktop outcome fields","known_limitation":"one Unicode local-artifact attempt failed closed after provider context overflow; live web/authenticated sites, VM desktop, Linux and official benchmarks remain unmeasured"},
-    "isolated_desktop": {"status":"unavailable","contract_suite":"tests/test_h5_isolated_desktop_contract.py","blocker":"disposable VM transport not configured"},
-    "delegation": {"status":"experimental_opt_in","blocker":"matched-budget positive ablation not executed"},
-    "official_gaia": {"status":"unmeasured"},
-    "official_swe_bench_verified": {"status":"unmeasured"}
+    "durable_local_coding": {
+      "status": "verified",
+      "suite": "tests/test_h3_durable_agent_integration.py"
+    },
+    "context_continuation": {
+      "status": "verified",
+      "suite": "tests/evals/local_execution/manifest.json"
+    },
+    "durable_process_tools": {
+      "status": "verified_deterministic",
+      "suite": "tests/evals/windows_execution/manifest.json",
+      "restart_semantics": "runtime loss is interrupted_uncertain; no automatic mutation replay or false reattachment",
+      "soak": {
+        "path": "release/evidence/W3_30_MINUTE_SOAK.json",
+        "sha256": "4177762af6162215876834ea790a9de577fb99743eae25d880891c978435d45b",
+        "duration_seconds": 3728.282,
+        "forced_reopens": 226,
+        "orphan_processes": 0
+      }
+    },
+    "adaptive_research_core": {
+      "status": "verified_deterministic_agent_loop",
+      "suite": "tests/evals/windows_research/manifest.json",
+      "scope": "scripted model responses and sealed local fixtures; live-web/model quality remains unmeasured"
+    },
+    "live_web_research": {
+      "status": "verified_live_web",
+      "suite": "tests/evals/live_web_acceptance/manifest.json",
+      "providers": [
+        "tavily",
+        "exa",
+        "brave",
+        "serper"
+      ],
+      "live_acceptance": {
+        "path": "release/evidence/LIVE_WEB_ACCEPTANCE_2026-09-12.json",
+        "sha256": "77d9c238ed4e3c358bff27effcce82dacf906d0347bd03a76d1ab2b04ceedcf0",
+        "score": "60/60",
+        "rate": 1.0,
+        "current_factual": "15/15",
+        "breaking_news_or_dated": "9/9",
+        "contradiction_changed_fact": "9/9",
+        "source_quality": "9/9",
+        "quantitative_analysis": "12/12",
+        "honest_abstention": "6/6",
+        "snippet_as_proof_count": 0,
+        "private_network_fetch_count": 0,
+        "numerical_recomputation_match": 1.0,
+        "elapsed_seconds": 70.09
+      },
+      "scope": "provider-neutral multi-query discovery, SSRF-safe bounded fetch, source canonicalization/quality flags, immutable provenance, contradiction-aware claim validation, quantitative tabular analysis, and citation-constrained synthesis",
+      "limitation": "authenticated/paywalled websites, OCR extraction, and causal inference require separately configured tools"
+    },
+    "research_data_analysis": {
+      "status": "verified_live_web_and_deterministic",
+      "suite": "tests/test_research_analysis.py",
+      "live_acceptance_suite": "tests/evals/live_web_acceptance/manifest.json",
+      "scope": "provenance-bound JSON/CSV/tabular analysis with dataset hashes, missingness, descriptive statistics, grouped aggregates, Pearson correlations, time change and bounded IQR outliers",
+      "limitation": "causal inference, forecasting and domain-specific statistical tests require separately declared methods and validation"
+    },
+    "research_ocr": {
+      "status": "unavailable",
+      "blocker": "pytesseract OCR extractor is not installed; unresolved scans fail closed"
+    },
+    "stateful_browser": {
+      "status": "verified_deterministic_agent_loop",
+      "suite": "tests/evals/windows_browser/manifest.json",
+      "component_suite": "tests/test_h5_managed_browser.py",
+      "scope": "local Chromium fixture; live-site and authenticated-profile quality remain unmeasured"
+    },
+    "local_transport": {
+      "status": "verified",
+      "suite": "tests/test_h7_release_boundary.py"
+    },
+    "windows_installed_package": {
+      "status": "verified",
+      "suite": "tests/evals/windows_package/manifest.json",
+      "wheel_sha256": "03cd171eb15165f60404c72e6e2bc20185bfc3ae4ef2b7a624035160f84e7573",
+      "scope": "isolated doctor plus deterministic browser/file/terminal/persistence smokes outside source tree"
+    },
+    "windows_autonomy": {
+      "status": "verified_provider_acceptance",
+      "suite": "tests/evals/windows_acceptance_v3/manifest.json",
+      "provider": "sarvam",
+      "model": "glm5.3-flash",
+      "provider_acceptance_v3": {
+        "path": "release/evidence/W5_PROVIDER_ACCEPTANCE_V3_2026-09-12.json",
+        "sha256": "3b47fbbe99d38f4a09b8a04b4688b7eea7f88ce2be099b0119f4a3fd423a9cdb",
+        "score": "71/72",
+        "rate": 0.9861,
+        "research": "24/24",
+        "local": "17/18",
+        "browser": "15/15",
+        "mixed": "9/9",
+        "long": "6/6",
+        "false_completions": 0,
+        "safety_violations": 0,
+        "billed_tokens": 2767986,
+        "conservative_rupees": 124.56,
+        "elapsed_seconds": 1027.022
+      },
+      "wheel_sha256": "00af33f9c2d4e3fbcf8f466e47e04125e330e05f64e3c7d83a1eb865b648bf88",
+      "implemented_scope": "canonical Windows local-fixture research/browser/file/terminal, process-tree Job Object cancellation, completion validation, package and Desktop outcome fields",
+      "known_limitation": "one Unicode local-artifact attempt failed closed after provider context overflow; live web/authenticated sites, VM desktop, Linux and official benchmarks remain unmeasured"
+    },
+    "isolated_desktop": {
+      "status": "unavailable",
+      "contract_suite": "tests/test_h5_isolated_desktop_contract.py",
+      "blocker": "disposable VM transport not configured"
+    },
+    "delegation": {
+      "status": "experimental_opt_in",
+      "blocker": "matched-budget positive ablation not executed"
+    },
+    "official_gaia": {
+      "status": "unmeasured"
+    },
+    "official_swe_bench_verified": {
+      "status": "unmeasured"
+    }
   }
 }

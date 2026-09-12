@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "suite": "smara-live-web-data-analysis-20-v1",
+  "references": {
+    "LW-01": {
+      "key_terms": [
+        "pep 703",
+        "global interpreter lock",
+        "cpython"
+      ],
+      "expected_outcome": "supported",
+      "primary_domain": "peps.python.org"
+    },
+    "LW-02": {
+      "key_terms": [
+        "rfc 9110",
+        "http semantics",
+        "7231"
+      ],
+      "expected_outcome": "supported",
+      "primary_domain": "ietf.org"
+    },
+    "LW-03": {
+      "key_terms": [
+        "rust 2024",
+        "edition"
+      ],
+      "expected_outcome": "supported",
+      "primary_domain": "rust-lang.org"
+    },
+    "LW-04": {
+      "key_terms": [
+        "fastapi",
+        "mit license"
+      ],
+      "expected_outcome": "supported",
+      "primary_domain": "github.com"
+    },
+    "LW-05": {
+      "key_terms": [
+        "21778",
+        "json"
+      ],
+      "expected_outcome": "supported",
+      "primary_domain": "iec.ch"
+    },
+    "LW-06": {
+      "key_terms": [
+        "artemis",
+        "reid wiseman",
+        "victor glover",
+        "christina koch",
+        "jeremy hansen"
+      ],
+      "expected_outcome": "supported",
+      "primary_domain": "nasa.gov"
+    },
+    "LW-07": {
+      "key_terms": [
+        "3.12.0",
+        "october 2 2023"
+      ],
+      "expected_outcome": "supported",
+      "primary_domain": "python.org"
+    },
+    "LW-08": {
+      "key_terms": [
+        "webb",
+        "july 12 2022"
+      ],
+      "expected_outcome": "supported",
+      "primary_domain": "nasa.gov"
+    },
+    "LW-09": {
+      "key_terms": [
+        "pydantic",
+        "field_validator"
+      ],
+      "expected_outcome": "supported",
+      "primary_domain": "pydantic.dev"
+    },
+    "LW-10": {
+      "key_terms": [
+        "pluto",
+        "dwarf planet",
+        "iau"
+      ],
+      "expected_outcome": "supported",
+      "primary_domain": "iau.org"
+    },
+    "LW-11": {
+      "key_terms": [
+        "dns over tls",
+        "853",
+        "rfc 7858"
+      ],
+      "expected_outcome": "supported",
+      "primary_domain": "rfc-editor.org"
+    },
+    "LW-12": {
+      "key_terms": [
+        "webassembly",
+        "binary",
+        "wasm"
+      ],
+      "expected_outcome": "supported",
+      "primary_domain": "developer.mozilla.org"
+    },
+    "LW-13": {
+      "key_terms": [
+        "assert",
+        "__debug__",
+        "-o"
+      ],
+      "expected_outcome": "supported",
+      "primary_domain": "python.org"
+    },
+    "LW-14": {
+      "key_terms": [
+        "tls_aes_128_gcm_sha256",
+        "rfc 8446"
+      ],
+      "expected_outcome": "supported",
+      "primary_domain": "ietf.org"
+    },
+    "LW-15": {
+      "expected_grouped_mean_throughput": {
+        "us-east": 183.33333333333334,
+        "eu-central": 172.5
+      },
+      "expected_missing_values": {
+        "error_count": 1
+      },
+      "expected_outcome": "supported"
+    },
+    "LW-16": {
+      "expected_pearson_r": 0.9999938317121504,
+      "expected_outcome": "supported"
+    },
+    "LW-17": {
+      "expected_start_date": "2026-01-01T00:00:00",
+      "expected_end_date": "2026-01-14T00:00:00",
+      "expected_absolute_change": 1300.0,
+      "expected_percent_change": 130.0,
+      "expected_outcome": "supported"
+    },
+    "LW-18": {
+      "expected_q1": 43.25,
+      "expected_q3": 54.75,
+      "expected_iqr": 11.5,
+      "expected_upper_bound": 72.0,
+      "expected_outlier_count": 2,
+      "expected_outcome": "supported"
+    },
+    "LW-19": {
+      "expected_outcome": "blocked",
+      "expected_reason": "ssrf_private_network_blocked"
+    },
+    "LW-20": {
+      "expected_outcome": "insufficient",
+      "expected_reason": "zero_evidence_honest_abstention"
+    }
+  }
+}

@@ -55,7 +55,7 @@ def analyze_tabular(rows:Iterable[Mapping[str,Any]],*,numeric_columns:Iterable[s
     correlations=[_correlation(data,left,right) for i,left in enumerate(numeric) for right in numeric[i+1:]]
     trends={}
     if time_column:
-        dated=sorted((stamp,row) for row in data if (stamp:=_time(row.get(time_column))) is not None)
+        dated = sorted([(stamp, row) for row in data if (stamp:=_time(row.get(time_column))) is not None], key=lambda item: item[0])
         for column in numeric:
             series=[(stamp,value) for stamp,row in dated if (value:=_number(row.get(column))) is not None]
             if len(series)>=2:

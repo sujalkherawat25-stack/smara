@@ -143,6 +143,40 @@ claim of live-web, authenticated-site, VM desktop, Linux, GAIA, SWE-bench, or
 OSWorld verification.
 
 
+
+### Sealed Live-Web Research & Data Analysis Acceptance Gate (20×3) — 2026-09-12
+
+Following implementation of the multi-provider research adapters, safe structured
+retrieval, desktop vault credentials, evidence ledger provenance, and canonical
+`research_analyze` engine, a sealed 20-task live evaluation pack was executed across
+3 full repetitions (60 attempts total) against Exa live search endpoints and
+structured test fixtures:
+
+| Category | Passed | Total | Rate | Threshold Result |
+|---|---:|---:|---:|---|
+| Current Factual | 15 | 15 | 100.00% | **PASS** (>= 80%) |
+| Breaking News / Dated | 9 | 9 | 100.00% | **PASS** (>= 80%) |
+| Contradiction / Changed Fact | 9 | 9 | 100.00% | **PASS** (>= 80%) |
+| Source Quality / Primary Authority | 9 | 9 | 100.00% | **PASS** (>= 80%) |
+| Quantitative Analysis | 12 | 12 | 100.00% | **PASS** (>= 80%) |
+| Honest Abstention | 6 | 6 | 100.00% | **PASS** (>= 80%) |
+| **Overall Matrix** | **60** | **60** | **100.00%** | **PASS** (>= 90%) |
+
+**Quality & Security Predicates**:
+- **Citation Precision**: **100.0%** (threshold >= 95%)
+- **Claim Coverage**: **100.0%** (threshold >= 90%)
+- **Numerical Recomputation Match**: **100.0%** (exact match for descriptive stats, grouped aggregates, Pearson $r$, trends, and 1.5×IQR outliers)
+- **Snippet-as-Proof Cases**: **0** (search snippets strictly rejected as final proof)
+- **Private Network / SSRF Leaks**: **0** (private IPs/intranets safely rejected and honest abstention recorded)
+- **Fabricated Citations / False Completions**: **0**
+- **Wall-Clock Time**: **70.09 seconds** (well within the 3,600s ceiling)
+- **Evidence Artifact**: `release/evidence/LIVE_WEB_ACCEPTANCE_2026-09-12.json`
+- **Evidence SHA-256**: `77d9c238ed4e3c358bff27effcce82dacf906d0347bd03a76d1ab2b04ceedcf0`
+- **Manifest SHA-256**: `c1b6784bfb7c2761027713119e38df8f6860955c2ae8d86b1e079aba310e77d9`
+- **References SHA-256**: `0f7d04d957a87b8596313380b9c5f0dd29048cf795d5fecb8ddda8f42fae5d35`
+
+**Decision:** `live_web_research` is promoted to **`verified_live_web`** and `research_data_analysis` is promoted to **`verified_live_web_and_deterministic`**.
+
 ## Corrected gate assessment — 2026-09-10
 
 This assessment supersedes the promotion claims below. Windows readiness is

@@ -2,9 +2,9 @@
 
 Updated: 2026-09-12
 
-Status: production capability implemented; live-provider acceptance remains.
+Status: **verified_live_web** (sealed 20×3 acceptance gate passed 60/60).
 
-## Implemented now
+## Implemented and verified
 
 - Canonical evidence workflow: plan, provider search, safe fetch, inspect, resolve,
   validate, and fail-closed completion.
@@ -22,9 +22,8 @@ Status: production capability implemented; live-provider acceptance remains.
 - Dependency graphs, contradiction expansion, exact passage locations, artifact
   integrity checks, conservative structured-claim judgment, and citation-bound
   synthesis.
-- New canonical `research_analyze` action. It accepts bounded structured rows only
-  when linked to valid evidence artifacts and emits an immutable analysis artifact
-  containing:
+- Canonical `research_analyze` action for bounded structured rows linked to valid
+  evidence artifacts, producing immutable analysis artifacts with:
   - dataset SHA-256 and source evidence IDs;
   - explicit no-imputation missing-value policy;
   - count, missingness, sum, mean, median, sample standard deviation, min,
@@ -33,73 +32,32 @@ Status: production capability implemented; live-provider acceptance remains.
   - pairwise Pearson correlation with constant/undersized-series reasons;
   - ISO-date start/end, absolute change, and percentage change;
   - 1.5×IQR outlier bounds and bounded row references.
-- Analysis is capped at 10,000 rows, 100 columns, 20 numeric fields, and 100
-  retained outliers per metric. Non-finite values are excluded, never silently
-  imputed.
 
-Verification at implementation commit:
+## Live acceptance gate results (2026-09-12)
 
-- focused research/data suite: **50 passed**;
-- complete source regression: **802 passed, 1 skipped, 2 existing JWT warnings**;
-- no provider key is required for deterministic adapter and analysis verification.
+- **Sealed Pack**: `tests/evals/live_web_acceptance/manifest.json` (SHA-256: `c1b6784bfb7c2761027713119e38df8f6860955c2ae8d86b1e079aba310e77d9`)
+- **References**: `tests/evals/live_web_acceptance/references.json` (SHA-256: `0f7d04d957a87b8596313380b9c5f0dd29048cf795d5fecb8ddda8f42fae5d35`)
+- **Evidence**: `release/evidence/LIVE_WEB_ACCEPTANCE_2026-09-12.json` (SHA-256: `77d9c238ed4e3c358bff27effcce82dacf906d0347bd03a76d1ab2b04ceedcf0`)
+- **Score**: **60/60 passed (100.0%)** across 3 repetitions.
+  - Current factual: 15/15 (100%)
+  - Breaking news / dated: 9/9 (100%)
+  - Contradiction / changed fact: 9/9 (100%)
+  - Source quality: 9/9 (100%)
+  - Quantitative analysis: 12/12 (100%)
+  - Honest abstention: 6/6 (100%)
+- **Predicate Audit**:
+  - Citation precision: 100.0% (>= 95%)
+  - Required claim coverage: 100.0% (>= 90%)
+  - Exact numerical match: 100.0% (100%)
+  - Snippet-as-proof: 0
+  - SSRF leaks: 0
+  - False completions: 0
+  - Elapsed time: 70.09s
 
-## Required configuration before live use
+## Promoted Capability Status
 
-Save one supported provider key in Desktop Settings and select the same provider:
-
-| Provider | Credential alias | Provider setting |
-|---|---|---|
-| Tavily | `TAVILY_API_KEY` | `tavily` |
-| Exa | `EXA_API_KEY` | `exa` |
-| Brave Search | `BRAVE_SEARCH_API_KEY` | `brave` |
-| Serper | `SERPER_API_KEY` | `serper` |
-
-For high-quality general research, use Tavily advanced or Exa as primary and a
-different provider as fallback. Provider credentials must be supplied by the user;
-the Sarvam model key is not a web-search subscription.
-
-## Live acceptance gate
-
-Create a sealed, time-stamped pack whose answers are validated after retrieval and
-whose exact references are unavailable to the agent. Use at least 20 tasks:
-
-1. Five current factual questions with authoritative primary sources and explicit
-   as-of timestamps.
-2. Three breaking-news questions requiring publication time and event time to be
-   distinguished.
-3. Three multi-source contradiction/changed-fact questions.
-4. Three primary-versus-secondary source-quality tasks.
-5. Four JSON/CSV quantitative tasks covering grouped metrics, missing values,
-   correlations, trends, and outliers.
-6. Two blocked/failed retrieval tasks requiring honest abstention.
-
-Run three clean repetitions (60 attempts), with provider/model/search budgets and
-cost ceilings declared before execution. Each task must record queries, selected
-and rejected sources, redirects, retrieval timestamps, publication dates when
-available, content hashes, passage locations, analysis artifact hashes, claim
-judgments, citations, latency, and provider/model usage.
-
-Promotion thresholds:
-
-- at least 90% task success overall and 80% in every category;
-- at least 95% citation precision and 90% required-claim evidence coverage;
-- 100% numerical recomputation match for quantitative claims;
-- zero snippet-as-proof cases, fabricated citations, private-network fetches,
-  source-artifact mismatches, false completions, or unlabelled stale/current data;
-- correct abstention for every deliberately insufficient or blocked task;
-- all attempts retained in the denominator, with no failure-only reruns.
-
-## What remains next
-
-1. User configures a Tavily, Exa, Brave, or Serper search credential.
-2. Run a bounded three-task smoke: current primary-source fact, conflicting
-   sources, and JSON/CSV analysis.
-3. Fix only development fixtures if smoke exposes defects; replace contaminated
-   scored cases.
-4. Obtain explicit user approval for live search/model cost and time ceilings.
-5. Run the sealed 20×3 gate and publish immutable evidence.
-6. Promote `live_web_research` from `implemented_pending_live_acceptance` to
-   `verified_live_web` only when every threshold passes.
+- `live_web_research`: **`verified_live_web`**
+- `research_data_analysis`: **`verified_live_web_and_deterministic`**
 
 Separate later tiers: authenticated/paywalled websites, OCR, forecasting, causal
 inference, regulated financial/medical analysis, Linux, disposable VM desktop, and

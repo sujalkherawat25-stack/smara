@@ -81,12 +81,12 @@ class WebSearchTool:
         query = query.strip()
         if not query:
             raise ResearchToolError("Research search needs a non-empty question.")
-        provider = (provider_override or settings.search_provider).strip().lower()
-        api_key = api_key_override if api_key_override is not None else settings.search_api_key or self._local_key(provider)
+        provider = (provider_override or os.getenv("SMARA_SEARCH_PROVIDER") or getattr(settings, "search_provider", "brave")).strip().lower()
+        api_key = api_key_override if api_key_override is not None else os.getenv("SMARA_SEARCH_API_KEY") or getattr(settings, "search_api_key", "") or self._local_key(provider)
         if not api_key:
             raise ResearchToolError("Smara web-search provider is not configured.")
 
-        search_url = (url_override if url_override is not None else settings.search_url).strip() or self.default_urls.get(provider, "")
+        search_url = (url_override if url_override is not None else os.getenv("SMARA_SEARCH_URL") or settings.search_url).strip() or self.default_urls.get(provider, "")
         if not search_url:
             raise ResearchToolError(f"Unsupported Smara search provider: {provider}.")
         count = max(1, min(self.max_results, int(max_results)))
@@ -189,7 +189,14 @@ class FetchUrlTool:
 
     async def fetch(self, url: str) -> RetrievedSource:
         owns_client = self._http is None
-        client = self._http or httpx.AsyncClient(timeout=httpx.Timeout(12.0), follow_redirects=False, headers={"User-Agent": "SmaraResearch/0.1 (+evidence-ledger)"})
+        client = self._http or httpx.AsyncClient(
+            timeout=httpx.Timeout(12.0),
+            follow_redirects=False,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json,text/plain;q=0.8,*/*;q=0.5",
+            },
+        )
         try:
             return await fetch_public_source(client, url)
         finally:
