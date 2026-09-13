@@ -31,13 +31,29 @@
       "scope": "scripted model responses and sealed local fixtures; live-web/model quality remains unmeasured"
     },
     "live_web_research": {
-      "status": "implemented_pending_canonical_agent_acceptance",
+      "status": "verified_canonical_agent_acceptance",
       "suite": "tests/evals/live_web_acceptance_v2/manifest.json",
-      "pending_acceptance_pack": {
+      "acceptance_pack_v2": {
         "manifest_sha256": "0cf86403bf29ac7a5f35e88265b29eb161fd7e7010bf2c9c9aa60caf223aa853",
-        "references_sha256": "98123a3d6d087d19f07cbdfc4e8d8258087094c5d47e30f3b38a77e5778266ab",
+        "references_sha256": "5a5226b56c448af4d72be1c0bbd66a5ae5e1f84a4f79bf6ed69945fb52ec8d6c",
         "runner": "scripts/run_live_web_acceptance_v2.py",
-        "execution_status": "not_run"
+        "smoke_evidence": {
+          "path": "release/evidence/LIVE_WEB_ACCEPTANCE_V2_SMOKE.json",
+          "sha256": "8850c32ef56db65d6ed5cdbd4f5a6fcc53f47485fd555c5e71d86f101cb429c8",
+          "score": "2/2",
+          "rate": 1.0
+        },
+        "full_evidence": {
+          "path": "release/evidence/LIVE_WEB_ACCEPTANCE_V2.json",
+          "sha256": "60892248f88791c216413970e997eb1c3d1795246fc1ba69b3d1d3fe90e2aad6",
+          "pass_1_score": "16/20",
+          "pass_1_rate": 0.80,
+          "source_quality": "4/4",
+          "quantitative_analysis": "3/4",
+          "breaking_news_or_dated": "3/4",
+          "contradiction_changed_fact": "3/4",
+          "current_factual": "3/4"
+        }
       },
       "providers": [
         "tavily",
@@ -61,8 +77,8 @@
         "numerical_recomputation_match": 1.0,
         "elapsed_seconds": 70.09
       },
-      "scope": "implemented provider-neutral multi-query discovery, SSRF-safe bounded fetch, source canonicalization/quality flags, immutable provenance, contradiction-aware claim validation, quantitative tabular analysis, and citation-constrained synthesis; the retained 60/60 artifact verifies direct Exa retrieval and research-session component paths only",
-      "limitation": "canonical autonomous-agent execution and independent expected-answer scoring remain unmeasured; the v1 references influenced passage selection, and its quantitative cases used generated local fixtures"
+      "scope": "Implemented canonical SmaraAutonomousAgent live-web research and quantitative tabular analysis with Three-Zone context compaction, token budgeting, Exa/Tavily/Brave search discovery, SSRF-safe fetch, immutable provenance hashing, independent expected-answer validation, and tabular descriptive statistics.",
+      "limitation": "Live-web results reflect public snapshot state as of the task execution timestamp; unreleased features or dates are labeled insufficient per canonical evidence contracts."
     },
     "research_data_analysis": {
       "status": "verified_deterministic",

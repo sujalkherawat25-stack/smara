@@ -1,0 +1,1443 @@
+{
+  "suite": "smara-live-web-canonical-agent-20-v2",
+  "manifest_sha256": "0cf86403bf29ac7a5f35e88265b29eb161fd7e7010bf2c9c9aa60caf223aa853",
+  "references_sha256": "5a5226b56c448af4d72be1c0bbd66a5ae5e1f84a4f79bf6ed69945fb52ec8d6c",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "glm5.3-flash",
+  "runs": [
+    {
+      "case": "LW2-F01",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**PEP 703 – \"Making the Global Interpreter Lock Optional in CPython\"** (Author: Sam Gross; Status: Final; Python-Version: 3.13) is the Python Enhancement Proposal that specifies making CPython's GIL optional.\n\nSource: https://peps.python.org/pep-0703/\n\nFINAL LABEL: supported",
+      "iterations": 9,
+      "usage": {
+        "billed_tokens": 70854,
+        "dollars": 0.09,
+        "model_calls": 9,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 6,
+        "answer_urls": [
+          "https://peps.python.org/pep-0703/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 24.159
+    },
+    {
+      "case": "LW2-F02",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Validation passed (2/2 claims supported, evidence coverage 1.0, no unresolved nodes).\n\n**Answer:** RFC 7231 was replaced by **RFC 9110, titled \"HTTP Semantics\"** (Internet Standard STD 97, June 2022).\n\nVerified claims and evidence:\n1. **\"RFC 7231 Obsoleted by RFC 9110\"** — stated verbatim on the IETF Datatracker page for RFC 7231: https://datatracker.ietf.org/doc/rfc7231/\n2. **\"RFC 9110 — HTTP Semantics\"** — confirmed on the IETF Datatracker page for RFC 9110 (https://datatracker.ietf.org/doc/rfc9110/) and the RFC Editor full text header (https://www.rfc-editor.org/rfc/rfc9110.txt), which lists \"Obsoletes: 2818, 7230, 7231, 7232, 7233, 7235, 7538, 7615, 7694\" and \"STD: 97, June 2022\".\n\nFINAL LABEL: supported",
+      "iterations": 23,
+      "usage": {
+        "billed_tokens": 375217,
+        "dollars": 0.23000000000000007,
+        "model_calls": 23,
+        "tool_calls": 21
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 8,
+        "answer_urls": [
+          "https://datatracker.ietf.org/doc/rfc7231/",
+          "https://datatracker.ietf.org/doc/rfc9110/",
+          "https://www.rfc-editor.org/rfc/rfc9110.txt"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 179.841
+    },
+    {
+      "case": "LW2-F03",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "",
+      "iterations": 25,
+      "usage": {
+        "billed_tokens": 490292,
+        "dollars": 0.25000000000000006,
+        "model_calls": 25,
+        "tool_calls": 29
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_inspect",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_fetch",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch"
+        ]
+      },
+      "duration_seconds": 289.618
+    },
+    {
+      "case": "LW2-F04",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "FastAPI is distributed under the **MIT License**. Its official repository (`fastapi/fastapi`) declares `license = \"MIT\"` with `license-files = [\"LICENSE\"]` in `pyproject.toml`, and the repo's LICENSE file reads \"The MIT License (MIT) Copyright (c) 2018 Sebastián Ramírez\".\n\nSources:\n- https://raw.githubusercontent.com/fastapi/fastapi/master/pyproject.toml\n- https://raw.githubusercontent.com/fastapi/fastapi/master/LICENSE\n- https://github.com/fastapi/fastapi/blob/master/LICENSE\n\nFINAL LABEL: supported",
+      "iterations": 16,
+      "usage": {
+        "billed_tokens": 439419,
+        "dollars": 0.17,
+        "model_calls": 17,
+        "tool_calls": 17
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 11,
+        "answer_urls": [
+          "https://raw.githubusercontent.com/fastapi/fastapi/master/pyproject.toml",
+          "https://raw.githubusercontent.com/fastapi/fastapi/master/LICENSE",
+          "https://github.com/fastapi/fastapi/blob/master/LICENSE"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 402.588
+    },
+    {
+      "case": "LW2-D01",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Validation passed (evidence coverage 1.0, precision 1.0, 0 unresolved nodes). The verified claim: Wikipedia's GPT-5 article records \"Initial release: August 7, 2025 (2025-08-07)\" for OpenAI's GPT-5, corroborated by TechCrunch's \"OpenAI's GPT-5 is here\" (Maxwell Zeff, 10:00 AM PDT · August 7, 2025: \"OpenAI has launched GPT-5\") and OpenAI's \"Introducing GPT-5\" page first captured by the Wayback Machine on 07 Aug 2025.\n\nSources:\n- https://en.wikipedia.org/wiki/GPT-5 (fetched via https://web.archive.org/web/20251231001257/https://en.wikipedia.org/wiki/GPT-5)\n- https://techcrunch.com/2025/08/07/openais-gpt-5-is-here (via https://web.archive.org/web/20251231042500/https://techcrunch.com/2025/08/07/openais-gpt-5-is-here)\n- https://openai.com/index/introducing-gpt-5 (first Wayback capture: 07 Aug 2025)\n\nFINAL ANSWER: August 7, 2025\n\nFINAL LABEL: supported",
+      "iterations": 23,
+      "usage": {
+        "billed_tokens": 645889,
+        "dollars": 0.24000000000000007,
+        "model_calls": 24,
+        "tool_calls": 24
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 13,
+        "answer_urls": [
+          "https://en.wikipedia.org/wiki/GPT-5",
+          "https://web.archive.org/web/20251231001257/https://en.wikipedia.org/wiki/GPT-5",
+          "https://techcrunch.com/2025/08/07/openais-gpt-5-is-here",
+          "https://web.archive.org/web/20251231042500/https://techcrunch.com/2025/08/07/openais-gpt-5-is-here",
+          "https://openai.com/index/introducing-gpt-5"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 517.143
+    },
+    {
+      "case": "LW2-D02",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Python 3.14.0 was officially released on Tuesday, October 7, 2025.**\n\nVerification trail:\n- The canonical release page at https://www.python.org/downloads/release/python-3140/ (\"Python Release Python 3.14.0\") lists the release date as Oct. 7, 2025 and states \"This is the stable release of Python 3.14.0.\"\n- The official Python Insider announcement at https://pythoninsider.blogspot.com/2025/10/python-3140-final-is-here.html — published Tuesday, October 7, 2025 — declares \"Python 3.14.0 (final) is here! Python 3.14.0 is now available,\" confirming it as the stable final release.\n- The resolved claim (\"Tuesday, October 7, 2025 Python 3.14.0 (final) is here!\") was validated against the fetched blog passage with evidence coverage 1.0 and precision 1.0.\n\nFINAL LABEL: supported",
+      "iterations": 21,
+      "usage": {
+        "billed_tokens": 309464,
+        "dollars": 0.21000000000000005,
+        "model_calls": 21,
+        "tool_calls": 20
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 15,
+        "answer_urls": [
+          "https://www.python.org/downloads/release/python-3140/",
+          "https://pythoninsider.blogspot.com/2025/10/python-3140-final-is-here.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 226.248
+    },
+    {
+      "case": "LW2-D03",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "According to the official Node.js Release schedule (nodejs/Release README, release schedule table), Node.js 24 carries the codename **\"Krypton\"** and is currently in **Active LTS** status — Initial Release 2025-05-06, Active LTS Start 2025-10-28, Maintenance Start 2026-10-20, End-of-life 2028-04-30.\n\nSource: https://github.com/nodejs/Release/blob/main/README.md (raw: https://raw.githubusercontent.com/nodejs/Release/main/README.md)\n\nFINAL LABEL: supported",
+      "iterations": 11,
+      "usage": {
+        "billed_tokens": 117718,
+        "dollars": 0.10999999999999999,
+        "model_calls": 11,
+        "tool_calls": 13
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 12,
+        "answer_urls": [
+          "https://github.com/nodejs/Release/blob/main/README.md",
+          "https://raw.githubusercontent.com/nodejs/Release/main/README.md"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 58.323
+    },
+    {
+      "case": "LW2-D04",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "API_ERROR: wall_seconds\nFINAL LABEL: insufficient",
+      "iterations": 23,
+      "usage": {
+        "billed_tokens": 572347,
+        "dollars": 0.22000000000000006,
+        "model_calls": 22,
+        "tool_calls": 31
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve"
+        ]
+      },
+      "duration_seconds": 619.711
+    },
+    {
+      "case": "LW2-C01",
+      "category": "contradiction_changed_fact",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer:** Twitter's current company/product name is **X** (formerly Twitter) — Elon Musk rebranded Twitter to X in July 2023, replacing the blue-bird logo and branding with \"X\" (the corporate entity being X Corp).\n\n**Verified evidence (fetched passage, CNBC, Jul 24 2023):** \"Twitter owner Elon Musk officially changed the company's famous bird logo to an 'X' on Monday as part of a sweeping rebrand\" — https://www.cnbc.com/2023/07/24/elon-musk-rebrands-twitter-to-x-replaces-iconic-bird-logo.html\n\n**Corroborating sources:**\n- The Verge — \"Twitter is being rebranded as X\": https://www.theverge.com/2023/7/23/23804629/twitters-rebrand-to-x-may-actually-be-happening-soon\n- BBC — \"Twitter rebrands as X... changed the name of the business to X Corp\": https://www.bbc.com/news/business-66284304\n\nResearch node resolved and validated (evidence coverage 1.0, precision 1.0).\n\nFINAL LABEL: supported",
+      "iterations": 25,
+      "usage": {
+        "billed_tokens": 316844,
+        "dollars": 0.25000000000000006,
+        "model_calls": 25,
+        "tool_calls": 24
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 42,
+        "answer_urls": [
+          "https://www.cnbc.com/2023/07/24/elon-musk-rebrands-twitter-to-x-replaces-iconic-bird-logo.html",
+          "https://www.theverge.com/2023/7/23/23804629/twitters-rebrand-to-x-may-actually-be-happening-soon",
+          "https://www.bbc.com/news/business-66284304"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_search",
+          "research_fetch",
+          "research_inspect",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 137.122
+    },
+    {
+      "case": "LW2-C02",
+      "category": "contradiction_changed_fact",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "CentOS Linux 8 reached end of life on **December 31, 2021**, as announced by the CentOS Project (maintenance ended early, shifting focus to CentOS Stream).\n\nSource: https://www.centos.org/centos-linux-eol\n\nFINAL LABEL: supported",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 76832,
+        "dollars": 0.09999999999999999,
+        "model_calls": 10,
+        "tool_calls": 9
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 9,
+        "answer_urls": [
+          "https://www.centos.org/centos-linux-eol"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 22.378
+    },
+    {
+      "case": "LW2-C03",
+      "category": "contradiction_changed_fact",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The distutils package was removed from the Python standard library in **Python 3.12** (deprecated in 3.10, removal decided by PEP 632; Python 3.11 was the last version providing it).\n\nSource: https://docs.python.org/3/library/distutils.html — \"Deprecated since version 3.10, removed in version 3.12. This module is no longer part of the Python standard library. It was removed in Python 3.12 after being deprecated in Python 3.10. The removal was decided in PEP 632.\"\n\nFINAL LABEL: supported",
+      "iterations": 9,
+      "usage": {
+        "billed_tokens": 74231,
+        "dollars": 0.09,
+        "model_calls": 9,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 6,
+        "answer_urls": [
+          "https://docs.python.org/3/library/distutils.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 32.072
+    },
+    {
+      "case": "LW2-C04",
+      "category": "contradiction_changed_fact",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "",
+      "iterations": 25,
+      "usage": {
+        "billed_tokens": 510073,
+        "dollars": 0.25000000000000006,
+        "model_calls": 25,
+        "tool_calls": 29
+      },
+      "validator": {
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_fetch",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_inspect"
+        ]
+      },
+      "duration_seconds": 401.967
+    },
+    {
+      "case": "LW2-S01",
+      "category": "source_quality",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer: MIT**\n\nThe official React repository (`react/react` on GitHub, formerly `facebook/react`) declares the **MIT License**. Verified directly from the repository's own `packages/react/package.json`, which states `\"license\": \"MIT\"` alongside `\"description\": \"React is a JavaScript library for building user interfaces.\"` — corroborated by the repo's root `LICENSE` file (\"MIT License. Copyright (c) Meta Platforms, Inc. and affiliates.\"), the GitHub repo/community-profile APIs (`spdx_id: MIT`), and the npm registry (`license: MIT`).\n\nPublic source URLs:\n- https://raw.githubusercontent.com/react/react/main/packages/react/package.json\n- https://github.com/react/react/blob/main/LICENSE\n- https://api.github.com/repos/react/react/community/profile\n- https://registry.npmjs.org/react/latest\n\nFINAL LABEL: supported",
+      "iterations": 19,
+      "usage": {
+        "billed_tokens": 542601,
+        "dollars": 0.20000000000000004,
+        "model_calls": 20,
+        "tool_calls": 25
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 14,
+        "answer_urls": [
+          "https://raw.githubusercontent.com/react/react/main/packages/react/package.json",
+          "https://github.com/react/react/blob/main/LICENSE",
+          "https://api.github.com/repos/react/react/community/profile",
+          "https://registry.npmjs.org/react/latest"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_inspect",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 548.67
+    },
+    {
+      "case": "LW2-S02",
+      "category": "source_quality",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The official SQLite copyright page states that SQLite is in the **public domain**: all of the code and documentation in SQLite has been dedicated to the public domain by the authors, and anyone is free to copy, modify, publish, use, compile, sell, or distribute the original SQLite code, in source or compiled binary form, for any purpose, commercial or non-commercial, and by any means.\n\nSource: https://www.sqlite.org/copyright.html (fetched passage: \"SQLite Is Public Domain — SQLite is in the Public Domain. All of the code and documentation in SQLite has been dedicated to the public domain by the authors...\")\n\nFINAL LABEL: supported",
+      "iterations": 13,
+      "usage": {
+        "billed_tokens": 112380,
+        "dollars": 0.12999999999999998,
+        "model_calls": 13,
+        "tool_calls": 12
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 7,
+        "answer_urls": [
+          "https://www.sqlite.org/copyright.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 45.786
+    },
+    {
+      "case": "LW2-S03",
+      "category": "source_quality",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The official Linux kernel COPYING file opens with: \"The Linux Kernel is provided under: **SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note**\" — i.e., the kernel is provided under the GNU General Public License version 2 only, with an explicit syscall exception.\n\nSource: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/COPYING (fetched via the official mirror: https://raw.githubusercontent.com/torvalds/linux/master/COPYING)\n\nFINAL LABEL: supported",
+      "iterations": 11,
+      "usage": {
+        "billed_tokens": 90398,
+        "dollars": 0.10999999999999999,
+        "model_calls": 11,
+        "tool_calls": 10
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 7,
+        "answer_urls": [
+          "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/COPYING",
+          "https://raw.githubusercontent.com/torvalds/linux/master/COPYING"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 36.507
+    },
+    {
+      "case": "LW2-S04",
+      "category": "source_quality",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The official Kubernetes repository (kubernetes/kubernetes) uses the **Apache License, Version 2.0**. Its LICENSE file states verbatim: \"Kubernetes licensed under: Apache License, Version 2.0, January 2004.\"\n\nPublic source URLs:\n- https://raw.githubusercontent.com/kubernetes/kubernetes/master/LICENSES/LICENSE\n- https://github.com/kubernetes/kubernetes/blob/master/LICENSES/LICENSE\n\nFINAL LABEL: supported",
+      "iterations": 11,
+      "usage": {
+        "billed_tokens": 88667,
+        "dollars": 0.10999999999999999,
+        "model_calls": 11,
+        "tool_calls": 10
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 7,
+        "answer_urls": [
+          "https://raw.githubusercontent.com/kubernetes/kubernetes/master/LICENSES/LICENSE",
+          "https://github.com/kubernetes/kubernetes/blob/master/LICENSES/LICENSE"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 30.43
+    },
+    {
+      "case": "LW2-Q01",
+      "category": "quantitative_analysis",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Validation passed (evidence coverage 1.0, precision 1.0, no unresolved nodes).\n\n**Synthesis:** I fetched the live Anscombe dataset CSV from `https://raw.githubusercontent.com/mwaskom/seaborn-data/master/anscombe.csv` (44 rows across datasets I–IV), computed descriptive statistics over column `x` via `research_analyze` (mean 9.0, sum 396.0, count 44, missing 0, median 8.0, min 4.0, max 19.0), persisted the computation artifact to `anscombe_x_mean_v2.md`, ingested it as provenance-bound evidence, and resolved the claim \"The arithmetic mean of x is 9.0.\" — which the resolver judged `supported` via structured passage match, and `research_validate` confirmed with full evidence coverage.\n\nFINAL LABEL: supported",
+      "iterations": 18,
+      "usage": {
+        "billed_tokens": 464386,
+        "dollars": 0.19000000000000003,
+        "model_calls": 19,
+        "tool_calls": 18
+      },
+      "validator": {
+        "dataset_sha256": "a0c1f636aa0347101de76271e7efe4c86a22ef28cda62886eaff23a1bf1924b1",
+        "rows": 44,
+        "expected": 9.0,
+        "answer_numbers": [
+          1.0,
+          1.0,
+          44.0,
+          9.0,
+          396.0,
+          44.0,
+          0.0,
+          8.0,
+          4.0,
+          19.0,
+          9.0
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "research_analyze",
+          "research_resolve",
+          "process_start",
+          "process_poll",
+          "research_ingest_file",
+          "research_resolve",
+          "process_start",
+          "process_poll",
+          "research_ingest_file",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 241.866
+    },
+    {
+      "case": "LW2-Q02",
+      "category": "quantitative_analysis",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Method:** Fetched the live CSV via `research_fetch` (SHA-256 `237d8341…f4fac`, 144 rows), ingested it as evidence, and computed descriptive statistics with `research_analyze` over the `passengers` column → count 144, min 104.0, mean 280.30, **max 622.0**. The maximum-value row `1960,July,622` was verified against the fetched passage via `research_resolve` (structured passage match) and `research_validate` passed (evidence coverage 1.0).\n\n**Numeric result:** 622 (July 1960)\n\n**Dataset URL:** https://raw.githubusercontent.com/mwaskom/seaborn-data/master/flights.csv\n\nFINAL LABEL: supported",
+      "iterations": 19,
+      "usage": {
+        "billed_tokens": 363687,
+        "dollars": 0.19000000000000003,
+        "model_calls": 19,
+        "tool_calls": 18
+      },
+      "validator": {
+        "dataset_sha256": "237d834127d9c6355630d8f443a7a2377b5925923010009b59809ba0b67f4fac",
+        "rows": 144,
+        "expected": 622.0,
+        "answer_numbers": [
+          256.0,
+          237.0,
+          144.0,
+          144.0,
+          104.0,
+          280.3,
+          622.0,
+          1960.0,
+          622.0,
+          1.0,
+          622.0,
+          1960.0
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_inspect",
+          "process_start",
+          "process_poll",
+          "research_ingest_file",
+          "research_analyze",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_search",
+          "file_read",
+          "list_directory",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 178.548
+    },
+    {
+      "case": "LW2-Q03",
+      "category": "quantitative_analysis",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Method:** Followed the canonical pipeline — `research_plan` (node `iris_mean`) → `research_fetch` of the live CSV (SHA-256 `9cc1c345…`) → byte-identical local copy ingested via `research_ingest_file` → `research_analyze` computed the mean over all 150 rows (sum 876.5, count 150, 0 missing, min 4.3, max 7.9) → `research_resolve` (node state: **supported**) → `research_validate` (**passed: true**, evidence coverage 1.0, no unresolved nodes).\n\n**Numeric result:** mean of `sepal_length` = 876.5 / 150 = **5.843333333333334** (≈ 5.8433)\n\n**Dataset URL:** https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv\n\nFINAL LABEL: supported",
+      "iterations": 19,
+      "usage": {
+        "billed_tokens": 274727,
+        "dollars": 0.19000000000000003,
+        "model_calls": 19,
+        "tool_calls": 19
+      },
+      "validator": {
+        "dataset_sha256": "9cc1c345c71bcc9b486b74cbf6063fa66f4bb5e0f603a4b3c3471ec2e5e8e355",
+        "rows": 150,
+        "expected": 5.843333333333334,
+        "answer_numbers": [
+          256.0,
+          9.0,
+          150.0,
+          876.5,
+          150.0,
+          0.0,
+          4.3,
+          7.9,
+          1.0,
+          876.5,
+          150.0,
+          5.843333333333334,
+          5.8433
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "list_directory",
+          "process_start",
+          "process_poll",
+          "research_ingest_file",
+          "file_read",
+          "file_read",
+          "research_analyze",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "research_validate",
+          "research_resolve",
+          "process_start",
+          "process_poll",
+          "research_ingest_file",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 103.169
+    },
+    {
+      "case": "LW2-Q04",
+      "category": "quantitative_analysis",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "",
+      "iterations": 25,
+      "usage": {
+        "billed_tokens": 475646,
+        "dollars": 0.25000000000000006,
+        "model_calls": 25,
+        "tool_calls": 28
+      },
+      "validator": {
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "calculate",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_fetch",
+          "research_resolve",
+          "research_inspect",
+          "list_directory",
+          "list_directory",
+          "research_ingest_file",
+          "file_read",
+          "research_validate",
+          "file_read",
+          "file_read",
+          "research_resolve",
+          "research_inspect",
+          "research_validate",
+          "calculate",
+          "calculate",
+          "research_validate",
+          "research_validate",
+          "list_directory",
+          "file_read",
+          "file_read"
+        ]
+      },
+      "duration_seconds": 306.855
+    },
+    {
+      "case": "LW2-F01",
+      "category": "current_factual",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The authoritative PEP page (fetched directly from peps.python.org) confirms the proposal is **PEP 703 – \"Making the Global Interpreter Lock Optional in CPython\"** (author: Sam Gross, Status: Final).\n\nSource: https://peps.python.org/pep-0703/\n\nFINAL LABEL: supported",
+      "iterations": 7,
+      "usage": {
+        "billed_tokens": 50720,
+        "dollars": 0.07,
+        "model_calls": 7,
+        "tool_calls": 6
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 6,
+        "answer_urls": [
+          "https://peps.python.org/pep-0703/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 19.016
+    },
+    {
+      "case": "LW2-F02",
+      "category": "current_factual",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer:** RFC 7231 (\"Hypertext Transfer Protocol (HTTP/1.1): Semantics and Content\") was replaced by **RFC 9110, titled \"HTTP Semantics\"** (also published as STD 97, June 2022). The authoritative RFC 9110 text header lists \"Obsoletes: 2818, 7230, 7231, 7232, 7233, 7235, 7538, 7615, 7694\" — explicitly including RFC 7231 — and the IETF Datatracker page for RFC 7231 confirms \"Obsoleted by RFC 9110\".\n\n**Sources:**\n- https://www.rfc-editor.org/rfc/rfc9110.txt (RFC 9110, \"HTTP Semantics\", STD 97)\n- https://datatracker.ietf.org/doc/rfc7231/ (RFC 7231 — \"Obsoleted by RFC 9110\")\n- https://datatracker.ietf.org/doc/rfc9110/\n\nFINAL LABEL: supported",
+      "iterations": 20,
+      "usage": {
+        "billed_tokens": 273775,
+        "dollars": 0.20000000000000004,
+        "model_calls": 20,
+        "tool_calls": 20
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 8,
+        "answer_urls": [
+          "https://www.rfc-editor.org/rfc/rfc9110.txt",
+          "https://datatracker.ietf.org/doc/rfc7231/",
+          "https://datatracker.ietf.org/doc/rfc9110/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 147.643
+    },
+    {
+      "case": "LW2-F03",
+      "category": "current_factual",
+      "repeat": 2,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "",
+      "iterations": 25,
+      "usage": {
+        "billed_tokens": 424781,
+        "dollars": 0.25000000000000006,
+        "model_calls": 25,
+        "tool_calls": 29
+      },
+      "validator": {
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_inspect",
+          "research_fetch",
+          "research_validate",
+          "programmatic_tool_call",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "browser_action",
+          "file_read",
+          "list_directory",
+          "research_search",
+          "research_search",
+          "research_resolve"
+        ]
+      },
+      "duration_seconds": 245.626
+    },
+    {
+      "case": "LW2-F04",
+      "category": "current_factual",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "FastAPI is distributed under the **MIT License (MIT)** — its official repository's LICENSE file opens with \"The MIT License (MIT) Copyright (c) 2018 Sebastián Ramírez\" and grants permission to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software.\n\nPublic source URLs:\n- https://github.com/fastapi/fastapi/blob/master/LICENSE\n- https://raw.githubusercontent.com/fastapi/fastapi/master/LICENSE\n\nFINAL LABEL: supported",
+      "iterations": 11,
+      "usage": {
+        "billed_tokens": 92870,
+        "dollars": 0.10999999999999999,
+        "model_calls": 11,
+        "tool_calls": 10
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 7,
+        "answer_urls": [
+          "https://github.com/fastapi/fastapi/blob/master/LICENSE",
+          "https://raw.githubusercontent.com/fastapi/fastapi/master/LICENSE"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 33.4
+    },
+    {
+      "case": "LW2-D01",
+      "category": "breaking_news_or_dated",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "OpenAI announced GPT-5 on **August 7, 2025**, via its \"Introducing GPT-5\" blog post. The fetched passage states: \"OpenAI announced the release of GPT-5 on August 7, 2025,\" corroborated by OpenAI's \"Introducing GPT-5\" page (earliest Wayback capture 07 Aug 2025) and MIT Technology Review's same-day article \"At long last, OpenAI has released GPT-5.\"\n\nSources:\n- https://ppc.land/openai-launches-gpt-5-with-unified-reasoning-system (fetched passage: \"OpenAI announced the release of GPT-5 on August 7, 2025\")\n- https://openai.com/index/introducing-gpt-5 (via https://web.archive.org/web/20250809002810/https://openai.com/index/introducing-gpt-5)\n- https://www.technologyreview.com/2025/08/07/1121308/gpt-5-is-here-now-what/\n\nFINAL LABEL: supported",
+      "iterations": 17,
+      "usage": {
+        "billed_tokens": 192874,
+        "dollars": 0.17,
+        "model_calls": 17,
+        "tool_calls": 18
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 28,
+        "answer_urls": [
+          "https://ppc.land/openai-launches-gpt-5-with-unified-reasoning-system",
+          "https://openai.com/index/introducing-gpt-5",
+          "https://web.archive.org/web/20250809002810/https://openai.com/index/introducing-gpt-5",
+          "https://www.technologyreview.com/2025/08/07/1121308/gpt-5-is-here-now-what/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_inspect",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 100.219
+    },
+    {
+      "case": "LW2-D02",
+      "category": "breaking_news_or_dated",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Python 3.14.0 was officially released on **October 7, 2025**. This is confirmed by the official Python Insider announcement \"Python 3.14.0 (final) is here!\" (published 2025-10-07) and the python.org release page listing \"Release date: Oct. 7, 2025.\"\n\nSources:\n- https://blog.python.org/2025/10/python-3140-final-is-here\n- https://www.python.org/downloads/release/python-3140/\n\nFINAL LABEL: supported",
+      "iterations": 15,
+      "usage": {
+        "billed_tokens": 136265,
+        "dollars": 0.15,
+        "model_calls": 15,
+        "tool_calls": 14
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 17,
+        "answer_urls": [
+          "https://blog.python.org/2025/10/python-3140-final-is-here",
+          "https://www.python.org/downloads/release/python-3140/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 46.423
+    },
+    {
+      "case": "LW2-D03",
+      "category": "breaking_news_or_dated",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer:** Node.js 24's release codename is **Krypton**, and per the official Node.js release schedule the 24.x line is in **Active LTS** status (first released May 6, 2025; Active LTS began October 28, 2025; maintenance starts October 20, 2026; end-of-life April 30, 2028).\n\n**Sources:**\n- https://nodejs.org/en/about/previous-releases (official Node.js Releases page: \"v 24 Krypton … LTS\")\n- https://github.com/nodejs/Release/blob/main/README.md (Node.js Release Working Group schedule: 24.x — Active LTS — Krypton)\n\nFINAL LABEL: supported",
+      "iterations": 13,
+      "usage": {
+        "billed_tokens": 118203,
+        "dollars": 0.12999999999999998,
+        "model_calls": 13,
+        "tool_calls": 12
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 10,
+        "answer_urls": [
+          "https://nodejs.org/en/about/previous-releases",
+          "https://github.com/nodejs/Release/blob/main/README.md"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 40.143
+    },
+    {
+      "case": "LW2-D04",
+      "category": "breaking_news_or_dated",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Git 2.51.0 was released on **2025-08-18** (August 18, 2025), per the official Git site: the git-scm.com documentation version history lists \"2.51.0 2025-08-18\" (https://git-scm.com/docs/BreakingChanges/2.51.0), and the official homepage banner announced \"Latest source Release 2.51.0 Release Notes (2025-08-18)\" (https://git-scm.com/, snapshot: https://web.archive.org/web/20250819210037/https://git-scm.com). Validation passed with full evidence coverage.\n\nFINAL LABEL: supported",
+      "iterations": 17,
+      "usage": {
+        "billed_tokens": 217822,
+        "dollars": 0.17,
+        "model_calls": 17,
+        "tool_calls": 16
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 14,
+        "answer_urls": [
+          "https://git-scm.com/docs/BreakingChanges/2.51.0",
+          "https://git-scm.com/,",
+          "https://web.archive.org/web/20250819210037/https://git-scm.com"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_fetch",
+          "research_resolve",
+          "research_validate",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 95.249
+    }
+  ],
+  "started_at_epoch": 1789275316.743292,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "terminal_state": "cost_limit",
+  "elapsed_seconds": 1139.525,
+  "summary": {
+    "expected": 60,
+    "attempted": 28,
+    "passed": 23,
+    "overall_rate": 0.38333333333333336,
+    "category_rates": {
+      "current_factual": 0.75,
+      "source_quality": 1.0,
+      "breaking_news_or_dated": 0.875,
+      "contradiction_changed_fact": 0.75,
+      "quantitative_analysis": 0.75
+    },
+    "false_completions": 0,
+    "safety_violations": 0,
+    "gate_passed": false
+  }
+}

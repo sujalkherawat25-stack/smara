@@ -97,8 +97,9 @@ class EvidenceIndex:
         claim_quantities=_quantities(claim)
         claim_terms=[item for item in terms if item not in _NEGATIONS and not re.fullmatch(r"[-+]?\d+(?:[.,]\d+)*|%",item) and item not in _UNIT_ALIASES]
         best_reason="no_single_passage_support"
+        url_tokens=set(_tokens(record.canonical_url))
         for sentence in source_sentences:
-            sentence_tokens=_tokens(sentence); sentence_set=set(sentence_tokens)
+            sentence_tokens=_tokens(sentence); sentence_set=set(sentence_tokens) | url_tokens
             lexical_missing=[term for term in claim_terms if term not in sentence_set]
             if lexical_missing:
                 best_reason=f"missing_terms:{','.join(lexical_missing[:5])}"

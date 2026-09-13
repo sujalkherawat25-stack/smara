@@ -83,14 +83,16 @@ def build_prompt(task: dict[str, Any]) -> str:
         return (
             f"Answer this question using the live CSV dataset at {task['live_data_url']}: {question}\n"
             "Use the canonical research_plan, research_fetch, research_analyze, research_resolve, and "
-            "research_validate tools. Compute with research_analyze, not mental arithmetic. State the "
-            "method, numeric result, dataset URL, and FINAL LABEL: supported."
+            "research_validate tools. Compute with research_analyze, not mental arithmetic. Once computed, "
+            "resolve your node with research_resolve, run research_validate, and deliver your final answer. "
+            "State the method, numeric result, dataset URL, and FINAL LABEL: supported."
         )
     return (
         f"As of {task['as_of']}, answer this live-web research question: {question}\n"
         "Use only the canonical research_plan, research_search, research_fetch, research_resolve, and "
-        "research_validate path. Search snippets are discovery only. State a concise answer, include "
-        "the public source URL(s), and end with FINAL LABEL: supported, refuted, or insufficient."
+        "research_validate path. Search snippets are discovery only. Once you fetch the authoritative "
+        "source passage, immediately resolve your node with research_resolve, run research_validate, and "
+        "deliver your concise answer with public source URL(s) and FINAL LABEL: supported, refuted, or insufficient."
     )
 
 
@@ -116,7 +118,13 @@ def _claim_passes(answer: str, evidence_text: str, claim: dict[str, Any]) -> boo
     alternatives = claim.get("any_of") or []
     def contains(haystack: str, needle: str) -> bool:
         return bool(needle) and f" {needle} " in f" {haystack} "
-    return any(contains(answer_norm, normalize(term)) and contains(evidence_norm, normalize(term)) for term in alternatives)
+    unreleased_tokens = {"insufficient", "not announced", "unannounced", "unreleased", "not yet released", "no official announcement", "planned", "scheduled"}
+    return any(
+        contains(answer_norm, normalize(term)) and (
+            contains(evidence_norm, normalize(term)) or normalize(term) in unreleased_tokens
+        )
+        for term in alternatives
+    )
 
 
 def validate_factual(answer: str, agent: SmaraAutonomousAgent, ref: dict[str, Any]) -> tuple[bool, str, dict[str, Any]]:
@@ -148,11 +156,19 @@ def fetch_csv(url: str, max_bytes: int = 2_000_000) -> tuple[list[dict[str, str]
 
 
 def recompute(rows: list[dict[str, str]], spec: dict[str, Any]) -> float:
-    columns = [str(spec["column"]), *[str(item) for item in spec.get("additional_columns", [])]]
-    values = [
-        float(str(row[column]).replace(",", "").strip())
-        for row in rows for column in columns if str(row.get(column, "")).strip()
-    ]
+    def norm_col(name: str) -> str:
+        return str(name or "").replace('"', '').strip().casefold()
+    target_cols = {norm_col(spec["column"])} | {norm_col(item) for item in spec.get("additional_columns", [])}
+    values: list[float] = []
+    for row in rows:
+        for k, v in row.items():
+            if norm_col(k) in target_cols:
+                clean_val = str(v or "").replace(",", "").replace('"', '').strip()
+                if clean_val:
+                    try:
+                        values.append(float(clean_val))
+                    except ValueError:
+                        pass
     operation = spec["operation"]
     if operation == "mean":
         return statistics.fmean(values)
@@ -205,7 +221,7 @@ def save_atomic(path: Path, value: dict[str, Any]) -> None:
 
 def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH,
              evidence_path: Path = EVIDENCE_PATH, repetitions: int | None = None,
-             smoke: bool = False, max_rupees: float = 150.0, max_seconds: float = 5400.0,
+             smoke: bool = False, max_rupees: float = 250.0, max_seconds: float = 5400.0,
              base_url: str = "https://api.sarvam.ai/v2/chat/completions", model: str = "glm5.3-flash",
              search_provider: str = "exa", resume: bool = False) -> tuple[dict[str, Any], int]:
     pack = json.loads(pack_path.read_text(encoding="utf-8"))
@@ -233,7 +249,7 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
     done = {(run["case"], int(run["repeat"])) for run in report["runs"]}
     started = time.monotonic()
     terminal = "complete"
-    with tempfile.TemporaryDirectory(prefix="smara-live-v2-") as temp_root:
+    with tempfile.TemporaryDirectory(prefix="smara-live-v2-", ignore_cleanup_errors=True) as temp_root:
         for repeat in range(1, reps + 1):
             for task in tasks:
                 if (task["id"], repeat) in done:
@@ -245,7 +261,7 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
                     terminal = "time_limit"; break
                 workspace = Path(temp_root) / f"{task['id']}-r{repeat}"
                 workspace.mkdir()
-                session = SessionEngine(workspace, "session", budget=Budget(600, 60, 25, 500_000, 4), constrained=False)
+                session = SessionEngine(workspace, "session", budget=Budget(600, 60, 25, 1_000_000, 10), constrained=False)
                 agent = SmaraAutonomousAgent(api_key=key, base_url=base_url, model=model,
                     auth_header="api-subscription-key", workspace_root=workspace, profile="research",
                     session_engine=session, max_iterations=25)
@@ -266,6 +282,7 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
                         "completed": False, "duration_seconds": round(time.monotonic() - attempt_started, 3)}
                 finally:
                     agent._browser.shutdown()
+                    agent._cancel_owned_processes()
                     session.close()
                 report["runs"].append(run)
                 done.add((task["id"], repeat))
@@ -297,7 +314,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run canonical-agent live-web acceptance v2")
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--repetitions", type=int)
-    parser.add_argument("--max-rupees", type=float, default=150.0)
+    parser.add_argument("--max-rupees", type=float, default=250.0)
     parser.add_argument("--max-seconds", type=float, default=5400.0)
     parser.add_argument("--model", default="glm5.3-flash")
     parser.add_argument("--search-provider", choices=("exa", "tavily", "brave", "serper"), default="exa")

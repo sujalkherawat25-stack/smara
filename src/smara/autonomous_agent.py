@@ -186,7 +186,7 @@ def _extract_text_tool_calls(text: str) -> List[Tuple[str, Dict[str, Any]]]:
 
 def _compact_conversation_history(
     messages: List[Dict[str, Any]],
-    max_chars: int = 35000,
+    max_chars: int = 40000,
     planner: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
     """Three-Zone Context Compactor:
@@ -195,31 +195,27 @@ def _compact_conversation_history(
     Zone 3: Middle Turns (compact large observations to preserve attention and token budget)
     Also preserves active task checklist from SmaraTaskPlanner across compaction.
     """
-    # Characters are only an approximation, but this legacy adapter must at
-    # least enforce a hard packed-request budget. Tool call/result pairs are
-    # retained together; raw oversized observations remain in artifacts.
     total_chars = sum(len(str(m.get("content") or "")) for m in messages)
-    if total_chars <= max_chars:
+    if total_chars <= max_chars and not any(len(str(m.get("content") or "")) > 6000 for m in messages):
         return messages
 
-    head_count = 2
+    head_count = min(2, len(messages))
     tail_count = min(4, len(messages) - head_count)
-    # Never start the protected tail with a tool result without its call.
     if len(messages) - tail_count > head_count and messages[len(messages) - tail_count].get("role") == "tool":
         tail_count += 1
-    middle_messages = messages[head_count : len(messages) - tail_count]
+    middle_messages = messages[head_count : len(messages) - tail_count] if len(messages) > head_count + tail_count else []
 
     compacted_middle: List[Dict[str, Any]] = []
     for m in middle_messages:
         role = m.get("role")
         content = str(m.get("content") or "")
-        if role == "tool" and len(content) > 800:
+        if role == "tool" and len(content) > 600:
             compacted_m = dict(m)
-            compacted_m["content"] = content[:350] + f"\n... [Context Compaction: {len(content)-550} chars omitted to preserve attention budget] ...\n" + content[-200:]
+            compacted_m["content"] = content[:300] + f"\n... [Context Compaction: {len(content)-450} chars omitted to preserve attention budget] ...\n" + content[-150:]
             compacted_middle.append(compacted_m)
-        elif role == "assistant" and len(content) > 1200:
+        elif role == "assistant" and len(content) > 800:
             compacted_m = dict(m)
-            compacted_m["content"] = content[:600] + "\n... [Assistant thought condensed] ...\n" + content[-300:]
+            compacted_m["content"] = content[:400] + "\n... [Assistant thought condensed] ...\n" + content[-200:]
             compacted_middle.append(compacted_m)
         else:
             compacted_middle.append(m)
@@ -233,35 +229,40 @@ def _compact_conversation_history(
                 "content": active_snapshot,
             })
 
-    packed = messages[:head_count] + compacted_middle + messages[len(messages) - tail_count:]
-    # Drop oldest middle messages first, never the original task/system or
-    # protected tail. A tool result is removed with its immediately preceding
-    # assistant call so the provider never receives an orphaned exchange.
+    tail_messages = messages[len(messages) - tail_count:] if tail_count > 0 else []
+    compacted_tail: List[Dict[str, Any]] = []
+    for m in tail_messages:
+        role = m.get("role")
+        content = str(m.get("content") or "")
+        if role == "tool" and len(content) > 4000:
+            compacted_m = dict(m)
+            compacted_m["content"] = content[:2000] + f"\n... [Tool Observation Excerpt: {len(content)-2800} chars indexed in EvidenceIndex] ...\n" + content[-800:]
+            compacted_tail.append(compacted_m)
+        else:
+            compacted_tail.append(m)
+
+    packed = messages[:head_count] + compacted_middle + compacted_tail
     while sum(len(str(m.get("content") or "")) for m in packed) > max_chars and len(packed) > head_count + tail_count + 1:
         index = head_count
         if packed[index].get("role") == "tool" and index > head_count:
             packed.pop(index - 1)
             index -= 1
         packed.pop(index)
-    # Extremely large pinned content is clipped as a final compatibility
-    # fallback; the task itself is retained and the raw source remains local.
+
     overflow = sum(len(str(m.get("content") or "")) for m in packed) - max_chars
     if overflow > 0:
         for message in packed:
             content = str(message.get("content") or "")
-            if overflow <= 0: break
+            if overflow <= 0:
+                break
             if len(content) > 256:
                 remove = min(overflow, len(content) - 256)
                 message["content"] = content[:len(content) - remove]
                 overflow -= remove
-    if planner is not None and getattr(planner, "has_items", lambda: False)():
-        snapshot = planner.format_for_injection()
-        if snapshot and not any(snapshot in str(item.get("content") or "") for item in packed):
-            packed.insert(head_count, {"role": "user", "content": snapshot})
     return packed
 
 
-def _offload_massive_result(content: str, call_id: str, max_chars: int = 14000) -> str:
+def _offload_massive_result(content: str, call_id: str, max_chars: int = 4000) -> str:
     """If tool output is massive, persist full output to cache directory and return a clean excerpt."""
     if len(content) <= max_chars:
         return content
@@ -1073,8 +1074,8 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - For running terminal commands, test suites, builds, or git, use `terminal`.
    - For headless browser actions, screenshots, or scraping, use `browser_action`.
    - Keep internal reasoning concise and focused (under 150 words) before executing tools or stating answers.
-   - For quick factual web lookup, use `web_search` and `web_extract`. For evidence-backed research, use the canonical `research_plan` -> `research_search` -> `research_fetch` -> `research_resolve` -> `research_validate` path so snippets cannot become proof.
-   - For quantitative claims from fetched CSV/JSON/table data, use `research_analyze`; cite its source evidence IDs and report missingness, units, time range, and method. Never estimate statistics manually or treat correlation as causation.
+   - For quick factual web lookup, use `web_search` and `web_extract`. For evidence-backed research, use the canonical `research_plan` -> `research_search` -> `research_fetch` -> `research_resolve` -> `research_validate` path so snippets cannot become proof. Keep plan nodes simple and independent (e.g. 1-2 root nodes without dependencies). In research tasks, always include the public source URL(s) and end with FINAL LABEL: supported, refuted, or insufficient.
+   - For quantitative claims from CSV/JSON/table data: first call `research_plan` with a node, then `research_fetch` the dataset URL, then `research_analyze` on the fetched rows, then `research_resolve` that node with the computed claim and evidence ID, then `research_validate`, and finally state your result, the dataset URL, and FINAL LABEL: supported.
    - When two or more independent read-only facts are needed, use `programmatic_tool_call` to batch them in one turn. Its allowlist is strict: never use it for shell commands, writes, memory changes, credentials, delegation, or browser control.
    - For historical snapshots of web pages, use `wayback_extract`.
    - For current or historical Wikipedia articles, revision histories, or image counts, use `wikipedia_page`.
@@ -1110,8 +1111,10 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - Verify every intermediate step with real tool outputs.
 
 4. **Strict Final Answer Delivery Format**:
-   - When verified, provide your definitive answer on the final line strictly as:
+   - For standard coding/benchmark tasks, provide your definitive answer on the final line strictly as:
      FINAL ANSWER: <exact answer>
+   - For research tasks, provide your concise synthesis, explicitly cite the public source URL(s) or live dataset URL, and end on the final line with:
+     FINAL LABEL: <supported|refuted|insufficient>
    - Provide ONLY the direct, concise answer value required by the question.
    - Do NOT include conversational filler, explanations, justifications, or prefixes (such as 'the answer is', 'the result is').
    - For numerical questions with units (e.g. 'Report the answer in kilograms...'), report ONLY the bare number in that requested unit without adding unit symbols or text (e.g. 42.5, NOT 42.5 kg).
@@ -1545,13 +1548,35 @@ class SmaraAutonomousAgent:
 
     def _call_model_api(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, max_tokens: int = 16384) -> Dict[str, Any]:
         """Perform HTTP POST request to OpenAI-compatible chat completions with Three-Zone Context Compaction."""
-        from smara.context_packing import ModelContextProfile, pack_messages
+        from smara.context_packing import ContextOverflow, ModelContextProfile, pack_messages
         profile = ModelContextProfile(
             tokenizer_id=f"unknown:{self.model}",
-            input_capacity=int(os.getenv("SMARA_MODEL_CONTEXT_TOKENS", "65536")),
+            input_capacity=int(os.getenv("SMARA_MODEL_CONTEXT_TOKENS", "131072")),
             output_reserve=max_tokens,
         )
-        packed = pack_messages(messages, profile, tools=tools or ())
+        compacted = _compact_conversation_history(
+            messages,
+            max_chars=int(os.getenv("SMARA_CONTEXT_MAX_CHARS", "45000")),
+            planner=self.task_planner,
+        )
+        try:
+            packed = pack_messages(compacted, profile, tools=tools or ())
+        except ContextOverflow:
+            emergency = _compact_conversation_history(compacted, max_chars=18000, planner=self.task_planner)
+            for msg in emergency:
+                c = str(msg.get("content") or "")
+                if msg.get("role") != "system" and len(c) > 1000:
+                    msg["content"] = c[:500] + f"\n... [Compacted {len(c)-800} chars] ...\n" + c[-300:]
+            try:
+                packed = pack_messages(emergency, profile, tools=tools or ())
+            except ContextOverflow:
+                profile_emergency = ModelContextProfile(
+                    tokenizer_id=f"unknown:{self.model}",
+                    input_capacity=int(os.getenv("SMARA_MODEL_CONTEXT_TOKENS", "131072")),
+                    output_reserve=max(2048, min(max_tokens, 4096)),
+                    safety_margin=64,
+                )
+                packed = pack_messages(emergency, profile_emergency, tools=tools or ())
         compacted_messages = list(packed.messages)
         self._report_progress("context_packed", {"input_tokens": packed.input_tokens, "accounting_quality": packed.accounting_quality, "omitted_messages": packed.omitted_messages})
 
@@ -1886,8 +1911,12 @@ class SmaraAutonomousAgent:
                     if fn_name in {"patch", "file_write"} and _tool_result_succeeded(raw_obs):
                         _mark_mutation(parsed_args)
                     _record_verification(fn_name, raw_obs)
-                    # Spill safety: offload massive results to disk cache
-                    obs = stall_note + _offload_massive_result(raw_obs, call_id=call_id)
+                    guidance = ""
+                    if fn_name == "research_resolve" and ("supported" in raw_obs or "ok" in raw_obs):
+                        guidance = "\n[Research Guidance: Node resolved. Run research_validate on your resolved claims to verify evidence coverage, then deliver your concise answer with source URLs.]\n"
+                    elif fn_name == "research_validate" and ("passed" in raw_obs or "validated" in raw_obs):
+                        guidance = "\n[Research Guidance: Validation passed. Deliver your verified final answer now, cite public source URLs, and conclude with FINAL LABEL: supported.]\n"
+                    obs = stall_note + _offload_massive_result(raw_obs, call_id=call_id) + guidance
                     self._report_progress("tool_end", {"iteration": iteration, "tool": fn_name, "observation": obs})
                     return tc, fn_name, parsed_args, call_id, obs
 
@@ -1961,7 +1990,7 @@ class SmaraAutonomousAgent:
 
             # Check if model has provided the definitive final answer
             has_final_answer = False
-            fa_pattern = r"(?:FINAL ANSWER|Final Answer|final answer):\s*([^\n\r]+)"
+            fa_pattern = r"(?:FINAL ANSWER|Final Answer|final answer|FINAL LABEL|Final Label|final label):\s*([^\n\r]+)"
             fa_match_c = re.search(fa_pattern, content or "")
             if fa_match_c:
                 cand = fa_match_c.group(1).strip()
@@ -2048,11 +2077,18 @@ class SmaraAutonomousAgent:
                     "If you already have the complete answer and no tool execution is required, provide your final response directly."
                 )
             else:
-                prompt_content = (
-                    "If you need to perform additional actions or verify, call the appropriate tool. "
-                    "If you have completed the task and verified the result, synthesize your final response. "
-                    "For benchmark evaluation tasks, output strictly on a single line as:\nFINAL ANSWER: <exact answer>"
-                )
+                if self.session_engine is not None and self.session_engine.get("research_required", False):
+                    prompt_content = (
+                        "If you need to perform additional actions or verify, call the appropriate tool. "
+                        "If you have completed the task and verified the result via research_validate, synthesize your final response. "
+                        "Include the public source URL(s) or live dataset URL and end on the final line strictly with:\nFINAL LABEL: <supported|refuted|insufficient>"
+                    )
+                else:
+                    prompt_content = (
+                        "If you need to perform additional actions or verify, call the appropriate tool. "
+                        "If you have completed the task and verified the result, synthesize your final response. "
+                        "For benchmark evaluation tasks, output strictly on a single line as:\nFINAL ANSWER: <exact answer>"
+                    )
             messages.append({
                 "role": "user",
                 "content": prompt_content
@@ -2069,8 +2105,7 @@ class SmaraAutonomousAgent:
         # Extract concise final answer
         if raw_concluding:
             if self.session_engine is not None and self.session_engine.get("research_required",False):
-                research_match=re.search(r"(?:FINAL ANSWER|Final Answer|final answer):\s*(.+)",raw_concluding,re.IGNORECASE|re.DOTALL)
-                final_answer=(research_match.group(1) if research_match else raw_concluding).strip()
+                final_answer = raw_concluding.strip()
                 outcome = self._research.primary_outcome() if hasattr(self, "_research") else ""
                 if outcome and not re.search(rf"\b{re.escape(outcome)}\b", final_answer, re.IGNORECASE):
                     final_answer = f"{final_answer}\nFINAL LABEL: {outcome}"

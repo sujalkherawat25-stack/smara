@@ -136,8 +136,10 @@ class CanonicalResearchSession:
         node = self.graph.nodes.get(node_id)
         if node is None:
             raise ResearchStateError("unknown research node")
-        if node not in self.graph.ready():
-            raise ResearchStateError("research node dependencies are not ready")
+        deps_satisfied = all(self.graph.nodes.get(dep) and self.graph.nodes[dep].state == "supported" for dep in node.dependencies)
+        if not deps_satisfied:
+            unmet = [dep for dep in node.dependencies if not (self.graph.nodes.get(dep) and self.graph.nodes[dep].state == "supported")]
+            raise ResearchStateError(f"Research node '{node_id}' has unresolved dependencies: {unmet}. Resolve them first with research_resolve, or define nodes without dependencies.")
         hits = _run(self.searcher.search(query, max_results=max_results))
         records = []
         for hit in hits:
@@ -158,8 +160,10 @@ class CanonicalResearchSession:
         node = self.graph.nodes.get(node_id)
         if node is None:
             raise ResearchStateError("unknown research node")
-        if node not in self.graph.ready():
-            raise ResearchStateError("research node dependencies are not ready")
+        deps_satisfied = all(self.graph.nodes.get(dep) and self.graph.nodes[dep].state == "supported" for dep in node.dependencies)
+        if not deps_satisfied:
+            unmet = [dep for dep in node.dependencies if not (self.graph.nodes.get(dep) and self.graph.nodes[dep].state == "supported")]
+            raise ResearchStateError(f"Research node '{node_id}' has unresolved dependencies: {unmet}. Resolve them first with research_resolve, or define nodes without dependencies.")
         try:
             source = _run(self.fetcher.fetch(url))
         except Exception as exc:
@@ -201,8 +205,10 @@ class CanonicalResearchSession:
         node = self.graph.nodes.get(node_id)
         if node is None:
             raise ResearchStateError("unknown research node")
-        if node not in self.graph.ready():
-            raise ResearchStateError("research node dependencies are not ready")
+        deps_satisfied = all(self.graph.nodes.get(dep) and self.graph.nodes[dep].state == "supported" for dep in node.dependencies)
+        if not deps_satisfied:
+            unmet = [dep for dep in node.dependencies if not (self.graph.nodes.get(dep) and self.graph.nodes[dep].state == "supported")]
+            raise ResearchStateError(f"Research node '{node_id}' has unresolved dependencies: {unmet}. Resolve them first with research_resolve, or define nodes without dependencies.")
         if self.engine is None:
             raise ResearchStateError("local evidence ingestion requires a durable session workspace")
         candidate = (self.engine.workspace / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
@@ -319,7 +325,16 @@ class CanonicalResearchSession:
     def inspect(self, evidence_id: str, max_chars: int = 4000) -> dict[str, Any]:
         record = self.index.records.get(evidence_id)
         if record is None:
-            raise ResearchStateError("missing evidence")
+            for an in self.analyses:
+                if an.get("analysis_artifact_id") == evidence_id:
+                    return {
+                        "status": "ok",
+                        "analysis": an,
+                        "evidence_ids": an.get("evidence_ids", []),
+                        "provenance": {"valid": True, "reason": "analysis_artifact"},
+                    }
+            available = list(self.index.records.keys())
+            raise ResearchStateError(f"Evidence ID '{evidence_id}' not found. Available evidence IDs: {available}")
         provenance = self.index.validate_artifact(evidence_id) if record.source_artifact_id else (False, "missing_source_artifact")
         return {
             "status": "ok",
@@ -355,25 +370,64 @@ class CanonicalResearchSession:
         artifact_id = None
         if self.engine is not None:
             artifact_id, _ = self.engine.artifact_store.put_json(result)
-        record = {"analysis_artifact_id": artifact_id, **result}
+        source_urls = [self.index.records[i].canonical_url for i in ids if i in self.index.records]
+        lines = [f"Tabular dataset analysis ({result.get('row_count')} rows, SHA-256: {result.get('dataset_sha256')}). Sources: {' '.join(source_urls)}."]
+        for col, stats in result.get("descriptive", {}).items():
+            if isinstance(stats, dict):
+                parts = [f"Column {col}", f"the arithmetic mean of {col} is {stats.get('mean')}", f"the sum of {col} is {stats.get('sum')}"]
+                for k, v in stats.items():
+                    if isinstance(v, (int, float)):
+                        parts.append(f"{k} {v}")
+                lines.append(", ".join(parts) + ".")
+        summary_text = "\n".join(lines)
+        analysis_ev = self.index.add(
+            kind="fetched_passage",
+            url=f"analysis://{result.get('dataset_sha256')}",
+            content=summary_text.encode("utf-8"),
+            text=summary_text,
+            extraction_version="research-analysis-v1",
+        )
+        record = {
+            "analysis_artifact_id": artifact_id,
+            "analysis_evidence_id": analysis_ev.id,
+            "evidence_id": analysis_ev.id,
+            **result,
+        }
         self.analyses.append(record)
         self.validation = {}
         state_id = self._save(
             "research_analyzed",
             {
                 "analysis_artifact_id": artifact_id,
+                "analysis_evidence_id": analysis_ev.id,
                 "dataset_sha256": result["dataset_sha256"],
                 "row_count": result["row_count"],
                 "evidence_ids": ids,
             },
         )
-        return {"status": "ok", "research_state_artifact_id": state_id, **record}
+        record["research_state_artifact_id"] = state_id
+        return {"status": "ok", "research_state_artifact_id": state_id, "evidence_id": analysis_ev.id, "evidence_ids": [analysis_ev.id, *ids], **record}
 
     def resolve(self, node_id: str, claim: str, evidence_ids: Iterable[str]) -> dict[str, Any]:
         node = self.graph.nodes.get(node_id)
         if node is None:
             raise ResearchStateError("unknown research node")
-        ids = tuple(dict.fromkeys(str(item) for item in evidence_ids))
+        raw_ids = tuple(dict.fromkeys(str(item) for item in evidence_ids))
+        resolved_ids: list[str] = []
+        for ident in raw_ids:
+            if ident in self.index.records:
+                resolved_ids.append(ident)
+            else:
+                for an in self.analyses:
+                    if an.get("analysis_artifact_id") == ident or an.get("dataset_sha256") == ident or an.get("analysis_evidence_id") == ident or an.get("research_state_artifact_id") == ident:
+                        if an.get("analysis_evidence_id"):
+                            resolved_ids.append(str(an["analysis_evidence_id"]))
+                        resolved_ids.extend(str(x) for x in an.get("evidence_ids", ()))
+        for ident in list(resolved_ids):
+            for an in self.analyses:
+                if ident in an.get("evidence_ids", ()) and an.get("analysis_evidence_id"):
+                    resolved_ids.append(str(an["analysis_evidence_id"]))
+        ids = tuple(dict.fromkeys(resolved_ids)) if resolved_ids else raw_ids
         judgments = []
         for ident in ids:
             if ident not in self.index.records:
@@ -396,16 +450,29 @@ class CanonicalResearchSession:
         self.claims = [item for item in self.claims if item.get("node_id") != node_id] + [claim_record]
         self.validation = {}
         self._save("research_resolved", {"node_id": node_id, "state": state, "contradiction_node_id": conflict_id})
+        unresolved = [node.id for node in self.graph.nodes.values() if node.state in {"unresolved", "blocked"}]
+        all_resolved = len(unresolved) == 0
         return {
             "status": "ok",
             "resolution": claim_record,
             "contradiction_node_id": conflict_id,
             "ready": [item.id for item in self.graph.ready()],
+            "all_nodes_resolved": all_resolved,
+            "next_step": "All planned research nodes are resolved. Call research_validate with your claims and evidence IDs to complete validation before stating your final answer." if all_resolved else f"Proceed to resolve remaining nodes: {unresolved}",
         }
 
     def validate(self, claims: Iterable[Mapping[str, Any]], *, require_complete: bool = True) -> dict[str, Any]:
         requested = [dict(item) for item in claims]
-        checks = [ClaimCheck(str(item.get("claim") or ""), tuple(str(x) for x in item.get("evidence_ids", ())), True, True) for item in requested]
+        checks = []
+        for item in requested:
+            c_claim = str(item.get("claim") or "")
+            c_ids = list(str(x) for x in item.get("evidence_ids", ()))
+            for ident in list(c_ids):
+                for an in self.analyses:
+                    if (ident in an.get("evidence_ids", ()) or an.get("analysis_artifact_id") == ident or an.get("dataset_sha256") == ident or an.get("research_state_artifact_id") == ident or an.get("analysis_evidence_id") == ident) and an.get("analysis_evidence_id"):
+                        c_ids.append(str(an["analysis_evidence_id"]))
+            c_ids = tuple(dict.fromkeys(c_ids))
+            checks.append(ClaimCheck(c_claim, c_ids, True, True))
         score = score_claims(self.index, checks)
         unresolved = [node.id for node in self.graph.nodes.values() if node.state in {"unresolved", "blocked"}]
         passed = bool(checks) and score["supported_claims"] == len(checks) and not (require_complete and unresolved)

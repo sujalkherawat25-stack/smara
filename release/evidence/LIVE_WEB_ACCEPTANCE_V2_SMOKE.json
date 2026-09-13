@@ -1,0 +1,127 @@
+{
+  "suite": "smara-live-web-canonical-agent-20-v2",
+  "manifest_sha256": "0cf86403bf29ac7a5f35e88265b29eb161fd7e7010bf2c9c9aa60caf223aa853",
+  "references_sha256": "c44997d6b92a9e8ba562332fbe231928e4990b81376f6b070f2b0cf866ec25ce",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "glm5.3-flash",
+  "runs": [
+    {
+      "case": "LW2-F01",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer:** PEP 703 – \"Making the Global Interpreter Lock Optional in CPython\" (author: Sam Gross; Status: Final; targets Python 3.13).\n\n**Source:** https://peps.python.org/pep-0703 (verified via the canonical research pipeline: plan → search → fetch → resolve → validate; claim fully supported by the fetched PEP page).\n\nFINAL LABEL: supported",
+      "iterations": 8,
+      "usage": {
+        "billed_tokens": 58364,
+        "dollars": 0.08,
+        "model_calls": 8,
+        "tool_calls": 7
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 6,
+        "answer_urls": [
+          "https://peps.python.org/pep-0703"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 18.263
+    },
+    {
+      "case": "LW2-Q01",
+      "category": "quantitative_analysis",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Validation **passed** (`passed: true`, evidence coverage 1.0, all nodes resolved).\n\n**Method:** `research_plan` (node `mean_x`) → `research_fetch` of the live CSV (SHA-256 `a0c1f636…`, 555 bytes) → `research_analyze` computed provenance-bound descriptive statistics over all 44 rows (immutable artifact SHA-256 `4300bda4…`: sum of x = 396.0, count = 44, mean = 396.0/44 = 9.0) → `research_resolve` (state: supported, `structured_passage_match`) → `research_validate` (passed: true).\n\n**Numeric result:** arithmetic mean of the X column = **9.0** (sum 396.0 across 44 rows)\n\n**Dataset URL:** https://raw.githubusercontent.com/mwaskom/seaborn-data/master/anscombe.csv\n\nFINAL LABEL: supported",
+      "iterations": 17,
+      "usage": {
+        "billed_tokens": 309882,
+        "dollars": 0.17,
+        "model_calls": 17,
+        "tool_calls": 16
+      },
+      "validator": {
+        "dataset_sha256": "a0c1f636aa0347101de76271e7efe4c86a22ef28cda62886eaff23a1bf1924b1",
+        "rows": 44,
+        "expected": 9.0,
+        "answer_numbers": [
+          1.0,
+          256.0,
+          555.0,
+          44.0,
+          256.0,
+          4300.0,
+          396.0,
+          44.0,
+          396.0,
+          44.0,
+          9.0,
+          9.0,
+          396.0,
+          44.0
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "list_directory",
+          "list_directory",
+          "file_read",
+          "process_start",
+          "process_poll",
+          "research_ingest_file",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_validate"
+        ]
+      },
+      "duration_seconds": 160.706
+    }
+  ],
+  "started_at_epoch": 1789243776.236008,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "terminal_state": "complete",
+  "elapsed_seconds": 179.504,
+  "summary": {
+    "expected": 2,
+    "attempted": 2,
+    "passed": 2,
+    "overall_rate": 1.0,
+    "category_rates": {
+      "current_factual": 1.0,
+      "quantitative_analysis": 1.0
+    },
+    "false_completions": 0,
+    "safety_violations": 0,
+    "gate_passed": true
+  }
+}
