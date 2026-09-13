@@ -22,6 +22,13 @@ ClaimState=Literal["supported","refuted","insufficient"]
 _NEGATIONS={"no","not","never","neither","nor","without","cannot","can't","didn't","doesn't","isn't","wasn't","weren't"}
 _STOPWORDS={"a","an","and","are","as","at","be","been","being","by","for","from","has","have","had","in","into","is","it","its","of","on","or","that","the","their","there","these","this","those","to","was","were","with"}
 _CAUSAL={"because","cause","causes","caused","causing","due","leads","led","results","resulted","therefore"}
+_MONTHS={
+    "jan":1,"january":1,"feb":2,"february":2,"mar":3,"march":3,
+    "apr":4,"april":4,"may":5,"jun":6,"june":6,"jul":7,"july":7,
+    "aug":8,"august":8,"sep":9,"sept":9,"september":9,"oct":10,
+    "october":10,"nov":11,"november":11,"dec":12,"december":12,
+}
+_DATE_CONTEXT_WORDS={"date","dated","day","final","official","officially","release","released","published","publication","announcement","announced","on","as","of"}
 _UNIT_ALIASES={
     "kg":("mass",1.0),"kgs":("mass",1.0),"kilogram":("mass",1.0),"kilograms":("mass",1.0),
     "g":("mass",.001),"gram":("mass",.001),"grams":("mass",.001),
@@ -44,6 +51,22 @@ def _meaningful(value:str) -> list[str]:
 
 def _sentences(value:str) -> list[str]:
     return [item.strip() for item in re.split(r"(?<=[.!?;])\s+|[\r\n]+",_normalise(value)) if item.strip()]
+
+def _date_keys(value:str) -> set[str]:
+    """Return canonical calendar dates, accepting ISO and common prose forms."""
+    text=_normalise(value)
+    keys:set[str]=set()
+    for match in re.finditer(r"\b(\d{4})[-/]([01]?\d)[-/]([0-3]?\d)\b",text):
+        try: keys.add(datetime(int(match.group(1)),int(match.group(2)),int(match.group(3))).date().isoformat())
+        except ValueError: pass
+    month_pattern="|".join(sorted((re.escape(item) for item in _MONTHS),key=len,reverse=True))
+    for match in re.finditer(rf"\b({month_pattern})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?(?:,)?\s+(\d{{4}})\b",text):
+        try: keys.add(datetime(int(match.group(3)),_MONTHS[match.group(1)],int(match.group(2))).date().isoformat())
+        except ValueError: pass
+    for match in re.finditer(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+({month_pattern})\.?\s+(\d{{4}})\b",text):
+        try: keys.add(datetime(int(match.group(3)),_MONTHS[match.group(2)],int(match.group(1))).date().isoformat())
+        except ValueError: pass
+    return keys
 
 def _quantities(value:str) -> list[tuple[float,str,str]]:
     result=[]
@@ -96,31 +119,66 @@ class EvidenceIndex:
         claim_negated=any(token in _NEGATIONS for token in _tokens(claim))
         claim_quantities=_quantities(claim)
         claim_terms=[item for item in terms if item not in _NEGATIONS and not re.fullmatch(r"[-+]?\d+(?:[.,]\d+)*|%",item) and item not in _UNIT_ALIASES]
+        claim_dates=_date_keys(claim)
         best_reason="no_single_passage_support"
+        refuted_reason=""
         url_tokens=set(_tokens(record.canonical_url))
-        for sentence in source_sentences:
-            sentence_tokens=_tokens(sentence); sentence_set=set(sentence_tokens) | url_tokens
-            lexical_missing=[term for term in claim_terms if term not in sentence_set]
-            if lexical_missing:
-                best_reason=f"missing_terms:{','.join(lexical_missing[:5])}"
-                continue
-            sentence_negated=any(token in _NEGATIONS for token in sentence_tokens)
-            if claim_negated!=sentence_negated:
-                return ClaimJudgment("refuted","negation_conflict",evidence_id,passage_hash)
-            source_quantities=_quantities(sentence)
-            if claim_quantities:
-                unmatched=[item for item in claim_quantities if not any(_quantity_equal(item,other) for other in source_quantities)]
-                if unmatched:
-                    same_dimensions={item[1] for item in claim_quantities}&{item[1] for item in source_quantities}
-                    state="refuted" if same_dimensions else "insufficient"
-                    return ClaimJudgment(state,"quantity_conflict" if same_dimensions else "quantity_missing",evidence_id,passage_hash)
-            claim_causal=bool(set(_tokens(claim))&_CAUSAL); source_causal=bool(set(sentence_tokens)&_CAUSAL)
-            if claim_causal and not source_causal:
-                return ClaimJudgment("insufficient","causal_relation_not_stated",evidence_id,passage_hash)
-            # Lexical support is accepted only within one exact passage and
-            # after polarity/quantity/relation checks.  Paraphrases remain
-            # insufficient for a separate semantic validator to assess.
-            return ClaimJudgment("supported","structured_passage_match",evidence_id,passage_hash)
+        for sentence_index, sentence in enumerate(source_sentences):
+            # Official pages frequently put a title/identifier in one sentence
+            # and its definition in the immediately following sentences. Keep
+            # the matching window bounded to four adjacent sentences and 8k
+            # characters so this is still passage-local rather than whole-
+            # document word overlap.
+            windows=[]
+            for width in range(1, 5):
+                end_index=sentence_index + width
+                if end_index > len(source_sentences):
+                    break
+                passage=" ".join(source_sentences[sentence_index:end_index])
+                if len(passage) <= 8000:
+                    windows.append(passage)
+            for passage in windows:
+                sentence_tokens=_tokens(passage); sentence_set=set(sentence_tokens) | url_tokens
+                sentence=passage
+                lexical_missing=[term for term in claim_terms if term not in sentence_set]
+                if lexical_missing and claim_dates and claim_dates & _date_keys(sentence):
+                # Date answers are often rendered as "Oct. 7, 2024" while the
+                # source uses ISO form (or vice versa).  Permit that safe
+                # representation change when all remaining missing words are
+                # generic date/release framing, never when an entity or fact
+                # term is absent.
+                    if all(term in _DATE_CONTEXT_WORDS or term in _MONTHS for term in lexical_missing):
+                        lexical_missing=[]
+                if lexical_missing:
+                    best_reason=f"missing_terms:{','.join(lexical_missing[:5])}"
+                    continue
+                # Polarity belongs to the sentence that anchors the match;
+                # adjacent context may legitimately contain unrelated words
+                # such as "not" and must not invert this claim.
+                anchor_tokens=_tokens(source_sentences[sentence_index])
+                sentence_negated=any(token in _NEGATIONS for token in anchor_tokens)
+                if claim_negated!=sentence_negated:
+                    refuted_reason="negation_conflict"
+                    continue
+                source_quantities=_quantities(sentence)
+                if claim_quantities:
+                    unmatched=[item for item in claim_quantities if not any(_quantity_equal(item,other) for other in source_quantities)]
+                    if unmatched:
+                        same_dimensions={item[1] for item in claim_quantities}&{item[1] for item in source_quantities}
+                        state="refuted" if same_dimensions else "insufficient"
+                        if state=="refuted":
+                            refuted_reason="quantity_conflict"
+                        else:
+                            best_reason="quantity_missing"
+                        continue
+                claim_causal=bool(set(_tokens(claim))&_CAUSAL); source_causal=bool(set(sentence_tokens)&_CAUSAL)
+                if claim_causal and not source_causal:
+                    return ClaimJudgment("insufficient","causal_relation_not_stated",evidence_id,passage_hash)
+                # Lexical support is accepted only within this bounded passage
+                # after polarity, quantity, and relation checks.
+                return ClaimJudgment("supported","structured_passage_match",evidence_id,passage_hash)
+        if refuted_reason:
+            return ClaimJudgment("refuted",refuted_reason,evidence_id,passage_hash)
         return ClaimJudgment("insufficient",best_reason,evidence_id,passage_hash)
     def support(self,evidence_id:str,claim_text:str,*,require_fetched=True):
         judgment=self.judge(evidence_id,claim_text,require_fetched=require_fetched)

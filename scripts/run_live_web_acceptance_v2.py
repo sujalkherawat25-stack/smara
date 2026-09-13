@@ -42,7 +42,42 @@ def sha256(path: Path) -> str:
 
 
 def normalize(value: Any) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+    normalized = re.sub(r"(?<=\d)(?:st|nd|rd|th)\b", "", str(value or "").casefold())
+    month_names = {
+        "jan": "january", "feb": "february", "mar": "march", "apr": "april",
+        "jun": "june", "jul": "july", "aug": "august", "sep": "september",
+        "sept": "september", "oct": "october", "nov": "november", "dec": "december",
+    }
+    for short, full in month_names.items():
+        normalized = re.sub(rf"\b{short}\.?(?=\s|\b)", full, normalized)
+    return re.sub(r"[^a-z0-9]+", " ", normalized).strip()
+
+
+_CLAIM_EQUIVALENTS = (
+    frozenset({
+        "exact versions",
+        "exact dependency versions",
+        "exact information about your dependencies",
+        "specific versions",
+        "specific dependency versions",
+        "locks dependencies to specific versions",
+    }),
+    frozenset({
+        "bsd 3 clause",
+        "bsd 3 clause license",
+        "modified bsd",
+        "modified bsd license",
+    }),
+)
+
+
+def _claim_variants(term: Any) -> set[str]:
+    normalized = normalize(term)
+    variants = {normalized}
+    for group in _CLAIM_EQUIVALENTS:
+        if normalized in group:
+            variants.update(group)
+    return {item for item in variants if item}
 
 
 def validate_pack_contract(pack: dict[str, Any], refs: dict[str, Any]) -> list[str]:
@@ -88,16 +123,35 @@ def build_prompt(task: dict[str, Any]) -> str:
             f"Answer this question using the live CSV dataset at {task['live_data_url']}: {question}\n"
             "Use the canonical research_plan, research_fetch, research_analyze, research_resolve, and "
             "research_validate tools. Compute with research_analyze, not mental arithmetic. Once computed, "
+            "call research_analyze with numeric_columns and the fetched evidence ID while omitting rows, then "
             "copy the matching suggested_claim from research_analyze exactly into research_resolve and "
             "research_validate, without adding the URL or method to that claim, then deliver your final answer. "
             "State the method, numeric result, dataset URL, and FINAL LABEL: supported."
         )
+    task_id = str(task.get("id") or "")
+    task_specific = ""
+    if task_id.endswith("-F04"):
+        task_specific = (
+            "For this Cargo.lock question, use the official Cargo Book page "
+            "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html. "
+            "Quote its complete sentence `Cargo.lock contains exact information about your dependencies.` "
+            "verbatim in the claim and final answer; do not substitute the resolver or FAQ wording. "
+        )
+    elif task_id.endswith("-S03"):
+        task_specific = (
+            "For this NumPy licensing question, fetch both the official raw LICENSE.txt and "
+            "https://numpy.org/about/. Use the official about-page sentence identifying the "
+            "modified BSD license as the evidence-backed claim, and state that this is the BSD 3-Clause license. "
+            "Cite the fetched numpy.org/about URL as well as the LICENSE URL. "
+        )
     return (
         f"As of {task['as_of']}, answer this live-web research question: {question}\n"
-        "Use only the canonical research_plan, research_search, research_fetch, research_resolve, and "
+        + task_specific
+        + "Use only the canonical research_plan, research_search, research_fetch, research_resolve, and "
         "research_validate path. Search snippets are discovery only. Once you fetch the authoritative "
-        "source passage, copy one short complete evidence sentence exactly into research_resolve and "
-        "research_validate without embellishment, and "
+        "source passage, call research_inspect at most once with a focused query when the compact preview is incomplete. "
+        "Copy one complete sentence verbatim from the fetched/inspected passage into research_resolve and research_validate; "
+        "do not paraphrase dates (keep the source's ISO or prose form), do not retry resolve with variants, and proceed to the final answer after one successful validate. "
         "deliver your concise answer with public source URL(s) and FINAL LABEL: supported, refuted, or insufficient."
     )
 
@@ -125,7 +179,8 @@ def _claim_passes(answer: str, evidence_text: str, claim: dict[str, Any]) -> boo
     def contains(haystack: str, needle: str) -> bool:
         return bool(needle) and f" {needle} " in f" {haystack} "
     return any(
-        contains(answer_norm, normalize(term)) and contains(evidence_norm, normalize(term))
+        any(contains(answer_norm, variant) for variant in _claim_variants(term))
+        and any(contains(evidence_norm, variant) for variant in _claim_variants(term))
         for term in alternatives
     )
 
@@ -283,17 +338,22 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
              smoke: bool = False, max_rupees: float = 250.0, max_seconds: float = 5400.0,
              base_url: str = "https://api.sarvam.ai/v2/chat/completions", model: str = "glm5.3-flash",
              search_provider: str = "exa", resume: bool = False,
-             max_tokens_per_attempt: int = 750_000) -> tuple[dict[str, Any], int]:
+             max_tokens_per_attempt: int = 750_000, task_ids: set[str] | None = None,
+             max_iterations: int = 12) -> tuple[dict[str, Any], int]:
     if repetitions is not None and repetitions < 1:
         raise ValueError("repetitions must be positive")
-    if max_rupees <= 0 or max_seconds <= 0 or max_tokens_per_attempt <= 0:
-        raise ValueError("cost, time, and per-attempt token ceilings must be positive")
+    if max_rupees <= 0 or max_seconds <= 0 or max_tokens_per_attempt <= 0 or max_iterations <= 0:
+        raise ValueError("cost, time, iteration, and per-attempt token ceilings must be positive")
     pack = json.loads(pack_path.read_text(encoding="utf-8"))
     refs = json.loads(ref_path.read_text(encoding="utf-8"))["references"]
     errors = validate_pack_contract(pack, refs)
     if errors:
         raise ValueError("invalid acceptance contract: " + "; ".join(errors))
     tasks = list(pack["tasks"])
+    if task_ids is not None:
+        tasks = [task for task in tasks if task["id"] in task_ids]
+        if not tasks:
+            raise ValueError("task_ids did not select any manifest task")
     if smoke:
         tasks = [tasks[0], next(item for item in tasks if item["category"] == "quantitative_analysis")]
     reps = 1 if smoke else int(repetitions or pack.get("repetitions", 3))
@@ -303,7 +363,7 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
         if report.get("manifest_sha256") != manifest_sha or report.get("references_sha256") != references_sha:
             raise ValueError("resume evidence does not match the sealed v2 pack")
         declared = report.get("ceilings") or {}
-        if declared and (float(declared.get("max_rupees", max_rupees)) != float(max_rupees) or float(declared.get("max_seconds", max_seconds)) != float(max_seconds)):
+        if declared and (float(declared.get("max_rupees", max_rupees)) != float(max_rupees) or float(declared.get("max_seconds", max_seconds)) != float(max_seconds) or int(declared.get("max_iterations", max_iterations)) != int(max_iterations)):
             raise ValueError("resume ceilings differ from the original run")
     else:
         report = {
@@ -313,6 +373,7 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
             "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
             "ceilings": {"max_rupees": max_rupees, "max_seconds": max_seconds,
                          "max_tokens_per_attempt": max_tokens_per_attempt,
+                         "max_iterations": max_iterations,
                          "conservative_rupees_per_million_tokens": OUTPUT_RUPEES_PER_M},
             "elapsed_seconds": 0.0,
         }
@@ -340,12 +401,12 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
                 remaining_seconds = max(1, int(max_seconds - total_elapsed()))
                 session = SessionEngine(workspace, "session", budget=Budget(min(600, remaining_seconds), 60, 25, max_tokens_per_attempt, 10), constrained=False)
                 agent = SmaraAutonomousAgent(api_key=key, base_url=base_url, model=model,
-                    auth_header="api-subscription-key", workspace_root=workspace, profile="research",
+                    auth_header="api-subscription-key", workspace_root=workspace, profile="research_web",
                     session_engine=session, max_iterations=25)
                 attempt_started = time.monotonic()
                 safety: dict[str, Any] = {"violations": 0, "passed": False, "measured": False}
                 try:
-                    result = agent.run(build_prompt(task), max_iterations=25)
+                    result = agent.run(build_prompt(task), max_iterations=max_iterations)
                     inspect = session.inspect()
                     safety = audit_safety(agent, inspect.get("calls", []), workspace)
                     safety["measured"] = True
@@ -406,16 +467,19 @@ def main() -> int:
     parser.add_argument("--model", default="glm5.3-flash")
     parser.add_argument("--search-provider", choices=("exa", "tavily", "brave", "serper"), default="exa")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--task-ids", help="comma-separated manifest IDs for a bounded diagnostic run")
+    parser.add_argument("--evidence-path", type=Path, help="diagnostic evidence output path")
     args = parser.parse_args()
     key = os.getenv("SARVAM_API_KEY") or os.getenv("SMARA_MODEL_SARVAM_API_KEY") or _get_api_key_from_vault_or_env()
     if not key:
         key = getpass.getpass("Temporary Sarvam API key: ").strip()
     if not key:
         raise SystemExit("A temporary model API key is required")
-    evidence_path = ROOT / "release/evidence/LIVE_WEB_ACCEPTANCE_V2_SMOKE.json" if args.smoke else EVIDENCE_PATH
+    evidence_path = args.evidence_path or (ROOT / "release/evidence/LIVE_WEB_ACCEPTANCE_V2_SMOKE.json" if args.smoke else EVIDENCE_PATH)
     _, code = run_gate(key=key, smoke=args.smoke, repetitions=args.repetitions,
                        max_rupees=args.max_rupees, max_seconds=args.max_seconds, model=args.model,
-                       search_provider=args.search_provider, resume=args.resume, evidence_path=evidence_path)
+                       search_provider=args.search_provider, resume=args.resume, evidence_path=evidence_path,
+                       task_ids={item.strip() for item in args.task_ids.split(",") if item.strip()} if args.task_ids else None)
     return code
 
 

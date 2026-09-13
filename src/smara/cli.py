@@ -904,7 +904,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--prompt-file", help="Read a headless session prompt from a file")
     run.add_argument("--json", action="store_true", help="Emit durable session result JSON")
     run.add_argument("--budget-profile", default="short")
-    run.add_argument("--tool-profile", choices=["full","research","coding"], default="full")
+    run.add_argument(
+        "--tool-profile",
+        choices=["full", "research", "research-web", "research_web", "live-web", "coding"],
+        default="full",
+        help="Tool authority profile; research-web/live-web selects the verified canonical live-web workflow",
+    )
     resume_cmd = subparsers.add_parser("resume", help="Inspect a durable local session result")
     resume_cmd.add_argument("session_id")
     resume_cmd.add_argument("--json", action="store_true")
@@ -1100,7 +1105,7 @@ def main(argv: list[str] | None = None) -> int:
 
     def run_canonical(prompt: str, session=None, budget=None):
         """Run every autonomous CLI surface through the durable engine."""
-        from .autonomous_agent import SmaraAutonomousAgent
+        from .autonomous_agent import SmaraAutonomousAgent,normalize_tool_profile
         from .harness import Budget, SessionEngine
         active_workspace=engine.workspace
         session=session or SessionEngine(active_workspace,budget=budget or Budget())
@@ -1110,7 +1115,7 @@ def main(argv: list[str] | None = None) -> int:
             model_config={"profile_id":profile.get("id","default"),"base_url":profile.get("base_url","https://api.sarvam.ai/v2"),"model":profile.get("model","glm5.2"),"auth_header":profile.get("auth_header","authorization")}
             session.set("model_config",model_config)
         profile=next((item for item in engine.profiles if item.get("id")==model_config.get("profile_id")),model_config)
-        tool_profile=session.get("tool_profile") or getattr(parsed_args,"tool_profile","full")
+        tool_profile=normalize_tool_profile(session.get("tool_profile") or getattr(parsed_args,"tool_profile","full"))
         session.set("tool_profile",tool_profile)
         agent=SmaraAutonomousAgent(api_key=_resolve_profile_key(profile,engine.credentials),base_url=model_config["base_url"],model=model_config["model"],auth_header=model_config.get("auth_header","authorization"),workspace_root=active_workspace,profile=tool_profile,session_engine=session)
         agent_result=agent.run(prompt,max_iterations=25)
@@ -1143,7 +1148,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload if getattr(parsed_args, "events", False) or getattr(parsed_args, "json", False) else compact, indent=2))
         return 0 if cmd != "resume" or payload.get("status") == "completed" else 1
 
-    if cmd == "run" and getattr(parsed_args, "json", False) and not getattr(parsed_args, "goal", False):
+    if cmd == "run" and not getattr(parsed_args, "goal", False):
         from .harness import BUDGET_PROFILES, SessionEngine
         prompt = Path(parsed_args.prompt_file).read_text(encoding="utf-8") if parsed_args.prompt_file else parsed_args.objective
         if not prompt.strip():
@@ -1152,7 +1157,14 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"status": "denied", "answer": "", "unresolved_items": [f"unknown budget profile: {parsed_args.budget_profile}"]}, indent=2)); return 1
         session = SessionEngine(workspace, budget=BUDGET_PROFILES[parsed_args.budget_profile])
         _,payload=run_canonical(prompt,session=session)
-        print(json.dumps(payload, indent=2)); return 0 if payload["status"] == "completed" else 1
+        if parsed_args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(str(payload.get("answer") or ""))
+            if payload.get("unresolved_work"):
+                print("Unresolved: " + "; ".join(str(item) for item in payload["unresolved_work"]))
+            print(f"Session: {payload['session_id']} (resume with: {payload['resume']['command']})")
+        return 0 if payload["status"] == "completed" else 1
 
     # Handle subcommands
     if cmd == "ask":

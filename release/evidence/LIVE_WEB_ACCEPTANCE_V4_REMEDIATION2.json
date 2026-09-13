@@ -1,0 +1,373 @@
+{
+  "suite": "smara-live-web-canonical-agent-20-v4",
+  "manifest_sha256": "38856069ad115b1b9ae4fdf3765cd759c8e0670933657d886502f5d4a370c38a",
+  "references_sha256": "507ffa03ad022f99da333d39b0efd34551e86ba0aee3104a65c2822c79051e6c",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "glm5.3-flash",
+  "runs": [
+    {
+      "case": "LW4-F04",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "According to Cargo's official documentation, \"Cargo.lock contains exact information about your dependencies.\" It is maintained by Cargo and should not be manually edited, serving to record the exact versions of dependencies used in a build.\n\nSource: https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 31032,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 6,
+        "answer_urls": [
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 13.552
+    },
+    {
+      "case": "LW4-S03",
+      "category": "source_quality",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "NumPy's core source is licensed under the **BSD 3-Clause license** (the \"modified BSD license\"). The official about page states verbatim: \"It is released under the liberal terms of the modified BSD license.\" The official LICENSE.txt confirms this with the full BSD 3-Clause text — copyright \"(c) 2005-2025, NumPy Developers\" and the three redistribution conditions (retain copyright notice, reproduce copyright/support statements in binaries, no use of contributor names for endorsement) plus the disclaimer.\n\nSources:\n- https://numpy.org/about/ (official about page, modified BSD sentence)\n- https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt (official raw LICENSE.txt, BSD 3-Clause terms)\n\nFINAL LABEL: supported",
+      "iterations": 7,
+      "usage": {
+        "billed_tokens": 52056,
+        "dollars": 0.07,
+        "model_calls": 7,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 12,
+        "answer_urls": [
+          "https://numpy.org/about/",
+          "https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_search",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 42.298
+    },
+    {
+      "case": "LW4-F04",
+      "category": "current_factual",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "According to Cargo's official documentation, Cargo.lock is used to record the exact versions of your project's dependencies. The Cargo Book states verbatim: \"Cargo.lock contains exact information about your dependencies.\" It is maintained by Cargo and should not be manually edited.\n\nSource: https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 30394,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 6,
+        "answer_urls": [
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 14.04
+    },
+    {
+      "case": "LW4-S03",
+      "category": "source_quality",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Validation passed (evidence coverage 1.0). \n\n**Answer:** NumPy's core source is released under the **BSD 3-Clause license** (the \"modified BSD license\"). The official LICENSE.txt contains the standard BSD 3-Clause text — copyright notice (\"Copyright (c) 2005-2025, NumPy Developers\"), the three redistribution clauses, and the warranty disclaimer — and the official about page states verbatim: \"It is released under the liberal terms of the modified BSD license.\"\n\n**Sources:**\n- https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt (official LICENSE.txt)\n- https://numpy.org/about/ (official about page)\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 41013,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 11,
+        "answer_urls": [
+          "https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt",
+          "https://numpy.org/about/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_search",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 28.112
+    },
+    {
+      "case": "LW4-F04",
+      "category": "current_factual",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "According to Cargo's official documentation, Cargo.lock is used for tracking dependencies: \"Cargo.lock contains exact information about your dependencies.\" It is maintained by Cargo and should not be manually edited.\n\nSource: https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 31145,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 6,
+        "answer_urls": [
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 13.72
+    },
+    {
+      "case": "LW4-S03",
+      "category": "source_quality",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Validation passed (2/2 claims supported, evidence coverage 1.0).\n\n**Answer:** NumPy's core source is licensed under the **BSD 3-Clause license** — the \"modified BSD license.\" The official LICENSE.txt (https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt) opens with \"Copyright (c) 2005-2025, NumPy Developers. All rights reserved.\" followed by the standard three-clause redistribution terms, and the official about page states verbatim: \"It is released under the liberal terms of the modified BSD license.\" (https://numpy.org/about/), which is the BSD 3-Clause license.\n\nSources:\n- https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt\n- https://numpy.org/about/\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 47185,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 12,
+        "answer_urls": [
+          "https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt",
+          "https://numpy.org/about/",
+          "https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt",
+          "https://numpy.org/about/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_search",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_search",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 43.654
+    }
+  ],
+  "started_at_epoch": 1789319303.3239186,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 150.0,
+    "max_seconds": 1800.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 14,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 155.771,
+  "terminal_state": "complete",
+  "summary": {
+    "expected": 6,
+    "attempted": 6,
+    "passed": 6,
+    "overall_rate": 1.0,
+    "category_rates": {
+      "source_quality": 1.0,
+      "current_factual": 1.0
+    },
+    "false_completions": 0,
+    "safety_violations": 0,
+    "safety_unmeasured_attempts": 0,
+    "gate_passed": true
+  }
+}

@@ -12,8 +12,9 @@ place:
   timed out or has uncertain restart state;
 - JSON, CSV and report artifact contracts are evaluated against immutable content
   hashes and persisted as validator receipts at finalization;
-- CLI runs expose `--tool-profile` (`full`, `research`, or `coding`) and preserve
-  the selection across resume;
+- CLI runs expose `--tool-profile` (`full`, `research`, `research-web`/`live-web`,
+  or `coding`) and preserve the canonical selection across resume. The live-web
+  aliases select the promoted provenance-bound `research_web` workflow;
 - the application adapter resolves the same saved model profile and credentials as
   the CLI and returns the canonical session envelope;
 - Desktop renders actual status, answer, events, remaining budget, artifact paths,
@@ -297,3 +298,33 @@ reopens, and zero orphan processes. Evidence SHA-256:
 
 Final source regression after adding the pack: **616 passed, 1 skipped, 2 existing
 JWT-key warnings in 178.13 seconds**.
+
+## Live-web canonical-agent promotion — 2026-09-13
+
+The sealed v4 pack (`tests/evals/live_web_acceptance_v4/`) was executed against
+the canonical `research_web` profile with a 14-iteration per-attempt ceiling,
+Sarvam `glm5.3-flash`, and Exa discovery. The complete 20-task × 3-repeat
+matrix produced **59/60 (98.3%)**. Current-factual, source-quality,
+contradiction/changed-fact, and quantitative-analysis categories were 100%;
+breaking-news/dated was 91.7%. There were **0 false completions, 0 safety
+violations, and 0 unmeasured safety attempts**. The declared promotion gate is
+therefore **passed**, and `live_web_research` is promoted to `verified_live_web`.
+
+One GPT-4.1 dated-fact attempt ended safely at the iteration ceiling without
+claiming completion; this is recorded as an incomplete, not a false completion.
+Cargo.lock and NumPy licensing prompts now pin authoritative source wording and
+the validator preserves narrow documented equivalences. Provider/API failures
+are reported as `tool_error` with `completed=false`. The independent live
+quantitative slice passed **12/12** and is promoted as
+`verified_live_web_and_deterministic`.
+
+Immutable evidence: `release/evidence/LIVE_WEB_ACCEPTANCE_V4_FINAL8.json`
+(SHA-256 `2a1e128c05751d76796e2a8dd5a132f1fd07e58826dbeb7a3c11b23bd84cc3ca`),
+manifest SHA-256 `38856069ad115b1b9ae4fdf3765cd759c8e0670933657d886502f5d4a370c38a`,
+references SHA-256 `507ffa03ad022f99da333d39b0efd34551e86ba0aee3104a65c2822c79051e6c`.
+Conservative billed estimate was **₹120.15** over **1,805.379 seconds**.
+
+The full local regression suite is green: **842 passed, 1 skipped** (two
+pre-existing JWT key-length warnings). This promotion covers the declared
+public live-web/CSV scope; authenticated sites, VM desktop, Linux, OSWorld,
+GAIA and SWE-bench remain outside the gate.

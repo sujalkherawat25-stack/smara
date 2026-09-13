@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import csv
+import io
 import json
 import re
 from dataclasses import asdict
@@ -193,10 +195,13 @@ class CanonicalResearchSession:
                 "extraction_artifact_id": record.extraction_artifact_id,
             },
         )
+        evidence = asdict(record)
+        evidence["text_length"] = len(record.text)
+        evidence["text"] = record.text[:2400]
         return {
             "status": "ok",
             "node_id": node_id,
-            "evidence": asdict(record),
+            "evidence": evidence,
             "title": source.title,
             "published_at": source.published_at,
         }
@@ -322,7 +327,7 @@ class CanonicalResearchSession:
         )
         return {"status": "ok", "node_id": node_id, "evidence": asdict(record)}
 
-    def inspect(self, evidence_id: str, max_chars: int = 4000) -> dict[str, Any]:
+    def inspect(self, evidence_id: str, max_chars: int = 4000, query: str = "") -> dict[str, Any]:
         record = self.index.records.get(evidence_id)
         if record is None:
             for an in self.analyses:
@@ -336,15 +341,26 @@ class CanonicalResearchSession:
             available = list(self.index.records.keys())
             raise ResearchStateError(f"Evidence ID '{evidence_id}' not found. Available evidence IDs: {available}")
         provenance = self.index.validate_artifact(evidence_id) if record.source_artifact_id else (False, "missing_source_artifact")
+        limit = max(1, min(int(max_chars), 16000))
+        start = 0
+        if query and len(record.text) > limit:
+            normalized_text = record.text.casefold()
+            normalized_query = str(query).casefold().strip()
+            index = normalized_text.find(normalized_query)
+            if index < 0:
+                terms = sorted(set(re.findall(r"[a-z0-9]{3,}", normalized_query)), key=len, reverse=True)
+                positions = [normalized_text.find(term) for term in terms]
+                index = next((position for position in positions if position >= 0), 0)
+            start = max(0, min(index - limit // 3, len(record.text) - limit))
         return {
             "status": "ok",
-            "evidence": {**asdict(record), "text": record.text[: max(1, min(int(max_chars), 16000))]},
+            "evidence": {**asdict(record), "text": record.text[start:start + limit], "text_start": start, "text_length": len(record.text)},
             "provenance": {"valid": provenance[0], "reason": provenance[1]},
         }
 
     def analyze(
         self,
-        rows: Iterable[Mapping[str, Any]],
+        rows: Iterable[Mapping[str, Any]] | None,
         numeric_columns: Iterable[str],
         *,
         evidence_ids: Iterable[str],
@@ -363,8 +379,35 @@ class CanonicalResearchSession:
                 invalid.append({"evidence_id": ident, "reason": reason})
         if invalid:
             raise ResearchStateError(f"analysis evidence is invalid: {invalid}")
+        materialized_rows = [dict(item) for item in (rows or [])]
+        if not materialized_rows:
+            for ident in ids:
+                record = self.index.records.get(ident)
+                raw = self.index._artifact_bytes(record.source_artifact_id) if record is not None else None
+                if not raw:
+                    continue
+                try:
+                    decoded = raw.decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    continue
+                try:
+                    parsed = json.loads(decoded)
+                except json.JSONDecodeError:
+                    parsed = None
+                if isinstance(parsed, list) and all(isinstance(item, dict) for item in parsed):
+                    materialized_rows = [dict(item) for item in parsed]
+                elif isinstance(parsed, dict):
+                    candidate = next((value for value in parsed.values() if isinstance(value, list) and all(isinstance(item, dict) for item in value)), None)
+                    if candidate is not None:
+                        materialized_rows = [dict(item) for item in candidate]
+                if not materialized_rows:
+                    candidate_rows = list(csv.DictReader(io.StringIO(decoded)))
+                    if candidate_rows and any(candidate_rows[0].values()):
+                        materialized_rows = [dict(item) for item in candidate_rows]
+                if materialized_rows:
+                    break
         try:
-            result = analyze_tabular(rows, numeric_columns=numeric_columns, group_by=group_by, time_column=time_column, evidence_ids=ids)
+            result = analyze_tabular(materialized_rows, numeric_columns=numeric_columns, group_by=group_by, time_column=time_column, evidence_ids=ids)
         except ResearchAnalysisError as exc:
             raise ResearchStateError(str(exc)) from exc
         artifact_id = None

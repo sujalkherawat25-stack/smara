@@ -39,12 +39,17 @@ def test_analysis_rejects_ambiguous_or_unbounded_inputs():
 
 
 def test_canonical_analysis_requires_valid_artifact_provenance(tmp_path:Path):
-    (tmp_path/"data.csv").write_text("date,region,revenue,cost\n2025-01-01,north,100,60\n",encoding="utf-8")
+    (tmp_path/"data.csv").write_text(
+        "date,region,revenue,cost\n"
+        "2025-01-01,north,100,60\n2025-02-01,north,120,70\n"
+        "2025-03-01,south,180,90\n2025-04-01,south,200,100\n",
+        encoding="utf-8",
+    )
     engine=SessionEngine(tmp_path,"analysis")
     session=CanonicalResearchSession(session_engine=engine)
     session.plan("Analyze revenue",[{"id":"data","question":"What does revenue show?"}])
     ingested=session.ingest_file("data","data.csv");evidence_id=ingested["evidence"]["id"]
-    result=session.analyze(ROWS,numeric_columns=["revenue","cost"],group_by="region",time_column="date",evidence_ids=[evidence_id])
+    result=session.analyze(None,numeric_columns=["revenue","cost"],group_by="region",time_column="date",evidence_ids=[evidence_id])
     assert result["analysis_artifact_id"]
     max_claim=next(item["claim"] for item in result["suggested_claims"] if item["column"]=="revenue" and item["metric"]=="max")
     assert max_claim=="The maximum of column revenue is 200.0."
@@ -58,6 +63,17 @@ def test_canonical_analysis_requires_valid_artifact_provenance(tmp_path:Path):
     assert "research_analyzed" in event_types and event_types[-1]=="research_validated"
     with pytest.raises(ResearchStateError,match="invalid"):
         session.analyze(ROWS,numeric_columns=["revenue"],evidence_ids=["missing"])
+
+
+def test_research_inspect_can_focus_a_long_verified_passage(tmp_path:Path):
+    phrase="Python Software Foundation License Version 2"
+    (tmp_path/"license.txt").write_text("preamble "*800+phrase+" terms",encoding="utf-8")
+    session=CanonicalResearchSession(session_engine=SessionEngine(tmp_path,"inspect"))
+    session.plan("License",[{"id":"license","question":"Which license?"}])
+    ingested=session.ingest_file("license","license.txt")
+    result=session.inspect(ingested["evidence"]["id"],120,phrase)
+    assert phrase in result["evidence"]["text"]
+    assert result["evidence"]["text_start"]>0
 
 
 def test_research_profile_exposes_analysis_tool():

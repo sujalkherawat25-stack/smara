@@ -18,7 +18,7 @@ from .config import settings
 from .store import TaskStore
 
 MAX_SOURCE_BYTES = 1_000_000
-MAX_EXCERPT_CHARS = 1_800
+MAX_EXCERPT_CHARS = 16_000
 _TRACKING_QUERY_KEYS = {
     "fbclid", "gclid", "msclkid", "ref", "ref_src", "source",
     "utm_campaign", "utm_content", "utm_medium", "utm_source", "utm_term",

@@ -14,13 +14,13 @@
       "reason": "validated",
       "status": "completed",
       "completed": true,
-      "answer": "HTTP/1.1 is specified by **RFC 9112, titled \"HTTP/1.1\"** (published June 2022; it obsoletes the earlier RFC 7230, \"Hypertext Transfer Protocol (HTTP/1.1): Message Syntax and Routing\"). Evidence sentence from the authoritative source: \"This document specifies the HTTP/1.1 message syntax, message parsing, connection management, and related security concerns.\"\n\nSource: https://www.rfc-editor.org/rfc/rfc9112.html (also https://datatracker.ietf.org/doc/html/rfc9112)\n\nFINAL LABEL: supported",
-      "iterations": 6,
+      "answer": "HTTP/1.1 is specified by **RFC 9112, titled \"HTTP/1.1\"** (also known as STD 99, an Internet Standard since June 2022, obsoleting RFC 7230).\n\nEvidence sentence (exact, from the fetched passage): \"HTTP/1.1 RFC 9112 also known as STD 99\"\n\nSource: https://datatracker.ietf.org/doc/rfc9112/\n\nFINAL LABEL: supported",
+      "iterations": 8,
       "usage": {
-        "billed_tokens": 43648,
-        "dollars": 0.060000000000000005,
-        "model_calls": 6,
-        "tool_calls": 5
+        "billed_tokens": 61394,
+        "dollars": 0.08,
+        "model_calls": 8,
+        "tool_calls": 7
       },
       "validator": {
         "claims": [
@@ -29,8 +29,7 @@
         ],
         "fetched_sources": 6,
         "answer_urls": [
-          "https://www.rfc-editor.org/rfc/rfc9112.html",
-          "https://datatracker.ietf.org/doc/html/rfc9112"
+          "https://datatracker.ietf.org/doc/rfc9112/"
         ],
         "cited_fetched": true,
         "domain_ok": true,
@@ -39,6 +38,8 @@
           "research_plan",
           "research_search",
           "research_fetch",
+          "research_fetch",
+          "research_resolve",
           "research_resolve",
           "research_validate"
         ],
@@ -46,6 +47,7 @@
           "research_plan",
           "research_search",
           "research_fetch",
+          "research_resolve",
           "research_resolve",
           "research_validate"
         ]
@@ -58,7 +60,7 @@
         "measured": true
       },
       "safety_violation": false,
-      "duration_seconds": 14.921
+      "duration_seconds": 33.854
     },
     {
       "case": "LWS3-Q01",
@@ -68,27 +70,28 @@
       "reason": "validated",
       "status": "completed",
       "completed": true,
-      "answer": "**Method**: Fetched the live CSV via `research_fetch`, parsed all 44 rows (columns: dataset, x, y), and computed descriptive statistics with `research_analyze`, which returned the maximum of the x column as 19.0 (occurring in dataset IV). The claim was resolved and validated with full evidence coverage.\n\n**Numeric result**: 19.0\n\n**Dataset URL**: https://raw.githubusercontent.com/mwaskom/seaborn-data/master/anscombe.csv\n\nFINAL LABEL: supported",
-      "iterations": 6,
+      "answer": "Method: Fetched the live CSV via research_fetch, then computed descriptive statistics with research_analyze (numeric_columns: x, y; rows omitted) on the immutable artifact; the max of column x was computed as 19.0, resolved and validated with evidence coverage 1.0.\n\nNumeric result: 19.0\n\nDataset URL: https://raw.githubusercontent.com/mwaskom/seaborn-data/master/anscombe.csv\n\nFINAL LABEL: supported",
+      "iterations": 7,
       "usage": {
-        "billed_tokens": 48815,
-        "dollars": 0.060000000000000005,
-        "model_calls": 6,
-        "tool_calls": 5
+        "billed_tokens": 49365,
+        "dollars": 0.07,
+        "model_calls": 7,
+        "tool_calls": 6
       },
       "validator": {
         "dataset_sha256": "a0c1f636aa0347101de76271e7efe4c86a22ef28cda62886eaff23a1bf1924b1",
         "rows": 44,
         "expected": 19.0,
         "answer_numbers": [
-          44.0,
           19.0,
+          1.0,
           19.0
         ],
         "tolerance": 0.0001,
         "url_ok": true,
         "tool_chain_ok": true,
         "tool_names": [
+          "research_plan",
           "research_plan",
           "research_fetch",
           "research_analyze",
@@ -111,10 +114,10 @@
         "measured": true
       },
       "safety_violation": false,
-      "duration_seconds": 18.888
+      "duration_seconds": 16.46
     }
   ],
-  "started_at_epoch": 1789296513.0396311,
+  "started_at_epoch": 1789313045.0507402,
   "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
   "ceilings": {
     "max_rupees": 80.0,
@@ -122,7 +125,7 @@
     "max_tokens_per_attempt": 750000,
     "conservative_rupees_per_million_tokens": 45.0
   },
-  "elapsed_seconds": 33.94,
+  "elapsed_seconds": 50.662,
   "terminal_state": "complete",
   "summary": {
     "expected": 2,
@@ -130,8 +133,8 @@
     "passed": 2,
     "overall_rate": 1.0,
     "category_rates": {
-      "current_factual": 1.0,
-      "quantitative_analysis": 1.0
+      "quantitative_analysis": 1.0,
+      "current_factual": 1.0
     },
     "false_completions": 0,
     "safety_violations": 0,

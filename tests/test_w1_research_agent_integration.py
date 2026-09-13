@@ -175,6 +175,17 @@ def test_research_profile_cannot_complete_without_using_evidence_tools(tmp_path,
     assert not session.get("research_validation",{}).get("passed",False)
 
 
+def test_provider_api_error_is_not_reported_as_completed(tmp_path,monkeypatch):
+    agent, session = make_agent(tmp_path, "provider-error")
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("provider unavailable")
+    monkeypatch.setattr(agent, "_call_model_api", fail)
+    result = agent.run("Research the fixture and cite validated evidence.", max_iterations=2)
+    assert result["status"] == "tool_error"
+    assert result["completed"] is False
+    assert result["session"]["status"] == "tool_error"
+
+
 def test_corrupt_research_state_artifact_invalidates_prior_validation(tmp_path,monkeypatch):
     claim="The value is 42 kilograms.";agent,session=make_agent(tmp_path,"corrupt")
     def steps(agent,index):

@@ -12,6 +12,7 @@ from scripts.run_live_web_acceptance_v2 import (
     validate_factual,
     validate_pack_contract,
 )
+from smara.autonomous_agent import get_tool_schemas
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +53,25 @@ def test_abstention_language_still_requires_fetched_evidence():
     assert _claim_passes("The answer is insufficient", "Evidence status: insufficient", {"any_of": ["insufficient"]})
 
 
+def test_factual_claim_matching_normalizes_date_ordinals():
+    claim = {"any_of": ["11 September 2023"]}
+    assert _claim_passes("The source says 11th September 2023", "as of today, 11th September 2023", claim)
+    assert _claim_passes("Release date: Oct. 7, 2024", "Release date: Oct. 7, 2024", {"any_of": ["October 7, 2024"]})
+
+
+def test_factual_claim_matching_accepts_declared_license_and_dependency_equivalents():
+    assert _claim_passes(
+        "Cargo.lock locks dependencies to specific versions.",
+        "The result is stored in Cargo.lock and locks dependencies to specific versions.",
+        {"any_of": ["exact dependency versions"]},
+    )
+    assert _claim_passes(
+        "NumPy uses the BSD 3-Clause license.",
+        "NumPy is released under the modified BSD license.",
+        {"any_of": ["BSD 3-Clause"]},
+    )
+
+
 def test_failed_tool_call_does_not_satisfy_canonical_chain():
     task = {"category": "current_factual"}
     calls = [
@@ -63,6 +83,12 @@ def test_failed_tool_call_does_not_satisfy_canonical_chain():
     assert not passed
     assert reason == "canonical_tool_chain_incomplete"
     assert "research_search" not in detail["successful_tool_names"]
+
+def test_strict_research_web_profile_exposes_only_canonical_tools():
+    names = {item["function"]["name"] for item in get_tool_schemas("research_web")}
+    assert names == {"research_plan", "research_search", "research_fetch", "research_inspect", "research_analyze", "research_resolve", "research_validate"}
+    assert get_tool_schemas("research-web") == get_tool_schemas("research_web")
+    assert get_tool_schemas("live-web") == get_tool_schemas("research_web")
 
 
 def test_safety_audit_measures_workspace_and_private_source_violations(tmp_path):
@@ -85,12 +111,13 @@ def test_v3_acceptance_and_disjoint_smoke_contracts_are_valid():
     assert full_ids.isdisjoint(smoke_ids)
 
 
-def test_v3_sealed_hashes_match_pending_capability_declaration():
+def test_v3_sealed_hashes_match_capability_declaration_after_v4_promotion():
     capability = json.loads((ROOT / "release/capabilities.json").read_text(encoding="utf-8"))["capabilities"]["live_web_research"]
     declared = capability["pending_acceptance_pack_v3"]
     def digest(relative: str) -> str:
         return hashlib.sha256((ROOT / relative).read_bytes()).hexdigest()
-    assert capability["status"] == "implemented_pending_canonical_agent_acceptance"
+    assert capability["status"] == "verified_live_web"
+    assert capability["acceptance_pack_v4"]["status"] == "passed_promoted"
     assert declared["manifest_sha256"] == digest("tests/evals/live_web_acceptance_v3/manifest.json")
     assert declared["references_sha256"] == digest("tests/evals/live_web_acceptance_v3/references.json")
     assert declared["smoke_manifest_sha256"] == digest("tests/evals/live_web_smoke_v3/manifest.json")

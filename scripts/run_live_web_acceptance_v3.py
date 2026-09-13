@@ -31,6 +31,8 @@ def main() -> int:
     parser.add_argument("--max-rupees", type=float, help="hard ceiling; defaults to Rs 80 for smoke or Rs 850 for full")
     parser.add_argument("--max-seconds", type=float, help="cumulative ceiling; defaults to 30 minutes for smoke or 3 hours for full")
     parser.add_argument("--max-tokens-per-attempt", type=int, default=750000)
+    parser.add_argument("--max-iterations", type=int, default=12, help="bounded model/tool iterations per attempt")
+    parser.add_argument("--repetitions", type=int, help="repetitions for a bounded diagnostic run")
     parser.add_argument("--model", default="glm5.3-flash")
     parser.add_argument("--search-provider", choices=("exa", "tavily", "brave", "serper"), default="exa")
     parser.add_argument(
@@ -38,6 +40,10 @@ def main() -> int:
         action="store_true",
         help="securely prompt for a process-local search key, overriding any saved provider key",
     )
+    parser.add_argument("--pack-path", type=Path, help="sealed manifest path (defaults to the v3 pack)")
+    parser.add_argument("--ref-path", type=Path, help="sealed references path (defaults to the v3 pack)")
+    parser.add_argument("--task-ids", help="comma-separated manifest IDs for a bounded diagnostic run")
+    parser.add_argument("--evidence-path", type=Path, help="diagnostic evidence output path")
     args = parser.parse_args()
     key = os.getenv("SARVAM_API_KEY") or os.getenv("SMARA_MODEL_SARVAM_API_KEY") or _get_api_key_from_vault_or_env()
     if not key:
@@ -50,13 +56,19 @@ def main() -> int:
             raise SystemExit(f"A configured {args.search_provider} search key is required")
         os.environ["SMARA_SEARCH_API_KEY"] = search_key
     pack, refs, evidence = (SMOKE_PACK, SMOKE_REFS, SMOKE_EVIDENCE) if args.smoke else (PACK, REFS, EVIDENCE)
+    if args.pack_path:
+        pack = args.pack_path
+    if args.ref_path:
+        refs = args.ref_path
     max_rupees = args.max_rupees if args.max_rupees is not None else (80.0 if args.smoke else 850.0)
     max_seconds = args.max_seconds if args.max_seconds is not None else (1800.0 if args.smoke else 10800.0)
     _, code = run_gate(
-        key=key, pack_path=pack, ref_path=refs, evidence_path=evidence,
-        repetitions=None, smoke=False, resume=args.resume, max_rupees=max_rupees,
+        key=key, pack_path=pack, ref_path=refs, evidence_path=args.evidence_path or evidence,
+        repetitions=args.repetitions, smoke=False, resume=args.resume, max_rupees=max_rupees,
         max_seconds=max_seconds, max_tokens_per_attempt=args.max_tokens_per_attempt,
+        max_iterations=args.max_iterations,
         model=args.model, search_provider=args.search_provider,
+        task_ids={item.strip() for item in args.task_ids.split(",") if item.strip()} if args.task_ids else None,
     )
     return code
 

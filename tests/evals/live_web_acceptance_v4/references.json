@@ -1,0 +1,27 @@
+{
+  "version": 4,
+  "suite": "smara-live-web-canonical-agent-20-v4",
+  "sealed": true,
+  "references": {
+    "LW4-F01":{"expected_answer":"PEP 668 — Marking Python base environments as externally managed","required_claims":[{"any_of":["PEP 668"]},{"any_of":["externally managed"]}],"allowed_domains":["peps.python.org"]},
+    "LW4-F02":{"expected_answer":"RFC 9457 — Problem Details for HTTP APIs","required_claims":[{"any_of":["RFC 9457"]},{"any_of":["Problem Details for HTTP APIs"]}],"allowed_domains":["rfc-editor.org","ietf.org"]},
+    "LW4-F03":{"expected_answer":"PEP 621 — Storing project metadata in pyproject.toml","required_claims":[{"any_of":["PEP 621"]},{"any_of":["Storing project metadata in pyproject.toml"]}],"allowed_domains":["peps.python.org"]},
+    "LW4-F04":{"expected_answer":"Cargo.lock records the exact dependency versions used by a project","required_claims":[{"any_of":["exact versions","exact dependency versions","exact information about your dependencies"]},{"any_of":["Cargo.lock"]}],"allowed_domains":["doc.rust-lang.org"]},
+    "LW4-D01":{"expected_answer":"October 7, 2024","required_claims":[{"any_of":["October 7, 2024","7 October 2024","2024-10-07"]}],"allowed_domains":["python.org"]},
+    "LW4-D02":{"expected_answer":"Jod","required_claims":[{"any_of":["Jod"]}],"allowed_domains":["nodejs.org","github.com"]},
+    "LW4-D03":{"expected_answer":"April 14, 2025","required_claims":[{"any_of":["April 14, 2025","14 April 2025","2025-04-14"]}],"allowed_domains":["openai.com"]},
+    "LW4-D04":{"expected_answer":"March 14, 2025","required_claims":[{"any_of":["March 14, 2025","14 March 2025","2025-03-14"]}],"allowed_domains":["git-scm.com"]},
+    "LW4-C01":{"expected_answer":"RFC 2616 was obsoleted by RFCs 7230 through 7235","required_claims":[{"any_of":["RFC 2616"]},{"any_of":["RFC 7230"]},{"any_of":["RFC 7235"]}],"allowed_domains":["rfc-editor.org","ietf.org"]},
+    "LW4-C02":{"expected_answer":"Python 3.11","required_claims":[{"any_of":["Python 3.11","3.11"]},{"any_of":["tomllib"]}],"allowed_domains":["python.org","docs.python.org"]},
+    "LW4-C03":{"expected_answer":"September 11, 2023","required_claims":[{"any_of":["September 11, 2023","11 September 2023","2023-09-11"]}],"allowed_domains":["nodejs.org","github.com","raw.githubusercontent.com"]},
+    "LW4-C04":{"expected_answer":"September 11, 2023","required_claims":[{"any_of":["September 11, 2023","11 September 2023","2023-09-11"]}],"allowed_domains":["openssl.org","openssl-library.org"]},
+    "LW4-S01":{"expected_answer":"Python Software Foundation License Version 2","required_claims":[{"any_of":["Python Software Foundation License Version 2","PSF License"]}],"allowed_domains":["github.com","python.org"]},
+    "LW4-S02":{"expected_answer":"BSD-3-Clause","required_claims":[{"any_of":["BSD-3-Clause","BSD 3-Clause"]}],"allowed_domains":["github.com","djangoproject.com"]},
+    "LW4-S03":{"expected_answer":"BSD 3-Clause License","required_claims":[{"any_of":["BSD 3-Clause","BSD-3-Clause"]}],"allowed_domains":["github.com","numpy.org"]},
+    "LW4-S04":{"expected_answer":"PostgreSQL License","required_claims":[{"any_of":["PostgreSQL License"]}],"allowed_domains":["postgresql.org"]},
+    "LW4-Q01":{"numeric":{"operation":"mean","column":"y","tolerance":0.0001}},
+    "LW4-Q02":{"numeric":{"operation":"min","column":"passengers","tolerance":0.0001}},
+    "LW4-Q03":{"numeric":{"operation":"max","column":"petal_width","tolerance":0.0001}},
+    "LW4-Q04":{"numeric":{"operation":"sum","column":"size","tolerance":0.0001}}
+  }
+}

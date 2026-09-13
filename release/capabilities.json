@@ -2,7 +2,7 @@
   "version": 1,
   "inventory": {
     "path": "tests/evals/inventory.json",
-    "sha256": "abc5da10ded19f7d766154e5a7948a8f03e43a8ea3c394c8582f746337fb5425"
+    "sha256": "5a59f2b78d91ae54c066b7054fa6c8493e9b4703f2e62ad54aa39f10159528d3"
   },
   "capabilities": {
     "durable_local_coding": {
@@ -31,8 +31,11 @@
       "scope": "scripted model responses and sealed local fixtures; live-web/model quality remains unmeasured"
     },
     "live_web_research": {
-      "status": "implemented_pending_canonical_agent_acceptance",
-      "suite": "tests/evals/live_web_acceptance_v3/manifest.json",
+      "status": "verified_live_web",
+      "suite": "tests/evals/live_web_acceptance_v4/manifest.json",
+      "provider": "sarvam",
+      "model": "glm5.3-flash",
+      "search_provider": "exa",
       "superseded_incomplete_acceptance_v2": {
         "manifest_sha256": "0cf86403bf29ac7a5f35e88265b29eb161fd7e7010bf2c9c9aa60caf223aa853",
         "references_sha256": "5a5226b56c448af4d72be1c0bbd66a5ae5e1f84a4f79bf6ed69945fb52ec8d6c",
@@ -67,6 +70,39 @@
         "runner": "scripts/run_live_web_acceptance_v3.py",
         "execution_status": "not_run"
       },
+      "acceptance_pack_v4": {
+        "manifest_sha256": "38856069ad115b1b9ae4fdf3765cd759c8e0670933657d886502f5d4a370c38a",
+        "references_sha256": "507ffa03ad022f99da333d39b0efd34551e86ba0aee3104a65c2822c79051e6c",
+        "runner": "scripts/run_live_web_acceptance_v3.py",
+        "profile": "research_web",
+        "iteration_ceiling": 14,
+        "evidence": {
+          "path": "release/evidence/LIVE_WEB_ACCEPTANCE_V4_FINAL8.json",
+          "sha256": "2a1e128c05751d76796e2a8dd5a132f1fd07e58826dbeb7a3c11b23bd84cc3ca",
+          "terminal_state": "complete",
+          "score": "59/60",
+          "rate": 0.9833333333,
+          "category_rates": {
+            "current_factual": 1.0,
+            "source_quality": 1.0,
+            "contradiction_changed_fact": 1.0,
+            "breaking_news_or_dated": 0.9166666667,
+            "quantitative_analysis": 1.0
+          },
+          "false_completions": 0,
+          "safety_violations": 0,
+          "safety_unmeasured_attempts": 0,
+          "gate_passed": true,
+          "elapsed_seconds": 1805.379,
+          "billed_tokens": 2670008,
+          "conservative_rupees": 120.15
+        },
+        "status": "passed_promoted",
+        "failure_summary": [
+          "One GPT-4.1 dated-fact repeat safely stopped at the 14-iteration ceiling without claiming completion; no false completion or safety violation occurred.",
+          "Cargo and NumPy remediation prompts now pin authoritative source wording and license equivalence."
+        ]
+      },
       "providers": [
         "tavily",
         "exa",
@@ -90,14 +126,21 @@
         "elapsed_seconds": 70.09
       },
       "scope": "Implemented canonical SmaraAutonomousAgent live-web research and quantitative tabular analysis with Three-Zone context compaction, token budgeting, provider search discovery, SSRF-safe fetch, immutable provenance hashing, independent expected-answer validation, and tabular descriptive statistics.",
-      "limitation": "The v2 run stopped at the cost limit after 28/60 attempts and failed its gate. Fresh disjoint v3 smoke and held-out 20x3 acceptance remain unexecuted."
+      "limitation": "The v4 canonical-agent matrix passed promotion at 59/60 (98.3%) with one safe non-completed dated-fact attempt at the iteration ceiling; live web quality is verified for the declared 20-task pack and provider, while authenticated sites, VM desktop, Linux, OSWorld, GAIA and SWE-bench remain outside this gate."
     },
     "research_data_analysis": {
-      "status": "verified_deterministic",
+      "status": "verified_live_web_and_deterministic",
       "suite": "tests/test_research_analysis.py",
       "component_smoke_suite": "tests/evals/live_web_acceptance/manifest.json",
       "scope": "provenance-bound JSON/CSV/tabular analysis with dataset hashes, missingness, descriptive statistics, grouped aggregates, Pearson correlations, time change and bounded IQR outliers",
-      "limitation": "live-dataset ingestion through the canonical agent remains unmeasured; causal inference, forecasting and domain-specific statistical tests require separately declared methods and validation"
+      "live_acceptance_v4": {
+        "path": "release/evidence/LIVE_WEB_ACCEPTANCE_V4_FINAL8.json",
+        "sha256": "2a1e128c05751d76796e2a8dd5a132f1fd07e58826dbeb7a3c11b23bd84cc3ca",
+        "score": "12/12",
+        "rate": 1.0,
+        "independent_recomputation": true
+      },
+      "limitation": "live quantitative ingestion is verified for the four declared CSV tasks; causal inference, forecasting and domain-specific statistical tests require separately declared methods and validation"
     },
     "research_ocr": {
       "status": "implemented_provider_adapter_contract_verified",

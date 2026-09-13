@@ -41,6 +41,16 @@ def test_claim_checker_preserves_entities_dates_units_and_causal_relations():
     assert index.judge(record.id,"Bob measured the sample at 42 kilograms.").state=="insufficient"
     assert index.judge(record.id,"Rain caused low output.").state=="insufficient"
 
+def test_claim_checker_accepts_equivalent_iso_and_prose_release_dates():
+    index=EvidenceIndex(); raw=b"3.13.0 final: Monday, 2024-10-07"
+    record=index.add(kind="fetched_passage",url="https://python.org/release",content=raw,text=raw.decode(),start=0,end=len(raw))
+    assert index.judge(record.id,"Release date: Oct. 7, 2024").state=="supported"
+
+def test_claim_checker_can_join_adjacent_title_and_definition_sentences():
+    index=EvidenceIndex(); raw=b"RFC 9457. Problem Details for HTTP APIs."
+    record=index.add(kind="fetched_passage",url="https://rfc-editor.org/rfc/rfc9457",content=raw,text=raw.decode(),start=0,end=len(raw))
+    assert index.judge(record.id,"RFC 9457 Problem Details for HTTP APIs.").state=="supported"
+
 def test_claim_checker_requires_current_recoverable_original_artifact(tmp_path):
     store=ArtifactStore(tmp_path/"artifacts");index=EvidenceIndex(store);raw=b"The value is 42 kilograms."
     record=index.add(kind="fetched_passage",url="https://facts.test/value",content=raw,text=raw.decode(),start=0,end=len(raw))

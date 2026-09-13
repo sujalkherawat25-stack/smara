@@ -96,7 +96,17 @@ IDEMPOTENT_TOOLS = frozenset({
 # H0 is deliberately conservative: delegation stays disabled until child
 # policy and process isolation are enforced by the broker work.
 DISABLED_TOOLS = frozenset({"delegate_task"})
-VALID_TOOLSETS = frozenset({"full", "coding", "swe", "worker", "worker_coding", "worker_verification", "research", "web", "multimodal", "vision", "audio"})
+VALID_TOOLSETS = frozenset({"full", "coding", "swe", "worker", "worker_coding", "worker_verification", "research", "research_web", "web", "multimodal", "vision", "audio"})
+TOOL_PROFILE_ALIASES = {
+    "live-web": "research_web",
+    "research-web": "research_web",
+}
+
+
+def normalize_tool_profile(profile: str | None = "full") -> str:
+    """Return the canonical persisted name for a public tool-profile value."""
+    value = (profile or "full").lower().strip()
+    return TOOL_PROFILE_ALIASES.get(value, value)
 
 
 def _tool_result_succeeded(observation: str) -> bool:
@@ -996,8 +1006,8 @@ TOOL_SCHEMAS.extend([
     {"type":"function","function":{"name":"research_search","description":"Search leads for one ready research node. Snippets are discovery-only.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","query"],"properties":{"node_id":{"type":"string"},"query":{"type":"string"},"max_results":{"type":"integer"}}}}},
     {"type":"function","function":{"name":"research_fetch","description":"Fetch a lead and preserve original response bytes plus extracted passage provenance.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","url"],"properties":{"node_id":{"type":"string"},"url":{"type":"string"}}}}},
     {"type":"function","function":{"name":"research_ingest_file","description":"Ingest UTF-8 text/Markdown/CSV/JSON, extract a PDF table cell, or extract image OCR evidence from a workspace file while preserving the original artifact.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","path"],"properties":{"node_id":{"type":"string"},"path":{"type":"string"},"page":{"type":"integer"},"row":{"type":"integer"},"column":{"type":"integer"}}}}},
-    {"type":"function","function":{"name":"research_inspect","description":"Inspect an evidence passage and verify its recoverable source artifact.","parameters":{"type":"object","additionalProperties":False,"required":["evidence_id"],"properties":{"evidence_id":{"type":"string"},"max_chars":{"type":"integer"}}}}},
-    {"type":"function","function":{"name":"research_analyze","description":"Compute provenance-bound descriptive statistics, grouped metrics, correlations, time changes, and IQR outliers from structured rows. Results are deterministic and stored as an immutable artifact; missing values are never imputed.","parameters":{"type":"object","additionalProperties":False,"required":["rows","numeric_columns","evidence_ids"],"properties":{"rows":{"type":"array","maxItems":10000,"items":{"type":"object"}},"numeric_columns":{"type":"array","maxItems":20,"items":{"type":"string"}},"evidence_ids":{"type":"array","minItems":1,"maxItems":20,"items":{"type":"string"}},"group_by":{"type":"string"},"time_column":{"type":"string"}}}}},
+    {"type":"function","function":{"name":"research_inspect","description":"Inspect a provenance-verified evidence passage. Supply query to retrieve the most relevant bounded window from a long source.","parameters":{"type":"object","additionalProperties":False,"required":["evidence_id"],"properties":{"evidence_id":{"type":"string"},"query":{"type":"string"},"max_chars":{"type":"integer"}}}}},
+    {"type":"function","function":{"name":"research_analyze","description":"Compute provenance-bound descriptive statistics, grouped metrics, correlations, time changes, and IQR outliers. Omit rows to parse CSV/JSON directly from the fetched evidence artifact. Results are deterministic and stored as an immutable artifact; missing values are never imputed.","parameters":{"type":"object","additionalProperties":False,"required":["numeric_columns","evidence_ids"],"properties":{"rows":{"type":"array","maxItems":10000,"items":{"type":"object"}},"numeric_columns":{"type":"array","maxItems":20,"items":{"type":"string"}},"evidence_ids":{"type":"array","minItems":1,"maxItems":20,"items":{"type":"string"}},"group_by":{"type":"string"},"time_column":{"type":"string"}}}}},
     {"type":"function","function":{"name":"research_resolve","description":"Resolve a question only through conservative claim/evidence judgments.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","claim","evidence_ids"],"properties":{"node_id":{"type":"string"},"claim":{"type":"string"},"evidence_ids":{"type":"array","maxItems":20,"items":{"type":"string"}}}}}},
     {"type":"function","function":{"name":"research_validate","description":"Validate the final required claim/evidence map; unsupported claims prevent completion.","parameters":{"type":"object","additionalProperties":False,"required":["claims"],"properties":{"claims":{"type":"array","maxItems":40,"items":{"type":"object","additionalProperties":False,"required":["claim","evidence_ids"],"properties":{"claim":{"type":"string"},"evidence_ids":{"type":"array","maxItems":20,"items":{"type":"string"}}}}},"require_complete":{"type":"boolean"}}}}},
 ])
@@ -1022,7 +1032,7 @@ TOOL_SCHEMAS.extend([
 
 def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
     """Return tool schemas filtered by profile to optimize token budget."""
-    prof = (profile or "full").lower().strip()
+    prof = normalize_tool_profile(profile)
     if prof not in VALID_TOOLSETS:
         # Schema callers can inspect an unsupported profile without falling
         # back to full authority. Agent construction rejects it below.
@@ -1056,6 +1066,14 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
             ,"browser_open","browser_observe","browser_navigate","browser_act","browser_tabs","browser_switch","browser_scroll","browser_download","browser_close"
             ,"process_start","process_poll","process_stdin","process_cancel"
         }
+    elif prof == "research_web":
+        # Acceptance and production live-web journeys must stay on the
+        # provenance-bound canonical research path.  Do not expose local file,
+        # process, browser, or generic programmatic tools that invite detours.
+        allowed = {
+            "research_plan", "research_search", "research_fetch", "research_inspect",
+            "research_analyze", "research_resolve", "research_validate"
+        }
     elif prof == "web":
         allowed = {"browser_action","web_search","web_extract","web_reader_dynamic","wayback_extract","wikipedia_page","pdf_search","calculate","file_read","list_directory","programmatic_tool_call","todo"}
     elif prof in ["multimodal", "vision", "audio"]:
@@ -1075,7 +1093,7 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - For headless browser actions, screenshots, or scraping, use `browser_action`.
    - Keep internal reasoning concise and focused (under 150 words) before executing tools or stating answers.
    - For quick factual web lookup, use `web_search` and `web_extract`. For evidence-backed research, use the canonical `research_plan` -> `research_search` -> `research_fetch` -> `research_resolve` -> `research_validate` path so snippets cannot become proof. Keep plan nodes simple and independent (e.g. 1-2 root nodes without dependencies). In research tasks, always include the public source URL(s) and end with FINAL LABEL: supported, refuted, or insufficient.
-   - For quantitative claims from CSV/JSON/table data: first call `research_plan` with one node, then `research_fetch` the dataset URL, then call `research_analyze` exactly once on the fetched rows. Copy the matching `suggested_claims[].claim` verbatim into `research_resolve` with the returned analysis evidence ID, then copy that same claim and ID into `research_validate`. Do not inspect artifacts, download the data again, or add method/URL prose to the validation claim. Finally state the result, dataset URL, and FINAL LABEL: supported.
+   - For quantitative claims from CSV/JSON/table data: first call `research_plan` with one node, then `research_fetch` the dataset URL, then call `research_analyze` exactly once with `numeric_columns` and the fetched `evidence_id`; omit `rows` so the tool parses the immutable CSV/JSON artifact directly. Copy the matching `suggested_claims[].claim` verbatim into `research_resolve` with the returned analysis evidence ID, then copy that same claim and ID into `research_validate`. Do not inspect artifacts, download the data again, or add method/URL prose to the validation claim. Finally state the result, dataset URL, and FINAL LABEL: supported.
    - When two or more independent read-only facts are needed, use `programmatic_tool_call` to batch them in one turn. Its allowlist is strict: never use it for shell commands, writes, memory changes, credentials, delegation, or browser control.
    - For historical snapshots of web pages, use `wayback_extract`.
    - For current or historical Wikipedia articles, revision histories, or image counts, use `wikipedia_page`.
@@ -1166,7 +1184,7 @@ class SmaraAutonomousAgent:
         self.model = model
         self.auth_header = auth_header.lower().strip()
         self.max_iterations = max_iterations
-        self.toolset = profile or toolset
+        self.toolset = normalize_tool_profile(profile or toolset)
         if self.toolset not in VALID_TOOLSETS:
             raise ValueError(f"Unknown tool profile '{self.toolset}'.")
         self.workspace_root = Path(workspace_root).resolve() if workspace_root else Path.cwd()
@@ -1372,7 +1390,7 @@ class SmaraAutonomousAgent:
         return self._research_result(self._research.ingest_file(str(args.get("node_id") or ""),str(args.get("path") or ""),page=int(args.get("page") or 1),row=int(args.get("row") or 1),column=int(args.get("column") or 1)))
 
     def _dispatch_research_inspect(self,args:Dict[str,Any]) -> str:
-        return self._research_result(self._research.inspect(str(args.get("evidence_id") or ""),int(args.get("max_chars") or 4000)))
+        return self._research_result(self._research.inspect(str(args.get("evidence_id") or ""),int(args.get("max_chars") or 4000),str(args.get("query") or "")))
 
     def _dispatch_research_analyze(self,args:Dict[str,Any]) -> str:
         return self._research_result(self._research.analyze(args.get("rows") or [],args.get("numeric_columns") or [],evidence_ids=args.get("evidence_ids") or [],group_by=args.get("group_by"),time_column=args.get("time_column")))
@@ -2113,7 +2131,14 @@ class SmaraAutonomousAgent:
                 final_answer = self._clean_final_answer(raw_concluding)
         
         status = "completed"
-        if provider_budget_exhausted:
+        # A provider/API failure is diagnostic output, never a successful task
+        # completion.  Keep the error text for the caller, but mark the durable
+        # result as tool_error so acceptance gates cannot count it as a false
+        # completion.
+        provider_error = raw_concluding.startswith("API_ERROR:")
+        if provider_error:
+            status = "tool_error"
+        elif provider_budget_exhausted:
             status = "budget_exhausted"
         elif verification_failed:
             status = "tool_error"
