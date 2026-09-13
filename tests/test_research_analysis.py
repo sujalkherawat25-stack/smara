@@ -46,9 +46,16 @@ def test_canonical_analysis_requires_valid_artifact_provenance(tmp_path:Path):
     ingested=session.ingest_file("data","data.csv");evidence_id=ingested["evidence"]["id"]
     result=session.analyze(ROWS,numeric_columns=["revenue","cost"],group_by="region",time_column="date",evidence_ids=[evidence_id])
     assert result["analysis_artifact_id"]
+    max_claim=next(item["claim"] for item in result["suggested_claims"] if item["column"]=="revenue" and item["metric"]=="max")
+    assert max_claim=="The maximum of column revenue is 200.0."
+    resolved=session.resolve("data",max_claim,[result["analysis_evidence_id"]])
+    assert resolved["resolution"]["state"]=="supported"
+    validated=session.validate([{"claim":max_claim,"evidence_ids":[result["analysis_evidence_id"]]}])
+    assert validated["passed"]
     stored=json.loads(engine.resolve_artifact(result["analysis_artifact_id"]))
     assert stored["dataset_sha256"]==result["dataset_sha256"] and stored["row_count"]==4
-    assert engine.inspect()["events"][-1]["type"]=="research_analyzed"
+    event_types=[item["type"] for item in engine.inspect()["events"]]
+    assert "research_analyzed" in event_types and event_types[-1]=="research_validated"
     with pytest.raises(ResearchStateError,match="invalid"):
         session.analyze(ROWS,numeric_columns=["revenue"],evidence_ids=["missing"])
 

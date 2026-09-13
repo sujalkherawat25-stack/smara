@@ -8,6 +8,7 @@ from scripts.run_live_web_acceptance_v2 import (
     audit_safety,
     build_prompt,
     recompute,
+    validate_attempt,
     validate_factual,
     validate_pack_contract,
 )
@@ -49,6 +50,19 @@ def test_numeric_recomputation_supports_combined_columns():
 def test_abstention_language_still_requires_fetched_evidence():
     assert not _claim_passes("The answer is insufficient", "No matching passage here", {"any_of": ["insufficient"]})
     assert _claim_passes("The answer is insufficient", "Evidence status: insufficient", {"any_of": ["insufficient"]})
+
+
+def test_failed_tool_call_does_not_satisfy_canonical_chain():
+    task = {"category": "current_factual"}
+    calls = [
+        {"name": name, "state": "completed", "result": {"status": "ok"}}
+        for name in ("research_plan", "research_fetch", "research_resolve", "research_validate")
+    ]
+    calls.append({"name": "research_search", "state": "completed", "result": {"status": "error"}})
+    passed, reason, detail = validate_attempt(task, {}, SimpleNamespace(), {"completed": True}, calls)
+    assert not passed
+    assert reason == "canonical_tool_chain_incomplete"
+    assert "research_search" not in detail["successful_tool_names"]
 
 
 def test_safety_audit_measures_workspace_and_private_source_violations(tmp_path):

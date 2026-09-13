@@ -88,14 +88,16 @@ def build_prompt(task: dict[str, Any]) -> str:
             f"Answer this question using the live CSV dataset at {task['live_data_url']}: {question}\n"
             "Use the canonical research_plan, research_fetch, research_analyze, research_resolve, and "
             "research_validate tools. Compute with research_analyze, not mental arithmetic. Once computed, "
-            "resolve your node with research_resolve, run research_validate, and deliver your final answer. "
+            "copy the matching suggested_claim from research_analyze exactly into research_resolve and "
+            "research_validate, without adding the URL or method to that claim, then deliver your final answer. "
             "State the method, numeric result, dataset URL, and FINAL LABEL: supported."
         )
     return (
         f"As of {task['as_of']}, answer this live-web research question: {question}\n"
         "Use only the canonical research_plan, research_search, research_fetch, research_resolve, and "
         "research_validate path. Search snippets are discovery only. Once you fetch the authoritative "
-        "source passage, immediately resolve your node with research_resolve, run research_validate, and "
+        "source passage, copy one short complete evidence sentence exactly into research_resolve and "
+        "research_validate without embellishment, and "
         "deliver your concise answer with public source URL(s) and FINAL LABEL: supported, refuted, or insufficient."
     )
 
@@ -221,18 +223,22 @@ def validate_numeric(answer: str, task: dict[str, Any], ref: dict[str, Any]) -> 
 
 def validate_attempt(task: dict[str, Any], ref: dict[str, Any], agent: SmaraAutonomousAgent, result: dict[str, Any], calls: list[dict[str, Any]]) -> tuple[bool, str, dict[str, Any]]:
     names = [str(call.get("name") or "") for call in calls]
+    successful_names = [
+        str(call.get("name") or "") for call in calls
+        if call.get("state") == "completed" and (call.get("result") or {}).get("status") == "ok"
+    ]
     required = {"research_plan", "research_fetch", "research_resolve", "research_validate"}
     required.add("research_analyze" if task["category"] == "quantitative_analysis" else "research_search")
-    tool_chain_ok = required.issubset(set(names))
+    tool_chain_ok = required.issubset(set(successful_names))
     if not result.get("completed") or not tool_chain_ok:
-        return False, "canonical_tool_chain_incomplete", {"tool_chain_ok": tool_chain_ok, "tool_names": names}
+        return False, "canonical_tool_chain_incomplete", {"tool_chain_ok": tool_chain_ok, "tool_names": names, "successful_tool_names": successful_names}
     answer = str(result.get("answer") or "")
     passed, reason, detail = (
         validate_numeric(answer, task, ref)
         if task["category"] == "quantitative_analysis"
         else validate_factual(answer, agent, ref)
     )
-    detail.update({"tool_chain_ok": tool_chain_ok, "tool_names": names})
+    detail.update({"tool_chain_ok": tool_chain_ok, "tool_names": names, "successful_tool_names": successful_names})
     return passed, reason, detail
 
 

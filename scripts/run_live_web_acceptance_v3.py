@@ -33,14 +33,22 @@ def main() -> int:
     parser.add_argument("--max-tokens-per-attempt", type=int, default=750000)
     parser.add_argument("--model", default="glm5.3-flash")
     parser.add_argument("--search-provider", choices=("exa", "tavily", "brave", "serper"), default="exa")
+    parser.add_argument(
+        "--prompt-search-key",
+        action="store_true",
+        help="securely prompt for a process-local search key, overriding any saved provider key",
+    )
     args = parser.parse_args()
     key = os.getenv("SARVAM_API_KEY") or os.getenv("SMARA_MODEL_SARVAM_API_KEY") or _get_api_key_from_vault_or_env()
     if not key:
         key = getpass.getpass("Temporary Sarvam model API key: ").strip()
     if not key:
         raise SystemExit("A Sarvam model key is required")
-    if not (os.getenv("SMARA_SEARCH_API_KEY") or WebSearchTool._local_key(args.search_provider)):
-        raise SystemExit(f"A configured {args.search_provider} search key is required")
+    if args.prompt_search_key or not (os.getenv("SMARA_SEARCH_API_KEY") or WebSearchTool._local_key(args.search_provider)):
+        search_key = getpass.getpass(f"Temporary {args.search_provider} search API key: ").strip()
+        if not search_key:
+            raise SystemExit(f"A configured {args.search_provider} search key is required")
+        os.environ["SMARA_SEARCH_API_KEY"] = search_key
     pack, refs, evidence = (SMOKE_PACK, SMOKE_REFS, SMOKE_EVIDENCE) if args.smoke else (PACK, REFS, EVIDENCE)
     max_rupees = args.max_rupees if args.max_rupees is not None else (80.0 if args.smoke else 850.0)
     max_seconds = args.max_seconds if args.max_seconds is not None else (1800.0 if args.smoke else 10800.0)

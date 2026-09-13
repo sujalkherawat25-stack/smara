@@ -372,13 +372,16 @@ class CanonicalResearchSession:
             artifact_id, _ = self.engine.artifact_store.put_json(result)
         source_urls = [self.index.records[i].canonical_url for i in ids if i in self.index.records]
         lines = [f"Tabular dataset analysis ({result.get('row_count')} rows, SHA-256: {result.get('dataset_sha256')}). Sources: {' '.join(source_urls)}."]
+        suggested_claims = []
         for col, stats in result.get("descriptive", {}).items():
             if isinstance(stats, dict):
-                parts = [f"Column {col}", f"the arithmetic mean of {col} is {stats.get('mean')}", f"the sum of {col} is {stats.get('sum')}"]
-                for k, v in stats.items():
-                    if isinstance(v, (int, float)):
-                        parts.append(f"{k} {v}")
-                lines.append(", ".join(parts) + ".")
+                labels = {"mean": "arithmetic mean", "sum": "sum", "min": "minimum", "max": "maximum", "count": "count"}
+                for key, label in labels.items():
+                    value = stats.get(key)
+                    if isinstance(value, (int, float)):
+                        claim = f"The {label} of column {col} is {value}."
+                        lines.append(claim)
+                        suggested_claims.append({"metric": key, "column": col, "claim": claim})
         summary_text = "\n".join(lines)
         analysis_ev = self.index.add(
             kind="fetched_passage",
@@ -386,11 +389,14 @@ class CanonicalResearchSession:
             content=summary_text.encode("utf-8"),
             text=summary_text,
             extraction_version="research-analysis-v1",
+            start=0,
+            end=len(summary_text),
         )
         record = {
             "analysis_artifact_id": artifact_id,
             "analysis_evidence_id": analysis_ev.id,
             "evidence_id": analysis_ev.id,
+            "suggested_claims": suggested_claims,
             **result,
         }
         self.analyses.append(record)
