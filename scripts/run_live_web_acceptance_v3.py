@@ -4,11 +4,16 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from smara.autonomous_agent import _get_api_key_from_vault_or_env
 from smara.research_tools import WebSearchTool
-from scripts.run_live_web_acceptance_v2 import ROOT, run_gate
+from scripts.run_live_web_acceptance_v2 import run_gate
 
 
 PACK = ROOT / "tests/evals/live_web_acceptance_v3/manifest.json"
