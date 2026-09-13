@@ -188,6 +188,24 @@ local fixtures, not live datasets. `live_web_research` is therefore
 the v1 contract for promotion; the immutable evidence and hashes above remain
 unchanged.
 
+### Live-web v2 execution audit and v3 gate — 2026-09-13
+
+The later v2 execution did **not** pass its declared acceptance gate. Its own
+immutable evidence reports `terminal_state: cost_limit`, 28/60 attempts, 23
+passes, an overall matrix rate of 38.33%, and `gate_passed: false`. The first
+repetition was 16/20 (80%), with four categories at 75%. The v2 references also
+changed between the smoke and full runs. The `verified_canonical_agent_acceptance`
+promotion is revoked; v2 remains useful calibration evidence only.
+
+The gate runner now removes the evidence-free abstention exception, measures
+workspace and fetched-source boundary violations per attempt, reserves a full
+attempt's maximum token cost before admission, records its ceilings, and carries
+elapsed time across resume. A fresh 20x3 v3 pack and a separate two-task smoke
+pack are sealed under `tests/evals/live_web_acceptance_v3/` and
+`tests/evals/live_web_smoke_v3/`. Neither has been run. Capability status remains
+`implemented_pending_canonical_agent_acceptance` until the immutable v3 evidence
+itself reports a complete passing matrix.
+
 ### Sarvam OCR & Document Digitization Integration — 2026-09-12
 
 Smara integrates native document and image OCR via Sarvam's `/job/digitise` asynchronous endpoint (`sarvam-vision-v1`) alongside local `pytesseract` fallback:

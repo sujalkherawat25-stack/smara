@@ -1,0 +1,11 @@
+{
+  "version": 3,
+  "suite": "smara-live-web-calibration-smoke-v3",
+  "canonical_agent": true,
+  "repetitions": 1,
+  "reference_access": "validator_only",
+  "tasks": [
+    {"id":"LWS3-F01","category":"current_factual","as_of":"2026-09-13","question":"What RFC number and title specify HTTP/1.1?"},
+    {"id":"LWS3-Q01","category":"quantitative_analysis","question":"What is the maximum x value in the live Anscombe CSV?","live_data_url":"https://raw.githubusercontent.com/mwaskom/seaborn-data/master/anscombe.csv"}
+  ]
+}

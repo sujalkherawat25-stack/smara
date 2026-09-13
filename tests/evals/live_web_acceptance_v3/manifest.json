@@ -1,0 +1,29 @@
+{
+  "version": 3,
+  "suite": "smara-live-web-canonical-agent-20-v3",
+  "canonical_agent": true,
+  "repetitions": 3,
+  "reference_access": "validator_only",
+  "tasks": [
+    {"id":"LW3-F01","category":"current_factual","as_of":"2026-09-13","question":"What PEP number and title define the externally managed Python environment marker?"},
+    {"id":"LW3-F02","category":"current_factual","as_of":"2026-09-13","question":"What RFC number and title define Problem Details for HTTP APIs?"},
+    {"id":"LW3-F03","category":"current_factual","as_of":"2026-09-13","question":"Which PEP specifies project metadata in pyproject.toml, and what is its title?"},
+    {"id":"LW3-F04","category":"current_factual","as_of":"2026-09-13","question":"According to Cargo's official documentation, what is Cargo.lock used for?"},
+    {"id":"LW3-D01","category":"breaking_news_or_dated","as_of":"2026-09-13","question":"On what date was Python 3.13.0 officially released?"},
+    {"id":"LW3-D02","category":"breaking_news_or_dated","as_of":"2026-09-13","question":"What is the Node.js 22 release codename?"},
+    {"id":"LW3-D03","category":"breaking_news_or_dated","as_of":"2026-09-13","question":"On what date did OpenAI announce GPT-4.1 in the API?"},
+    {"id":"LW3-D04","category":"breaking_news_or_dated","as_of":"2026-09-13","question":"On what date was Git 2.49.0 released according to the official Git site?"},
+    {"id":"LW3-C01","category":"contradiction_changed_fact","as_of":"2026-09-13","question":"Is RFC 2616 still current, or which RFCs obsoleted it?"},
+    {"id":"LW3-C02","category":"contradiction_changed_fact","as_of":"2026-09-13","question":"In which Python version was tomllib added to the standard library?"},
+    {"id":"LW3-C03","category":"contradiction_changed_fact","as_of":"2026-09-13","question":"When did Node.js 16 reach end of life?"},
+    {"id":"LW3-C04","category":"contradiction_changed_fact","as_of":"2026-09-13","question":"When did OpenSSL 1.1.1 reach public end of life?"},
+    {"id":"LW3-S01","category":"source_quality","as_of":"2026-09-13","question":"What license does the official CPython repository declare?"},
+    {"id":"LW3-S02","category":"source_quality","as_of":"2026-09-13","question":"What SPDX license identifier does the official Django repository declare?"},
+    {"id":"LW3-S03","category":"source_quality","as_of":"2026-09-13","question":"What license applies to NumPy's core source according to the official LICENSE.txt?"},
+    {"id":"LW3-S04","category":"source_quality","as_of":"2026-09-13","question":"What is the name of PostgreSQL's official software license?"},
+    {"id":"LW3-Q01","category":"quantitative_analysis","question":"What is the arithmetic mean of the y column across all rows in the live Anscombe CSV?","live_data_url":"https://raw.githubusercontent.com/mwaskom/seaborn-data/master/anscombe.csv"},
+    {"id":"LW3-Q02","category":"quantitative_analysis","question":"What is the minimum passenger count in the live flights CSV?","live_data_url":"https://raw.githubusercontent.com/mwaskom/seaborn-data/master/flights.csv"},
+    {"id":"LW3-Q03","category":"quantitative_analysis","question":"What is the maximum petal_width in the live iris CSV?","live_data_url":"https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv"},
+    {"id":"LW3-Q04","category":"quantitative_analysis","question":"What is the sum of the size column across all rows in the live tips CSV?","live_data_url":"https://raw.githubusercontent.com/mwaskom/seaborn-data/master/tips.csv"}
+  ]
+}

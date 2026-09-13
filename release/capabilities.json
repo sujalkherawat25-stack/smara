@@ -31,9 +31,9 @@
       "scope": "scripted model responses and sealed local fixtures; live-web/model quality remains unmeasured"
     },
     "live_web_research": {
-      "status": "verified_canonical_agent_acceptance",
-      "suite": "tests/evals/live_web_acceptance_v2/manifest.json",
-      "acceptance_pack_v2": {
+      "status": "implemented_pending_canonical_agent_acceptance",
+      "suite": "tests/evals/live_web_acceptance_v3/manifest.json",
+      "superseded_incomplete_acceptance_v2": {
         "manifest_sha256": "0cf86403bf29ac7a5f35e88265b29eb161fd7e7010bf2c9c9aa60caf223aa853",
         "references_sha256": "5a5226b56c448af4d72be1c0bbd66a5ae5e1f84a4f79bf6ed69945fb52ec8d6c",
         "runner": "scripts/run_live_web_acceptance_v2.py",
@@ -46,6 +46,10 @@
         "full_evidence": {
           "path": "release/evidence/LIVE_WEB_ACCEPTANCE_V2.json",
           "sha256": "60892248f88791c216413970e997eb1c3d1795246fc1ba69b3d1d3fe90e2aad6",
+          "terminal_state": "cost_limit",
+          "attempted_score": "23/28",
+          "matrix_score": "23/60",
+          "gate_passed": false,
           "pass_1_score": "16/20",
           "pass_1_rate": 0.80,
           "source_quality": "4/4",
@@ -54,6 +58,14 @@
           "contradiction_changed_fact": "3/4",
           "current_factual": "3/4"
         }
+      },
+      "pending_acceptance_pack_v3": {
+        "manifest_sha256": "923431880576a64aebc0b9830fb5ca1cc7768e62b4255d12ac18003f19790072",
+        "references_sha256": "2aade3bb4eae9355fec7077313e6d79c6114b7bf6c3b691680f20dbfac68143b",
+        "smoke_manifest_sha256": "91411d22273bd7fda4dccb1faca96b60f0390bb18cf51516eee80fd494673b49",
+        "smoke_references_sha256": "2cc2000a845546318716c19a304c98fbedb8426b7f88095bf2cafff4456e9dc8",
+        "runner": "scripts/run_live_web_acceptance_v3.py",
+        "execution_status": "not_run"
       },
       "providers": [
         "tavily",
@@ -77,8 +89,8 @@
         "numerical_recomputation_match": 1.0,
         "elapsed_seconds": 70.09
       },
-      "scope": "Implemented canonical SmaraAutonomousAgent live-web research and quantitative tabular analysis with Three-Zone context compaction, token budgeting, Exa/Tavily/Brave search discovery, SSRF-safe fetch, immutable provenance hashing, independent expected-answer validation, and tabular descriptive statistics.",
-      "limitation": "Live-web results reflect public snapshot state as of the task execution timestamp; unreleased features or dates are labeled insufficient per canonical evidence contracts."
+      "scope": "Implemented canonical SmaraAutonomousAgent live-web research and quantitative tabular analysis with Three-Zone context compaction, token budgeting, provider search discovery, SSRF-safe fetch, immutable provenance hashing, independent expected-answer validation, and tabular descriptive statistics.",
+      "limitation": "The v2 run stopped at the cost limit after 28/60 attempts and failed its gate. Fresh disjoint v3 smoke and held-out 20x3 acceptance remain unexecuted."
     },
     "research_data_analysis": {
       "status": "verified_deterministic",

@@ -2,7 +2,7 @@
 
 Updated: 2026-09-12
 
-Status: **canonical-agent v2 gate implemented; live execution pending**. The retained
+Status: **canonical-agent implementation verified locally; fresh v3 live gate pending**. The retained
 20×3 result passed its component checks 60/60, but is not an end-to-end autonomy
 gate.
 
@@ -87,6 +87,29 @@ on this pack so it cannot create another promotion artifact.
    20 tasks x 3 repetitions with the declared cost/time ceilings. Promote only
    if the existing overall/category, false-completion, safety, and citation
    thresholds pass.
+
+## v2 execution audit and v3 replacement (2026-09-13)
+
+The v2 evidence is a failed, incomplete calibration run: it stopped at the cost
+limit after 28/60 attempts, passed 23 of those attempts, and reports
+`gate_passed: false`. Its first repetition scored 16/20, below the 90% overall
+threshold, and the reference file changed between smoke and full execution. It
+must not support capability promotion.
+
+The runner now requires all abstention claims to appear in fetched evidence,
+records measured workspace/source safety checks, reserves the maximum cost of
+the next attempt before starting it, persists declared ceilings, and accumulates
+elapsed time across resume. A fresh v3 acceptance pack and a disjoint two-task
+smoke pack are frozen at:
+
+- v3 manifest: `923431880576a64aebc0b9830fb5ca1cc7768e62b4255d12ac18003f19790072`
+- v3 references: `2aade3bb4eae9355fec7077313e6d79c6114b7bf6c3b691680f20dbfac68143b`
+- smoke manifest: `91411d22273bd7fda4dccb1faca96b60f0390bb18cf51516eee80fd494673b49`
+- smoke references: `2cc2000a845546318716c19a304c98fbedb8426b7f88095bf2cafff4456e9dc8`
+
+Do not edit these four files after a live run starts. Run the disjoint smoke
+first with `scripts/run_live_web_acceptance_v3.py --smoke`, then run the full
+matrix without changing code or references.
 
 Separate later tiers: authenticated/paywalled websites, OCR, forecasting, causal
 inference, regulated financial/medical analysis, Linux, disposable VM desktop, and

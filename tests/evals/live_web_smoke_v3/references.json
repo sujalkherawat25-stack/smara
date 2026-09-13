@@ -1,0 +1,9 @@
+{
+  "version": 3,
+  "suite": "smara-live-web-calibration-smoke-v3",
+  "sealed": true,
+  "references": {
+    "LWS3-F01":{"expected_answer":"RFC 9112 — HTTP/1.1","required_claims":[{"any_of":["RFC 9112"]},{"any_of":["HTTP/1.1"]}],"allowed_domains":["rfc-editor.org","ietf.org"]},
+    "LWS3-Q01":{"numeric":{"operation":"max","column":"x","tolerance":0.0001}}
+  }
+}
