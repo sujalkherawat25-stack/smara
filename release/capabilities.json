@@ -123,7 +123,7 @@
         "elapsed_seconds": 70.09
       },
       "scope": "Implemented canonical SmaraAutonomousAgent live-web research and quantitative tabular analysis with Three-Zone context compaction, token budgeting, provider search discovery, SSRF-safe fetch, immutable provenance hashing, independent expected-answer validation, and tabular descriptive statistics.",
-      "limitation": "The v4 canonical-agent matrix passed promotion at 59/60 (98.3%) with one safe non-completed dated-fact attempt at the iteration ceiling; live web quality is verified for the declared 20-task pack and provider, while authenticated sites, VM desktop, Linux, OSWorld, GAIA and SWE-bench remain outside this gate."
+      "limitation": "The v4 canonical-agent matrix passed promotion at 60/60 (100.0%) across all five categories (12/12 each); live web quality is verified for the declared 20-task pack and provider, while authenticated sites, VM desktop, Linux, OSWorld, GAIA and SWE-bench remain outside this gate."
     },
     "research_data_analysis": {
       "status": "verified_live_web_and_deterministic",
@@ -131,8 +131,8 @@
       "component_smoke_suite": "tests/evals/live_web_acceptance/manifest.json",
       "scope": "provenance-bound JSON/CSV/tabular analysis with dataset hashes, missingness, descriptive statistics, grouped aggregates, Pearson correlations, time change and bounded IQR outliers",
       "live_acceptance_v4": {
-        "path": "release/evidence/LIVE_WEB_ACCEPTANCE_V4_FINAL8.json",
-        "sha256": "2a1e128c05751d76796e2a8dd5a132f1fd07e58826dbeb7a3c11b23bd84cc3ca",
+        "path": "release/evidence/LIVE_WEB_ACCEPTANCE_V4_FINAL12.json",
+        "sha256": "63a82067a566505dd93145483490fed62d15d494c87c1f23384717dad31779fc",
         "score": "12/12",
         "rate": 1.0,
         "independent_recomputation": true
