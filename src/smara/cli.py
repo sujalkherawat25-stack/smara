@@ -178,10 +178,24 @@ def _load_local_profiles() -> tuple[list[dict[str, Any]], str, dict[str, str]]:
     if not profiles:
         profiles = [
             {"id": "grok", "label": "Grok-3 Mini", "base_url": "https://api.x.ai/v1", "model": "grok-3-mini", "auth_header": "authorization"},
-            {"id": "sarvam", "label": "Sarvam 105B", "base_url": "https://api.sarvam.ai/v1", "model": "sarvam-105b", "auth_header": "api-subscription-key"},
+            {"id": "sarvam", "label": "Sarvam 105B", "base_url": "https://api.sarvam.ai/v2", "model": "sarvam-105b", "auth_header": "api-subscription-key"},
             {"id": "ollama", "label": "Ollama Local", "base_url": "http://localhost:11434/v1", "model": "llama3.3", "auth_header": "authorization"},
             {"id": "openrouter", "label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "model": "anthropic/claude-3.5-sonnet", "auth_header": "authorization"},
         ]
+
+    # Sarvam retired the old GLM aliases.  Migrate stale Desktop/CLI profile
+    # state in memory so a persisted profile cannot silently call a deprecated
+    # model; the user's credential remains untouched in the vault.
+    for profile in profiles:
+        if str(profile.get("id", "")).lower() != "sarvam":
+            continue
+        model = str(profile.get("model") or "").lower().replace("-", "").replace(".", "")
+        if model in {"glm52", "glm53", "glm53flash"}:
+            profile["model"] = "sarvam-105b"
+            profile["label"] = "Sarvam 105B"
+        base_url = str(profile.get("base_url") or "")
+        if "api.sarvam.ai" in base_url and "/v1" in base_url and "/v2" not in base_url:
+            profile["base_url"] = "https://api.sarvam.ai/v2"
 
     return profiles, active_id, credentials
 
@@ -703,6 +717,16 @@ def _interactive_repl(engine: LocalAutonomousEngine, canonical_runner=None) -> N
             )
             continue
 
+        if line in {"/trust", "/untrust"}:
+            from .workspace_rules import is_workspace_trusted, trust_workspace, untrust_workspace
+            if line == "/trust":
+                trust_workspace(engine.workspace)
+                print(tui.paint(f"\nTrusted workspace: {engine.workspace}", "GREEN"))
+            else:
+                untrust_workspace(engine.workspace)
+                print(tui.paint(f"\nUntrusted workspace: {engine.workspace}", "YELLOW"))
+            continue
+
         if line.startswith("/rules"):
             from .workspace_rules import discover_workspace_rules
             rules = discover_workspace_rules(engine.workspace)
@@ -715,7 +739,8 @@ def _interactive_repl(engine: LocalAutonomousEngine, canonical_runner=None) -> N
 
         if line.startswith("/mcp"):
             from .mcp_client import MCPManager
-            mgr = MCPManager(engine.workspace)
+            from .workspace_rules import is_workspace_trusted
+            mgr = MCPManager(engine.workspace, trusted=is_workspace_trusted(engine.workspace))
             servers = mgr.discover_and_load()
             if servers:
                 print(tui.paint(f"\nConnected MCP Servers ({len(servers)}):", "BOLD"))
@@ -903,13 +928,14 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--no-approval", action="store_true")
     run.add_argument("--prompt-file", help="Read a headless session prompt from a file")
     run.add_argument("--json", action="store_true", help="Emit durable session result JSON")
-    run.add_argument("--budget-profile", default="short")
+    run.add_argument("--budget-profile", default="auto", help="Budget profile; auto selects the governed Quick or Deep Research budget")
     run.add_argument(
         "--tool-profile",
         choices=["full", "research", "research-web", "research_web", "live-web", "coding"],
         default="full",
         help="Tool authority profile; research-web/live-web selects the verified canonical live-web workflow",
     )
+    run.add_argument("--research-mode", choices=["auto", "quick", "deep"], default="auto", help="Research lane; auto judges the objective and records its decision")
     resume_cmd = subparsers.add_parser("resume", help="Inspect a durable local session result")
     resume_cmd.add_argument("session_id")
     resume_cmd.add_argument("--json", action="store_true")
@@ -1106,19 +1132,28 @@ def main(argv: list[str] | None = None) -> int:
     def run_canonical(prompt: str, session=None, budget=None):
         """Run every autonomous CLI surface through the durable engine."""
         from .autonomous_agent import SmaraAutonomousAgent,normalize_tool_profile
-        from .harness import Budget, SessionEngine
+        from .harness import BUDGET_PROFILES, Budget, SessionEngine
+        from .research_modes import select_research_lane,should_route_to_research
         active_workspace=engine.workspace
+        requested_mode=getattr(parsed_args,"research_mode","auto")
+        requested_profile=normalize_tool_profile(getattr(parsed_args,"tool_profile","full"))
+        if requested_profile=="full" and (requested_mode!="auto" or should_route_to_research(prompt)):
+            requested_profile="research_web"
+        if session is None and budget is None and requested_profile=="research_web":
+            selected=select_research_lane(prompt,requested_mode)[0].mode
+            budget=BUDGET_PROFILES["research_deep" if selected=="deep" else "research_quick"]
         session=session or SessionEngine(active_workspace,budget=budget or Budget())
         model_config=session.get("model_config")
         if model_config is None:
             profile=engine.active_profile
-            model_config={"profile_id":profile.get("id","default"),"base_url":profile.get("base_url","https://api.sarvam.ai/v2"),"model":profile.get("model","glm5.2"),"auth_header":profile.get("auth_header","authorization")}
+            model_config={"profile_id":profile.get("id","default"),"base_url":profile.get("base_url","https://api.sarvam.ai/v2"),"model":profile.get("model","sarvam-105b"),"auth_header":profile.get("auth_header","authorization")}
             session.set("model_config",model_config)
         profile=next((item for item in engine.profiles if item.get("id")==model_config.get("profile_id")),model_config)
-        tool_profile=normalize_tool_profile(session.get("tool_profile") or getattr(parsed_args,"tool_profile","full"))
+        tool_profile=normalize_tool_profile(session.get("tool_profile") or requested_profile)
         session.set("tool_profile",tool_profile)
-        agent=SmaraAutonomousAgent(api_key=_resolve_profile_key(profile,engine.credentials),base_url=model_config["base_url"],model=model_config["model"],auth_header=model_config.get("auth_header","authorization"),workspace_root=active_workspace,profile=tool_profile,session_engine=session)
-        agent_result=agent.run(prompt,max_iterations=25)
+        research_mode=session.get("research_mode") or requested_mode
+        agent=SmaraAutonomousAgent(api_key=_resolve_profile_key(profile,engine.credentials),base_url=model_config["base_url"],model=model_config["model"],auth_header=model_config.get("auth_header","authorization"),workspace_root=active_workspace,profile=tool_profile,session_engine=session,research_mode=research_mode)
+        agent_result=agent.run(prompt,max_iterations=None)
         payload=agent_result.get("session") or session.inspect().get("state",{}).get("result") or session.inspect()
         from .app_adapter import application_envelope
         payload={**payload,**application_envelope(session,payload)}
@@ -1153,14 +1188,28 @@ def main(argv: list[str] | None = None) -> int:
         prompt = Path(parsed_args.prompt_file).read_text(encoding="utf-8") if parsed_args.prompt_file else parsed_args.objective
         if not prompt.strip():
             print(json.dumps({"status": "needs_input", "answer": "", "unresolved_items": ["prompt is empty"]}, indent=2)); return 1
-        if parsed_args.budget_profile not in BUDGET_PROFILES:
+        budget_profile = parsed_args.budget_profile
+        if budget_profile == "auto":
+            from .autonomous_agent import normalize_tool_profile
+            from .research_modes import select_research_lane,should_route_to_research
+            effective_profile=normalize_tool_profile(parsed_args.tool_profile)
+            if effective_profile=="full" and (parsed_args.research_mode!="auto" or should_route_to_research(prompt)):
+                effective_profile="research_web"
+                parsed_args.tool_profile="research_web"
+            if effective_profile == "research_web":
+                budget_profile = "research_deep" if select_research_lane(prompt, parsed_args.research_mode)[0].mode == "deep" else "research_quick"
+            else:
+                budget_profile = "short"
+        if budget_profile not in BUDGET_PROFILES:
             print(json.dumps({"status": "denied", "answer": "", "unresolved_items": [f"unknown budget profile: {parsed_args.budget_profile}"]}, indent=2)); return 1
-        session = SessionEngine(workspace, budget=BUDGET_PROFILES[parsed_args.budget_profile])
+        session = SessionEngine(workspace, budget=BUDGET_PROFILES[budget_profile])
         _,payload=run_canonical(prompt,session=session)
         if parsed_args.json:
             print(json.dumps(payload, indent=2))
         else:
             print(str(payload.get("answer") or ""))
+            if payload.get("research_mode"):
+                print(f"Research mode: {payload['research_mode']}")
             if payload.get("unresolved_work"):
                 print("Unresolved: " + "; ".join(str(item) for item in payload["unresolved_work"]))
             print(f"Session: {payload['session_id']} (resume with: {payload['resume']['command']})")

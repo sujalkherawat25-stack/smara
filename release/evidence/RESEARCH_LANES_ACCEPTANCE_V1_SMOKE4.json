@@ -1,0 +1,91 @@
+{
+  "suite": "smara-research-lanes-quick-deep-8-v1",
+  "manifest_sha256": "f87e13c7a3ad97c375446365cfb5db6e1a80308dde0c02deb80a2f2ddf1c6dd9",
+  "references_sha256": "5e7ee52ff479de40e02b852ac028cfdd4880eae0329ebc8eab02ced74ebc4058",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "glm5.3-flash",
+  "runs": [
+    {
+      "case": "RL1-Q01",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "HTTP Semantics is defined by **RFC 9110** (also known as STD 97, an Internet Standard published June 2022), which obsoletes RFC 7230–7235.\n\nSources:\n-  (IETF Datatracker: \"HTTP Semantics RFC 9110 also known as STD 97\")\n-  (HTTP Working Group spec)\n-  (MDN: \"RFC 9110 HTTP Semantics Internet Standard\")\n\nFINAL LABEL: supported\n\nSources:\n- https://datatracker.ietf.org/doc/rfc9110\n- https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Resources_and_specifications\n- https://httpwg.org/specs",
+      "iterations": 9,
+      "usage": {
+        "billed_tokens": 54848,
+        "dollars": 0.09,
+        "model_calls": 9,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 8,
+        "answer_urls": [
+          "https://datatracker.ietf.org/doc/rfc9110",
+          "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Resources_and_specifications",
+          "https://httpwg.org/specs"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_fact_question"
+          ],
+          "requested": "auto",
+          "score": -2,
+          "selected": "quick"
+        },
+        "fetched_source_count": 3
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 41.432
+    }
+  ],
+  "started_at_epoch": 1789376731.9516327,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 160.0,
+    "max_seconds": 3600.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 40,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 41.506
+}

@@ -1,0 +1,292 @@
+{
+  "suite": "smara-research-lanes-quick-deep-8-v1",
+  "manifest_sha256": "b882d2c5284cb4429b0be34edf7521816439211818d490af4a46421a72411e37",
+  "references_sha256": "32ca7f485d90125654305a43af7c5ebb613636a3fdac6b713cafd47d00bd35fd",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "sarvam-105b",
+  "runs": [
+    {
+      "case": "RL1-Q01",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "answer_or_evidence_claim_mismatch",
+      "status": "completed",
+      "completed": true,
+      "answer": "This document describes the overall architecture of HTTP, establishes common terminology, and defines aspects of the protocol that are shared by all versions.\n\nSources:\n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://ftp.math.utah.edu/pub/rfc/std/std97.txt\n- https://httpwg.org/specs/rfc9110.html\n- https://rfcinfo.com/rfc-9110",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 9357,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true,
+          false
+        ],
+        "fetched_sources": 11,
+        "answer_urls": [
+          "https://ftp.math.utah.edu/pub/rfc/std/std97.txt",
+          "https://httpwg.org/specs/rfc9110.html",
+          "https://rfcinfo.com/rfc-9110"
+        ],
+        "cited_fetched": true,
+        "domain_ok": false,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_fact_question"
+          ],
+          "requested": "auto",
+          "score": -2,
+          "selected": "quick"
+        },
+        "fetched_source_count": 3
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 28.076
+    },
+    {
+      "case": "RL1-Q02",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Specification A new module tomllib will be added to the Python standard library, exposing the following public functions: def load( fp: SupportsRead[bytes], /, *, parse_float: Callable[[str], Any] = ..., ) -> dict[str, Any]: ...\ntomllib — Parse TOML files — Python 3.11.1 documentation Table of Contents tomllib — Parse TOML files Examples Conversion Table Previous topic configparser — Configuration file parser Next topic netrc — netrc file processing This Page Report a Bug Show Source Navigation index modules | next | previous | Python » 3.11.1 Documentation » The Python Standard Library » File Formats » tomllib — Parse TOML files | tomllib — Parse TOML files ¶ New in version 3.11.\n\nSources:\n- \n- \n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://docs.python.org/3.11/library/tomllib.html\n- https://docs.python.org/3/library/tomllib.html\n- https://docs.python.org/release/3.11.1/library/tomllib.html\n- https://github.com/python/cpython/pull/31498\n- https://github.com/python/peps/blob/main/peps/pep-0680.rst",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 9486,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 5,
+        "answer_urls": [
+          "https://docs.python.org/3.11/library/tomllib.html",
+          "https://docs.python.org/3/library/tomllib.html",
+          "https://docs.python.org/release/3.11.1/library/tomllib.html",
+          "https://github.com/python/cpython/pull/31498",
+          "https://github.com/python/peps/blob/main/peps/pep-0680.rst"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_default"
+          ],
+          "requested": "auto",
+          "score": 0,
+          "selected": "quick"
+        },
+        "fetched_source_count": 5
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 13.42
+    },
+    {
+      "case": "RL1-Q03",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "answer_or_evidence_claim_mismatch",
+      "status": "completed",
+      "completed": true,
+      "answer": "Lock file Cargo gives the highest priority to versions contained in the Cargo.lock file , when used.\n\nSources:\n- \n- \n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://doc.rust-lang.org/cargo/commands/cargo-generate-lockfile.html\n- https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/nightly/cargo/reference/resolver.html\n- https://doc.rust-lang.org/stable/cargo/faq.html\n- https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 9037,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          false,
+          true
+        ],
+        "fetched_sources": 5,
+        "answer_urls": [
+          "https://doc.rust-lang.org/cargo/commands/cargo-generate-lockfile.html",
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/nightly/cargo/reference/resolver.html",
+          "https://doc.rust-lang.org/stable/cargo/faq.html",
+          "https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 5
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 9.912
+    },
+    {
+      "case": "RL1-Q04",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "PostgreSQL License | Software Package Data Exchange (SPDX) Linux Foundation Collaborative Projects Software Package Data Exchange (SPDX) Home » Licenses PostgreSQL License false Full name PostgreSQL License Short identifier PostgreSQL Other web pages for this license   true Notes None Text Text in italicized blue is omittable (see Matching Guidelines B.3.5 ).\n\nSources:\n- \n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://choosealicense.com/licenses/postgresql\n- https://spdx.org/licenses/PostgreSQL.html\n- https://wiki.postgresql.org/wiki/FAQ\n- https://www.postgresql.org/about/press/faq",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 9025,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 5,
+        "answer_urls": [
+          "https://choosealicense.com/licenses/postgresql",
+          "https://spdx.org/licenses/PostgreSQL.html",
+          "https://wiki.postgresql.org/wiki/FAQ",
+          "https://www.postgresql.org/about/press/faq"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 4
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 13.113
+    }
+  ],
+  "started_at_epoch": 1789543040.9533699,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 150.0,
+    "max_seconds": 5400.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 12,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 64.748
+}

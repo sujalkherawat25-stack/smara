@@ -1,0 +1,1737 @@
+{
+  "suite": "smara-research-lanes-quick-deep-8-v1",
+  "manifest_sha256": "b882d2c5284cb4429b0be34edf7521816439211818d490af4a46421a72411e37",
+  "references_sha256": "32ca7f485d90125654305a43af7c5ebb613636a3fdac6b713cafd47d00bd35fd",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "glm5.3-flash",
+  "runs": [
+    {
+      "case": "RL1-Q01",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "HTTP Semantics is defined by **RFC 9110** (also known as STD 97), published by the IETF in June 2022. It obsoletes RFC 7230–7231 and, together with RFC 9111 (Caching), RFC 9112 (HTTP/1.1), and RFC 9113 (HTTP/2), forms the current HTTP specification family.\n\nSources:\n-  (IETF Datatracker — \"HTTP Semantics RFC 9110 also known as STD 97\")\n-  (HTTP Working Group)\n-  (MDN Web Docs)\n\nFINAL LABEL: supported\n\nSources:\n- https://datatracker.ietf.org/doc/rfc9110\n- https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview\n- https://httpwg.org/specs/rfc9110.html",
+      "iterations": 9,
+      "usage": {
+        "billed_tokens": 70986,
+        "dollars": 0.09,
+        "model_calls": 9,
+        "tool_calls": 11
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 7,
+        "answer_urls": [
+          "https://datatracker.ietf.org/doc/rfc9110",
+          "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview",
+          "https://httpwg.org/specs/rfc9110.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_fact_question"
+          ],
+          "requested": "auto",
+          "score": -2,
+          "selected": "quick"
+        },
+        "fetched_source_count": 3
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 52.058
+    },
+    {
+      "case": "RL1-Q03",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "According to Cargo's official documentation, Cargo.lock is used to record the exact versions of a project's dependencies. The Cargo Book states verbatim: \"Cargo.lock contains exact information about your dependencies. It is maintained by Cargo and should not be manually edited.\" This ensures reproducible builds by pinning precise dependency versions, and it is kept in version control for projects with binaries.\n\nSources:\n-  (authoritative passage)\n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://dev-doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/cargo/commands/cargo-generate-lockfile.html\n- https://doc.rust-lang.org/cargo/faq.html?highlight=why+do+binaries+have+cargo.lock+but+not\n- https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/stable/cargo/faq.html\n- https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 35417,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 6,
+        "answer_urls": [
+          "https://dev-doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/cargo/commands/cargo-generate-lockfile.html",
+          "https://doc.rust-lang.org/cargo/faq.html?highlight=why+do+binaries+have+cargo.lock+but+not",
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/stable/cargo/faq.html",
+          "https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 6
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 19.905
+    },
+    {
+      "case": "RL1-Q04",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "PostgreSQL's official software license is the **PostgreSQL License** — a BSD-like \"permissive\" license. Verbatim from the official PostgreSQL 17 Press Kit: \"PostgreSQL uses the PostgreSQL License , a BSD-like \"permissive\" license.\" Corroborated by SPDX (full name: \"PostgreSQL License\") and the PostgreSQL source distribution README.\n\nSources:\n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://download.postgresql.org/pub/README\n- https://opensource.org/license/postgresql\n- https://spdx.org/licenses/PostgreSQL.html\n- https://www.postgresql.org/about/press/presskit17/base",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 35707,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://download.postgresql.org/pub/README",
+          "https://opensource.org/license/postgresql",
+          "https://spdx.org/licenses/PostgreSQL.html",
+          "https://www.postgresql.org/about/press/presskit17/base"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 4
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 18.881
+    },
+    {
+      "case": "RL1-D02",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Report preserved (artifact: `C:\\Users\\sujal\\AppData\\Local\\Temp\\smara-live-v2-w9g5x9tf\\RL1-D02-r1\\.smara\\sessions\\session\\artifacts\\46603aad6768aa3ad8732dbf3bd4193b215ba71ac54a3ba5bab8e1bd0a3f7925.md`, 8,559 chars, 26 fetched sources, 7/7 claims validated).\n\n**Summary:** PEP 621's exact title is **\"Storing project metadata in pyproject.toml\"** (Standards Track, Packaging, created 22-Jun-2020, Final). Its purpose, verbatim from the abstract: \"This PEP specifies how to write a project's core metadata in a pyproject.toml file for packaging-related tools to consume.\" Packaging tools consume it via a two-layer pipeline: front-ends (pip, build) read the PEP 518 `[build-system]` table and invoke the PEP 517 build backend, which parses the `[project]` table and translates it into core metadata (PKG-INFO/Metadata) embedded in wheels and sdists — setuptools (≥61.0.0) \"will use the information contained in this file as an input in the build process,\" and Flit confirms \"Project metadata is specified in the standard [project] table.\"\n\n**Sources:**\n- https://peps.python.org/pep-0621\n- https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html\n- https://flit.pypa.io/en/latest/pyproject_toml.html\n- https://peps.python.org/pep-0518\n- https://packaging.python.org/en/latest/specifications/pyproject-toml\n- https://setuptools.pypa.io/en/latest/userguide/license_migration.html\n\nFINAL LABEL: supported",
+      "iterations": 15,
+      "usage": {
+        "billed_tokens": 238798,
+        "dollars": 0.15,
+        "model_calls": 15,
+        "tool_calls": 23
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 29,
+        "answer_urls": [
+          "https://peps.python.org/pep-0621",
+          "https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html",
+          "https://flit.pypa.io/en/latest/pyproject_toml.html",
+          "https://peps.python.org/pep-0518",
+          "https://packaging.python.org/en/latest/specifications/pyproject-toml",
+          "https://setuptools.pypa.io/en/latest/userguide/license_migration.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_report",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report",
+          "research_report"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "expected_lane": "deep",
+        "actual_lane": "deep",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "explicit_deep_intent:comprehensive report",
+            "comprehensive_deliverable",
+            "broad_prompt"
+          ],
+          "requested": "auto",
+          "score": 8,
+          "selected": "deep"
+        },
+        "fetched_source_count": 26,
+        "report_artifact_id": "46603aad6768aa3ad8732dbf3bd4193b215ba71ac54a3ba5bab8e1bd0a3f7925",
+        "report_characters": 8559
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 160.904
+    },
+    {
+      "case": "RL1-D03",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Deep comparative report delivered** (artifact: `C:\\Users\\sujal\\AppData\\Local\\Temp\\smara-live-v2-w9g5x9tf\\RL1-D03-r1\\.smara\\sessions\\session\\artifacts\\11d7d94f2d21cdc3917acdac7874895a97654ab085bd0483457eb55644b43cf1.md`, 9,700 chars, 22 fetched sources, 6-node DAG, 8/8 claims validated with evidence coverage 1.0).\n\n**Synthesis:**\n- **Cargo.toml (the manifest)** — written by you; describes package metadata and dependencies \"in a broad sense\" via version *requirements* (e.g. `serde = \"1.x\"`), not exact pins.\n- **Cargo.lock (the lockfile)** — contains \"exact information about your dependencies\"; it is \"maintained by Cargo and should not be manually edited.\" It stores the resolver's output: \"The result of the resolution is stored in the Cargo.lock file which 'locks' the dependencies to specific versions, and keeps them fixed over time\" — covering the full graph (including transitive deps) with exact versions, sources, and checksums.\n- **Why exact information?** Loose manifest ranges would re-resolve over time, so builds at different moments could pick different versions: \"This would be bad because we want reproducible builds.\" Pinning exact versions makes every later build (CI, teammates, releases) identical, with changes happening only via manifest edits or explicit `cargo update` (\"This command will update dependencies in the Cargo.lock file to the latest version\"). Convention: \"When in doubt, check Cargo.lock into the version control system (e.g. Git).\"\n\n**Sources:**\n- https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/cargo/reference/manifest.html\n- https://doc.rust-lang.org/cargo/reference/resolver.html\n- https://doc.rust-lang.org/cargo/faq.html\n- https://doc.rust-lang.org/cargo/commands/cargo-update.html\n\nFINAL LABEL: supported",
+      "iterations": 14,
+      "usage": {
+        "billed_tokens": 192235,
+        "dollars": 0.13999999999999999,
+        "model_calls": 14,
+        "tool_calls": 20
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 25,
+        "answer_urls": [
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/cargo/reference/manifest.html",
+          "https://doc.rust-lang.org/cargo/reference/resolver.html",
+          "https://doc.rust-lang.org/cargo/faq.html",
+          "https://doc.rust-lang.org/cargo/commands/cargo-update.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "expected_lane": "deep",
+        "actual_lane": "deep",
+        "requested_mode": "deep",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "deep",
+          "score": null,
+          "selected": "deep"
+        },
+        "fetched_source_count": 22,
+        "report_artifact_id": "11d7d94f2d21cdc3917acdac7874895a97654ab085bd0483457eb55644b43cf1",
+        "report_characters": 9700
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 127.949
+    },
+    {
+      "case": "RL1-Q01",
+      "category": "quick_research",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer:** HTTP Semantics is defined by **RFC 9110** (published June 2022; also designated STD 97, obsoleting RFC 2818 and 7230–7235).\n\nVerified across three unique fetched sources:\n-  (IETF Datatracker — \"RFC 9110 - HTTP Semantics\")\n-  (HTTP Working Group official spec page — \"RFC 9110 - HTTP Semantics\")\n-  (RFC info mirror — \"RFC 9110 - HTTP Semantics\")\n\nClaim \"RFC 9110 defines HTTP Semantics.\" passed validation (evidence coverage 1.0, precision 1.0).\n\nFINAL LABEL: supported\n\nSources:\n- https://datatracker.ietf.org/doc/rfc9110\n- https://httpwg.org/specs/rfc9110.html\n- https://rfcinfo.com/rfc-9110",
+      "iterations": 8,
+      "usage": {
+        "billed_tokens": 92512,
+        "dollars": 0.08,
+        "model_calls": 8,
+        "tool_calls": 7
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 6,
+        "answer_urls": [
+          "https://datatracker.ietf.org/doc/rfc9110",
+          "https://httpwg.org/specs/rfc9110.html",
+          "https://rfcinfo.com/rfc-9110"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_fact_question"
+          ],
+          "requested": "auto",
+          "score": -2,
+          "selected": "quick"
+        },
+        "fetched_source_count": 3
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 102.395
+    },
+    {
+      "case": "RL1-Q02",
+      "category": "quick_research",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "tomllib was added to the Python standard library in Python 3.11. The official Python documentation for the `tomllib` module states verbatim: \"Added in version 3.11.\" This is corroborated by PEP 680 (\"tomllib: Parse TOML in the standard library\"), which was accepted for Python 3.11, and the CPython implementation PR.\n\nSources:\n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://docs.python.org/3/library/tomllib.html\n- https://github.com/python/cpython/pull/31498\n- https://github.com/python/peps/blob/main/peps/pep-0680.rst",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 33274,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://docs.python.org/3/library/tomllib.html",
+          "https://github.com/python/cpython/pull/31498",
+          "https://github.com/python/peps/blob/main/peps/pep-0680.rst"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_default"
+          ],
+          "requested": "auto",
+          "score": 0,
+          "selected": "quick"
+        },
+        "fetched_source_count": 3
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 16.514
+    },
+    {
+      "case": "RL1-Q03",
+      "category": "quick_research",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "According to Cargo's official documentation, Cargo.lock stores the result of dependency resolution — it \"locks\" the dependencies to specific versions and keeps them fixed over time, ensuring reproducible builds. Verbatim from the Cargo Book (Dependency Resolution): \"The result of the resolution is stored in the Cargo.lock file which \"locks\" the dependencies to specific versions, and keeps them fixed over time.\"\n\nSources:\n-  (Cargo Book — Dependency Resolution, authoritative passage)\n-  (Cargo Book — FAQ, corroborating)\n\nFINAL LABEL: supported\n\nSources:\n- https://doc.rust-lang.org/cargo/commands/cargo-generate-lockfile.html\n- https://doc.rust-lang.org/cargo/faq.html?highlight=why+do+binaries+have+cargo.lock+but+not\n- https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/cargo/reference/resolver.html\n- https://doc.rust-lang.org/nightly/cargo/reference/resolver.html\n- https://doc.rust-lang.org/stable/cargo/faq.html\n- https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html",
+      "iterations": 7,
+      "usage": {
+        "billed_tokens": 41876,
+        "dollars": 0.07,
+        "model_calls": 7,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 7,
+        "answer_urls": [
+          "https://doc.rust-lang.org/cargo/commands/cargo-generate-lockfile.html",
+          "https://doc.rust-lang.org/cargo/faq.html?highlight=why+do+binaries+have+cargo.lock+but+not",
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/cargo/reference/resolver.html",
+          "https://doc.rust-lang.org/nightly/cargo/reference/resolver.html",
+          "https://doc.rust-lang.org/stable/cargo/faq.html",
+          "https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 7
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 23.238
+    },
+    {
+      "case": "RL1-Q04",
+      "category": "quick_research",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "PostgreSQL's official software license is the **PostgreSQL License** — a BSD-like \"permissive\" license. Verified verbatim from the authoritative source: \"PostgreSQL uses the PostgreSQL License , a BSD-like \"permissive\" license.\" Corroborated by SPDX (full name: \"PostgreSQL License\") and the Open Source Initiative.\n\nSources:\n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://opensource.org/license/postgresql\n- https://spdx.org/licenses/PostgreSQL.html\n- https://www.postgresql.org/about/press/presskit17/base",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 32814,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://opensource.org/license/postgresql",
+          "https://spdx.org/licenses/PostgreSQL.html",
+          "https://www.postgresql.org/about/press/presskit17/base"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 3
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 15.388
+    },
+    {
+      "case": "RL1-D01",
+      "category": "deep_research",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer:** RFC 9110's exact title is **\"HTTP Semantics\"** (also designated STD 97, published June 2022). It defines the version-independent semantics of HTTP — per its abstract: *\"This document describes the overall architecture of HTTP, establishes common terminology, and defines aspects of the protocol that are shared by all versions,\"* including core protocol elements, extensibility mechanisms, and the \"http\" and \"https\" URI schemes. It replaces the earlier HTTP/1.1 **RFC 7230–7235 (2014) family**: *\"This document updates RFC 3864 and obsoletes RFCs 2818, 7231, 7232, 7233, 7235, 7538, 7615, 7694, and portions of 7230\"* (RFC 7234 went to RFC 9111 and the remaining 7230/7231 portions to RFC 9112).\n\n**Public source:** https://datatracker.ietf.org/doc/rfc9110 (corroborated by the RFC Editor BibTeX record at https://www.rfc-editor.org/info/rfc9110)\n\n**Report artifact:** `C:\\Users\\sujal\\AppData\\Local\\Temp\\smara-live-v2-w9g5x9tf\\RL1-D01-r2\\.smara\\sessions\\session\\artifacts\\769730ba807794e991989fdeca40aa1d180fd0711c6db62a8b1de863077d4e32.md` (26 fetched sources, 3/3 claims validated)\n\nFINAL LABEL: supported",
+      "iterations": 14,
+      "usage": {
+        "billed_tokens": 282239,
+        "dollars": 0.13999999999999999,
+        "model_calls": 14,
+        "tool_calls": 17
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 48,
+        "answer_urls": [
+          "https://datatracker.ietf.org/doc/rfc9110",
+          "https://www.rfc-editor.org/info/rfc9110"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_gather",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report",
+          "research_report",
+          "research_report"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_gather",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "expected_lane": "deep",
+        "actual_lane": "deep",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "comprehensive_deliverable",
+            "broad_prompt"
+          ],
+          "requested": "auto",
+          "score": 4,
+          "selected": "deep"
+        },
+        "fetched_source_count": 26,
+        "report_artifact_id": "769730ba807794e991989fdeca40aa1d180fd0711c6db62a8b1de863077d4e32",
+        "report_characters": 6313
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 226.158
+    },
+    {
+      "case": "RL1-D02",
+      "category": "deep_research",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Report preserved (9,089 chars, 31 sources, 6/6 claims validated). \n\n**Summary:** PEP 621 is titled **\"Storing project metadata in pyproject.toml\"** (Status: Final, Type: Standards Track, Topic: Packaging, Created: 22-Jun-2020). Its purpose, verbatim from the abstract: \"This PEP specifies how to write a project's core metadata in a pyproject.toml file for packaging-related tools to consume.\" Packaging tools consume the metadata as follows: pyproject.toml \"acts as a configuration file for packaging-related tools (as well as other tools)\" via the `[build-system]`, `[project]`, and `[tool]` tables; PEP 518 declares build dependencies (\"This PEP specifies how Python software packages should specify what build dependencies they have in order to execute their chosen build system\"); and setuptools confirms direct consumption: \"Starting with PEP 621, the Python community selected pyproject.toml as a standard way of specifying project metadata. Setuptools has adopted this standard and will use the information contained in this file as an input in the build process.\" The PEP page notes it is \"a historical document\" with the canonical spec maintained on the PyPA specs page.\n\n**Sources:**\n- https://peps.python.org/pep-0621\n- https://raw.githubusercontent.com/python/peps/main/peps/pep-0621.rst\n- https://packaging.python.org/en/latest/specifications/pyproject-toml\n- https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html\n- https://peps.python.org/pep-0518\n\n**Report artifact:** `C:\\Users\\sujal\\AppData\\Local\\Temp\\smara-live-v2-w9g5x9tf\\RL1-D02-r2\\.smara\\sessions\\session\\artifacts\\5eb57c26b6e632f942a886492fa0f9fea6dec602cedbad03c501433cd39fab67.md`\n\nFINAL LABEL: supported",
+      "iterations": 24,
+      "usage": {
+        "billed_tokens": 357506,
+        "dollars": 0.24000000000000007,
+        "model_calls": 24,
+        "tool_calls": 31
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 32,
+        "answer_urls": [
+          "https://peps.python.org/pep-0621",
+          "https://raw.githubusercontent.com/python/peps/main/peps/pep-0621.rst",
+          "https://packaging.python.org/en/latest/specifications/pyproject-toml",
+          "https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html",
+          "https://peps.python.org/pep-0518"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_report",
+          "research_report",
+          "research_report"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "expected_lane": "deep",
+        "actual_lane": "deep",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "explicit_deep_intent:comprehensive report",
+            "comprehensive_deliverable",
+            "broad_prompt"
+          ],
+          "requested": "auto",
+          "score": 8,
+          "selected": "deep"
+        },
+        "fetched_source_count": 31,
+        "report_artifact_id": "5eb57c26b6e632f942a886492fa0f9fea6dec602cedbad03c501433cd39fab67",
+        "report_characters": 9089
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 174.565
+    },
+    {
+      "case": "RL1-D04",
+      "category": "deep_research",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Report:** Official License Declarations Compared: CPython (PSF-2.0), Django (BSD-3-Clause), NumPy (BSD-3-Clause) — preserved at `.smara\\sessions\\session\\artifacts\\ad8bff198349230cc209a4a0603ca693fcaa3cb0aec97f251e04148f04120019.md` (9,661 chars, 37 fetched sources, 4/4 claims validated).\n\n**Comparison of official license declarations (as of 2026-09-14):**\n\n- **CPython** — Python Software Foundation License Version 2 (SPDX: PSF-2.0). Primary repository evidence: the `LICENSE` file in `python/cpython`, which states verbatim: \"Python software and documentation are licensed under the Python Software Foundation License Version 2.\" — https://github.com/python/cpython/blob/main/LICENSE (corroborated by https://docs.python.org/3/license.html)\n- **Django** — 3-clause BSD license (SPDX: BSD-3-Clause). Primary repository evidence: the `LICENSE` file in `django/django` (\"Copyright (c) Django Software Foundation and individual contributors. All rights reserved.\" plus the three BSD clauses); the official FAQ states verbatim: \"Django is distributed under the 3-clause BSD license.\" — https://raw.githubusercontent.com/django/django/main/LICENSE (corroborated by https://docs.djangoproject.com/en/6.1/faq/general)\n- **NumPy** — Modified BSD license, i.e. the same BSD 3-clause terms (SPDX: BSD-3-Clause). Primary repository evidence: the `LICENSE.txt` file in `numpy/numpy` (\"Copyright (c) 2005-2025, NumPy Developers. All rights reserved.\" plus the three BSD clauses); numpy.org/about states verbatim: \"It is released under the liberal terms of the modified BSD license.\" — https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt (corroborated by https://numpy.org/about)\n\nCross-check: the SPDX BSD-3-Clause clause \"Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:\" appears verbatim in both the Django and NumPy repository license files (https://raw.githubusercontent.com/spdx/license-list-data/main/text/BSD-3-Clause.txt), while CPython's PSF-2.0 terms match the SPDX PSF-2.0 text (https://github.com/spdx/license-list-data/blob/main/text/PSF-2.0.txt). No contradictions found; Django and NumPy share the same license under different names, while CPython uses the distinct Python-specific PSF-2.0.\n\nFINAL LABEL: supported",
+      "iterations": 17,
+      "usage": {
+        "billed_tokens": 317287,
+        "dollars": 0.17,
+        "model_calls": 17,
+        "tool_calls": 34
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 37,
+        "answer_urls": [
+          "https://github.com/python/cpython/blob/main/LICENSE",
+          "https://docs.python.org/3/license.html",
+          "https://raw.githubusercontent.com/django/django/main/LICENSE",
+          "https://docs.djangoproject.com/en/6.1/faq/general",
+          "https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt",
+          "https://numpy.org/about",
+          "https://raw.githubusercontent.com/spdx/license-list-data/main/text/BSD-3-Clause.txt",
+          "https://github.com/spdx/license-list-data/blob/main/text/PSF-2.0.txt"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_report",
+          "research_report"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "expected_lane": "deep",
+        "actual_lane": "deep",
+        "requested_mode": "deep",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "deep",
+          "score": null,
+          "selected": "deep"
+        },
+        "fetched_source_count": 37,
+        "report_artifact_id": "ad8bff198349230cc209a4a0603ca693fcaa3cb0aec97f251e04148f04120019",
+        "report_characters": 9661
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 171.648
+    },
+    {
+      "case": "RL1-Q01",
+      "category": "quick_research",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "HTTP Semantics is defined by **RFC 9110** (also known as STD 97), an Internet Standard published in June 2022 that obsoletes the earlier HTTP/1.1 semantics RFCs (e.g., 7231). Verified verbatim from the IETF Datatracker passage: \"HTTP Semantics RFC 9110 also known as STD 97\", corroborated by the RFC Editor text and the HTTP Working Group spec page.\n\nSources:\n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://datatracker.ietf.org/doc/rfc9110\n- https://httpwg.org/specs/rfc9110.html\n- https://www.rfc-editor.org/rfc/rfc9110.txt",
+      "iterations": 7,
+      "usage": {
+        "billed_tokens": 50526,
+        "dollars": 0.07,
+        "model_calls": 7,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 10,
+        "answer_urls": [
+          "https://datatracker.ietf.org/doc/rfc9110",
+          "https://httpwg.org/specs/rfc9110.html",
+          "https://www.rfc-editor.org/rfc/rfc9110.txt"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_fact_question"
+          ],
+          "requested": "auto",
+          "score": -2,
+          "selected": "quick"
+        },
+        "fetched_source_count": 3
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 31.655
+    },
+    {
+      "case": "RL1-Q02",
+      "category": "quick_research",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "tomllib was added to the Python standard library in **Python 3.11**. The official documentation states verbatim: \"Added in version 3.11.\" — corroborated by PEP 680 (the accepted proposal for a TOML library in the stdlib) and the CPython implementation PR.\n\nSources:\n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://docs.python.org/3/library/tomllib.html\n- https://github.com/python/cpython/pull/31498\n- https://github.com/python/peps/blob/main/peps/pep-0680.rst\n- https://mail.python.org/archives/list/python-dev@python.org/thread/3AHGWYY562HHO55L4Z2OVYUFZP5W73IS",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 33344,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://docs.python.org/3/library/tomllib.html",
+          "https://github.com/python/cpython/pull/31498",
+          "https://github.com/python/peps/blob/main/peps/pep-0680.rst",
+          "https://mail.python.org/archives/list/python-dev@python.org/thread/3AHGWYY562HHO55L4Z2OVYUFZP5W73IS"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_default"
+          ],
+          "requested": "auto",
+          "score": 0,
+          "selected": "quick"
+        },
+        "fetched_source_count": 4
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 18.403
+    },
+    {
+      "case": "RL1-Q03",
+      "category": "quick_research",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "According to Cargo's official documentation (The Cargo Book, \"Cargo.toml vs Cargo.lock\"), Cargo.lock is used to record the exact versions of a project's dependencies: \"Cargo.lock contains exact information about your dependencies.\" It is maintained by Cargo and should not be manually edited, ensuring reproducible builds.\n\nSources:\n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://dev-doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/1.65.0/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 30556,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://dev-doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/1.65.0/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 4
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 19.972
+    },
+    {
+      "case": "RL1-Q04",
+      "category": "quick_research",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "PostgreSQL's official software license is **The PostgreSQL License** (SPDX short identifier: `PostgreSQL`) — a liberal, OSI-approved open-source license similar to BSD/MIT. Verified verbatim from the Open Source Initiative passage: \"To use it, say that it is The PostgreSQL License, and then substitute the copyright year and name of the copyright holder into the body of the license.\"\n\nSources:\n-  (Open Source Initiative)\n-  (SPDX — full name \"PostgreSQL License\")\n-  (PostgreSQL distribution README)\n\nFINAL LABEL: supported\n\nSources:\n- https://download.postgresql.org/pub/README\n- https://opensource.org/license/postgresql\n- https://spdx.org/licenses/PostgreSQL.html\n- https://www.postgresql.org/about/press/faq",
+      "iterations": 7,
+      "usage": {
+        "billed_tokens": 43973,
+        "dollars": 0.07,
+        "model_calls": 7,
+        "tool_calls": 6
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://download.postgresql.org/pub/README",
+          "https://opensource.org/license/postgresql",
+          "https://spdx.org/licenses/PostgreSQL.html",
+          "https://www.postgresql.org/about/press/faq"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 4
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 26.233
+    },
+    {
+      "case": "RL1-D01",
+      "category": "deep_research",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**RFC 9110 research complete** — report preserved at `.smara\\sessions\\session\\artifacts\\1670741e1ae544c061227ffeee4bdc120ec37560ff3b2ce6973ee5859c4aad78.md` (29 unique fetched sources, 3/3 claims validated).\n\n**Synthesis:**\n- **Exact title:** \"HTTP Semantics\" — confirmed by the RFC Editor primary text header, the HTTP WG spec page, the IETF Datatracker BibTeX, the RFC Editor STD 97 page, and the RFC Index.\n- **What it defines:** Per its abstract, it \"describes the overall architecture of HTTP, establishes common terminology, and defines aspects of the protocol that are shared by all versions,\" including \"core protocol elements, extensibility mechanisms, and the 'http' and 'https' Uniform Resource Identifier (URI) schemes\" — i.e., the version-independent core HTTP semantics (Standards Track, also STD 97).\n- **Earlier HTTP/1.1 RFC family replaced:** the **RFC 723x family (RFC 7230–7235, June 2014)**. RFC 9110 \"obsoletes RFCs 2818, 7231, 7232, 7233, 7235, 7538, 7615, 7694, and portions of 7230\" — within the HTTP/1.1 suite: RFC 7231 (Semantics and Content), 7232 (Conditional Requests), 7233 (Range Requests), 7235 (Authentication), and portions of 7230 (Message Syntax and Routing); the rest of 7230 went to RFC 9112 and RFC 7234 to RFC 9111.\n\n**Sources:** https://www.rfc-editor.org/rfc/rfc9110.txt · https://httpwg.org/specs/rfc9110.html · https://datatracker.ietf.org/doc/rfc9110/bibtex · https://www.rfc-editor.org/info/std97 · https://www.rfc-editor.org/rfc/rfc7231.txt · https://www.rfc-editor.org/rfc/rfc9112.txt · https://www.rfc-editor.org/rfc/rfc9111.txt\n\nFINAL LABEL: supported",
+      "iterations": 11,
+      "usage": {
+        "billed_tokens": 223483,
+        "dollars": 0.10999999999999999,
+        "model_calls": 11,
+        "tool_calls": 20
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 52,
+        "answer_urls": [
+          "https://www.rfc-editor.org/rfc/rfc9110.txt",
+          "https://httpwg.org/specs/rfc9110.html",
+          "https://datatracker.ietf.org/doc/rfc9110/bibtex",
+          "https://www.rfc-editor.org/info/std97",
+          "https://www.rfc-editor.org/rfc/rfc7231.txt",
+          "https://www.rfc-editor.org/rfc/rfc9112.txt",
+          "https://www.rfc-editor.org/rfc/rfc9111.txt"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "expected_lane": "deep",
+        "actual_lane": "deep",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "comprehensive_deliverable",
+            "broad_prompt"
+          ],
+          "requested": "auto",
+          "score": 4,
+          "selected": "deep"
+        },
+        "fetched_source_count": 29,
+        "report_artifact_id": "1670741e1ae544c061227ffeee4bdc120ec37560ff3b2ce6973ee5859c4aad78",
+        "report_characters": 7262
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 246.6
+    },
+    {
+      "case": "RL1-D02",
+      "category": "deep_research",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Report preserved (artifact: `fd8b1320d595452c3d2647cbaa1ece121804274b7a12d1ab9bb98908e6779ebe.md`, 25 sources, 6/6 claims validated).\n\n**Synthesis:** PEP 621's exact title is **\"PEP 621 – Storing project metadata in pyproject.toml\"** (Standards Track, Packaging, status **Final**, created 22-Jun-2020). Its purpose, verbatim from the abstract: *\"This PEP specifies how to write a project's core metadata in a pyproject.toml file for packaging-related tools to consume.\"* Packaging tools consume this metadata as follows: build backends (setuptools, Hatch, Flit, PDM, Poetry 2.0+) parse the standardized `[project]` table and translate it into Core Metadata (METADATA/PKG-INFO) during PEP 517 builds — setuptools states it \"will use the information contained in this file as an input in the build process\" — while frontends (pip, build, uv) invoke the declared backend and PyPI consumes the resulting metadata. The canonical, up-to-date specification is maintained by PyPA at packaging.python.org; the PEP itself is now marked a historical document.\n\nSources: https://peps.python.org/pep-0621 · https://packaging.python.org/en/latest/specifications/pyproject-toml · https://setuptools.pypa.io/en/stable/userguide/pyproject_config.html\n\nFINAL LABEL: supported",
+      "iterations": 17,
+      "usage": {
+        "billed_tokens": 287172,
+        "dollars": 0.17,
+        "model_calls": 17,
+        "tool_calls": 21
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 26,
+        "answer_urls": [
+          "https://peps.python.org/pep-0621",
+          "https://packaging.python.org/en/latest/specifications/pyproject-toml",
+          "https://setuptools.pypa.io/en/stable/userguide/pyproject_config.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_fetch",
+          "research_resolve",
+          "research_fetch",
+          "research_resolve",
+          "research_validate",
+          "research_report",
+          "research_report",
+          "research_report",
+          "research_report",
+          "research_report"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_fetch",
+          "research_resolve",
+          "research_fetch",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "expected_lane": "deep",
+        "actual_lane": "deep",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "explicit_deep_intent:comprehensive report",
+            "comprehensive_deliverable",
+            "broad_prompt"
+          ],
+          "requested": "auto",
+          "score": 8,
+          "selected": "deep"
+        },
+        "fetched_source_count": 25,
+        "report_artifact_id": "fd8b1320d595452c3d2647cbaa1ece121804274b7a12d1ab9bb98908e6779ebe",
+        "report_characters": 6736
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 221.442
+    },
+    {
+      "case": "RL1-Q02",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "tool_error",
+      "completed": false,
+      "answer": "API_ERROR: Model API HTTP 404: {\"error\":{\"message\":\"glm5.3-flash has been deprecated.\",\"code\":\"not_found_error\",\"request_id\":\"20260916_093bb2f0-9199-474c-be74-92c83120e229\"}}\nFINAL LABEL: insufficient",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 33310,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 0
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [],
+        "successful_tool_names": []
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 0.478
+    },
+    {
+      "case": "RL1-D01",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "tool_error",
+      "completed": false,
+      "answer": "API_ERROR: Model API HTTP 404: {\"error\":{\"message\":\"glm5.3-flash has been deprecated.\",\"code\":\"not_found_error\",\"request_id\":\"20260916_78010db7-6698-4d6d-ae4c-49670cab7671\"}}\nFINAL LABEL: insufficient",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 34059,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 0
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [],
+        "successful_tool_names": []
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 0.332
+    },
+    {
+      "case": "RL1-D04",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "tool_error",
+      "completed": false,
+      "answer": "API_ERROR: Model API HTTP 404: {\"error\":{\"message\":\"glm5.3-flash has been deprecated.\",\"code\":\"not_found_error\",\"request_id\":\"20260916_bd5a11b7-f99a-462e-a626-f2e4e46b16d9\"}}\nFINAL LABEL: insufficient",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 33992,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 0
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [],
+        "successful_tool_names": []
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 0.33
+    },
+    {
+      "case": "RL1-D03",
+      "category": "deep_research",
+      "repeat": 2,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "tool_error",
+      "completed": false,
+      "answer": "API_ERROR: Model API HTTP 404: {\"error\":{\"message\":\"glm5.3-flash has been deprecated.\",\"code\":\"not_found_error\",\"request_id\":\"20260916_832eea71-485f-4ba9-a637-865f31bcf169\"}}\nFINAL LABEL: insufficient",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 33963,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 0
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [],
+        "successful_tool_names": []
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 0.369
+    },
+    {
+      "case": "RL1-D03",
+      "category": "deep_research",
+      "repeat": 3,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "tool_error",
+      "completed": false,
+      "answer": "API_ERROR: Model API HTTP 404: {\"error\":{\"message\":\"glm5.3-flash has been deprecated.\",\"code\":\"not_found_error\",\"request_id\":\"20260916_88133731-9c79-4a87-bd62-b9febafd9dd7\"}}\nFINAL LABEL: insufficient",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 33963,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 0
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [],
+        "successful_tool_names": []
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 0.318
+    },
+    {
+      "case": "RL1-D04",
+      "category": "deep_research",
+      "repeat": 3,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "tool_error",
+      "completed": false,
+      "answer": "API_ERROR: Model API HTTP 404: {\"error\":{\"message\":\"glm5.3-flash has been deprecated.\",\"code\":\"not_found_error\",\"request_id\":\"20260916_eb6618cb-7426-4521-bd19-a08a745af483\"}}\nFINAL LABEL: insufficient",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 33992,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 0
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [],
+        "successful_tool_names": []
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 0.336
+    }
+  ],
+  "started_at_epoch": 1789378220.1889591,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 850.0,
+    "max_seconds": 10800.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 40,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 3516.805,
+  "terminal_state": "complete",
+  "summary": {
+    "expected": 24,
+    "attempted": 24,
+    "passed": 18,
+    "overall_rate": 0.75,
+    "category_rates": {
+      "quick_research": 0.9166666666666666,
+      "deep_research": 0.5833333333333334
+    },
+    "false_completions": 0,
+    "safety_violations": 0,
+    "safety_unmeasured_attempts": 0,
+    "gate_passed": false
+  }
+}

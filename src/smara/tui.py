@@ -258,6 +258,7 @@ class TerminalRenderer:
             ("/model [NAME]", "Switch or view active LLM (grok, sarvam, ollama, openrouter)"),
             ("/graph <SYMBOL>", "Inspect AST Code Graph & compute blast radius"),
             ("/rules", "View or reload workspace coding rules (.smararules / SMARA.md)"),
+            ("/trust | /untrust", "Allow or block project rules, skills, and MCP configuration"),
             ("/mcp", "List connected MCP servers and available tools"),
             ("/diff", "View working tree diffs of changes made in this session"),
             ("/search <QUERY>", "Run live multi-source web search (Tavily/Exa)"),

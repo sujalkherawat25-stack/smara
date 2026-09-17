@@ -1,0 +1,284 @@
+{
+  "suite": "smara-research-lanes-quick-deep-8-v1",
+  "manifest_sha256": "b882d2c5284cb4429b0be34edf7521816439211818d490af4a46421a72411e37",
+  "references_sha256": "32ca7f485d90125654305a43af7c5ebb613636a3fdac6b713cafd47d00bd35fd",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "sarvam-105b",
+  "runs": [
+    {
+      "case": "RL1-Q01",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "",
+      "iterations": 12,
+      "usage": {
+        "billed_tokens": 94791,
+        "dollars": 0.11999999999999998,
+        "model_calls": 12,
+        "tool_calls": 19
+      },
+      "validator": {
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_validate",
+          "research_search",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate",
+          "research_validate",
+          "research_search",
+          "research_validate",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 62.39
+    },
+    {
+      "case": "RL1-Q02",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "answer_or_evidence_claim_mismatch",
+      "status": "completed",
+      "completed": true,
+      "answer": "Specification A new module tomllib will be added to the Python standard library, exposing the following public functions: def load( fp: SupportsRead[bytes], /, *, parse_float: Callable[[str], Any] = ..., ) -> dict[str, Any]: ...\ncanonical-doc:: :mod:`python:tomllib` Abstract This PEP proposes adding the tomllib module to the standard library for parsing TOML (Tom's Obvious Minimal Language,  ).\n\nSources:\n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://docs.python.org/3/library/tomllib.html\n- https://github.com/python/cpython/pull/31498\n- https://github.com/python/peps/blob/main/peps/pep-0680.rst",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 9347,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          false,
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://docs.python.org/3/library/tomllib.html",
+          "https://github.com/python/cpython/pull/31498",
+          "https://github.com/python/peps/blob/main/peps/pep-0680.rst"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_default"
+          ],
+          "requested": "auto",
+          "score": 0,
+          "selected": "quick"
+        },
+        "fetched_source_count": 3
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 11.596
+    },
+    {
+      "case": "RL1-Q03",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "answer_or_evidence_claim_mismatch",
+      "status": "completed",
+      "completed": true,
+      "answer": "While cargo new defaults to tracking Cargo.lock in version control, whether you do is dependent on the needs of your package.\n\nSources:\n- \n- \n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://dev-doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/cargo/commands/cargo-generate-lockfile.html\n- https://doc.rust-lang.org/cargo/faq.html\n- https://doc.rust-lang.org/stable/cargo/faq.html\n- https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 9230,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          false,
+          true
+        ],
+        "fetched_sources": 5,
+        "answer_urls": [
+          "https://dev-doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/cargo/commands/cargo-generate-lockfile.html",
+          "https://doc.rust-lang.org/cargo/faq.html",
+          "https://doc.rust-lang.org/stable/cargo/faq.html",
+          "https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 5
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 11.777
+    },
+    {
+      "case": "RL1-Q04",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Permissions Conditions Limitations ✓ Commercial use ✓ Distribution ✓ Modification ✓ Private use ⓘ License and copyright notice ✕ Liability ✕ Warranty PostgreSQL License Copyright (c) [year], [fullname] Permission to use, copy, modify, and distribute this software and its documentation for any purpose, without fee, and without a written agreement is hereby granted, provided that the above copyright notice and this paragraph and the following two paragraphs appear in all copies.\n\nSources:\n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://choosealicense.com/licenses/postgresql\n- https://wiki.postgresql.org/wiki/FAQ\n- https://www.postgresql.org/about/press/faq",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 9204,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://choosealicense.com/licenses/postgresql",
+          "https://wiki.postgresql.org/wiki/FAQ",
+          "https://www.postgresql.org/about/press/faq"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 3
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 11.09
+    }
+  ],
+  "started_at_epoch": 1789543384.9422967,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 150.0,
+    "max_seconds": 5400.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 12,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 97.091
+}

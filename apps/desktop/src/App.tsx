@@ -2289,11 +2289,11 @@ function BrowserTab() {
           <div className="browser-panel" style={{ gridColumn: "1 / -1" }}>
             <div className="panel-sub-header">
               <h4>📊 Autonomous Strategic Market Analysis & Intelligence</h4>
-              {researchResult?.report_path && (
+              {(researchResult?.research_report_path || researchResult?.report_path) && (
                 <button
                   type="button"
                   className="btn-refresh"
-                  onClick={() => desktop.openFile(researchResult.report_path)}
+                  onClick={() => desktop.openFile(researchResult.research_report_path || researchResult.report_path)}
                 >
                   📄 Open Full Report
                 </button>
@@ -2312,7 +2312,8 @@ function BrowserTab() {
               <div className="research-results-container" style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "16px" }}>
                 <div style={{ background: "rgba(56, 189, 248, 0.1)", border: "1px solid rgba(56, 189, 248, 0.3)", borderRadius: "8px", padding: "14px" }}>
                   <h4 style={{ color: "#38bdf8", margin: "0 0 8px 0" }}>📋 Executive Summary</h4>
-                  <p style={{ margin: 0, lineHeight: 1.6, color: "#e2e8f0" }}>{researchResult.analysis?.executive_summary}</p>
+                  <p style={{ margin: 0, lineHeight: 1.6, color: "#e2e8f0" }}>{researchResult.answer || researchResult.analysis?.executive_summary}</p>
+                  {researchResult.research_mode && <p style={{ margin: "8px 0 0", color: "#94a3b8" }}>Selected lane: <strong>{researchResult.research_mode}</strong></p>}
                 </div>
 
                 <div>
@@ -3266,6 +3267,8 @@ function GoalsTab({ onSetNotice }: { onSetNotice: (msg: string) => void }) {
 
           {/* Steps Pipeline */}
           <p>{activeSession.answer}</p>
+          {activeSession.research_mode && <p>Research lane: <strong>{activeSession.research_mode}</strong></p>}
+          {activeSession.research_lane_decision?.reasons?.length > 0 && <p>Lane decision: {activeSession.research_lane_decision.reasons.join(", ")}</p>}
           <p>Remaining budget: {JSON.stringify(activeSession.remaining_budget || {})}</p>
           {(activeSession.unresolved_work || []).map((item: string, i: number) => <p key={`unresolved-${i}`}>{item}</p>)}
           {(activeSession.artifact_locations || []).map((path: string) => <p key={path}>{path}</p>)}

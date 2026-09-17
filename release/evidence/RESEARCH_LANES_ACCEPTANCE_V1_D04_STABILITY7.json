@@ -1,0 +1,143 @@
+{
+  "suite": "smara-research-lanes-quick-deep-8-v1",
+  "manifest_sha256": "b882d2c5284cb4429b0be34edf7521816439211818d490af4a46421a72411e37",
+  "references_sha256": "32ca7f485d90125654305a43af7c5ebb613636a3fdac6b713cafd47d00bd35fd",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "sarvam-105b",
+  "runs": [
+    {
+      "case": "RL1-D04",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Python Software Foundation License Version 2.\nBSD-3-Clause license.\nmodified BSD license.\nPython Software Foundation License Version 2.\n\nSources:\n- https://docs.djangoproject.com/en/6.0/internals/git\n- https://docs.python.org/3/license.html\n- https://github.com/django/django/blob/08a752c1cd8f378b4c64d96c319da23726df6ed3/LICENSE.python\n- https://github.com/django/django/blob/5c456a879300e5f51010d3f6aa7449302413efed/setup.cfg\n- https://github.com/django/django/blob/b181cae2e3697b2e53b5b67ac67e59f3b05a6f0d/LICENSE.python\n- https://github.com/django/django/blob/e5c844d6f2a4ac6ae674d741b5f1fa2a688cedf4/LICENSE.python\n- https://github.com/django/django/blob/main/LICENSE\n- https://github.com/django/django/blob/stable/2.2.x/LICENSE.python\n- https://github.com/django/django?tab=readme-ov-file\n- https://github.com/numpy/numpy/blob/62df7a80e79b7323f673f9b26c5f699325606466/setup.py\n- https://github.com/numpy/numpy/blob/main/LICENSE.txt\n- https://github.com/numpy/numpy/blob/main/pyproject.toml\n- https://github.com/numpy/numpy?tab=License-1-ov-file\n- https://github.com/python/cpython\n- https://github.com/python/cpython/blob/HEAD/LICENSE\n- https://github.com/python/cpython/blob/b6ae2ae47ca754aed313e84990f220777cf45905/LICENSE\n- https://github.com/python/cpython/blob/ba0a3edd26bce7abf435ac4103b707e8ea1c3e7e/LICENSE\n- https://github.com/python/cpython/blob/d9d63f13cf5b6b896c245099c42b08f6da083d05/LICENSE\n- https://github.com/python/cpython/blob/v3.12.13/LICENSE\n- https://github.com/python/cpython?tab=License-1-ov-file\n- https://numpy.org/\n- https://numpy.org/about\n- https://numpy.org/doc/2.3/license.html\n- https://numpy.org/doc/stable/license.html\n- https://raw.githubusercontent.com/python/cpython/main/LICENSE\n- https://raw.githubusercontent.com/python/cpython/master/LICENSE\n\nFINAL LABEL: supported",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 6427,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 13
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 26,
+        "answer_urls": [
+          "https://docs.djangoproject.com/en/6.0/internals/git",
+          "https://docs.python.org/3/license.html",
+          "https://github.com/django/django/blob/08a752c1cd8f378b4c64d96c319da23726df6ed3/LICENSE.python",
+          "https://github.com/django/django/blob/5c456a879300e5f51010d3f6aa7449302413efed/setup.cfg",
+          "https://github.com/django/django/blob/b181cae2e3697b2e53b5b67ac67e59f3b05a6f0d/LICENSE.python",
+          "https://github.com/django/django/blob/e5c844d6f2a4ac6ae674d741b5f1fa2a688cedf4/LICENSE.python",
+          "https://github.com/django/django/blob/main/LICENSE",
+          "https://github.com/django/django/blob/stable/2.2.x/LICENSE.python",
+          "https://github.com/django/django?tab=readme-ov-file",
+          "https://github.com/numpy/numpy/blob/62df7a80e79b7323f673f9b26c5f699325606466/setup.py",
+          "https://github.com/numpy/numpy/blob/main/LICENSE.txt",
+          "https://github.com/numpy/numpy/blob/main/pyproject.toml",
+          "https://github.com/numpy/numpy?tab=License-1-ov-file",
+          "https://github.com/python/cpython",
+          "https://github.com/python/cpython/blob/HEAD/LICENSE",
+          "https://github.com/python/cpython/blob/b6ae2ae47ca754aed313e84990f220777cf45905/LICENSE",
+          "https://github.com/python/cpython/blob/ba0a3edd26bce7abf435ac4103b707e8ea1c3e7e/LICENSE",
+          "https://github.com/python/cpython/blob/d9d63f13cf5b6b896c245099c42b08f6da083d05/LICENSE",
+          "https://github.com/python/cpython/blob/v3.12.13/LICENSE",
+          "https://github.com/python/cpython?tab=License-1-ov-file",
+          "https://numpy.org/",
+          "https://numpy.org/about",
+          "https://numpy.org/doc/2.3/license.html",
+          "https://numpy.org/doc/stable/license.html",
+          "https://raw.githubusercontent.com/python/cpython/main/LICENSE",
+          "https://raw.githubusercontent.com/python/cpython/master/LICENSE"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "expected_lane": "deep",
+        "actual_lane": "deep",
+        "requested_mode": "deep",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "deep",
+          "score": null,
+          "selected": "deep"
+        },
+        "fetched_source_count": 26,
+        "report_artifact_id": "13c4391d21aabbd081f9f4e8dd20016c828a03b7e4cef822a414b31a5da4729e",
+        "report_characters": 7720
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 54.787
+    }
+  ],
+  "started_at_epoch": 1789548009.7601066,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 80.0,
+    "max_seconds": 1200.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 12,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 54.918,
+  "terminal_state": "complete",
+  "summary": {
+    "expected": 1,
+    "attempted": 1,
+    "passed": 1,
+    "overall_rate": 1.0,
+    "category_rates": {
+      "deep_research": 1.0
+    },
+    "false_completions": 0,
+    "safety_violations": 0,
+    "safety_unmeasured_attempts": 0,
+    "gate_passed": true
+  }
+}

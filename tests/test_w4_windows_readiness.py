@@ -13,9 +13,13 @@ def test_w4_doctor_runs_independent_functional_probes(tmp_path):
     assert {"configured","available","tested","status","detail"}<=set(result["checks"]["browser_backend"])
     assert result["checks"]["browser_backend"]["tested"]
     assert result["checks"]["process_operations"]["tested"]
-    assert set(result["profiles"])=={"research","live_web_research","local_execution"}
+    assert set(result["profiles"])=={"research","quick_research","deep_research","local_execution"}
     assert "research_validate" in result["profiles"]["research"]["capabilities"]
-    assert set(result["profiles"]["live_web_research"]["capabilities"])=={"research_plan","research_search","research_fetch","research_inspect","research_analyze","research_resolve","research_validate"}
+    expected={"research_plan","research_search","research_fetch","research_gather","research_inspect","research_analyze","research_resolve","research_validate","research_report"}
+    assert set(result["profiles"]["quick_research"]["capabilities"])==expected
+    assert set(result["profiles"]["deep_research"]["capabilities"])==expected
+    assert result["profiles"]["quick_research"]["budget"]["wall_seconds"]==120
+    assert result["profiles"]["deep_research"]["budget"]["wall_seconds"]==1800
     assert "process_start" in result["profiles"]["local_execution"]["capabilities"]
     rendered=json.dumps(result);assert "API_KEY" not in rendered and "Bearer " not in rendered
 

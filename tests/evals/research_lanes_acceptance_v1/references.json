@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "suite": "smara-research-lanes-quick-deep-8-v1",
+  "sealed": true,
+  "references": {
+    "RL1-Q01": {
+      "expected_answer": "RFC 9110 — HTTP Semantics",
+      "required_claims": [
+        {"any_of": ["RFC 9110"]},
+        {"any_of": ["HTTP Semantics"]}
+      ],
+      "allowed_domains": ["rfc-editor.org", "ietf.org"]
+    },
+    "RL1-Q02": {
+      "expected_answer": "Python 3.11",
+      "required_claims": [
+        {"any_of": ["Python 3.11", "3.11"]},
+        {"any_of": ["tomllib"]}
+      ],
+      "allowed_domains": ["python.org", "docs.python.org"]
+    },
+    "RL1-Q03": {
+      "expected_answer": "Cargo.lock contains exact information about dependencies",
+      "required_claims": [
+        {"any_of": ["exact information about your dependencies", "exact dependency versions", "exact versions"]},
+        {"any_of": ["Cargo.lock"]}
+      ],
+      "allowed_domains": ["doc.rust-lang.org"]
+    },
+    "RL1-Q04": {
+      "expected_answer": "PostgreSQL License",
+      "required_claims": [
+        {"any_of": ["PostgreSQL License"]}
+      ],
+      "allowed_domains": ["postgresql.org"]
+    },
+    "RL1-D01": {
+      "expected_answer": "RFC 9110 — HTTP Semantics defines HTTP semantics and replaces the earlier HTTP/1.1 RFC family",
+      "required_claims": [
+        {"any_of": ["RFC 9110"]},
+        {"any_of": ["HTTP Semantics"]},
+        {"any_of": ["overall architecture", "HTTP semantics"]}
+      ],
+      "allowed_domains": ["rfc-editor.org", "ietf.org"]
+    },
+    "RL1-D02": {
+      "expected_answer": "PEP 621 — Storing project metadata in pyproject.toml",
+      "required_claims": [
+        {"any_of": ["PEP 621"]},
+        {"any_of": ["Storing project metadata in pyproject.toml"]},
+        {"any_of": ["pyproject.toml"]}
+      ],
+      "allowed_domains": ["peps.python.org", "python.org"]
+    },
+    "RL1-D03": {
+      "expected_answer": "Cargo.toml declares project dependencies while Cargo.lock records exact dependency information",
+      "required_claims": [
+        {"any_of": ["Cargo.toml"]},
+        {"any_of": ["Cargo.lock"]},
+        {"any_of": ["exact information about your dependencies", "exact dependency versions", "exact versions"]}
+      ],
+      "allowed_domains": ["doc.rust-lang.org"]
+    },
+    "RL1-D04": {
+      "expected_answer": "CPython uses the Python Software Foundation License Version 2; Django uses BSD-3-Clause; NumPy uses the modified BSD license",
+      "required_claims": [
+        {"any_of": ["Python Software Foundation License Version 2", "PSF License"]},
+        {"any_of": ["BSD-3-Clause", "BSD 3-Clause"]},
+        {"any_of": ["modified BSD", "BSD 3-Clause"]}
+      ],
+      "allowed_domains": ["github.com", "python.org", "numpy.org", "djangoproject.com"]
+    }
+  }
+}

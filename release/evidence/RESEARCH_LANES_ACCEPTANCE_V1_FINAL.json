@@ -1,0 +1,313 @@
+{
+  "suite": "smara-research-lanes-quick-deep-8-v1",
+  "manifest_sha256": "b882d2c5284cb4429b0be34edf7521816439211818d490af4a46421a72411e37",
+  "references_sha256": "32ca7f485d90125654305a43af7c5ebb613636a3fdac6b713cafd47d00bd35fd",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "glm5.3-flash",
+  "runs": [
+    {
+      "case": "RL1-Q01",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer:** HTTP Semantics is defined by **RFC 9110** (also known as STD 97), an Internet Standard published in June 2022.\n\nVerbatim source passage: \"HTTP Semantics RFC 9110 also known as STD 97\"\n\nSources:\n- IETF Datatracker: \n- IETF mail archive (announcement):  (RFC 9110 / STD 97 announcement)\n- MDN Web Docs: \n\nFINAL LABEL: supported\n\nSources:\n- https://datatracker.ietf.org/doc/rfc9110\n- https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Resources_and_specifications\n- https://mailarchive.ietf.org/arch/msg/ietf-announce/vg9JMu7V281gQ59WHANapf97pBI",
+      "iterations": 7,
+      "usage": {
+        "billed_tokens": 51086,
+        "dollars": 0.07,
+        "model_calls": 7,
+        "tool_calls": 7
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 10,
+        "answer_urls": [
+          "https://datatracker.ietf.org/doc/rfc9110",
+          "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Resources_and_specifications",
+          "https://mailarchive.ietf.org/arch/msg/ietf-announce/vg9JMu7V281gQ59WHANapf97pBI"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_search",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_search",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_fact_question"
+          ],
+          "requested": "auto",
+          "score": -2,
+          "selected": "quick"
+        },
+        "fetched_source_count": 3
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 51.457
+    },
+    {
+      "case": "RL1-Q02",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer:** tomllib was added to the Python standard library in **Python 3.11** (via PEP 680).\n\nVerified against three diverse fetched sources:\n- Python 3.11 tomllib documentation (verbatim: \"New in version 3.11.\"): \n- What's New in Python 3.11 (lists tomllib as a new standard library module under PEP 680): \n- CPython commit \"bpo-40059: Add tomllib (PEP-680)\": \n\nFINAL LABEL: supported\n\nSources:\n- https://docs.python.org/3.11/library/tomllib.html\n- https://docs.python.org/3/library/tomllib.html\n- https://docs.python.org/release/3.11.1/library/tomllib.html\n- https://docs.python.org/release/3.11.1/whatsnew/3.11.html\n- https://github.com/hukkin/tomli\n- https://github.com/python/cpython/commit/591f6754b56cb7f6c31fce8c22528bdf0a99556c\n- https://github.com/python/cpython/pull/31498",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 76861,
+        "dollars": 0.09999999999999999,
+        "model_calls": 10,
+        "tool_calls": 9
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 8,
+        "answer_urls": [
+          "https://docs.python.org/3.11/library/tomllib.html",
+          "https://docs.python.org/3/library/tomllib.html",
+          "https://docs.python.org/release/3.11.1/library/tomllib.html",
+          "https://docs.python.org/release/3.11.1/whatsnew/3.11.html",
+          "https://github.com/hukkin/tomli",
+          "https://github.com/python/cpython/commit/591f6754b56cb7f6c31fce8c22528bdf0a99556c",
+          "https://github.com/python/cpython/pull/31498"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_default"
+          ],
+          "requested": "auto",
+          "score": 0,
+          "selected": "quick"
+        },
+        "fetched_source_count": 7
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 48.43
+    },
+    {
+      "case": "RL1-Q03",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "According to Cargo's official documentation, Cargo.lock is a lockfile that records the exact versions of dependencies used for a build. The Cargo FAQ states verbatim: \"The purpose of a Cargo.lock lockfile is to describe the state of the world at the time of a successful build.\" The Cargo Book guide adds: \"Cargo.lock contains exact information about your dependencies.\"\n\nSources:\n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://doc.rust-lang.org/cargo/faq.html?highlight=why+do+binaries+have+cargo.lock+but+not\n- https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/stable/cargo/faq.html\n- https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html",
+      "iterations": 12,
+      "usage": {
+        "billed_tokens": 83858,
+        "dollars": 0.11999999999999998,
+        "model_calls": 12,
+        "tool_calls": 11
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://doc.rust-lang.org/cargo/faq.html?highlight=why+do+binaries+have+cargo.lock+but+not",
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/stable/cargo/faq.html",
+          "https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 4
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 39.73
+    },
+    {
+      "case": "RL1-Q04",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "PostgreSQL's official software license is the **PostgreSQL License** — a BSD-like \"permissive\" license. Verbatim from the official PostgreSQL press kit: \"PostgreSQL uses the PostgreSQL License , a BSD-like \"permissive\" license.\" Corroborated by SPDX (full name: \"PostgreSQL License\") and the Open Source Initiative's \"The PostgreSQL License\" page.\n\nSources:\n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://opensource.org/license/postgresql\n- https://spdx.org/licenses/PostgreSQL.html\n- https://www.postgresql.org/about/press/presskit17/base",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 33594,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://opensource.org/license/postgresql",
+          "https://spdx.org/licenses/PostgreSQL.html",
+          "https://www.postgresql.org/about/press/presskit17/base"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 3
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 17.944
+    }
+  ],
+  "started_at_epoch": 1789377848.3069675,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 850.0,
+    "max_seconds": 10800.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 40,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 157.93
+}

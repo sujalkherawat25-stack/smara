@@ -127,6 +127,19 @@ integrations). Work that takes time, creates an artifact, or needs approval
 must use `smara run` so it survives a closed terminal or browser. Direct chat
 can never send, edit, delete, execute local commands, or bypass an approval.
 
+Public-web research has two durable lanes. Smara selects one automatically and
+records why, or it can be selected explicitly:
+
+```powershell
+smara run "When was Python 3.13 released?" --tool-profile live-web --research-mode quick
+smara run "Compare the inference-compute market and produce a comprehensive report" --tool-profile live-web --research-mode deep
+smara run "Research the latest primary evidence" --tool-profile live-web --research-mode auto --json
+```
+
+Quick Research performs bounded parallel retrieval over 3–8 sources. Deep
+Research executes adaptive ready-node DAG waves over 20–200 sources and cannot
+complete until its claims validate and a comprehensive report artifact exists.
+
 The pairing flow is deliberately two-part: an authenticated Smara Web session
 starts the code, and the terminal exchanges it once. Smara
 stores only hashes of pairing codes and issued device IDs; the CLI bearer uses

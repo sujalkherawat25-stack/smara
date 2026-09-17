@@ -1,0 +1,150 @@
+{
+  "suite": "smara-research-lanes-quick-deep-8-v1",
+  "manifest_sha256": "b882d2c5284cb4429b0be34edf7521816439211818d490af4a46421a72411e37",
+  "references_sha256": "32ca7f485d90125654305a43af7c5ebb613636a3fdac6b713cafd47d00bd35fd",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "sarvam-105b",
+  "runs": [
+    {
+      "case": "RL1-D01",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Does RFC 9110 define the PATCH method?\nCore Specifications The “core” semantics of the HTTP protocol are defined by: RFC 9110: HTTP Semantics RFC 9111: HTTP Caching Those semantics are expressed “on the wire” in three ways: RFC 9112: HTTP/1.1 RFC 9113: HTTP/2 RFC 9114: HTTP/3 Later versions of HTTP offer field compression: RFC 7541: HPACK Header Compression for HTTP/2 RFC 9204: QPACK Field Compression for HTTP/3 These RFCs collectively obsolete all preceding RFCs defining HTTP, including RFC 1945 , RFC 2068 , RFC 2616 , RFC 2617 , RFC 7230-5 , and RFC 7540 .\nErratum 7306 - RFC 9110 RFC Errata About Login RFC 9110 inline-errata , \"HTTP Semantics\", June 2022 Source of RFC: httpbis (wit) Errata-ID: 7306 Status: Verified Type: Technical Publication Formats: TXT PDF HTML Reported By: Julian Reschke Date Reported: 2023-01-13 Verified by: Francesca Palombini Date Verified: 2023-10-23 Section 14.1.1 says: ranges-specifier = range-unit \"=\" range-set range-set = 1#range-spec range-spec = int-range / suffix-range / other-range It should say: ranges-specifier = range-unit \"=\" OWS range-set range-set = 1#range-spec range-spec = int-range / suffix-range / other-range Notes: The ABNF is inconsistent with one of the examples given in 14.1.2 bytes= 0-999, 4500-5499, -1000 The bug in the ABNF was likely introduced when converting away from \"implied linear whitespace\".\n\nSources:\n- http://www.armware.dk/RFC/std/std97.html\n- https://curl.se/rfc/rfc9110.txt\n- https://datatracker.ietf.org/doc/rfc9110/bibtex\n- https://datatracker.ietf.org/doc/rfc9110/history\n- https://datatracker.ietf.org/doc/rfc9110/references\n- https://errata.rfc-editor.org/eid7306\n- https://getrfc.com/data/txt/rfc9110.txt\n- https://hjp.at/doc/rfc/rfc9110.html\n- https://httpwg.org/specs\n- https://httpwg.org/specs/rfc9110.html\n- https://httpwg.org/specs/rfc9112.html\n- https://mnot.net/blog/2014/rfc2616_is_dead\n- https://rfcinfo.com/rfc-9110\n- https://rfcinfo.com/rfc-9110/appendix-b\n- https://statuscodefyi.com/specs/rfc-9110\n- https://web.archive.org/web/20231003104525/https:/httpwg.org/specs/rfc9110.html\n- https://www.earth.org.uk/bibliography/IETFRFC9110.html\n- https://www.greenbytes.de/tech/webdav/httpbis-errata-status2.html\n- https://www.restguide.info/rfc-9110\n- https://www.rfc-editor.org/rfc/rfc9112.html\n\nFINAL LABEL: supported",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 4794,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 21
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 154,
+        "answer_urls": [
+          "http://www.armware.dk/RFC/std/std97.html",
+          "https://curl.se/rfc/rfc9110.txt",
+          "https://datatracker.ietf.org/doc/rfc9110/bibtex",
+          "https://datatracker.ietf.org/doc/rfc9110/history",
+          "https://datatracker.ietf.org/doc/rfc9110/references",
+          "https://errata.rfc-editor.org/eid7306",
+          "https://getrfc.com/data/txt/rfc9110.txt",
+          "https://hjp.at/doc/rfc/rfc9110.html",
+          "https://httpwg.org/specs",
+          "https://httpwg.org/specs/rfc9110.html",
+          "https://httpwg.org/specs/rfc9112.html",
+          "https://mnot.net/blog/2014/rfc2616_is_dead",
+          "https://rfcinfo.com/rfc-9110",
+          "https://rfcinfo.com/rfc-9110/appendix-b",
+          "https://statuscodefyi.com/specs/rfc-9110",
+          "https://web.archive.org/web/20231003104525/https:/httpwg.org/specs/rfc9110.html",
+          "https://www.earth.org.uk/bibliography/IETFRFC9110.html",
+          "https://www.greenbytes.de/tech/webdav/httpbis-errata-status2.html",
+          "https://www.restguide.info/rfc-9110",
+          "https://www.rfc-editor.org/rfc/rfc9112.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "expected_lane": "deep",
+        "actual_lane": "deep",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "comprehensive_deliverable",
+            "broad_prompt"
+          ],
+          "requested": "auto",
+          "score": 4,
+          "selected": "deep"
+        },
+        "fetched_source_count": 20,
+        "report_artifact_id": "ffa76a394891548873114138da84765e3be97f58eaa9a9c8b238ef7a6d8939ef",
+        "report_characters": 8005
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 124.994
+    }
+  ],
+  "started_at_epoch": 1789542581.589815,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 90.0,
+    "max_seconds": 900.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 12,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 125.117,
+  "terminal_state": "complete",
+  "summary": {
+    "expected": 1,
+    "attempted": 1,
+    "passed": 1,
+    "overall_rate": 1.0,
+    "category_rates": {
+      "deep_research": 1.0
+    },
+    "false_completions": 0,
+    "safety_violations": 0,
+    "safety_unmeasured_attempts": 0,
+    "gate_passed": true
+  }
+}

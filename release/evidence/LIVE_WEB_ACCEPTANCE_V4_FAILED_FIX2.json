@@ -1,0 +1,256 @@
+{
+  "suite": "smara-live-web-canonical-agent-20-v4",
+  "manifest_sha256": "38856069ad115b1b9ae4fdf3765cd759c8e0670933657d886502f5d4a370c38a",
+  "references_sha256": "507ffa03ad022f99da333d39b0efd34551e86ba0aee3104a65c2822c79051e6c",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "glm5.3-flash",
+  "runs": [
+    {
+      "case": "LW4-F04",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Cargo.lock contains exact information about your dependencies.\n\nSources:\n- https://dev-doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html\n\nFINAL LABEL: supported",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 28406,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://dev-doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 18.858
+    },
+    {
+      "case": "LW4-D02",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "This release marks the transition of Node.js 22.x into Long Term Support (LTS) with the codename 'Jod'.\n\nSources:\n- https://github.com/nodejs/node/releases/tag/v22.11.0\n- https://nodejs.org/en/blog/release/v22.11.0\n- https://nodesource.com/blog/Node.js-v22-Long-Term-Support-LTS\n\nFINAL LABEL: supported",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 26592,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://github.com/nodejs/node/releases/tag/v22.11.0",
+          "https://nodejs.org/en/blog/release/v22.11.0",
+          "https://nodesource.com/blog/Node.js-v22-Long-Term-Support-LTS"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 19.922
+    },
+    {
+      "case": "LW4-D03",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": false,
+      "reason": "answer_or_evidence_claim_mismatch",
+      "status": "completed",
+      "completed": true,
+      "answer": "OpenAI has introduced GPT-4.1, a successor to the GPT-4o multimodal AI model launched by the company last year.\n\nSources:\n- https://community.openai.com/t/april-14-livestream-announcing-gpt-4-1-series-api-only-models-gpt-4-5-deprecated/1230037/1\n- https://techcrunch.com/2025/04/14/openais-new-gpt-4-1-models-focus-on-coding\n- https://www.theverge.com/news/647896/openai-chatgpt-gpt-4-1-mini-nano-launch-availability\n\nFINAL LABEL: supported",
+      "iterations": 7,
+      "usage": {
+        "billed_tokens": 48151,
+        "dollars": 0.07,
+        "model_calls": 7,
+        "tool_calls": 7
+      },
+      "validator": {
+        "claims": [
+          false
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://community.openai.com/t/april-14-livestream-announcing-gpt-4-1-series-api-only-models-gpt-4-5-deprecated/1230037/1",
+          "https://techcrunch.com/2025/04/14/openais-new-gpt-4-1-models-focus-on-coding",
+          "https://www.theverge.com/news/647896/openai-chatgpt-gpt-4-1-mini-nano-launch-availability"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_analyze",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 40.304
+    },
+    {
+      "case": "LW4-C04",
+      "category": "contradiction_changed_fact",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "LTS lasts five years and consequently OpenSSL 1.1.1 has reached its EOL as of today, 11th September 2023.\n\nSources:\n- https://mta.openssl.org/pipermail/openssl-announce/2023-September/000271.html\n- https://mta.openssl.org/pipermail/openssl-users/2023-March/016116.html\n- https://openssl-library.org/post/2023-09-11-eol-111/index.html\n\nFINAL LABEL: supported",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 27259,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://mta.openssl.org/pipermail/openssl-announce/2023-September/000271.html",
+          "https://mta.openssl.org/pipermail/openssl-users/2023-March/016116.html",
+          "https://openssl-library.org/post/2023-09-11-eol-111/index.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 13.908
+    }
+  ],
+  "started_at_epoch": 1789371242.3404684,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 250.0,
+    "max_seconds": 3600.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 14,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 93.398,
+  "terminal_state": "complete",
+  "summary": {
+    "expected": 4,
+    "attempted": 4,
+    "passed": 3,
+    "overall_rate": 0.75,
+    "category_rates": {
+      "current_factual": 1.0,
+      "breaking_news_or_dated": 0.5,
+      "contradiction_changed_fact": 1.0
+    },
+    "false_completions": 1,
+    "safety_violations": 0,
+    "safety_unmeasured_attempts": 0,
+    "gate_passed": false
+  }
+}

@@ -2486,9 +2486,9 @@ async fn get_goal_sessions() -> Result<Value, String> {
 
 #[tauri::command]
 async fn run_deep_research(topic: String) -> Result<Value, String> {
-    let clean = topic.trim().replace('"', "\\\"");
+    let topic_json = serde_json::to_string(topic.trim()).map_err(|error| error.to_string())?;
     let py_code = format!(
-        "import json\nfrom smara.deep_research import DeepResearchEngine\nengine = DeepResearchEngine()\nres = engine.run_full_pipeline(\"{clean}\")\nprint(json.dumps(res))\n"
+        "import json\nfrom smara.app_adapter import run_canonical_task\nres = run_canonical_task({topic_json}, tool_profile='research_web', research_mode='deep', budget_profile='research_deep')\nprint(json.dumps(res))\n"
     );
     run_python_bridge_code(&py_code).await
 }

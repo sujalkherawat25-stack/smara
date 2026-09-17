@@ -84,9 +84,21 @@ def test_failed_tool_call_does_not_satisfy_canonical_chain():
     assert reason == "canonical_tool_chain_incomplete"
     assert "research_search" not in detail["successful_tool_names"]
 
+
+def test_parallel_gather_satisfies_search_and_fetch_chain():
+    task = {"category": "current_factual"}
+    calls = [
+        {"name": name, "state": "completed", "result": {"status": "ok"}}
+        for name in ("research_plan", "research_gather", "research_resolve", "research_validate")
+    ]
+    agent = SimpleNamespace(_research=SimpleNamespace(index=SimpleNamespace(records={})))
+    passed, reason, detail = validate_attempt(task, {"required_claims": [], "allowed_domains": []}, agent, {"completed": True, "answer": ""}, calls)
+    assert detail["tool_chain_ok"]
+    assert reason != "canonical_tool_chain_incomplete"
+
 def test_strict_research_web_profile_exposes_only_canonical_tools():
     names = {item["function"]["name"] for item in get_tool_schemas("research_web")}
-    assert names == {"research_plan", "research_search", "research_fetch", "research_inspect", "research_analyze", "research_resolve", "research_validate"}
+    assert names == {"research_plan", "research_search", "research_fetch", "research_gather", "research_inspect", "research_analyze", "research_resolve", "research_validate", "research_report"}
     assert get_tool_schemas("research-web") == get_tool_schemas("research_web")
     assert get_tool_schemas("live-web") == get_tool_schemas("research_web")
 

@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "suite": "smara-research-lanes-quick-deep-8-v1",
+  "canonical_agent": true,
+  "reference_access": "validator_only",
+  "repetitions": 3,
+  "tasks": [
+    {
+      "id": "RL1-Q01",
+      "category": "quick_research",
+      "requested_mode": "auto",
+      "expected_lane": "quick",
+      "as_of": "2026-09-14",
+      "question": "Which RFC defines HTTP Semantics, and what is its number?"
+    },
+    {
+      "id": "RL1-Q02",
+      "category": "quick_research",
+      "requested_mode": "auto",
+      "expected_lane": "quick",
+      "as_of": "2026-09-14",
+      "question": "In which Python version was tomllib added to the standard library?"
+    },
+    {
+      "id": "RL1-Q03",
+      "category": "quick_research",
+      "requested_mode": "quick",
+      "expected_lane": "quick",
+      "as_of": "2026-09-14",
+      "question": "According to Cargo's official documentation, what is Cargo.lock used for?"
+    },
+    {
+      "id": "RL1-Q04",
+      "category": "quick_research",
+      "requested_mode": "quick",
+      "expected_lane": "quick",
+      "as_of": "2026-09-14",
+      "question": "What is the name of PostgreSQL's official software license?"
+    },
+    {
+      "id": "RL1-D01",
+      "category": "deep_research",
+      "requested_mode": "auto",
+      "expected_lane": "deep",
+      "as_of": "2026-09-14",
+      "question": "Conduct a comprehensive evidence-backed report answering this focused question: What is the exact title of RFC 9110, what does it define, and which earlier HTTP/1.1 RFC family does it replace? Keep the claims limited to those requested facts."
+    },
+    {
+      "id": "RL1-D02",
+      "category": "deep_research",
+      "requested_mode": "auto",
+      "expected_lane": "deep",
+      "as_of": "2026-09-14",
+      "question": "Prepare a comprehensive report on PEP 621 and pyproject.toml project metadata, including the exact PEP title, purpose, and how packaging tools consume the metadata."
+    },
+    {
+      "id": "RL1-D03",
+      "category": "deep_research",
+      "requested_mode": "deep",
+      "expected_lane": "deep",
+      "as_of": "2026-09-14",
+      "question": "Produce a deep comparative report explaining Cargo.toml versus Cargo.lock, their roles, and why the lockfile records exact dependency information."
+    },
+    {
+      "id": "RL1-D04",
+      "category": "deep_research",
+      "requested_mode": "deep",
+      "expected_lane": "deep",
+      "as_of": "2026-09-14",
+      "question": "Write a comprehensive source-backed report comparing the official license declarations for CPython, Django, and NumPy, naming each license and the primary repository evidence."
+    }
+  ]
+}

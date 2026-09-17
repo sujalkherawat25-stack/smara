@@ -1,0 +1,229 @@
+{
+  "suite": "smara-research-lanes-quick-deep-8-v1",
+  "manifest_sha256": "b882d2c5284cb4429b0be34edf7521816439211818d490af4a46421a72411e37",
+  "references_sha256": "32ca7f485d90125654305a43af7c5ebb613636a3fdac6b713cafd47d00bd35fd",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "glm5.3-flash",
+  "runs": [
+    {
+      "case": "RL1-Q03",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "According to Cargo's official documentation, Cargo.lock is used to record the exact versions of dependencies used in a build — \"Cargo.lock contains exact information about your dependencies.\" It is maintained by Cargo (not manually edited) and ensures reproducible builds by pinning the precise dependency versions.\n\nSources:\n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://dev-doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/cargo/commands/cargo-generate-lockfile.html\n- https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 37406,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://dev-doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/cargo/commands/cargo-generate-lockfile.html",
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 4
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 34.971
+    },
+    {
+      "case": "RL1-D02",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Report preserved:** `.smara/sessions/session/artifacts/d843e48364cd871edafbf727d2d6f088846ab5a9e3a4008bdac4b2aa5f220df3.md` (10,287 chars, 24 fetched sources, 6/6 claims validated).\n\n## Summary\n\n**Exact PEP title:** PEP 621 — **\"Storing project metadata in pyproject.toml\"** (Status: Final, Standards Track, Packaging; created 22-Jun-2020).\n\n**Purpose:** Its abstract states verbatim: *\"This PEP specifies how to write a project's core metadata in a pyproject.toml file for packaging-related tools to consume.\"* It standardizes a static, tool-agnostic `[project]` table so all build back-ends read the same metadata deterministically without executing Python code.\n\n**How packaging tools consume it:** PEP 518 front-ends (pip, build) read the `[build-system]` table, install the declared back-end into an isolated environment, and invoke PEP 517 hooks; the back-end (setuptools, Hatchling, Flit-core, PDM-backend) then reads the `[project]` table — *\"The keys defined in this specification MUST be in a table named [project] in pyproject.toml\"* — validates it, and converts it into RFC 822-style wheel/sdist METADATA. Poetry-core historically used `[tool.poetry]` instead of the standard table.\n\n**Key sources:**\n- https://peps.python.org/pep-0621\n- https://github.com/python/peps/blob/main/peps/pep-0621.rst\n- https://packaging.python.org/en/latest/specifications/pyproject-toml\n- https://setuptools.pypa.io/en/stable/userguide/pyproject%5Fconfig.html\n- https://pdm-project.org/en/latest/reference/pep621\n- https://hatch.pypa.io/1.5/config/metadata\n\nFINAL LABEL: supported",
+      "iterations": 16,
+      "usage": {
+        "billed_tokens": 239563,
+        "dollars": 0.16,
+        "model_calls": 16,
+        "tool_calls": 32
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 26,
+        "answer_urls": [
+          "https://peps.python.org/pep-0621",
+          "https://github.com/python/peps/blob/main/peps/pep-0621.rst",
+          "https://packaging.python.org/en/latest/specifications/pyproject-toml",
+          "https://setuptools.pypa.io/en/stable/userguide/pyproject%5Fconfig.html",
+          "https://pdm-project.org/en/latest/reference/pep621",
+          "https://hatch.pypa.io/1.5/config/metadata"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report",
+          "research_report"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "expected_lane": "deep",
+        "actual_lane": "deep",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "explicit_deep_intent:comprehensive report",
+            "comprehensive_deliverable",
+            "broad_prompt"
+          ],
+          "requested": "auto",
+          "score": 8,
+          "selected": "deep"
+        },
+        "fetched_source_count": 24,
+        "report_artifact_id": "d843e48364cd871edafbf727d2d6f088846ab5a9e3a4008bdac4b2aa5f220df3",
+        "report_characters": 10287
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 173.188
+    }
+  ],
+  "started_at_epoch": 1789377610.2847106,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 180.0,
+    "max_seconds": 3600.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 40,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 208.405,
+  "terminal_state": "complete",
+  "summary": {
+    "expected": 2,
+    "attempted": 2,
+    "passed": 2,
+    "overall_rate": 1.0,
+    "category_rates": {
+      "deep_research": 1.0,
+      "quick_research": 1.0
+    },
+    "false_completions": 0,
+    "safety_violations": 0,
+    "safety_unmeasured_attempts": 0,
+    "gate_passed": true
+  }
+}

@@ -920,20 +920,35 @@ def memory_tool(action: str, target: str = "memory", content: str = "", old_text
     return json.dumps(res, indent=2)
 
 
-def skills_list_tool(tag_filter: Optional[str] = None) -> str:
+def skills_list_tool(
+    tag_filter: Optional[str] = None,
+    workspace_dir: Optional[str] = None,
+    workspace_trusted: Optional[bool] = None,
+) -> str:
     """List available skills with metadata."""
     from smara.skills_system import get_default_skills_registry
-    registry = get_default_skills_registry()
+    registry = get_default_skills_registry(
+        workspace_dir=workspace_dir,
+        workspace_trusted=workspace_trusted,
+    )
     skills = registry.list_skills(tag_filter=tag_filter)
     if not skills:
         return "No skills currently discovered in workspace or global library."
     return json.dumps(skills, indent=2)
 
 
-def skill_view_tool(skill_name: str, relative_path: Optional[str] = None) -> str:
+def skill_view_tool(
+    skill_name: str,
+    relative_path: Optional[str] = None,
+    workspace_dir: Optional[str] = None,
+    workspace_trusted: Optional[bool] = None,
+) -> str:
     """Load full instructions or referenced documents for a skill."""
     from smara.skills_system import get_default_skills_registry
-    registry = get_default_skills_registry()
+    registry = get_default_skills_registry(
+        workspace_dir=workspace_dir,
+        workspace_trusted=workspace_trusted,
+    )
     res = registry.view_skill(skill_name, relative_path=relative_path)
     return json.dumps(res, indent=2)
 

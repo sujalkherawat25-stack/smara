@@ -43,7 +43,14 @@ class Budget:
     def __post_init__(self):
         if self.wall_seconds <= 0 or min(self.tool_calls, self.model_calls, self.billed_tokens) < 0 or self.dollars < 0: raise ValueError("invalid budget")
 
-BUDGET_PROFILES = {"short": Budget(), "gaia": Budget(900,160,80,400_000,3), "coding": Budget(1800,240,120,800_000,5), "long": Budget(5400,600,300,2_000_000,15)}
+BUDGET_PROFILES = {
+    "short": Budget(),
+    "research_quick": Budget(120, 40, 20, 150_000, 2),
+    "research_deep": Budget(1800, 400, 150, 1_500_000, 15),
+    "gaia": Budget(900,160,80,400_000,3),
+    "coding": Budget(1800,240,120,800_000,5),
+    "long": Budget(5400,600,300,2_000_000,15),
+}
 
 @dataclass(frozen=True)
 class RunRequest:
@@ -152,7 +159,7 @@ TOOL_SCHEMAS={
  "process_write":{"type":"object","additionalProperties":False,"required":["process_id","text"],"properties":{"process_id":{"type":"string"},"text":{"type":"string"}}},
  "process_cancel":{"type":"object","additionalProperties":False,"required":["process_id"],"properties":{"process_id":{"type":"string"}}},
  "browser_open":{"type":"object"},"browser_observe":{"type":"object"},"browser_navigate":{"type":"object"},"browser_act":{"type":"object"},"browser_tabs":{"type":"object"},"browser_switch":{"type":"object"},"browser_scroll":{"type":"object"},"browser_download":{"type":"object"},"browser_close":{"type":"object"},
- "research_plan":{"type":"object"},"research_search":{"type":"object"},"research_fetch":{"type":"object"},"research_ingest_file":{"type":"object"},"research_inspect":{"type":"object"},"research_analyze":{"type":"object"},"research_resolve":{"type":"object"},"research_validate":{"type":"object"},
+ "research_plan":{"type":"object"},"research_search":{"type":"object"},"research_fetch":{"type":"object"},"research_gather":{"type":"object"},"research_ingest_file":{"type":"object"},"research_inspect":{"type":"object"},"research_analyze":{"type":"object"},"research_resolve":{"type":"object"},"research_validate":{"type":"object"},"research_report":{"type":"object"},
 }
 
 class ProcessSupervisor:

@@ -1,0 +1,222 @@
+{
+  "suite": "smara-research-lanes-quick-deep-8-v1",
+  "manifest_sha256": "459284dafc9fa19b485f624bc127e831451407f3150013da57b820453c2e9ac0",
+  "references_sha256": "2bb100dc504549c7325b5c37ae724367e92dc9755fc1d16b9425ff56f831c4a2",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "glm5.3-flash",
+  "runs": [
+    {
+      "case": "RL1-Q01",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "HTTP Semantics is defined by **RFC 9110** (also published as STD 97). Verified across three fetched sources: the IETF Datatracker page titled \"RFC 9110 - HTTP Semantics\" (header: \"Request for Comments: 9110\"), the HTTP Working Group specs index stating the core semantics of HTTP are defined by \"RFC 9110: HTTP Semantics\", and a StatusCodeFYI reference guide \"RFC 9110: HTTP Semantics Deep Dive\".\n\nSources:\n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://datatracker.ietf.org/doc/rfc9110\n- https://httpwg.org/specs\n- https://rfcinfo.com/rfc-9110\n- https://statuscodefyi.com/guides/rfc-9110-http-semantics",
+      "iterations": 14,
+      "usage": {
+        "billed_tokens": 128003,
+        "dollars": 0.13999999999999999,
+        "model_calls": 14,
+        "tool_calls": 12
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 12,
+        "answer_urls": [
+          "https://datatracker.ietf.org/doc/rfc9110",
+          "https://httpwg.org/specs",
+          "https://rfcinfo.com/rfc-9110",
+          "https://statuscodefyi.com/guides/rfc-9110-http-semantics"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_validate",
+          "research_validate",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_validate",
+          "research_validate",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_fact_question"
+          ],
+          "requested": "auto",
+          "score": -2,
+          "selected": "quick"
+        },
+        "fetched_source_count": 4
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 83.2
+    },
+    {
+      "case": "RL1-D01",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "",
+      "iterations": 18,
+      "usage": {
+        "billed_tokens": 408202,
+        "dollars": 0.18000000000000002,
+        "model_calls": 18,
+        "tool_calls": 40
+      },
+      "validator": {
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 332.429
+    }
+  ],
+  "started_at_epoch": 1789375876.4549143,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 120.0,
+    "max_seconds": 1800.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 18,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 415.796,
+  "terminal_state": "complete",
+  "summary": {
+    "expected": 2,
+    "attempted": 2,
+    "passed": 1,
+    "overall_rate": 0.5,
+    "category_rates": {
+      "quick_research": 1.0,
+      "deep_research": 0.0
+    },
+    "false_completions": 0,
+    "safety_violations": 0,
+    "safety_unmeasured_attempts": 0,
+    "gate_passed": false
+  }
+}

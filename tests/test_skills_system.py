@@ -62,5 +62,31 @@ Always pull before push.
     print("All skills_system tests passed successfully!")
 
 
+def test_skill_reference_rejects_sibling_prefix_escape(tmp_path: Path):
+    skill_dir = tmp_path / ".smara" / "skills" / "foo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: foo\n---\nInstructions", encoding="utf-8")
+    sibling = tmp_path / ".smara" / "skills" / "foo-secret"
+    sibling.mkdir()
+    (sibling / "secret.txt").write_text("should not be readable", encoding="utf-8")
+
+    registry = SkillsRegistry(workspace_dir=tmp_path)
+    result = registry.view_skill("foo", relative_path="../foo-secret/secret.txt")
+    assert result["status"] == "error"
+
+
+def test_skill_asset_rejects_escape(tmp_path: Path):
+    registry = SkillsRegistry(workspace_dir=tmp_path)
+    result = registry.create_skill(
+        "safe",
+        "safe skill",
+        [],
+        "instructions",
+        assets={"../escape.txt": "must not be written"},
+    )
+    assert result["status"] == "error"
+    assert not (tmp_path / ".smara" / "escape.txt").exists()
+
+
 if __name__ == "__main__":
     test_skills_system()

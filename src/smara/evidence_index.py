@@ -123,6 +123,20 @@ class EvidenceIndex:
         best_reason="no_single_passage_support"
         refuted_reason=""
         url_tokens=set(_tokens(record.canonical_url))
+        # Standards pages frequently render a short identifier/title in
+        # separate navigation and heading blocks.  For a concise RFC/PEP
+        # title claim, allow an identifier-matched fetched URL to corroborate
+        # all meaningful title terms across that immutable document.  The URL
+        # must carry the same identifier, so this does not turn unrelated
+        # page-wide word overlap into proof.
+        identifier_match = re.search(r"\b(?:rfc|pep)\s*[-#]?(\d{2,6})\b", claim, re.I)
+        if identifier_match and record.kind != "search_snippet":
+            identifier = identifier_match.group(1)
+            url_identifier = re.search(r"(?:rfc|pep)[-/]?(\d{2,6})\b", record.canonical_url, re.I)
+            if url_identifier and url_identifier.group(1) == identifier:
+                source_tokens = set(_tokens(source))
+                if len(claim_terms) <= 10 and all(term in source_tokens for term in claim_terms):
+                    return ClaimJudgment("supported", "identifier_matched_document", evidence_id, passage_hash)
         for sentence_index, sentence in enumerate(source_sentences):
             # Official pages frequently put a title/identifier in one sentence
             # and its definition in the immediately following sentences. Keep

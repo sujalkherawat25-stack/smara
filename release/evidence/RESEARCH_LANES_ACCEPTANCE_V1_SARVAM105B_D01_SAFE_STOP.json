@@ -1,0 +1,33 @@
+{
+  "suite": "smara-research-lanes-quick-deep-8-v1",
+  "manifest_sha256": "b882d2c5284cb4429b0be34edf7521816439211818d490af4a46421a72411e37",
+  "references_sha256": "32ca7f485d90125654305a43af7c5ebb613636a3fdac6b713cafd47d00bd35fd",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "sarvam-105b",
+  "runs": [],
+  "started_at_epoch": 1789538842.4276776,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 30.0,
+    "max_seconds": 600.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 20,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 0.002,
+  "terminal_state": "cost_limit",
+  "summary": {
+    "expected": 1,
+    "attempted": 0,
+    "passed": 0,
+    "overall_rate": 0.0,
+    "category_rates": {
+      "deep_research": 0.0
+    },
+    "false_completions": 0,
+    "safety_violations": 0,
+    "safety_unmeasured_attempts": 0,
+    "gate_passed": false
+  }
+}

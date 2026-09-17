@@ -63,4 +63,4 @@ def diagnose(workspace:Path,*,test_browser:bool=True)->dict[str,Any]:
     from .autonomous_agent import get_tool_schemas
     from .harness import BUDGET_PROFILES
     def profile(name,budget):return {"id":name,"capabilities":[item["function"]["name"] for item in get_tool_schemas(name)],"model_context":{"accounting":"conservative_utf8_upper_bound","input_capacity":int(os.getenv("SMARA_MODEL_CONTEXT_TOKENS","65536")),"output_reserve":16384},"budget":BUDGET_PROFILES[budget].__dict__,"output_contract":"validated_result"}
-    return {"version":1,"ok":all(checks[name]["tested"] for name in required),"checks":checks,"required":list(required),"profiles":{"research":profile("research","long"),"live_web_research":profile("research_web","long"),"local_execution":profile("coding","coding")}}
+    return {"version":1,"ok":all(checks[name]["tested"] for name in required),"checks":checks,"required":list(required),"profiles":{"research":profile("research","long"),"quick_research":profile("research_web","research_quick"),"deep_research":profile("research_web","research_deep"),"local_execution":profile("coding","coding")}}

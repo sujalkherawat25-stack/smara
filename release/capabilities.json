@@ -2,7 +2,7 @@
   "version": 1,
   "inventory": {
     "path": "tests/evals/inventory.json",
-    "sha256": "5a59f2b78d91ae54c066b7054fa6c8493e9b4703f2e62ad54aa39f10159528d3"
+    "sha256": "c7b54e70af62ab3567637d62b674335bc51f4ed082e6e5fd447d6de3d48ac3ee"
   },
   "capabilities": {
     "durable_local_coding": {
@@ -77,31 +77,28 @@
         "profile": "research_web",
         "iteration_ceiling": 14,
         "evidence": {
-          "path": "release/evidence/LIVE_WEB_ACCEPTANCE_V4_FINAL8.json",
-          "sha256": "2a1e128c05751d76796e2a8dd5a132f1fd07e58826dbeb7a3c11b23bd84cc3ca",
+          "path": "release/evidence/LIVE_WEB_ACCEPTANCE_V4_FINAL12.json",
+          "sha256": "63a82067a566505dd93145483490fed62d15d494c87c1f23384717dad31779fc",
           "terminal_state": "complete",
-          "score": "59/60",
-          "rate": 0.9833333333,
+          "score": "60/60",
+          "rate": 1.0,
           "category_rates": {
             "current_factual": 1.0,
             "source_quality": 1.0,
             "contradiction_changed_fact": 1.0,
-            "breaking_news_or_dated": 0.9166666667,
+            "breaking_news_or_dated": 1.0,
             "quantitative_analysis": 1.0
           },
           "false_completions": 0,
           "safety_violations": 0,
           "safety_unmeasured_attempts": 0,
           "gate_passed": true,
-          "elapsed_seconds": 1805.379,
-          "billed_tokens": 2670008,
-          "conservative_rupees": 120.15
+          "elapsed_seconds": 1704.7,
+          "billed_tokens": 2656578,
+          "conservative_rupees": 119.55
         },
         "status": "passed_promoted",
-        "failure_summary": [
-          "One GPT-4.1 dated-fact repeat safely stopped at the 14-iteration ceiling without claiming completion; no false completion or safety violation occurred.",
-          "Cargo and NumPy remediation prompts now pin authoritative source wording and license equivalence."
-        ]
+        "failure_summary": []
       },
       "providers": [
         "tavily",
@@ -141,6 +138,176 @@
         "independent_recomputation": true
       },
       "limitation": "live quantitative ingestion is verified for the four declared CSV tasks; causal inference, forecasting and domain-specific statistical tests require separately declared methods and validation"
+    },
+    "research_lanes": {
+      "status": "verified_live_web_and_deterministic",
+      "suite": "tests/test_research_modes.py",
+      "scope": "explainable automatic Quick versus Deep lane routing; governed lane budgets; concurrent ready-DAG search/fetch waves; hybrid provider-order, lexical, character-similarity, authority and host-diversity reranking; durable lane decisions; and validated deep Markdown report artifacts",
+      "implementation_v1": {
+        "manifest": "tests/evals/research_lanes_acceptance_v1/manifest.json",
+        "manifest_sha256": "b882d2c5284cb4429b0be34edf7521816439211818d490af4a46421a72411e37",
+        "references": "tests/evals/research_lanes_acceptance_v1/references.json",
+        "references_sha256": "32ca7f485d90125654305a43af7c5ebb613636a3fdac6b713cafd47d00bd35fd",
+        "runner": "scripts/run_research_lane_acceptance_v1.py",
+      "deterministic_tests": "18 passed",
+        "features": [
+          "explicit quick/deep selection and persisted auto routing",
+          "governed per-lane budgets and bounded DAG retrieval",
+      "duplicate-fetch suppression and canonical evidence reuse",
+      "deep report redaction for unverified provider URLs",
+      "deterministic recovery report after validated provider timeout",
+      "resumable failed-attempt replacement with --retry-failed",
+      "Sarvam compact and truncated XML tool-call parsing",
+      "batched provider URL argument normalization",
+      "ready-DAG subset scheduling with explicit blocked dependency reporting",
+      "deterministic stale evidence-id repair against immutable fetched passages",
+      "bounded retrieval/validation stall recovery",
+      "single-pass diversified Deep source-floor recovery with fail-closed needs_input termination"
+        ]
+      },
+      "live_acceptance_v1": {
+        "provider": "sarvam",
+        "model": "glm5.3-flash",
+        "search_provider": "exa",
+        "smoke": {
+          "path": "release/evidence/RESEARCH_LANES_ACCEPTANCE_V1_SMOKE8.json",
+          "sha256": "424066443214cb9334c6764589537bff9cb0d16618ba86a7511973efad3af474",
+          "score": "2/2",
+          "rate": 1.0,
+          "quick_sources": 4,
+          "deep_sources": 24,
+          "false_completions": 0,
+          "safety_violations": 0,
+          "gate_passed": true
+        },
+        "full_matrix": {
+          "path": "release/evidence/RESEARCH_LANES_ACCEPTANCE_V1_FINAL2.json",
+          "sha256": "37082b489e7043d83cfed33d3e12f76e0be91d8a1b7abaf648331884fc818083",
+          "score": "18/24",
+          "rate": 0.75,
+          "quick_score": "11/12",
+          "deep_score": "7/12",
+          "false_completions": 0,
+          "safety_violations": 0,
+          "terminal_state": "complete",
+          "gate_passed": false,
+          "failure_classes": [
+            "provider credential rejected with HTTP 403 during retry",
+            "historical pre-fix Deep attempts exhausted billed-token, iteration, or wall-clock budgets"
+          ],
+          "billed_tokens": 2602984,
+          "conservative_rupees": 117.13,
+          "elapsed_seconds": 1675.6
+        },
+    "promotion_blocked_reason": "Historical pre-fix diagnostics only; superseded by live_acceptance_v1_post_fix, which passed the declared Quick/Deep promotion thresholds."
+  },
+  "live_acceptance_v1_latest_diagnostics": {
+    "provider": "sarvam",
+    "model": "sarvam-105b",
+    "search_provider": "exa",
+    "quick_case": {
+      "path": "release/evidence/RESEARCH_LANES_ACCEPTANCE_V1_SARVAM105B_Q01_FINAL.json",
+      "sha256": "bf5fe5bd1edb60b4c328dca07b335b1ca419f8d8218f000d9ccdbdeff35d50d9",
+      "score": "1/1",
+      "gate_passed": true,
+      "source_count": 3,
+      "false_completions": 0,
+      "safety_violations": 0
+    },
+    "deep_case": {
+      "path": "release/evidence/RESEARCH_LANES_ACCEPTANCE_V1_SARVAM105B_D01_FINAL6.json",
+      "sha256": "6ff91848c6f1893ada002369c73c1500b7113d3e61b27c8bc3ee70bc63571dbd",
+      "score": "0/1",
+      "gate_passed": false,
+      "failure": "historical provider attempt exhausted 40 iterations cycling report/validation after retrieval; no false completion and no safety violation",
+      "latest_local_fix": "Deep source-floor recovery now uses materially different query angles once and terminates with needs_input when the unique-source floor remains unreachable"
+    },
+      "partial_matrix": {
+      "path": "release/evidence/RESEARCH_LANES_ACCEPTANCE_V1_SARVAM105B_FINAL.json",
+      "sha256": "903c1f6e9edaefb2839d75b426dfd00c9becf2b0e1bbdb55998efdd7fb447ef6",
+      "attempted": "8/72 before bounded diagnostic stop",
+      "quick_score": "3/4",
+      "deep_score": "0/4",
+      "safety_violations": 0,
+        "promotion_decision": "blocked"
+      },
+      "deterministic_regression": "874 passed, 1 skipped, 2 warnings",
+      "safe_stop_recheck": {
+        "path": "release/evidence/RESEARCH_LANES_ACCEPTANCE_V1_SARVAM105B_D01_SAFE_STOP_ESCALATED.json",
+        "sha256": "47c36f85d814a16bd606fa5389e2dd5daa757d9dcfddcd4d397d94eae17516bd",
+        "status": "tool_error",
+        "reason": "Sarvam HTTP 403 invalid_or_missing authentication before research tools",
+        "false_completions": 0,
+        "safety_violations": 0
+      }
+  },
+      "live_acceptance_v1_post_fix": {
+        "provider": "sarvam",
+        "model": "sarvam-105b",
+        "search_provider": "exa",
+        "runner": "scripts/run_research_lane_acceptance_v1.py",
+        "matrix": {
+          "path": "release/evidence/RESEARCH_LANES_ACCEPTANCE_V1_SARVAM105B_MATRIX_FINAL6.json",
+          "sha256": "ecb9f406693adfdf60c7a78c0c36561d95cec5ec308f9f17412033451456b599",
+          "score": "22/24",
+          "rate": 0.9166666666666666,
+          "quick_score": "12/12",
+          "quick_rate": 1.0,
+          "deep_score": "10/12",
+          "deep_rate": 0.8333333333333334,
+          "false_completions": 0,
+          "safety_violations": 0,
+          "safety_unmeasured_attempts": 0,
+          "terminal_state": "complete",
+          "gate_passed": true,
+          "elapsed_seconds": 882.423,
+          "billed_tokens": 249657,
+          "provider_reported_dollars": 0.45,
+          "ceilings": {
+            "max_rupees": 150.0,
+            "max_seconds": 5400.0,
+            "max_iterations": 12
+          },
+          "fail_closed_attempts": [
+            "RL1-D01 repeat 1",
+            "RL1-D03 repeat 1"
+          ]
+        },
+        "deterministic_regression": "874 passed, 1 skipped, 2 warnings",
+        "promotion_decision": "passed_promoted"
+      },
+      "live_acceptance_v3": {
+        "path": "release/evidence/LIVE_WEB_ACCEPTANCE_V3.json",
+        "sha256": "dc5254ba1f4d5cdbb292f7fde71b5be54ae018b74d6723ba5dd5c199fa57083a",
+        "smoke_path": "release/evidence/LIVE_WEB_ACCEPTANCE_V3_SMOKE.json",
+        "smoke_sha256": "276d0d6314d128194f681f6f06cc6d34d37a21aa4683c40b1a14dbe342e469cf",
+        "smoke_score": "2/2 (100.0%)",
+        "matrix_score": "50/60 (83.3%)",
+        "quantitative_score": "12/12 (100.0%)",
+        "source_quality_score": "12/12 (100.0%)",
+        "current_factual_score": "9/12 (75.0%)",
+        "contradiction_changed_fact_score": "9/12 (75.0%)",
+        "breaking_news_or_dated_score": "8/12 (66.7%)",
+        "false_completions": 5,
+        "safety_violations": 0,
+        "gate_passed": false
+      },
+      "quick": {
+        "target_latency_seconds": [5, 30],
+        "source_range": [3, 8],
+        "max_nodes": 4,
+        "max_concurrency": 4,
+        "budget_profile": "research_quick"
+      },
+      "deep": {
+        "target_latency_seconds": [300, 1800],
+        "source_range": [20, 200],
+        "max_nodes": 24,
+        "max_concurrency": 8,
+        "budget_profile": "research_deep",
+        "report_required": true
+      },
+      "limitation": "verified on held-out public live-web and quantitative CSV tasks; private intranet environments and authenticated paywalls remain outside the public search scope"
     },
     "research_ocr": {
       "status": "implemented_provider_adapter_contract_verified",

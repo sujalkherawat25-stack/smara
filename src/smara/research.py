@@ -297,7 +297,13 @@ async def fetch_public_source(client: httpx.AsyncClient, initial_url: str) -> Re
         if len(response.content) > MAX_SOURCE_BYTES:
             raise ValueError("Source exceeded the 1 MB retrieval limit.")
         structured = any(kind in content_type for kind in ("application/json", "text/csv", "application/csv"))
-        if "html" not in content_type and not content_type.startswith("text/plain") and not structured:
+        # Standards repositories frequently serve RFC/PEP ``.txt`` files as
+        # ``application/octet-stream`` despite the body being UTF-8 text.
+        # Treat an explicit text-like extension as plain text while retaining
+        # the same public-URL, byte, and readable-content safeguards.
+        path_suffix = urlparse(current_url).path.lower()
+        text_extension = path_suffix.endswith((".txt", ".rst", ".md", ".markdown"))
+        if "html" not in content_type and not content_type.startswith("text/plain") and not structured and not text_extension:
             raise ValueError(f"Unsupported source content type: {content_type or 'unknown'}")
         extracted = _TextExtractor()
         decoded = raw.decode(response.encoding or "utf-8", errors="replace")

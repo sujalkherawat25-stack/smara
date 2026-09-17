@@ -1,0 +1,730 @@
+{
+  "suite": "smara-research-lanes-quick-deep-8-v1",
+  "manifest_sha256": "b882d2c5284cb4429b0be34edf7521816439211818d490af4a46421a72411e37",
+  "references_sha256": "32ca7f485d90125654305a43af7c5ebb613636a3fdac6b713cafd47d00bd35fd",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "sarvam-105b",
+  "runs": [
+    {
+      "case": "RL1-Q01",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "RFC 9110 - HTTP Semantics 📄 Documentation Work in Progress HTTP Extensions Future Work Participate About the HTTP Working Group Contribution Policy WG Charter Group Mailing List 📨 Meeting Materials Document Editor Resources RFC 9110 1.\n\nSources:\n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://datatracker.ietf.org/doc/rfc9110\n- https://httpwg.org/specs/rfc9110.html\n- https://rfcinfo.com/rfc-9110",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 9205,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 8,
+        "answer_urls": [
+          "https://datatracker.ietf.org/doc/rfc9110",
+          "https://httpwg.org/specs/rfc9110.html",
+          "https://rfcinfo.com/rfc-9110"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_fact_question"
+          ],
+          "requested": "auto",
+          "score": -2,
+          "selected": "quick"
+        },
+        "fetched_source_count": 3
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 14.562
+    },
+    {
+      "case": "RL1-Q02",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "A version of Tomli, the tomllib module, was added to the standard library in Python 3.11 via PEP 680 .\n\nSources:\n- \n- \n- \n- \n- \n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://docs.python.org/3.11/library/tomllib.html\n- https://docs.python.org/3/library/tomllib.html\n- https://docs.python.org/release/3.11.1/library/tomllib.html\n- https://github.com/hukkin/tomli?tab=readme-ov-file\n- https://github.com/python/cpython/blob/main/Doc/library/tomllib.rst\n- https://github.com/python/cpython/commit/591f6754b56cb7f6c31fce8c22528bdf0a99556c\n- https://github.com/python/cpython/pull/31498\n- https://github.com/python/peps/blob/main/peps/pep-0680.rst",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 9471,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 8,
+        "answer_urls": [
+          "https://docs.python.org/3.11/library/tomllib.html",
+          "https://docs.python.org/3/library/tomllib.html",
+          "https://docs.python.org/release/3.11.1/library/tomllib.html",
+          "https://github.com/hukkin/tomli?tab=readme-ov-file",
+          "https://github.com/python/cpython/blob/main/Doc/library/tomllib.rst",
+          "https://github.com/python/cpython/commit/591f6754b56cb7f6c31fce8c22528bdf0a99556c",
+          "https://github.com/python/cpython/pull/31498",
+          "https://github.com/python/peps/blob/main/peps/pep-0680.rst"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_default"
+          ],
+          "requested": "auto",
+          "score": 0,
+          "selected": "quick"
+        },
+        "fetched_source_count": 8
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 15.078
+    },
+    {
+      "case": "RL1-Q03",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "answer_or_evidence_claim_mismatch",
+      "status": "completed",
+      "completed": true,
+      "answer": "By the time Cargo next runs, bitflags 1.3.5 is out. When resolving dependencies, 1.2.1 will still be used because it is present in your Cargo.lock file.\n\nSources:\n- \n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://doc.rust-lang.org/cargo/faq.html\n- https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/stable/cargo/reference/resolver.html",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 4482,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          false,
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://doc.rust-lang.org/cargo/faq.html",
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/stable/cargo/reference/resolver.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 4
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 6.778
+    },
+    {
+      "case": "RL1-Q04",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The PostgreSQL Global Development Group remains committed to making PostgreSQL available as free and open source software in perpetuity. There are no plans to change the PostgreSQL License or release PostgreSQL under a different license.\n\nSources:\n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://download.postgresql.org/pub/README\n- https://wiki.postgresql.org/wiki/FAQ\n- https://www.postgresql.org/about/licence",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 4428,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://download.postgresql.org/pub/README",
+          "https://wiki.postgresql.org/wiki/FAQ",
+          "https://www.postgresql.org/about/licence"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 3
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 7.249
+    },
+    {
+      "case": "RL1-D01",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Cite RFC 9110 instead.\nDoes RFC 9110 define the PATCH method?\nRFC 9110 defines what HTTP messages mean, and not how a particular version transmits them. The same semantics apply to HTTP/1.1, HTTP/2, and HTTP/3.\n\nSources:\n- http://www.armware.dk/RFC/std/std97.html\n- https://curl.se/rfc/rfc9110.txt\n- https://datatracker.ietf.org/doc/rfc9110\n- https://datatracker.ietf.org/doc/rfc9110/bibtex\n- https://datatracker.ietf.org/doc/rfc9110/history\n- https://datatracker.ietf.org/doc/rfc9110/referencedby\n- https://datatracker.ietf.org/doc/rfc9110/references\n- https://getrfc.com/data/txt/rfc9110.txt\n- https://httpwg.org/specs\n- https://httpwg.org/specs/rfc9110.html\n- https://mnot.net/blog/2014/rfc2616_is_dead\n- https://p.rst.im/\n- https://rfcinfo.com/rfc-9110\n- https://statuscodefyi.com/guides/rfc-9110-http-semantics\n- https://statuscodefyi.com/specs/rfc-9110\n- https://web.archive.org/web/20231003104525/https:/httpwg.org/specs/rfc9110.html\n- https://www.earth.org.uk/bibliography/IETFRFC9110.html\n- https://www.innoq.com/en/blog/2025/04/kurze-geschichte-von-http\n- https://www.restguide.info/rfc-9110\n- https://www.rfc-editor.org/rfc/rfc9112.html\n\nFINAL LABEL: supported",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 5289,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 16
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 111,
+        "answer_urls": [
+          "http://www.armware.dk/RFC/std/std97.html",
+          "https://curl.se/rfc/rfc9110.txt",
+          "https://datatracker.ietf.org/doc/rfc9110",
+          "https://datatracker.ietf.org/doc/rfc9110/bibtex",
+          "https://datatracker.ietf.org/doc/rfc9110/history",
+          "https://datatracker.ietf.org/doc/rfc9110/referencedby",
+          "https://datatracker.ietf.org/doc/rfc9110/references",
+          "https://getrfc.com/data/txt/rfc9110.txt",
+          "https://httpwg.org/specs",
+          "https://httpwg.org/specs/rfc9110.html",
+          "https://mnot.net/blog/2014/rfc2616_is_dead",
+          "https://p.rst.im/",
+          "https://rfcinfo.com/rfc-9110",
+          "https://statuscodefyi.com/guides/rfc-9110-http-semantics",
+          "https://statuscodefyi.com/specs/rfc-9110",
+          "https://web.archive.org/web/20231003104525/https:/httpwg.org/specs/rfc9110.html",
+          "https://www.earth.org.uk/bibliography/IETFRFC9110.html",
+          "https://www.innoq.com/en/blog/2025/04/kurze-geschichte-von-http",
+          "https://www.restguide.info/rfc-9110",
+          "https://www.rfc-editor.org/rfc/rfc9112.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "expected_lane": "deep",
+        "actual_lane": "deep",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "comprehensive_deliverable",
+            "broad_prompt"
+          ],
+          "requested": "auto",
+          "score": 4,
+          "selected": "deep"
+        },
+        "fetched_source_count": 20,
+        "report_artifact_id": "b222176719688172d2e00d1af7b4f25a78ec7132e3da4887dd941fef65bc469c",
+        "report_characters": 5828
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 97.309
+    },
+    {
+      "case": "RL1-D02",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "What is PEP 612? What is PEP 621?\nPEP 621 – Storing project metadata in pyproject.toml | peps.python.org Python Enhancement Proposals Python » PEP Index » PEP 621 Toggle light / dark / auto colour theme PEP 621 – Storing project metadata in pyproject.toml PEP 621 – Storing project metadata in pyproject.toml Author : Brett Cannon <brett at python.org>, Dustin Ingram <di at python.org>, Paul Ganssle <paul at ganssle.io>, Pradyun Gedam <pradyunsg at gmail.com>, Sébastien Eustace <sebastien at eustace.io>, Thomas Kluyver <thomas at kluyver.me.uk>, Tzu-ping Chung <uranusjr at gmail.com> Discussions-To : Discourse thread Status : Final Type : Standards Track Topic : Packaging Created : 22-Jun-2020 Post-History : 22-Jun-2020, 18-Oct-2020, 24-Oct-2020, 31-Oct-2020 Resolution : Discourse message Table of Contents Abstract Motivation Rationale Specification Details Table name name version description readme requires-python license authors / maintainers keywords classifiers urls Entry points dependencies / optional-dependencies dynamic Example Backwards Compatibility Security Implications Reference Implementation Rejected Ideas Other table names Anything under [build-system] [package] [metadata] Support for a metadata provider Require a normalized project name Specify files to include when building Name the [project.urls] table [project.project-urls] Have a separate url / home-page field Recommend that tools put development-related dependencies into a “dev” extra Have the dynamic field only require specifying missing required fields Different structures for the readme field Allowing the readme field to imply text/plain Other names for dependencies / optional-dependencies Drop maintainers to unify with authors Support an arbitrary depth of tables for project.entry-points Using structured TOML dictionaries to specify dependencies Require build back-ends to update pyproject.toml when generating an sdist Allow tools to add/extend data Open Issues Copyright Important This PEP is a historical document.\nFor tools wishing to store their own settings in pyproject.toml , they may use the [tool] table as defined in PEP 518 . The lack of a [project] table implicitly means the build back-end will dynamically provide all fields. name Format: string Core metadata : Name ( link ) Synonyms Flit : module / dist-name ( link ) Poetry : name ( link ) Setuptools : name ( link ) The name of the project.\n\nSources:\n- https://daobook.github.io/packaging.python.org/specifications/declaring-project-metadata.html\n- https://discuss.python.org/t/pep-621-storing-project-metadata-in-pyproject-toml/4513\n- https://github.com/pypa/packaging.python.org/blob/main/source/guides/writing-pyproject-toml.rst\n- https://github.com/pypa/packaging.python.org/blob/main/source/specifications/pyproject-toml.rst\n- https://github.com/pypa/packaging.python.org/blob/main/source/specifications/pyproject-toml.rst?plain=true\n- https://github.com/pypa/setuptools/blob/main/docs/userguide/pyproject%5Fconfig.rst\n- https://github.com/pypa/setuptools/blob/main/docs/userguide/pyproject_config.rst\n- https://github.com/python/peps/blob/main/peps/pep-0621.rst\n- https://github.com/python/peps/commit/1fa2817f5fb0e773d3a7ce020a5cd23c66136c9a\n- https://github.com/python/peps/commit/3008efd0deb4bd4fc9d2ed57d557feeaad8a297d\n- https://packaging.python.org/en/latest/guides/writing-pyproject-toml\n- https://packaging.python.org/en/latest/guides/writing-pyproject-toml?highlight=+pyproject.toml-based\n- https://pdm-project.org/en/latest/reference/pep621\n- https://pdm-project.org/en/stable/reference/pep621\n- https://pep621.readthedocs.io/en/stable/api/pyproject_metadata.html\n- https://peps.python.org/pep-0621\n- https://pydevtools.com/handbook/explanation/what-is-pep-621-compatibility\n- https://pydevtools.com/handbook/explanation/what-is-pep-621-compatibility.md\n- https://setuptools.pypa.io/en/latest/build%5Fmeta.html\n- https://setuptools.pypa.io/en/latest/userguide/pyproject%5Fconfig.html\n- https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html\n- https://setuptools.pypa.io/en/stable/userguide/pyproject%5Fconfig.html\n\nFINAL LABEL: supported",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 5411,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 23,
+        "answer_urls": [
+          "https://daobook.github.io/packaging.python.org/specifications/declaring-project-metadata.html",
+          "https://discuss.python.org/t/pep-621-storing-project-metadata-in-pyproject-toml/4513",
+          "https://github.com/pypa/packaging.python.org/blob/main/source/guides/writing-pyproject-toml.rst",
+          "https://github.com/pypa/packaging.python.org/blob/main/source/specifications/pyproject-toml.rst",
+          "https://github.com/pypa/packaging.python.org/blob/main/source/specifications/pyproject-toml.rst?plain=true",
+          "https://github.com/pypa/setuptools/blob/main/docs/userguide/pyproject%5Fconfig.rst",
+          "https://github.com/pypa/setuptools/blob/main/docs/userguide/pyproject_config.rst",
+          "https://github.com/python/peps/blob/main/peps/pep-0621.rst",
+          "https://github.com/python/peps/commit/1fa2817f5fb0e773d3a7ce020a5cd23c66136c9a",
+          "https://github.com/python/peps/commit/3008efd0deb4bd4fc9d2ed57d557feeaad8a297d",
+          "https://packaging.python.org/en/latest/guides/writing-pyproject-toml",
+          "https://packaging.python.org/en/latest/guides/writing-pyproject-toml?highlight=+pyproject.toml-based",
+          "https://pdm-project.org/en/latest/reference/pep621",
+          "https://pdm-project.org/en/stable/reference/pep621",
+          "https://pep621.readthedocs.io/en/stable/api/pyproject_metadata.html",
+          "https://peps.python.org/pep-0621",
+          "https://pydevtools.com/handbook/explanation/what-is-pep-621-compatibility",
+          "https://pydevtools.com/handbook/explanation/what-is-pep-621-compatibility.md",
+          "https://setuptools.pypa.io/en/latest/build%5Fmeta.html",
+          "https://setuptools.pypa.io/en/latest/userguide/pyproject%5Fconfig.html",
+          "https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html",
+          "https://setuptools.pypa.io/en/stable/userguide/pyproject%5Fconfig.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "expected_lane": "deep",
+        "actual_lane": "deep",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "explicit_deep_intent:comprehensive report",
+            "comprehensive_deliverable",
+            "broad_prompt"
+          ],
+          "requested": "auto",
+          "score": 8,
+          "selected": "deep"
+        },
+        "fetched_source_count": 22,
+        "report_artifact_id": "282320814ce3003b08363d5702356507ac4953350f95fa1a7e4a1d039433164c",
+        "report_characters": 11056
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 29.735
+    },
+    {
+      "case": "RL1-D03",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "answer_or_evidence_claim_mismatch",
+      "status": "completed",
+      "completed": true,
+      "answer": "It follows a TOML (Tom’s Obvious, Minimal Language) format and serves as the central configuration file for Rust projects. Properly configuring Cargo.toml ensures deterministic builds, dependency resolution, and efficient package management .\nDependency Management with Cargo Cargo.toml and Cargo.lock When to commit Cargo.lock Adding Dependencies Version Requirements and Cargo SemVer Prefer broad compatible requirements for libraries Dependency Resolution: What Cargo Actually Does Feature Flags Enabling dependency features Defining your own features Features are additive Use feature resolver version 2 Optional Dependencies in Rust Code Workspace Dependency Management Workspace policy suggestions Path, Git, Registry, and Patched Dependencies Patching crates Updating Dependencies Safely Reproducible and Offline Builds Security and Supply-Chain Auditing Dependency Features and Compile-Time Cost Public API Design and Dependency Exposure Native Dependencies and Build Scripts Minimum Supported Rust Version Visualizing Cargo Dependency Management Practical Cargo.toml Example Common Dependency Management Pitfalls Adding dependencies before checking the standard library Accepting default features blindly Using exact pins everywhere Exposing incidental dependencies in public APIs Ignoring duplicate versions Letting feature combinations go untested Treating cargo update as risk-free Recommended Commands Try It Yourself Knowledge Check References and Links Key Takeaways Quiz Time!\nDependency Management with Cargo Cargo.toml and Cargo.lock When to commit Cargo.lock Adding Dependencies Version Requirements and Cargo SemVer Prefer broad compatible requirements for libraries Dependency Resolution: What Cargo Actually Does Feature Flags Enabling dependency features Defining your own features Features are additive Use feature resolver version 2 Optional Dependencies in Rust Code Workspace Dependency Management Workspace policy suggestions Path, Git, Registry, and Patched Dependencies Patching crates Updating Dependencies Safely Reproducible and Offline Builds Security and Supply-Chain Auditing Dependency Features and Compile-Time Cost Public API Design and Dependency Exposure Native Dependencies and Build Scripts Minimum Supported Rust Version Visualizing Cargo Dependency Management Practical Cargo.toml Example Common Dependency Management Pitfalls Adding dependencies before checking the standard library Accepting default features blindly Using exact pins everywhere Exposing incidental dependencies in public APIs Ignoring duplicate versions Letting feature combinations go untested Treating cargo update as risk-free Recommended Commands Try It Yourself Knowledge Check References and Links Key Takeaways Quiz Time!\nDependency Management with Cargo Cargo.toml and Cargo.lock When to commit Cargo.lock Adding Dependencies Version Requirements and Cargo SemVer Prefer broad compatible requirements for libraries Dependency Resolution: What Cargo Actually Does Feature Flags Enabling dependency features Defining your own features Features are additive Use feature resolver version 2 Optional Dependencies in Rust Code Workspace Dependency Management Workspace policy suggestions Path, Git, Registry, and Patched Dependencies Patching crates Updating Dependencies Safely Reproducible and Offline Builds Security and Supply-Chain Auditing Dependency Features and Compile-Time Cost Public API Design and Dependency Exposure Native Dependencies and Build Scripts Minimum Supported Rust Version Visualizing Cargo Dependency Management Practical Cargo.toml Example Common Dependency Management Pitfalls Adding dependencies before checking the standard library Accepting default features blindly Using exact pins everywhere Exposing incidental dependencies in public APIs Ignoring duplicate versions Letting feature combinations go untested Treating cargo update as risk-free Recommended Commands Try It Yourself Knowledge Check References and Links Key Takeaways Quiz Time!\nDependency Management with Cargo Cargo.toml and Cargo.lock When to commit Cargo.lock Adding Dependencies Version Requirements and Cargo SemVer Prefer broad compatible requirements for libraries Dependency Resolution: What Cargo Actually Does Feature Flags Enabling dependency features Defining your own features Features are additive Use feature resolver version 2 Optional Dependencies in Rust Code Workspace Dependency Management Workspace policy suggestions Path, Git, Registry, and Patched Dependencies Patching crates Updating Dependencies Safely Reproducible and Offline Builds Security and Supply-Chain Auditing Dependency Features and Compile-Time Cost Public API Design and Dependency Exposure Native Dependencies and Build Scripts Minimum Supported Rust Version Visualizing Cargo Dependency Management Practical Cargo.toml Example Common Dependency Management Pitfalls Adding dependencies before checking the standard library Accepting default features blindly Using exact pins everywhere Exposing incidental dependencies in public APIs Ignoring duplicate versions Letting feature combinations go untested Treating cargo update as risk-free Recommended Commands Try It Yourself Knowledge Check References and Links Key Takeaways Quiz Time!\n\nSources:\n- https://dasroot.net/posts/2026/02/managing-rust-dependencies-cargo\n- https://dev-doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://dev-doc.rust-lang.org/cargo/guide/dependencies.html\n- https://dev-doc.rust-lang.org/stable/cargo/reference/manifest.html\n- https://dev.to/alexmercedcoder/introduction-to-cargo-and-cargotoml-2l86\n- https://dev.to/rijultp/getting-started-with-dependency-management-in-rust-using-cargotoml-54oo\n- https://doc.rust-lang.org/1.49.0/cargo/reference/manifest.html\n- https://doc.rust-lang.org/1.56.0/cargo/reference/manifest.html\n- https://doc.rust-lang.org/1.65.0/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/cargo/guide/why-cargo-exists.html\n- https://doc.rust-lang.org/cargo/reference/manifest.html?highlight=License\n- https://doc.rust-lang.org/cargo/reference/manifest.html?highlight=files\n- https://doc.rust-lang.org/cargo/reference/registries.html\n- https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html\n- https://doc.rust-lang.org/nightly/cargo/reference/specifying-dependencies.html?highlight=feature\n- https://doc.rust-lang.org/stable/cargo/guide\n- https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/stable/cargo/reference/manifest.html\n- https://doc.rust-lang.org/stable/cargo/reference/specifying-dependencies.html\n- https://doc.rust-lang.org/style-guide/cargo.html\n- https://softwarepatternslexicon.com/rust/rust-language-features-and-best-practices/dependency-management-with-cargo\n\nFINAL LABEL: supported",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 5558,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 15
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          false
+        ],
+        "fetched_sources": 29,
+        "answer_urls": [
+          "https://dasroot.net/posts/2026/02/managing-rust-dependencies-cargo",
+          "https://dev-doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://dev-doc.rust-lang.org/cargo/guide/dependencies.html",
+          "https://dev-doc.rust-lang.org/stable/cargo/reference/manifest.html",
+          "https://dev.to/alexmercedcoder/introduction-to-cargo-and-cargotoml-2l86",
+          "https://dev.to/rijultp/getting-started-with-dependency-management-in-rust-using-cargotoml-54oo",
+          "https://doc.rust-lang.org/1.49.0/cargo/reference/manifest.html",
+          "https://doc.rust-lang.org/1.56.0/cargo/reference/manifest.html",
+          "https://doc.rust-lang.org/1.65.0/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/cargo/guide/why-cargo-exists.html",
+          "https://doc.rust-lang.org/cargo/reference/manifest.html?highlight=License",
+          "https://doc.rust-lang.org/cargo/reference/manifest.html?highlight=files",
+          "https://doc.rust-lang.org/cargo/reference/registries.html",
+          "https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html",
+          "https://doc.rust-lang.org/nightly/cargo/reference/specifying-dependencies.html?highlight=feature",
+          "https://doc.rust-lang.org/stable/cargo/guide",
+          "https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/stable/cargo/reference/manifest.html",
+          "https://doc.rust-lang.org/stable/cargo/reference/specifying-dependencies.html",
+          "https://doc.rust-lang.org/style-guide/cargo.html",
+          "https://softwarepatternslexicon.com/rust/rust-language-features-and-best-practices/dependency-management-with-cargo"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "expected_lane": "deep",
+        "actual_lane": "deep",
+        "requested_mode": "deep",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "deep",
+          "score": null,
+          "selected": "deep"
+        },
+        "fetched_source_count": 21,
+        "report_artifact_id": "d48816d2d3042a707a080882e72b5e8474e4695b0af7daa5efce2d3d534d33bb",
+        "report_characters": 19408
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 53.333
+    },
+    {
+      "case": "RL1-D04",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "tool_error",
+      "completed": false,
+      "answer": "API_ERROR: The read operation timed out\nFINAL LABEL: supported",
+      "iterations": 4,
+      "usage": {
+        "billed_tokens": 188873,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 11
+      },
+      "validator": {
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_inspect",
+          "research_search",
+          "research_search"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_inspect",
+          "research_search",
+          "research_search"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 358.664
+    },
+    {
+      "case": "RL1-Q01",
+      "category": "quick_research",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "RFC 9110 - HTTP Semantics 📄 Documentation Work in Progress HTTP Extensions Future Work Participate About the HTTP Working Group Contribution Policy WG Charter Group Mailing List 📨 Meeting Materials Document Editor Resources RFC 9110 1.\n\nSources:\n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://httpwg.org/specs/rfc9110.html\n- https://rfcinfo.com/rfc-9110\n- https://www.rfc-editor.org/rfc/rfc9110.txt",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 9630,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 11
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 8,
+        "answer_urls": [
+          "https://httpwg.org/specs/rfc9110.html",
+          "https://rfcinfo.com/rfc-9110",
+          "https://www.rfc-editor.org/rfc/rfc9110.txt"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_gather",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_gather",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_fact_question"
+          ],
+          "requested": "auto",
+          "score": -2,
+          "selected": "quick"
+        },
+        "fetched_source_count": 3
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 22.387
+    }
+  ],
+  "started_at_epoch": 1789544716.0836759,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 150.0,
+    "max_seconds": 5400.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 12,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 605.621
+}

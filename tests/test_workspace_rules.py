@@ -8,6 +8,7 @@ from smara.workspace_rules import (
     RULE_FILENAMES,
     discover_workspace_rules,
     format_rules_for_prompt,
+    is_workspace_trusted,
 )
 
 
@@ -64,3 +65,19 @@ def test_rules_content_truncation(tmp_path: Path):
     assert res["found"] is True
     assert len(res["content"]) > 100
     assert "Workspace rules truncated" in res["content"]
+
+
+def test_untrusted_rules_are_withheld_from_agent_prompt(tmp_path: Path):
+    (tmp_path / "SMARA.md").write_text("do not inject this", encoding="utf-8")
+    res = discover_workspace_rules(tmp_path, trusted=False)
+    assert res["found"] is False
+    assert res["blocked"] is True
+    assert res["requires_trust"] is True
+    assert res["content"] == ""
+
+
+def test_workspace_trust_requires_explicit_process_override(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("SMARA_TRUST_WORKSPACE", raising=False)
+    assert is_workspace_trusted(tmp_path) is False
+    monkeypatch.setenv("SMARA_TRUST_WORKSPACE", "1")
+    assert is_workspace_trusted(tmp_path) is True

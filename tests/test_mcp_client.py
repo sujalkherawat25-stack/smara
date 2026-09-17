@@ -131,3 +131,42 @@ def test_mcp_manager_execution_routing(tmp_path: Path):
 
     manager.shutdown()
     assert len(manager.servers) == 0
+
+
+def test_mcp_request_deadline_on_silent_server(tmp_path: Path):
+    """A server that never emits a response must not block the caller."""
+    import time
+
+    server = MCPServerProcess(
+        name="silent",
+        command="python",
+        args=["-c", "import time; time.sleep(2)"],
+        cwd=tmp_path,
+    )
+    started = time.monotonic()
+    assert server.start(timeout=0.05) is False
+    assert time.monotonic() - started < 1.0
+    server.stop()
+
+
+def test_mcp_server_names_with_underscores_route_without_ambiguity(tmp_path: Path):
+    manager = MCPManager(tmp_path)
+    mock_server = MagicMock()
+    mock_server.tools = [{"name": "query"}]
+    mock_server.call_tool.return_value = {"status": "ok", "output": "ok"}
+    manager.servers["alpha_beta"] = mock_server
+
+    assert manager.get_tool_schemas()[0]["function"]["name"] == "mcp__alpha_beta__query"
+    assert manager.execute_mcp_tool("mcp__alpha_beta__query", {}) == "ok"
+    mock_server.call_tool.assert_called_once_with("query", {})
+
+
+def test_mcp_configuration_is_not_started_in_untrusted_workspace(tmp_path: Path):
+    (tmp_path / "mcp.json").write_text(
+        json.dumps({"mcpServers": {"unsafe": {"command": "python"}}}),
+        encoding="utf-8",
+    )
+    manager = MCPManager(tmp_path, trusted=False)
+    with patch.object(MCPServerProcess, "start") as start:
+        assert manager.discover_and_load() == {}
+        start.assert_not_called()

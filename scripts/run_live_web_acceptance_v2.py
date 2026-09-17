@@ -26,7 +26,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from smara.autonomous_agent import SmaraAutonomousAgent, _get_api_key_from_vault_or_env
-from smara.harness import Budget, SessionEngine
+from smara.harness import BUDGET_PROFILES, Budget, SessionEngine
 from smara.research import _is_public_http_url
 
 
@@ -95,6 +95,14 @@ def validate_pack_contract(pack: dict[str, Any], refs: dict[str, Any]) -> list[s
     for task in tasks:
         task_id = str(task.get("id") or "")
         category = str(task.get("category") or "")
+        requested_mode = task.get("requested_mode")
+        expected_lane = task.get("expected_lane")
+        if requested_mode is not None and str(requested_mode) not in {"auto", "quick", "deep"}:
+            errors.append(f"{task_id}: requested_mode must be auto, quick, or deep")
+        if expected_lane is not None and str(expected_lane) not in {"quick", "deep"}:
+            errors.append(f"{task_id}: expected_lane must be quick or deep")
+        if expected_lane is not None and requested_mode is None:
+            errors.append(f"{task_id}: expected_lane requires requested_mode")
         ref = refs.get(task_id)
         if not isinstance(ref, dict):
             errors.append(f"{task_id}: sealed reference missing")
@@ -144,11 +152,28 @@ def build_prompt(task: dict[str, Any]) -> str:
             "modified BSD license as the evidence-backed claim, and state that this is the BSD 3-Clause license. "
             "Cite the fetched numpy.org/about URL as well as the LICENSE URL. "
         )
+    lane_specific = ""
+    if task.get("expected_lane") == "quick":
+        lane_specific = (
+            "This is a dedicated Quick-lane acceptance case. Keep the plan bounded to one or two nodes, "
+            "gather exactly enough diverse sources to meet the 3-source floor, validate once the claim is supported, "
+            "never fetch the same URL twice, and do not create a report artifact. Once three unique sources are fetched, "
+            "stop retrieval and resolve/validate the requested claim. "
+        )
+    elif task.get("expected_lane") == "deep":
+        lane_specific = (
+            "This is a dedicated Deep-lane acceptance case. Keep the DAG bounded to at most six useful nodes, "
+            "gather at least 20 diverse fetched sources in parallel waves, resolve the material claims, call "
+            "research_validate, then call research_report with a comprehensive Markdown report (at least 1000 characters) "
+            "before giving the final answer. Validate only the claims requested in the question; do not add incidental "
+            "metadata or new claims. Stop expanding once those requirements are met. "
+        )
     return (
         f"As of {task['as_of']}, answer this live-web research question: {question}\n"
-        + task_specific
-        + "Use only the canonical research_plan, research_search, research_fetch, research_resolve, and "
-        "research_validate path. Search snippets are discovery only. Once you fetch the authoritative "
+        + task_specific + lane_specific
+        + "Use the canonical research_plan, then prefer research_gather to search, hybrid-rerank, and fetch diverse sources in parallel; "
+        "research_search plus research_fetch is the compatible fallback. Continue through research_resolve and research_validate. "
+        "Search snippets are discovery only. Once you fetch the authoritative "
         "source passage, call research_inspect at most once with a focused query when the compact preview is incomplete. "
         "Copy one complete sentence verbatim from the fetched/inspected passage into research_resolve and research_validate; "
         "do not paraphrase dates (keep the source's ISO or prose form), do not retry resolve with variants, and proceed to the final answer after one successful validate. "
@@ -282,18 +307,55 @@ def validate_attempt(task: dict[str, Any], ref: dict[str, Any], agent: SmaraAuto
         str(call.get("name") or "") for call in calls
         if call.get("state") == "completed" and (call.get("result") or {}).get("status") == "ok"
     ]
-    required = {"research_plan", "research_fetch", "research_resolve", "research_validate"}
-    required.add("research_analyze" if task["category"] == "quantitative_analysis" else "research_search")
-    tool_chain_ok = required.issubset(set(successful_names))
+    successful = set(successful_names)
+    required = {"research_plan", "research_resolve", "research_validate"}
+    # Lane cases still require canonical planning/resolution/validation, but
+    # permit the documented serial fetch fallback when the model cannot form
+    # a ready gather wave.  The normal V4 pack retains its stricter gather or
+    # search+fetch requirement.
+    retrieval_ok = "research_gather" in successful or "research_fetch" in successful
+    if task["category"] == "quantitative_analysis":
+        tool_chain_ok = required.issubset(successful) and retrieval_ok and "research_analyze" in successful
+    else:
+        lane_fallback = bool(task.get("expected_lane")) and "research_fetch" in successful
+        tool_chain_ok = required.issubset(successful) and ("research_gather" in successful or {"research_search", "research_fetch"}.issubset(successful) or lane_fallback)
     if not result.get("completed") or not tool_chain_ok:
         return False, "canonical_tool_chain_incomplete", {"tool_chain_ok": tool_chain_ok, "tool_names": names, "successful_tool_names": successful_names}
+    expected_lane = task.get("expected_lane")
+    lane_detail: dict[str, Any] = {}
+    if expected_lane:
+        session_result = result.get("session") or {}
+        actual_lane = session_result.get("research_mode") or (agent.session_engine.get("research_mode") if agent.session_engine is not None else None)
+        decision = session_result.get("research_lane_decision") or (agent.session_engine.get("research_lane_decision") if agent.session_engine is not None else None) or {}
+        lane_detail = {"expected_lane": expected_lane, "actual_lane": actual_lane, "requested_mode": decision.get("requested"), "lane_decision": decision}
+        if actual_lane != expected_lane:
+            return False, "research_lane_selection_mismatch", {"tool_chain_ok": tool_chain_ok, "tool_names": names, "successful_tool_names": successful_names, **lane_detail}
+        research = getattr(agent, "_research", None)
+        source_count = len(research.fetched_source_urls()) if research is not None else 0
+        lane_detail["fetched_source_count"] = source_count
+        if expected_lane == "quick":
+            if not 3 <= source_count <= 8:
+                return False, "quick_source_floor_or_cap_violation", {"tool_chain_ok": tool_chain_ok, "tool_names": names, "successful_tool_names": successful_names, **lane_detail}
+            if agent.session_engine is not None and agent.session_engine.get("research_report_artifact_id"):
+                return False, "quick_report_artifact_unexpected", {"tool_chain_ok": tool_chain_ok, "tool_names": names, "successful_tool_names": successful_names, **lane_detail}
+        else:
+            report_id = agent.session_engine.get("research_report_artifact_id") if agent.session_engine is not None else None
+            report_bytes = b""
+            if report_id and agent.session_engine is not None:
+                try:
+                    report_bytes = agent.session_engine.resolve_artifact(report_id)
+                except (FileNotFoundError, ValueError):
+                    report_bytes = b""
+            lane_detail.update({"report_artifact_id": report_id, "report_characters": len(report_bytes.decode("utf-8", errors="replace"))})
+            if source_count < 20 or not report_id or len(report_bytes) < 1000 or "research_report" not in successful:
+                return False, "deep_source_floor_or_report_violation", {"tool_chain_ok": tool_chain_ok, "tool_names": names, "successful_tool_names": successful_names, **lane_detail}
     answer = str(result.get("answer") or "")
     passed, reason, detail = (
         validate_numeric(answer, task, ref)
         if task["category"] == "quantitative_analysis"
         else validate_factual(answer, agent, ref)
     )
-    detail.update({"tool_chain_ok": tool_chain_ok, "tool_names": names, "successful_tool_names": successful_names})
+    detail.update({"tool_chain_ok": tool_chain_ok, "tool_names": names, "successful_tool_names": successful_names, **lane_detail})
     return passed, reason, detail
 
 
@@ -339,7 +401,7 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
              base_url: str = "https://api.sarvam.ai/v2/chat/completions", model: str = "glm5.3-flash",
              search_provider: str = "exa", resume: bool = False,
              max_tokens_per_attempt: int = 750_000, task_ids: set[str] | None = None,
-             max_iterations: int = 12) -> tuple[dict[str, Any], int]:
+             max_iterations: int = 12, retry_failed: bool = False) -> tuple[dict[str, Any], int]:
     if repetitions is not None and repetitions < 1:
         raise ValueError("repetitions must be positive")
     if max_rupees <= 0 or max_seconds <= 0 or max_tokens_per_attempt <= 0 or max_iterations <= 0:
@@ -378,6 +440,20 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
             "elapsed_seconds": 0.0,
         }
     os.environ["SMARA_SEARCH_PROVIDER"] = search_provider
+    # A resumed diagnostic can explicitly retry only failed attempts.  Remove
+    # those stale records before appending replacements so the final evidence
+    # remains a sealed one-record-per-(case,repeat) matrix.
+    selected_ids = {task["id"] for task in tasks}
+    if resume and retry_failed:
+        retry_keys = {
+            (run["case"], int(run["repeat"]))
+            for run in report["runs"]
+            if run.get("case") in selected_ids and not bool(run.get("passed"))
+        }
+        report["runs"] = [
+            run for run in report["runs"]
+            if (run.get("case"), int(run.get("repeat", 0))) not in retry_keys
+        ]
     done = {(run["case"], int(run["repeat"])) for run in report["runs"]}
     previous_elapsed = float(report.get("elapsed_seconds", 0.0) or 0.0)
     started = time.monotonic()
@@ -399,10 +475,26 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
                 workspace = Path(temp_root) / f"{task['id']}-r{repeat}"
                 workspace.mkdir()
                 remaining_seconds = max(1, int(max_seconds - total_elapsed()))
-                session = SessionEngine(workspace, "session", budget=Budget(min(600, remaining_seconds), 60, 25, max_tokens_per_attempt, 10), constrained=False)
+                # Lane-aware acceptance runs use the same governed budgets as
+                # production.  The legacy 25-tool budget is sufficient for
+                # bounded V4 facts but truncates a legitimate Deep DAG before
+                # it can validate claims and persist its report.
+                if task.get("expected_lane") in {"quick", "deep"}:
+                    profile_budget = BUDGET_PROFILES["research_deep" if task["expected_lane"] == "deep" else "research_quick"]
+                    session_budget = Budget(
+                        min(profile_budget.wall_seconds, remaining_seconds),
+                        profile_budget.tool_calls,
+                        profile_budget.model_calls,
+                        max_tokens_per_attempt,
+                        profile_budget.dollars,
+                    )
+                else:
+                    session_budget = Budget(min(600, remaining_seconds), 60, 25, max_tokens_per_attempt, 10)
+                session = SessionEngine(workspace, "session", budget=session_budget, constrained=False)
                 agent = SmaraAutonomousAgent(api_key=key, base_url=base_url, model=model,
                     auth_header="api-subscription-key", workspace_root=workspace, profile="research_web",
-                    session_engine=session, max_iterations=25)
+                    session_engine=session, max_iterations=25,
+                    research_mode=str(task.get("requested_mode") or "auto"))
                 attempt_started = time.monotonic()
                 safety: dict[str, Any] = {"violations": 0, "passed": False, "measured": False}
                 try:
@@ -467,6 +559,7 @@ def main() -> int:
     parser.add_argument("--model", default="glm5.3-flash")
     parser.add_argument("--search-provider", choices=("exa", "tavily", "brave", "serper"), default="exa")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--retry-failed", action="store_true", help="when resuming, rerun failed attempts and replace their records")
     parser.add_argument("--task-ids", help="comma-separated manifest IDs for a bounded diagnostic run")
     parser.add_argument("--evidence-path", type=Path, help="diagnostic evidence output path")
     args = parser.parse_args()
@@ -479,7 +572,8 @@ def main() -> int:
     _, code = run_gate(key=key, smoke=args.smoke, repetitions=args.repetitions,
                        max_rupees=args.max_rupees, max_seconds=args.max_seconds, model=args.model,
                        search_provider=args.search_provider, resume=args.resume, evidence_path=evidence_path,
-                       task_ids={item.strip() for item in args.task_ids.split(",") if item.strip()} if args.task_ids else None)
+                       task_ids={item.strip() for item in args.task_ids.split(",") if item.strip()} if args.task_ids else None,
+                       retry_failed=args.retry_failed)
     return code
 
 

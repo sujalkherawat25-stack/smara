@@ -1,0 +1,3492 @@
+{
+  "suite": "smara-live-web-canonical-agent-20-v4",
+  "manifest_sha256": "38856069ad115b1b9ae4fdf3765cd759c8e0670933657d886502f5d4a370c38a",
+  "references_sha256": "507ffa03ad022f99da333d39b0efd34551e86ba0aee3104a65c2822c79051e6c",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "glm5.3-flash",
+  "runs": [
+    {
+      "case": "LW4-F01",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer:** The externally managed Python environment marker is defined by **PEP 668 – \"Marking Python base environments as 'externally managed'\"**. The fetched authoritative PEP page states verbatim: \"This PEP proposes a mechanism for a Python installation to communicate to tools like pip that its global package installation context is managed by some means external to Python, such as an OS package manager.\" This mechanism is implemented via the `EXTERNALLY-MANAGED` marker file.\n\n**Source:** https://peps.python.org/pep-0668/\n\nFINAL LABEL: supported",
+      "iterations": 8,
+      "usage": {
+        "billed_tokens": 54677,
+        "dollars": 0.08,
+        "model_calls": 8,
+        "tool_calls": 7
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 6,
+        "answer_urls": [
+          "https://peps.python.org/pep-0668/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 39.969
+    },
+    {
+      "case": "LW4-F02",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer:** RFC 9457, titled **\"Problem Details for HTTP APIs\"** (Nottingham, et al., July 2023), is the current RFC defining Problem Details for HTTP APIs. It obsoletes the original RFC 7807 (\"Problem Details for HTTP APIs\", 2016). The fetched IETF passage states verbatim: \"This document defines a 'problem detail' to carry machine-readable details of errors in HTTP response content to avoid the need to define new error response formats for HTTP APIs.\" and \"This document obsoletes RFC 7807.\"\n\n**Sources:**\n- https://datatracker.ietf.org/doc/html/rfc9457.html (IETF Datatracker, RFC 9457)\n- https://www.rfc-editor.org/rfc/rfc9457 (RFC Editor)\n- https://www.rfc-editor.org/info/rfc7807 (RFC Editor, notes RFC 7807 is obsolete, see RFC 9457)\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 39390,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 6
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://datatracker.ietf.org/doc/html/rfc9457.html",
+          "https://www.rfc-editor.org/rfc/rfc9457",
+          "https://www.rfc-editor.org/info/rfc7807"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 28.643
+    },
+    {
+      "case": "LW4-F03",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "PEP 621 specifies project metadata in pyproject.toml; its title is \"Storing project metadata in pyproject.toml\" (verbatim from the official PEP page header: \"PEP 621 – Storing project metadata in pyproject.toml\").\n\nSource: https://peps.python.org/pep-0621\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 33936,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://peps.python.org/pep-0621"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 17.97
+    },
+    {
+      "case": "LW4-F04",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "",
+      "iterations": 14,
+      "usage": {
+        "billed_tokens": 119832,
+        "dollars": 0.13999999999999999,
+        "model_calls": 14,
+        "tool_calls": 14
+      },
+      "validator": {
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_report",
+          "research_fetch",
+          "research_resolve",
+          "research_fetch",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_resolve",
+          "research_fetch",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 72.753
+    },
+    {
+      "case": "LW4-D01",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Python 3.13.0 was officially released on **October 7, 2024**. The authoritative python.org release page states verbatim: \"Release date: Oct. 7, 2024\" — corroborated by the official Python Insider blog announcement \"Python 3.13.0 (final) released\" (posted Oct 7, 2024) and endoflife.date's structured data (`\"cycle\": \"3.13\", \"releaseDate\": \"2024-10-07\"`).\n\nSources:\n- https://www.python.org/downloads/release/python-3130/\n- https://blog.python.org/2024/10/python-3130-final-released.html\n- https://endoflife.date/api/python.json\n\nFINAL LABEL: supported",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 109111,
+        "dollars": 0.09999999999999999,
+        "model_calls": 10,
+        "tool_calls": 10
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 7,
+        "answer_urls": [
+          "https://www.python.org/downloads/release/python-3130/",
+          "https://blog.python.org/2024/10/python-3130-final-released.html",
+          "https://endoflife.date/api/python.json"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 95.571
+    },
+    {
+      "case": "LW4-D02",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": false,
+      "reason": "answer_or_evidence_claim_mismatch",
+      "status": "completed",
+      "completed": true,
+      "answer": "Node.js 22's release codename is **Jod**. The official Node.js blog states verbatim: \"This release marks the transition of Node.js 22.x into Long Term Support (LTS) with the codename 'Jod'.\"\n\nSource: https://nodejs.org/en/blog/announcements/v22-release-announce\n\nFINAL LABEL: supported",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 25269,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://nodejs.org/en/blog/announcements/v22-release-announce"
+        ],
+        "cited_fetched": false,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 14.268
+    },
+    {
+      "case": "LW4-D03",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "OpenAI announced GPT-4.1 in the API on **April 14, 2025** — the announcement post \"Introducing GPT-4.1 in the API\" went live that day, corroborated by TechCrunch's fetched passage (byline \"10:00 AM PDT · April 14, 2025\": \"OpenAI on Monday launched a new family of models called GPT-4.1.\") and The Verge's same-day coverage (\"OpenAI debuts its GPT-4.1 flagship AI model\"), with the model listed in OpenAI's API docs.\n\nSources:\n- https://openai.com/index/gpt-4-1/ (primary announcement; blocked 403 to automated fetch, verified via same-day independent coverage)\n- https://techcrunch.com/2025/04/14/openais-new-gpt-4-1-models-focus-on-coding (fetched, published 2025-04-14T17:00:00+00:00)\n- https://www.theverge.com/news/647478/openai-gpt-4-1-ai-model (fetched, April 14, 2025)\n- https://developers.openai.com/api/docs/models/gpt-4.1 (fetched, OpenAI API docs)\n\nFINAL LABEL: supported",
+      "iterations": 12,
+      "usage": {
+        "billed_tokens": 98522,
+        "dollars": 0.11999999999999998,
+        "model_calls": 12,
+        "tool_calls": 13
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 11,
+        "answer_urls": [
+          "https://openai.com/index/gpt-4-1/",
+          "https://techcrunch.com/2025/04/14/openais-new-gpt-4-1-models-focus-on-coding",
+          "https://www.theverge.com/news/647478/openai-gpt-4-1-ai-model",
+          "https://developers.openai.com/api/docs/models/gpt-4.1"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 63.699
+    },
+    {
+      "case": "LW4-D04",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "According to the official Git site's version log, the entry reads verbatim: \"2.49.0 2025-03-14\" — corroborated by the official Git v2.49.0 announcement by Junio C Hamano dated Fri Mar 14 2025.\n\nSource: https://git-scm.com/docs/git/2.49.0 (official Git site version log)\n\nFINAL LABEL: supported",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 68966,
+        "dollars": 0.09999999999999999,
+        "model_calls": 10,
+        "tool_calls": 9
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 13,
+        "answer_urls": [
+          "https://git-scm.com/docs/git/2.49.0"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 33.824
+    },
+    {
+      "case": "LW4-C01",
+      "category": "contradiction_changed_fact",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "RFC 2616 (Hypertext Transfer Protocol -- HTTP/1.1, June 1999) is **not current**. Per the IETF Datatracker, it is \"Obsoleted by RFC 7230 , RFC 7231 , RFC 7232 , RFC 7233 , RFC 7234 , RFC 7235\" (the June 2014 HTTP/1.1 revision suite: message syntax/routing, semantics, conditional requests, range requests, caching, and authentication), while the RFC Editor text confirms RFC 2616 itself \"Obsoletes: 2068\". (Those 723x RFCs were in turn obsoleted by RFC 9110–9112 in June 2022, the current HTTP specifications.)\n\nSources:\n- https://datatracker.ietf.org/doc/rfc2616\n- https://www.rfc-editor.org/rfc/rfc2616.txt\n- https://httpwg.org/specs/rfc7230.html\n\nFINAL LABEL: supported",
+      "iterations": 9,
+      "usage": {
+        "billed_tokens": 67817,
+        "dollars": 0.09,
+        "model_calls": 9,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 5,
+        "answer_urls": [
+          "https://datatracker.ietf.org/doc/rfc2616",
+          "https://www.rfc-editor.org/rfc/rfc2616.txt",
+          "https://httpwg.org/specs/rfc7230.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 40.988
+    },
+    {
+      "case": "LW4-C02",
+      "category": "contradiction_changed_fact",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The official Python documentation for `tomllib` states verbatim: \"Added in version 3.11.\" — corroborated by PEP 680, which proposed tomllib for inclusion in Python 3.11.\n\nSource: https://docs.python.org/3/library/tomllib.html\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 32358,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://docs.python.org/3/library/tomllib.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 15.428
+    },
+    {
+      "case": "LW4-C03",
+      "category": "contradiction_changed_fact",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Node.js 16 reached end of life on **September 11, 2023** (originally scheduled for April 30, 2024, but brought forward to coincide with OpenSSL 1.1.1's end of support). The official Node.js release schedule confirms `\"v16\": { \"end\": \"2023-09-11\", \"codename\": \"Gallium\" }`, and the official announcement states verbatim: \"We are moving the End-of-Life date of Node.js 16 by seven months to coincide with the end of support of OpenSSL 1.1.1 on September 11th, 2023.\"\n\nSources:\n- https://nodejs.org/en/blog/announcements/nodejs16-eol (official Node.js blog announcement)\n- https://raw.githubusercontent.com/nodejs/Release/main/schedule.json (official Node.js Release Working Group schedule)\n- https://github.com/nodejs/Release (release schedule README)\n\nFINAL LABEL: supported",
+      "iterations": 8,
+      "usage": {
+        "billed_tokens": 59835,
+        "dollars": 0.08,
+        "model_calls": 8,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 11,
+        "answer_urls": [
+          "https://nodejs.org/en/blog/announcements/nodejs16-eol",
+          "https://raw.githubusercontent.com/nodejs/Release/main/schedule.json",
+          "https://github.com/nodejs/Release"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 34.596
+    },
+    {
+      "case": "LW4-C04",
+      "category": "contradiction_changed_fact",
+      "repeat": 1,
+      "passed": false,
+      "reason": "answer_or_evidence_claim_mismatch",
+      "status": "completed",
+      "completed": true,
+      "answer": "OpenSSL 1.1.1 reached public end of life on 11th September 2023, per the official OpenSSL blog: \"OpenSSL 1.1.1 series will reach End of Life (EOL) on 11th September 2023.\"\n\nSource: https://www.openssl-library.org/blog/2023/06/15/OpenSSL-1.1.1-EOL/\n\nFINAL LABEL: supported",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 26053,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://www.openssl-library.org/blog/2023/06/15/OpenSSL-1.1.1-EOL/"
+        ],
+        "cited_fetched": false,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 13.451
+    },
+    {
+      "case": "LW4-S01",
+      "category": "source_quality",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The official CPython repository (python/cpython) declares its license in the LICENSE file: \"Python software and documentation are licensed under the Python Software Foundation License Version 2.\" (SPDX: PSF-2.0). The file also notes that starting with Python 3.8.6, documentation code examples are dual licensed under PSF License Version 2 and Zero-Clause BSD.\n\nSource: https://github.com/python/cpython/blob/main/LICENSE\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 32831,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://github.com/python/cpython/blob/main/LICENSE"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 14.218
+    },
+    {
+      "case": "LW4-S02",
+      "category": "source_quality",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer: BSD-3-Clause**\n\nThe official Django repository (github.com/django/django) declares the SPDX license identifier **BSD-3-Clause**. Its license metadata states verbatim: `\"spdx_id\": \"BSD-3-Clause\"`, and the repository's LICENSE file contains the corresponding BSD 3-Clause (\"New\" or \"Revised\") license text (\"Copyright (c) Django Software Foundation and individual contributors. All rights reserved. Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:\").\n\nSources:\n- https://github.com/django/django\n- https://api.github.com/repos/django/django/license\n- https://raw.githubusercontent.com/django/django/main/LICENSE\n\nFINAL LABEL: supported",
+      "iterations": 13,
+      "usage": {
+        "billed_tokens": 161740,
+        "dollars": 0.12999999999999998,
+        "model_calls": 13,
+        "tool_calls": 13
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 12,
+        "answer_urls": [
+          "https://github.com/django/django",
+          "https://api.github.com/repos/django/django/license",
+          "https://raw.githubusercontent.com/django/django/main/LICENSE"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 112.079
+    },
+    {
+      "case": "LW4-S03",
+      "category": "source_quality",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "NumPy's core source is licensed under the **BSD 3-Clause license** (the \"modified BSD license\"). The official LICENSE.txt in the NumPy repository contains the standard BSD 3-Clause terms, and the official about page states verbatim: \"It is released under the liberal terms of the modified BSD license .\" — this modified BSD license is the BSD 3-Clause license.\n\nSources:\n- https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt\n- https://numpy.org/about/\n\nFINAL LABEL: supported",
+      "iterations": 7,
+      "usage": {
+        "billed_tokens": 45273,
+        "dollars": 0.07,
+        "model_calls": 7,
+        "tool_calls": 6
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 7,
+        "answer_urls": [
+          "https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt",
+          "https://numpy.org/about/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 31.163
+    },
+    {
+      "case": "LW4-S04",
+      "category": "source_quality",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "PostgreSQL's official software license is the **PostgreSQL License** — a liberal open-source license similar to the BSD or MIT licenses. Verbatim from the authoritative source: \"PostgreSQL is released under the PostgreSQL License , a liberal Open Source license, similar to the BSD or MIT licenses.\"\n\nSource: https://www.postgresql.org/about/licence/\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 31856,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://www.postgresql.org/about/licence/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 16.447
+    },
+    {
+      "case": "LW4-Q01",
+      "category": "quantitative_analysis",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Method: `research_fetch` retrieved the live CSV (44 rows; columns dataset/x/y) plus three corroborating sources (seaborn-data GitHub repo, seaborn Anscombe's quartet docs, R datasets documentation noting y values with mean 7.5). `research_analyze` computed descriptive statistics directly from the immutable CSV artifact (rows omitted), yielding the arithmetic mean of the y column. The claim was resolved and validated with evidence coverage 1.0 across 4 fetched sources.\n\nNumeric result: 7.5006818181818184 (≈ 7.5007)\n\nDataset URL: https://raw.githubusercontent.com/mwaskom/seaborn-data/master/anscombe.csv\n\nFINAL LABEL: supported",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 69008,
+        "dollars": 0.09999999999999999,
+        "model_calls": 10,
+        "tool_calls": 10
+      },
+      "validator": {
+        "dataset_sha256": "a0c1f636aa0347101de76271e7efe4c86a22ef28cda62886eaff23a1bf1924b1",
+        "rows": 44,
+        "expected": 7.5006818181818184,
+        "answer_numbers": [
+          44.0,
+          7.5,
+          1.0,
+          4.0,
+          7.5006818181818184,
+          7.5007
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 31.686
+    },
+    {
+      "case": "LW4-Q02",
+      "category": "quantitative_analysis",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Method: Fetched the live CSV plus corroborating public sources (raw CSV, GitHub blob page, GitHub API contents metadata), then computed descriptive statistics with `research_analyze` (numeric_columns=[\"passengers\"], rows omitted) on the immutable artifact; the min metric was resolved and validated against the analysis evidence with the fetched source floor met.\n\nNumeric result: minimum passenger count = 104 (November 1955).\n\nDataset URL: https://raw.githubusercontent.com/mwaskom/seaborn-data/master/flights.csv\n\nFINAL LABEL: supported",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 65744,
+        "dollars": 0.09999999999999999,
+        "model_calls": 10,
+        "tool_calls": 9
+      },
+      "validator": {
+        "dataset_sha256": "237d834127d9c6355630d8f443a7a2377b5925923010009b59809ba0b67f4fac",
+        "rows": 144,
+        "expected": 104.0,
+        "answer_numbers": [
+          104.0,
+          1955.0
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 26.648
+    },
+    {
+      "case": "LW4-Q03",
+      "category": "quantitative_analysis",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Method: Fetched the live CSV via `research_fetch`, computed the maximum of the `petal_width` column with `research_analyze` (150 rows, no imputation), resolved the claim, and validated it against the analysis artifact plus corroborating fetched sources (UCI Iris dataset page, seaborn-data GitHub repo, scikit-learn toy datasets docs). Validation passed with the source floor met.\n\nNumeric result: 2.5\n\nDataset URL: https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv\n\nFINAL LABEL: supported",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 67519,
+        "dollars": 0.09999999999999999,
+        "model_calls": 10,
+        "tool_calls": 10
+      },
+      "validator": {
+        "dataset_sha256": "9cc1c345c71bcc9b486b74cbf6063fa66f4bb5e0f603a4b3c3471ec2e5e8e355",
+        "rows": 150,
+        "expected": 2.5,
+        "answer_numbers": [
+          150.0,
+          2.5
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 27.649
+    },
+    {
+      "case": "LW4-Q04",
+      "category": "quantitative_analysis",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Method:** Fetched the live CSV via `research_fetch` (plus two corroborating sources: the GitHub blob page and the Rdatasets mirror of the same dataset), then computed the sum of the `size` column with `research_analyze` (numeric_columns=[\"size\"], rows omitted, parsing the immutable CSV artifacts directly). Two independent analyses both returned sum = 627.0 across 244 rows. The claim \"The sum of column size is 627.0.\" was resolved and validated with 100% evidence coverage across 3 fetched sources.\n\n**Numeric result:** 627.0\n\n**Dataset URL:** https://raw.githubusercontent.com/mwaskom/seaborn-data/master/tips.csv\n\nFINAL LABEL: supported",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 73319,
+        "dollars": 0.09999999999999999,
+        "model_calls": 10,
+        "tool_calls": 9
+      },
+      "validator": {
+        "dataset_sha256": "e54cc4d2ce1bff65d32ca60b3e4b802e06bde1d7e7caf6f796f6bf7370e863b0",
+        "rows": 244,
+        "expected": 627.0,
+        "answer_numbers": [
+          627.0,
+          244.0,
+          627.0,
+          100.0,
+          3.0,
+          627.0
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_analyze",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_analyze",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 33.509
+    },
+    {
+      "case": "LW4-F01",
+      "category": "current_factual",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer:** PEP 668 — \"Marking Python base environments as 'externally managed'\". This PEP defines the `EXTERNALLY-MANAGED` marker file that signals a Python installation's global package context is managed externally (e.g., by an OS package manager), causing tools like pip to refuse installs there by default.\n\n**Source:** https://peps.python.org/pep-0668/ (verified verbatim: \"PEP 668 – Marking Python base environments as 'externally managed'\")\n\nFINAL LABEL: supported",
+      "iterations": 7,
+      "usage": {
+        "billed_tokens": 46742,
+        "dollars": 0.07,
+        "model_calls": 7,
+        "tool_calls": 6
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 6,
+        "answer_urls": [
+          "https://peps.python.org/pep-0668/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 28.576
+    },
+    {
+      "case": "LW4-F02",
+      "category": "current_factual",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Problem Details for HTTP APIs is defined by **RFC 9457**, titled **\"Problem Details for HTTP APIs\"** (Proposed Standard, M. Nottingham, E. Wilde, S. Dalal, July 2023; it obsoletes RFC 7807). The fetched RFC text states verbatim: \"RFC 9457 Problem Details for HTTP APIs\" and \"This document obsoletes RFC 7807.\"\n\nSources (3 fetched, all supporting):\n- https://www.rfc-editor.org/info/rfc9457\n- https://datatracker.ietf.org/doc/html/rfc9457\n- https://www.rfc-editor.org/rfc/rfc9457.html\n\nFINAL LABEL: supported",
+      "iterations": 9,
+      "usage": {
+        "billed_tokens": 85112,
+        "dollars": 0.09,
+        "model_calls": 9,
+        "tool_calls": 7
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://www.rfc-editor.org/info/rfc9457",
+          "https://datatracker.ietf.org/doc/html/rfc9457",
+          "https://www.rfc-editor.org/rfc/rfc9457.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 50.117
+    },
+    {
+      "case": "LW4-F03",
+      "category": "current_factual",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer:** PEP 621, titled **\"Storing project metadata in pyproject.toml\"**. The authoritative PEP page states verbatim: \"This PEP specifies how to write a project's core metadata in a pyproject.toml file for packaging-related tools to consume.\"\n\nSource: https://peps.python.org/pep-0621/\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 34223,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://peps.python.org/pep-0621/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 18.94
+    },
+    {
+      "case": "LW4-F04",
+      "category": "current_factual",
+      "repeat": 2,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "",
+      "iterations": 14,
+      "usage": {
+        "billed_tokens": 114942,
+        "dollars": 0.13999999999999999,
+        "model_calls": 14,
+        "tool_calls": 16
+      },
+      "validator": {
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate",
+          "research_report",
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate",
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 58.877
+    },
+    {
+      "case": "LW4-D01",
+      "category": "breaking_news_or_dated",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Python 3.13.0 was officially released on **October 7, 2024**. The official Python Insider blog (core developer blog) states verbatim: \"Python 3.13.0 (final) released Thomas Wouters / October 7, 2024 · Updated October 7, 2024\" — \"Python 3.13.0 is now available.\"\n\nSource: https://blog.python.org/2024/10/python-3130-final-released\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 33465,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://blog.python.org/2024/10/python-3130-final-released"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 17.958
+    },
+    {
+      "case": "LW4-D02",
+      "category": "breaking_news_or_dated",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Node.js 22's release codename is **Jod**. The official Node.js release post states verbatim: \"This release marks the transition of Node.js 22.x into Long Term Support (LTS) with the codename 'Jod'.\"\n\nSource: https://nodejs.org/en/blog/release/v22.11.0\n\nFINAL LABEL: supported",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 25579,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://nodejs.org/en/blog/release/v22.11.0"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 12.564
+    },
+    {
+      "case": "LW4-D03",
+      "category": "breaking_news_or_dated",
+      "repeat": 2,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "",
+      "iterations": 14,
+      "usage": {
+        "billed_tokens": 140955,
+        "dollars": 0.13999999999999999,
+        "model_calls": 14,
+        "tool_calls": 16
+      },
+      "validator": {
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_search",
+          "research_fetch"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_search",
+          "research_search"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 78.059
+    },
+    {
+      "case": "LW4-D04",
+      "category": "breaking_news_or_dated",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Git 2.49.0 was released on **2025-03-14** (March 14, 2025), per the official Git site's version history, which lists the entry \"2.49.0 2025-03-14\" (corroborated by Junio C Hamano's [ANNOUNCE] Git v2.49.0 dated Fri Mar 14 2025).\n\nSource: https://git-scm.com/docs/git/2.49.0\n\nFINAL LABEL: supported",
+      "iterations": 9,
+      "usage": {
+        "billed_tokens": 70334,
+        "dollars": 0.09,
+        "model_calls": 9,
+        "tool_calls": 9
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 13,
+        "answer_urls": [
+          "https://git-scm.com/docs/git/2.49.0"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 43.96
+    },
+    {
+      "case": "LW4-C01",
+      "category": "contradiction_changed_fact",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "RFC 2616 (HTTP/1.1, June 1999) is **not current** — it is obsoleted. The IETF Datatracker status page states verbatim: \"Obsoleted by RFC 7230 , RFC 7231 , RFC 7232 , RFC 7233 , RFC 7234 , RFC 7235\" (the June 2014 HTTP/1.1 update series). Those in turn were obsoleted by RFC 9110 and RFC 9112 (June 2022), the current HTTP specifications.\n\nSource: https://datatracker.ietf.org/doc/rfc2616/\n\nFINAL LABEL: supported",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 70310,
+        "dollars": 0.09999999999999999,
+        "model_calls": 10,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 6,
+        "answer_urls": [
+          "https://datatracker.ietf.org/doc/rfc2616/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 43.543
+    },
+    {
+      "case": "LW4-C02",
+      "category": "contradiction_changed_fact",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The `tomllib` module (for parsing TOML files) was added to the Python standard library in Python 3.11, per the official Python documentation's verbatim note: \"Added in version 3.11.\" (corroborated by PEP 680, which proposed its inclusion in 3.11).\n\nSource: https://docs.python.org/3/library/tomllib.html\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 32293,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://docs.python.org/3/library/tomllib.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 14.43
+    },
+    {
+      "case": "LW4-C03",
+      "category": "contradiction_changed_fact",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Node.js 16 reached end of life on **September 11, 2023** — brought forward by seven months (from April 2024) to coincide with the end of support for OpenSSL 1.1.1. The official announcement states: \"We are moving the End-of-Life date of Node.js 16 by seven months to coincide with the end of support of OpenSSL 1.1.1 on September 11th, 2023.\" This is corroborated by the nodejs/Release schedule table (16.x EOL: 2023-09-11).\n\nSources:\n- https://nodejs.org/en/blog/announcements/nodejs16-eol\n- https://github.com/nodejs/Release/blob/main/README.md\n\nFINAL LABEL: supported",
+      "iterations": 8,
+      "usage": {
+        "billed_tokens": 58387,
+        "dollars": 0.08,
+        "model_calls": 8,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 8,
+        "answer_urls": [
+          "https://nodejs.org/en/blog/announcements/nodejs16-eol",
+          "https://github.com/nodejs/Release/blob/main/README.md"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 32.319
+    },
+    {
+      "case": "LW4-C04",
+      "category": "contradiction_changed_fact",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "OpenSSL 1.1.1 reached public end of life on **11 September 2023** (11th September 2023), after which it no longer received publicly available security fixes.\n\nVerbatim from the official OpenSSL blog: \"OpenSSL 1.1.1 was released on 11th September 2018, and it will reach its EOL on 11th September 2023.\"\n\nSource: https://openssl-library.org/post/2023-06-15-1.1.1-eol-reminder/index.html\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 34769,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://openssl-library.org/post/2023-06-15-1.1.1-eol-reminder/index.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 15.999
+    },
+    {
+      "case": "LW4-S01",
+      "category": "source_quality",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The official CPython repository (python/cpython) declares the **Python Software Foundation License Version 2 (PSF-2.0)**. Its LICENSE file states verbatim: \"Python software and documentation are licensed under the Python Software Foundation License Version 2.\"\n\nSource: https://github.com/python/cpython/blob/main/LICENSE\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 32289,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://github.com/python/cpython/blob/main/LICENSE"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 16.18
+    },
+    {
+      "case": "LW4-S02",
+      "category": "source_quality",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The official Django repository (github.com/django/django) declares the SPDX license identifier **BSD-3-Clause** (BSD 3-Clause \"New\" or \"Revised\" License), per its GitHub API metadata (`\"spdx_id\": \"BSD-3-Clause\"`), corroborated by the BSD 3-clause LICENSE file (\"Copyright (c) Django Software Foundation and individual contributors.\").\n\nSources:\n- https://api.github.com/repos/django/django\n- https://raw.githubusercontent.com/django/django/main/LICENSE\n\nFINAL LABEL: supported",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 74677,
+        "dollars": 0.09999999999999999,
+        "model_calls": 10,
+        "tool_calls": 9
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 7,
+        "answer_urls": [
+          "https://api.github.com/repos/django/django",
+          "https://raw.githubusercontent.com/django/django/main/LICENSE"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 39.327
+    },
+    {
+      "case": "LW4-S03",
+      "category": "source_quality",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "NumPy's core source is licensed under the **BSD 3-Clause license** (the \"modified BSD\" license). The official LICENSE.txt contains the standard three-clause BSD text (\"Copyright (c) 2005-2025, NumPy Developers. All rights reserved. Redistribution and use in source and binary forms...\"), and the official about page states verbatim: \"It is released under the liberal terms of the modified BSD license.\"\n\nSources:\n- https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt\n- https://numpy.org/about/\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 38538,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 6
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 8,
+        "answer_urls": [
+          "https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt",
+          "https://numpy.org/about/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 25.151
+    },
+    {
+      "case": "LW4-S04",
+      "category": "source_quality",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "PostgreSQL's official software license is the **PostgreSQL License** — a liberal open-source license similar to BSD or MIT. The authoritative source states verbatim: \"PostgreSQL is released under the PostgreSQL License , a liberal Open Source license, similar to the BSD or MIT licenses.\"\n\nSource: https://www.postgresql.org/about/licence/\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 32002,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://www.postgresql.org/about/licence/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 17.653
+    },
+    {
+      "case": "LW4-Q01",
+      "category": "quantitative_analysis",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Method:** Fetched the live CSV via `research_fetch`, then computed the mean of the `y` column with `research_analyze` (numeric_columns=[\"y\"], rows omitted, parsed directly from the immutable CSV artifact) across all 44 rows. The claim was resolved and validated with evidence coverage 1.0 across 3 fetched sources (the CSV artifact plus two corroborating references reporting mean of y = 7.5).\n\n**Numeric result:** 7.5006818181818184\n\n**Dataset URL:** https://raw.githubusercontent.com/mwaskom/seaborn-data/master/anscombe.csv\n\nFINAL LABEL: supported",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 63912,
+        "dollars": 0.09999999999999999,
+        "model_calls": 10,
+        "tool_calls": 8
+      },
+      "validator": {
+        "dataset_sha256": "a0c1f636aa0347101de76271e7efe4c86a22ef28cda62886eaff23a1bf1924b1",
+        "rows": 44,
+        "expected": 7.5006818181818184,
+        "answer_numbers": [
+          44.0,
+          1.0,
+          3.0,
+          7.5,
+          7.5006818181818184
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 27.365
+    },
+    {
+      "case": "LW4-Q02",
+      "category": "quantitative_analysis",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Method: Fetched the live CSV via `research_fetch`, computed descriptive statistics with `research_analyze` (numeric_columns=[\"passengers\"], rows omitted) on the immutable artifact, and corroborated with additional fetched sources (GitHub repository page, dataset explainer, seaborn docs) via `research_gather`. The claim \"The minimum of column passengers is 104.0.\" was resolved and validated with evidence coverage 1.0.\n\nNumeric result: 104.0\n\nDataset URL: https://raw.githubusercontent.com/mwaskom/seaborn-data/master/flights.csv\n\nFINAL LABEL: supported",
+      "iterations": 9,
+      "usage": {
+        "billed_tokens": 56066,
+        "dollars": 0.09,
+        "model_calls": 9,
+        "tool_calls": 7
+      },
+      "validator": {
+        "dataset_sha256": "237d834127d9c6355630d8f443a7a2377b5925923010009b59809ba0b67f4fac",
+        "rows": 144,
+        "expected": 104.0,
+        "answer_numbers": [
+          104.0,
+          1.0,
+          104.0
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 30.999
+    },
+    {
+      "case": "LW4-Q03",
+      "category": "quantitative_analysis",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Method: Fetched the live CSV via `research_fetch`, computed statistics with `research_analyze` (numeric_columns, rows omitted) on the immutable artifact; corroborated with an independent mirror of the same iris dataset (uiuc-cse data-fa14, 150 rows, max petal_width = 2.5) plus UCI Iris repository sources, then resolved and validated the claim against all fetched evidence.\n\nNumeric result: 2.5\n\nDataset URL: https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv\n\nFINAL LABEL: supported",
+      "iterations": 12,
+      "usage": {
+        "billed_tokens": 87752,
+        "dollars": 0.11999999999999998,
+        "model_calls": 12,
+        "tool_calls": 11
+      },
+      "validator": {
+        "dataset_sha256": "9cc1c345c71bcc9b486b74cbf6063fa66f4bb5e0f603a4b3c3471ec2e5e8e355",
+        "rows": 150,
+        "expected": 2.5,
+        "answer_numbers": [
+          150.0,
+          2.5,
+          2.5
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_analyze",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_fetch",
+          "research_analyze",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 41.183
+    },
+    {
+      "case": "LW4-Q04",
+      "category": "quantitative_analysis",
+      "repeat": 2,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Method: Fetched the live CSV plus two corroborating sources (GitHub repo page, Rdatasets tips documentation), then computed the sum of the `size` column with `research_analyze` (numeric_columns=[\"size\"], rows omitted) on the immutable CSV artifact. All claims resolved and validated with evidence coverage 1.0 across 3 fetched sources.\n\nNumeric result: 627.0 (sum of `size` across all 244 rows)\n\nDataset URL: https://raw.githubusercontent.com/mwaskom/seaborn-data/master/tips.csv\n\nFINAL LABEL: supported",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 68248,
+        "dollars": 0.09999999999999999,
+        "model_calls": 10,
+        "tool_calls": 9
+      },
+      "validator": {
+        "dataset_sha256": "e54cc4d2ce1bff65d32ca60b3e4b802e06bde1d7e7caf6f796f6bf7370e863b0",
+        "rows": 244,
+        "expected": 627.0,
+        "answer_numbers": [
+          1.0,
+          3.0,
+          627.0,
+          244.0
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_validate",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_validate",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 30.408
+    },
+    {
+      "case": "LW4-F01",
+      "category": "current_factual",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The externally managed Python environment marker is defined by **PEP 668 – \"Marking Python base environments as 'externally managed'\"**, which introduces the `EXTERNALLY-MANAGED` marker file that tells tools like pip the environment is managed externally (e.g., by an OS package manager).\n\nSource: https://peps.python.org/pep-0668/\n\nFINAL LABEL: supported",
+      "iterations": 7,
+      "usage": {
+        "billed_tokens": 42993,
+        "dollars": 0.07,
+        "model_calls": 7,
+        "tool_calls": 6
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://peps.python.org/pep-0668/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 22.019
+    },
+    {
+      "case": "LW4-F02",
+      "category": "current_factual",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Answer:** Problem Details for HTTP APIs is defined by **RFC 9457 — \"Problem Details for HTTP APIs\"** (obsoletes RFC 7807). The fetched RFC Editor page states verbatim: \"This document defines a \"problem detail\" to carry machine-readable details of errors in HTTP response content to avoid the need to define new error response formats for HTTP APIs.\"\n\n**Sources:**\n- https://www.rfc-editor.org/rfc/rfc9457\n- https://datatracker.ietf.org/doc/rfc9457/\n\nFINAL LABEL: supported",
+      "iterations": 8,
+      "usage": {
+        "billed_tokens": 53916,
+        "dollars": 0.08,
+        "model_calls": 8,
+        "tool_calls": 6
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://www.rfc-editor.org/rfc/rfc9457",
+          "https://datatracker.ietf.org/doc/rfc9457/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 31.45
+    },
+    {
+      "case": "LW4-F03",
+      "category": "current_factual",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "PEP 621 specifies project metadata in pyproject.toml; its title is \"Storing project metadata in pyproject.toml\". The fetched PEP page states verbatim: \"This PEP specifies how to write a project's core metadata in a pyproject.toml file for packaging-related tools to consume.\"\n\nSource: https://peps.python.org/pep-0621/\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 32647,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://peps.python.org/pep-0621/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 14.848
+    },
+    {
+      "case": "LW4-F04",
+      "category": "current_factual",
+      "repeat": 3,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "",
+      "iterations": 14,
+      "usage": {
+        "billed_tokens": 110562,
+        "dollars": 0.13999999999999999,
+        "model_calls": 14,
+        "tool_calls": 16
+      },
+      "validator": {
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_fetch",
+          "research_gather",
+          "research_resolve",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_report",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_gather"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 74.72
+    },
+    {
+      "case": "LW4-D01",
+      "category": "breaking_news_or_dated",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Python 3.13.0 was officially released on **October 7, 2024** — the authoritative python.org release page states verbatim: \"Release Date: Oct. 7, 2024\", corroborated by the primary Python Insider announcement \"Python 3.13.0 (final) released\" (posted October 7, 2024). The claim was resolved against both fetched passages and passed validation with full evidence coverage.\n\nSource: https://www.python.org/downloads/release/python-3130\n\nFINAL LABEL: supported",
+      "iterations": 7,
+      "usage": {
+        "billed_tokens": 76180,
+        "dollars": 0.07,
+        "model_calls": 7,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://www.python.org/downloads/release/python-3130"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 100.001
+    },
+    {
+      "case": "LW4-D02",
+      "category": "breaking_news_or_dated",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The Node.js 22 release codename is **Jod**. The official Node.js release page states verbatim: \"This release marks the transition of Node.js 22.x into Long Term Support (LTS) with the codename 'Jod'.\"\n\nSource: https://nodejs.org/en/blog/release/v22.11.0\n\nFINAL LABEL: supported",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 25719,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://nodejs.org/en/blog/release/v22.11.0"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 14.284
+    },
+    {
+      "case": "LW4-D03",
+      "category": "breaking_news_or_dated",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "OpenAI announced GPT-4.1 in the API on **April 14, 2025**. The authoritative OpenAI blog post \"Introducing GPT-4.1 in the API\" carries the byline date \"April 14, 2025\" and states: \"Today, we're launching three new models in the API: GPT‑4.1, GPT‑4.1 mini, and GPT‑4.1 nano.\"\n\nSources:\n- https://openai.com/index/gpt-4-1 (verified via Wayback snapshot: https://web.archive.org/web/20250415013610/https://openai.com/index/gpt-4-1)\n\nFINAL LABEL: supported",
+      "iterations": 9,
+      "usage": {
+        "billed_tokens": 68571,
+        "dollars": 0.09,
+        "model_calls": 9,
+        "tool_calls": 10
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 10,
+        "answer_urls": [
+          "https://openai.com/index/gpt-4-1",
+          "https://web.archive.org/web/20250415013610/https://openai.com/index/gpt-4-1"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 47.306
+    },
+    {
+      "case": "LW4-D04",
+      "category": "breaking_news_or_dated",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Git 2.49.0 was released on **2025-03-14** (March 14, 2025), per the official Git site's version log, which lists \"2.49.0 2025-03-14\". This is corroborated by Junio C Hamano's official announcement \"[ANNOUNCE] Git v2.49.0\" dated Fri Mar 14 2025.\n\nSource: https://git-scm.com/docs/git/2.49.0\n\nFINAL LABEL: supported",
+      "iterations": 9,
+      "usage": {
+        "billed_tokens": 61149,
+        "dollars": 0.09,
+        "model_calls": 9,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 9,
+        "answer_urls": [
+          "https://git-scm.com/docs/git/2.49.0"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 30.563
+    },
+    {
+      "case": "LW4-C01",
+      "category": "contradiction_changed_fact",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "RFC 2616 (Hypertext Transfer Protocol -- HTTP/1.1, June 1999) is **not current**. Per the IETF Datatracker, it is \"Obsoleted by RFC 7230 , RFC 7231 , RFC 7232 , RFC 7233 , RFC 7234 , RFC 7235\" (the June 2014 HTTP/1.1 revision suite). Those were in turn obsoleted by RFCs 9110–9112 (June 2022), the current HTTP specifications.\n\nSource: https://datatracker.ietf.org/doc/rfc2616/\n\nFINAL LABEL: supported",
+      "iterations": 7,
+      "usage": {
+        "billed_tokens": 44977,
+        "dollars": 0.07,
+        "model_calls": 7,
+        "tool_calls": 6
+      },
+      "validator": {
+        "claims": [
+          true,
+          true,
+          true
+        ],
+        "fetched_sources": 6,
+        "answer_urls": [
+          "https://datatracker.ietf.org/doc/rfc2616/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 27.629
+    },
+    {
+      "case": "LW4-C02",
+      "category": "contradiction_changed_fact",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The official Python 3.11 \"What's New\" documentation lists tomllib among the new standard library modules: \"New standard library modules: PEP 680 : tomllib — Support for parsing TOML in the Standard Library\" (https://docs.python.org/release/3.11.1/whatsnew/3.11.html). The CPython commit \"bpo-40059: Add tomllib (PEP-680)\" (https://github.com/python/cpython/commit/591f675) corroborates this.\n\n**Answer:** tomllib was added to the Python standard library in **Python 3.11** (via PEP 680).\n\nFINAL LABEL: supported",
+      "iterations": 7,
+      "usage": {
+        "billed_tokens": 42612,
+        "dollars": 0.07,
+        "model_calls": 7,
+        "tool_calls": 6
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://docs.python.org/release/3.11.1/whatsnew/3.11.html",
+          "https://github.com/python/cpython/commit/591f675"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 28.118
+    },
+    {
+      "case": "LW4-C03",
+      "category": "contradiction_changed_fact",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Node.js 16 reached end of life on **2023-09-11** (September 11, 2023). The fetched record for cycle 16 states: `{\"cycle\":\"16\",\"releaseDate\":\"2021-04-20\",\"lts\":\"2021-10-26\",\"eol\":\"2023-09-11\",\"latest\":\"16.20.2\",\"latestReleaseDate\":\"2023-08-09\",\"support\":\"2022-10-18\",\"extendedSupport\":true}` — corroborated by the official Node.js release schedule (nodejs/Release) and nodejs.org's previous-releases page, which list v16 \"Gallium\" as End-of-Life.\n\nSources:\n- https://endoflife.date/api/nodejs.json\n- https://github.com/nodejs/Release/blob/main/README.md\n- https://nodejs.org/en/about/previous-releases\n\nFINAL LABEL: supported",
+      "iterations": 8,
+      "usage": {
+        "billed_tokens": 79206,
+        "dollars": 0.08,
+        "model_calls": 8,
+        "tool_calls": 9
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 7,
+        "answer_urls": [
+          "https://endoflife.date/api/nodejs.json",
+          "https://github.com/nodejs/Release/blob/main/README.md",
+          "https://nodejs.org/en/about/previous-releases"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 55.168
+    },
+    {
+      "case": "LW4-C04",
+      "category": "contradiction_changed_fact",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "OpenSSL 1.1.1 reached public end of life on **11th September 2023**. The official OpenSSL blog post states verbatim: \"LTS lasts five years and consequently OpenSSL 1.1.1 has reached its EOL as of today, 11th September 2023.\"\n\nSource: https://openssl-library.org/post/2023-09-11-eol-111/index.html\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 33470,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://openssl-library.org/post/2023-09-11-eol-111/index.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 17.665
+    },
+    {
+      "case": "LW4-S01",
+      "category": "source_quality",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The official CPython repository declares the **Python Software Foundation License Version 2 (PSF-2.0)**. The LICENSE file in the python/cpython repo states verbatim: \"Python software and documentation are licensed under the Python Software Foundation License Version 2.\"\n\nSource: https://github.com/python/cpython/blob/main/LICENSE\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 32515,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://github.com/python/cpython/blob/main/LICENSE"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 12.887
+    },
+    {
+      "case": "LW4-S02",
+      "category": "source_quality",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The official Django repository (github.com/django/django) declares the SPDX license identifier **BSD-3-Clause**. Its `pyproject.toml` on the main branch states verbatim: `license = \"BSD-3-Clause\"` (with `license-files = [\"LICENSE\", \"LICENSE.python\", \"AUTHORS\"]`), and the repository's LICENSE file contains the corresponding BSD 3-Clause license text.\n\nSources:\n- https://raw.githubusercontent.com/django/django/main/pyproject.toml\n- https://raw.githubusercontent.com/django/django/main/LICENSE\n- https://github.com/django/django\n\nFINAL LABEL: supported",
+      "iterations": 12,
+      "usage": {
+        "billed_tokens": 139744,
+        "dollars": 0.11999999999999998,
+        "model_calls": 12,
+        "tool_calls": 12
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 12,
+        "answer_urls": [
+          "https://raw.githubusercontent.com/django/django/main/pyproject.toml",
+          "https://raw.githubusercontent.com/django/django/main/LICENSE",
+          "https://github.com/django/django"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 92.695
+    },
+    {
+      "case": "LW4-S03",
+      "category": "source_quality",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "NumPy's core source is distributed under the **BSD 3-Clause license** (the \"modified BSD\" license). The official LICENSE.txt in the numpy/numpy repository contains the standard 3-clause BSD text — verbatim: \"Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:\" — and the official about page states verbatim: \"It is released under the liberal terms of the modified BSD license.\" That modified BSD license is the BSD 3-Clause license.\n\nSources:\n- https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt\n- https://numpy.org/about/\n\nFINAL LABEL: supported",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 72231,
+        "dollars": 0.09999999999999999,
+        "model_calls": 10,
+        "tool_calls": 10
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 5,
+        "answer_urls": [
+          "https://raw.githubusercontent.com/numpy/numpy/main/LICENSE.txt",
+          "https://numpy.org/about/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_fetch",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_resolve",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 39.145
+    },
+    {
+      "case": "LW4-S04",
+      "category": "source_quality",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "PostgreSQL's official software license is the **PostgreSQL License** — a liberal open-source license similar to BSD/MIT (SPDX identifier: `PostgreSQL`).\n\nSources:\n- https://www.postgresql.org/about/licence/ (\"PostgreSQL is released under the PostgreSQL License, a liberal Open Source license, similar to the BSD or MIT licenses.\")\n- https://spdx.org/licenses/PostgreSQL.html\n- https://opensource.org/license/postgresql/\n\nFINAL LABEL: supported",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 32122,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://www.postgresql.org/about/licence/",
+          "https://spdx.org/licenses/PostgreSQL.html",
+          "https://opensource.org/license/postgresql/"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 16.925
+    },
+    {
+      "case": "LW4-Q01",
+      "category": "quantitative_analysis",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Method: Fetched the live CSV plus corroborating sources (GitHub seaborn-data repo, seaborn docs Anscombe's quartet page), then computed the mean of the y column with `research_analyze` (numeric_columns=[\"y\"], rows omitted) directly on the immutable fetched CSV artifact; the claim was resolved and validated with full evidence coverage across 3 fetched sources.\n\nNumeric result: 7.5006818181818184 (mean of y across all 44 rows)\n\nDataset URL: https://raw.githubusercontent.com/mwaskom/seaborn-data/master/anscombe.csv\n\nFINAL LABEL: supported",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 62159,
+        "dollars": 0.09999999999999999,
+        "model_calls": 10,
+        "tool_calls": 9
+      },
+      "validator": {
+        "dataset_sha256": "a0c1f636aa0347101de76271e7efe4c86a22ef28cda62886eaff23a1bf1924b1",
+        "rows": 44,
+        "expected": 7.5006818181818184,
+        "answer_numbers": [
+          3.0,
+          7.5006818181818184,
+          44.0
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 25.742
+    },
+    {
+      "case": "LW4-Q02",
+      "category": "quantitative_analysis",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Method: Fetched the live CSV via `research_fetch`, computed the `passengers` column statistics with `research_analyze` (rows omitted; parsed directly from the immutable CSV artifact), corroborated with additional fetched sources (GitHub flights.csv page and seaborn-data repo page), then resolved and validated the claim — validation passed with evidence coverage 1.0 across 4 fetched sources.\n\nNumeric result: 104.0\n\nDataset URL: https://raw.githubusercontent.com/mwaskom/seaborn-data/master/flights.csv\n\nFINAL LABEL: supported",
+      "iterations": 9,
+      "usage": {
+        "billed_tokens": 56599,
+        "dollars": 0.09,
+        "model_calls": 9,
+        "tool_calls": 7
+      },
+      "validator": {
+        "dataset_sha256": "237d834127d9c6355630d8f443a7a2377b5925923010009b59809ba0b67f4fac",
+        "rows": 144,
+        "expected": 104.0,
+        "answer_numbers": [
+          1.0,
+          4.0,
+          104.0
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_gather",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 30.458
+    },
+    {
+      "case": "LW4-Q03",
+      "category": "quantitative_analysis",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Method: Fetched the live CSV via `research_fetch`, computed statistics with `research_analyze` (numeric_columns=[\"petal_width\"], rows omitted) on the immutable artifact, and corroborated against two independently fetched mirrors of the same dataset — all three analyses returned max petal_width = 2.5 over 150 rows. The claim was resolved and validated with all fetched evidence (validation passed, source floor met).\n\nNumeric result: maximum petal_width = 2.5\n\nDataset URL: https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv\n\nFINAL LABEL: supported",
+      "iterations": 12,
+      "usage": {
+        "billed_tokens": 94917,
+        "dollars": 0.11999999999999998,
+        "model_calls": 12,
+        "tool_calls": 14
+      },
+      "validator": {
+        "dataset_sha256": "9cc1c345c71bcc9b486b74cbf6063fa66f4bb5e0f603a4b3c3471ec2e5e8e355",
+        "rows": 150,
+        "expected": 2.5,
+        "answer_numbers": [
+          2.5,
+          150.0,
+          2.5
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_analyze",
+          "research_analyze",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_analyze",
+          "research_analyze",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 42.706
+    },
+    {
+      "case": "LW4-Q04",
+      "category": "quantitative_analysis",
+      "repeat": 3,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "**Method:** Fetched the live CSV via `research_fetch` (plus corroborating sources: the seaborn-data GitHub repository and seaborn `load_dataset` documentation to meet the source floor), then computed the sum of the `size` column with `research_analyze` (numeric_columns=[\"size\"], rows omitted) on the immutable dataset artifact. The claim was resolved via `research_resolve` and passed `research_validate` (evidence coverage 1.0, claim supported).\n\n**Numeric result:** 627.0 (sum of `size` across all 244 rows)\n\n**Dataset URL:** https://raw.githubusercontent.com/mwaskom/seaborn-data/master/tips.csv\n\nFINAL LABEL: supported",
+      "iterations": 9,
+      "usage": {
+        "billed_tokens": 57398,
+        "dollars": 0.09,
+        "model_calls": 9,
+        "tool_calls": 8
+      },
+      "validator": {
+        "dataset_sha256": "e54cc4d2ce1bff65d32ca60b3e4b802e06bde1d7e7caf6f796f6bf7370e863b0",
+        "rows": 244,
+        "expected": 627.0,
+        "answer_numbers": [
+          1.0,
+          627.0,
+          244.0
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_fetch",
+          "research_fetch",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 25.238
+    }
+  ],
+  "started_at_epoch": 1789368529.737728,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 850.0,
+    "max_seconds": 10800.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 14,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 2162.856,
+  "terminal_state": "complete",
+  "summary": {
+    "expected": 60,
+    "attempted": 60,
+    "passed": 54,
+    "overall_rate": 0.9,
+    "category_rates": {
+      "quantitative_analysis": 1.0,
+      "source_quality": 1.0,
+      "contradiction_changed_fact": 0.9166666666666666,
+      "current_factual": 0.75,
+      "breaking_news_or_dated": 0.8333333333333334
+    },
+    "false_completions": 2,
+    "safety_violations": 0,
+    "safety_unmeasured_attempts": 0,
+    "gate_passed": false
+  }
+}

@@ -116,3 +116,24 @@ def test_extract_text_tool_calls_json_and_xml():
     name_xml, args_xml = calls_xml[0]
     assert name_xml == "bash"
     assert args_xml["command"] == "pytest"
+
+    # Compact provider XML emitted as assistant content with arg_key/value
+    # pairs (common on Sarvam-compatible endpoints).
+    compact = (
+        "<tool_call>web_search\n"
+        "<arg_key>query</arg_key><arg_value>RFC 9110</arg_value>\n"
+        "<arg_key>max_results</arg_key><arg_value>5</arg_value>\n"
+        "</tool_call>"
+    )
+    calls_compact = _extract_text_tool_calls(compact)
+    assert calls_compact == [("web_search", {"query": "RFC 9110", "max_results": 5})]
+
+    truncated = (
+        "<tool_call>research_resolve\n"
+        "<arg_key>node_id</arg_key><arg_value>claim</arg_value>\n"
+        "<arg_key>claim</arg_key><arg_value>The value is 42.</arg_value>\n"
+        "<arg_key>evidence_ids</arg_key><arg_value>[\"abc\"]"
+    )
+    assert _extract_text_tool_calls(truncated) == [
+        ("research_resolve", {"node_id": "claim", "claim": "The value is 42.", "evidence_ids": ["abc"]})
+    ]

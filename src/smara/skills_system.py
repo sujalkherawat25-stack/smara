@@ -26,6 +26,15 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger("smara.skills_system")
 
 
+def _is_within(path: Path, root: Path) -> bool:
+    """Check resolved ancestor containment without string-prefix aliases."""
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 @dataclass
 class SkillMetadata:
     name: str
@@ -74,8 +83,9 @@ def parse_yaml_frontmatter(text: str) -> Tuple[Dict[str, Any], str]:
 class SkillsRegistry:
     """Manages progressive discovery, validation, and loading of Smara skills."""
 
-    def __init__(self, workspace_dir: Optional[Path] = None):
+    def __init__(self, workspace_dir: Optional[Path] = None, workspace_trusted: Optional[bool] = None):
         self.workspace_dir = Path(workspace_dir or Path.cwd()).resolve()
+        self.workspace_trusted = workspace_trusted
         self.roots: List[Tuple[str, Path]] = [
             ("workspace", self.workspace_dir / ".smara" / "skills"),
             ("user", Path.home() / ".smara" / "skills"),
@@ -87,6 +97,8 @@ class SkillsRegistry:
         discovered: Dict[str, SkillMetadata] = {}
 
         for source, root in self.roots:
+            if source == "workspace" and self.workspace_trusted is False:
+                continue
             if not root.exists() or not root.is_dir():
                 continue
 
@@ -195,7 +207,7 @@ class SkillsRegistry:
             clean_rel = relative_path.replace("\\", "/").lstrip("/")
             target_path = (skill_dir / clean_rel).resolve()
             # Path traversal safety check
-            if not str(target_path).startswith(str(skill_dir.resolve())):
+            if not _is_within(target_path, skill_dir):
                 return {"status": "error", "message": "Access denied: Path traversal detected."}
 
             if not target_path.exists() or not target_path.is_file():
@@ -261,9 +273,14 @@ class SkillsRegistry:
         if assets:
             for rel_path, asset_content in assets.items():
                 p = (target_dir / rel_path.replace("\\", "/").lstrip("/")).resolve()
-                if str(p).startswith(str(target_dir.resolve())):
+                if _is_within(p, target_dir):
                     p.parent.mkdir(parents=True, exist_ok=True)
                     p.write_text(asset_content, encoding="utf-8")
+                else:
+                    return {
+                        "status": "error",
+                        "message": f"Access denied: Asset path '{rel_path}' escapes the skill directory.",
+                    }
 
         return {
             "status": "success",
@@ -276,8 +293,11 @@ class SkillsRegistry:
 # Global default instance
 _default_skills: Optional[SkillsRegistry] = None
 
-def get_default_skills_registry(workspace_dir: Optional[Path] = None) -> SkillsRegistry:
+def get_default_skills_registry(
+    workspace_dir: Optional[Path] = None,
+    workspace_trusted: Optional[bool] = None,
+) -> SkillsRegistry:
     global _default_skills
-    if _default_skills is None or workspace_dir is not None:
-        _default_skills = SkillsRegistry(workspace_dir=workspace_dir)
+    if _default_skills is None or workspace_dir is not None or workspace_trusted is not None:
+        _default_skills = SkillsRegistry(workspace_dir=workspace_dir, workspace_trusted=workspace_trusted)
     return _default_skills

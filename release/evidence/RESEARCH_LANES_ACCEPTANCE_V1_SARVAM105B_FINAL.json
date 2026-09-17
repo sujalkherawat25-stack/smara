@@ -1,0 +1,503 @@
+{
+  "suite": "smara-research-lanes-quick-deep-8-v1",
+  "manifest_sha256": "b882d2c5284cb4429b0be34edf7521816439211818d490af4a46421a72411e37",
+  "references_sha256": "32ca7f485d90125654305a43af7c5ebb613636a3fdac6b713cafd47d00bd35fd",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "sarvam-105b",
+  "runs": [
+    {
+      "case": "RL1-Q01",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "",
+      "iterations": 20,
+      "usage": {
+        "billed_tokens": 97525,
+        "dollars": 0.20000000000000004,
+        "model_calls": 20,
+        "tool_calls": 3
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 35.229
+    },
+    {
+      "case": "RL1-Q02",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The tomllib module is new in version 3.11 of Python\n\nSources:\n- \n- \n- \n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://docs.python.org/3.11/library/tomllib.html\n- https://docs.python.org/3.11/whatsnew/3.11.html\n- https://docs.python.org/3/library/tomllib.html\n- https://github.com/hukkin/tomli?tab=readme-ov-file\n- https://github.com/python/cpython/pull/31498\n- https://github.com/python/peps/blob/main/peps/pep-0680.rst",
+      "iterations": 16,
+      "usage": {
+        "billed_tokens": 167849,
+        "dollars": 0.16,
+        "model_calls": 16,
+        "tool_calls": 17
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 10,
+        "answer_urls": [
+          "https://docs.python.org/3.11/library/tomllib.html",
+          "https://docs.python.org/3.11/whatsnew/3.11.html",
+          "https://docs.python.org/3/library/tomllib.html",
+          "https://github.com/hukkin/tomli?tab=readme-ov-file",
+          "https://github.com/python/cpython/pull/31498",
+          "https://github.com/python/peps/blob/main/peps/pep-0680.rst"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "auto",
+        "lane_decision": {
+          "reasons": [
+            "bounded_default"
+          ],
+          "requested": "auto",
+          "score": 0,
+          "selected": "quick"
+        },
+        "fetched_source_count": 6
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 82.774
+    },
+    {
+      "case": "RL1-Q03",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Cargo.lock contains exact information about your dependencies.\n\nSources:\n- \n- \n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://doc.rust-lang.org/cargo/commands/cargo-generate-lockfile.html\n- https://doc.rust-lang.org/cargo/faq.html?highlight=why+do+binaries+have+cargo.lock+but+not\n- https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/stable/cargo/faq.html\n- https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html",
+      "iterations": 8,
+      "usage": {
+        "billed_tokens": 58772,
+        "dollars": 0.08,
+        "model_calls": 8,
+        "tool_calls": 10
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 13,
+        "answer_urls": [
+          "https://doc.rust-lang.org/cargo/commands/cargo-generate-lockfile.html",
+          "https://doc.rust-lang.org/cargo/faq.html?highlight=why+do+binaries+have+cargo.lock+but+not",
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/stable/cargo/faq.html",
+          "https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_inspect",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 5
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 37.606
+    },
+    {
+      "case": "RL1-Q04",
+      "category": "quick_research",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The PostgreSQL License is the name of the license for PostgreSQL.\n\nSources:\n- \n- \n- \n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://opensource.org/license/postgresql\n- https://spdx.org/licenses/PostgreSQL.html\n- https://wiki.postgresql.org/wiki/FAQ\n- https://www.postgresql.org/about/licence\n- https://www.postgresql.org/about/press/faq\n- https://www.postgresql.org/docs/current/legalnotice.html",
+      "iterations": 8,
+      "usage": {
+        "billed_tokens": 59805,
+        "dollars": 0.08,
+        "model_calls": 8,
+        "tool_calls": 8
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 12,
+        "answer_urls": [
+          "https://opensource.org/license/postgresql",
+          "https://spdx.org/licenses/PostgreSQL.html",
+          "https://wiki.postgresql.org/wiki/FAQ",
+          "https://www.postgresql.org/about/licence",
+          "https://www.postgresql.org/about/press/faq",
+          "https://www.postgresql.org/docs/current/legalnotice.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_search",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_resolve",
+          "research_search",
+          "research_resolve",
+          "research_validate"
+        ],
+        "expected_lane": "quick",
+        "actual_lane": "quick",
+        "requested_mode": "quick",
+        "lane_decision": {
+          "reasons": [
+            "explicit_user_selection"
+          ],
+          "requested": "quick",
+          "score": null,
+          "selected": "quick"
+        },
+        "fetched_source_count": 6
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 39.244
+    },
+    {
+      "case": "RL1-D01",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "",
+      "iterations": 40,
+      "usage": {
+        "billed_tokens": 336889,
+        "dollars": 0.4000000000000002,
+        "model_calls": 40,
+        "tool_calls": 15
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_report",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate",
+          "research_report"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_search",
+          "research_inspect",
+          "research_inspect",
+          "research_resolve",
+          "research_validate",
+          "research_resolve",
+          "research_resolve",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 89.757
+    },
+    {
+      "case": "RL1-D02",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "",
+      "iterations": 40,
+      "usage": {
+        "billed_tokens": 283477,
+        "dollars": 0.4000000000000002,
+        "model_calls": 40,
+        "tool_calls": 8
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_gather",
+          "research_search",
+          "research_inspect",
+          "research_inspect",
+          "research_fetch"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_inspect",
+          "research_fetch"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 84.858
+    },
+    {
+      "case": "RL1-D03",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "budget_exhausted",
+      "completed": false,
+      "answer": "",
+      "iterations": 40,
+      "usage": {
+        "billed_tokens": 231798,
+        "dollars": 0.4000000000000002,
+        "model_calls": 40,
+        "tool_calls": 3
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 74.847
+    },
+    {
+      "case": "RL1-D04",
+      "category": "deep_research",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "tool_error",
+      "completed": false,
+      "answer": "API_ERROR: The read operation timed out\nFINAL LABEL: insufficient",
+      "iterations": 8,
+      "usage": {
+        "billed_tokens": 164313,
+        "dollars": 0.09,
+        "model_calls": 9,
+        "tool_calls": 14
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_inspect",
+          "research_search",
+          "research_search",
+          "research_search"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch",
+          "research_fetch",
+          "research_search",
+          "research_search",
+          "research_search"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 260.057
+    }
+  ],
+  "started_at_epoch": 1789532621.2322974,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 850.0,
+    "max_seconds": 10800.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 40,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 705.323
+}

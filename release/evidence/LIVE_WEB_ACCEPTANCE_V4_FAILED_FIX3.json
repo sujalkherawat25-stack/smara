@@ -1,0 +1,256 @@
+{
+  "suite": "smara-live-web-canonical-agent-20-v4",
+  "manifest_sha256": "38856069ad115b1b9ae4fdf3765cd759c8e0670933657d886502f5d4a370c38a",
+  "references_sha256": "507ffa03ad022f99da333d39b0efd34551e86ba0aee3104a65c2822c79051e6c",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "glm5.3-flash",
+  "runs": [
+    {
+      "case": "LW4-F04",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "According to Cargo's official documentation, Cargo.lock is used to record the exact versions of a project's dependencies. The Cargo Book states verbatim: \"Cargo.lock contains exact information about your dependencies.\" This lets Cargo build reproducibly with the same dependency versions across builds and machines, while Cargo.toml describes the abstract requirements.\n\nSource: \n\nFINAL LABEL: supported\n\nSources:\n- https://doc.rust-lang.org/beta/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html\n- https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 26754,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://doc.rust-lang.org/beta/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+          "https://doc.rust-lang.org/stable/cargo/guide/cargo-toml-vs-cargo-lock.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 13.858
+    },
+    {
+      "case": "LW4-D02",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The Node.js 22 release codename is **Jod**. The official Node.js blog states verbatim: \"This release marks the transition of Node.js 22.x into Long Term Support (LTS) with the codename 'Jod'.\"\n\nSource:  (also announced at )\n\nFINAL LABEL: supported\n\nSources:\n- https://github.com/nodejs/Release/issues/1001\n- https://github.com/nodejs/nodejs.org/blob/main/apps/site/pages/en/blog/release/v22.11.0.md\n- https://nodejs.org/en/blog/release/v22.11.0",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 25707,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://github.com/nodejs/Release/issues/1001",
+          "https://github.com/nodejs/nodejs.org/blob/main/apps/site/pages/en/blog/release/v22.11.0.md",
+          "https://nodejs.org/en/blog/release/v22.11.0"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 13.849
+    },
+    {
+      "case": "LW4-D03",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "OpenAI announced GPT-4.1 in the API on **April 14, 2025**, via a livestream introducing the GPT-4.1 series of API-only models (gpt-4.1, gpt-4.1-mini, gpt-4.1-nano). This is confirmed by the OpenAI Developer Community announcement post (published 2025-04-14T15:08:09+00:00, titled \"April 14 Livestream: Announcing GPT-4.1 series API-only models\") and corroborated by The Verge (\"Updated Apr 14, 2025, 5:42 PM UTC — OpenAI has introduced GPT-4.1\") and TechCrunch (April 14, 2025).\n\nSources:\n- \n- \n- \n\nFINAL LABEL: supported\n\nSources:\n- https://community.openai.com/t/april-14-livestream-announcing-gpt-4-1-series-api-only-models-gpt-4-5-deprecated/1230037\n- https://community.openai.com/t/april-14-livestream-announcing-gpt-4-1-series-api-only-models-gpt-4-5-deprecated/1230037/1\n- https://techcrunch.com/2025/04/14/openais-new-gpt-4-1-models-focus-on-coding\n- https://www.theverge.com/news/647896/openai-chatgpt-gpt-4-1-mini-nano-launch-availability",
+      "iterations": 11,
+      "usage": {
+        "billed_tokens": 102203,
+        "dollars": 0.10999999999999999,
+        "model_calls": 11,
+        "tool_calls": 9
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 10,
+        "answer_urls": [
+          "https://community.openai.com/t/april-14-livestream-announcing-gpt-4-1-series-api-only-models-gpt-4-5-deprecated/1230037",
+          "https://community.openai.com/t/april-14-livestream-announcing-gpt-4-1-series-api-only-models-gpt-4-5-deprecated/1230037/1",
+          "https://techcrunch.com/2025/04/14/openais-new-gpt-4-1-models-focus-on-coding",
+          "https://www.theverge.com/news/647896/openai-chatgpt-gpt-4-1-mini-nano-launch-availability"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_search",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 134.386
+    },
+    {
+      "case": "LW4-C04",
+      "category": "contradiction_changed_fact",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "OpenSSL 1.1.1 reached public end of life on **11th September 2023**. The official OpenSSL blog post states verbatim: \"LTS lasts five years and consequently OpenSSL 1.1.1 has reached its EOL as of today, 11th September 2023.\"\n\nSource: \n\nFINAL LABEL: supported\n\nSources:\n- https://mta.openssl.org/pipermail/openssl-announce/2023-September/000271.html\n- https://mta.openssl.org/pipermail/openssl-users/2023-March/016116.html\n- https://openssl-library.org/post/2023-09-11-eol-111/index.html",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 33944,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "fetched_sources": 3,
+        "answer_urls": [
+          "https://mta.openssl.org/pipermail/openssl-announce/2023-September/000271.html",
+          "https://mta.openssl.org/pipermail/openssl-users/2023-March/016116.html",
+          "https://openssl-library.org/post/2023-09-11-eol-111/index.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 17.471
+    }
+  ],
+  "started_at_epoch": 1789371391.1674821,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 250.0,
+    "max_seconds": 3600.0,
+    "max_tokens_per_attempt": 750000,
+    "max_iterations": 14,
+    "conservative_rupees_per_million_tokens": 45.0
+  },
+  "elapsed_seconds": 179.975,
+  "terminal_state": "complete",
+  "summary": {
+    "expected": 4,
+    "attempted": 4,
+    "passed": 4,
+    "overall_rate": 1.0,
+    "category_rates": {
+      "contradiction_changed_fact": 1.0,
+      "breaking_news_or_dated": 1.0,
+      "current_factual": 1.0
+    },
+    "false_completions": 0,
+    "safety_violations": 0,
+    "safety_unmeasured_attempts": 0,
+    "gate_passed": true
+  }
+}
