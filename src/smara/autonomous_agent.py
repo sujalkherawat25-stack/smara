@@ -47,6 +47,7 @@ from smara.agent_tools import (
     calculate,
     audio_transcribe,
     video_inspect,
+    youtube_ingest,
     image_inspect,
     wikipedia_page,
     memory_tool,
@@ -708,6 +709,23 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "youtube_ingest",
+            "description": "Fetch a bounded, timestamped YouTube transcript without downloading video/audio. Results include segment timestamps, a transcript hash, and discovery-only/licensing metadata.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url_or_id": {"type": "string", "description": "One YouTube watch/shorts/embed/ youtu.be URL or an 11-character video ID."},
+                    "language": {"type": "string", "description": "Optional BCP-47 transcript language preference, such as en or hi."},
+                    "max_segments": {"type": "integer", "minimum": 1, "maximum": 20000, "default": 5000},
+                    "max_chars": {"type": "integer", "minimum": 1000, "maximum": 2000000, "default": 120000}
+                },
+                "required": ["url_or_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "image_inspect",
             "description": "Visually inspect an image, photo, screenshot, or diagram using Gemma 4 multimodal vision. Returns transcription of text and detailed visual descriptions.",
             "parameters": {
@@ -1145,7 +1163,7 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
     elif prof == "web":
         allowed = {"browser_action","web_search","web_extract","web_reader_dynamic","wayback_extract","wikipedia_page","pdf_search","calculate","file_read","list_directory","programmatic_tool_call","todo"}
     elif prof in ["multimodal", "vision", "audio"]:
-        allowed = {"browser_action", "image_inspect", "audio_transcribe", "video_inspect", "file_read", "todo"}
+        allowed = {"browser_action", "image_inspect", "audio_transcribe", "video_inspect", "youtube_ingest", "file_read", "todo"}
     return [s for s in TOOL_SCHEMAS if s.get("function", {}).get("name") in allowed - DISABLED_TOOLS]
 
 
@@ -1169,7 +1187,7 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - For arithmetic, statistical calculations, data processing, regex, geometry, or counting, ALWAYS execute Python code via `python_execute` or `calculate` instead of estimating.
    - For local attached files, use `file_read` or `zip_extract_and_read`.
    - For audio recordings (.mp3, .wav), use `audio_transcribe`.
-   - For YouTube videos or video files, use `video_inspect` (actions: 'transcript', 'info', 'frame'). When asked what appears at a specific timestamp, use action='frame' with `timestamp_seconds=N`.
+   - For YouTube transcript research, prefer `youtube_ingest`: it is transcript-first, timestamped, bounded, hashed, and marks the source discovery-only until claims are validated. Use `video_inspect` for local video metadata or timestamped frames. When asked what appears at a specific timestamp, use action='frame' with `timestamp_seconds=N`.
    - For images, charts, diagrams, and photos, use `image_inspect` or `file_read`.
    - For complex modular tasks, delegate sub-goals using `delegate_task`.
    - For multi-stage dependency workflows or parallel task graphs, construct and execute DAGs using `dag_flow`.
@@ -1294,6 +1312,7 @@ class SmaraAutonomousAgent:
             "calculate": self._dispatch_calculate,
             "audio_transcribe": self._dispatch_audio_transcribe,
             "video_inspect": self._dispatch_video_inspect,
+            "youtube_ingest": self._dispatch_youtube_ingest,
             "image_inspect": self._dispatch_image_inspect,
             "memory": self._dispatch_memory,
             "skills_list": self._dispatch_skills_list,
@@ -1655,6 +1674,14 @@ class SmaraAutonomousAgent:
         ts = args.get("timestamp_seconds")
         prompt = args.get("prompt")
         return video_inspect(u, action=act, timestamp_seconds=ts, prompt=prompt)
+
+    def _dispatch_youtube_ingest(self, args: Dict[str, Any]) -> str:
+        return youtube_ingest(
+            args.get("url_or_id") or args.get("url") or "",
+            language=args.get("language") or "",
+            max_segments=args.get("max_segments", 5000),
+            max_chars=args.get("max_chars", 120000),
+        )
 
     def _dispatch_image_inspect(self, args: Dict[str, Any]) -> str:
         img = args.get("image_path") or args.get("path") or ""

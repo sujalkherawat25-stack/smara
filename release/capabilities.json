@@ -318,6 +318,12 @@
       "limitation": "Document AI and Gemma 4 provider behavior are not live-promoted for the supplied credential; Gemma 4 fallback is image-only visual transcription, not structured Parse or scanned-PDF OCR",
       "cli_command": "smara ocr <file> [--lang en-IN] [--format md|txt] [--output out.md]"
     },
+    "youtube_transcript_ingestion": {
+      "status": "verified_contract_only",
+      "suite": "tests/test_multimodal_ingestion.py",
+      "scope": "Transcript-first single-YouTube-video ingestion with timestamp normalization, bounded limits, content hashing, discovery-only quality, and explicit licensing metadata",
+      "limitation": "Live transcript-provider access and audio-download fallback are not promoted; media download is disabled by default"
+    },
     "stateful_browser": {
       "status": "verified_deterministic_agent_loop",
       "suite": "tests/evals/windows_browser/manifest.json",
@@ -371,7 +377,7 @@
       "integration_suite": "scripts/docker_desktop_smoke.py",
       "evidence": {
         "path": "release/evidence/PLATFORM_CAPABILITY_SMOKE_2026-09-17.json",
-        "sha256": "5320fbbf0d4615dff36f0f8cac7b37aececfe81ffb866dd5c0bcb9f9a3a8d68b"
+        "sha256": "ff1d9fb6b9ea6b263b982f139504e7631e3ee62378d0a53e016b2a619c5c8dab"
       },
       "scope": "Reset-attested Linux Xvfb/Openbox guest in Docker Desktop with bounded screenshot, click, stale-observation, cancellation, and cleanup checks",
       "limitation": "This is an isolated disposable Linux container guest, not a hypervisor VM and not native Windows desktop control"

@@ -42,6 +42,19 @@
     ],
     "live_status": "not_run_without_a_key_whitelisted_for_gemma4_beta"
   },
+  "youtube_transcript_ingestion": {
+    "status": "passed_contract_only",
+    "suite": "tests/test_multimodal_ingestion.py",
+    "checks": [
+      "single-video URL/ID validation",
+      "timestamp and duration normalization",
+      "bounded segment and character limits",
+      "immutable transcript SHA-256",
+      "discovery-only and licensing metadata"
+    ],
+    "live_status": "not_run_without_external_network_fixture",
+    "media_download": "disabled_by_default"
+  },
   "real_vm_desktop": {
     "status": "passed_disposable_docker_guest",
     "image": "smara-desktop-gate:local",

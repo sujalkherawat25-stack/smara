@@ -588,7 +588,7 @@ above (22/24, 91.67%, zero false completions, zero safety violations).
 
 The remaining capability checks are sealed in
 `release/evidence/PLATFORM_CAPABILITY_SMOKE_2026-09-17.json` (SHA-256
-`5320fbbf0d4615dff36f0f8cac7b37aececfe81ffb866dd5c0bcb9f9a3a8d68b`):
+`ff1d9fb6b9ea6b263b982f139504e7631e3ee62378d0a53e016b2a619c5c8dab`):
 
 - Docker Desktop `desktop-linux` built the Linux image and ran
   `scripts/linux_wheel_smoke.py` successfully (`LINUX_WHEEL_SMOKE_OK`). This
@@ -624,6 +624,12 @@ The remaining capability checks are sealed in
   Document AI 404, requires a base64 image data URI, and labels results as
   `sarvam-gemma4/gemma4`. It never runs after authentication failures and does
   not claim PDF parsing, structured extraction, or Sarvam Vision entitlement.
+- The first multimodal-ingestion phase is now implemented as
+  `youtube_ingest`: a transcript-first, single-video path with strict URL
+  validation, timestamp/duration normalization, segment and character caps,
+  transcript SHA-256, discovery-only quality, and explicit copyright metadata.
+  It does not download media by default; live transcript and bounded audio
+  fallback remain the next acceptance step.
 - Multi-agent delegation remains opt-in (`SMARA_ENABLE_DELEGATION=true`) and
   learned-skill promotion remains quarantined/revocable; historical public
   acceptance does not silently enable either capability.

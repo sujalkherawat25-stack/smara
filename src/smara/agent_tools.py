@@ -7,6 +7,7 @@ Provides real, production-ready tool implementations for autonomous problem solv
 - python_execute: Subprocess Python 3.11 execution with timeout and output capture
 - file_read: Multi-format document reader (.pdf, .xlsx, .docx, .pdb, .txt, .csv)
 - zip_extract_and_read: Batch archive extractor and reader
+- youtube_ingest: Bounded, timestamped YouTube transcript ingestion
 - calculate: Math evaluation
 """
 from __future__ import annotations
@@ -783,18 +784,11 @@ def video_inspect(
         # Try YouTubeTranscriptApi for YouTube URLs first
         yt_id_match = re.search(r"(?:v=|youtu\.be/|shorts/)([a-zA-Z0-9_-]{11})", url_or_path)
         if yt_id_match:
-            vid_id = yt_id_match.group(1)
             try:
-                from youtube_transcript_api import YouTubeTranscriptApi
-                t = YouTubeTranscriptApi().fetch(vid_id)
-                lines = []
-                for seg in t:
-                    text = seg.text if hasattr(seg, 'text') else seg.get('text', '')
-                    start = seg.start if hasattr(seg, 'start') else seg.get('start', 0)
-                    lines.append(f"[{start:.1f}s] {text}")
-                return _truncate_output("\n".join(lines))
-            except Exception:
-                pass
+                result = youtube_ingest(url_or_path)
+                return _truncate_output(result)
+            except Exception as exc:
+                return f"YouTube transcript unavailable: {exc}"
 
         # Fallback: transcribe audio using Whisper
         return audio_transcribe(url_or_path)
@@ -878,6 +872,29 @@ def video_inspect(
             return f"Video frame extraction error: {e}"
 
     return f"Unknown video_inspect action: {action}. Available actions: transcript, info, frame"
+
+
+def youtube_ingest(
+    url_or_id: str,
+    language: str = "",
+    max_segments: int = 5000,
+    max_chars: int = 120000,
+) -> str:
+    """Fetch a bounded, timestamped YouTube transcript without downloading media."""
+    try:
+        from .multimodal_ingestion import ingest_youtube_transcript, youtube_result_json
+    except ImportError:
+        from smara.multimodal_ingestion import ingest_youtube_transcript, youtube_result_json
+    try:
+        result = ingest_youtube_transcript(
+            url_or_id,
+            language=language.strip() or None,
+            max_segments=int(max_segments),
+            max_chars=int(max_chars),
+        )
+        return youtube_result_json({"status": "ok", **result})
+    except Exception as exc:
+        return json.dumps({"status": "error", "error": str(exc), "source": str(url_or_id)}, ensure_ascii=False, sort_keys=True)
 
 
 def calculate(expression: str) -> str:
