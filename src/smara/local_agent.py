@@ -96,7 +96,7 @@ LOCAL_SKILLS: dict[str, LocalSkillSpec] = {
         artifact_schema={"type": "object", "properties": {"source_url": {"type": "string"}}},
     ),
     "local_integration": LocalSkillSpec(
-        "local_integration", "Call an approved local read-only integration using a local secret.", _ANY_OBJECT,
+        "local_integration", "Call an approved local read-only integration using a local secret (Tavily/Exa live web search or GitHub repositories).", _ANY_OBJECT,
         timeout_seconds=30, max_output_bytes=16_000, side_effecting=False,
         result_schema={"type": "object", "required": ["action", "provider"]},
     ),

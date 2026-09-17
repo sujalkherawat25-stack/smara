@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from smara.local_agent import LocalAutonomousAgent
-from smara.local_agent_runtime import _compact_history
+from smara.local_agent_runtime import _compact_history, _live_web_fallback_answer, _live_web_query
 
 
 def test_packaged_top_level_import_can_compact_history():
@@ -79,3 +79,89 @@ def test_parse_plan_dynamic_formats():
     plan3 = _parse_plan('<think>Let me fetch the data</think>\n```json\n{"action": "local_python", "payload": {"code": "fetch()"}}\n```')
     assert plan3 is not None
     assert plan3["capability"] == "local_python"
+
+
+def test_live_web_intent_uses_previous_question_for_short_follow_up():
+    context = [{"role": "user", "content": "Is there any chance of rainfall today in Banswara Rajasthan?"}]
+    query = _live_web_query("do the web search", context)
+    assert query is not None
+    assert "Banswara" in query
+    assert "live information for" in query
+
+
+def test_live_web_intent_does_not_override_explicit_opt_out():
+    assert _live_web_query("How do I search the web without a live web search?", []) is None
+    assert _live_web_query("What is the current git branch?", []) is None
+
+
+def test_live_web_fallback_is_source_backed():
+    raw = '{"action":"local_integration","provider":"tavily","results":[{"title":"Weather","url":"https://weather.example","snippet":"Overcast; 28% chance of rain."}],"citations":["https://weather.example"]}'
+    answer = _live_web_fallback_answer(raw, "Banswara weather today")
+    assert answer is not None
+    assert "https://weather.example" in answer
+    assert "28% chance" in answer
+
+
+def test_shared_turn_preflights_current_web_request(monkeypatch, tmp_path: Path):
+    from smara import local_agent_runtime as runtime
+
+    calls = []
+
+    def fake_action(capability, payload):
+        calls.append((capability, payload))
+        return {
+            "action": "local_integration",
+            "provider": payload["provider"],
+            "operation": "search",
+            "results": [{"title": "Official weather", "url": "https://weather.example/today", "snippet": "Rain chance 40%."}],
+            "citations": ["https://weather.example/today"],
+            "proof": {"results": 1},
+        }
+
+    def fake_model(self, history):
+        assert any("LIVE_WEB_PREFLIGHT_PRESENT" in str(item.get("content")) for item in history if isinstance(item, dict))
+        return {"kind": "answer", "answer": "The live result reports a 40% chance of rain."}
+
+    monkeypatch.setattr(runtime.OpenAICompatiblePlanner, "__call__", fake_model)
+    config = runtime.LocalModelConfig(base_url="http://127.0.0.1:1", model="unused")
+    result = runtime.run_shared_local_turn(
+        prompt="Will it rain in Banswara today?",
+        state_path=tmp_path / "desktop.json",
+        config=config,
+        workspace_id=str(tmp_path),
+        action_executor=fake_action,
+    )
+    assert calls and calls[0][0] == "local_integration"
+    assert result["live_web"]["citations"] == ["https://weather.example/today"]
+    assert "https://weather.example/today" in result["answer"]
+
+
+def test_shared_turn_recovers_subject_for_follow_up_after_restart(monkeypatch, tmp_path: Path):
+    from smara import local_agent_runtime as runtime
+    from smara.local_conversation_memory import SQLiteConversationMemory
+
+    state = tmp_path / "desktop.json"
+    memory = SQLiteConversationMemory.for_state(state)
+    memory.append_exchange(
+        conversation_id="follow-up",
+        workspace_id=str(tmp_path),
+        user_message="Is there any chance of rainfall today in Banswara Rajasthan?",
+        assistant_message="I need to check live data.",
+    )
+    calls = []
+
+    def fake_action(capability, payload):
+        calls.append(payload)
+        return {"action": "local_integration", "provider": "tavily", "results": [{"title": "Forecast", "url": "https://weather.example", "snippet": "Rain likely."}], "citations": ["https://weather.example"]}
+
+    monkeypatch.setattr(runtime.OpenAICompatiblePlanner, "__call__", lambda self, history: {"kind": "answer", "answer": "Live result received."})
+    result = runtime.run_shared_local_turn(
+        prompt="do the web search",
+        state_path=state,
+        config=runtime.LocalModelConfig(base_url="http://127.0.0.1:1", model="unused"),
+        conversation_id="follow-up",
+        workspace_id=str(tmp_path),
+        action_executor=fake_action,
+    )
+    assert calls and "Banswara" in calls[0]["query"]
+    assert result["live_web"]["query"].startswith("Is there any chance")
