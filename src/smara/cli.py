@@ -616,51 +616,6 @@ class LocalAutonomousEngine:
 # Legacy Cloud Client & CLI Argument Parser
 # ============================================================================
 
-def _client(args: argparse.Namespace) -> httpx.Client:
-    headers: dict[str, str] = {"Accept": "application/json"}
-    token = getattr(args, "token", None) or _load_token()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    if getattr(args, "dev_account", None):
-        headers["X-Smara-Account-Id"] = args.dev_account
-    request_timeout = max(15, min(600, int(getattr(args, "request_timeout", 180))))
-    timeout = httpx.Timeout(connect=10.0, read=float(request_timeout), write=30.0, pool=10.0)
-    api_url = getattr(args, "api", "https://api.smara.ai").rstrip("/")
-    return httpx.Client(base_url=api_url, headers=headers, timeout=timeout)
-
-
-def _token_path() -> Path:
-    configured = os.getenv("SMARA_TOKEN_FILE")
-    if configured:
-        return Path(configured)
-    root = Path(os.getenv("APPDATA", Path.home() / ".config")) / "Smara"
-    return root / "token.json"
-
-
-def _load_token() -> str:
-    try:
-        data = json.loads(_token_path().read_text(encoding="utf-8"))
-        token = data.get("access_token")
-        return token if isinstance(token, str) else ""
-    except (OSError, ValueError):
-        return ""
-
-
-def _save_token(result: dict[str, Any]) -> None:
-    path = _token_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"access_token": result["access_token"], "expires_in": result.get("expires_in")}), encoding="utf-8")
-    if os.name != "nt":
-        path.chmod(0o600)
-
-
-def _clear_token() -> None:
-    try:
-        _token_path().unlink()
-    except FileNotFoundError:
-        pass
-
-
 def _interactive_repl(engine: LocalAutonomousEngine, canonical_runner=None) -> None:
     """Claude Code inspired interactive terminal REPL."""
     tui = engine.tui
@@ -1142,6 +1097,7 @@ def main(argv: list[str] | None = None) -> int:
         if session is None and budget is None and requested_profile=="research_web":
             selected=select_research_lane(prompt,requested_mode)[0].mode
             budget=BUDGET_PROFILES["research_deep" if selected=="deep" else "research_quick"]
+        ephemeral_session = session is None and budget is None
         session=session or SessionEngine(active_workspace,budget=budget or Budget())
         model_config=session.get("model_config")
         if model_config is None:
@@ -1152,7 +1108,17 @@ def main(argv: list[str] | None = None) -> int:
         tool_profile=normalize_tool_profile(session.get("tool_profile") or requested_profile)
         session.set("tool_profile",tool_profile)
         research_mode=session.get("research_mode") or requested_mode
-        agent=SmaraAutonomousAgent(api_key=_resolve_profile_key(profile,engine.credentials),base_url=model_config["base_url"],model=model_config["model"],auth_header=model_config.get("auth_header","authorization"),workspace_root=active_workspace,profile=tool_profile,session_engine=session,research_mode=research_mode)
+        api_key=_resolve_profile_key(profile,engine.credentials)
+        # Direct/ask prompts must fail fast when no provider is configured.
+        # Durable `run`/resume calls keep their session path intact so a
+        # caller can configure a provider and resume without losing state.
+        if not api_key and ephemeral_session:
+            answer=f"No API key configured for active model profile '{profile.get('label', profile.get('id', 'default'))}'. Configure a local provider in Settings or run 'smara models'."
+            canonical=session.finish_incremental("needs_input",answer,("model provider credential is missing",))
+            from .app_adapter import application_envelope
+            payload={**canonical,**application_envelope(session,canonical)}
+            return canonical,payload
+        agent=SmaraAutonomousAgent(api_key=api_key,base_url=model_config["base_url"],model=model_config["model"],auth_header=model_config.get("auth_header","authorization"),workspace_root=active_workspace,profile=tool_profile,session_engine=session,research_mode=research_mode)
         agent_result=agent.run(prompt,max_iterations=None)
         payload=agent_result.get("session") or session.inspect().get("state",{}).get("result") or session.inspect()
         from .app_adapter import application_envelope

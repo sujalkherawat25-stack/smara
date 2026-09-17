@@ -12,8 +12,11 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter};
 
-const DEFAULT_API_URL: &str = "https://ai.syntarus.com/smara-api";
-const DEFAULT_WEB_URL: &str = "https://ai.syntarus.com/";
+// The installed companion is local-first.  A hosted endpoint is only used
+// after an explicit cloud pairing/configuration; it must never be injected by
+// a fresh install or by a stale beta state file.
+const DEFAULT_API_URL: &str = "http://127.0.0.1:8080";
+const DEFAULT_WEB_URL: &str = "http://127.0.0.1:3000";
 
 fn shared_http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -272,7 +275,30 @@ fn stored_local_model_profiles() -> Vec<LocalModelProfile> {
         .and_then(|value| serde_json::from_value::<Vec<LocalModelProfile>>(value).ok())
         .unwrap_or_default();
     if !profiles.is_empty() {
-        return profiles;
+        let mut changed = false;
+        let migrated = profiles.into_iter().map(|mut profile| {
+            if profile.id == "sarvam" {
+                let model = profile.model.to_ascii_lowercase().replace(['-', '.'], "");
+                if matches!(model.as_str(), "glm52" | "glm53" | "glm53flash") {
+                    profile.model = "sarvam-105b".to_owned();
+                    profile.label = "Sarvam 105B".to_owned();
+                    changed = true;
+                }
+                if profile.base_url.contains("api.sarvam.ai") && profile.base_url.ends_with("/v1") {
+                    profile.base_url = "https://api.sarvam.ai/v2".to_owned();
+                    changed = true;
+                }
+                if profile.auth_header != "api-subscription-key" {
+                    profile.auth_header = "api-subscription-key".to_owned();
+                    changed = true;
+                }
+            }
+            profile
+        }).collect::<Vec<_>>();
+        if changed {
+            let _ = write_local_model_profiles(&migrated);
+        }
+        return migrated;
     }
 
     // Older beta builds saved the selected profile and encrypted credential,
@@ -625,14 +651,31 @@ async fn login_cli(api_url: String, web_url: String) -> Result<String, String> {
 fn current_connection() -> ConnectionState {
     let state = read_json(&state_path());
     let preferences = read_json(&preferences_path());
-    let configured_api_url = preferences.as_ref().and_then(|value| value.get("api_url")).and_then(Value::as_str).or_else(|| state.as_ref().and_then(|value| value.get("smara_url")).and_then(Value::as_str)).unwrap_or(DEFAULT_API_URL);
+    // Do not let a legacy paired state silently switch a local install back to
+    // the retired hosted endpoint.  Cloud is opt-in through an explicit
+    // runtime_mode=cloud setting.
+    let runtime_mode = preferences.as_ref().and_then(|value| value.get("runtime_mode")).and_then(Value::as_str)
+        .or_else(|| state.as_ref().and_then(|value| value.get("runtime_mode")).and_then(Value::as_str))
+        .filter(|value| matches!(*value, "local" | "cloud"))
+        .unwrap_or("local").to_owned();
+    let configured_api_url = if runtime_mode == "cloud" {
+        preferences.as_ref().and_then(|value| value.get("api_url")).and_then(Value::as_str)
+            .or_else(|| state.as_ref().and_then(|value| value.get("smara_url")).and_then(Value::as_str))
+            .unwrap_or(DEFAULT_API_URL)
+    } else {
+        DEFAULT_API_URL
+    };
     let api_url = normalized_api_url(configured_api_url);
-    let configured_web_url = preferences.as_ref().and_then(|value| value.get("web_url")).and_then(Value::as_str).unwrap_or(DEFAULT_WEB_URL);
+    let configured_web_url = if runtime_mode == "cloud" {
+        preferences.as_ref().and_then(|value| value.get("web_url")).and_then(Value::as_str).unwrap_or(DEFAULT_WEB_URL)
+    } else {
+        DEFAULT_WEB_URL
+    };
     let web_url = normalized_web_url(&api_url, configured_web_url);
     let workspace = preferences.as_ref().and_then(|value| value.get("workspace")).and_then(Value::as_str).unwrap_or("default").to_owned();
     let model_profile = preferences.as_ref().and_then(|value| value.get("model_profile")).and_then(Value::as_str).unwrap_or("default").to_owned();
     let pid = read_json(&runtime_path()).and_then(|value| value.get("pid").and_then(Value::as_u64).map(|value| value as u32)).filter(|value| process_alive(*value));
-    let paired = state.as_ref().map(|value| value.get("executor_id").and_then(Value::as_str).is_some() && (value.get("token").and_then(Value::as_str).is_some() || value.get("token_dpapi").and_then(Value::as_str).is_some())).unwrap_or(false);
+    let paired = runtime_mode == "cloud" && state.as_ref().map(|value| value.get("executor_id").and_then(Value::as_str).is_some() && (value.get("token").and_then(Value::as_str).is_some() || value.get("token_dpapi").and_then(Value::as_str).is_some())).unwrap_or(false);
     let paired_capabilities = string_list(state.as_ref().and_then(|value| value.get("capabilities")));
     let configured_list = |key: &str| -> Vec<String> {
         if let Some(value) = preferences.as_ref().and_then(|item| item.get(key)) { string_list(Some(value)) } else { string_list(state.as_ref().and_then(|item| item.get(key))) }
@@ -647,20 +690,13 @@ fn current_connection() -> ConnectionState {
         .or_else(|| state.as_ref().and_then(|value| value.get("approval_mode")).and_then(Value::as_str))
         .filter(|value| matches!(*value, "ask" | "auto"))
         .unwrap_or("auto").to_owned();
-    // New installations are local-first.  Existing paired installations
-    // without an explicit mode stay on the legacy cloud path until the user
-    // chooses Local mode in Settings, preventing a surprise behavior change.
-    let runtime_mode = preferences.as_ref().and_then(|value| value.get("runtime_mode")).and_then(Value::as_str)
-        .or_else(|| state.as_ref().and_then(|value| value.get("runtime_mode")).and_then(Value::as_str))
-        .filter(|value| matches!(*value, "local" | "cloud"))
-        .unwrap_or(if state.is_some() { "cloud" } else { "local" }).to_owned();
     let capabilities = if runtime_mode == "local" {
         derived_local_capabilities(&allowed_roots, &terminal_allowlist, &browser_domains)
     } else {
         paired_capabilities
     };
     let token_path = cli_token_path();
-    ConnectionState { runtime_mode, api_url, web_url, workspace, model_profile, paired, executor_id: state.as_ref().and_then(|value| value.get("executor_id")).and_then(Value::as_str).map(str::to_owned), capabilities, allowed_roots, terminal_allowlist, browser_domains, auto_approve_safe, approval_mode, paused: pause_path().exists(), running: pid.is_some(), pid, log_path: log_path().display().to_string(), has_cli_token: read_json(&token_path).and_then(|value| value.get("access_token").and_then(Value::as_str).map(|token| !token.is_empty())).unwrap_or(false), last_error: None }
+    ConnectionState { runtime_mode: runtime_mode.clone(), api_url, web_url, workspace, model_profile, paired, executor_id: if runtime_mode == "cloud" { state.as_ref().and_then(|value| value.get("executor_id")).and_then(Value::as_str).map(str::to_owned) } else { None }, capabilities, allowed_roots, terminal_allowlist, browser_domains, auto_approve_safe, approval_mode, paused: pause_path().exists(), running: pid.is_some(), pid, log_path: log_path().display().to_string(), has_cli_token: runtime_mode == "cloud" && read_json(&token_path).and_then(|value| value.get("access_token").and_then(Value::as_str).map(|token| !token.is_empty())).unwrap_or(false), last_error: None }
 }
 
 #[tauri::command]
@@ -684,7 +720,15 @@ fn save_settings(settings: LocalSettings) -> Result<ConnectionState, String> {
     write_json(&preferences_path(), &value)?;
     let mut state = read_json(&state_path()).unwrap_or_else(|| json!({}));
     if let Some(object) = state.as_object_mut() {
-        object.insert("smara_url".to_owned(), Value::String(api_url.to_owned()));
+        if runtime_mode == "local" {
+            object.remove("smara_url");
+            object.remove("token");
+            object.remove("token_dpapi");
+            object.remove("executor_id");
+            object.remove("account_id");
+        } else {
+            object.insert("smara_url".to_owned(), Value::String(api_url.to_owned()));
+        }
         object.insert("allowed_roots".to_owned(), value["allowed_roots"].clone());
         object.insert("terminal_allowlist".to_owned(), value["terminal_allowlist"].clone());
         object.insert("browser_domains".to_owned(), value["browser_domains"].clone());
@@ -2504,7 +2548,14 @@ async fn run_research(topic: String, research_mode: String) -> Result<Value, Str
         _ => return Err("Research lane must be Auto, Quick, or Deep.".to_owned()),
     };
     let topic_json = serde_json::to_string(topic.trim()).map_err(|error| error.to_string())?;
-    let budget = if mode == "deep" { "research_deep" } else { "research_quick" };
+    // Auto must retain the larger adaptive budget so the canonical selector
+    // can legitimately choose Deep; forcing the quick ceiling made Auto look
+    // like a failed/partial research run for broad questions.
+    let budget = match mode {
+        "deep" => "research_deep",
+        "quick" => "research_quick",
+        _ => "auto",
+    };
     let py_code = format!(
         "import json\nfrom smara.app_adapter import run_canonical_task\nres = run_canonical_task({topic_json}, tool_profile='research_web', research_mode='{mode}', budget_profile='{budget}')\nprint(json.dumps(res))\n"
     );

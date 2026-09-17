@@ -857,6 +857,7 @@ def test_desktop_runner_refreshes_step_before_completion(monkeypatch, tmp_path: 
 
     monkeypatch.setattr("smara.desktop_executor.execute_step", lambda *_args, **_kwargs: "result")
     state = {
+        "runtime_mode": "cloud",
         "smara_url": "https://smara.example",
         "executor_id": "desktop_1",
         "token": "opaque",
@@ -871,3 +872,19 @@ def test_desktop_runner_refreshes_step_before_completion(monkeypatch, tmp_path: 
         "https://smara.example/v1/executors/steps/step_1/heartbeat",
         "https://smara.example/v1/executors/steps/step_1/complete",
     ]
+
+
+def test_legacy_state_without_runtime_mode_never_resumes_hosted_polling(tmp_path: Path):
+    state_path = tmp_path / "desktop.json"
+    state_path.write_text(json.dumps({
+        "smara_url": "https://old-smara.example",
+        "executor_id": "desktop_legacy",
+        "token": "opaque",
+        "capabilities": ["local_file_read"],
+    }), encoding="utf-8")
+
+    class Client:
+        def post(self, *_args, **_kwargs):
+            raise AssertionError("legacy state must not contact a hosted endpoint")
+
+    assert DesktopRunner(state_path).run_once(Client(), {}) is False

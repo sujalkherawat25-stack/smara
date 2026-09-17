@@ -2714,7 +2714,10 @@ class DesktopRunner:
         # may still exist for optional cloud use, but the hosted lease loop is
         # disabled so a stale/background process cannot claim cloud work while
         # the user has selected Local mode in Desktop Settings.
-        if state.get("runtime_mode", "cloud") == "local":
+        # A legacy state file without an explicit mode is not permission to
+        # resume polling a hosted endpoint.  New installs are local-first;
+        # cloud polling requires an explicit runtime_mode=cloud.
+        if state.get("runtime_mode", "local") != "cloud":
             return False
         # Used only for local undo snapshots; never persisted or sent to Smara.
         state["_state_path"] = str(self.state_path)

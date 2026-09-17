@@ -11,8 +11,8 @@ export type NavTab = "chat" | "goals" | "dag" | "swarm" | "memory" | "skills" | 
 
 const fallbackConnection: ConnectionState = {
   runtime_mode: "local",
-  api_url: "https://ai.syntarus.com/smara-api",
-  web_url: "https://ai.syntarus.com/",
+  api_url: "http://127.0.0.1:8080",
+  web_url: "http://127.0.0.1:3000",
   workspace: "default",
   model_profile: "default",
   paired: false,
@@ -523,14 +523,13 @@ export default function App() {
           tool_profile: researchMode === "auto" ? "full" : "research_web",
         });
       } else {
-        setTimeout(() => {
-          setMessages((items) => items.map((item) => item.id === answerId ? {
-            ...item,
-            pending: false,
-            text: `Autonomous ReAct turn completed for: "${text}" with 0 approval delays.`,
-          } : item));
-          setStreaming(false);
-        }, 1000);
+        setMessages((items) => items.map((item) => item.id === answerId ? {
+          ...item,
+          pending: false,
+          failed: true,
+          text: "The native Smara Desktop runtime is required for local execution. Open the installed Desktop app instead of the preview page.",
+        } : item));
+        setStreaming(false);
       }
     } catch (error) {
       setStreaming(false);
@@ -1350,37 +1349,7 @@ function GraphTab() {
     setSelectedNode(null);
     try {
       if (!isNativeDesktop) {
-        setData({
-          name: target,
-          kind: "Class",
-          file: "src/smara/local_agent.py",
-          line_start: 45,
-          line_end: 320,
-          docstring: "Atomic local task persistence and status management.",
-          defined_methods: [
-            { name: "create_local_task", line: 62, signature: "def create_local_task(self, prompt: str) -> str" },
-            { name: "complete_task", line: 110, signature: "def complete_task(self, task_id: str) -> None" },
-            { name: "transition_step", line: 154, signature: "def transition_step(self, task_id: str, step: str) -> None" },
-          ],
-          called_by: [
-            { caller_name: "LocalAutonomousEngine.run_turn", caller_file: "src/smara/cli.py", caller_line: 112 },
-            { caller_name: "DesktopExecutor.execute", caller_file: "src-tauri/main.rs", caller_line: 45 },
-          ],
-          blast_radius: {
-            symbol: target,
-            direct_callers: 2,
-            affected_files: ["src/smara/cli.py", "src/smara/desktop_executor.py"],
-            risk_level: "LOW",
-            total_impact: 3,
-          },
-        });
-        setSelectedNode({
-          title: target,
-          subtitle: `Class in src/smara/local_agent.py`,
-          details: "Atomic local task persistence and status management.",
-          line: 45,
-          file: "src/smara/local_agent.py",
-        });
+        setData({ name: target, error: "The native Smara Desktop runtime is required for code-graph inspection." });
         return;
       }
 
@@ -1654,17 +1623,7 @@ function TestsTab() {
     setActionError(null);
     try {
       if (!isNativeDesktop) {
-        setTestResult({
-          success: true,
-          total: 13,
-          passed: 13,
-          failed: 0,
-          errors: 0,
-          skipped: 0,
-          duration_seconds: 1.25,
-          failures: [],
-          raw_output: "All 13 tests passed successfully",
-        });
+        setActionError("The native Smara Desktop runtime is required to run tests.");
         return;
       }
       const res = await desktop.runTestSuite(filter.trim() || undefined);
@@ -1684,16 +1643,7 @@ function TestsTab() {
     setActionError(null);
     try {
       if (!isNativeDesktop) {
-        setFixResult({
-          status: "healed",
-          message: "Successfully auto-fixed test failures in mock environment!",
-          iterations_count: 1,
-          duration_seconds: 0.8,
-          session_summary: {
-            session_id: "mock_session",
-            files: [{ file: "tests/test_sample.py", additions: 2, deletions: 1, diff: "--- a/test\n+++ b/test\n@@ -1,1 +1,2 @@\n-assert 1 == 2\n+assert 2 == 2" }],
-          },
-        });
+        setActionError("The native Smara Desktop runtime is required for test repair.");
         return;
       }
       const res = await desktop.autoFixTests(filter.trim() || undefined);
@@ -1985,20 +1935,7 @@ function BrowserTab() {
     setActionError(null);
     try {
       if (!isNativeDesktop) {
-        setScrapeResult({
-          success: true,
-          url,
-          title: "Example Domain",
-          headings: ["Example Domain"],
-          content_snippet: "This domain is for use in documentation examples without needing permission.",
-          dom_length: 560,
-          duration_ms: 320,
-        });
-        setScreenshotData({
-          success: true,
-          url,
-          data_url: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4MDAiIGhlaWdodD0iNTAwIj48cmVjdCB3aWR0aD0iODAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0iIzBmMTcyYSIvPjx0ZXh0IHg9IjQwIiB5PSI2MCIgZmlsbD0iIzM4YmRmOCIgZm9udC1zaXplPSIyMCI+RXhhbXBsZSBEb21haW4gQnJvd3NlcjwvdGV4dD48L3N2Zz4=",
-        });
+        setActionError("The native Smara Desktop runtime is required for live browser control.");
         return;
       }
       const [scrape, shot] = await Promise.all([
@@ -2020,19 +1957,7 @@ function BrowserTab() {
     setHealNotice(null);
     try {
       if (!isNativeDesktop) {
-        setE2eResult({
-          suite_name: "Smara Local App & Web E2E Verification",
-          success: true,
-          passed_count: 4,
-          failed_count: 0,
-          total_duration_ms: 1240,
-          steps: [
-            { step_index: 1, action: "navigate", target: url, status: "passed", duration_ms: 310, details: "Loaded page DOM (length 560)" },
-            { step_index: 2, action: "assert_title", target: "Example Domain", status: "passed", duration_ms: 20, details: "Title matches 'Example Domain'" },
-            { step_index: 3, action: "assert_text", target: "documentation examples", status: "passed", duration_ms: 15, details: "Text 'documentation examples' found in DOM" },
-            { step_index: 4, action: "screenshot", target: url, status: "passed", duration_ms: 450, details: "Visual replay snapshot captured" },
-          ],
-        });
+        setActionError("The native Smara Desktop runtime is required for browser E2E tests.");
         return;
       }
       const steps = [
@@ -2055,7 +1980,7 @@ function BrowserTab() {
     setHealNotice(null);
     try {
       if (!isNativeDesktop) {
-        setHealNotice("Healed component: updated text references in workspace.");
+        setActionError("The native Smara Desktop runtime is required for browser UI diagnosis.");
         return;
       }
       const res = await desktop.diagnoseBrowserUiComponent(brokenText);
@@ -2527,21 +2452,7 @@ function GitTab() {
     setActionNotice(null);
     try {
       if (!isNativeDesktop) {
-        setStatus({
-          is_repo: true,
-          branch: "main",
-          is_clean: false,
-          staged_files: ["src/smara/git_agent.py"],
-          unstaged_files: ["apps/desktop/src/App.tsx"],
-          untracked_files: ["tests/test_git_agent.py"],
-          conflicts: [],
-          total_changes: 3,
-        });
-        setBranches(["main", "feature/autonomous-healing"]);
-        setCommits([
-          { commit_hash: "12345678", short_hash: "1234567", author: "Smara Agent", date: "just now", message: "feat(git): add Smart Git Workspace" },
-          { commit_hash: "87654321", short_hash: "8765432", author: "Smara Agent", date: "1 hour ago", message: "feat(tests): add self-healing test auto-fixer" },
-        ]);
+        setActionNotice("The native Smara Desktop runtime is required to inspect the Git workspace.");
         return;
       }
 
@@ -2565,8 +2476,7 @@ function GitTab() {
   const generateCommitMsg = async () => {
     try {
       if (!isNativeDesktop) {
-        setCommitMsg("feat(git): implement Smart Git Workspace and visual timeline");
-        setCommitDesc("- add GitWorkspaceManager\n- add visual commit timeline\n- support AI conventional commits");
+        setActionNotice("The native Smara Desktop runtime is required to generate a commit message.");
         return;
       }
       const data = await desktop.generateAiCommitMessage();
@@ -3466,32 +3376,8 @@ function SearchTab({ onPreview }: { onPreview: (path: string) => void }) {
     setNotice(null);
     try {
       if (!isNativeDesktop) {
-        setResults([
-          {
-            file_path: "src/smara/auth_store.py",
-            symbol_name: "AccountStore",
-            kind: "class",
-            start_line: 28,
-            end_line: 185,
-            score: 0.75,
-            percentage: 75,
-            match_type: "hybrid",
-            docstring: "Persistent storage for account profiles, credentials, and encrypted bearer tokens.",
-            code_snippet: "class AccountStore:\n    def __init__(self, database_url: str = ''):\n        self.database_url = database_url\n    def get_session_token(self, account_id: str): ...",
-          },
-          {
-            file_path: "src/smara/store.py",
-            symbol_name: "claim_for_executor",
-            kind: "function",
-            start_line: 1255,
-            end_line: 1371,
-            score: 0.69,
-            percentage: 69,
-            match_type: "semantic",
-            docstring: "Authenticate executor with token and claim pending tasks.",
-            code_snippet: "def claim_for_executor(self, executor_id: str, token: str, lease_seconds: int):\n    executor = self.executor(executor_id, token)",
-          },
-        ]);
+        setResults([]);
+        setNotice("The native Smara Desktop runtime is required for workspace search.");
         return;
       }
       const data = await desktop.semanticSearch(q, 10);
@@ -3508,7 +3394,7 @@ function SearchTab({ onPreview }: { onPreview: (path: string) => void }) {
     setNotice(null);
     try {
       if (!isNativeDesktop) {
-        setNotice("Indexed 189 files (2,410 code chunks) into local SQLite database.");
+        setNotice("The native Smara Desktop runtime is required to index the workspace.");
         return;
       }
       const stats = await desktop.rebuildSemanticIndex(true);
@@ -3712,20 +3598,7 @@ function SpotlightSearchModal({
       setSearching(true);
       try {
         if (!isNativeDesktop) {
-          setResults([
-            {
-              file_path: "src/smara/auth_store.py",
-              symbol_name: "AccountStore",
-              kind: "class",
-              start_line: 28,
-              end_line: 185,
-              score: 0.75,
-              percentage: 75,
-              match_type: "hybrid",
-              docstring: "Persistent storage for account profiles, credentials, and encrypted bearer tokens.",
-              code_snippet: "class AccountStore:\n    def __init__(self, database_url: str = ''): ...",
-            },
-          ]);
+          setResults([]);
           return;
         }
         const data = await desktop.semanticSearch(query.trim(), 6);
@@ -3817,7 +3690,7 @@ function ModelsTab({
     } else if (preset === "sarvam") {
       setProvider("sarvam");
       setLabel("Sarvam 105B");
-      setBaseUrl("https://api.sarvam.ai/v1");
+      setBaseUrl("https://api.sarvam.ai/v2");
       setModelName("sarvam-105b");
       setAuthHeader("api-subscription-key");
     } else if (preset === "ollama") {
@@ -4403,64 +4276,10 @@ function CloudTab({
         const conv = await desktop.getCodingConventions();
         setConventions(conv || null);
       } else {
-        setDualStatus({
-          plane_1_local: {
-            name: "Plane 1: Local SQLite Vector DB",
-            plane_type: "local_sqlite",
-            status: "active",
-            endpoint: ".smara/semantic_index.db",
-            items_count: 2410,
-            details: "Indexed 2410 dense vector symbols offline. 0ms network latency.",
-          },
-          plane_2_continuum: {
-            name: "Plane 2: Continuum Memory Engine (LoCoMo 85+)",
-            plane_type: "continuum_syntarus",
-            status: "connected",
-            endpoint: "http://localhost:8000/v1",
-            items_count: 2,
-            details: "Connected to Continuum Memory Engine at http://localhost:8000/v1. LoCoMo 85+ Graph active.",
-          },
-          bridge_active: true,
-          last_sync_time: "2026-09-03 11:15:00",
-          total_memories_synced: 2,
-        });
-        setAdrs([
-          {
-            id: "0001",
-            title: "Dual-Plane Memory Architecture (SQLite Local + Continuum Cloud)",
-            date: "2026-09-03",
-            status: "Accepted",
-            context: "Smara needs offline vector search with cloud sync.",
-            decision: "Implement Dual-Plane bridge with local SQLite vector plane and Continuum graph plane.",
-            consequences: "Fast offline search with long-term retention.",
-            symbols_affected: ["DualPlaneMemoryBridge", "SemanticCodeSearcher"],
-          },
-          {
-            id: "0002",
-            title: "Zero-Approval Friction Model for Autonomous Pairing",
-            date: "2026-09-03",
-            status: "Accepted",
-            context: "Minimize interruption while ensuring security.",
-            decision: "Auto-approve safe AST, pytest, and local vector searches with atomic rollback ledgers.",
-            consequences: "High developer flow with instant 1-click rollback.",
-            symbols_affected: ["AutonomousRefactoringEngine", "AutonomousTestFixer"],
-          }
-        ]);
-        setConventions({
-          workspace_name: "smara",
-          analyzed_files_count: 111,
-          async_percentage: 20.7,
-          type_hint_coverage: 72.4,
-          test_framework: "pytest",
-          naming_conventions: { functions: "snake_case", classes: "PascalCase" },
-          key_patterns: [
-            "Functions use strict type annotations (72.4% typed across repository).",
-            "Public APIs use snake_case for functions and PascalCase for classes.",
-            "Asynchronous workflows use asyncio / async def (20.7% async routines).",
-            "Tests use pytest with assert assertions and fixtures."
-          ],
-          last_updated: "2026-09-03",
-        });
+        setDualStatus(null);
+        setAdrs([]);
+        setConventions(null);
+        onSetNotice("The native Smara Desktop runtime is required for memory inspection.");
       }
     } catch {
       // ignore
@@ -4479,7 +4298,7 @@ function CloudTab({
         onSetNotice(`✓ Synced ${res.synced_count || 0} architectural memories to Continuum at ${res.last_sync_time || "now"}`);
         await fetchStatus();
       } else {
-        onSetNotice("✓ Synced 2 architectural memories to Continuum!");
+        onSetNotice("The native Smara Desktop runtime is required to sync memory planes.");
       }
     } catch (e: any) {
       onSetNotice(`Sync notice: ${e?.message || String(e)}`);
@@ -4496,29 +4315,8 @@ function CloudTab({
         const res = await desktop.queryDualPlaneMemory(testQuery);
         setRecallResult(res);
       } else {
-        setRecallResult({
-          query: testQuery,
-          local_symbols: [
-            {
-              file_path: "src/smara/auth_store.py",
-              symbol_name: "AccountStore",
-              kind: "class",
-              start_line: 28,
-              end_line: 185,
-              score: 0.85,
-              percentage: 85,
-              match_type: "hybrid",
-              docstring: "Persistent storage for account profiles, credentials, and encrypted bearer tokens.",
-              code_snippet: "",
-            },
-          ],
-          continuum_memories: [
-            "Smara Architecture & Dual-Plane Foundation: Smara is an autonomous pairing developer agent...",
-            "Zero-Approval Friction Model: Smara operates autonomously with zero approval delays...",
-          ],
-          fused_context: "### 🧠 Continuum Long-Term Architectural Context (Plane 2):\n- Smara Architecture & Dual-Plane Foundation...",
-          retrieval_ms: 12,
-        });
+        setRecallResult(null);
+        onSetNotice("The native Smara Desktop runtime is required to query memory.");
       }
     } catch (e: any) {
       onSetNotice(`Recall error: ${e?.message || String(e)}`);
@@ -4528,6 +4326,10 @@ function CloudTab({
   }
 
   async function handleConnect() {
+    if (connection.runtime_mode !== "cloud") {
+      onSetNotice("Hosted mode is disabled in this local-first install. Enable it explicitly in Settings before signing in.");
+      return;
+    }
     setConnecting(true);
     try {
       onSetNotice("Opening browser for 1-click Syntarus Cloud sync...");
@@ -4535,8 +4337,8 @@ function CloudTab({
       onRefresh();
       onSetNotice("Connected to Syntarus Cloud Memory Plane!");
       await fetchStatus();
-    } catch {
-      onSetNotice("Syntarus Cloud login completed or standby mode active.");
+    } catch (e: any) {
+      onSetNotice(`Hosted sign-in failed: ${e?.message || String(e)}`);
     } finally {
       setConnecting(false);
     }
@@ -4550,16 +4352,8 @@ function CloudTab({
         const hist = await desktop.getSymbolEvolution(symbolQuery);
         setSymbolHistory(hist || []);
       } else {
-        setSymbolHistory([
-          {
-            symbol_name: symbolQuery,
-            file_path: "src/smara/dual_plane_memory.py",
-            timestamp: "2026-09-03T11:40:00",
-            change_type: "added",
-            diff_description: `Added new class '${symbolQuery}' with dual-plane orchestration.`,
-            new_signature: `class ${symbolQuery}`,
-          }
-        ]);
+        setSymbolHistory([]);
+        onSetNotice("The native Smara Desktop runtime is required for symbol history.");
       }
     } catch {
       // ignore
@@ -4585,10 +4379,7 @@ function CloudTab({
         setNewAdrDecision("");
         await fetchStatus();
       } else {
-        onSetNotice(`✓ Created ADR: ${newAdrTitle}`);
-        setShowDraftModal(false);
-        setNewAdrTitle("");
-        setNewAdrDecision("");
+        onSetNotice("The native Smara Desktop runtime is required to create an ADR.");
       }
     } catch (e: any) {
       onSetNotice(`Failed to create ADR: ${e?.message || String(e)}`);
@@ -4622,17 +4413,17 @@ function CloudTab({
               <h3>Local SQLite Vector DB</h3>
             </div>
             <span className={`status-pill ${dualStatus?.plane_1_local?.status === "active" ? "pill-active" : "pill-standby"}`}>
-              {dualStatus?.plane_1_local?.status?.toUpperCase() || "ACTIVE"}
+              {dualStatus?.plane_1_local?.status?.toUpperCase() || "NOT LOADED"}
             </span>
           </div>
           <p className="plane-desc">Offline, zero-network dense vector search across code symbols, docstrings, and syntax trees.</p>
           <div className="plane-stats-row">
             <div className="stat-box">
-              <span className="stat-num">{dualStatus?.plane_1_local?.items_count ?? 2410}</span>
+              <span className="stat-num">{dualStatus?.plane_1_local?.items_count ?? "—"}</span>
               <span className="stat-lbl">Indexed Symbols</span>
             </div>
             <div className="stat-box">
-              <span className="stat-num">0 ms</span>
+              <span className="stat-num">—</span>
               <span className="stat-lbl">Network Latency</span>
             </div>
             <div className="stat-box">
@@ -4641,7 +4432,7 @@ function CloudTab({
             </div>
           </div>
           <div className="plane-path-info">
-            <code>{dualStatus?.plane_1_local?.endpoint || ".smara/semantic_index.db"}</code>
+            <code>{dualStatus?.plane_1_local?.endpoint || "Not loaded"}</code>
           </div>
         </div>
 
@@ -4653,7 +4444,7 @@ function CloudTab({
               <h3>Continuum Memory Engine (LoCoMo 85+)</h3>
             </div>
             <span className={`status-pill ${dualStatus?.plane_2_continuum?.status === "connected" ? "pill-active" : "pill-standby"}`}>
-              {dualStatus?.plane_2_continuum?.status?.toUpperCase() || "CONNECTED"}
+              {dualStatus?.plane_2_continuum?.status?.toUpperCase() || "NOT CONNECTED"}
             </span>
           </div>
           <p className="plane-desc">Qdrant dense vectors + Neo4j knowledge graphs + temporal decay for cross-session architecture and conventions.</p>
@@ -4663,16 +4454,16 @@ function CloudTab({
               <span className="stat-lbl">Memories Synced</span>
             </div>
             <div className="stat-box">
-              <span className="stat-num">85.2%</span>
+              <span className="stat-num">—</span>
               <span className="stat-lbl">LoCoMo Score</span>
             </div>
             <div className="stat-box">
-              <span className="stat-num">{dualStatus?.last_sync_time ? "Synced" : "Ready"}</span>
+              <span className="stat-num">{dualStatus?.last_sync_time ? "Synced" : "Not synced"}</span>
               <span className="stat-lbl">Sync State</span>
             </div>
           </div>
           <div className="plane-path-info">
-            <code>{dualStatus?.plane_2_continuum?.endpoint || "http://localhost:8000/v1"}</code>
+            <code>{dualStatus?.plane_2_continuum?.endpoint || "Not configured"}</code>
           </div>
         </div>
       </div>
@@ -4866,17 +4657,21 @@ function CloudTab({
       <div className="cloud-hero-card" style={{ marginTop: "1rem" }}>
         <div className="cloud-connection-box">
           <div className="conn-status-row">
-            <span className={`dot ${connection.has_cli_token ? "dot-online" : "dot-standby"}`} />
-            <strong>{connection.has_cli_token ? "Connected to Hosted Syntarus Cloud Account" : "Local Standby Mode (Self-Hosted Continuum Active)"}</strong>
+            <span className={`dot ${connection.runtime_mode === "cloud" && connection.has_cli_token ? "dot-online" : "dot-standby"}`} />
+            <strong>{connection.runtime_mode === "cloud" && connection.has_cli_token ? "Connected to Hosted Syntarus Cloud Account" : "Local-only mode — hosted connection not configured"}</strong>
           </div>
           <div className="cloud-actions-row">
-            {!connection.has_cli_token ? (
+            {connection.runtime_mode === "cloud" && !connection.has_cli_token ? (
               <button className="primary-action-btn" onClick={() => void handleConnect()} disabled={connecting}>
                 {connecting ? "Connecting…" : "☁️ Connect Syntarus Cloud Account (1-Click)"}
               </button>
-            ) : (
+            ) : connection.runtime_mode === "cloud" && connection.has_cli_token ? (
               <button className="secondary-action-btn" onClick={() => void desktop.openWeb()}>
                 Open Web Console ↗
+              </button>
+            ) : (
+              <button className="secondary-action-btn" type="button" disabled>
+                Hosted mode is disabled in Settings
               </button>
             )}
           </div>

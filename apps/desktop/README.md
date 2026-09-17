@@ -1,13 +1,14 @@
 # Smara Desktop
 
-Smara Desktop is the Windows-native local companion for Smara. It is a thin
-Tauri shell around the existing outbound-only `smara-desktop` executor:
+Smara Desktop is the Windows-native local companion for Smara. It is a local
+first Tauri shell around the bundled `smara-desktop` executor:
 
-- Smara's hosted service remains the one agent brain, task graph, memory, and
-  approval system.
-- This PC owns browser sessions, files, terminal access, and local artifacts.
-- Nothing local runs because a chat message merely asked for it. The hosted
-  task must be leased to this paired device and pass the approval gate first.
+- This PC owns browser sessions, files, model connections, terminal access,
+  and local artifacts.
+- Nothing runs because a chat message merely asked for it. Local tasks still
+  pass the same capability and approval gates before execution.
+- Hosted pairing is explicit opt-in; a fresh install never contacts a legacy
+  hosted endpoint or reuses a legacy beta token.
 
 ## Run from the repository
 
@@ -23,19 +24,10 @@ The desktop shell finds the Python executor at
 `$env:SMARA_REPO_ROOT\.venv\Scripts\smara-desktop.exe`. You can point to an
 explicit executable instead with `$env:SMARA_DESKTOP_EXECUTABLE`.
 
-Before chat/task history can load, choose **Sign in** in the app's Settings.
-The app opens the hosted Smara approval page at the canonical site root and stores the
-short-lived device token in the local Smara profile. For headless/CLI workflows, the equivalent
-command remains:
-
-```powershell
-smara --api https://ai.syntarus.com/smara-api login
-```
-
-The CLI token is read from `%APPDATA%\Smara\token.json`; the desktop never
-shows or sends it to the UI. Pairing is completed from Smara Web's Desktop
-settings, then the one-time code is pasted into the app. Start with only an
-approved folder and add terminal/browser allowlists only when needed.
+For local chat, add a private model under Settings → Models. Hosted sign-in and
+pairing are optional and require an operator-supplied API URL; the local
+runtime does not need an account or hosted token. Start with only an approved
+folder and add terminal/browser allowlists only when needed.
 
 ## Build the Windows package
 
@@ -53,27 +45,23 @@ dependencies. The NSIS installer creates a `Smara Desktop.lnk` shortcut on the
 Windows Desktop and removes that shortcut on uninstall. MSI remains an optional
 operator build when WiX is available.
 
-## Hosted provider/model profiles
+## Optional hosted provider/model profiles
 
-The model picker exposes `Automatic`, `Grok`, and `Sarvam`. Provider URLs and
-API keys stay in the Smara server configuration; never commit an xAI or Sarvam
-key. The app forwards only the selected profile name to hosted Smara. The
-settings screen also shows whether each local tool credential is configured and
-how many file, terminal, and browser allowlist entries are currently enabled.
-The Web URL is configured separately from the reverse-proxied API URL so sign
-in opens `https://ai.syntarus.com/?cli_device=...`, never the API endpoint.
+The local model picker stores only encrypted credentials on this PC. If an
+operator explicitly switches to hosted mode, the API and Web URLs are supplied
+by that operator; no public Syntarus URL is hard-coded into a new install.
 
 ## Private desktop model providers
 
 Settings → Model provider → **Add provider** can store a Sarvam, Grok, or
 custom OpenAI-compatible endpoint for direct chat from this PC. Sarvam is
-pre-filled with `https://api.sarvam.ai/v1/chat/completions`, model
+pre-filled with `https://api.sarvam.ai/v2`, model
 `sarvam-105b`, and the `api-subscription-key` header; Grok is pre-filled with
 the xAI endpoint and Bearer authentication. The key is encrypted in the
 Windows-account credential vault and is read only by the native desktop when a
-private chat is started. It never travels to Smara's hosted API. Hosted task
-planning, research, approvals, and task history continue to use the hosted
-profile, so choosing a private model is clearly a chat-only local mode.
+private chat is started. It never travels to a hosted API. Local task planning,
+research, approvals, and task history stay on this PC; a hosted profile is
+never selected implicitly.
 
 ## Personal local tool credentials
 
@@ -82,8 +70,8 @@ PC. On Windows, values are encrypted with DPAPI for the signed-in Windows
 account and the UI only lists the alias. An approved `local_terminal` payload
 may request selected aliases using `credential_env`; only that child process
 receives them, and any value echoed by the process is redacted before output
-is returned to hosted Smara. Provider secrets for hosted Grok/Sarvam are not
-stored here, and local personal tool keys are not uploaded to the VM.
+is returned to the local task record. Provider secrets are encrypted locally
+and are not uploaded to a VM implicitly.
 
 ## Verification
 
@@ -93,8 +81,7 @@ Push-Location src-tauri; cargo check; Pop-Location
 Push-Location ../..; .\.venv\Scripts\python.exe -m pytest -q; Pop-Location
 ```
 
-The local Activity screen shows executor state, hosted task status, approvals,
+The local Activity screen shows executor state, local task status, approvals,
 expandable final task results, and the bounded local log. It refreshes while
-visible, and an expired hosted sign-in is cleared rather than appearing as a
-false connected session. Revoke stops the tracked process before invalidating
-the server token, preventing a stale runner from polling during revocation.
+visible. Cleanup stops any tracked process before removing its local state,
+preventing a stale runner from polling an old endpoint.

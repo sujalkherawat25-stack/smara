@@ -16,6 +16,10 @@ def test_interactive_ask_json_and_gaia_share_incremental_events(tmp_path: Path,m
         traces.append([event["type"] for event in session.inspect()["events"]])
         return {"answer":"ok","raw_answer":"FINAL ANSWER: ok","completed":True,"status":"completed","trace":[],"session":result}
     monkeypatch.setattr("smara.autonomous_agent.SmaraAutonomousAgent.run",fake_run)
+    # The CLI now fails fast when a real direct prompt has no provider
+    # credential.  This test replaces the model run with a deterministic
+    # fixture, so provide a synthetic key to exercise the event-parity path.
+    monkeypatch.setattr("smara.cli._resolve_profile_key",lambda *_args: "fixture-key")
     for arguments in (["--workspace",str(tmp_path),"direct objective"],["--workspace",str(tmp_path),"ask","ask objective"],["--workspace",str(tmp_path),"run","json objective","--json"]):
         assert cli.main(arguments)==0;capsys.readouterr()
     monkeypatch.setenv("SMARA_BENCHMARK_MODEL_ENDPOINT","https://model.test/v1");monkeypatch.setenv("SMARA_BENCHMARK_MODEL","test")
