@@ -31,8 +31,23 @@ DELEGATE_BLOCKED_TOOLS = frozenset([
     "dag_flow",          # Prevent subagents from reconfiguring top-level DAG
 ])
 
-# Delegation stays opt-in until a matched-budget ablation demonstrates value.
-DELEGATION_ENABLED = False
+# Delegation stays opt-in.  A deployment must explicitly acknowledge the
+# additional model spend and isolated-worker attack surface.
+DELEGATION_ENABLED = os.getenv("SMARA_ENABLE_DELEGATION", "").strip().lower() in {"1", "true", "yes", "on"}
+
+MODEL_ALIASES = {
+    # Historical names are kept at the public CLI boundary, but workers use
+    # the currently provisioned Sarvam identifiers when they are launched.
+    "glm5.2": "sarvam-105b",
+    "glm-5.2": "sarvam-105b",
+    "glm5.3": "glm5.3-flash",
+    "glm-5.3": "glm5.3-flash",
+}
+
+
+def normalize_worker_model(model: str | None) -> str:
+    value = str(model or "sarvam-105b").strip()
+    return MODEL_ALIASES.get(value.casefold(), value)
 
 
 class SubagentRole(str, enum.Enum):
@@ -83,7 +98,7 @@ class SubagentWorker:
         self.role = role
         self.api_key = api_key
         self.base_url = base_url
-        self.model = model
+        self.model = normalize_worker_model(model)
         self.max_iterations = max_iterations
         self.isolate_worktree = isolate_worktree or (role == SubagentRole.CODER)
         self.workspace_root = Path(workspace_root).resolve() if workspace_root else None
@@ -263,7 +278,7 @@ class SubagentOrchestrator:
             role=role,
             api_key=self.api_key,
             base_url=self.base_url,
-            model=self.default_model,
+            model=normalize_worker_model(self.default_model),
             max_iterations=max_iterations,
             workspace_root=self.workspace_root,
             budget=child_budget,

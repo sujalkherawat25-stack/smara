@@ -141,7 +141,7 @@ class Settings:
     # selectable chat profile.
     capture_ocr_base_url: str = os.getenv("SMARA_CAPTURE_OCR_BASE_URL", "")
     capture_ocr_api_key: str = _secret_with_fallback("SMARA_CAPTURE_OCR_API_KEY", "SMARA_SARVAM_KEY")
-    capture_ocr_model: str = os.getenv("SMARA_CAPTURE_OCR_MODEL", "sarvam-vision-v1")
+    capture_ocr_model: str = os.getenv("SMARA_CAPTURE_OCR_MODEL", "sarvam-vision-1.5")
     capture_ocr_language: str = os.getenv("SMARA_CAPTURE_OCR_LANGUAGE", "en-IN")
     capture_ocr_auth_header: str = os.getenv("SMARA_CAPTURE_OCR_AUTH_HEADER", "api-subscription-key")
     # Disabled until a separately isolated sandbox service is deployed.

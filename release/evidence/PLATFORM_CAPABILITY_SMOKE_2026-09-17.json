@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-17",
+  "purpose": "Bounded verification of the remaining platform and ingestion capabilities.",
+  "linux_container_packaging": {
+    "status": "passed",
+    "engine": "Docker Desktop desktop-linux",
+    "checks": ["docker compose config --quiet", "docker build -t smara-linux-gate:local .", "python scripts/linux_wheel_smoke.py"],
+    "result": "LINUX_WHEEL_SMOKE_OK"
+  },
+  "advanced_statistics": {
+    "status": "passed_deterministic",
+    "suite": "tests/test_research_analysis.py",
+    "methods": ["bounded ordinary-least-squares forecast", "observational difference in means and Cohen's d", "Jarque-Bera screening", "z-score outlier screening"],
+    "guardrails": ["forecast horizon 1..30", "forecast requires a time column", "causal output explicitly observational", "no missing-value imputation"]
+  },
+  "academic_discovery": {
+    "status": "passed_live_keyless",
+    "providers": {"openalex": {"results": 3, "discovery_only": true}, "crossref": {"results": 3, "discovery_only": true}},
+    "evidence_policy": "DOI or publisher URLs must still pass canonical fetch and claim validation before they become evidence."
+  },
+  "ocr_pdf": {
+    "status": "blocked_provider_entitlement",
+    "provider": "Sarvam Document AI",
+    "current_endpoint": "/doc-ai/v1/job/digitise",
+    "legacy_fallback": "/v2/job/digitise",
+    "http_status": 404,
+    "false_completion": false,
+    "reason": "The supplied temporary credential/account returned Not Found on both routes; the adapter stopped without creating an OCR artifact."
+  },
+  "real_vm_desktop": {
+    "status": "blocked_contract_only",
+    "reason": "Docker Desktop is running, but no disposable VM transport is configured; the isolated desktop contract remains fail-closed."
+  },
+  "delegation_and_learned_skills": {
+    "status": "experimental_opt_in",
+    "default_enabled": false,
+    "opt_in": "SMARA_ENABLE_DELEGATION=true",
+    "model_aliases": {"glm5.2": "sarvam-105b", "glm5.3": "glm5.3-flash"},
+    "promotion_policy": "quarantined candidates require held-out passed evaluations and remain revocable"
+  }
+}

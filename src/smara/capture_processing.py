@@ -97,7 +97,7 @@ async def process_capture(
     vision_auth_header: str = "Authorization",
     ocr_base_url: str = "",
     ocr_api_key: str = "",
-    ocr_model: str = "sarvam-vision-v1",
+    ocr_model: str = "sarvam-vision-1.5",
     ocr_language: str = "en-IN",
     ocr_auth_header: str = "api-subscription-key",
 ) -> str:

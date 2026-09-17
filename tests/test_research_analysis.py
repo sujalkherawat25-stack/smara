@@ -38,6 +38,39 @@ def test_analysis_rejects_ambiguous_or_unbounded_inputs():
         analyze_tabular(({"value":i} for i in range(10_001)),numeric_columns=["value"])
 
 
+def test_forecast_causal_and_domain_diagnostics_are_bounded_and_explicit():
+    rows = [
+        {"date": f"2025-0{index}-01", "treated": "yes" if index >= 3 else "no", "outcome": index * 10 + (5 if index >= 3 else 0), "value": index + 1}
+        for index in range(1, 7)
+    ]
+    result = analyze_tabular(
+        rows,
+        numeric_columns=["outcome", "value"],
+        time_column="date",
+        forecast_columns=["outcome"],
+        forecast_horizon=2,
+        treatment_column="treated",
+        outcome_column="outcome",
+        treatment_value="yes",
+        domain_test="zscore",
+        domain_column="value",
+        evidence_ids=["e1"],
+    )
+    assert result["schema_version"] == 2
+    assert len(result["forecasts"]["outcome"]["points"]) == 2
+    assert result["causal"]["status"] == "ok"
+    assert result["causal"]["warning"].startswith("association only")
+    assert result["domain_tests"]["value"]["test"] == "zscore"
+    assert "not causal" in result["methods_disclaimer"]
+
+
+def test_forecast_requires_time_and_limits_horizon():
+    with pytest.raises(ResearchAnalysisError, match="forecasting requires time_column"):
+        analyze_tabular([{"value": 1}, {"value": 2}, {"value": 3}], numeric_columns=["value"], forecast_columns=["value"], forecast_horizon=1)
+    with pytest.raises(ResearchAnalysisError, match="between 1 and 30"):
+        analyze_tabular([{"date": f"2025-0{i}-01", "value": i} for i in range(1, 4)], numeric_columns=["value"], time_column="date", forecast_columns=["value"], forecast_horizon=31)
+
+
 def test_canonical_analysis_requires_valid_artifact_provenance(tmp_path:Path):
     (tmp_path/"data.csv").write_text(
         "date,region,revenue,cost\n"

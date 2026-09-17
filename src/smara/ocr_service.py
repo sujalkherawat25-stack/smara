@@ -31,7 +31,7 @@ class OCRResult:
     format: str
     language: str
     provider: str
-    model: str = "sarvam-vision-v1"
+    model: str = "sarvam-vision-1.5"
     job_id: str | None = None
     character_count: int = 0
 
@@ -77,10 +77,10 @@ def resolve_ocr_credentials() -> tuple[str, str, str]:
         except Exception:
             pass
 
-    base_url = os.getenv("SARVAM_BASE_URL") or os.getenv("SMARA_OCR_BASE_URL") or "https://api.sarvam.ai/v2"
-    if "/v2" not in base_url and "api.sarvam.ai" in base_url:
-        base_url = "https://api.sarvam.ai/v2"
-    model = os.getenv("SMARA_OCR_MODEL", "sarvam-vision-v1")
+    # Document AI is rooted at the host (not the chat `/v2` namespace).
+    # Keep an explicit override for compatible private gateways.
+    base_url = os.getenv("SARVAM_DOC_AI_BASE_URL") or os.getenv("SMARA_OCR_BASE_URL") or os.getenv("SARVAM_BASE_URL") or "https://api.sarvam.ai"
+    model = os.getenv("SMARA_OCR_MODEL", "sarvam-vision-1.5")
     return base_url.rstrip("/"), api_key, model
 
 
@@ -165,21 +165,42 @@ class SarvamOCRClient:
         data = {
             "language": language or "en-IN",
             "output_format": output_format or "md",
-            "content_type": content_type or "printed",
         }
-        if self.model:
-            data["model"] = self.model
-
         try:
+            # Sarvam retired the earlier `/v2/job/digitise` route in favour of
+            # Document AI. Strip a legacy `/v2` suffix from shared chat
+            # profiles so OCR still reaches the host-level API.
+            api_root = self.base_url
+            if "api.sarvam.ai" in api_root and api_root.rstrip("/").endswith("/v2"):
+                api_root = api_root.rstrip("/")[:-3].rstrip("/")
+            job_prefix = f"{api_root}/doc-ai/v1/job"
+            active_job_prefix = job_prefix
             # 1. Submit digitise job
             response = await client.post(
-                f"{self.base_url}/job/digitise",
+                f"{job_prefix}/digitise",
                 headers=headers,
                 data=data,
                 files={"file": (file_name, raw_bytes, mime_type)},
             )
+            # Keep compatibility with accounts still pinned to the legacy
+            # digitisation route. A 404 is the only safe fallback trigger;
+            # auth, quota, and validation failures must surface unchanged.
+            if response.status_code == 404:
+                legacy_root = self.base_url
+                if "api.sarvam.ai" in legacy_root and not legacy_root.rstrip("/").endswith("/v2"):
+                    legacy_root = legacy_root.rstrip("/") + "/v2"
+                response = await client.post(
+                    f"{legacy_root}/job/digitise",
+                    headers=headers,
+                    data={**data, "content_type": content_type or "printed"},
+                    files={"file": (file_name, raw_bytes, mime_type)},
+                )
+                active_job_prefix = f"{legacy_root}/job"
             if response.status_code >= 400:
-                raise OCRError(f"Sarvam OCR submission failed: HTTP {response.status_code} ({response.text[:200]})")
+                detail = response.text[:200]
+                if response.status_code == 404:
+                    detail = "Document AI endpoint unavailable for this credential or account."
+                raise OCRError(f"Sarvam OCR submission failed: HTTP {response.status_code} ({detail})")
 
             job = response.json()
             job_id = job.get("job_id") if isinstance(job, dict) else None
@@ -199,7 +220,7 @@ class SarvamOCRClient:
                 await asyncio.sleep(poll_interval)
                 elapsed += poll_interval
 
-                status_resp = await client.get(f"{self.base_url}/job/{job_id}/status", headers=headers)
+                status_resp = await client.get(f"{active_job_prefix}/{job_id}/status", headers=headers)
                 if status_resp.status_code >= 400:
                     raise OCRError(f"Sarvam OCR status check failed: HTTP {status_resp.status_code}")
                 status_payload = status_resp.json()
@@ -208,7 +229,7 @@ class SarvamOCRClient:
                 raise OCRError(f"Sarvam OCR job {job_id} timed out after {max_wait_seconds}s.")
 
             # 3. Retrieve download URL
-            dl_resp = await client.get(f"{self.base_url}/job/{job_id}/download-url", headers=headers)
+            dl_resp = await client.get(f"{active_job_prefix}/{job_id}/download-url", headers=headers)
             if dl_resp.status_code >= 400:
                 raise OCRError(f"Sarvam OCR download-url failed: HTTP {dl_resp.status_code}")
             dl_payload = dl_resp.json()

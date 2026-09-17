@@ -122,7 +122,7 @@
         "numerical_recomputation_match": 1.0,
         "elapsed_seconds": 70.09
       },
-      "scope": "Implemented canonical SmaraAutonomousAgent live-web research and quantitative tabular analysis with Three-Zone context compaction, token budgeting, provider search discovery, SSRF-safe fetch, immutable provenance hashing, independent expected-answer validation, and tabular descriptive statistics.",
+      "scope": "Implemented canonical SmaraAutonomousAgent live-web research and quantitative tabular analysis with Three-Zone context compaction, token budgeting, provider search discovery, SSRF-safe fetch, immutable provenance hashing, independent expected-answer validation, descriptive/grouped statistics, bounded forecasting, observational effect summaries, and screening diagnostics.",
       "limitation": "The v4 canonical-agent matrix passed promotion at 60/60 (100.0%) across all five categories (12/12 each); live web quality is verified for the declared 20-task pack and provider, while authenticated sites, VM desktop, Linux, OSWorld, GAIA and SWE-bench remain outside this gate."
     },
     "research_data_analysis": {
@@ -137,7 +137,7 @@
         "rate": 1.0,
         "independent_recomputation": true
       },
-      "limitation": "live quantitative ingestion is verified for the four declared CSV tasks; causal inference, forecasting and domain-specific statistical tests require separately declared methods and validation"
+      "limitation": "live quantitative ingestion is verified for the four declared CSV tasks; forecasting, observational effects, and domain-specific tests are now deterministic and bounded but do not constitute causal or confirmatory inference without domain validation"
     },
     "research_lanes": {
       "status": "verified_live_web_and_deterministic",
@@ -313,9 +313,9 @@
       "status": "implemented_provider_adapter_contract_verified",
       "suite": "tests/test_sarvam_ocr.py",
       "provider": "sarvam",
-      "model": "sarvam-vision-v1",
-      "scope": "Sarvam Cloud OCR (/job/digitise) adapter and local pytesseract image fallback (.png, .jpg, .jpeg, .webp), returning content-addressed extracted Markdown/text, page counts, and immutable cryptographic digests",
-      "limitation": "Sarvam behavior is verified with mocked HTTP only; no sealed live-provider evidence exists, and the local fallback does not support PDF OCR",
+      "model": "sarvam-vision-1.5",
+      "scope": "Sarvam Document AI (/doc-ai/v1/job/digitise) adapter with legacy-route fallback and local pytesseract image fallback (.png, .jpg, .jpeg, .webp), returning content-addressed extracted Markdown/text, page counts, and immutable cryptographic digests",
+      "limitation": "Adapter and fallback behavior are deterministic-tested; the 2026-09-17 live credential smoke returned HTTP 404 on both current and legacy routes, so provider entitlement remains unverified and local fallback still does not support scanned-PDF OCR",
       "cli_command": "smara ocr <file> [--lang en-IN] [--format md|txt] [--output out.md]"
     },
     "stateful_browser": {
@@ -364,9 +364,31 @@
       "contract_suite": "tests/test_h5_isolated_desktop_contract.py",
       "blocker": "disposable VM transport not configured"
     },
+    "academic_research_discovery": {
+      "status": "verified_keyless_provider_smoke",
+      "suite": "tests/test_research_tools.py",
+      "providers": ["openalex", "crossref"],
+      "scope": "bounded scholarly metadata discovery with DOI/landing URLs, author/year normalization, and explicit discovery_only labeling; canonical fetch and claim validation remain required",
+      "live_smoke": {
+        "openalex": "3 results",
+        "crossref": "3 results",
+        "credentials": "none"
+      }
+    },
+    "linux_container_packaging": {
+      "status": "verified_linux_container",
+      "suite": "scripts/linux_wheel_smoke.py",
+      "evidence": {
+        "path": "release/evidence/PLATFORM_CAPABILITY_SMOKE_2026-09-17.json",
+        "sha256": "c08d7b18e51b8605455b003b39933018d58b9f2b3da73d250c9074a170c0df0e"
+      },
+      "scope": "Docker Desktop linux engine builds and runs the wheel smoke with filesystem/tool broker checks",
+      "limitation": "WSL host integration and a graphical Linux VM are not measured by this container gate"
+    },
     "delegation": {
       "status": "experimental_opt_in",
-      "blocker": "matched-budget positive ablation not executed"
+      "blocker": "matched-budget positive ablation not executed; SMARA_ENABLE_DELEGATION must be explicitly enabled",
+      "model_aliases": "glm5.2 -> sarvam-105b; glm5.3 -> glm5.3-flash"
     },
     "official_gaia": {
       "status": "unmeasured"

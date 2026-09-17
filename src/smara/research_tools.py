@@ -39,6 +39,59 @@ class SearchHit:
     quality_flags: tuple[str, ...] = ()
 
 
+class AcademicSearchTool:
+    """Keyless, bounded academic discovery across OpenAlex and Crossref.
+
+    Discovery records are not proof.  Callers must fetch the DOI or publisher
+    page through the canonical evidence path before resolving claims.
+    """
+
+    max_results = 8
+
+    def __init__(self, http_client: httpx.AsyncClient | None = None):
+        self._http = http_client
+
+    async def search(self, query: str, *, max_results: int = 5, provider: str = "openalex") -> list[dict[str, object]]:
+        query = str(query or "").strip()
+        if not query or len(query) > 500:
+            raise ResearchToolError("Academic search needs a query up to 500 characters.")
+        provider = str(provider or "openalex").strip().lower()
+        if provider not in {"openalex", "crossref"}:
+            raise ResearchToolError("Academic providers are openalex and crossref.")
+        count = max(1, min(self.max_results, int(max_results)))
+        owns_client = self._http is None
+        client = self._http or httpx.AsyncClient(timeout=15.0, follow_redirects=False, headers={"User-Agent": "SmaraAcademicSearch/0.1 (mailto:research@smara.local)"})
+        try:
+            if provider == "openalex":
+                response = await client.get("https://api.openalex.org/works", params={"search": query, "per-page": count, "select": "id,doi,title,publication_year,authorships,primary_location,open_access,abstract_inverted_index"})
+                response.raise_for_status()
+                items = (response.json() or {}).get("results") or []
+                output=[]
+                for item in items[:count]:
+                    abstract_index=item.get("abstract_inverted_index") or {}
+                    abstract_words=[]
+                    for word, positions in abstract_index.items():
+                        for position in positions or []: abstract_words.append((int(position),str(word)))
+                    abstract=" ".join(word for _,word in sorted(abstract_words))[:4000]
+                    authors=[str((author.get("author") or {}).get("display_name") or "") for author in (item.get("authorships") or []) if isinstance(author,dict)]
+                    location=item.get("primary_location") or {}
+                    landing=str(location.get("landing_page_url") or item.get("doi") or item.get("id") or "")
+                    output.append({"provider":"openalex","id":str(item.get("id") or ""),"doi":str(item.get("doi") or ""),"title":str(item.get("title") or "")[:500],"year":item.get("publication_year"),"authors":authors[:20],"url":landing[:2000],"open_access":bool((item.get("open_access") or {}).get("is_oa")),"abstract":abstract,"discovery_only":True})
+                return output
+            response = await client.get("https://api.crossref.org/works", params={"query": query, "rows": count, "select": "DOI,title,author,published,URL,container-title,type"})
+            response.raise_for_status()
+            items=((response.json() or {}).get("message") or {}).get("items") or []
+            output=[]
+            for item in items[:count]:
+                published=((item.get("published") or {}).get("date-parts") or [[]])[0]
+                output.append({"provider":"crossref","doi":str(item.get("DOI") or ""),"title":str((item.get("title") or [""])[0])[:500],"year":published[0] if published else None,"authors":[f"{a.get('given','')} {a.get('family','')}".strip() for a in item.get("author") or [] if isinstance(a,dict)][:20],"url":str(item.get("URL") or "")[:2000],"container":str((item.get("container-title") or [""])[0]),"type":str(item.get("type") or ""),"discovery_only":True})
+            return output
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ResearchToolError(f"Academic provider is unavailable: {type(exc).__name__}.") from exc
+        finally:
+            if owns_client: await client.aclose()
+
+
 class WebSearchTool:
     """Search the configured provider and return only usable public URLs."""
 

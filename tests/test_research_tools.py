@@ -155,6 +155,65 @@ def test_tavily_uses_advanced_depth_by_default(monkeypatch):
     assert asyncio.run(execute()) == []
 
 
+def test_academic_search_normalizes_openalex_discovery_records():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.openalex.org"
+        assert request.url.params["per-page"] == "2"
+        return httpx.Response(200, json={"results": [{
+            "id": "https://openalex.org/W1",
+            "doi": "https://doi.org/10.1234/example",
+            "title": "A scholarly result",
+            "publication_year": 2025,
+            "authorships": [{"author": {"display_name": "Ada Lovelace"}}],
+            "primary_location": {"landing_page_url": "https://publisher.example/paper"},
+            "open_access": {"is_oa": True},
+            "abstract_inverted_index": {"result": [1], "A": [0]},
+        }]})
+
+    async def execute():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await research_tools.AcademicSearchTool(client).search("causal inference", max_results=2)
+
+    result = asyncio.run(execute())
+    assert result[0]["title"] == "A scholarly result"
+    assert result[0]["abstract"] == "A result"
+    assert result[0]["discovery_only"] is True
+    assert result[0]["open_access"] is True
+
+
+def test_academic_search_normalizes_crossref_and_bounds_provider():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.crossref.org"
+        return httpx.Response(200, json={"message": {"items": [{
+            "DOI": "10.5678/paper",
+            "title": ["Crossref paper"],
+            "published": {"date-parts": [[2024]]},
+            "author": [{"given": "Grace", "family": "Hopper"}],
+            "URL": "https://doi.org/10.5678/paper",
+            "container-title": ["Journal"],
+            "type": "journal-article",
+        }]}})
+
+    async def execute():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await research_tools.AcademicSearchTool(client).search("statistics", provider="crossref", max_results=99)
+
+    result = asyncio.run(execute())
+    assert result[0]["doi"] == "10.5678/paper"
+    assert result[0]["authors"] == ["Grace Hopper"]
+    assert result[0]["discovery_only"] is True
+
+    async def invalid():
+        await research_tools.AcademicSearchTool().search("x", provider="unknown")
+
+    try:
+        asyncio.run(invalid())
+    except research_tools.ResearchToolError as exc:
+        assert "openalex" in str(exc)
+    else:
+        raise AssertionError("unknown academic provider must fail closed")
+
+
 def test_deep_research_searches_the_subject_not_output_requirements(monkeypatch):
     monkeypatch.setattr(
         research_tools,

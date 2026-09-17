@@ -583,3 +583,35 @@ The installed smoke therefore verifies routing, deep-report creation, resume,
 and fail-closed behavior. The two bounded Quick non-completions remain a
 provider/model stability issue and do not change the sealed promotion result
 above (22/24, 91.67%, zero false completions, zero safety violations).
+
+### Remaining-capability smoke — 2026-09-17
+
+The remaining capability checks are sealed in
+`release/evidence/PLATFORM_CAPABILITY_SMOKE_2026-09-17.json` (SHA-256
+`c08d7b18e51b8605455b003b39933018d58b9f2b3da73d250c9074a170c0df0e`):
+
+- Docker Desktop `desktop-linux` built the Linux image and ran
+  `scripts/linux_wheel_smoke.py` successfully (`LINUX_WHEEL_SMOKE_OK`). This
+  verifies Linux container packaging; WSL host integration and a graphical VM
+  are still not measured.
+- `research_analyze` now exposes bounded deterministic forecasting, observational
+  treatment/control summaries, and domain screening diagnostics. The methods
+  are explicitly labelled non-causal/screening and retain the existing
+  provenance and no-imputation rules.
+- OpenAlex and Crossref keyless discovery both returned three live scholarly
+  records. Every record is marked `discovery_only`; DOI/publisher retrieval and
+  claim validation are still required before citation.
+- Sarvam OCR now targets `/doc-ai/v1/job/digitise` and falls back only on a 404
+  to the legacy `/v2/job/digitise` route. The supplied temporary credential
+  returned 404 on both routes, so the live PDF OCR gate stopped safely with no
+  artifact and remains provider-entitlement blocked. The deterministic OCR
+  adapter suite remains green.
+- Real VM/desktop control remains contract-only and unavailable because no
+  disposable VM transport is configured. Docker Desktop alone is not evidence
+  of a reset-attested graphical guest.
+- Multi-agent delegation remains opt-in (`SMARA_ENABLE_DELEGATION=true`) and
+  learned-skill promotion remains quarantined/revocable; historical public
+  acceptance does not silently enable either capability.
+
+The complete deterministic regression suite after these changes is **881
+passed, 1 skipped**, with the same two pre-existing JWT key-length warnings.

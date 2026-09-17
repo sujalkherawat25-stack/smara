@@ -540,6 +540,14 @@ class CanonicalResearchSession:
         evidence_ids: Iterable[str],
         group_by: str | None = None,
         time_column: str | None = None,
+        forecast_columns: Iterable[str] = (),
+        forecast_horizon: int = 0,
+        treatment_column: str | None = None,
+        outcome_column: str | None = None,
+        treatment_value: Any = None,
+        domain_test: str | None = None,
+        domain_column: str | None = None,
+        alpha: float = .05,
     ) -> dict[str, Any]:
         from .research_analysis import ResearchAnalysisError, analyze_tabular
 
@@ -581,7 +589,21 @@ class CanonicalResearchSession:
                 if materialized_rows:
                     break
         try:
-            result = analyze_tabular(materialized_rows, numeric_columns=numeric_columns, group_by=group_by, time_column=time_column, evidence_ids=ids)
+            result = analyze_tabular(
+                materialized_rows,
+                numeric_columns=numeric_columns,
+                group_by=group_by,
+                time_column=time_column,
+                evidence_ids=ids,
+                forecast_columns=forecast_columns,
+                forecast_horizon=forecast_horizon,
+                treatment_column=treatment_column,
+                outcome_column=outcome_column,
+                treatment_value=treatment_value,
+                domain_test=domain_test,
+                domain_column=domain_column,
+                alpha=alpha,
+            )
         except ResearchAnalysisError as exc:
             raise ResearchStateError(str(exc)) from exc
         artifact_id = None

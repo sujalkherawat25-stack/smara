@@ -13,6 +13,7 @@ Architecture:
 
 from __future__ import annotations
 import base64
+import asyncio
 import json
 import html
 import logging
@@ -65,6 +66,7 @@ from smara.agent_tools import (
 from smara.task_memory import get_default_memory_store
 from smara.task_planner import SmaraTaskPlanner
 from smara.ptc_kernel import PTC_SAFE_TOOLS, ProgrammaticToolKernel
+from smara.research_tools import AcademicSearchTool, ResearchToolError
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -1067,11 +1069,12 @@ TOOL_SCHEMAS = [
 TOOL_SCHEMAS.extend([
     {"type":"function","function":{"name":"research_plan","description":"Create a dependency-aware research question graph before retrieval.","parameters":{"type":"object","additionalProperties":False,"required":["question","nodes"],"properties":{"question":{"type":"string"},"nodes":{"type":"array","maxItems":24,"items":{"type":"object","additionalProperties":False,"required":["id","question"],"properties":{"id":{"type":"string"},"question":{"type":"string"},"dependencies":{"type":"array","items":{"type":"string"}},"stopping_criterion":{"type":"string"}}}}}}}},
     {"type":"function","function":{"name":"research_search","description":"Search leads for one ready research node. Snippets are discovery-only.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","query"],"properties":{"node_id":{"type":"string"},"query":{"type":"string"},"max_results":{"type":"integer"}}}}},
+    {"type":"function","function":{"name":"academic_search","description":"Discover scholarly works from OpenAlex or Crossref. Results are discovery-only; fetch the DOI or publisher URL before using them as evidence.","parameters":{"type":"object","additionalProperties":False,"required":["query"],"properties":{"query":{"type":"string","maxLength":500},"provider":{"type":"string","enum":["openalex","crossref"]},"max_results":{"type":"integer","minimum":1,"maximum":8}}}}},
     {"type":"function","function":{"name":"research_fetch","description":"Fetch a lead and preserve original response bytes plus extracted passage provenance.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","url"],"properties":{"node_id":{"type":"string"},"url":{"type":"string"}}}}},
     {"type":"function","function":{"name":"research_gather","description":"Execute one ready research-DAG wave: search all requested nodes concurrently, hybrid-rerank results, fetch diverse sources concurrently, and preserve provenance. Prefer this over serial search/fetch in Quick and Deep Research lanes.","parameters":{"type":"object","additionalProperties":False,"required":["requests"],"properties":{"requests":{"type":"array","maxItems":24,"items":{"type":"object","additionalProperties":False,"required":["node_id","query"],"properties":{"node_id":{"type":"string"},"query":{"type":"string"}}}},"max_sources_per_node":{"type":"integer"}}}}},
     {"type":"function","function":{"name":"research_ingest_file","description":"Ingest UTF-8 text/Markdown/CSV/JSON, extract a PDF table cell, or extract image OCR evidence from a workspace file while preserving the original artifact.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","path"],"properties":{"node_id":{"type":"string"},"path":{"type":"string"},"page":{"type":"integer"},"row":{"type":"integer"},"column":{"type":"integer"}}}}},
     {"type":"function","function":{"name":"research_inspect","description":"Inspect a provenance-verified evidence passage. Supply query to retrieve the most relevant bounded window from a long source.","parameters":{"type":"object","additionalProperties":False,"required":["evidence_id"],"properties":{"evidence_id":{"type":"string"},"query":{"type":"string"},"max_chars":{"type":"integer"}}}}},
-    {"type":"function","function":{"name":"research_analyze","description":"Compute provenance-bound descriptive statistics, grouped metrics, correlations, time changes, and IQR outliers. Omit rows to parse CSV/JSON directly from the fetched evidence artifact. Results are deterministic and stored as an immutable artifact; missing values are never imputed.","parameters":{"type":"object","additionalProperties":False,"required":["numeric_columns","evidence_ids"],"properties":{"rows":{"type":"array","maxItems":10000,"items":{"type":"object"}},"numeric_columns":{"type":"array","maxItems":20,"items":{"type":"string"}},"evidence_ids":{"type":"array","minItems":1,"maxItems":20,"items":{"type":"string"}},"group_by":{"type":"string"},"time_column":{"type":"string"}}}}},
+    {"type":"function","function":{"name":"research_analyze","description":"Compute provenance-bound descriptive statistics, grouped metrics, correlations, time changes, IQR outliers, bounded linear forecasts, observational treatment effects, or screening diagnostics. Omit rows to parse CSV/JSON directly from fetched evidence. Results are deterministic and stored as an immutable artifact; missing values are never imputed. Forecasts are not causal claims.","parameters":{"type":"object","additionalProperties":False,"required":["numeric_columns","evidence_ids"],"properties":{"rows":{"type":"array","maxItems":10000,"items":{"type":"object"}},"numeric_columns":{"type":"array","maxItems":20,"items":{"type":"string"}},"evidence_ids":{"type":"array","minItems":1,"maxItems":20,"items":{"type":"string"}},"group_by":{"type":"string"},"time_column":{"type":"string"},"forecast_columns":{"type":"array","maxItems":10,"items":{"type":"string"}},"forecast_horizon":{"type":"integer","minimum":1,"maximum":30},"treatment_column":{"type":"string"},"outcome_column":{"type":"string"},"treatment_value":{},"domain_test":{"type":"string","enum":["normality","jarque_bera","zscore","outlier_zscore"]},"domain_column":{"type":"string"},"alpha":{"type":"number","minimum":0.001,"maximum":0.5}}}}},
     {"type":"function","function":{"name":"research_resolve","description":"Resolve a question only through conservative claim/evidence judgments.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","claim","evidence_ids"],"properties":{"node_id":{"type":"string"},"claim":{"type":"string"},"evidence_ids":{"type":"array","maxItems":20,"items":{"type":"string"}}}}}},
     {"type":"function","function":{"name":"research_validate","description":"Validate the final required claim/evidence map; unsupported claims prevent completion.","parameters":{"type":"object","additionalProperties":False,"required":["claims"],"properties":{"claims":{"type":"array","maxItems":40,"items":{"type":"object","additionalProperties":False,"required":["claim","evidence_ids"],"properties":{"claim":{"type":"string"},"evidence_ids":{"type":"array","maxItems":20,"items":{"type":"string"}}}}},"require_complete":{"type":"boolean"}}}}},
     {"type":"function","function":{"name":"research_report","description":"After deep-lane claims pass validation and the source floor is met, preserve the comprehensive Markdown report as an immutable session artifact.","parameters":{"type":"object","additionalProperties":False,"required":["title","markdown"],"properties":{"title":{"type":"string","maxLength":500},"markdown":{"type":"string","minLength":1000,"maxLength":120000}}}}},
@@ -1127,7 +1130,7 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
             "browser_action", "pdf_search", "calculate",
             "file_read", "list_directory", "programmatic_tool_call", "todo",
             "research_plan", "research_search", "research_fetch", "research_inspect",
-            "research_gather", "research_ingest_file", "research_analyze", "research_resolve", "research_validate", "research_report"
+            "academic_search", "research_gather", "research_ingest_file", "research_analyze", "research_resolve", "research_validate", "research_report"
             ,"browser_open","browser_observe","browser_navigate","browser_act","browser_tabs","browser_switch","browser_scroll","browser_download","browser_close"
             ,"process_start","process_poll","process_stdin","process_cancel"
         }
@@ -1159,6 +1162,7 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - Keep internal reasoning concise and focused (under 150 words) before executing tools or stating answers.
    - For quick factual web lookup, use `web_search` and `web_extract`. For evidence-backed research, use the canonical `research_plan` -> `research_search` -> `research_fetch` -> `research_resolve` -> `research_validate` path so snippets cannot become proof. Keep plan nodes simple and independent (e.g. 1-2 root nodes without dependencies). In research tasks, always include the public source URL(s) and end with FINAL LABEL: supported, refuted, or insufficient.
    - For quantitative claims from CSV/JSON/table data: first call `research_plan` with one node, then `research_fetch` the dataset URL, then call `research_analyze` exactly once with `numeric_columns` and the fetched `evidence_id`; omit `rows` so the tool parses the immutable CSV/JSON artifact directly. Copy the matching `suggested_claims[].claim` verbatim into `research_resolve` with the returned analysis evidence ID, then copy that same claim and ID into `research_validate`. Do not inspect artifacts, download the data again, or add method/URL prose to the validation claim. Finally state the result, dataset URL, and FINAL LABEL: supported.
+   - For academic questions, `academic_search` (when available in the research profile) is discovery-only metadata from OpenAlex/Crossref. Treat DOI and publisher URLs as leads: fetch them through the canonical research path and validate passage-local claims before citing.
    - When two or more independent read-only facts are needed, use `programmatic_tool_call` to batch them in one turn. Its allowlist is strict: never use it for shell commands, writes, memory changes, credentials, delegation, or browser control.
    - For historical snapshots of web pages, use `wayback_extract`.
    - For current or historical Wikipedia articles, revision histories, or image counts, use `wikipedia_page`.
@@ -1312,6 +1316,7 @@ class SmaraAutonomousAgent:
             "browser_close": self._dispatch_browser_close,
             "research_plan": self._dispatch_research_plan,
             "research_search": self._dispatch_research_search,
+            "academic_search": self._dispatch_academic_search,
             "research_fetch": self._dispatch_research_fetch,
             "research_gather": self._dispatch_research_gather,
             "research_ingest_file": self._dispatch_research_ingest_file,
@@ -1460,6 +1465,23 @@ class SmaraAutonomousAgent:
                 pass
         return self._research_result(self._research.search(node_id,str(query),int(args.get("max_results") or args.get("num_results") or 5)))
 
+    def _dispatch_academic_search(self, args: Dict[str, Any]) -> str:
+        """Return bounded scholarly discovery records without treating them as proof."""
+        async def run() -> list[dict[str, object]]:
+            return await AcademicSearchTool().search(
+                str(args.get("query") or ""),
+                provider=str(args.get("provider") or "openalex"),
+                max_results=int(args.get("max_results") or 5),
+            )
+        try:
+            results = asyncio.run(run())
+        except ResearchToolError as exc:
+            return self._research_result({"status": "error", "error": str(exc), "discovery_only": True})
+        except Exception as exc:
+            logger.warning("academic search failed safely: %s", type(exc).__name__)
+            return self._research_result({"status": "error", "error": "academic provider unavailable", "discovery_only": True})
+        return self._research_result({"status": "ok", "discovery_only": True, "results": results})
+
     def _dispatch_research_fetch(self,args:Dict[str,Any]) -> str:
         node_id = str(args.get("node_id") or "")
         urls = args.get("urls")
@@ -1498,7 +1520,21 @@ class SmaraAutonomousAgent:
         return self._research_result(self._research.inspect(str(args.get("evidence_id") or ""),int(args.get("max_chars") or 4000),str(args.get("query") or "")))
 
     def _dispatch_research_analyze(self,args:Dict[str,Any]) -> str:
-        return self._research_result(self._research.analyze(args.get("rows") or [],args.get("numeric_columns") or [],evidence_ids=args.get("evidence_ids") or [],group_by=args.get("group_by"),time_column=args.get("time_column")))
+        return self._research_result(self._research.analyze(
+            args.get("rows") or [],
+            args.get("numeric_columns") or [],
+            evidence_ids=args.get("evidence_ids") or [],
+            group_by=args.get("group_by"),
+            time_column=args.get("time_column"),
+            forecast_columns=args.get("forecast_columns") or [],
+            forecast_horizon=int(args.get("forecast_horizon") or 0),
+            treatment_column=args.get("treatment_column"),
+            outcome_column=args.get("outcome_column"),
+            treatment_value=args.get("treatment_value"),
+            domain_test=args.get("domain_test"),
+            domain_column=args.get("domain_column"),
+            alpha=float(args.get("alpha") or .05),
+        ))
 
     def _dispatch_research_resolve(self,args:Dict[str,Any]) -> str:
         node_id = str(args.get("node_id") or "")
