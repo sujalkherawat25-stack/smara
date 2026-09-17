@@ -314,8 +314,8 @@
       "suite": "tests/test_sarvam_ocr.py",
       "provider": "sarvam",
       "model": "sarvam-vision-1.5",
-      "scope": "Sarvam Document AI (/doc-ai/v1/job/digitise) adapter with legacy-route fallback and local pytesseract image fallback (.png, .jpg, .jpeg, .webp), returning content-addressed extracted Markdown/text, page counts, and immutable cryptographic digests",
-      "limitation": "Adapter and fallback behavior are deterministic-tested; the 2026-09-17 live credential smoke returned HTTP 404 on both current and legacy routes, so provider entitlement remains unverified and local fallback still does not support scanned-PDF OCR",
+      "scope": "Sarvam Document AI (/doc-ai/v1/job/digitise) adapter with legacy-route fallback, Gemma 4 visual image fallback, and local pytesseract fallback (.png, .jpg, .jpeg, .webp), returning content-addressed extracted Markdown/text, page counts, and immutable cryptographic digests",
+      "limitation": "Document AI and Gemma 4 provider behavior are not live-promoted for the supplied credential; Gemma 4 fallback is image-only visual transcription, not structured Parse or scanned-PDF OCR",
       "cli_command": "smara ocr <file> [--lang en-IN] [--format md|txt] [--output out.md]"
     },
     "stateful_browser": {
@@ -371,7 +371,7 @@
       "integration_suite": "scripts/docker_desktop_smoke.py",
       "evidence": {
         "path": "release/evidence/PLATFORM_CAPABILITY_SMOKE_2026-09-17.json",
-        "sha256": "903a2929b5c3f00331f0de8d88181745e57dd535fd55758350fb1ceaa091a37b"
+        "sha256": "5320fbbf0d4615dff36f0f8cac7b37aececfe81ffb866dd5c0bcb9f9a3a8d68b"
       },
       "scope": "Reset-attested Linux Xvfb/Openbox guest in Docker Desktop with bounded screenshot, click, stale-observation, cancellation, and cleanup checks",
       "limitation": "This is an isolated disposable Linux container guest, not a hypervisor VM and not native Windows desktop control"

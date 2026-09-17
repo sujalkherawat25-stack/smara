@@ -87,6 +87,65 @@ async def test_sarvam_ocr_handles_job_failure(tmp_path: Path):
             await ocr_client.digitize(img_path)
 
 
+@pytest.mark.anyio
+async def test_sarvam_ocr_falls_back_to_gemma4_for_image_when_document_ai_is_unavailable(tmp_path: Path):
+    img_path = _make_sample_image(tmp_path / "scan.png")
+    requests: list[tuple[str, dict]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/job/digitise" in url:
+            return httpx.Response(404, json={"code": "not_found_error"})
+        if url.endswith("/v2/chat/completions"):
+            payload = json.loads(request.content.decode("utf-8"))
+            requests.append((url, payload))
+            return httpx.Response(200, json={"choices": [{"message": {"content": "Invoice total: ₹42"}}]})
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        ocr_client = SarvamOCRClient(
+            base_url="https://api.sarvam.ai/v2",
+            api_key="test_sarvam_key",
+            http_client=client,
+        )
+        result = await ocr_client.digitize(img_path)
+
+    assert result.provider == "sarvam-gemma4"
+    assert result.model == "gemma4"
+    assert result.text == "Invoice total: ₹42"
+    assert len(requests) == 1
+    assert requests[0][1]["model"] == "gemma4"
+    assert requests[0][1]["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+@pytest.mark.anyio
+async def test_sarvam_ocr_does_not_use_gemma4_fallback_for_auth_failure(tmp_path: Path):
+    img_path = _make_sample_image(tmp_path / "scan.png")
+    chat_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal chat_calls
+        url = str(request.url)
+        if url.endswith("/v2/chat/completions"):
+            chat_calls += 1
+        if "/job/digitise" in url:
+            return httpx.Response(403, json={"code": "invalid_api_key_error"})
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        ocr_client = SarvamOCRClient(
+            base_url="https://api.sarvam.ai/v2",
+            api_key="bad-key",
+            http_client=client,
+        )
+        with pytest.raises(OCRError, match="HTTP 403"):
+            await ocr_client.digitize(img_path)
+
+    assert chat_calls == 0
+
+
 def test_research_session_ingest_image_with_sarvam_ocr(tmp_path: Path, monkeypatch):
     img_path = _make_sample_image(tmp_path / "table.png")
     extracted_text = "Year | Revenue\n2025 | $10M\n2026 | $25M"

@@ -28,6 +28,20 @@
     "false_completion": false,
     "reason": "The supplied temporary credential/account returned Not Found on both routes; the adapter stopped without creating an OCR artifact."
   },
+  "gemma4_visual_ocr": {
+    "status": "passed_contract_only",
+    "endpoint": "POST https://api.sarvam.ai/v2/chat/completions",
+    "model": "gemma4",
+    "trigger": "image-only fallback after Document AI returns 404",
+    "checks": [
+      "base64 data-URI image request",
+      "visible-text transcription response",
+      "provider/model are labelled sarvam-gemma4/gemma4",
+      "no fallback on authentication failure",
+      "PDF and structured Parse claims remain disabled"
+    ],
+    "live_status": "not_run_without_a_key_whitelisted_for_gemma4_beta"
+  },
   "real_vm_desktop": {
     "status": "passed_disposable_docker_guest",
     "image": "smara-desktop-gate:local",

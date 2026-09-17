@@ -588,7 +588,7 @@ above (22/24, 91.67%, zero false completions, zero safety violations).
 
 The remaining capability checks are sealed in
 `release/evidence/PLATFORM_CAPABILITY_SMOKE_2026-09-17.json` (SHA-256
-`903a2929b5c3f00331f0de8d88181745e57dd535fd55758350fb1ceaa091a37b`):
+`5320fbbf0d4615dff36f0f8cac7b37aececfe81ffb866dd5c0bcb9f9a3a8d68b`):
 
 - Docker Desktop `desktop-linux` built the Linux image and ran
   `scripts/linux_wheel_smoke.py` successfully (`LINUX_WHEEL_SMOKE_OK`). This
@@ -619,6 +619,11 @@ The remaining capability checks are sealed in
   HTTP 404 `not_found_error`, so no PDF parse artifact was claimed. Current
   Document AI OCR remains separately gated on `/doc-ai/v1/job/digitise` and
   remains provider-entitlement blocked for that credential.
+- Gemma 4 is now a contract-tested, image-only fallback at
+  `POST https://api.sarvam.ai/v2/chat/completions`. It is invoked only after a
+  Document AI 404, requires a base64 image data URI, and labels results as
+  `sarvam-gemma4/gemma4`. It never runs after authentication failures and does
+  not claim PDF parsing, structured extraction, or Sarvam Vision entitlement.
 - Multi-agent delegation remains opt-in (`SMARA_ENABLE_DELEGATION=true`) and
   learned-skill promotion remains quarantined/revocable; historical public
   acceptance does not silently enable either capability.

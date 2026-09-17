@@ -133,16 +133,32 @@ class SarvamOCRClient:
 
         # If Sarvam key is configured, use Sarvam Cloud OCR
         if self.api_key:
-            return await self._digitize_sarvam(
-                path.name,
-                raw_bytes,
-                mime_type=mime_type,
-                language=language,
-                output_format=output_format,
-                content_type=content_type,
-                content_sha=content_sha,
-                max_wait_seconds=max_wait_seconds,
-            )
+            try:
+                return await self._digitize_sarvam(
+                    path.name,
+                    raw_bytes,
+                    mime_type=mime_type,
+                    language=language,
+                    output_format=output_format,
+                    content_type=content_type,
+                    content_sha=content_sha,
+                    max_wait_seconds=max_wait_seconds,
+                )
+            except OCRError as exc:
+                # Gemma 4 is a visual chat model, not a Parse/Document AI
+                # entitlement. Use it only for image files and only when the
+                # purpose-built endpoint is unavailable (404); auth, quota,
+                # validation, and provider failures must remain fail-closed.
+                if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} and "endpoint unavailable" in str(exc).lower():
+                    return await self._digitize_gemma4_visual(
+                        path.name,
+                        raw_bytes,
+                        mime_type=mime_type,
+                        language=language,
+                        output_format=output_format,
+                        content_sha=content_sha,
+                    )
+                raise
 
         # Fallback to local pytesseract if installed
         return self._digitize_local_pytesseract(path, raw_bytes, content_sha)
@@ -258,6 +274,93 @@ class SarvamOCRClient:
                 language=language,
                 provider="sarvam",
                 job_id=job_id,
+                character_count=len(extracted_text),
+            )
+        finally:
+            if owns_client:
+                await client.aclose()
+
+    async def _digitize_gemma4_visual(
+        self,
+        file_name: str,
+        raw_bytes: bytes,
+        *,
+        mime_type: str,
+        language: str,
+        output_format: str,
+        content_sha: str,
+    ) -> OCRResult:
+        """Best-effort visual transcription for images when Document AI is absent.
+
+        This deliberately does not accept PDFs or claim structured Parse
+        semantics. Gemma 4 receives a base64 data URI through the OpenAI-
+        compatible chat endpoint and the result is labelled separately from
+        Sarvam Vision/Document AI so callers cannot mistake it for a verified
+        document extraction.
+        """
+        if len(raw_bytes) > 7_500_000:
+            raise OCRError("Gemma 4 visual OCR image exceeds the safe 10 MB encoded request budget.")
+        supported_mimes = {"image/png", "image/jpeg", "image/webp"}
+        if mime_type not in supported_mimes:
+            raise OCRError(f"Gemma 4 visual OCR does not support image type: {mime_type}")
+
+        owns_client = self._http is None
+        client = self._http or httpx.AsyncClient(timeout=httpx.Timeout(35.0))
+        try:
+            base_url = self.base_url.rstrip("/")
+            if base_url.endswith("/v1"):
+                base_url = base_url[:-3].rstrip("/")
+            if not base_url.endswith("/v2"):
+                base_url = f"{base_url}/v2"
+            url = f"{base_url}/chat/completions"
+            prompt = (
+                "Transcribe all visible text in this image exactly. Preserve line breaks "
+                f"and numbers. The requested language is {language or 'en-IN'}. "
+                "Do not infer missing text, summarize, or invent content. "
+                "If there is no readable text, reply exactly NO_TEXT_FOUND."
+            )
+            payload = {
+                "model": "gemma4",
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64.b64encode(raw_bytes).decode('ascii')}"}},
+                    ],
+                }],
+                "temperature": 0,
+                "max_tokens": 2000,
+            }
+            response = await client.post(
+                url,
+                headers=_auth_headers(self.api_key, "api-subscription-key") | {"Content-Type": "application/json"},
+                json=payload,
+            )
+            if response.status_code >= 400:
+                detail = response.text[:240]
+                raise OCRError(f"Gemma 4 visual OCR failed: HTTP {response.status_code} ({detail})")
+            try:
+                data = response.json()
+            except ValueError as exc:
+                raise OCRError("Gemma 4 visual OCR returned invalid JSON.") from exc
+            message = ((data.get("choices") or [{}])[0] or {}).get("message") or {}
+            content = message.get("content")
+            if isinstance(content, list):
+                content = "\n".join(str(part.get("text", "")) for part in content if isinstance(part, dict)).strip()
+            extracted_text = str(content or "").strip()
+            if not extracted_text or extracted_text == "NO_TEXT_FOUND":
+                raise OCRError("Gemma 4 visual OCR returned no readable text.")
+            text_sha = hashlib.sha256(extracted_text.encode("utf-8")).hexdigest()
+            return OCRResult(
+                text=extracted_text,
+                content_sha256=content_sha,
+                text_sha256=text_sha,
+                pages=1,
+                format=output_format,
+                language=language,
+                provider="sarvam-gemma4",
+                model="gemma4",
+                job_id=None,
                 character_count=len(extracted_text),
             )
         finally:
