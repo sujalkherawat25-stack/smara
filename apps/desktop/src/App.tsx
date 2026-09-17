@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { desktop, isNativeDesktop } from "./api";
-import type { ActivityItem, ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatMessage, CodingConventionsData, ConnectionState, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, SearchResultItem, SemanticIndexStats, SwarmMessageData, SwarmTaskResultData, SymbolEvolutionData, TaskSummary, TestFailureItem, TestSuiteResultData, WebScrapeData } from "./types";
+import type { ActivityItem, ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatMessage, CodingConventionsData, ConnectionState, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ResearchMode, SearchResultItem, SemanticIndexStats, SwarmMessageData, SwarmTaskResultData, SymbolEvolutionData, TaskSummary, TestFailureItem, TestSuiteResultData, WebScrapeData } from "./types";
 import smaraLogo from "./assets/smara-logo.svg";
 import { TaskMemoryTab } from "./components/TaskMemoryTab";
 import { ProgressiveSkillsTab } from "./components/ProgressiveSkillsTab";
@@ -316,7 +316,8 @@ export default function App() {
   const [sidebarMode, setSidebarMode] = useState<"sessions" | "bots">("sessions");
   const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
   const [capTab, setCapTab] = useState<"dag" | "memory" | "skills" | "swarm" | "benchmarks" | "git">("dag");
-  const [selectedModel, setSelectedModel] = useState("GLM 5.2 · Med");
+  const [selectedProfileId, setSelectedProfileId] = useState("auto");
+  const [researchMode, setResearchMode] = useState<ResearchMode>("auto");
   const [audioMuted, setAudioMuted] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
 
@@ -354,6 +355,7 @@ export default function App() {
       setConnectors(conns);
       setModelProfiles(models);
       setTasks(tList);
+      setSelectedProfileId((current) => current === "auto" ? (conn.model_profile.startsWith("local:") ? conn.model_profile.slice("local:".length) : "auto") : current);
     } catch {
       setConnection(fallbackConnection);
     }
@@ -493,13 +495,32 @@ export default function App() {
     setActivity((items) => [{ id: uid("start"), tone: "blue" as const, label: "Autonomous turn started" }, ...items].slice(0, 10));
 
     try {
+      if (isNativeDesktop && researchMode !== "auto") {
+        setActivity((items) => [{ id: uid("research"), tone: "blue" as const, label: `${researchMode === "deep" ? "Deep" : "Quick"} research started`, detail: "The selected research lane is running with bounded live-web evidence." }, ...items].slice(0, 10));
+        const result = await desktop.runResearch(text, researchMode);
+        const answer = typeof result?.answer === "string" && result.answer.trim()
+          ? result.answer
+          : "Research finished without a textual answer. Open the run details or report artifact for the evidence.";
+        const lane = result?.research_mode ? `\n\nLane: ${result.research_mode}` : "";
+        setMessages((items) => items.map((item) => item.id === answerId ? { ...item, pending: false, text: `${answer}${lane}` } : item));
+        setStreaming(false);
+        setActivity((items) => [{ id: uid("research-done"), tone: "green" as const, label: "Research completed", detail: result?.research_report_path || "Evidence and result are available in the run output." }, ...items].slice(0, 10));
+        assistantId.current = null;
+        void refreshAll();
+        return;
+      }
       if (isNativeDesktop) {
+        const selectedModelProfile = selectedProfileId === "auto"
+          ? (connection.model_profile.startsWith("local:") ? connection.model_profile : modelProfiles[0] ? `local:${modelProfiles[0].id}` : "default")
+          : `local:${selectedProfileId}`;
         await desktop.streamChat({
           api_url: connection.api_url,
           workspace: connection.workspace,
-          model_profile: connection.model_profile.startsWith("local:") ? connection.model_profile : modelProfiles[0] ? `local:${modelProfiles[0].id}` : "default",
+          model_profile: selectedModelProfile,
           message: text,
           conversation_id: conversationId.current,
+          research_mode: researchMode,
+          tool_profile: researchMode === "auto" ? "full" : "research_web",
         });
       } else {
         setTimeout(() => {
@@ -654,13 +675,30 @@ export default function App() {
                   </button>
 
                   <div className="sidebar-section-divider">
-                    <span>Projects</span>
+                    <span>Recent work</span>
+                    {tasks.length > 0 && <span style={{ color: "#64748b", fontWeight: 500 }}>{tasks.length}</span>}
                   </div>
 
-                  <div className="sidebar-empty-label">
-                    <span style={{ fontSize: 13, opacity: 0.6 }}>📂</span>
-                    <span>No sessions yet</span>
-                  </div>
+                  {tasks.length > 0 ? tasks.slice(0, 6).map((task) => (
+                    <button
+                      key={task.id}
+                      type="button"
+                      className="sidebar-task-row"
+                      onClick={() => setTab("goals")}
+                      title={`${task.title} · ${task.status}`}
+                    >
+                      <span className={`sidebar-task-dot ${task.status === "completed" ? "done" : task.status === "failed" ? "failed" : ""}`} />
+                      <span className="sidebar-task-copy">
+                        <span className="sidebar-task-title">{task.title || "Untitled task"}</span>
+                        <span className="sidebar-task-status">{task.status.replaceAll("_", " ")}</span>
+                      </span>
+                    </button>
+                  )) : (
+                    <div className="sidebar-empty-label">
+                      <span style={{ fontSize: 13, opacity: 0.6 }}>◌</span>
+                      <span>No runs yet — start with a goal</span>
+                    </div>
+                  )}
 
                   <button
                     type="button"
@@ -735,8 +773,11 @@ export default function App() {
               transcriptEndRef={transcriptEndRef}
               onPreview={handlePreview}
               sidebarMode={sidebarMode}
-              selectedModel={selectedModel}
-              setSelectedModel={setSelectedModel}
+              modelProfiles={modelProfiles}
+              selectedProfileId={selectedProfileId}
+              setSelectedProfileId={setSelectedProfileId}
+              researchMode={researchMode}
+              setResearchMode={setResearchMode}
               audioMuted={audioMuted}
               setAudioMuted={setAudioMuted}
               onOpenCapabilities={() => setCapabilitiesOpen(true)}
@@ -1101,8 +1142,11 @@ function ChatTab({
   transcriptEndRef,
   onPreview,
   sidebarMode,
-  selectedModel,
-  setSelectedModel,
+  modelProfiles,
+  selectedProfileId,
+  setSelectedProfileId,
+  researchMode,
+  setResearchMode,
   audioMuted,
   setAudioMuted,
   onOpenCapabilities,
@@ -1118,8 +1162,11 @@ function ChatTab({
   transcriptEndRef: RefObject<HTMLDivElement>;
   onPreview: (path: string) => void;
   sidebarMode: "sessions" | "bots";
-  selectedModel: string;
-  setSelectedModel: (val: string) => void;
+  modelProfiles: LocalModelProfile[];
+  selectedProfileId: string;
+  setSelectedProfileId: (val: string) => void;
+  researchMode: ResearchMode;
+  setResearchMode: (val: ResearchMode) => void;
   audioMuted: boolean;
   setAudioMuted: (val: boolean) => void;
   onOpenCapabilities: () => void;
@@ -1225,15 +1272,22 @@ function ChatTab({
           />
 
           <div className="composer-dock-actions">
-            <button
-              type="button"
-              className="model-selector-pill"
-              onClick={() => setSelectedModel(selectedModel.includes("GLM") ? "Sarvam AI · Fast" : "GLM 5.2 · Med")}
-              title="Click to toggle model"
-            >
-              <span>{selectedModel}</span>
-              <span style={{ fontSize: 9 }}>▾</span>
-            </button>
+            <label className="composer-control" title="Choose the research lane">
+              <span className="composer-control-label">Lane</span>
+              <select className="composer-dock-select" value={researchMode} onChange={(event) => setResearchMode(event.target.value as ResearchMode)} disabled={streaming}>
+                <option value="auto">Auto</option>
+                <option value="quick">Quick research</option>
+                <option value="deep">Deep research</option>
+              </select>
+            </label>
+
+            <label className="composer-control" title="Choose a configured local model profile">
+              <span className="composer-control-label">Model</span>
+              <select className="composer-dock-select model-select" value={selectedProfileId} onChange={(event) => setSelectedProfileId(event.target.value)} disabled={streaming}>
+                <option value="auto">Automatic</option>
+                {modelProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.label || profile.model}</option>)}
+              </select>
+            </label>
 
             <button
               type="button"
@@ -1904,18 +1958,19 @@ function BrowserTab() {
   const [screenshotData, setScreenshotData] = useState<BrowserScreenshotData | null>(null);
   const [e2eResult, setE2eResult] = useState<E2ESuiteResultData | null>(null);
   const [researchTopic, setResearchTopic] = useState("market condition of inference compute");
+  const [researchMode, setResearchMode] = useState<ResearchMode>("auto");
   const [researchResult, setResearchResult] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [healing, setHealing] = useState(false);
   const [healNotice, setHealNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const handleRunDeepResearch = async () => {
+  const handleRunResearch = async () => {
     if (!researchTopic.trim()) return;
     setLoading(true);
     setActionError(null);
     try {
-      const res = await desktop.runDeepResearch(researchTopic.trim());
+      const res = await desktop.runResearch(researchTopic.trim(), researchMode);
       setResearchResult(res);
     } catch (err: any) {
       setActionError(err?.message || String(err));
@@ -2039,7 +2094,7 @@ function BrowserTab() {
             className={`mode-btn ${mode === "research" ? "active" : ""}`}
             onClick={() => setMode("research")}
           >
-            📊 Deep Market Intelligence
+            📊 Research workspace
           </button>
         </div>
       </div>
@@ -2066,16 +2121,21 @@ function BrowserTab() {
                 type="text"
                 value={researchTopic}
                 onChange={(e) => setResearchTopic(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleRunDeepResearch()}
-                placeholder="Enter market sector or topic, e.g. market condition of inference compute..."
+                onKeyDown={(e) => e.key === "Enter" && handleRunResearch()}
+                placeholder="Ask a question to research with live, cited sources..."
               />
+              <select className="research-lane-select" value={researchMode} onChange={(e) => setResearchMode(e.target.value as ResearchMode)} disabled={loading} aria-label="Research lane">
+                <option value="auto">Auto lane</option>
+                <option value="quick">Quick · 5–30s</option>
+                <option value="deep">Deep · 5–30m</option>
+              </select>
               <button
                 type="button"
                 className="btn-browser-action"
-                onClick={handleRunDeepResearch}
+                onClick={handleRunResearch}
                 disabled={loading || !researchTopic.trim()}
               >
-                {loading ? "Analyzing..." : "🚀 Launch Market Deep Dive"}
+                {loading ? "Researching..." : "🚀 Start research"}
               </button>
             </>
           ) : (
@@ -2283,12 +2343,12 @@ function BrowserTab() {
         </div>
       )}
 
-      {/* Mode 3: Deep Autonomous Market Intelligence */}
+      {/* Mode 3: Quick / Deep Autonomous Research */}
       {mode === "research" && (
         <div className="browser-content-grid">
           <div className="browser-panel" style={{ gridColumn: "1 / -1" }}>
             <div className="panel-sub-header">
-              <h4>📊 Autonomous Strategic Market Analysis & Intelligence</h4>
+              <h4>📊 Live research result</h4>
               {(researchResult?.research_report_path || researchResult?.report_path) && (
                 <button
                   type="button"
@@ -2314,10 +2374,18 @@ function BrowserTab() {
                   <h4 style={{ color: "#38bdf8", margin: "0 0 8px 0" }}>📋 Executive Summary</h4>
                   <p style={{ margin: 0, lineHeight: 1.6, color: "#e2e8f0" }}>{researchResult.answer || researchResult.analysis?.executive_summary}</p>
                   {researchResult.research_mode && <p style={{ margin: "8px 0 0", color: "#94a3b8" }}>Selected lane: <strong>{researchResult.research_mode}</strong></p>}
+                  {researchResult.research_lane_decision?.reasons?.length > 0 && <p style={{ margin: "6px 0 0", color: "#94a3b8", fontSize: 12 }}>Why: {researchResult.research_lane_decision.reasons.join(" · ")}</p>}
+                </div>
+
+                <div className="research-summary-grid">
+                  <div><span>Run status</span><strong>{researchResult.status || "completed"}</strong></div>
+                  <div><span>Sources / evidence</span><strong>{researchResult.evidence_count ?? researchResult.progress?.length ?? "—"}</strong></div>
+                  <div><span>Unresolved work</span><strong>{researchResult.unresolved_work?.length || 0}</strong></div>
+                  <div><span>Resume</span><strong>{researchResult.resume?.command ? "Available" : "Not needed"}</strong></div>
                 </div>
 
                 <div>
-                  <h4 style={{ color: "#f8fafc", marginBottom: "8px" }}>🏆 Competitive Landscape Matrix</h4>
+                  <h4 style={{ color: "#f8fafc", marginBottom: "8px" }}>🏆 Structured findings</h4>
                   <div style={{ overflowX: "auto" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
                       <thead>
@@ -2369,8 +2437,8 @@ function BrowserTab() {
             {!loading && !researchResult && (
               <div className="empty-e2e-placeholder">
                 <span>📊</span>
-                <h4>Ready for Autonomous Market Intelligence</h4>
-                <p>Enter any market sector or topic above and click "Launch Market Deep Dive" to execute multi-vector research.</p>
+                <h4>Ready for live research</h4>
+                <p>Choose Auto, Quick, or Deep, then ask a question. Smara will show the lane decision, evidence, and report artifact here.</p>
               </div>
             )}
           </div>

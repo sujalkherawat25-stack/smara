@@ -1,5 +1,7 @@
 export type Screen = "chat" | "activity" | "settings";
 
+export type ResearchMode = "auto" | "quick" | "deep";
+
 export interface ConnectionState {
   runtime_mode: "local" | "cloud";
   api_url: string;

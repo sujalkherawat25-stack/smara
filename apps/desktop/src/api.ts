@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, CodingConventionsData, ConnectionState, DAGNodeData, DAGWorkflowData, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ProgressiveSkillDetail, ProgressiveSkillItem, RemoteStatus, SearchResultItem, SemanticIndexStats, SubagentDelegationData, SubagentRolesData, SwarmTaskResultData, SymbolEvolutionData, TaskDetail, TaskMemoryActionResult, TaskMemorySearchItem, TaskMemorySnapshot, TaskMemoryStoreData, TaskSummary, TestSuiteResultData, WebScrapeData } from "./types";
+import type { ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, CodingConventionsData, ConnectionState, DAGNodeData, DAGWorkflowData, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ProgressiveSkillDetail, ProgressiveSkillItem, RemoteStatus, ResearchMode, SearchResultItem, SemanticIndexStats, SubagentDelegationData, SubagentRolesData, SwarmTaskResultData, SymbolEvolutionData, TaskDetail, TaskMemoryActionResult, TaskMemorySearchItem, TaskMemorySnapshot, TaskMemoryStoreData, TaskSummary, TestSuiteResultData, WebScrapeData } from "./types";
 
 export const isNativeDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -49,7 +49,7 @@ export const desktop = {
   modelProfiles: () => invoke<LocalModelProfile[]>("list_local_model_profiles"),
   saveModelProfile: (profile: { id: string; label: string; provider: string; base_url: string; model: string; api_key: string; auth_header?: string }) => invoke<LocalModelProfile[]>("save_local_model_profile", { profile }),
   deleteModelProfile: (id: string) => invoke<LocalModelProfile[]>("delete_local_model_profile", { id }),
-  streamChat: (args: { api_url: string; workspace: string; model_profile: string; message: string; conversation_id: string }) =>
+  streamChat: (args: { api_url: string; workspace: string; model_profile: string; message: string; conversation_id: string; research_mode?: ResearchMode; tool_profile?: string }) =>
     invoke<void>("stream_chat", { args }),
   onChatEvent: (handler: (event: ChatEvent) => void): Promise<UnlistenFn> =>
     listen<ChatEvent>("smara-chat-event", (event) => handler(event.payload)),
@@ -93,6 +93,7 @@ export const desktop = {
   runGoalTask: (objective: string) => invoke<any>("run_goal_task", { objective }),
   getGoalSessions: () => invoke<any[]>("get_goal_sessions"),
   runDeepResearch: (topic: string) => invoke<any>("run_deep_research", { topic }),
+  runResearch: (topic: string, researchMode: ResearchMode) => invoke<any>("run_research", { topic, research_mode: researchMode }),
   generatePrDraft: (intent?: string) => invoke<any>("generate_pr_draft", { intent: intent || null }),
   publishPrBranch: (draftTitle: string, branchName: string, commitMessage: string, bodyMarkdown: string) =>
     invoke<any>("publish_pr_branch", { draftTitle, branchName, commitMessage, bodyMarkdown }),
