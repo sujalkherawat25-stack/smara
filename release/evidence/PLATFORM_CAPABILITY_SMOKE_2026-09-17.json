@@ -55,6 +55,33 @@
     "live_status": "not_run_without_external_network_fixture",
     "media_download": "disabled_by_default"
   },
+  "pdf_collection_ingestion": {
+    "status": "passed_contract_only",
+    "suite": "tests/test_pdf_collection.py",
+    "checks": [
+      "deterministic recursive PDF enumeration without symlink traversal",
+      "per-file and per-page SHA-256 records",
+      "hard file/page/byte/character bounds with explicit limit errors",
+      "resumable unchanged-page manifest",
+      "page evidence with immutable source and extraction artifacts",
+      "empty/scanned pages reported as needs_ocr instead of silently completed"
+    ],
+    "live_status": "not_run_against an external collection",
+    "limitation": "Scanned-page OCR requires a separately selected OCR provider and is not inferred from empty pypdf text."
+  },
+  "academic_fulltext": {
+    "status": "passed_contract_only",
+    "suite": "tests/test_research_tools.py",
+    "providers": ["semantic_scholar", "pubmed", "crossref"],
+    "checks": [
+      "DOI/PMID normalization",
+      "citation metadata and author/year normalization",
+      "public PDF candidate extraction",
+      "PubMed XML parsing",
+      "abstracts and metadata remain discovery_only until canonical fetch and passage validation"
+    ],
+    "live_status": "not_run without a dedicated external academic acceptance fixture"
+  },
   "real_vm_desktop": {
     "status": "passed_disposable_docker_guest",
     "image": "smara-desktop-gate:local",
@@ -84,6 +111,14 @@
     "default_enabled": false,
     "opt_in": "SMARA_ENABLE_DELEGATION=true",
     "model_aliases": {"glm5.2": "sarvam-105b", "glm5.3": "glm5.3-flash"},
-    "promotion_policy": "quarantined candidates require held-out passed evaluations and remain revocable"
+    "promotion_policy": "quarantined candidates require held-out passed evaluations and remain revocable",
+    "control_plane_gate": {
+      "path": "release/evidence/DELEGATION_CONTROL_ACCEPTANCE_2026-09-17.json",
+      "sha256": "8e8159c98b64b474c6d85fd682294eb97f00b9d1185edc1326a1136110c53562",
+      "score": "20/20",
+      "provider_calls": 0,
+      "gate_passed": true,
+      "promotion_limit": "external matched-budget provider ablation remains required"
+    }
   }
 }

@@ -588,7 +588,7 @@ above (22/24, 91.67%, zero false completions, zero safety violations).
 
 The remaining capability checks are sealed in
 `release/evidence/PLATFORM_CAPABILITY_SMOKE_2026-09-17.json` (SHA-256
-`ff1d9fb6b9ea6b263b982f139504e7631e3ee62378d0a53e016b2a619c5c8dab`):
+`6c45c81278cd6f0d6fb9da1c3fdbf89d8dddb2b8f1d3e7976e04ed2b071e48df`):
 
 - Docker Desktop `desktop-linux` built the Linux image and ran
   `scripts/linux_wheel_smoke.py` successfully (`LINUX_WHEEL_SMOKE_OK`). This
@@ -630,9 +630,25 @@ The remaining capability checks are sealed in
   transcript SHA-256, discovery-only quality, and explicit copyright metadata.
   It does not download media by default; live transcript and bounded audio
   fallback remain the next acceptance step.
-- Multi-agent delegation remains opt-in (`SMARA_ENABLE_DELEGATION=true`) and
-  learned-skill promotion remains quarantined/revocable; historical public
-  acceptance does not silently enable either capability.
+- Large local PDF collections now have a bounded, deterministic ingestion path:
+  recursive symlink-safe enumeration, per-file/page hashes, resumable
+  manifests, hard file/page/byte/character ceilings, and page-level evidence
+  artifacts. Empty/scanned pages are explicitly returned as `needs_ocr` and
+  cannot be silently claimed as read.
+- Academic full-text resolution now normalizes DOI/PMID metadata through
+  Semantic Scholar, PubMed XML, and Crossref adapters, including public PDF
+  candidates. Abstracts and metadata remain `discovery_only` until a public
+  full-text URL is fetched through the canonical evidence path and claims pass
+  passage validation.
+- Delegation now has a deterministic 20-case control-plane gate covering role
+  floors, budgets, recursion, safety, and false-completion counters. It passed
+  with zero provider calls and is sealed at
+  `release/evidence/DELEGATION_CONTROL_ACCEPTANCE_2026-09-17.json`; real
+  provider delegation and learned-skill promotion remain opt-in
+  (`SMARA_ENABLE_DELEGATION=true`), quarantine-first, and revocable until a
+  matched-budget external ablation is run.
 
-The complete deterministic regression suite after these changes is **881
-passed, 1 skipped**, with the same two pre-existing JWT key-length warnings.
+The complete deterministic regression suite after these changes is **896
+passed, 1 skipped**, with the same two pre-existing JWT key-length warnings;
+live provider, external PDF collection, and publisher/paywall acceptance
+remain separate gates.

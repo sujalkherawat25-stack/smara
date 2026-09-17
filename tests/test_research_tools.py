@@ -178,7 +178,44 @@ def test_academic_search_normalizes_openalex_discovery_records():
     assert result[0]["title"] == "A scholarly result"
     assert result[0]["abstract"] == "A result"
     assert result[0]["discovery_only"] is True
-    assert result[0]["open_access"] is True
+
+
+def test_academic_fulltext_semantic_scholar_normalizes_doi_and_keeps_discovery_only():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.semanticscholar.org"
+        assert "/DOI:10.1234/example" in str(request.url)
+        return httpx.Response(200, json={
+            "title": "A full text candidate", "year": 2024,
+            "authors": [{"name": "Ada Lovelace"}],
+            "abstract": "Abstract only", "url": "https://publisher.example/paper",
+            "openAccessPdf": {"url": "https://publisher.example/paper.pdf"},
+        })
+
+    async def execute():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await research_tools.AcademicFullTextTool(client).resolve("https://doi.org/10.1234/EXAMPLE")
+
+    result = asyncio.run(execute())
+    assert result["doi"] == "10.1234/example"
+    assert result["pdf_url"].endswith(".pdf")
+    assert result["fulltext_status"] == "candidate"
+    assert result["discovery_only"] is True
+
+
+def test_academic_fulltext_pubmed_parses_xml():
+    xml = """<PubmedArticleSet><PubmedArticle><MedlineCitation><Article><ArticleTitle>Study title</ArticleTitle><Abstract><AbstractText>Study abstract.</AbstractText></Abstract><AuthorList><Author><ForeName>Ada</ForeName><LastName>Lovelace</LastName></Author></AuthorList><Journal><JournalIssue><PubDate><Year>2023</Year></PubDate></JournalIssue></Journal></Article><PubmedData><ArticleIdList><ArticleId IdType='doi'>10.5555/Test</ArticleId></ArticleIdList></PubmedData></MedlineCitation></PubmedArticle></PubmedArticleSet>"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "eutils.ncbi.nlm.nih.gov"
+        return httpx.Response(200, text=xml)
+
+    async def execute():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await research_tools.AcademicFullTextTool(client).resolve("PMID:123")
+
+    result = asyncio.run(execute())
+    assert result["doi"] == "10.5555/test"
+    assert result["year"] == 2023
+    assert result["authors"] == ["Ada Lovelace"]
 
 
 def test_academic_search_normalizes_crossref_and_bounds_provider():

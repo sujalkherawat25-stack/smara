@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from dataclasses import asdict
 from pathlib import Path
@@ -90,6 +91,109 @@ class AcademicSearchTool:
             raise ResearchToolError(f"Academic provider is unavailable: {type(exc).__name__}.") from exc
         finally:
             if owns_client: await client.aclose()
+
+
+def normalize_doi(value: str) -> str:
+    """Return a lowercase DOI without resolver prefixes or URL fragments."""
+    text = str(value or "").strip()
+    text = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", text, flags=re.I)
+    text = re.sub(r"^doi:\s*", "", text, flags=re.I).strip().rstrip(" .,")
+    if not re.fullmatch(r"10\.\d{4,9}/\S+", text, flags=re.I):
+        return ""
+    return text.lower()
+
+
+class AcademicFullTextTool:
+    """Resolve bounded academic metadata and public full-text candidates.
+
+    Metadata is still discovery-only until the caller fetches a candidate URL
+    through :class:`FetchUrlTool` and records passage-local evidence.  This
+    adapter intentionally never treats an abstract or publisher snippet as a
+    citation proof.
+    """
+
+    def __init__(self, http_client: httpx.AsyncClient | None = None):
+        self._http = http_client
+
+    @staticmethod
+    def _citation(*, doi: str, title: str, authors: list[str], year: int | None, abstract: str, source: str, url: str, pdf_url: str = "") -> dict[str, object]:
+        return {
+            "doi": doi,
+            "title": title[:500],
+            "authors": authors[:30],
+            "year": year,
+            "abstract": abstract[:6000],
+            "url": url[:2000],
+            "pdf_url": pdf_url[:2000],
+            "provider": source,
+            "open_access": bool(pdf_url),
+            "fulltext_status": "candidate" if pdf_url else "metadata_only",
+            "discovery_only": True,
+        }
+
+    async def resolve(self, identifier: str, *, provider: str = "auto") -> dict[str, object]:
+        raw = str(identifier or "").strip()
+        doi = normalize_doi(raw)
+        pmid = ""
+        if re.fullmatch(r"(?:pmid:)?\d{1,10}", raw, flags=re.I):
+            pmid = re.sub(r"^pmid:", "", raw, flags=re.I)
+        if not doi and not pmid:
+            raise ResearchToolError("Academic full text needs a DOI or PMID.")
+        provider = str(provider or "auto").lower()
+        if provider not in {"auto", "semantic_scholar", "pubmed", "crossref"}:
+            raise ResearchToolError("Academic full-text providers are auto, semantic_scholar, pubmed, and crossref.")
+        owns_client = self._http is None
+        client = self._http or httpx.AsyncClient(timeout=15.0, follow_redirects=False, headers={"User-Agent": "SmaraAcademicFullText/0.1 (mailto:research@smara.local)"})
+        try:
+            if (provider in {"auto", "semantic_scholar"}) and doi:
+                url = f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}"
+                response = await client.get(url, params={"fields": "title,authors,year,abstract,openAccessPdf,externalIds,url"})
+                if response.status_code < 400:
+                    item = response.json() or {}
+                    authors = [str((a or {}).get("name") or "") for a in item.get("authors") or [] if isinstance(a, dict)]
+                    access = item.get("openAccessPdf") or {}
+                    return self._citation(doi=doi, title=str(item.get("title") or ""), authors=authors, year=item.get("year"), abstract=str(item.get("abstract") or ""), source="semantic_scholar", url=str(item.get("url") or f"https://doi.org/{doi}"), pdf_url=str(access.get("url") or ""))
+                if provider == "semantic_scholar":
+                    response.raise_for_status()
+            if (provider in {"auto", "pubmed"}) and pmid:
+                response = await client.get("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi", params={"db": "pubmed", "id": pmid, "retmode": "xml"})
+                response.raise_for_status()
+                root = ET.fromstring(response.text)
+                article = root.find(".//PubmedArticle")
+                if article is None:
+                    raise ResearchToolError("PubMed returned no article for that PMID.")
+                title = " ".join(article.findtext(".//ArticleTitle", default="").split())
+                abstract = " ".join([" ".join(list(node.itertext())).strip() for node in article.findall(".//AbstractText")])
+                year_text = article.findtext(".//PubDate/Year") or article.findtext(".//PubDate/MedlineDate") or ""
+                match = re.search(r"\b(19|20)\d{2}\b", year_text)
+                authors = []
+                for author in article.findall(".//Author"):
+                    name = " ".join(filter(None, [author.findtext("ForeName"), author.findtext("LastName")]))
+                    if name:
+                        authors.append(name)
+                doi_value = ""
+                for ident_node in article.findall(".//ArticleId"):
+                    if str(ident_node.attrib.get("IdType") or "").lower() == "doi":
+                        doi_value = normalize_doi("".join(ident_node.itertext()))
+                doi_value = doi_value or doi
+                return self._citation(doi=doi_value, title=title, authors=authors, year=int(match.group(0)) if match else None, abstract=abstract, source="pubmed", url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/")
+            if (provider in {"auto", "crossref"}) and doi:
+                response = await client.get(f"https://api.crossref.org/works/{doi}")
+                response.raise_for_status()
+                item = (response.json() or {}).get("message") or {}
+                published = ((item.get("published") or {}).get("date-parts") or [[]])[0]
+                authors = [f"{a.get('given', '')} {a.get('family', '')}".strip() for a in item.get("author") or [] if isinstance(a, dict)]
+                return self._citation(doi=doi, title=str((item.get("title") or [""])[0]), authors=authors, year=published[0] if published else None, abstract="", source="crossref", url=str(item.get("URL") or f"https://doi.org/{doi}"))
+            raise ResearchToolError("No supported academic identifier/provider combination.")
+        except (httpx.HTTPError, ValueError, ET.ParseError) as exc:
+            raise ResearchToolError(f"Academic full-text provider is unavailable: {type(exc).__name__}.") from exc
+        finally:
+            if owns_client:
+                await client.aclose()
+
+    async def fetch(self, identifier: str, *, provider: str = "auto") -> dict[str, object]:
+        """Compatibility alias for the metadata/candidate resolver."""
+        return await self.resolve(identifier, provider=provider)
 
 
 class WebSearchTool:

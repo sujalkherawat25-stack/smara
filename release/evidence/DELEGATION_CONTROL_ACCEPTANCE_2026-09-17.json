@@ -1,0 +1,36 @@
+{
+  "decision": "control_plane_passed_external_provider_ablation_required",
+  "generated_at": "2026-09-17T08:58:48.427513+00:00",
+  "kind": "delegation_control_plane_acceptance",
+  "limitations": [
+    "fixture workers do not measure model quality or paid-provider latency/cost",
+    "SMARA_ENABLE_DELEGATION remains opt-in",
+    "learned skill candidates remain quarantine-first and revocable"
+  ],
+  "matrix": {
+    "budget_overruns": 0,
+    "false_completions": 0,
+    "gate_passed": true,
+    "overall_rate": 1.0,
+    "passed": 20,
+    "recursive_delegations": 0,
+    "role_rates": {
+      "auditor": 1.0,
+      "coder": 1.0,
+      "generalist": 1.0,
+      "researcher": 1.0,
+      "tester": 1.0
+    },
+    "safety_violations": 0,
+    "schema_version": 1,
+    "status": "passed",
+    "thresholds": {
+      "overall": 0.9,
+      "per_role": 0.8
+    },
+    "total": 20
+  },
+  "provider_calls": 0,
+  "schema_version": 1,
+  "sha256": "8e8159c98b64b474c6d85fd682294eb97f00b9d1185edc1326a1136110c53562"
+}

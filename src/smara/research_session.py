@@ -17,6 +17,7 @@ from .research_graph import ResearchGraph, ResearchNode
 from .research_modes import QUICK_POLICY
 from .research_ranking import hybrid_rank
 from .research_tools import FetchUrlTool, WebSearchTool
+from .pdf_collection import PdfCollectionError, scan_pdf_collection
 
 
 class ResearchStateError(RuntimeError):
@@ -500,6 +501,108 @@ class CanonicalResearchSession:
             },
         )
         return {"status": "ok", "node_id": node_id, "evidence": asdict(record)}
+
+    def ingest_pdf_collection(
+        self,
+        node_id: str,
+        root: str,
+        *,
+        max_files: int = 50,
+        max_pages: int = 2000,
+        max_bytes: int = 500 * 1024 * 1024,
+        max_chars_per_page: int = 60_000,
+        resume_manifest: Mapping[str, Any] | str | None = None,
+    ) -> dict[str, Any]:
+        """Ingest bounded page evidence from every PDF below a workspace root.
+
+        Empty pages are deliberately not passed to an unbounded OCR loop.  They
+        are returned as ``needs_ocr_pages`` so the caller can select an OCR
+        provider and preserve its separate extraction provenance.
+        """
+        node = self.graph.nodes.get(node_id)
+        if node is None:
+            raise ResearchStateError("unknown research node")
+        if self.engine is None:
+            raise ResearchStateError("local evidence ingestion requires a durable session workspace")
+        candidate = (self.engine.workspace / root).resolve() if not Path(root).is_absolute() else Path(root).resolve()
+        if candidate != self.engine.workspace and self.engine.workspace not in candidate.parents:
+            raise ResearchStateError("evidence path escapes workspace")
+        if not candidate.is_dir():
+            raise ResearchStateError("PDF collection root is missing")
+        prior: Mapping[str, Any] | None = None
+        if isinstance(resume_manifest, Mapping):
+            prior = resume_manifest
+        elif isinstance(resume_manifest, str) and resume_manifest.strip():
+            try:
+                if re.fullmatch(r"[0-9a-f]{64}", resume_manifest.strip(), flags=re.I):
+                    loaded = json.loads(self.engine.resolve_artifact(resume_manifest.strip()))
+                else:
+                    manifest_path = (self.engine.workspace / resume_manifest).resolve()
+                    if manifest_path != self.engine.workspace and self.engine.workspace not in manifest_path.parents:
+                        raise ResearchStateError("resume manifest escapes workspace")
+                    if not manifest_path.is_file():
+                        raise ResearchStateError("resume manifest is missing")
+                    loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, FileNotFoundError) as exc:
+                raise ResearchStateError("resume manifest is invalid JSON or missing") from exc
+            if not isinstance(loaded, Mapping):
+                raise ResearchStateError("resume manifest must be a JSON object")
+            prior = loaded
+        try:
+            manifest = scan_pdf_collection(
+                candidate,
+                max_files=max_files,
+                max_pages=max_pages,
+                max_bytes=max_bytes,
+                max_chars_per_page=max_chars_per_page,
+                resume_manifest=prior,
+            )
+        except PdfCollectionError as exc:
+            raise ResearchStateError(str(exc)) from exc
+        page_records: list[dict[str, Any]] = []
+        for file_record in manifest.get("files", ()):
+            relative = str(file_record["relative_path"])
+            path = candidate / Path(relative)
+            raw = path.read_bytes()
+            for page_record in file_record.get("pages", ()):
+                text = str(page_record.get("text") or "")
+                page_number = int(page_record.get("page") or 0)
+                if not text or page_number <= 0:
+                    continue
+                url = f"{path.as_uri()}#page={page_number}"
+                record = self.index.add(
+                    kind="pdf_page",
+                    url=url,
+                    content=raw,
+                    extracted_content=text.encode("utf-8"),
+                    text=text,
+                    page=page_number,
+                    bbox=(0.0, 0.0, 1.0, 1.0),
+                    extraction_version="pypdf-collection-v1",
+                )
+                page_records.append({"relative_path": relative, "page": page_number, "evidence_id": record.id, "truncated": bool(page_record.get("truncated"))})
+        manifest["evidence"] = page_records
+        self.validation = {}
+        manifest_artifact_id = None
+        if self.engine is not None:
+            manifest_artifact_id, _ = self.engine.artifact_store.put_json(manifest)
+            manifest["manifest_artifact_id"] = manifest_artifact_id
+        artifact_id = self._save(
+            "research_pdf_collection_ingested",
+            {
+                "node_id": node_id,
+                "root": str(candidate),
+                "file_count": manifest.get("file_count", 0),
+                "page_count": manifest.get("total_pages", 0),
+                "evidence_count": len(page_records),
+                "needs_ocr_count": len(manifest.get("needs_ocr_pages", ())),
+                "manifest_sha256": manifest.get("manifest_sha256"),
+            },
+        )
+        manifest["research_state_artifact_id"] = artifact_id
+        manifest["status"] = manifest.get("status", "ok")
+        manifest["node_id"] = node_id
+        return manifest
 
     def inspect(self, evidence_id: str, max_chars: int = 4000, query: str = "") -> dict[str, Any]:
         record = self.index.records.get(evidence_id)
