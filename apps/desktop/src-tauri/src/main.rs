@@ -699,6 +699,23 @@ fn current_connection() -> ConnectionState {
     ConnectionState { runtime_mode: runtime_mode.clone(), api_url, web_url, workspace, model_profile, paired, executor_id: if runtime_mode == "cloud" { state.as_ref().and_then(|value| value.get("executor_id")).and_then(Value::as_str).map(str::to_owned) } else { None }, capabilities, allowed_roots, terminal_allowlist, browser_domains, auto_approve_safe, approval_mode, paused: pause_path().exists(), running: pid.is_some(), pid, log_path: log_path().display().to_string(), has_cli_token: runtime_mode == "cloud" && read_json(&token_path).and_then(|value| value.get("access_token").and_then(Value::as_str).map(|token| !token.is_empty())).unwrap_or(false), last_error: None }
 }
 
+/// Locate the source checkout used by the Python bridge without embedding a
+/// developer-specific path.  Installed builds still use the bundled executor,
+/// but bridge-backed panels (skills, reports, memory) may need the source tree
+/// when the app was installed on the same machine that built it.
+fn smara_repo_root() -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(root) = std::env::var_os("SMARA_REPO_ROOT") {
+        candidates.push(PathBuf::from(root));
+    }
+    let compiled_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("..");
+    candidates.push(compiled_root);
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd);
+    }
+    candidates.into_iter().find(|root| root.join("src").join("smara").is_dir())
+}
+
 #[tauri::command]
 fn load_connection() -> ConnectionState { current_connection() }
 
@@ -2229,12 +2246,9 @@ fn run_python_bridge_code_sync(py_code: &str) -> Result<Value, String> {
         "C:\\Users\\sujal\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
     ];
 
-    let configured_root = std::env::var_os("SMARA_REPO_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\Users\sujal\memoryos\smara"));
-    if !configured_root.is_dir() {
-        return Err(format!("Smara repository was not found at {}", configured_root.display()));
-    }
+    let configured_root = smara_repo_root().ok_or_else(|| {
+        "Smara source repository is unavailable for this panel. Set SMARA_REPO_ROOT to a Smara checkout or run the installed local executor for task/chat operations.".to_owned()
+    })?;
     let cwd = configured_root.as_path();
 
     let mut last_err = String::from("No Python executable succeeded");
@@ -2711,9 +2725,7 @@ fn benchmark_scorecard(name: &str, path: &Path) -> Value {
 
 #[tauri::command]
 async fn get_benchmark_scorecards() -> Result<Value, String> {
-    let base = std::env::var_os("SMARA_REPO_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\Users\sujal\memoryos\smara"));
+    let base = smara_repo_root().unwrap_or_else(|| PathBuf::from("."));
     let reports = base.join("reports");
     Ok(json!({
         "gaia": benchmark_scorecard("GAIA Level 1 (strict)", &reports.join("gaia_fair_level1_results.json")),
@@ -2729,12 +2741,15 @@ fn open_benchmark_report(path: String) -> Result<bool, String> {
     let target = if p.is_absolute() && p.exists() {
         p
     } else {
-        let local = PathBuf::from(r"C:\Users\sujal\memoryos\smara").join(&path);
+        let local = smara_repo_root().unwrap_or_else(|| PathBuf::from(".")).join(&path);
         if local.exists() {
             local
         } else {
-            let doc = PathBuf::from(r"C:\Users\sujal\Documents").join(&path);
-            if doc.exists() {
+            let doc = std::env::var_os("USERPROFILE")
+                .or_else(|| std::env::var_os("HOME"))
+                .map(PathBuf::from)
+                .map(|root| root.join("Documents").join(&path));
+            if let Some(doc) = doc.filter(|candidate| candidate.exists()) {
                 doc
             } else {
                 return Err(format!("Report file not found: {path}"));

@@ -1,9 +1,24 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 from smara.local_agent import LocalAutonomousAgent
 from smara.local_agent_runtime import _compact_history
+
+
+def test_packaged_top_level_import_can_compact_history():
+    """PyInstaller loads the executor modules without a package parent."""
+    source_root = Path(__file__).resolve().parents[1] / "src" / "smara"
+    code = (
+        "import sys; "
+        f"sys.path.insert(0, {str(source_root)!r}); "
+        "from local_agent_runtime import _compact_history; "
+        "assert _compact_history([{'role':'user','content':'ok'}])"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_compaction_keeps_newest_history_in_chronological_order():
@@ -64,4 +79,3 @@ def test_parse_plan_dynamic_formats():
     plan3 = _parse_plan('<think>Let me fetch the data</think>\n```json\n{"action": "local_python", "payload": {"code": "fetch()"}}\n```')
     assert plan3 is not None
     assert plan3["capability"] == "local_python"
-

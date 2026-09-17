@@ -161,7 +161,10 @@ def _compact_history(history: list[dict[str, Any]], *, max_chars: int = MAX_LOCA
         if normalized.get("role")=="tool" and not normalized.get("tool_call_id"):
             normalized["role"]="user";normalized["_smara_local_tool"]=True
         items.append(normalized)
-    from .context_packing import ModelContextProfile, pack_messages
+    try:
+        from .context_packing import ModelContextProfile, pack_messages
+    except ImportError:  # pragma: no cover - exercised by the bundled executable
+        from context_packing import ModelContextProfile, pack_messages
     profile = ModelContextProfile("unknown:local", max_chars + 64, 0, safety_margin=32, protocol_overhead=32)
     return list(pack_messages(items, profile).messages)
 
