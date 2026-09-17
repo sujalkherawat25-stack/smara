@@ -93,7 +93,11 @@ export const desktop = {
   runGoalTask: (objective: string) => invoke<any>("run_goal_task", { objective }),
   getGoalSessions: () => invoke<any[]>("get_goal_sessions"),
   runDeepResearch: (topic: string) => invoke<any>("run_deep_research", { topic }),
-  runResearch: (topic: string, researchMode: ResearchMode) => invoke<any>("run_research", { topic, research_mode: researchMode }),
+  // Tauri's command schema exposes snake_case Rust parameters as camelCase
+  // keys to JavaScript. Keep this spelling aligned with the generated command
+  // boundary (`researchMode`), otherwise the command is rejected before it
+  // reaches the research runner.
+  runResearch: (topic: string, researchMode: ResearchMode) => invoke<any>("run_research", { topic, researchMode }),
   generatePrDraft: (intent?: string) => invoke<any>("generate_pr_draft", { intent: intent || null }),
   publishPrBranch: (draftTitle: string, branchName: string, commitMessage: string, bodyMarkdown: string) =>
     invoke<any>("publish_pr_branch", { draftTitle, branchName, commitMessage, bodyMarkdown }),
