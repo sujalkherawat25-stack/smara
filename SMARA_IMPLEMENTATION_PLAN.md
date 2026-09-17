@@ -10,6 +10,11 @@ This is the single active plan for Smara. Historical implementation notes,
 experimental dashboards, and unrelated integration work are intentionally not
 part of this document.
 
+The next product slice is GUI modernization across the existing Desktop and
+hosted Web surfaces. See `SMARA_GUI_UPGRADE_PLAN.md` for the phased plan and
+the explicitly deferred OCR, multimodal ingestion, VM, packaging, and
+experimental delegation work.
+
 ## 1. Product vision
 
 Smara is one personal agent with two coordinated surfaces:

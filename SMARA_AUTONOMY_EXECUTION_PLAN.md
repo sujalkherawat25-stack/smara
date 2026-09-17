@@ -560,6 +560,28 @@ Do not begin broad connector, multi-agent, or always-on-node work before this
 milestone has an end-to-end disposable repository test and a physical Desktop
 reconnect drill.
 
+## 8. GUI modernization and deferred capability work
+
+The CLI and hosted control plane are now the reliable execution surface. The
+next product slice is to bring the existing Desktop and hosted Web interfaces
+onto one truthful run experience: shared status, Auto/Quick/Deep routing,
+configured model profiles, live progress, evidence, artifacts, unresolved
+work, and safe resume/cancel/retry actions.
+
+The implementation order and acceptance criteria are recorded in
+`SMARA_GUI_UPGRADE_PLAN.md`. Phase 1 is the shared run contract and run center;
+Phase 2 is the composer/profile/lane controls; Phase 3 is the Quick/Deep
+research workspace; Phase 4 is capability and permission presentation; Phase 5
+is GUI smoke verification.
+
+The following remain explicitly deferred and must stay marked unavailable or
+experimental in the GUI until their own gates pass: Unlimited OCR/live OCR
+provider acceptance, YouTube and large-PDF/academic multimodal ingestion,
+native VM/real desktop control, Linux/WSL packaging, broad provider-backed
+multi-agent delegation and learned-skill promotion, and broader causal or
+domain-specific analysis. Docker remains the safe local validation path for
+the VM capability, not a claim of native desktop control.
+
 ## Verification snapshot — 2026-09-04
 
 - The synchronized source bundle was rebuilt and checked: Python test suite
