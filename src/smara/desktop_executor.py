@@ -3240,13 +3240,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in {401, 403}:
-            message = "Desktop credentials were rejected; revoke the old desktop and pair this device again."
+            message = "The selected Smara provider rejected its credentials; update the provider in Desktop Settings."
         else:
-            message = f"Hosted Smara rejected the request (HTTP {exc.response.status_code})."
+            message = f"The selected Smara provider rejected the request (HTTP {exc.response.status_code})."
         print(f"Smara Desktop: {message}", file=sys.stderr)
         return 1
     except httpx.HTTPError:
-        print("Smara Desktop: hosted Smara is temporarily unreachable; check the connection and try again.", file=sys.stderr)
+        print("Smara Desktop: the selected provider is temporarily unreachable; check its endpoint and try again.", file=sys.stderr)
         return 1
 
 
