@@ -560,3 +560,26 @@ and earlier provider responses also exhausted the bounded recovery path without
 an unverified completion. These are non-completions, not promotion evidence;
 the sealed 24-attempt matrix above remains the authoritative lane promotion
 artifact.
+
+### Installed lane smoke follow-up — 2026-09-17
+
+Using a fresh temporary Sarvam credential and the configured Exa endpoint, the
+installed entry point was exercised for all requested routing paths:
+
+- **Auto:** correctly selected `quick` for the bounded RFC 9110 question, then
+  returned `needs_input` after bounded recovery exhaustion. No answer or report
+  artifact was claimed.
+- **Explicit Quick:** reached and inspected authoritative Cargo evidence, then
+  returned `budget_exhausted` without a completion artifact. This is a safe
+  non-completion and exposes provider/tool-loop instability rather than a false
+  completion.
+- **Explicit Deep:** completed the PEP 621 report with 23 fetched sources and a
+  verified Markdown report artifact at
+  `scratch/installed-smoke-deep/.smara/sessions/c85d8c810e2048dfb175c9c206254b7e/artifacts/7a3810d96fc1f2636f2156058bcc1340ec6959a7cf8db082f32d7e69b85761f8.md`.
+- **Resume:** `smara resume c85d8c810e2048dfb175c9c206254b7e --json` completed
+  and preserved the same report artifact and provenance ledger.
+
+The installed smoke therefore verifies routing, deep-report creation, resume,
+and fail-closed behavior. The two bounded Quick non-completions remain a
+provider/model stability issue and do not change the sealed promotion result
+above (22/24, 91.67%, zero false completions, zero safety violations).
