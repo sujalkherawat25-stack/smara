@@ -4,7 +4,7 @@ No native host implementation is provided intentionally. A transport must
 attest a reset snapshot before actions are admitted.
 """
 from __future__ import annotations
-import hashlib,time,uuid
+import hashlib,os,re,subprocess,time,uuid
 from dataclasses import dataclass
 from typing import Any,Protocol
 
@@ -15,6 +15,116 @@ class DesktopTransport(Protocol):
 class StaleDesktopObservation(RuntimeError):pass
 class UnsafeDesktopBackend(RuntimeError):pass
 class DesktopDeadlineExceeded(TimeoutError):pass
+
+
+class DockerDesktopTransport:
+    """Bounded transport for a disposable Docker X11 guest.
+
+    The guest is intentionally not the Windows desktop.  It is an isolated
+    Linux GUI (Xvfb + Openbox) whose reset label is attested before every
+    action.  The transport never invokes a host shell and only admits a small
+    xdotool action allow-list.
+    """
+
+    _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
+    _LAUNCH_ALLOWLIST = {"xterm", "xmessage", "xclock"}
+
+    def __init__(self, container_name: str, *, docker_bin: str = "docker"):
+        if not self._NAME.fullmatch(container_name):
+            raise ValueError("invalid Docker desktop container name")
+        self.container_name = container_name
+        self.docker_bin = docker_bin
+
+    @classmethod
+    def start(cls, *, image: str = "smara-desktop-gate:local", container_name: str | None = None, docker_bin: str = "docker") -> "DockerDesktopTransport":
+        name = container_name or f"smara-desktop-{uuid.uuid4().hex[:12]}"
+        if not cls._NAME.fullmatch(name):
+            raise ValueError("invalid Docker desktop container name")
+        reset_id = uuid.uuid4().hex
+        result = subprocess.run(
+            [docker_bin, "run", "-d", "--rm", "--name", name, "--label", f"smara.reset_id={reset_id}", image],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode:
+            raise UnsafeDesktopBackend("Docker desktop guest failed to start")
+        return cls(name, docker_bin=docker_bin)
+
+    def _run(self, *argv: str, timeout: float = 10, binary: bool = False):
+        result = subprocess.run(
+            [self.docker_bin, *argv], capture_output=True, timeout=timeout,
+            text=not binary,
+        )
+        if result.returncode:
+            detail = (result.stderr or result.stdout or "").strip()[:240]
+            raise UnsafeDesktopBackend(f"Docker desktop guest command failed: {detail}")
+        return result.stdout
+
+    def reset_identity(self) -> str:
+        value = self._run(
+            "inspect", "--format", "{{.State.Running}}|{{index .Config.Labels \"smara.reset_id\"}}|{{.Id}}",
+            self.container_name,
+        ).strip().split("|", 2)
+        if len(value) != 3 or value[0].lower() != "true" or not value[1] or not value[2]:
+            return ""
+        return f"docker:{value[1]}:{value[2][:16]}"
+
+    def screenshot(self) -> tuple[bytes, dict[str, Any]]:
+        info = self._run("exec", self.container_name, "xdpyinfo", timeout=10)
+        match = re.search(r"dimensions:\s+(\d+)x(\d+) pixels", info)
+        if not match:
+            raise UnsafeDesktopBackend("Docker desktop guest returned no display geometry")
+        width, height = int(match.group(1)), int(match.group(2))
+        pixels = self._run("exec", self.container_name, "/usr/local/bin/smara-screenshot", timeout=15, binary=True)
+        return pixels, {
+            "pixel_width": width, "pixel_height": height,
+            "guest_width": width, "guest_height": height,
+            "origin_x": 0, "origin_y": 0,
+            "window_id": "root", "display_id": os.getenv("SMARA_DOCKER_DISPLAY", ":99"),
+            "dpi_scale": 1.0,
+        }
+
+    def action(self, payload: dict[str, Any]) -> dict[str, Any]:
+        kind = str(payload.get("kind") or "")
+        if kind == "click":
+            self._run("exec", self.container_name, "xdotool", "mousemove", str(int(payload["x"])), str(int(payload["y"])))
+            self._run("exec", self.container_name, "xdotool", "click", "1")
+        elif kind == "type":
+            self._run("exec", self.container_name, "xdotool", "type", "--delay", "1", "--", str(payload.get("text") or ""))
+        elif kind == "hotkey":
+            raw_keys = str(payload.get("text") or "").strip()
+            if not raw_keys:
+                raise UnsafeDesktopBackend("Docker desktop hotkey cannot be empty")
+            normalized: list[str] = []
+            for raw_key in raw_keys.split("+"):
+                key = raw_key.strip().casefold()
+                aliases = {"control": "ctrl", "return": "Return", "esc": "Escape", "del": "Delete"}
+                key = aliases.get(key, key)
+                if not re.fullmatch(r"[a-z0-9_]+", key) and key not in {"Return", "Escape", "Delete"}:
+                    raise UnsafeDesktopBackend("Docker desktop hotkey contains an invalid key")
+                normalized.append(key)
+            keys = "+".join(normalized)
+            self._run("exec", self.container_name, "xdotool", "key", keys)
+        elif kind == "scroll":
+            delta = int(payload.get("delta_y") or payload.get("scroll_y") or 0)
+            button = "4" if delta > 0 else "5"
+            for _ in range(min(20, max(1, abs(delta) // 100))):
+                self._run("exec", self.container_name, "xdotool", "click", button)
+        elif kind == "clipboard":
+            self._run("exec", self.container_name, "sh", "-lc", "printf %s \"$1\" | xclip -selection clipboard", "smara", str(payload.get("text") or ""))
+        elif kind == "launch":
+            argv = payload.get("argv") or [str(payload.get("text") or "xterm")]
+            if not isinstance(argv, list) or not argv or str(argv[0]) not in self._LAUNCH_ALLOWLIST:
+                raise UnsafeDesktopBackend("Docker desktop launch command is not allow-listed")
+            self._run("exec", "-d", self.container_name, *[str(item) for item in argv])
+        else:
+            raise UnsafeDesktopBackend(f"Docker desktop action is not supported: {kind}")
+        return {"accepted": True, "state": "changed", "reset_id": self.reset_identity()}
+
+    def cancel(self) -> None:
+        subprocess.run([self.docker_bin, "stop", "-t", "2", self.container_name], capture_output=True, timeout=10)
+
+    def close(self) -> None:
+        subprocess.run([self.docker_bin, "rm", "-f", self.container_name], capture_output=True, timeout=10)
 
 @dataclass(frozen=True)
 class DisplayTransform:

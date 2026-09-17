@@ -362,7 +362,19 @@
     "isolated_desktop": {
       "status": "unavailable",
       "contract_suite": "tests/test_h5_isolated_desktop_contract.py",
-      "blocker": "disposable VM transport not configured"
+      "blocker": "native Windows or hypervisor VM transport is not configured",
+      "verified_container_guest": "docker_desktop_guest"
+    },
+    "docker_desktop_guest": {
+      "status": "verified_disposable_docker_guest",
+      "contract_suite": "tests/test_h5_isolated_desktop_contract.py",
+      "integration_suite": "scripts/docker_desktop_smoke.py",
+      "evidence": {
+        "path": "release/evidence/PLATFORM_CAPABILITY_SMOKE_2026-09-17.json",
+        "sha256": "903a2929b5c3f00331f0de8d88181745e57dd535fd55758350fb1ceaa091a37b"
+      },
+      "scope": "Reset-attested Linux Xvfb/Openbox guest in Docker Desktop with bounded screenshot, click, stale-observation, cancellation, and cleanup checks",
+      "limitation": "This is an isolated disposable Linux container guest, not a hypervisor VM and not native Windows desktop control"
     },
     "academic_research_discovery": {
       "status": "verified_keyless_provider_smoke",

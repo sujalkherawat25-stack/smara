@@ -588,7 +588,7 @@ above (22/24, 91.67%, zero false completions, zero safety violations).
 
 The remaining capability checks are sealed in
 `release/evidence/PLATFORM_CAPABILITY_SMOKE_2026-09-17.json` (SHA-256
-`c08d7b18e51b8605455b003b39933018d58b9f2b3da73d250c9074a170c0df0e`):
+`903a2929b5c3f00331f0de8d88181745e57dd535fd55758350fb1ceaa091a37b`):
 
 - Docker Desktop `desktop-linux` built the Linux image and ran
   `scripts/linux_wheel_smoke.py` successfully (`LINUX_WHEEL_SMOKE_OK`). This
@@ -606,9 +606,19 @@ The remaining capability checks are sealed in
   returned 404 on both routes, so the live PDF OCR gate stopped safely with no
   artifact and remains provider-entitlement blocked. The deterministic OCR
   adapter suite remains green.
-- Real VM/desktop control remains contract-only and unavailable because no
-  disposable VM transport is configured. Docker Desktop alone is not evidence
-  of a reset-attested graphical guest.
+- The new Docker desktop transport passed `scripts/docker_desktop_smoke.py`
+  (`DOCKER_DESKTOP_SMOKE_OK`): the guest was built from
+  `docker/Dockerfile.desktop`, reset-attested through its container label and
+  ID (image digest
+  `sha256:166fb1eaf5e874b30429fe5437e532da150b7b4f11fc042a0eed44b7b86090c7`),
+  observed at 1024x768, clicked, rejected a stale observation, then
+  cancelled and cleaned up. This is a disposable Linux Xvfb/Openbox container
+  guest—not a hypervisor VM and not native Windows desktop control.
+- The Sarvam model catalogue's Parse entry is not a usable live endpoint for
+  the supplied credential: `POST https://api.sarvam.ai/parse/parsepdf` returned
+  HTTP 404 `not_found_error`, so no PDF parse artifact was claimed. Current
+  Document AI OCR remains separately gated on `/doc-ai/v1/job/digitise` and
+  remains provider-entitlement blocked for that credential.
 - Multi-agent delegation remains opt-in (`SMARA_ENABLE_DELEGATION=true`) and
   learned-skill promotion remains quarantined/revocable; historical public
   acceptance does not silently enable either capability.

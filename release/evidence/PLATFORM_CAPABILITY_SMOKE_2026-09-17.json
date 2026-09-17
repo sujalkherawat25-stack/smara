@@ -29,8 +29,28 @@
     "reason": "The supplied temporary credential/account returned Not Found on both routes; the adapter stopped without creating an OCR artifact."
   },
   "real_vm_desktop": {
-    "status": "blocked_contract_only",
-    "reason": "Docker Desktop is running, but no disposable VM transport is configured; the isolated desktop contract remains fail-closed."
+    "status": "passed_disposable_docker_guest",
+    "image": "smara-desktop-gate:local",
+    "image_digest": "sha256:166fb1eaf5e874b30429fe5437e532da150b7b4f11fc042a0eed44b7b86090c7",
+    "checks": [
+      "Docker Xvfb/Openbox guest build",
+      "reset identity attestation",
+      "screenshot geometry 1024x768",
+      "click action",
+      "normalized hotkey action",
+      "stale observation rejection",
+      "cancellation and cleanup"
+    ],
+    "result": "DOCKER_DESKTOP_SMOKE_OK",
+    "limitation": "This is an isolated Linux container guest, not a hypervisor VM or native Windows desktop control."
+  },
+  "sarvam_parse": {
+    "status": "blocked_provider_or_entitlement",
+    "endpoint": "POST https://api.sarvam.ai/parse/parsepdf",
+    "http_status": 404,
+    "error_code": "not_found_error",
+    "false_completion": false,
+    "reason": "The model catalogue lists Parse, but the supplied credential returned Not Found for the legacy Parse route; no parse artifact was created."
   },
   "delegation_and_learned_skills": {
     "status": "experimental_opt_in",

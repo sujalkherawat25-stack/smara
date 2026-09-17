@@ -1,0 +1,12 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends xvfb openbox xdotool x11-utils x11-apps imagemagick xclip xterm x11-xserver-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY docker/smara-desktop-entrypoint.sh /usr/local/bin/smara-desktop-entrypoint
+COPY docker/smara-screenshot.sh /usr/local/bin/smara-screenshot
+RUN chmod 0755 /usr/local/bin/smara-desktop-entrypoint /usr/local/bin/smara-screenshot
+
+ENV DISPLAY=:99
+ENTRYPOINT ["/usr/local/bin/smara-desktop-entrypoint"]
