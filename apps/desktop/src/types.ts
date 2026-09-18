@@ -91,6 +91,9 @@ export interface ChatEvent {
   recoverable?: boolean;
   total_ms?: number;
   tools_used?: number;
+  status?: string;
+  completed?: boolean;
+  unresolved_items?: string[];
   task_id?: string;
   task_ids?: string[];
 }
@@ -101,6 +104,7 @@ export interface ChatMessage {
   text: string;
   pending?: boolean;
   failed?: boolean;
+  needsInput?: boolean;
   error?: string;
   sourcePrompt?: string;
 }

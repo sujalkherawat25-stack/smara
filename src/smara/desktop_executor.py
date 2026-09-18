@@ -3022,6 +3022,7 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--local-run", action="store_true", help="drain approved private local tasks and exit")
     parser.add_argument("--local-run-task", help="run one approved private local task and exit")
     parser.add_argument("--local-agent-turn", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--python-bridge", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--skills", action="store_true", help="print the installed local skill protocol")
     parser.add_argument("--credential-list", action="store_true", help="list local credential names without values")
     parser.add_argument("--credential-set", help="save a local credential from stdin")
@@ -3229,6 +3230,25 @@ def _main(argv: list[str] | None = None) -> int:
             "allowed_roots": state.get("allowed_roots", []),
             "log": str(args.log),
         }, indent=2))
+        return 0
+    if args.python_bridge:
+        # Bridge snippets are compiled into the trusted Tauri companion.  The
+        # installed companion has no source checkout or system Python, so the
+        # bundled executor must be able to run those same snippets.  Keep the
+        # IPC deliberately small and machine-readable; stderr carries the
+        # traceback while stdout is reserved for the JSON value printed by the
+        # snippet.
+        if hasattr(sys.stdin, "buffer"):
+            bridge_code = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+        else:
+            bridge_code = sys.stdin.read()
+        if not bridge_code.strip() or len(bridge_code) > 1_000_000:
+            raise SystemExit("Python bridge input is empty or too large.")
+        try:
+            namespace = {"__name__": "__smara_tauri_bridge__", "__file__": "<smara-tauri-bridge>"}
+            exec(compile(bridge_code, "<smara-tauri-bridge>", "exec"), namespace, namespace)
+        except Exception as exc:
+            raise SystemExit(f"Python bridge failed: {exc}") from exc
         return 0
     if args.pair:
         state = pair(args.api, args.pair, args.state, allowed_roots=args.allow_root)

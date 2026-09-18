@@ -793,11 +793,39 @@ fn run_executor(args: Vec<String>) -> Result<String, String> {
 }
 
 fn run_executor_with_input(args: Vec<String>, input: &str) -> Result<String, String> {
+    run_executor_with_input_timeout_in_dir(args, input, 300, None)
+}
+
+fn run_executor_with_input_timeout(args: Vec<String>, input: &str, timeout_seconds: u64) -> Result<String, String> {
+    run_executor_with_input_timeout_in_dir(args, input, timeout_seconds, None)
+}
+
+fn run_executor_with_input_timeout_in_dir(args: Vec<String>, input: &str, timeout_seconds: u64, cwd: Option<&Path>) -> Result<String, String> {
     let mut command = executor_command(&args);
+    if let Some(path) = cwd {
+        command.current_dir(path);
+    }
     command.stdin(Stdio::piped());
     let mut child = command.spawn().map_err(|error| format!("Could not start the local executor input: {error}"))?;
     child.stdin.take().ok_or_else(|| "Could not open the local executor input.".to_owned())?.write_all(input.as_bytes()).map_err(|error| format!("Could not send local executor input: {error}"))?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_seconds.max(1));
+    let mut timed_out = false;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() >= deadline => {
+                timed_out = true;
+                let _ = child.kill();
+                break;
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            Err(error) => return Err(format!("Could not inspect the local executor: {error}")),
+        }
+    }
     let output = child.wait_with_output().map_err(|error| format!("Could not finish the local executor request: {error}"))?;
+    if timed_out {
+        return Err(format!("The local executor exceeded its {timeout_seconds}s deadline and was stopped."));
+    }
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
     if !output.status.success() { return Err(if stderr.is_empty() { stdout } else { stderr }); }
@@ -1112,7 +1140,7 @@ async fn emit_local_builtin_answer(app: &AppHandle, args: &ChatArgs, tool: &str,
     let _ = persist_local_chat_turn(&args.conversation_id, &args.message, answer);
     app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"})).map_err(|error| error.to_string())?;
     app.emit("smara-chat-event", json!({"type": "token", "text": answer})).map_err(|error| error.to_string())?;
-    app.emit("smara-chat-event", json!({"type": "done", "tools_used": 1})).map_err(|error| error.to_string())?;
+    app.emit("smara-chat-event", json!({"type": "done", "tools_used": 1, "status": "completed", "completed": true, "unresolved_items": []})).map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -1170,6 +1198,7 @@ async fn emit_local_task_plan(app: &AppHandle, args: &ChatArgs, arguments: &Valu
     app.emit("smara-chat-event", json!({"type": "tool_call", "name": capability, "preview": title})).map_err(|error| error.to_string())?;
     
     let (task_id, tool_result) = execute_local_action_and_get_result(arguments, &args.conversation_id).await?;
+    let waiting = tool_result.starts_with("Action ") && tool_result.ends_with("queued for approval.");
     
     let answer = if !tool_result.is_empty() {
         if let Ok(parsed) = serde_json::from_str::<Value>(&tool_result) {
@@ -1200,7 +1229,7 @@ async fn emit_local_task_plan(app: &AppHandle, args: &ChatArgs, arguments: &Valu
     app.emit("smara-chat-event", json!({"type": "tool_result", "name": capability, "ok": true, "preview": "Completed"}))
         .map_err(|error| error.to_string())?;
     app.emit("smara-chat-event", json!({"type": "token", "text": answer})).map_err(|error| error.to_string())?;
-    app.emit("smara-chat-event", json!({"type": "done", "tools_used": 1, "task_id": task_id}))
+    app.emit("smara-chat-event", json!({"type": "done", "tools_used": 1, "task_id": task_id, "status": if waiting { "waiting_approval" } else { "completed" }, "completed": !waiting, "unresolved_items": if waiting { vec!["Local action is waiting for Desktop approval." ] } else { Vec::<&str>::new() }}))
         .map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -1533,7 +1562,7 @@ async fn try_local_json_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &L
         let _ = persist_local_chat_turn(&args.conversation_id, &args.message, answer);
         app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"})).map_err(|error| error.to_string())?;
         app.emit("smara-chat-event", json!({"type": "token", "text": answer})).map_err(|error| error.to_string())?;
-        app.emit("smara-chat-event", json!({"type": "done", "tools_used": 0})).map_err(|error| error.to_string())?;
+        app.emit("smara-chat-event", json!({"type": "done", "tools_used": 0, "status": "completed", "completed": true, "unresolved_items": []})).map_err(|error| error.to_string())?;
     }
     Ok(Some(()))
 }
@@ -1798,7 +1827,7 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
         let _ = persist_local_chat_turn(&args.conversation_id, &args.message, &fallback_answer);
         app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"})).map_err(|error| error.to_string())?;
         app.emit("smara-chat-event", json!({"type": "token", "text": fallback_answer})).map_err(|error| error.to_string())?;
-        app.emit("smara-chat-event", json!({"type": "done", "tools_used": 1, "task_id": task_id})).map_err(|error| error.to_string())?;
+        app.emit("smara-chat-event", json!({"type": "done", "tools_used": 1, "task_id": task_id, "status": "completed", "completed": true, "unresolved_items": []})).map_err(|error| error.to_string())?;
         return Ok(Some(()));
     }
     // A tool-capable provider may still answer in prose instead of selecting
@@ -1811,7 +1840,7 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
         let _ = persist_local_chat_turn(&args.conversation_id, &args.message, content);
         app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"})).map_err(|error| error.to_string())?;
         app.emit("smara-chat-event", json!({"type": "token", "text": content})).map_err(|error| error.to_string())?;
-        app.emit("smara-chat-event", json!({"type": "done", "tools_used": 0})).map_err(|error| error.to_string())?;
+        app.emit("smara-chat-event", json!({"type": "done", "tools_used": 0, "status": "completed", "completed": true, "unresolved_items": []})).map_err(|error| error.to_string())?;
         return Ok(Some(()));
     }
     Ok(None)
@@ -1839,10 +1868,12 @@ async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile
     });
     app.emit("smara-chat-event", json!({"type": "phase", "phase": "local_agent"})).map_err(|error| error.to_string())?;
     app.emit("smara-chat-event", json!({"type": "thought", "text": "Planning a bounded multi-step local run on this Desktop..."})).map_err(|error| error.to_string())?;
-    let output = run_executor_with_input(
+    let request_json = serde_json::to_string(&request).map_err(|error| error.to_string())?;
+    let output = tauri::async_runtime::spawn_blocking(move || run_executor_with_input_timeout(
         vec!["--state".to_owned(), state_path().display().to_string(), "--local-agent-turn".to_owned()],
-        &serde_json::to_string(&request).map_err(|error| error.to_string())?,
-    )?;
+        &request_json,
+        3600,
+    )).await.map_err(|error| format!("Local agent worker failed: {error}"))??;
     let result: Value = serde_json::from_str(&output).map_err(|_| "The shared local agent returned invalid JSON.".to_owned())?;
     let steps = result.get("steps").and_then(Value::as_array).cloned().unwrap_or_default();
     for (index, step) in steps.iter().enumerate() {
@@ -1871,7 +1902,10 @@ async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile
     let _ = persist_local_chat_turn(&args.conversation_id, &args.message, &answer);
     app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"})).map_err(|error| error.to_string())?;
     app.emit("smara-chat-event", json!({"type": "token", "text": answer})).map_err(|error| error.to_string())?;
-    app.emit("smara-chat-event", json!({"type": "done", "tools_used": steps.len(), "iterations": result.get("iterations").cloned().unwrap_or_else(|| json!(steps.len()))})).map_err(|error| error.to_string())?;
+    let completed = result.get("completed").and_then(Value::as_bool).unwrap_or(false);
+    let status = result.get("status").and_then(Value::as_str).unwrap_or(if completed { "completed" } else { "needs_input" });
+    let unresolved_items = result.get("unresolved_items").cloned().unwrap_or_else(|| if completed { json!([]) } else { json!(["The agent did not mark this turn complete."]) });
+    app.emit("smara-chat-event", json!({"type": "done", "tools_used": steps.len(), "iterations": result.get("iterations").cloned().unwrap_or_else(|| json!(steps.len())), "status": status, "completed": completed, "unresolved_items": unresolved_items})).map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -1926,7 +1960,7 @@ async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModel
         return Err(format!("{} returned no visible answer. Check the model name and token limit.", profile.label));
     }
     let _ = persist_local_chat_turn(&args.conversation_id, &args.message, &streamed);
-    app.emit("smara-chat-event", json!({"type": "done", "tools_used": 0})).map_err(|error| error.to_string())?;
+    app.emit("smara-chat-event", json!({"type": "done", "tools_used": 0, "status": "completed", "completed": true, "unresolved_items": []})).map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -2249,14 +2283,32 @@ fn read_file_preview(path: String) -> Result<Value, String> {
 }
 
 fn run_python_bridge_code_sync(py_code: &str) -> Result<Value, String> {
+    if py_code.len() > 1_000_000 {
+        return Err("Python bridge code is too large.".to_owned());
+    }
+
+    // Installed Desktop builds contain the executor but not the source
+    // checkout or a system Python.  Route the exact same trusted bridge
+    // snippets through that bundled runtime first; this keeps Skills, Memory,
+    // Research, Git and report panels working after installation.
+    let bridge_cwd = smara_repo_root()
+        .or_else(|| current_connection().allowed_roots.first().map(PathBuf::from))
+        .filter(|path| path.is_dir());
+    let bridge_args = vec!["--state".to_owned(), state_path().display().to_string(), "--python-bridge".to_owned()];
+    if let Ok(raw) = run_executor_with_input_timeout_in_dir(bridge_args, py_code, 120, bridge_cwd.as_deref()) {
+        if let Ok(value) = serde_json::from_str::<Value>(raw.trim()) {
+            return Ok(value);
+        }
+    }
+
     let python_candidates = [
         "python",
         "python.exe",
         "C:\\Users\\sujal\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
     ];
 
-    let configured_root = smara_repo_root().ok_or_else(|| {
-        "Smara source repository is unavailable for this panel. Set SMARA_REPO_ROOT to a Smara checkout or run the installed local executor for task/chat operations.".to_owned()
+    let configured_root = smara_repo_root().or_else(|| current_connection().allowed_roots.first().map(PathBuf::from)).ok_or_else(|| {
+        "Smara source repository is unavailable for this panel. Configure an allowed workspace folder in Desktop Settings.".to_owned()
     })?;
     let cwd = configured_root.as_path();
 
@@ -2286,7 +2338,7 @@ fn run_python_bridge_code_sync(py_code: &str) -> Result<Value, String> {
             }
         }
     }
-    Err(last_err)
+    Err(if last_err.is_empty() { "The Desktop bridge returned no JSON output.".to_owned() } else { last_err })
 }
 
 async fn run_python_bridge_code(py_code: &str) -> Result<Value, String> {
@@ -2610,31 +2662,71 @@ async fn publish_pr_branch(draft_title: String, branch_name: String, commit_mess
 
 #[tauri::command]
 async fn run_terminal_command(command: String, cwd: Option<String>) -> Result<Value, String> {
+    let connection = current_connection();
+    let trimmed = command.trim();
+    if trimmed.is_empty() || trimmed.len() > 8_000 || trimmed.chars().any(|character| character.is_control()) {
+        return Err("Terminal command is empty, too long, or contains control characters.".to_owned());
+    }
+    let mut parts = trimmed.split_whitespace();
+    let mut executable = parts.next().unwrap_or("").trim_matches(['"', '\'']);
+    if executable == "&" {
+        executable = parts.next().unwrap_or("").trim_matches(['"', '\'']);
+    }
+    let executable = executable.rsplit(['\\', '/']).next().unwrap_or(executable).trim_end_matches(".exe");
+    if executable.is_empty() || !connection.terminal_allowlist.iter().any(|allowed| {
+        let normalized = allowed.trim().trim_matches(['"', '\'']).rsplit(['\\', '/']).next().unwrap_or("").trim_end_matches(".exe");
+        normalized.eq_ignore_ascii_case(executable)
+    }) {
+        return Err(format!("Terminal executable '{executable}' is not allowlisted in Desktop Settings."));
+    }
+    let requested_cwd = cwd.unwrap_or_default();
+    let working_dir = if requested_cwd.trim().is_empty() {
+        connection.allowed_roots.first().cloned().ok_or_else(|| "Choose an allowed workspace folder before using the terminal.".to_owned())?
+    } else {
+        requested_cwd.trim().to_owned()
+    };
+    let canonical_cwd = std::fs::canonicalize(&working_dir).map_err(|error| format!("Terminal working folder is unavailable: {error}"))?;
+    let allowed = connection.allowed_roots.iter().filter_map(|root| std::fs::canonicalize(root).ok()).any(|root| canonical_cwd == root || canonical_cwd.starts_with(&root));
+    if !allowed {
+        return Err("Terminal working folder must be inside an allowed Desktop root.".to_owned());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let mut cmd = std::process::Command::new("powershell");
         cmd.args(["-NoProfile", "-Command", &command]);
-        if let Some(ref dir) = cwd {
-            if !dir.trim().is_empty() {
-                cmd.current_dir(dir.trim());
+        cmd.current_dir(&canonical_cwd);
+        command_hidden(&mut cmd);
+        let start = std::time::Instant::now();
+        let mut child = cmd.spawn().map_err(|err| format!("Failed to execute command: {err}"))?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        let mut timed_out = false;
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if std::time::Instant::now() >= deadline => {
+                    timed_out = true;
+                    let _ = child.kill();
+                    break;
+                }
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                Err(error) => return Err(format!("Failed to inspect terminal command: {error}")),
             }
         }
-        let start = std::time::Instant::now();
-        match cmd.output() {
-            Ok(output) => {
-                let duration = start.elapsed().as_millis();
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                let exit_code = output.status.code().unwrap_or(if output.status.success() { 0 } else { 1 });
-                Ok(json!({
-                    "exit_code": exit_code,
-                    "stdout": stdout,
-                    "stderr": stderr,
-                    "duration_ms": duration,
-                    "command": command,
-                }))
-            },
-            Err(err) => Err(format!("Failed to execute command: {err}")),
+        let output = child.wait_with_output().map_err(|error| format!("Failed to finish command: {error}"))?;
+        if timed_out {
+            return Err("Terminal command exceeded the 120s deadline and was stopped.".to_owned());
         }
+        let duration = start.elapsed().as_millis();
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let exit_code = output.status.code().unwrap_or(if output.status.success() { 0 } else { 1 });
+        Ok(json!({
+            "exit_code": exit_code,
+            "stdout": stdout,
+            "stderr": stderr,
+            "duration_ms": duration,
+            "command": command,
+            "working_directory": canonical_cwd.display().to_string(),
+        }))
     })
     .await
     .map_err(|e| format!("Join error: {e}"))?

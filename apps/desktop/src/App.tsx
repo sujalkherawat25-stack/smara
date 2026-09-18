@@ -447,9 +447,16 @@ export default function App() {
       setStreaming(false);
       setCurrentExecution(null);
       setCurrentThought(null);
-      setMessages((items) => items.map((item) => item.id === target ? { ...item, pending: false } : item));
+      const completed = event.completed !== false && (event.status || "completed") === "completed";
+      const unresolved = Array.isArray(event.unresolved_items) ? event.unresolved_items.filter(Boolean).join("; ") : "";
+      setMessages((items) => items.map((item) => item.id === target ? {
+        ...item,
+        pending: false,
+        needsInput: !completed,
+        error: completed ? undefined : (unresolved || "The agent did not mark this turn complete."),
+      } : item));
       setActivity((items) => [
-        { id: uid("done"), tone: "green" as const, label: "Turn completed", detail: event.total_ms ? `${event.total_ms} ms` : "Done" },
+        { id: uid("done"), tone: completed ? "green" as const : "amber" as const, label: completed ? "Turn completed" : "Turn needs input", detail: unresolved || (event.total_ms ? `${event.total_ms} ms` : "The run is resumable") },
         ...items,
       ].slice(0, 10));
       assistantId.current = null;
@@ -547,9 +554,17 @@ export default function App() {
           ? result.answer
           : "Research finished without a textual answer. Open the run details or report artifact for the evidence.";
         const lane = result?.research_mode ? `\n\nLane: ${result.research_mode}` : "";
-        setMessages((items) => items.map((item) => item.id === answerId ? { ...item, pending: false, text: `${answer}${lane}` } : item));
+        const completed = result?.completed !== false && (!result?.status || result.status === "completed");
+        const unresolved = Array.isArray(result?.unresolved_items) ? result.unresolved_items.filter(Boolean).join("; ") : "";
+        setMessages((items) => items.map((item) => item.id === answerId ? {
+          ...item,
+          pending: false,
+          needsInput: !completed,
+          text: `${answer}${lane}`,
+          error: completed ? undefined : (unresolved || "Research did not reach a verified completion."),
+        } : item));
         setStreaming(false);
-        setActivity((items) => [{ id: uid("research-done"), tone: "green" as const, label: "Research completed", detail: result?.research_report_path || "Evidence and result are available in the run output." }, ...items].slice(0, 10));
+        setActivity((items) => [{ id: uid("research-done"), tone: completed ? "green" as const : "amber" as const, label: completed ? "Research completed" : "Research needs input", detail: unresolved || result?.research_report_path || "Evidence and result are available in the run output." }, ...items].slice(0, 10));
         assistantId.current = null;
         void refreshAll();
         return;
@@ -1280,7 +1295,7 @@ function ChatTab({
             return (
               <div key={m.id} className={`message-bubble-row ${m.role === "user" ? "user-row" : "agent-row"}`}>
                 <div className="msg-avatar">{m.role === "user" ? "👤" : "⚡"}</div>
-                <div className={`msg-card ${m.failed ? "msg-failed" : ""}`}>
+                  <div className={`msg-card ${m.failed ? "msg-failed" : ""} ${m.needsInput ? "msg-needs-input" : ""}`}>
                   <div className="msg-header">
                     <span className="msg-author">{m.role === "user" ? "You" : "Smara Agent"}</span>
                   </div>
