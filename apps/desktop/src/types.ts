@@ -102,6 +102,12 @@ export interface ChatMessage {
   pending?: boolean;
   failed?: boolean;
   error?: string;
+  sourcePrompt?: string;
+}
+
+export interface ChatHistoryTurn {
+  role: "user" | "assistant";
+  content: string;
 }
 
 export interface FilePreview {

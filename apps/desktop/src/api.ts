@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, CodingConventionsData, ConnectionState, DAGNodeData, DAGWorkflowData, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ProgressiveSkillDetail, ProgressiveSkillItem, RemoteStatus, ResearchMode, SearchResultItem, SemanticIndexStats, SubagentDelegationData, SubagentRolesData, SwarmTaskResultData, SymbolEvolutionData, TaskDetail, TaskMemoryActionResult, TaskMemorySearchItem, TaskMemorySnapshot, TaskMemoryStoreData, TaskSummary, TestSuiteResultData, WebScrapeData } from "./types";
+import type { ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatHistoryTurn, CodingConventionsData, ConnectionState, DAGNodeData, DAGWorkflowData, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ProgressiveSkillDetail, ProgressiveSkillItem, RemoteStatus, ResearchMode, SearchResultItem, SemanticIndexStats, SubagentDelegationData, SubagentRolesData, SwarmTaskResultData, SymbolEvolutionData, TaskDetail, TaskMemoryActionResult, TaskMemorySearchItem, TaskMemorySnapshot, TaskMemoryStoreData, TaskSummary, TestSuiteResultData, WebScrapeData } from "./types";
 
 export const isNativeDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -37,6 +37,7 @@ export const desktop = {
   revoke: () => invoke<ConnectionState>("revoke_executor"),
   log: () => invoke<string>("read_log"),
   tasks: () => invoke<TaskSummary[]>("load_tasks"),
+  chatHistory: (conversationId: string) => invoke<ChatHistoryTurn[]>("load_local_chat_history", { conversationId }),
   localTaskDetails: (taskId: string) => invoke<TaskDetail>("load_task_details", { taskId }),
   taskDetails: (taskId: string) => invoke<TaskDetail>("load_task_details", { taskId }),
   decideLocalTask: (taskId: string, approved: boolean) => invoke<void>("decide_local_task", { taskId, approved }),

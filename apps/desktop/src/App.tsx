@@ -84,6 +84,16 @@ function initialConversationId() {
   }
 }
 
+function createConversationId() {
+  const value = `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    window.localStorage.setItem("smara.local.conversation_id", value);
+  } catch {
+    // The native history journal remains authoritative if storage is blocked.
+  }
+  return value;
+}
+
 function splitLines(value: string) {
   return value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean);
 }
@@ -320,6 +330,7 @@ export default function App() {
   const [researchMode, setResearchMode] = useState<ResearchMode>("auto");
   const [audioMuted, setAudioMuted] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [activityOpen, setActivityOpen] = useState(false);
 
   const handlePreview = async (filePath: string) => {
     try {
@@ -364,6 +375,28 @@ export default function App() {
   useEffect(() => {
     void refreshAll();
   }, [refreshAll]);
+
+  // Hermes keeps the same session usable from every surface. Rehydrate the
+  // selected local conversation when Desktop starts so a restart never looks
+  // like data was lost.
+  useEffect(() => {
+    if (!isNativeDesktop) return;
+    let active = true;
+    void desktop.chatHistory(conversationId.current).then((turns) => {
+      if (!active || !Array.isArray(turns)) return;
+      const restored: ChatMessage[] = turns
+        .filter((turn) => (turn.role === "user" || turn.role === "assistant") && typeof turn.content === "string" && turn.content.trim())
+        .map((turn, index) => ({
+          id: `restored-${index}-${turn.role}`,
+          role: turn.role,
+          text: turn.content,
+        }));
+      if (restored.length) setMessages(restored);
+    }).catch(() => {
+      // A missing/legacy journal should leave a clean composer usable.
+    });
+    return () => { active = false; };
+  }, []);
 
   const flushAssistantText = useCallback(() => {
     if (assistantFrame.current !== null) {
@@ -455,6 +488,18 @@ export default function App() {
     };
   }, []);
 
+  const startNewSession = useCallback(() => {
+    if (streaming) return;
+    conversationId.current = createConversationId();
+    setMessages([]);
+    setActivity([]);
+    setDraft("");
+    setNotice(null);
+    setCurrentExecution(null);
+    setCurrentThought(null);
+    setTab("chat");
+  }, [streaming]);
+
   const [showSpotlight, setShowSpotlight] = useState(false);
 
   useEffect(() => {
@@ -489,7 +534,7 @@ export default function App() {
     setMessages((items) => [
       ...items,
       { id: uid("user"), role: "user", text },
-      { id: answerId, role: "assistant", text: "", pending: true },
+      { id: answerId, role: "assistant", text: "", pending: true, sourcePrompt: text },
     ]);
     setStreaming(true);
     setActivity((items) => [{ id: uid("start"), tone: "blue" as const, label: "Autonomous turn started" }, ...items].slice(0, 10));
@@ -566,6 +611,15 @@ export default function App() {
           </button>
           <button
             type="button"
+            className={`sleek-icon-btn ${activityOpen ? "active" : ""}`}
+            onClick={() => setActivityOpen((open) => !open)}
+            title={activityOpen ? "Hide live activity" : "Show live activity"}
+            aria-label={activityOpen ? "Hide live activity" : "Show live activity"}
+          >
+            ◌
+          </button>
+          <button
+            type="button"
             className="sleek-icon-btn"
             onClick={() => setAudioMuted(!audioMuted)}
             title={audioMuted ? "Unmute Audio" : "Mute Audio"}
@@ -611,11 +665,7 @@ export default function App() {
                   <button
                     type="button"
                     className="sidebar-action-row"
-                    onClick={() => {
-                      setMessages([]);
-                      setDraft("");
-                      setTab("chat");
-                    }}
+                    onClick={startNewSession}
                     title="Start fresh session (Ctrl+N)"
                   >
                     <div className="sidebar-action-left">
@@ -769,8 +819,11 @@ export default function App() {
               currentExecution={currentExecution}
               currentThought={currentThought}
               activity={activity}
+              activityOpen={activityOpen}
+              onToggleActivity={() => setActivityOpen((open) => !open)}
               transcriptEndRef={transcriptEndRef}
               onPreview={handlePreview}
+              onRetry={(prompt) => void send(prompt)}
               sidebarMode={sidebarMode}
               modelProfiles={modelProfiles}
               selectedProfileId={selectedProfileId}
@@ -1138,8 +1191,10 @@ function ChatTab({
   streaming,
   currentExecution,
   currentThought,
+  activity,
   transcriptEndRef,
   onPreview,
+  onRetry,
   sidebarMode,
   modelProfiles,
   selectedProfileId,
@@ -1149,6 +1204,8 @@ function ChatTab({
   audioMuted,
   setAudioMuted,
   onOpenCapabilities,
+  activityOpen,
+  onToggleActivity,
 }: {
   messages: ChatMessage[];
   draft: string;
@@ -1158,8 +1215,11 @@ function ChatTab({
   currentExecution?: string | null;
   currentThought?: string | null;
   activity: ActivityItem[];
+  activityOpen: boolean;
+  onToggleActivity: () => void;
   transcriptEndRef: RefObject<HTMLDivElement>;
   onPreview: (path: string) => void;
+  onRetry: (prompt: string) => void;
   sidebarMode: "sessions" | "bots";
   modelProfiles: LocalModelProfile[];
   selectedProfileId: string;
@@ -1199,9 +1259,11 @@ function ChatTab({
           )}
         </div>
       ) : (
+        <div className="chat-stage-body">
         <div className="transcript-feed" style={{ paddingBottom: 120 }}>
           {messages.map((m) => {
             const detected = m.role === "assistant" ? detectFiles(m.text) : [];
+            const retryPrompt = m.sourcePrompt;
             return (
               <div key={m.id} className={`message-bubble-row ${m.role === "user" ? "user-row" : "agent-row"}`}>
                 <div className="msg-avatar">{m.role === "user" ? "👤" : "⚡"}</div>
@@ -1225,6 +1287,11 @@ function ChatTab({
                     </div>
                   )}
                   {m.error && <div className="msg-err-box">{m.error}</div>}
+                  {m.failed && retryPrompt && (
+                    <button type="button" className="message-retry-btn" onClick={() => onRetry(retryPrompt)} disabled={streaming}>
+                      ↻ Retry this turn
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -1239,6 +1306,33 @@ function ChatTab({
             </div>
           )}
           <div ref={transcriptEndRef} />
+        </div>
+        {activityOpen && (
+          <aside className="activity-rail" aria-label="Live activity">
+            <div className="activity-rail-header">
+              <div>
+                <span className="activity-eyebrow">RUN STATUS</span>
+                <strong>{streaming ? "Working" : "Recent activity"}</strong>
+              </div>
+              <button type="button" className="activity-close-btn" onClick={onToggleActivity} aria-label="Hide live activity">×</button>
+            </div>
+            {activity.length === 0 ? (
+              <div className="activity-empty">Tool calls and evidence will appear here while Smara works.</div>
+            ) : (
+              <div className="activity-list">
+                {activity.map((item) => (
+                  <div key={item.id} className={`activity-item activity-${item.tone}`}>
+                    <span className="activity-dot" />
+                    <div className="activity-copy">
+                      <strong>{item.label}</strong>
+                      {item.detail && <span>{item.detail}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </aside>
+        )}
         </div>
       )}
 
