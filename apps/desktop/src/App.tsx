@@ -4002,7 +4002,7 @@ function IntegrationsTab({
         <section className="config-card provider-key-editor">
           <div className="section-kicker">ADD OR ROTATE A KEY</div>
           <h3>Choose a provider</h3>
-          <select value={selectedKeyId} onChange={(event) => setSelectedKeyId(event.target.value as typeof selectedKeyId)}>
+          <select value={selectedKeyId} onChange={(event) => { setSelectedKeyId(event.target.value as typeof selectedKeyId); setSecret(""); setNotice(null); }}>
             {TOOL_KEY_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
           </select>
           <p className="card-subtext">{selected.description}</p>
