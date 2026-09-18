@@ -3196,9 +3196,31 @@ def _main(argv: list[str] | None = None) -> int:
         print("Smara Desktop was revoked and local pairing state was removed.")
         return 0
     if args.status:
-        state = _load_state(args.state)
+        try:
+            state = _load_state(args.state)
+        except RuntimeError as paired_error:
+            # A local-first install intentionally has no hosted executor
+            # token.  Do not surface the old hosted-pairing error for the
+            # read-only status command; report the actual local posture.
+            try:
+                local_state = _load_local_state(args.state)
+            except RuntimeError:
+                raise paired_error
+            print(json.dumps({
+                "paired": False,
+                "runtime_mode": "local",
+                "paused": _pause_path(args.state).exists(),
+                "executor_id": None,
+                "api_url": local_state.get("api_url", "http://127.0.0.1:8080"),
+                "capabilities": local_state.get("capabilities", DEFAULT_CAPABILITIES),
+                "auto_approve_safe": local_state.get("auto_approve_safe") is True,
+                "allowed_roots": local_state.get("allowed_roots", []),
+                "log": str(args.log),
+            }, indent=2))
+            return 0
         print(json.dumps({
             "paired": True,
+            "runtime_mode": "cloud",
             "paused": _pause_path(args.state).exists(),
             "executor_id": state["executor_id"],
             "smara_url": state["smara_url"],
