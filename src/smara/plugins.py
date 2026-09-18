@@ -10,10 +10,13 @@ import json
 import re
 import os
 import time
+import hashlib
+import shutil
 from pathlib import Path
 from typing import Any
 
 _NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?$")
 
 
 class PluginManager:
@@ -37,6 +40,95 @@ class PluginManager:
         self.root.mkdir(parents=True, exist_ok=True)
         tmp = self.state_path.with_suffix(".tmp"); tmp.write_text(json.dumps(state, indent=2), encoding="utf-8"); os.replace(tmp, self.state_path)
 
+    @staticmethod
+    def validate_manifest(value: Any) -> dict:
+        """Validate an inert plugin descriptor before it enters the catalogue."""
+        if not isinstance(value, dict):
+            raise ValueError("plugin manifest must be an object")
+        name = str(value.get("name", ""))
+        if not _NAME.fullmatch(name):
+            raise ValueError("plugin name must be lowercase and bounded")
+        version = str(value.get("version", ""))
+        if not _VERSION.fullmatch(version):
+            raise ValueError("plugin version must use semantic versioning")
+        kind = value.get("kind")
+        if kind not in {"mcp", "remote_readonly"}:
+            raise ValueError("plugin kind must be mcp or remote_readonly")
+        tools = value.get("tools", [])
+        if not isinstance(tools, list) or len(tools) > 50 or any(not isinstance(tool, str) or len(tool) > 120 for tool in tools):
+            raise ValueError("plugin tools must be a bounded list of names")
+        endpoint = value.get("endpoint") or value.get("url")
+        if endpoint:
+            from .mcp_client import _remote_url_allowed
+            if not _remote_url_allowed(str(endpoint), allow_private=False):
+                raise ValueError("plugin endpoint must be a public HTTPS URL")
+        clean = {key: value[key] for key in ("name", "version", "kind", "tools", "endpoint", "url", "oauth", "description") if key in value}
+        clean["enabled"] = False
+        return clean
+
+    @staticmethod
+    def _digest(value: dict) -> str:
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    def _workspace_plugin(self, name: str) -> Path:
+        return self.root / name
+
+    def install(self, manifest_path: Path | str) -> dict:
+        """Install a local declarative manifest.  No code is copied or imported."""
+        source = Path(manifest_path).expanduser().resolve()
+        if not source.is_file():
+            raise FileNotFoundError(source)
+        try:
+            value = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ValueError("plugin manifest must be valid JSON") from exc
+        clean = self.validate_manifest(value)
+        target = self._workspace_plugin(clean["name"])
+        if target.exists():
+            raise ValueError("plugin is already installed; use update")
+        target.mkdir(parents=True, exist_ok=False)
+        manifest = target / "plugin.json"
+        manifest.write_text(json.dumps(clean, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        state = self._state(); state[clean["name"]] = {"enabled": False, "version": clean["version"], "sha256": self._digest(clean), "status": "installed", "updated_at": time.time(), "history": [{"event": "installed", "at": time.time()}]}; self._save(state)
+        return {**clean, "status": "installed", "sha256": self._digest(clean)}
+
+    def update(self, name: str, manifest_path: Path | str) -> dict:
+        rows = {row["name"]: row for row in self.discover()}
+        if name not in rows:
+            raise KeyError(name)
+        source = Path(manifest_path).expanduser().resolve()
+        try:
+            clean = self.validate_manifest(json.loads(source.read_text(encoding="utf-8")))
+        except (OSError, ValueError) as exc:
+            raise ValueError("plugin update manifest is invalid") from exc
+        if clean["name"] != name:
+            raise ValueError("plugin update name must match the installed plugin")
+        target = self._workspace_plugin(name)
+        if not target.is_dir():
+            raise ValueError("only workspace-installed plugins can be updated")
+        old = json.loads((target / "plugin.json").read_text(encoding="utf-8"))
+        if clean["version"] == str(old.get("version")) and self._digest(clean) == self._digest(old):
+            return {**clean, "status": "already_current", "sha256": self._digest(clean)}
+        backup = target / ".rollback"
+        backup.mkdir(exist_ok=True)
+        (backup / f"{old.get('version', 'unknown')}-{self._digest(old)[:12]}.json").write_text(json.dumps(old, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp = target / "plugin.json.tmp"; tmp.write_text(json.dumps(clean, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"); os.replace(tmp, target / "plugin.json")
+        state = self._state(); row = state.setdefault(name, {}); row.update({"version": clean["version"], "sha256": self._digest(clean), "status": "updated", "updated_at": time.time()}); row.setdefault("history", []).append({"event": "updated", "from": old.get("version"), "to": clean["version"], "at": time.time()}); self._save(state)
+        return {**clean, "status": "updated", "sha256": self._digest(clean)}
+
+    def rollback(self, name: str, version: str) -> dict:
+        target = self._workspace_plugin(name)
+        if not _VERSION.fullmatch(version) or not target.is_dir():
+            raise KeyError(name)
+        choices = sorted((target / ".rollback").glob(f"{version}-*.json"))
+        if not choices:
+            raise ValueError("no rollback manifest exists for that version")
+        previous = json.loads(choices[-1].read_text(encoding="utf-8"))
+        clean = self.validate_manifest(previous)
+        tmp = target / "plugin.json.tmp"; tmp.write_text(json.dumps(clean, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"); os.replace(tmp, target / "plugin.json")
+        state = self._state(); row = state.setdefault(name, {}); row.update({"version": version, "sha256": self._digest(clean), "status": "rolled_back", "updated_at": time.time()}); row.setdefault("history", []).append({"event": "rolled_back", "to": version, "at": time.time()}); self._save(state)
+        return {**clean, "status": "rolled_back", "sha256": self._digest(clean)}
+
     def discover(self) -> list[dict]:
         found: dict[str, dict] = {}
         for path in (self.workspace / ".smara" / "plugins", Path.home() / ".smara" / "plugins"):
@@ -47,13 +139,17 @@ class PluginManager:
                 if isinstance(data, dict) and _NAME.fullmatch(str(data.get("name", ""))):
                     data["source_path"] = str(item.parent); found[data["name"]] = data
         states = self._state()
-        for row in found.values(): row["enabled"] = bool(states.get(row["name"], {}).get("enabled", row.get("enabled", False)))
+        for row in found.values():
+            persisted = states.get(row["name"], {})
+            row["enabled"] = bool(persisted.get("enabled", row.get("enabled", False)))
+            row["lifecycle"] = persisted.get("status", "discovered")
+            row["sha256"] = persisted.get("sha256", self._digest(self.validate_manifest(row)))
         return sorted(found.values(), key=lambda row: row["name"])
 
     def set_enabled(self, name: str, enabled: bool) -> dict:
         rows = {row["name"]: row for row in self.discover()}
         if name not in rows: raise KeyError(name)
-        state = self._state(); state[name] = {"enabled": bool(enabled), "updated_at": time.time()}; self._save(state)
+        state = self._state(); prior = state.get(name, {}); state[name] = {**prior, "enabled": bool(enabled), "status": "enabled" if enabled else "disabled", "updated_at": time.time()}; state[name].setdefault("history", []).append({"event": "enabled" if enabled else "disabled", "at": time.time()}); self._save(state)
         rows[name]["enabled"] = bool(enabled); return rows[name]
 
     def remove(self, name: str) -> None:
@@ -61,8 +157,37 @@ class PluginManager:
         if name not in rows: raise KeyError(name)
         source = Path(rows[name].get("source_path", ""))
         if source.is_relative_to(self.workspace / ".smara" / "plugins") and source != self.root:
-            import shutil; shutil.rmtree(source)
+            shutil.rmtree(source)
         state = self._state(); state.pop(name, None); self._save(state)
+
+    def health(self, name: str | None = None) -> list[dict]:
+        """Run only MCP initialize/tools-list; tool calls are never health checks."""
+        rows = self.discover()
+        if name is not None:
+            rows = [row for row in rows if row["name"] == name]
+            if not rows:
+                raise KeyError(name)
+        results = []
+        for row in rows:
+            endpoint = row.get("endpoint") or row.get("url")
+            result = {"name": row["name"], "enabled": row["enabled"], "checked_at": time.time(), "status": "not_configured", "tool_count": 0}
+            if endpoint:
+                try:
+                    from .mcp_client import MCPRemoteServer
+                    remote = MCPRemoteServer(row["name"], str(endpoint), oauth=row.get("oauth") or {}, timeout=8.0)
+                    if remote.start(): result.update({"status": "healthy", "tool_count": len(remote.tools)})
+                    else: result["status"] = "unhealthy"
+                except Exception as exc:
+                    result.update({"status": "unhealthy", "error": str(exc)[:240]})
+            elif row.get("kind") == "mcp":
+                result["status"] = "requires_local_mcp_config"
+            results.append(result)
+        state = self._state()
+        for result in results:
+            if result["name"] in state:
+                state[result["name"]]["health"] = {key: value for key, value in result.items() if key not in {"name", "enabled"}}
+        self._save(state)
+        return results
 
 
 def manifests(raw: str = "", *, include_user_integrations: bool = True) -> list[dict[str, Any]]:

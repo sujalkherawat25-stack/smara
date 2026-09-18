@@ -925,6 +925,14 @@ def build_parser() -> argparse.ArgumentParser:
     plugin_enable = plugins_sub.add_parser("enable"); plugin_enable.add_argument("name")
     plugin_disable = plugins_sub.add_parser("disable"); plugin_disable.add_argument("name")
     plugin_remove = plugins_sub.add_parser("remove"); plugin_remove.add_argument("name")
+    plugin_install = plugins_sub.add_parser("install", help="install a declarative local plugin manifest")
+    plugin_install.add_argument("manifest")
+    plugin_update = plugins_sub.add_parser("update", help="validate and atomically update a local plugin")
+    plugin_update.add_argument("name"); plugin_update.add_argument("manifest")
+    plugin_rollback = plugins_sub.add_parser("rollback", help="restore a retained plugin manifest version")
+    plugin_rollback.add_argument("name"); plugin_rollback.add_argument("version")
+    plugin_health = plugins_sub.add_parser("health", help="run non-mutating connector/MCP health probes")
+    plugin_health.add_argument("name", nargs="?")
     subparsers.add_parser("approvals", help="list tasks awaiting approval")
 
     devices_cmd = subparsers.add_parser("devices", help="list or revoke authorized CLI devices")
@@ -1025,6 +1033,12 @@ def build_parser() -> argparse.ArgumentParser:
     skill_view = skills_sub.add_parser("view"); skill_view.add_argument("name")
     skill_promote = skills_sub.add_parser("promote"); skill_promote.add_argument("name")
     skill_revoke = skills_sub.add_parser("revoke"); skill_revoke.add_argument("name")
+    skill_validate = skills_sub.add_parser("validate", help="validate a versioned playbook without running it")
+    skill_validate.add_argument("name"); skill_validate.add_argument("--version")
+    skill_rollback = skills_sub.add_parser("rollback", help="restore a previously promoted skill version")
+    skill_rollback.add_argument("name"); skill_rollback.add_argument("version")
+    skill_reuse = skills_sub.add_parser("reuse-check", help="show whether automatic reuse is safe")
+    skill_reuse.add_argument("name"); skill_reuse.add_argument("query"); skill_reuse.add_argument("--version")
 
     subparsers.add_parser("backends", help="probe Docker and WSL execution backends")
     gateway_cmd = subparsers.add_parser("gateway", help="inspect or process the local message gateway")
@@ -1689,6 +1703,10 @@ def main(argv: list[str] | None = None) -> int:
             if action == "list": payload = manager.discover()
             elif action == "enable": payload = manager.set_enabled(parsed_args.name, True)
             elif action == "disable": payload = manager.set_enabled(parsed_args.name, False)
+            elif action == "install": payload = manager.install(parsed_args.manifest)
+            elif action == "update": payload = manager.update(parsed_args.name, parsed_args.manifest)
+            elif action == "rollback": payload = manager.rollback(parsed_args.name, parsed_args.version)
+            elif action == "health": payload = manager.health(parsed_args.name)
             else: manager.remove(parsed_args.name); payload = {"status": "removed", "name": parsed_args.name}
             print(json.dumps(payload, indent=2)); return 0
         except (KeyError, ValueError) as exc:
@@ -1702,6 +1720,9 @@ def main(argv: list[str] | None = None) -> int:
             if action == "list": payload = {"skills": registry.list_skills(), "promotions": lifecycle.list()}
             elif action == "view": payload = registry.view_skill(parsed_args.name)
             elif action == "promote": payload = lifecycle.promote(parsed_args.name)
+            elif action == "validate": payload = lifecycle.validate(parsed_args.name, version=parsed_args.version)
+            elif action == "rollback": payload = lifecycle.rollback(parsed_args.name, parsed_args.version)
+            elif action == "reuse-check": payload = lifecycle.reuse_decision(parsed_args.name, parsed_args.query, version=parsed_args.version)
             else: payload = lifecycle.set_state(parsed_args.name, "revoked", reason="revoked from CLI")
             print(json.dumps(payload, indent=2)); return 0
         except (KeyError, ValueError) as exc:

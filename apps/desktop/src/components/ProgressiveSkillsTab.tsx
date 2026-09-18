@@ -220,6 +220,11 @@ export function ProgressiveSkillsTab({ onSetNotice }: { onSetNotice: (msg: strin
                       {s.source}
                     </span>
                   </div>
+                  <div style={{ display: "flex", gap: "5px", alignItems: "center", fontSize: "10px", color: s.lifecycle === "promoted" ? "#34d399" : "#fbbf24" }}>
+                    <span>v{s.version}</span>
+                    <span>·</span>
+                    <span>{s.lifecycle === "promoted" ? "verified" : (s.lifecycle || "unreviewed")}</span>
+                  </div>
                   <p style={{ margin: 0, fontSize: "11.5px", color: "#8b949e", lineHeight: 1.4 }}>
                     {s.description}
                   </p>

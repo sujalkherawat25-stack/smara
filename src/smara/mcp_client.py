@@ -17,6 +17,7 @@ import threading
 import time
 import base64
 import hashlib
+import ipaddress
 import secrets
 import urllib.parse
 import urllib.request
@@ -33,7 +34,13 @@ def _remote_url_allowed(url: str, *, allow_private: bool = False) -> bool:
     host = (parsed.hostname or "").lower()
     if allow_private:
         return True
-    return host not in {"localhost", "127.0.0.1", "::1", "0.0.0.0"} and not host.endswith(".local")
+    if host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"} or host.endswith(".local"):
+        return False
+    try:
+        address = ipaddress.ip_address(host.strip("[]"))
+        return not (address.is_private or address.is_loopback or address.is_link_local or address.is_multicast or address.is_unspecified or address.is_reserved)
+    except ValueError:
+        return True
 
 
 class MCPRemoteServer:
@@ -68,6 +75,15 @@ class MCPRemoteServer:
         tools = self._request("tools/list", {}).get("result", {}).get("tools", [])
         self.tools = tools if isinstance(tools, list) else []
         return True
+
+    def health(self) -> dict[str, Any]:
+        """Bounded, non-mutating protocol health probe for operators."""
+        started = time.monotonic()
+        try:
+            tools = self.refresh_tools()
+            return {"name": self.name, "transport": "streamable_http", "status": "healthy", "tool_count": len(tools), "latency_ms": round((time.monotonic() - started) * 1000, 1)}
+        except Exception as exc:
+            return {"name": self.name, "transport": "streamable_http", "status": "unhealthy", "error": str(exc)[:240], "latency_ms": round((time.monotonic() - started) * 1000, 1)}
 
     def refresh_tools(self) -> list[dict[str, Any]]:
         self.tools = self._request("tools/list", {}).get("result", {}).get("tools", []) or []
@@ -448,6 +464,20 @@ class MCPManager:
             if server_name is None or name == server_name:
                 refresh = getattr(server, "refresh_tools", None)
                 if callable(refresh): refresh()
+
+    def health(self) -> list[dict[str, Any]]:
+        """Report connected transport health without invoking any external tool."""
+        status: list[dict[str, Any]] = []
+        for name, server in self.servers.items():
+            probe = getattr(server, "health", None)
+            if callable(probe):
+                value = probe()
+                if isinstance(value, dict):
+                    status.append(value)
+                    continue
+            running = bool(getattr(server, "_running", False))
+            status.append({"name": name, "transport": "stdio", "status": "healthy" if running else "unhealthy", "tool_count": len(getattr(server, "tools", []) or [])})
+        return status
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
         """Convert all loaded MCP server tools to OpenAI function schemas."""

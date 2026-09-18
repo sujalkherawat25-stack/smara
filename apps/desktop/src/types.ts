@@ -420,6 +420,7 @@ export interface ProgressiveSkillItem {
   tags: string[];
   source: string;
   skill_dir: string;
+  lifecycle?: "candidate" | "quarantined" | "promoted" | "rejected" | "revoked" | "superseded";
 }
 
 export interface ProgressiveSkillDetail {
