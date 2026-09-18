@@ -630,7 +630,7 @@ export default function App() {
             type="button"
             className="sleek-icon-btn"
             onClick={() => setTab(tab === "integrations" ? "chat" : "integrations")}
-            title="Settings & Connectors"
+            title="Providers, API keys, and tools"
           >
             ⚙
           </button>
@@ -691,11 +691,23 @@ export default function App() {
                     type="button"
                     className={`sidebar-action-row ${tab === "integrations" ? "active" : ""}`}
                     onClick={() => setTab(tab === "integrations" ? "chat" : "integrations")}
-                    title="Messaging & Connectors"
+                    title="Providers, API keys, and tools"
                   >
                     <div className="sidebar-action-left">
-                      <span className="icon">✉️</span>
-                      <span>Messaging</span>
+                      <span className="icon">🔐</span>
+                      <span>Providers & tools</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`sidebar-action-row ${tab === "models" ? "active" : ""}`}
+                    onClick={() => setTab(tab === "models" ? "chat" : "models")}
+                    title="Model providers and encrypted API keys"
+                  >
+                    <div className="sidebar-action-left">
+                      <span className="icon">🧠</span>
+                      <span>AI models</span>
                     </div>
                   </button>
 
@@ -883,6 +895,7 @@ export default function App() {
           {tab === "models" && (
             <ModelsTab
               modelProfiles={modelProfiles}
+              credentials={credentials}
               activeModel={connection.model_profile}
               onSelectModel={async (modelId) => {
                 await desktop.saveSettings({
@@ -3755,12 +3768,14 @@ function SpotlightSearchModal({
 // -------------------------------------------------------------
 function ModelsTab({
   modelProfiles,
+  credentials,
   activeModel,
   onSelectModel,
   onSaved,
   onDeleted,
 }: {
   modelProfiles: LocalModelProfile[];
+  credentials: LocalCredentialSummary[];
   activeModel: string;
   onSelectModel: (id: string) => Promise<void>;
   onSaved: (profiles: LocalModelProfile[]) => Promise<void>;
@@ -3773,6 +3788,13 @@ function ModelsTab({
   const [apiKey, setApiKey] = useState("");
   const [authHeader, setAuthHeader] = useState("authorization");
   const [busy, setBusy] = useState(false);
+
+  const credentialName = provider === "sarvam"
+    ? "SMARA_MODEL_SARVAM_API_KEY"
+    : provider === "grok"
+      ? "SMARA_MODEL_GROK_API_KEY"
+      : "";
+  const credentialConfigured = credentialName ? credentials.some((item) => item.name === credentialName) : true;
 
   function applyPreset(preset: "grok" | "sarvam" | "ollama" | "lmstudio" | "openrouter") {
     if (preset === "grok") {
@@ -3839,7 +3861,7 @@ function ModelsTab({
       <div className="pane-header">
         <div>
           <h2>🧠 Models & AI Configuration</h2>
-          <p>Choose or configure your frontier AI model. API keys are encrypted locally in Windows DPAPI.</p>
+          <p>Choose a provider, paste its key once, and keep the secret encrypted locally. The CLI reads the same vault.</p>
         </div>
       </div>
 
@@ -3857,6 +3879,10 @@ function ModelsTab({
         {/* Add / Edit Card */}
         <div className="config-card">
           <h3>Add / Update Model Provider</h3>
+          <div className={`provider-key-status ${credentialConfigured ? "ready" : "missing"}`}>
+            <span className="provider-key-dot" />
+            {credentialName ? (credentialConfigured ? `${credentialName} is stored locally` : `${credentialName} needs a key`) : "Local providers use their own local service"}
+          </div>
           <div className="form-group">
             <label>Provider Name</label>
             <input value={label} onChange={(e) => setLabel(e.target.value)} />
@@ -3919,7 +3945,123 @@ function ModelsTab({
 // -------------------------------------------------------------
 // INTEGRATIONS TAB
 // -------------------------------------------------------------
+const TOOL_KEY_PRESETS = [
+  { id: "tavily", label: "Tavily Search", name: "TAVILY_API_KEY", provider: "tavily", placeholder: "tvly-…", description: "Live web search and source discovery." },
+  { id: "exa", label: "Exa Search", name: "EXA_API_KEY", provider: "exa", placeholder: "Paste Exa key", description: "Neural search for technical and research sources." },
+  { id: "brave", label: "Brave Search", name: "BRAVE_SEARCH_API_KEY", provider: "brave", placeholder: "Paste Brave key", description: "Optional search fallback." },
+  { id: "serper", label: "Serper Search", name: "SERPER_API_KEY", provider: "serper", placeholder: "Paste Serper key", description: "Optional Google-results provider." },
+  { id: "github", label: "GitHub", name: "GITHUB_TOKEN", provider: "github", placeholder: "ghp_…", description: "Repository and pull-request tools." },
+  { id: "sarvam", label: "Sarvam model", name: "SMARA_MODEL_SARVAM_API_KEY", provider: "model:sarvam", placeholder: "Paste Sarvam key", description: "Used by Sarvam model profiles in AI models." },
+  { id: "grok", label: "xAI Grok", name: "SMARA_MODEL_GROK_API_KEY", provider: "model:grok", placeholder: "xai-…", description: "Used by Grok model profiles in AI models." },
+] as const;
+
 function IntegrationsTab({
+  credentials,
+  connectors,
+  onSaveKey,
+  onDeleteKey,
+}: {
+  credentials: LocalCredentialSummary[];
+  connectors: LocalConnectorSummary[];
+  onSaveKey: (name: string, provider: string, secret: string) => Promise<void>;
+  onDeleteKey: (name: string) => Promise<void>;
+}) {
+  const [selectedKeyId, setSelectedKeyId] = useState<(typeof TOOL_KEY_PRESETS)[number]["id"]>("tavily");
+  const [secret, setSecret] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const selected = TOOL_KEY_PRESETS.find((preset) => preset.id === selectedKeyId) || TOOL_KEY_PRESETS[0];
+
+  const isConfigured = (name: string) => credentials.some((item) => item.name === name);
+
+  async function saveSelected() {
+    if (!secret.trim()) return;
+    setSaving(true);
+    setNotice(null);
+    try {
+      await onSaveKey(selected.name, selected.provider, secret.trim());
+      setSecret("");
+      setNotice(`${selected.label} key saved in the local encrypted vault.`);
+    } catch (error) {
+      setNotice(`Could not save key: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="tab-pane-container providers-pane">
+      <div className="pane-header">
+        <div>
+          <h2>🔐 Providers & tools</h2>
+          <p>Add a tool or model-provider key once. Secrets stay in the Windows encrypted vault and are never displayed back.</p>
+        </div>
+      </div>
+
+      <div className="provider-settings-layout">
+        <section className="config-card provider-key-editor">
+          <div className="section-kicker">ADD OR ROTATE A KEY</div>
+          <h3>Choose a provider</h3>
+          <select value={selectedKeyId} onChange={(event) => setSelectedKeyId(event.target.value as typeof selectedKeyId)}>
+            {TOOL_KEY_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+          </select>
+          <p className="card-subtext">{selected.description}</p>
+          <label className="form-label" htmlFor="provider-secret">API key</label>
+          <input
+            id="provider-secret"
+            type="password"
+            autoComplete="off"
+            value={secret}
+            onChange={(event) => setSecret(event.target.value)}
+            placeholder={selected.placeholder}
+          />
+          <button className="primary-btn" onClick={() => void saveSelected()} disabled={saving || !secret.trim()}>
+            {saving ? "Encrypting…" : "Save encrypted key"}
+          </button>
+          {notice && <div className="provider-inline-notice">{notice}</div>}
+          <div className="provider-security-note">🔒 Stored locally with Windows DPAPI. Smara only resolves it when the selected tool is actually used.</div>
+        </section>
+
+        <section className="config-card provider-key-list">
+          <div className="section-kicker">LOCAL VAULT</div>
+          <h3>Configured providers</h3>
+          <div className="provider-list">
+            {TOOL_KEY_PRESETS.map((preset) => {
+              const configured = isConfigured(preset.name);
+              return (
+                <div className="provider-list-row" key={preset.id}>
+                  <span className={`provider-key-dot ${configured ? "ready" : "missing"}`} />
+                  <div className="provider-list-copy">
+                    <strong>{preset.label}</strong>
+                    <span>{configured ? "Key saved locally" : "Not configured"}</span>
+                  </div>
+                  {configured && <button className="delete-btn-text" onClick={() => void onDeleteKey(preset.name)}>Remove</button>}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+
+      <section className="config-card connector-readiness-card">
+        <div className="section-kicker">TOOL READINESS</div>
+        <h3>What Smara can use now</h3>
+        <div className="connector-readiness-grid">
+          {connectors.length === 0 ? (
+            <div className="empty-subtext">Add a tool key above to enable its connector.</div>
+          ) : connectors.map((connector) => (
+            <div className="connector-readiness-item" key={`${connector.provider}-${connector.operation}`}>
+              <span className={`provider-key-dot ${connector.credential_configured ? "ready" : "missing"}`} />
+              <div><strong>{connector.provider}</strong><span>{connector.operation} · {connector.credential_configured ? "ready" : "needs key"}</span></div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function LegacyIntegrationsTab({
   credentials,
   connectors,
   onSaveKey,
