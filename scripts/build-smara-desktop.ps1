@@ -18,6 +18,14 @@ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
 
 Push-Location $repoRoot
 try {
+    # Keep the CLI and the bundled Desktop on the exact same source revision.
+    # Editable installation is intentional for this local-first workspace: a
+    # subsequent source change is visible to ``python -m smara`` immediately,
+    # while this build still freezes that same tree into the PyInstaller
+    # executor below.  ``--no-deps`` avoids silently replacing the user's
+    # configured provider/browser packages during a Desktop rebuild.
+    & $python -m pip install --editable . --no-deps
+    Assert-NativeSuccess 'editable CLI install'
     # The executor is bundled from a file path (not ``python -m``), so the
     # package-relative import fallback needs the sibling module directory on
     # PyInstaller's analysis path as well.
