@@ -65,7 +65,9 @@ class SkillLifecycleManager:
         candidates = [self.root / name / "SKILL.md", self.root / f"{name}.json"]
         for candidate in candidates:
             try:
-                return hashlib.sha256(candidate.read_bytes()).hexdigest()
+                # Hash canonical text so Windows newline normalization cannot
+                # make a reviewed playbook look tampered after a restart.
+                return hashlib.sha256(candidate.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
             except OSError:
                 continue
         return ""
@@ -188,7 +190,8 @@ class SkillLifecycleManager:
             return validation
         validation = self.validate_playbook(content, version=str(record.get("version", "")), risk=str(record.get("risk", "confirm")))
         record["validation"] = validation
-        record["content_sha256"] = validation["content_sha256"] if content else record.get("content_sha256", "")
+        # ``content_sha256`` is the pinned approval digest.  Never replace it
+        # during validation; a changed file must make automatic reuse fail.
         entry["versions"][record["version"]] = record; self._write(values)
         return validation
 
@@ -256,7 +259,8 @@ class SkillLifecycleManager:
         triggers = " ".join(str(item) for item in gate.get("triggers", []))
         matching = not triggers or any(token in query.lower() for token in triggers.lower().split() if len(token) > 2)
         independent = int(gate.get("independent_runs", 0) or 0)
-        eligible = bool(record.get("state") == "promoted" and record.get("automatic_reuse") and record.get("risk") == "read_only" and bool(validation.get("content_sha256")) and validation.get("passed") and independent >= 3 and matching)
+        digest_matches = bool(record.get("content_sha256")) and record.get("content_sha256") == validation.get("content_sha256")
+        eligible = bool(record.get("state") == "promoted" and record.get("automatic_reuse") and record.get("risk") == "read_only" and digest_matches and validation.get("passed") and independent >= 3 and matching)
         return {"eligible": eligible, "name": name, "version": record.get("version"), "reason": "eligible" if eligible else "requires promoted read-only evidence with three independent runs and a matching trigger", "content_sha256": validation.get("content_sha256")}
 
     def state_for(self, name: str, version: str | None = None) -> str:

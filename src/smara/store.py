@@ -1512,6 +1512,16 @@ class TaskStore:
             rows = c.execute("SELECT * FROM integration_connections WHERE account_id=? ORDER BY provider", (account_id,)).fetchall()
         return [dict(row) | {"granted_scopes": json.loads(row["granted_scopes"]) if isinstance(row["granted_scopes"], str) else row["granted_scopes"]} for row in rows]
 
+    def disconnect_integration(self, account_id: str, provider: str) -> bool:
+        """Revoke the local Smara connection and encrypted credential together."""
+        with self._connect() as c:
+            row = c.execute("SELECT id FROM integration_connections WHERE account_id=? AND provider=?", (account_id, provider)).fetchone()
+            if not row:
+                return False
+            c.execute("DELETE FROM integration_credentials WHERE connection_id=?", (row["id"],))
+            c.execute("DELETE FROM integration_connections WHERE id=?", (row["id"],))
+            return True
+
     def request_integration_action(self, account_id: str, provider: str, action: str, preview: str, idempotency_key: str, payload: dict | None = None) -> dict:
         connection = self.integration(account_id, provider)
         # The registry, not the caller, classifies a small fixed action set.

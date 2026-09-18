@@ -25,6 +25,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+try:
+    from .version import __version__
+except ImportError:  # packaged one-file Desktop executor
+    __version__ = "0.1.1"
 
 
 def _remote_url_allowed(url: str, *, allow_private: bool = False) -> bool:
@@ -49,7 +53,7 @@ class MCPRemoteServer:
     def __init__(self, name: str, endpoint: str, *, headers: dict[str, str] | None = None, allow_private: bool = False, timeout: float = 20.0, oauth: dict[str, Any] | None = None):
         if not _remote_url_allowed(endpoint, allow_private=allow_private):
             raise ValueError("remote MCP endpoint must be an https URL on a public host")
-        self.name, self.endpoint, self.headers, self.timeout, self.oauth = name, endpoint, dict(headers or {}), timeout, dict(oauth or {})
+        self.name, self.endpoint, self.headers, self.timeout, self.oauth, self.allow_private = name, endpoint, dict(headers or {}), timeout, dict(oauth or {}), bool(allow_private)
         self.tools: list[dict[str, Any]] = []; self._req_id = 0
 
     def _request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -69,7 +73,7 @@ class MCPRemoteServer:
         return result
 
     def start(self) -> bool:
-        response = self._request("initialize", {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "smara", "version": "0.1.0"}})
+        response = self._request("initialize", {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "smara", "version": __version__}})
         if "error" in response: return False
         self._request("notifications/initialized", {})
         tools = self._request("tools/list", {}).get("result", {}).get("tools", [])
@@ -101,11 +105,13 @@ class MCPRemoteServer:
     def oauth_authorization_url(self, redirect_uri: str) -> tuple[str, str]:
         auth_endpoint = str(self.oauth.get("authorization_endpoint") or "")
         client_id = str(self.oauth.get("client_id") or "")
-        if not auth_endpoint or not client_id or not _remote_url_allowed(auth_endpoint):
+        if not auth_endpoint or not client_id or not _remote_url_allowed(auth_endpoint, allow_private=self.allow_private):
             raise ValueError("OAuth authorization endpoint and client_id are required")
         verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
-        query = urllib.parse.urlencode({"response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri, "code_challenge": challenge, "code_challenge_method": "S256", "scope": self.oauth.get("scope", "mcp")})
+        state = secrets.token_urlsafe(24)
+        self.oauth["state"] = state
+        query = urllib.parse.urlencode({"response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri, "code_challenge": challenge, "code_challenge_method": "S256", "scope": self.oauth.get("scope", "mcp"), "state": state})
         return auth_endpoint + ("&" if "?" in auth_endpoint else "?") + query, verifier
 
     def set_bearer(self, token: str) -> None:
@@ -115,7 +121,7 @@ class MCPRemoteServer:
     def oauth_exchange_code(self, code: str, verifier: str, redirect_uri: str) -> dict[str, Any]:
         token_endpoint = str(self.oauth.get("token_endpoint") or "")
         client_id = str(self.oauth.get("client_id") or "")
-        if not token_endpoint or not client_id or not _remote_url_allowed(token_endpoint):
+        if not token_endpoint or not client_id or not _remote_url_allowed(token_endpoint, allow_private=self.allow_private):
             raise ValueError("OAuth token endpoint and client_id are required")
         payload = urllib.parse.urlencode({"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri, "client_id": client_id, "code_verifier": verifier}).encode()
         request = urllib.request.Request(token_endpoint, data=payload, headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"}, method="POST")
@@ -202,7 +208,7 @@ class MCPServerProcess:
                 {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {},
-                    "clientInfo": {"name": "smara-mcp-client", "version": "0.1.0"},
+                    "clientInfo": {"name": "smara-mcp-client", "version": __version__},
                 },
                 timeout=timeout,
             )

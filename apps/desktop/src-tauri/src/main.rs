@@ -2998,6 +2998,84 @@ async fn create_skill_v2(name: String, description: String, tags: Vec<String>, i
     run_python_bridge_code(&py_code).await
 }
 
+fn bridge_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n")
+}
+
+#[tauri::command]
+async fn skill_lifecycle() -> Result<Value, String> {
+    let py_code = "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillLifecycleManager\nprint(json.dumps(SkillLifecycleManager().list()))\n";
+    run_python_bridge_code(py_code).await
+}
+
+#[tauri::command]
+async fn validate_skill_v2(name: String, version: Option<String>) -> Result<Value, String> {
+    let n = bridge_escape(&name);
+    let v = version.map(|value| format!("'{}'", bridge_escape(&value))).unwrap_or_else(|| "None".to_owned());
+    let py_code = format!("import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillLifecycleManager\nprint(json.dumps(SkillLifecycleManager().validate(\"{}\", version={})))\n", n, v);
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn promote_skill_v2(name: String, version: Option<String>) -> Result<Value, String> {
+    let n = bridge_escape(&name);
+    let v = version.map(|value| format!("'{}'", bridge_escape(&value))).unwrap_or_else(|| "None".to_owned());
+    let py_code = format!("import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillLifecycleManager\nprint(json.dumps(SkillLifecycleManager().promote(\"{}\", version={})))\n", n, v);
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn revoke_skill_v2(name: String, version: Option<String>) -> Result<Value, String> {
+    let n = bridge_escape(&name);
+    let v = version.map(|value| format!("'{}'", bridge_escape(&value))).unwrap_or_else(|| "None".to_owned());
+    let py_code = format!("import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillLifecycleManager\nprint(json.dumps(SkillLifecycleManager().set_state(\"{}\", 'revoked', version={})))\n", n, v);
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn rollback_skill_v2(name: String, version: String) -> Result<Value, String> {
+    let n = bridge_escape(&name); let v = bridge_escape(&version);
+    let py_code = format!("import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillLifecycleManager\nprint(json.dumps(SkillLifecycleManager().rollback(\"{}\", \"{}\")))\n", n, v);
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn list_integration_health() -> Result<Value, String> {
+    let py_code = "import json, sys\nsys.path.insert(0, 'src')\nfrom pathlib import Path\nfrom smara.plugins import PluginManager\nfrom smara.mcp_client import MCPManager\np = PluginManager(Path.cwd())\nm = MCPManager(Path.cwd(), trusted=True)\nm.discover_and_load()\nprint(json.dumps({'plugins': p.discover(), 'plugin_health': p.health(), 'mcp_health': m.health()}))\nm.shutdown()\n";
+    run_python_bridge_code(py_code).await
+}
+
+#[tauri::command]
+async fn begin_integration_oauth(provider: String) -> Result<Value, String> {
+    let provider = provider.trim().to_lowercase();
+    if !matches!(provider.as_str(), "gmail" | "calendar" | "drive" | "github") {
+        return Err("Unsupported OAuth provider.".to_owned());
+    }
+    let connection = current_connection();
+    let token = cli_token()?;
+    let response = shared_http_client().get(format!("{}/v1/integrations/{}/oauth/start", connection.api_url.trim_end_matches('/'), provider)).bearer_auth(token).timeout(std::time::Duration::from_secs(20)).send().await.map_err(|error| format!("OAuth start failed: {error}"))?;
+    let status = response.status();
+    let payload: Value = response.json().await.map_err(|error| format!("OAuth start returned invalid data: {error}"))?;
+    if !status.is_success() {
+        return Err(payload.get("detail").and_then(Value::as_str).unwrap_or("OAuth start was rejected.").to_owned());
+    }
+    let url = payload.get("authorization_url").and_then(Value::as_str).ok_or_else(|| "OAuth start did not return an authorization URL.".to_owned())?;
+    open::that(url).map_err(|error| format!("Could not open OAuth authorization: {error}"))?;
+    Ok(json!({"provider": provider, "status": "authorization_opened"}))
+}
+
+#[tauri::command]
+async fn disconnect_integration(provider: String) -> Result<Value, String> {
+    let provider = provider.trim().to_lowercase();
+    let connection = current_connection();
+    let token = cli_token()?;
+    let response = shared_http_client().delete(format!("{}/v1/integrations/{}", connection.api_url.trim_end_matches('/'), provider)).bearer_auth(token).timeout(std::time::Duration::from_secs(20)).send().await.map_err(|error| format!("Integration disconnect failed: {error}"))?;
+    let status = response.status();
+    let payload: Value = response.json().await.unwrap_or_else(|_| json!({}));
+    if !status.is_success() { return Err(payload.get("detail").and_then(Value::as_str).unwrap_or("Integration disconnect was rejected.").to_owned()); }
+    Ok(payload)
+}
+
 #[tauri::command]
 async fn get_dag_workflow(workflow_id: Option<String>) -> Result<Value, String> {
     let wid = workflow_id.unwrap_or_else(|| "smara_verification_flow".to_string());
@@ -3090,7 +3168,7 @@ async fn run_subagent_delegation(goal: String, role: String, context: Option<Str
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_local_chat_history, load_task_details, decide_local_task, stream_chat, get_runtime_session, cancel_runtime_session, resume_runtime_session, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile, open_file_in_default_app, reveal_file_in_explorer, read_file_preview, inspect_ast_graph, run_test_suite, auto_fix_tests, rollback_refactor_snapshot, get_git_status, get_git_branches, create_git_branch, switch_git_branch, generate_ai_commit_message, commit_git_changes, get_git_log, detect_git_conflicts, resolve_git_conflict, get_file_git_diff, semantic_search, rebuild_semantic_index, scrape_web_page, capture_browser_screenshot, run_browser_e2e, diagnose_browser_ui_component, get_dual_plane_status, sync_dual_plane_memory, query_dual_plane_memory, list_adrs, create_adr, get_coding_conventions, get_symbol_evolution, run_swarm_task, get_swarm_history, get_dynamic_tools, run_dynamic_tool, synthesize_dynamic_tool, run_goal_task, get_goal_sessions, run_deep_research, run_research, generate_pr_draft, publish_pr_branch, run_terminal_command, list_learned_skills, save_learned_skill, delete_learned_skill, run_gaia_benchmark, run_swe_benchmark, get_benchmark_scorecards, open_benchmark_report, list_task_memory, add_task_memory_entry, replace_task_memory_entry, remove_task_memory_entry, search_task_memory, get_memory_snapshot, list_skills_v2, view_skill_v2, create_skill_v2, get_dag_workflow, step_dag_workflow, run_dag_workflow, retry_dag_node, inject_dag_node, get_subagent_roles, run_subagent_delegation])
+        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_local_chat_history, load_task_details, decide_local_task, stream_chat, get_runtime_session, cancel_runtime_session, resume_runtime_session, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile, open_file_in_default_app, reveal_file_in_explorer, read_file_preview, inspect_ast_graph, run_test_suite, auto_fix_tests, rollback_refactor_snapshot, get_git_status, get_git_branches, create_git_branch, switch_git_branch, generate_ai_commit_message, commit_git_changes, get_git_log, detect_git_conflicts, resolve_git_conflict, get_file_git_diff, semantic_search, rebuild_semantic_index, scrape_web_page, capture_browser_screenshot, run_browser_e2e, diagnose_browser_ui_component, get_dual_plane_status, sync_dual_plane_memory, query_dual_plane_memory, list_adrs, create_adr, get_coding_conventions, get_symbol_evolution, run_swarm_task, get_swarm_history, get_dynamic_tools, run_dynamic_tool, synthesize_dynamic_tool, run_goal_task, get_goal_sessions, run_deep_research, run_research, generate_pr_draft, publish_pr_branch, run_terminal_command, list_learned_skills, save_learned_skill, delete_learned_skill, run_gaia_benchmark, run_swe_benchmark, get_benchmark_scorecards, open_benchmark_report, list_task_memory, add_task_memory_entry, replace_task_memory_entry, remove_task_memory_entry, search_task_memory, get_memory_snapshot, list_skills_v2, view_skill_v2, create_skill_v2, skill_lifecycle, validate_skill_v2, promote_skill_v2, revoke_skill_v2, rollback_skill_v2, list_integration_health, begin_integration_oauth, disconnect_integration, get_dag_workflow, step_dag_workflow, run_dag_workflow, retry_dag_node, inject_dag_node, get_subagent_roles, run_subagent_delegation])
         .run(tauri::generate_context!())
         .expect("error while running Smara Desktop");
 }

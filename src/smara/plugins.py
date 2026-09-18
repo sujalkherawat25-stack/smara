@@ -12,6 +12,8 @@ import os
 import time
 import hashlib
 import shutil
+import base64
+import os
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +43,29 @@ class PluginManager:
         tmp = self.state_path.with_suffix(".tmp"); tmp.write_text(json.dumps(state, indent=2), encoding="utf-8"); os.replace(tmp, self.state_path)
 
     @staticmethod
+    def canonical_manifest(value: dict) -> bytes:
+        return json.dumps({key: item for key, item in value.items() if key not in {"signature", "signing_key"}}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    @staticmethod
+    def verify_manifest_signature(value: dict) -> dict[str, Any]:
+        signature = value.get("signature")
+        key_id = str(value.get("signing_key") or "")
+        if not signature and not key_id:
+            return {"status": "unsigned", "key_id": None}
+        if not isinstance(signature, str) or not key_id:
+            return {"status": "invalid", "key_id": key_id or None, "reason": "signature and signing_key must both be present"}
+        try:
+            trust_keys = json.loads(os.getenv("SMARA_PLUGIN_TRUST_KEYS", "{}"))
+            raw_key = trust_keys.get(key_id)
+            if not isinstance(raw_key, str):
+                return {"status": "untrusted", "key_id": key_id, "reason": "signing key is not trusted on this device"}
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+            Ed25519PublicKey.from_public_bytes(base64.urlsafe_b64decode(raw_key + "=" * (-len(raw_key) % 4))).verify(base64.urlsafe_b64decode(signature + "=" * (-len(signature) % 4)), PluginManager.canonical_manifest(value))
+            return {"status": "verified", "key_id": key_id}
+        except Exception as exc:
+            return {"status": "invalid", "key_id": key_id, "reason": str(exc)[:180]}
+
+    @staticmethod
     def validate_manifest(value: Any) -> dict:
         """Validate an inert plugin descriptor before it enters the catalogue."""
         if not isinstance(value, dict):
@@ -62,7 +87,11 @@ class PluginManager:
             from .mcp_client import _remote_url_allowed
             if not _remote_url_allowed(str(endpoint), allow_private=False):
                 raise ValueError("plugin endpoint must be a public HTTPS URL")
-        clean = {key: value[key] for key in ("name", "version", "kind", "tools", "endpoint", "url", "oauth", "description") if key in value}
+        trust = PluginManager.verify_manifest_signature(value)
+        if trust["status"] == "invalid":
+            raise ValueError(f"plugin manifest signature is invalid: {trust.get('reason', 'verification failed')}")
+        clean = {key: value[key] for key in ("name", "version", "kind", "tools", "endpoint", "url", "oauth", "description", "signature", "signing_key") if key in value}
+        clean["trust"] = trust
         clean["enabled"] = False
         return clean
 
@@ -89,7 +118,7 @@ class PluginManager:
         target.mkdir(parents=True, exist_ok=False)
         manifest = target / "plugin.json"
         manifest.write_text(json.dumps(clean, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        state = self._state(); state[clean["name"]] = {"enabled": False, "version": clean["version"], "sha256": self._digest(clean), "status": "installed", "updated_at": time.time(), "history": [{"event": "installed", "at": time.time()}]}; self._save(state)
+        state = self._state(); state[clean["name"]] = {"enabled": False, "version": clean["version"], "sha256": self._digest(clean), "trust": clean["trust"], "status": "installed", "updated_at": time.time(), "history": [{"event": "installed", "at": time.time()}]}; self._save(state)
         return {**clean, "status": "installed", "sha256": self._digest(clean)}
 
     def update(self, name: str, manifest_path: Path | str) -> dict:
@@ -113,7 +142,7 @@ class PluginManager:
         backup.mkdir(exist_ok=True)
         (backup / f"{old.get('version', 'unknown')}-{self._digest(old)[:12]}.json").write_text(json.dumps(old, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         tmp = target / "plugin.json.tmp"; tmp.write_text(json.dumps(clean, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"); os.replace(tmp, target / "plugin.json")
-        state = self._state(); row = state.setdefault(name, {}); row.update({"version": clean["version"], "sha256": self._digest(clean), "status": "updated", "updated_at": time.time()}); row.setdefault("history", []).append({"event": "updated", "from": old.get("version"), "to": clean["version"], "at": time.time()}); self._save(state)
+        state = self._state(); row = state.setdefault(name, {}); row.update({"version": clean["version"], "sha256": self._digest(clean), "trust": clean["trust"], "status": "updated", "updated_at": time.time()}); row.setdefault("history", []).append({"event": "updated", "from": old.get("version"), "to": clean["version"], "at": time.time()}); self._save(state)
         return {**clean, "status": "updated", "sha256": self._digest(clean)}
 
     def rollback(self, name: str, version: str) -> dict:
@@ -126,7 +155,7 @@ class PluginManager:
         previous = json.loads(choices[-1].read_text(encoding="utf-8"))
         clean = self.validate_manifest(previous)
         tmp = target / "plugin.json.tmp"; tmp.write_text(json.dumps(clean, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"); os.replace(tmp, target / "plugin.json")
-        state = self._state(); row = state.setdefault(name, {}); row.update({"version": version, "sha256": self._digest(clean), "status": "rolled_back", "updated_at": time.time()}); row.setdefault("history", []).append({"event": "rolled_back", "to": version, "at": time.time()}); self._save(state)
+        state = self._state(); row = state.setdefault(name, {}); row.update({"version": version, "sha256": self._digest(clean), "trust": clean["trust"], "status": "rolled_back", "updated_at": time.time()}); row.setdefault("history", []).append({"event": "rolled_back", "to": version, "at": time.time()}); self._save(state)
         return {**clean, "status": "rolled_back", "sha256": self._digest(clean)}
 
     def discover(self) -> list[dict]:
@@ -141,14 +170,18 @@ class PluginManager:
         states = self._state()
         for row in found.values():
             persisted = states.get(row["name"], {})
+            manifest = {key: value for key, value in row.items() if key not in {"source_path", "enabled", "lifecycle", "sha256", "trust"}}
             row["enabled"] = bool(persisted.get("enabled", row.get("enabled", False)))
             row["lifecycle"] = persisted.get("status", "discovered")
-            row["sha256"] = persisted.get("sha256", self._digest(self.validate_manifest(row)))
+            row["sha256"] = persisted.get("sha256", self._digest(self.validate_manifest(manifest)))
+            row["trust"] = persisted.get("trust", self.verify_manifest_signature(manifest))
         return sorted(found.values(), key=lambda row: row["name"])
 
     def set_enabled(self, name: str, enabled: bool) -> dict:
         rows = {row["name"]: row for row in self.discover()}
         if name not in rows: raise KeyError(name)
+        if rows[name].get("trust", {}).get("status") in {"invalid", "untrusted"}:
+            raise ValueError("plugin signing key is not trusted on this device")
         state = self._state(); prior = state.get(name, {}); state[name] = {**prior, "enabled": bool(enabled), "status": "enabled" if enabled else "disabled", "updated_at": time.time()}; state[name].setdefault("history", []).append({"event": "enabled" if enabled else "disabled", "at": time.time()}); self._save(state)
         rows[name]["enabled"] = bool(enabled); return rows[name]
 

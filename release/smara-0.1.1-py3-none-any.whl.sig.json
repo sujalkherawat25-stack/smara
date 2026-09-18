@@ -1,0 +1,8 @@
+{
+  "algorithm": "Ed25519",
+  "artifact": "smara-0.1.1-py3-none-any.whl",
+  "public_key": "V--6OaDXpgoT75LFIHp6-yNFspzzqgT_9imJJFmiT9s",
+  "schema": "smara.release.signature.v1",
+  "sha256": "1528cfb7bd082fae3b3cbd7cdf0f616196a81b6c303f0e45d5e07ef8f093c608",
+  "signature": "f6LBNGN2gt_X7-Leau9Kzexxywjgmho0mN0sUlueyuIhAftxXSmkjlQZmtkrqjosCgdtb4hXex2v65Lvq8y8Bg"
+}

@@ -1,0 +1,8 @@
+{
+  "algorithm": "Ed25519",
+  "artifact": "RELEASE_GATE_0.1.1.json",
+  "public_key": "V--6OaDXpgoT75LFIHp6-yNFspzzqgT_9imJJFmiT9s",
+  "schema": "smara.release.signature.v1",
+  "sha256": "10628d5a9b7e48c401c84b22e5167d53b5abdc74c542c44f585d906e761a59a9",
+  "signature": "_2rMdqkYAtB2vUnn7ByVtu88BbYruSzeZ9ZwulStCWZZ_9VNwqy_b5EybgtftsbQornXUDMHRsyQtML_NjC2CQ"
+}

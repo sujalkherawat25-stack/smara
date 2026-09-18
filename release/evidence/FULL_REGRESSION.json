@@ -1,0 +1,17 @@
+{
+  "command": [
+    "C:\\Users\\sujal\\smara\\.venv\\Scripts\\python.exe",
+    "-m",
+    "pytest",
+    "-q",
+    "--basetemp",
+    ".pytest-tmp/full-regression"
+  ],
+  "content_sha256": "bd30f3aebfbe522c3db808ef606549b73fbb7017b53f3792352bae8edb4aa45a",
+  "duration_seconds": 270.98,
+  "passed": true,
+  "return_code": 0,
+  "schema": "smara.full_regression.v1",
+  "started_at": "2026-09-18T17:35:17.456657+00:00",
+  "summary": "........................................................................ [  7%]\n........................................................................ [ 15%]\n........................................................................ [ 23%]\n........................................................................ [ 31%]\n........................................................................ [ 38%]\n........................................................................ [ 46%]\n........................................................................ [ 54%]\n........................................................................ [ 62%]\n........................................................................ [ 70%]\n........................................................................ [ 77%]\n........................................................................ [ 85%]\n........................................................................ [ 93%]\n.............................................................            [100%]\n============================== warnings summary ===============================\ntests/test_native_auth.py::test_native_session_is_revocable\n  C:\\Users\\sujal\\smara\\.venv\\Lib\\site-packages\\jwt\\api_jwt.py:147: InsecureKeyLengthWarning: The HMAC key is 16 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.\n    return self._jws.encode(\n\ntests/test_native_auth.py::test_native_session_is_revocable\n  C:\\Users\\sujal\\smara\\.venv\\Lib\\site-packages\\jwt\\api_jwt.py:368: InsecureKeyLengthWarning: The HMAC key is 16 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.\n    decoded = self.decode_complete(\n\n.venv\\Lib\\site-packages\\_pytest\\cacheprovider.py:475\n  C:\\Users\\sujal\\smara\\.venv\\Lib\\site-packages\\_pytest\\cacheprovider.py:475: PytestCacheWarning: could not create cache path C:\\Users\\sujal\\smara\\.pytest_cache\\v\\cache\\nodeids: [WinError 183] Cannot create a file when that file already exists: 'C:\\\\Users\\\\sujal\\\\smara\\\\.pytest_cache\\\\v\\\\cache'\n    config.cache.set(\"cache/nodeids\", sorted(self.cached_nodeids))\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n925 passed, 3 warnings in 267.95s (0:04:27)"
+}

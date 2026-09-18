@@ -313,6 +313,7 @@ export default function App() {
   const [connection, setConnection] = useState<ConnectionState>(fallbackConnection);
   const [credentials, setCredentials] = useState<LocalCredentialSummary[]>([]);
   const [connectors, setConnectors] = useState<LocalConnectorSummary[]>([]);
+  const [integrationHealth, setIntegrationHealth] = useState<any>({ plugins: [], plugin_health: [], mcp_health: [] });
   const [modelProfiles, setModelProfiles] = useState<LocalModelProfile[]>([]);
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -356,16 +357,18 @@ export default function App() {
     try {
       const conn = await desktop.connection();
       setConnection(conn);
-      const [creds, conns, models, tList] = await Promise.all([
+      const [creds, conns, models, tList, health] = await Promise.all([
         desktop.credentials().catch(() => []),
         desktop.connectors().catch(() => []),
         desktop.modelProfiles().catch(() => []),
         desktop.tasks().catch(() => []),
+        desktop.integrationHealth().catch(() => ({ plugins: [], plugin_health: [], mcp_health: [] })),
       ]);
       setCredentials(creds);
       setConnectors(conns);
       setModelProfiles(models);
       setTasks(tList);
+      setIntegrationHealth(health || { plugins: [], plugin_health: [], mcp_health: [] });
       setSelectedProfileId((current) => current === "auto" ? (conn.model_profile.startsWith("local:") ? conn.model_profile.slice("local:".length) : "auto") : current);
     } catch {
       setConnection(fallbackConnection);
@@ -966,6 +969,7 @@ export default function App() {
             <IntegrationsTab
               credentials={credentials}
               connectors={connectors}
+              health={integrationHealth}
               onSaveKey={async (name, provider, secret) => {
                 const res = await desktop.saveCredential(name, provider, secret);
                 setCredentials(res);
@@ -4008,11 +4012,13 @@ const TOOL_KEY_PRESETS = [
 function IntegrationsTab({
   credentials,
   connectors,
+  health,
   onSaveKey,
   onDeleteKey,
 }: {
   credentials: LocalCredentialSummary[];
   connectors: LocalConnectorSummary[];
+  health: any;
   onSaveKey: (name: string, provider: string, secret: string) => Promise<void>;
   onDeleteKey: (name: string) => Promise<void>;
 }) {
@@ -4105,6 +4111,27 @@ function IntegrationsTab({
               <div><strong>{connector.provider}</strong><span>{connector.operation} · {connector.credential_configured ? "ready" : "needs key"}</span></div>
             </div>
           ))}
+        </div>
+      </section>
+
+      <section className="config-card connector-readiness-card">
+        <div className="section-kicker">REMOTE INTEGRATIONS</div>
+        <h3>MCP and OAuth health</h3>
+        <p className="card-subtext">Health probes only initialize MCP and enumerate tools; they never execute an external action.</p>
+        <div className="connector-readiness-grid">
+          {(health?.mcp_health || []).length === 0 && (health?.plugin_health || []).length === 0 ? (
+            <div className="empty-subtext">No remote MCP or installed plugin is configured.</div>
+          ) : <>
+            {(health?.mcp_health || []).map((item: any) => <div className="connector-readiness-item" key={`mcp-${item.name}`}><span className={`provider-key-dot ${item.status === "healthy" ? "ready" : "missing"}`} /><div><strong>MCP · {item.name}</strong><span>{item.status} · {item.tool_count ?? 0} tools</span></div></div>)}
+            {(health?.plugin_health || []).map((item: any) => <div className="connector-readiness-item" key={`plugin-${item.name}`}><span className={`provider-key-dot ${item.status === "healthy" ? "ready" : "missing"}`} /><div><strong>Plugin · {item.name}</strong><span>{item.status} · {item.tool_count ?? 0} tools</span></div></div>)}
+          </>}
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "12px" }}>
+          {(["gmail", "calendar", "drive", "github"] as const).map((provider) => <div key={provider} style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+            <span style={{ fontSize: "11px", color: "var(--text-subtle)" }}>{provider}</span>
+            <button className="filter-pill" type="button" onClick={() => void desktop.beginIntegrationOAuth(provider).catch((error) => setNotice(`OAuth connect failed: ${error?.message || String(error)}`))}>Connect / reconnect</button>
+            <button className="filter-pill" type="button" onClick={() => void desktop.disconnectIntegration(provider).then(() => setNotice(`${provider} disconnected.`)).catch((error) => setNotice(`Disconnect failed: ${error?.message || String(error)}`))}>Disconnect</button>
+          </div>)}
         </div>
       </section>
     </div>

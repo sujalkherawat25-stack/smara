@@ -1,0 +1,121 @@
+{
+  "artifact_hashes": {
+    "built_executor": "56c00ef8fbb1c257d494445fe29514b762f93bec8f3170c80365a7d9dccd5645",
+    "installed_executor": "56c00ef8fbb1c257d494445fe29514b762f93bec8f3170c80365a7d9dccd5645",
+    "installed_shell": "78df89911234e16656fb0920156ae2d7115233c3635bae170fb06f5438088ee0",
+    "wheel": "1528cfb7bd082fae3b3cbd7cdf0f616196a81b6c303f0e45d5e07ef8f093c608"
+  },
+  "checks": [
+    {
+      "command": [
+        "C:\\Program Files\\nodejs\\npm.cmd",
+        "run",
+        "build"
+      ],
+      "cwd": "C:\\Users\\sujal\\smara\\apps\\desktop",
+      "passed": true,
+      "return_code": 0,
+      "stderr_tail": "",
+      "stdout_tail": "\n> @smara/desktop@0.1.1 build\n> tsc && vite build --configLoader runner\n\nvite v6.4.3 building for production...\ntransforming...\n\u2713 35 modules transformed.\nrendering chunks...\ncomputing gzip size...\ndist/index.html                   0.45 kB \u2502 gzip:  0.29 kB\ndist/assets/index-wXvWNHQ1.css   86.20 kB \u2502 gzip: 14.65 kB\ndist/assets/index-CtPBZlYT.js   325.77 kB \u2502 gzip: 91.05 kB\n\u2713 built in 872ms\n"
+    },
+    {
+      "command": [
+        "C:\\Users\\sujal\\.cargo\\bin\\cargo.exe",
+        "check"
+      ],
+      "cwd": "C:\\Users\\sujal\\smara\\apps\\desktop\\src-tauri",
+      "passed": true,
+      "return_code": 0,
+      "stderr_tail": "warn: could not canonicalize path C:\\Users\\sujal\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.60s\n",
+      "stdout_tail": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\sujal\\smara\\.venv\\Scripts\\smara.exe",
+        "--version"
+      ],
+      "cwd": "C:\\Users\\sujal\\smara",
+      "passed": true,
+      "return_code": 0,
+      "stderr_tail": "",
+      "stdout_tail": "smara 0.1.1\n"
+    },
+    {
+      "command": [
+        "C:\\Users\\sujal\\smara\\.venv\\Scripts\\smara.exe",
+        "--workspace",
+        "C:\\Users\\sujal\\smara",
+        "skills",
+        "list"
+      ],
+      "cwd": "C:\\Users\\sujal\\smara",
+      "passed": true,
+      "return_code": 0,
+      "stderr_tail": "",
+      "stdout_tail": "{\n  \"skills\": [\n    {\n      \"name\": \"gaia-multimodal-reasoning\",\n      \"description\": \"Official GAIA benchmark multi-hop reasoning, table and audio analysis with 100% precision\",\n      \"version\": \"1.0.0\",\n      \"tags\": [\n        \"gaia\",\n        \"multimodal\",\n        \"reasoning\",\n        \"tables\"\n      ],\n      \"platforms\": [],\n      \"source\": \"workspace\",\n      \"skill_dir\": \"C:\\\\Users\\\\sujal\\\\smara\\\\.smara\\\\skills\\\\gaia-multimodal-reasoning\",\n      \"lifecycle\": \"promoted\"\n    },\n    {\n      \"name\": \"multilang_ast_blast_radius\",\n      \"description\": \"Cross-referencing changed files with AST Code Property Graph across Python, TS, and Rust.\",\n      \"version\": \"1.0.0\",\n      \"tags\": [\n        \"blast radius\",\n        \"code graph\",\n        \"impact analysis\",\n        \"dependencies\",\n        \"ast audit\"\n      ],\n      \"platforms\": [],\n      \"source\": \"workspace\",\n      \"skill_dir\": \"C:\\\\Users\\\\sujal\\\\smara\\\\.smara\\\\skills\",\n      \"lifecycle\": \"promoted\"\n    },\n    {\n      \"name\": \"pytest_self_healing\",\n      \"description\": \"Autonomous test execution with traceback parsing and precision patch healing.\",\n      \"version\": \"1.0.0\",\n      \"tags\": [\n        \"pytest\",\n        \"broken tests\",\n        \"self healing\",\n        \"test fixer\",\n        \"heal test\"\n      ],\n      \"platforms\": [],\n      \"source\": \"workspace\",\n      \"skill_dir\": \"C:\\\\Users\\\\sujal\\\\smara\\\\.smara\\\\skills\",\n      \"lifecycle\": \"promoted\"\n    },\n    {\n      \"name\": \"tauri_desktop_build\",\n      \"description\": \"Procedure for building and packaging native Tauri desktop binaries on Windows.\",\n      \"version\": \"1.0.0\",\n      \"tags\": [\n        \"tauri\",\n        \"desktop build\",\n        \"package desktop\",\n        \"release binary\",\n        \"compile tauri\"\n      ],\n      \"platforms\": [],\n      \"source\": \"workspace\",\n      \"skill_dir\": \"C:\\\\Users\\\\sujal\\\\smara\\\\.smara\\\\skills\",\n      \"lifecycle\": \"promoted\"\n    }\n  ],\n  \"promotions\": []\n}\n"
+    },
+    {
+      "command": [
+        "C:\\Users\\sujal\\smara\\.venv\\Scripts\\smara.exe",
+        "skills",
+        "--help"
+      ],
+      "cwd": "C:\\Users\\sujal\\smara",
+      "passed": true,
+      "return_code": 0,
+      "stderr_tail": "",
+      "stdout_tail": "usage: smara skills [-h]\n                    {list,view,promote,revoke,validate,rollback,reuse-check} ...\n\npositional arguments:\n  {list,view,promote,revoke,validate,rollback,reuse-check}\n    validate            validate a versioned playbook without running it\n    rollback            restore a previously promoted skill version\n    reuse-check         show whether automatic reuse is safe\n\noptions:\n  -h, --help            show this help message and exit\n"
+    },
+    {
+      "command": [
+        "C:\\Users\\sujal\\smara\\.venv\\Scripts\\smara.exe",
+        "plugins",
+        "--help"
+      ],
+      "cwd": "C:\\Users\\sujal\\smara",
+      "passed": true,
+      "return_code": 0,
+      "stderr_tail": "",
+      "stdout_tail": "usage: smara plugins [-h]\n                     {list,enable,disable,remove,install,update,rollback,health} ...\n\npositional arguments:\n  {list,enable,disable,remove,install,update,rollback,health}\n    install             install a declarative local plugin manifest\n    update              validate and atomically update a local plugin\n    rollback            restore a retained plugin manifest version\n    health              run non-mutating connector/MCP health probes\n\noptions:\n  -h, --help            show this help message and exit\n"
+    },
+    {
+      "command": [
+        "C:\\Users\\sujal\\AppData\\Local\\Smara Desktop\\resources\\smara-desktop.exe",
+        "--skills"
+      ],
+      "cwd": "C:\\Users\\sujal\\smara",
+      "passed": true,
+      "return_code": 0,
+      "skill_count": 14,
+      "stderr_tail": "",
+      "stdout_tail": "unded and credential values are redacted.\"\n  },\n  {\n    \"capability\": \"local_calculate\",\n    \"description\": \"Perform exact mathematical and scientific calculations.\",\n    \"input_schema\": {\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    },\n    \"approval\": \"task\",\n    \"timeout_seconds\": 10,\n    \"max_output_bytes\": 16000,\n    \"max_artifact_bytes\": 8388608,\n    \"side_effecting\": false,\n    \"idempotency_required\": true,\n    \"result_schema\": {\n      \"type\": \"object\",\n      \"required\": [\n        \"action\"\n      ]\n    },\n    \"artifact_schema\": {},\n    \"redaction\": \"Secrets are never returned; local output is bounded and credential values are redacted.\"\n  },\n  {\n    \"capability\": \"local_semantic_search\",\n    \"description\": \"Query local offline SQLite code index or cross-session FTS5 conversation memory.\",\n    \"input_schema\": {\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    },\n    \"approval\": \"task\",\n    \"timeout_seconds\": 15,\n    \"max_output_bytes\": 64000,\n    \"max_artifact_bytes\": 8388608,\n    \"side_effecting\": false,\n    \"idempotency_required\": true,\n    \"result_schema\": {\n      \"type\": \"object\",\n      \"required\": [\n        \"action\"\n      ]\n    },\n    \"artifact_schema\": {},\n    \"redaction\": \"Secrets are never returned; local output is bounded and credential values are redacted.\"\n  },\n  {\n    \"capability\": \"local_git\",\n    \"description\": \"Perform safe Git operations (status, log, smart conventional commit, branch switching).\",\n    \"input_schema\": {\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    },\n    \"approval\": \"task\",\n    \"timeout_seconds\": 30,\n    \"max_output_bytes\": 64000,\n    \"max_artifact_bytes\": 8388608,\n    \"side_effecting\": true,\n    \"idempotency_required\": true,\n    \"result_schema\": {\n      \"type\": \"object\",\n      \"required\": [\n        \"action\",\n        \"operation\"\n      ]\n    },\n    \"artifact_schema\": {},\n    \"redaction\": \"Secrets are never returned; local output is bounded and credential values are redacted.\"\n  },\n  {\n    \"capability\": \"local_refactor\",\n    \"description\": \"Autonomous multi-file refactoring with pre-change backup snapshots and atomic rollback.\",\n    \"input_schema\": {\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    },\n    \"approval\": \"task\",\n    \"timeout_seconds\": 60,\n    \"max_output_bytes\": 64000,\n    \"max_artifact_bytes\": 8388608,\n    \"side_effecting\": true,\n    \"idempotency_required\": true,\n    \"result_schema\": {\n      \"type\": \"object\",\n      \"required\": [\n        \"action\",\n        \"operation\"\n      ]\n    },\n    \"artifact_schema\": {},\n    \"redaction\": \"Secrets are never returned; local output is bounded and credential values are redacted.\"\n  },\n  {\n    \"capability\": \"local_test_fixer\",\n    \"description\": \"Run pytest test suites and autonomously heal broken test failures.\",\n    \"input_schema\": {\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    },\n    \"approval\": \"task\",\n    \"timeout_seconds\": 60,\n    \"max_output_bytes\": 64000,\n    \"max_artifact_bytes\": 8388608,\n    \"side_effecting\": true,\n    \"idempotency_required\": true,\n    \"result_schema\": {\n      \"type\": \"object\",\n      \"required\": [\n        \"action\",\n        \"operation\"\n      ]\n    },\n    \"artifact_schema\": {},\n    \"redaction\": \"Secrets are never returned; local output is bounded and credential values are redacted.\"\n  },\n  {\n    \"capability\": \"sandbox_execute\",\n    \"description\": \"Execute commands inside an isolated ephemeral micro-sandbox container.\",\n    \"input_schema\": {\n      \"type\": \"object\",\n      \"additionalProperties\": false\n    },\n    \"approval\": \"task\",\n    \"timeout_seconds\": 120,\n    \"max_output_bytes\": 64000,\n    \"max_artifact_bytes\": 8388608,\n    \"side_effecting\": true,\n    \"idempotency_required\": true,\n    \"result_schema\": {\n      \"type\": \"object\",\n      \"required\": [\n        \"action\",\n        \"isolated\"\n      ]\n    },\n    \"artifact_schema\": {},\n    \"redaction\": \"Secrets are never returned; local output is bounded and credential values are redacted.\"\n  }\n]\n"
+    }
+  ],
+  "full_regression": {
+    "evidence": "C:\\Users\\sujal\\smara\\release\\evidence\\FULL_REGRESSION.json",
+    "passed": true,
+    "summary": "........................................................................ [  7%]\n........................................................................ [ 15%]\n........................................................................ [ 23%]\n........................................................................ [ 31%]\n........................................................................ [ 38%]\n........................................................................ [ 46%]\n........................................................................ [ 54%]\n........................................................................ [ 62%]\n........................................................................ [ 70%]\n........................................................................ [ 77%]\n........................................................................ [ 85%]\n........................................................................ [ 93%]\n.............................................................            [100%]\n============================== warnings summary ===============================\ntests/test_native_auth.py::test_native_session_is_revocable\n  C:\\Users\\sujal\\smara\\.venv\\Lib\\site-packages\\jwt\\api_jwt.py:147: InsecureKeyLengthWarning: The HMAC key is 16 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.\n    return self._jws.encode(\n\ntests/test_native_auth.py::test_native_session_is_revocable\n  C:\\Users\\sujal\\smara\\.venv\\Lib\\site-packages\\jwt\\api_jwt.py:368: InsecureKeyLengthWarning: The HMAC key is 16 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.\n    decoded = self.decode_complete(\n\n.venv\\Lib\\site-packages\\_pytest\\cacheprovider.py:475\n  C:\\Users\\sujal\\smara\\.venv\\Lib\\site-packages\\_pytest\\cacheprovider.py:475: PytestCacheWarning: could not create cache path C:\\Users\\sujal\\smara\\.pytest_cache\\v\\cache\\nodeids: [WinError 183] Cannot create a file when that file already exists: 'C:\\\\Users\\\\sujal\\\\smara\\\\.pytest_cache\\\\v\\\\cache'\n    config.cache.set(\"cache/nodeids\", sorted(self.cached_nodeids))\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n925 passed, 3 warnings in 267.95s (0:04:27)"
+  },
+  "integration_acceptance": {
+    "evidence": "C:\\Users\\sujal\\smara\\release\\evidence\\INTEGRATION_ACCEPTANCE.json",
+    "passed": true
+  },
+  "passed": true,
+  "schema": "smara.release_gate.v1",
+  "started_at": "2026-09-18T17:41:02.289177+00:00",
+  "version": "0.1.1",
+  "version_consistency": {
+    "passed": true,
+    "values": {
+      "desktop_package": "0.1.1",
+      "release": "0.1.1",
+      "tauri_cargo": "0.1.1",
+      "wheel": "0.1.1"
+    }
+  },
+  "wheel_signature": {
+    "sha256": "1528cfb7bd082fae3b3cbd7cdf0f616196a81b6c303f0e45d5e07ef8f093c608",
+    "signature": "C:\\Users\\sujal\\smara\\release\\smara-0.1.1-py3-none-any.whl.sig.json",
+    "verified": true
+  }
+}

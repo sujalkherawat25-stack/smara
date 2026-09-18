@@ -1,0 +1,36 @@
+{
+  "boundaries": {
+    "connector_health_recovery": true,
+    "credential_expiry_refresh": true,
+    "pkce_oauth_exchange": true,
+    "plugin_lifecycle": true,
+    "remote_mcp_discovery_and_call": true,
+    "skill_promotion_reuse_rollback": true
+  },
+  "command": [
+    "C:\\Users\\sujal\\smara\\.venv\\Scripts\\python.exe",
+    "-m",
+    "pytest",
+    "tests/test_integration_acceptance_gate.py",
+    "tests/test_production_skills_and_plugins.py",
+    "tests/test_skill_lifecycle.py",
+    "tests/test_mcp_client.py",
+    "tests/test_plugins.py",
+    "-q"
+  ],
+  "content_sha256": "f9bcfbcd122aa2a7e4825e3b12e7e40a724d19b5738082c90c2eb21677a8e723",
+  "finished_at": "2026-09-18T17:02:35.914556+00:00",
+  "passed": true,
+  "return_code": 0,
+  "run_id": "integration_5a52fea73da747f2ad05929fd0c6e6af",
+  "schema": "smara.integration_acceptance.v1",
+  "started_at": "2026-09-18T17:02:32.438555+00:00",
+  "summary": ".....................                                                    [100%]\n21 passed in 2.25s",
+  "tests": [
+    "tests/test_integration_acceptance_gate.py",
+    "tests/test_production_skills_and_plugins.py",
+    "tests/test_skill_lifecycle.py",
+    "tests/test_mcp_client.py",
+    "tests/test_plugins.py"
+  ]
+}

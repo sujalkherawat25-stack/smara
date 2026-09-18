@@ -88,6 +88,33 @@ def test_plugin_rejects_non_https_or_non_semver(tmp_path: Path):
         manager.install(bad)
 
 
+def test_plugin_signature_verification_and_untrusted_enable(tmp_path: Path, monkeypatch):
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from smara.plugins import PluginManager
+
+    key = Ed25519PrivateKey.generate()
+    public = key.public_key().public_bytes_raw()
+    value = _manifest("signed", "1.0.0")
+    value["signing_key"] = "fixture-key"
+    value["signature"] = base64.urlsafe_b64encode(key.sign(PluginManager.canonical_manifest(value))).decode().rstrip("=")
+    path = tmp_path / "signed.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+    monkeypatch.setenv("SMARA_PLUGIN_TRUST_KEYS", json.dumps({"fixture-key": base64.urlsafe_b64encode(public).decode().rstrip("=")}))
+    manager = PluginManager(tmp_path)
+    assert manager.install(path)["trust"]["status"] == "verified"
+    assert manager.set_enabled("signed", True)["enabled"] is True
+
+    monkeypatch.setenv("SMARA_PLUGIN_TRUST_KEYS", "{}")
+    other = tmp_path / "other.json"
+    value["name"] = "other"
+    value["signature"] = base64.urlsafe_b64encode(key.sign(PluginManager.canonical_manifest(value))).decode().rstrip("=")
+    other.write_text(json.dumps(value), encoding="utf-8")
+    manager.install(other)
+    with pytest.raises(ValueError, match="not trusted"):
+        manager.set_enabled("other", True)
+
+
 def test_remote_mcp_rejects_private_ip_literals():
     assert _remote_url_allowed("https://203.0.113.20/mcp") is False
     assert _remote_url_allowed("https://10.0.0.7/mcp") is False

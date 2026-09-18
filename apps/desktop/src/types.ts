@@ -421,6 +421,7 @@ export interface ProgressiveSkillItem {
   source: string;
   skill_dir: string;
   lifecycle?: "candidate" | "quarantined" | "promoted" | "rejected" | "revoked" | "superseded";
+  automatic_reuse?: boolean;
 }
 
 export interface ProgressiveSkillDetail {

@@ -857,7 +857,9 @@ def _client(args: argparse.Namespace) -> httpx.Client:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from .version import __version__
     parser = argparse.ArgumentParser(prog="smara", description="Smara Autonomous Developer CLI")
+    parser.add_argument("--version", action="version", version=f"smara {__version__}")
     parser.add_argument("--api", default=os.getenv("SMARA_API_URL", "http://127.0.0.1:8080"))
     parser.add_argument("--token", default=os.getenv("SMARA_TOKEN", ""), help="Smara bearer token")
     parser.add_argument("--dev-account", default=os.getenv("SMARA_DEV_ACCOUNT", ""), help="development only")

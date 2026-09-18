@@ -23,9 +23,9 @@ reports/osworld_readiness.json
 /*.pdb
 *.apk
 dist/
+release/keys/*.private
 artifacts/
 .pytest_tmp/
 pytest-tmp/
 scratch/
 .worktrees/
-

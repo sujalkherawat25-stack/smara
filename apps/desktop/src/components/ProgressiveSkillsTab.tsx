@@ -17,13 +17,17 @@ export function ProgressiveSkillsTab({ onSetNotice }: { onSetNotice: (msg: strin
   const [newDesc, setNewDesc] = useState("");
   const [newTags, setNewTags] = useState("");
   const [newInstructions, setNewInstructions] = useState("");
+  const [lifecycleRows, setLifecycleRows] = useState<any[]>([]);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const [rollbackVersion, setRollbackVersion] = useState("");
 
   const refreshSkills = async () => {
     setLoading(true);
     try {
       if (isNativeDesktop) {
-        const data = await desktop.listSkillsV2();
+        const [data, lifecycle] = await Promise.all([desktop.listSkillsV2(), desktop.skillLifecycle().catch(() => [])]);
         setSkills(data || []);
+        setLifecycleRows(lifecycle || []);
         if (data && data.length > 0 && !selectedSkillName) {
           void loadSkillDetail(data[0].name);
         }
@@ -34,6 +38,29 @@ export function ProgressiveSkillsTab({ onSetNotice }: { onSetNotice: (msg: strin
       onSetNotice(`Error listing skills: ${err?.message || String(err)}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const selectedLifecycle = lifecycleRows.find((row) => row.name === selectedSkillName);
+  const runLifecycle = async (action: "validate" | "promote" | "revoke" | "rollback") => {
+    if (!selectedSkillName) return;
+    setLifecycleBusy(true);
+    try {
+      const version = skillDetail?.metadata?.version || undefined;
+      if (action === "validate") await desktop.validateSkillV2(selectedSkillName, version);
+      if (action === "promote") await desktop.promoteSkillV2(selectedSkillName, version);
+      if (action === "revoke") await desktop.revokeSkillV2(selectedSkillName, version);
+      if (action === "rollback") {
+        if (!rollbackVersion) throw new Error("Choose a retained version to roll back to.");
+        await desktop.rollbackSkillV2(selectedSkillName, rollbackVersion);
+      }
+      onSetNotice(`Skill ${selectedSkillName} ${action} completed.`);
+      await refreshSkills();
+      await loadSkillDetail(selectedSkillName);
+    } catch (err: any) {
+      onSetNotice(`Skill ${action} failed: ${err?.message || String(err)}`);
+    } finally {
+      setLifecycleBusy(false);
     }
   };
 
@@ -271,6 +298,25 @@ export function ProgressiveSkillsTab({ onSetNotice }: { onSetNotice: (msg: strin
                 >
                   ⚡ Use in Session
                 </button>
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", padding: "10px", background: "rgba(15, 23, 42, .6)", border: "1px solid #30363d", borderRadius: "8px" }}>
+                <span style={{ fontSize: "11px", color: selectedLifecycle?.state === "promoted" ? "#34d399" : "#fbbf24" }}>
+                  Lifecycle: <strong>{selectedLifecycle?.state || "unreviewed"}</strong>
+                </span>
+                <button type="button" className="filter-pill" disabled={lifecycleBusy} onClick={() => void runLifecycle("validate")}>Validate</button>
+                <button type="button" className="filter-pill" disabled={lifecycleBusy} onClick={() => void runLifecycle("promote")}>Promote</button>
+                <button type="button" className="filter-pill" disabled={lifecycleBusy} onClick={() => void runLifecycle("revoke")}>Revoke</button>
+                {(selectedLifecycle?.versions || []).length > 1 && <>
+                  <select value={rollbackVersion} onChange={(event) => setRollbackVersion(event.target.value)} aria-label="Rollback skill version">
+                    <option value="">Rollback version…</option>
+                    {(selectedLifecycle.versions || []).map((version: string) => <option key={version} value={version}>{version}</option>)}
+                  </select>
+                  <button type="button" className="filter-pill" disabled={lifecycleBusy || !rollbackVersion} onClick={() => void runLifecycle("rollback")}>Rollback</button>
+                </>}
+                {selectedLifecycle?.validation && <span style={{ width: "100%", fontSize: "10px", color: selectedLifecycle.validation.passed ? "#86efac" : "#fca5a5" }}>
+                  Validation: {selectedLifecycle.validation.passed ? "passed" : (selectedLifecycle.validation.failures || []).join(", ")}
+                </span>}
               </div>
 
               {/* Tier 2 / 3 Navigation Bar */}

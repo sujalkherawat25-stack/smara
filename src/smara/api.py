@@ -70,7 +70,9 @@ async def lifespan(app: FastAPI):
             await resources.aclose()
 
 
-app = FastAPI(title="Smara Control Plane", version="0.1.0", lifespan=lifespan)
+from .version import __version__
+
+app = FastAPI(title="Smara Control Plane", version=__version__, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()],
@@ -1289,6 +1291,13 @@ async def list_integrations(user: str = Depends(account_id)):
     if not settings.hosted_user_integrations_enabled:
         return {"integrations": [], "mode": "local-only"}
     return {"integrations": store.integrations(user), "mode": "hosted"}
+
+@app.delete("/v1/integrations/{provider}")
+async def disconnect_integration(provider: str, user: str = Depends(account_id)):
+    _require_hosted_user_integrations()
+    if provider not in {"gmail", "calendar", "telegram", "github", "drive"}:
+        raise HTTPException(404, "Unknown integration provider.")
+    return {"ok": store.disconnect_integration(user, provider), "provider": provider, "status": "disconnected"}
 
 @app.post("/v1/integration-actions", status_code=201)
 async def request_integration_action(body: IntegrationActionCreate, background: BackgroundTasks, user: str = Depends(account_id)):

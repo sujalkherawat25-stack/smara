@@ -132,6 +132,14 @@ export const desktop = {
     invoke<ProgressiveSkillDetail>("view_skill_v2", { skillName, relativePath: relativePath || null }),
   createSkillV2: (name: string, description: string, tags: string[], instructions: string) =>
     invoke<any>("create_skill_v2", { name, description, tags, instructions }),
+  skillLifecycle: () => invoke<any[]>("skill_lifecycle"),
+  validateSkillV2: (name: string, version?: string) => invoke<any>("validate_skill_v2", { name, version: version || null }),
+  promoteSkillV2: (name: string, version?: string) => invoke<any>("promote_skill_v2", { name, version: version || null }),
+  revokeSkillV2: (name: string, version?: string) => invoke<any>("revoke_skill_v2", { name, version: version || null }),
+  rollbackSkillV2: (name: string, version: string) => invoke<any>("rollback_skill_v2", { name, version }),
+  integrationHealth: () => invoke<any>("list_integration_health"),
+  beginIntegrationOAuth: (provider: string) => invoke<any>("begin_integration_oauth", { provider }),
+  disconnectIntegration: (provider: string) => invoke<any>("disconnect_integration", { provider }),
   // Interactive DAG Flow
   getDagWorkflow: (workflowId?: string) => invoke<DAGWorkflowData>("get_dag_workflow", { workflowId: workflowId || null }),
   stepDagWorkflow: (workflowData: DAGWorkflowData) => invoke<DAGWorkflowData>("step_dag_workflow", { workflowData }),
