@@ -12,6 +12,7 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
+from typing import Any
 from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -46,6 +47,7 @@ from .work_signals import wait_for_signal, WorkSignalBus
 from .workspace_contract import validate_workspace_job, workspace_job_summary
 from .skill_protocol import draft_skill_from_workflow, validate_skill_manifest
 from .profile_memory import explicit_profile_facts, profile_context, profile_summary
+from .runtime_session import SQLiteRuntimeSessionStore
 
 LOG = logging.getLogger("smara.api")
 configure_sentry(settings.sentry_dsn)
@@ -82,8 +84,25 @@ async_store = AsyncStoreFacade(store)  # fallback for direct/unit callers outsid
 configure_admin(store, account_store)
 app.include_router(admin_router)
 attachment_store = AttachmentStore(Path(settings.database_path or "./data/smara.db").parent / "attachments")
+_runtime_session_path = Path(settings.database_path or "./data/smara.db")
+if str(settings.database_path or "") == ":memory:":
+    _runtime_session_path = Path("./data/smara.db")
+runtime_session_store = SQLiteRuntimeSessionStore(_runtime_session_path.with_name("runtime-sessions.sqlite3"))
 limiter = RedisFixedWindowLimiter(settings.redis_url, settings.rate_limit_per_minute, allow_local_fallback=settings.dev_mode)
 MEMORY_WRITE_TIMEOUT_SECONDS = 8.0
+
+
+def _runtime_session_started(*, conversation_id: str, body: ChatRequest, user: str) -> None:
+    runtime_session_store.create_or_get(conversation_id, request=body.message, workspace_id=body.workspace_id,
+                                        account_id=user, mode="hosted", model_profile=body.model_profile)
+    runtime_session_store.checkpoint(conversation_id, status="running", event="turn.started",
+                                     event_payload={"request": body.message[:500]})
+
+
+def _runtime_session_finished(*, conversation_id: str, body: ChatRequest, status: str, result: dict[str, Any] | None = None, unresolved: list[str] | None = None, error: str | None = None) -> None:
+    payload = {"error": error[:500]} if error else {"conversation_id": conversation_id}
+    runtime_session_store.checkpoint(conversation_id, status=status, result=result or {}, unresolved=unresolved or [],
+                                     event=f"turn.{status}", event_payload=payload)
 def _agent_runtime(model_profile: str | None = None) -> SmaraAgentRuntime:
     """Construct the runtime without importing any MemoryOS implementation."""
     resources = getattr(app.state, "runtime_resources", None)
@@ -719,6 +738,15 @@ async def conversation_turns(conversation_id: str, workspace_id: str = Query(def
         raise HTTPException(404, "Conversation was not found in this account and workspace.") from exc
 
 
+@app.get("/v1/runtime-sessions/{session_id}")
+async def runtime_session(session_id: str, user: str = Depends(account_id)):
+    """Canonical cross-entry-point status/resume envelope."""
+    session = runtime_session_store.get(session_id)
+    if session is None or session.account_id != user:
+        raise HTTPException(404, "Runtime session was not found.")
+    return {"session": session.to_dict(), "events": [event.to_dict() for event in runtime_session_store.events(session_id)]}
+
+
 @app.delete("/v1/conversations/{conversation_id}", status_code=204)
 async def delete_conversation(conversation_id: str, user: str = Depends(account_id)):
     try:
@@ -731,6 +759,7 @@ async def delete_conversation(conversation_id: str, user: str = Depends(account_
 async def chat(body: ChatRequest, user: str = Depends(account_id)):
     """Direct chat with bounded read-only tools; writes remain durable tasks."""
     conversation_id, history, summary = await _conversation(body, user)
+    _runtime_session_started(conversation_id=conversation_id, body=body, user=user)
     # In the default local-only posture personal connectors (for example the
     # GitHub token stored in Desktop) cannot be invoked by the hosted direct
     # chat registry. Route those requests into the durable approval path so
@@ -746,6 +775,7 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
             "append_conversation_exchange",
             conversation_id, user, body.workspace_id, body.message, message, None,
         )
+        _runtime_session_finished(conversation_id=conversation_id, body=body, status="waiting_approval", result={"message": message}, unresolved=["durable task awaiting approval"])
         return ChatResponse(
             conversation_id=conversation_id,
             message=message,
@@ -758,6 +788,7 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
             "append_conversation_exchange",
             conversation_id, user, body.workspace_id, body.message, message, None,
         )
+        _runtime_session_finished(conversation_id=conversation_id, body=body, status="completed", result={"message": message})
         return ChatResponse(conversation_id=conversation_id, message=message, memory_used=True, tools_used=0)
     durable_profile = await _durable_profile_context(account_id=user, workspace_id=body.workspace_id)
     attachment_context = _attachment_context(body, user)
@@ -797,6 +828,7 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
             user_message=body.message,
             assistant_message=turn.message,
         )
+        _runtime_session_finished(conversation_id=conversation_id, body=body, status="completed", result=turn.__dict__)
         return ChatResponse(**turn.__dict__)
     except httpx.HTTPStatusError as exc:
         # Keep non-streaming clients (CLI, integrations, API consumers) on
@@ -806,6 +838,7 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
         kind, message = llm_errors.describe(
             exc, provider=body.model_profile or settings.llm_provider
         )
+        _runtime_session_finished(conversation_id=conversation_id, body=body, status="failed", error=message)
         raise HTTPException(503, message, headers={"X-Smara-Error": kind}) from exc
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc

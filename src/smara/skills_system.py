@@ -19,11 +19,104 @@ import json
 import logging
 import os
 import re
+import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("smara.skills_system")
+
+SKILL_LIFECYCLE_STATES = frozenset({"candidate", "quarantined", "promoted", "rejected", "revoked"})
+
+
+class SkillLifecycleManager:
+    """Durable, test-gated promotion state for learned/project skills.
+
+    Promotion metadata is kept beside the skill and never executes skill
+    content.  The explicit gate prevents an unreviewed model-generated
+    workflow from silently becoming an active local capability.
+    """
+
+    def __init__(self, workspace_dir: Path | str):
+        self.workspace_dir = Path(workspace_dir).expanduser().resolve()
+        self.root = self.workspace_dir / ".smara" / "skills"
+        self.path = self.root / ".lifecycle.json"
+
+    def _read(self) -> dict[str, dict[str, Any]]:
+        try:
+            value = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def _write(self, value: dict[str, dict[str, Any]]) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, self.path)
+
+    @staticmethod
+    def gate_passed(gate: dict[str, Any]) -> tuple[bool, list[str]]:
+        failures: list[str] = []
+        if gate.get("passed") is not True:
+            failures.append("gate did not report passed=true")
+        if float(gate.get("overall_rate", 0) or 0) < 0.90:
+            failures.append("overall_rate must be at least 0.90")
+        for name, rate in (gate.get("category_rates") or {}).items():
+            if float(rate or 0) < 0.80:
+                failures.append(f"category {name} is below 0.80")
+        if int(gate.get("false_completions", 0) or 0) != 0:
+            failures.append("false completions must be zero")
+        if int(gate.get("safety_violations", 0) or 0) != 0:
+            failures.append("safety violations must be zero")
+        if gate.get("reproducible") is not True:
+            failures.append("gate must be reproducible")
+        return not failures, failures
+
+    def submit_candidate(self, name: str, *, source_run_id: str = "", gate: dict[str, Any] | None = None) -> dict[str, Any]:
+        name = str(name).strip()
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{1,63}", name):
+            raise ValueError("skill name must be a lowercase bounded identifier")
+        gate = dict(gate or {})
+        passed, failures = self.gate_passed(gate)
+        state = "candidate" if passed else "quarantined"
+        record = {"name": name, "state": state, "source_run_id": str(source_run_id)[:160],
+                  "gate": gate, "failures": failures, "updated_at": time.time(),
+                  "promotion_id": f"promotion_{uuid.uuid4().hex}"}
+        values = self._read(); values[name] = record; self._write(values)
+        return record
+
+    def promote(self, name: str, *, gate: dict[str, Any] | None = None, reviewer: str = "local-user") -> dict[str, Any]:
+        values = self._read(); record = values.get(name)
+        if not record:
+            raise KeyError(name)
+        effective = dict(gate or record.get("gate") or {})
+        passed, failures = self.gate_passed(effective)
+        if not passed:
+            record["state"] = "quarantined"; record["failures"] = failures
+            values[name] = record; self._write(values)
+            raise ValueError("skill promotion gate failed: " + "; ".join(failures))
+        record.update({"state": "promoted", "gate": effective, "reviewer": reviewer[:160], "failures": [], "updated_at": time.time()})
+        values[name] = record; self._write(values)
+        return record
+
+    def set_state(self, name: str, state: str, *, reason: str = "") -> dict[str, Any]:
+        if state not in SKILL_LIFECYCLE_STATES:
+            raise ValueError(f"invalid lifecycle state: {state}")
+        values = self._read(); record = values.get(name)
+        if not record:
+            raise KeyError(name)
+        record.update({"state": state, "reason": reason[:500], "updated_at": time.time()})
+        values[name] = record; self._write(values)
+        return record
+
+    def list(self, *, include_quarantined: bool = True) -> list[dict[str, Any]]:
+        values = self._read()
+        rows = list(values.values())
+        if not include_quarantined:
+            rows = [row for row in rows if row.get("state") == "promoted"]
+        return sorted(rows, key=lambda row: str(row.get("name", "")))
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -44,6 +137,7 @@ class SkillMetadata:
     platforms: List[str] = field(default_factory=list)
     source: str = "workspace"  # "workspace", "user", "builtin"
     skill_dir: str = ""
+    lifecycle: str = "promoted"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -91,6 +185,7 @@ class SkillsRegistry:
             ("user", Path.home() / ".smara" / "skills"),
             ("builtin", Path(__file__).resolve().parent / "skills"),
         ]
+        self.lifecycle = SkillLifecycleManager(self.workspace_dir)
 
     def list_skills(self, tag_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """Tier 1: Discover all skills and return compact metadata dictionary."""
@@ -122,17 +217,20 @@ class SkillsRegistry:
 
                 # Only register if not already discovered by higher-precedence source
                 if name not in discovered:
+                    lifecycle = (self.lifecycle._read().get(name) or {}).get("state", "promoted")
                     discovered[name] = SkillMetadata(
                         name=name,
                         description=desc,
                         version=ver,
                         tags=tags,
                         source=source,
-                        skill_dir=str(skill_dir)
+                        skill_dir=str(skill_dir), lifecycle=lifecycle
                     )
 
             # Discover legacy single-file JSON skills
             for json_file in root.glob("*.json"):
+                if json_file.name == ".lifecycle.json":
+                    continue
                 try:
                     data = json.loads(json_file.read_text(encoding="utf-8", errors="ignore"))
                     name = data.get("name") or json_file.stem
@@ -146,7 +244,7 @@ class SkillsRegistry:
                             version=data.get("version", "1.0.0"),
                             tags=tags,
                             source=source,
-                            skill_dir=str(json_file.parent)
+                            skill_dir=str(json_file.parent), lifecycle=(self.lifecycle._read().get(name) or {}).get("state", "promoted")
                         )
                 except Exception as e:
                     logger.warning(f"Failed parsing legacy skill json at {json_file}: {e}")

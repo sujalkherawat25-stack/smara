@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import contextlib
 from datetime import date
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,10 +50,12 @@ try:
     from .local_agent import LocalAutonomousAgent, local_skill_catalog
     from .local_conversation_memory import SQLiteConversationMemory
     from .local_learning import LocalSkillLearningEngine, handle_learn_command, is_learn_command
+    from .runtime_session import session_store_for_state
 except ImportError:  # pragma: no cover - exercised by the packaged binary
     from local_agent import LocalAutonomousAgent, local_skill_catalog
     from local_conversation_memory import SQLiteConversationMemory
     from local_learning import LocalSkillLearningEngine, handle_learn_command, is_learn_command
+    from runtime_session import session_store_for_state
 
 
 @dataclass(frozen=True)
@@ -443,6 +446,24 @@ def run_shared_local_turn(
     """
     conversation = str(conversation_id or "local-default")[:240]
     memory = SQLiteConversationMemory.for_state(state_path)
+    # Desktop and CLI share one durable session envelope and event ledger.
+    # The specialised conversation/task stores remain intact, while resume
+    # callers now get one stable id and status contract.
+    runtime_sessions = session_store_for_state(state_path)
+    runtime_sessions.create_or_get(
+        conversation,
+        request=prompt,
+        workspace_id=workspace_id,
+        account_id="local",
+        mode="local",
+        model_profile=config.label,
+    )
+    runtime_sessions.checkpoint(
+        conversation,
+        status="running",
+        event="turn.started",
+        event_payload={"request": prompt[:500]},
+    )
     if is_learn_command(prompt):
         learned = handle_learn_command(
             prompt,
@@ -455,6 +476,15 @@ def run_shared_local_turn(
             workspace_id=workspace_id,
             user_message=prompt,
             assistant_message=str(learned.get("answer") or ""),
+        )
+        learned_status = "completed" if learned.get("completed") else "needs_input"
+        runtime_sessions.checkpoint(
+            conversation,
+            status=learned_status,
+            result=learned,
+            unresolved=[] if learned.get("completed") else [str((learned.get("learning") or {}).get("status") or "learning did not complete")],
+            event="turn.completed" if learned.get("completed") else "turn.needs_input",
+            event_payload={"learning": learned.get("learning") or {}},
         )
         return learned
 
@@ -585,6 +615,28 @@ def run_shared_local_turn(
             pass
         result["local_memory_hits"] = len(memory_hits)
         result["local_memory_indexed"] = True
+        completed = bool(result.get("completed"))
+        unresolved = result.get("unresolved_items")
+        if not isinstance(unresolved, list):
+            unresolved = [] if completed else ["The agent did not mark this turn complete."]
+        runtime_sessions.checkpoint(
+            conversation,
+            status="completed" if completed else "needs_input",
+            result=result,
+            unresolved=[str(item)[:500] for item in unresolved],
+            event="turn.completed" if completed else "turn.needs_input",
+            event_payload={"steps": len(result.get("steps") or []) if isinstance(result.get("steps"), list) else 0},
+        )
         return result
+    except Exception as exc:
+        with contextlib.suppress(Exception):
+            runtime_sessions.checkpoint(
+                conversation,
+                status="failed",
+                unresolved=[str(exc)[:500]],
+                event="turn.failed",
+                event_payload={"error": str(exc)[:500]},
+            )
+        raise
     finally:
         planner.close()

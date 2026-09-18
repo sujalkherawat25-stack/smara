@@ -919,7 +919,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("logout", help="logout and remove token")
     subparsers.add_parser("tools", help="list tools")
-    subparsers.add_parser("plugins", help="list plugins")
+    plugins_cmd = subparsers.add_parser("plugins", help="manage declarative plugins")
+    plugins_sub = plugins_cmd.add_subparsers(dest="plugin_action")
+    plugins_sub.add_parser("list")
+    plugin_enable = plugins_sub.add_parser("enable"); plugin_enable.add_argument("name")
+    plugin_disable = plugins_sub.add_parser("disable"); plugin_disable.add_argument("name")
+    plugin_remove = plugins_sub.add_parser("remove"); plugin_remove.add_argument("name")
     subparsers.add_parser("approvals", help="list tasks awaiting approval")
 
     devices_cmd = subparsers.add_parser("devices", help="list or revoke authorized CLI devices")
@@ -1014,6 +1019,29 @@ def build_parser() -> argparse.ArgumentParser:
     p_ocr.add_argument("--format", default="md", choices=["md", "txt"], help="Output format (default: md)")
     p_ocr.add_argument("--output", "-o", default=None, help="Save extracted text to a file path")
 
+    p_skills = subparsers.add_parser("skills", help="discover and promote learned declarative skills")
+    skills_sub = p_skills.add_subparsers(dest="skills_action")
+    skills_sub.add_parser("list")
+    skill_view = skills_sub.add_parser("view"); skill_view.add_argument("name")
+    skill_promote = skills_sub.add_parser("promote"); skill_promote.add_argument("name")
+    skill_revoke = skills_sub.add_parser("revoke"); skill_revoke.add_argument("name")
+
+    subparsers.add_parser("backends", help="probe Docker and WSL execution backends")
+    gateway_cmd = subparsers.add_parser("gateway", help="inspect or process the local message gateway")
+    gateway_sub = gateway_cmd.add_subparsers(dest="gateway_action")
+    gateway_sub.add_parser("status")
+    gateway_receive = gateway_sub.add_parser("receive"); gateway_receive.add_argument("channel"); gateway_receive.add_argument("sender"); gateway_receive.add_argument("text", nargs="+")
+    gateway_sub.add_parser("retry")
+    gateway_serve = gateway_sub.add_parser("serve"); gateway_serve.add_argument("--host", default="127.0.0.1"); gateway_serve.add_argument("--port", type=int, default=8787); gateway_serve.add_argument("--token", default=os.getenv("SMARA_GATEWAY_TOKEN", ""))
+    schedule_cmd = subparsers.add_parser("schedule", help="manage local durable schedules")
+    schedule_sub = schedule_cmd.add_subparsers(dest="schedule_action")
+    schedule_sub.add_parser("list")
+    schedule_sub.add_parser("run")
+    schedule_add = schedule_sub.add_parser("add"); schedule_add.add_argument("name"); schedule_add.add_argument("interval", type=int); schedule_add.add_argument("payload", nargs="?", default="{}")
+    schedule_pause = schedule_sub.add_parser("pause"); schedule_pause.add_argument("id")
+    schedule_resume = schedule_sub.add_parser("resume"); schedule_resume.add_argument("id")
+    schedule_remove = schedule_sub.add_parser("remove"); schedule_remove.add_argument("id")
+
     return parser
 
 
@@ -1030,7 +1058,7 @@ def main(argv: list[str] | None = None) -> int:
         "graph", "search", "report", "test", "refactor", "git", "find",
         "index", "browse", "e2e", "memory", "swarm", "models", "chat", "login",
         "logout", "run", "research", "tasks", "tools", "plugins", "approvals",
-        "devices", "desktop", "tool", "dynamic-tool", "ask", "goal", "benchmark", "resume", "cancel", "inspect", "doctor", "ocr"
+        "devices", "desktop", "tool", "dynamic-tool", "ask", "goal", "benchmark", "resume", "cancel", "inspect", "doctor", "ocr", "skills", "backends", "gateway", "schedule"
     }
 
     # Extract top-level flags before checking for direct prompt
@@ -1607,7 +1635,71 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\n  📄 Readiness report: {tui.paint(summary['report_path'], 'CYAN')}")
             return 0 if summary["status"] == "ready_to_invoke_external_environment" else 2
 
-    if cmd == "tool":
+    if cmd == "plugins":
+        from .plugins import PluginManager
+        manager = PluginManager(engine.workspace)
+        action = getattr(parsed_args, "plugin_action", None) or "list"
+        try:
+            if action == "list": payload = manager.discover()
+            elif action == "enable": payload = manager.set_enabled(parsed_args.name, True)
+            elif action == "disable": payload = manager.set_enabled(parsed_args.name, False)
+            else: manager.remove(parsed_args.name); payload = {"status": "removed", "name": parsed_args.name}
+            print(json.dumps(payload, indent=2)); return 0
+        except (KeyError, ValueError) as exc:
+            print(json.dumps({"status": "error", "error": str(exc)}, indent=2)); return 1
+
+    if cmd == "skills":
+        from .skills_system import SkillLifecycleManager, SkillsRegistry
+        registry = SkillsRegistry(engine.workspace, workspace_trusted=True); lifecycle = SkillLifecycleManager(engine.workspace)
+        action = getattr(parsed_args, "skills_action", None) or "list"
+        try:
+            if action == "list": payload = {"skills": registry.list_skills(), "promotions": lifecycle.list()}
+            elif action == "view": payload = registry.view_skill(parsed_args.name)
+            elif action == "promote": payload = lifecycle.promote(parsed_args.name)
+            else: payload = lifecycle.set_state(parsed_args.name, "revoked", reason="revoked from CLI")
+            print(json.dumps(payload, indent=2)); return 0
+        except (KeyError, ValueError) as exc:
+            print(json.dumps({"status": "error", "error": str(exc)}, indent=2)); return 1
+
+    if cmd == "backends":
+        from .sandbox import backend_status
+        print(json.dumps(backend_status(), indent=2)); return 0
+
+    if cmd == "gateway":
+        from .local_gateway import GatewayLedger, LocalGateway
+        ledger = GatewayLedger(engine.workspace / ".smara" / "gateway.sqlite3")
+        action = getattr(parsed_args, "gateway_action", None) or "status"
+        if action == "status": print(json.dumps({"pending": ledger.pending(), "database": str(ledger.path)}, indent=2)); return 0
+        gateway = LocalGateway(ledger, lambda text, _session: engine.run_turn(text))
+        if action == "receive": payload = gateway.receive(channel=parsed_args.channel, sender=parsed_args.sender, text=" ".join(parsed_args.text))
+        elif action == "retry": payload = {"results": gateway.retry_pending()}
+        else:
+            from .local_gateway import WebhookGatewayServer
+            server = WebhookGatewayServer(gateway, token=parsed_args.token); server.start(parsed_args.host, parsed_args.port)
+            print(json.dumps({"status": "serving", "host": parsed_args.host, "port": parsed_args.port}, indent=2))
+            try:
+                while True: time.sleep(1)
+            except KeyboardInterrupt:
+                server.stop()
+            return 0
+        print(json.dumps(payload, indent=2)); return 0 if payload.get("status", "delivered") != "retry" else 1
+
+    if cmd == "schedule":
+        from .local_scheduler import LocalScheduleStore
+        schedules = LocalScheduleStore(engine.workspace / ".smara" / "scheduler.sqlite3")
+        action = getattr(parsed_args, "schedule_action", None) or "list"
+        try:
+            if action == "list": payload = schedules.list()
+            elif action == "run": payload = schedules.tick(lambda item: engine.run_turn(str(item["payload"].get("prompt") or item["name"])))
+            elif action == "add": payload = schedules.add(parsed_args.name, json.loads(parsed_args.payload), parsed_args.interval)
+            elif action == "pause": schedules.set_enabled(parsed_args.id, False); payload = {"status": "paused", "id": parsed_args.id}
+            elif action == "resume": schedules.set_enabled(parsed_args.id, True); payload = {"status": "resumed", "id": parsed_args.id}
+            else: schedules.remove(parsed_args.id); payload = {"status": "removed", "id": parsed_args.id}
+            print(json.dumps(payload, indent=2)); return 0
+        except (KeyError, ValueError, json.JSONDecodeError) as exc:
+            print(json.dumps({"status": "error", "error": str(exc)}, indent=2)); return 1
+
+    if cmd in {"tool", "dynamic-tool"}:
         from .tool_synthesis import DynamicToolSynthesizer
         synthesizer = DynamicToolSynthesizer(engine.workspace)
         tool_cmd = getattr(parsed_args, "tool_subcommand", "list") or "list"

@@ -428,6 +428,30 @@
       "blocker": "matched-budget external-provider ablation not executed; SMARA_ENABLE_DELEGATION must be explicitly enabled",
       "model_aliases": "glm5.2 -> sarvam-105b; glm5.3 -> glm5.3-flash"
     },
+    "unified_runtime_sessions": {
+      "status": "implemented_tested",
+      "suite": "tests/test_runtime_session_contract.py",
+      "contract": "versioned SQLite envelope plus append-only lifecycle events shared by local and hosted entry points"
+    },
+    "skill_promotion_lifecycle": {
+      "status": "implemented_tested",
+      "suite": "tests/test_skill_lifecycle.py",
+      "promotion_gate": "reproducible, >=90% overall, >=80% per category, zero false completions and safety violations"
+    },
+    "mcp_remote_oauth_plugins": {
+      "status": "implemented_contract_tested",
+      "scope": "HTTPS JSON-RPC remote MCP, PKCE authorization-code exchange, tool refresh/reload, declarative plugin lifecycle"
+    },
+    "wsl_isolated_execution": {
+      "status": "implemented_contract_tested",
+      "suite": "tests/test_execution_backends.py",
+      "limitation": "WSL availability depends on a host-installed distribution; native hypervisor VM transport remains opt-in"
+    },
+    "local_gateway_scheduler": {
+      "status": "implemented_tested",
+      "suite": "tests/test_local_delivery.py",
+      "scope": "durable idempotent webhook ingress, retry ledger, interval scheduler, background tick loop"
+    },
     "official_gaia": {
       "status": "unmeasured"
     },

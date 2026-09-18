@@ -15,10 +15,99 @@ import subprocess
 import sys
 import threading
 import time
+import base64
+import hashlib
+import secrets
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+def _remote_url_allowed(url: str, *, allow_private: bool = False) -> bool:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"https", "http"} or (parsed.scheme != "https" and not allow_private) or not parsed.netloc or parsed.username or parsed.password:
+        return False
+    host = (parsed.hostname or "").lower()
+    if allow_private:
+        return True
+    return host not in {"localhost", "127.0.0.1", "::1", "0.0.0.0"} and not host.endswith(".local")
+
+
+class MCPRemoteServer:
+    """Streamable JSON-RPC HTTP MCP transport with optional PKCE OAuth."""
+
+    def __init__(self, name: str, endpoint: str, *, headers: dict[str, str] | None = None, allow_private: bool = False, timeout: float = 20.0, oauth: dict[str, Any] | None = None):
+        if not _remote_url_allowed(endpoint, allow_private=allow_private):
+            raise ValueError("remote MCP endpoint must be an https URL on a public host")
+        self.name, self.endpoint, self.headers, self.timeout, self.oauth = name, endpoint, dict(headers or {}), timeout, dict(oauth or {})
+        self.tools: list[dict[str, Any]] = []; self._req_id = 0
+
+    def _request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        self._req_id += 1
+        body = json.dumps({"jsonrpc": "2.0", "id": self._req_id, "method": method, "params": params or {}}).encode()
+        headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json", **self.headers}
+        request = urllib.request.Request(self.endpoint, data=body, headers=headers, method="POST")
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            payload = response.read(2_000_000).decode("utf-8", "replace")
+        # Providers may return one JSON-RPC line as SSE; accept only the data
+        # object and ignore keepalive/comment frames.
+        if payload.lstrip().startswith("data:"):
+            payload = next((line[5:].strip() for line in payload.splitlines() if line.startswith("data:")), "{}")
+        result = json.loads(payload)
+        if not isinstance(result, dict):
+            raise RuntimeError("remote MCP returned a non-object response")
+        return result
+
+    def start(self) -> bool:
+        response = self._request("initialize", {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "smara", "version": "0.1.0"}})
+        if "error" in response: return False
+        self._request("notifications/initialized", {})
+        tools = self._request("tools/list", {}).get("result", {}).get("tools", [])
+        self.tools = tools if isinstance(tools, list) else []
+        return True
+
+    def refresh_tools(self) -> list[dict[str, Any]]:
+        self.tools = self._request("tools/list", {}).get("result", {}).get("tools", []) or []
+        return self.tools
+
+    def call_tool(self, tool_name: str, arguments: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
+        try:
+            result = self._request("tools/call", {"name": tool_name, "arguments": arguments}).get("result", {})
+            content = result.get("content", []) if isinstance(result, dict) else []
+            text = "\n".join(str(item.get("text", "")) for item in content if isinstance(item, dict) and item.get("type") == "text")
+            return {"status": "error" if result.get("isError") else "ok", "output": text or json.dumps(result), "is_error": bool(result.get("isError"))}
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)[:1_000]}
+
+    def oauth_authorization_url(self, redirect_uri: str) -> tuple[str, str]:
+        auth_endpoint = str(self.oauth.get("authorization_endpoint") or "")
+        client_id = str(self.oauth.get("client_id") or "")
+        if not auth_endpoint or not client_id or not _remote_url_allowed(auth_endpoint):
+            raise ValueError("OAuth authorization endpoint and client_id are required")
+        verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+        query = urllib.parse.urlencode({"response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri, "code_challenge": challenge, "code_challenge_method": "S256", "scope": self.oauth.get("scope", "mcp")})
+        return auth_endpoint + ("&" if "?" in auth_endpoint else "?") + query, verifier
+
+    def set_bearer(self, token: str) -> None:
+        if not token or len(token) > 4096: raise ValueError("invalid OAuth access token")
+        self.headers["Authorization"] = "Bearer " + token
+
+    def oauth_exchange_code(self, code: str, verifier: str, redirect_uri: str) -> dict[str, Any]:
+        token_endpoint = str(self.oauth.get("token_endpoint") or "")
+        client_id = str(self.oauth.get("client_id") or "")
+        if not token_endpoint or not client_id or not _remote_url_allowed(token_endpoint):
+            raise ValueError("OAuth token endpoint and client_id are required")
+        payload = urllib.parse.urlencode({"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri, "client_id": client_id, "code_verifier": verifier}).encode()
+        request = urllib.request.Request(token_endpoint, data=payload, headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"}, method="POST")
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            data = json.loads(response.read(1_000_000).decode("utf-8", "replace"))
+        token = data.get("access_token") if isinstance(data, dict) else None
+        if not token: raise RuntimeError("OAuth token response did not include access_token")
+        self.set_bearer(str(token)); return data
 
 
 class MCPServerProcess:
@@ -299,7 +388,7 @@ class MCPManager:
         # explicit callers/tests.  Application entry points pass an explicit
         # trust decision so repository configuration cannot execute silently.
         self.trusted = trusted
-        self.servers: Dict[str, MCPServerProcess] = {}
+        self.servers: Dict[str, Any] = {}
 
     def discover_and_load(self) -> Dict[str, MCPServerProcess]:
         """Load mcp.json or .mcp/servers.json if present."""
@@ -328,6 +417,14 @@ class MCPManager:
             for name, cfg in server_defs.items():
                 if not isinstance(cfg, dict):
                     continue
+                endpoint = cfg.get("url") or cfg.get("endpoint")
+                if endpoint:
+                    try:
+                        remote = MCPRemoteServer(name, str(endpoint), headers=cfg.get("headers") or {}, allow_private=bool(cfg.get("allow_private", False)), oauth=cfg.get("oauth") or {})
+                        if remote.start(): self.servers[name] = remote
+                    except Exception as exc:
+                        logger.warning("Error loading remote MCP server %s: %s", name, exc)
+                    continue
                 cmd = cfg.get("command")
                 if not cmd:
                     continue
@@ -340,6 +437,17 @@ class MCPManager:
             logger.warning(f"Error loading MCP config from {target_config}: {exc}")
 
         return self.servers
+
+    def reload(self) -> Dict[str, Any]:
+        """Stop local transports and re-read configuration after edits."""
+        self.shutdown()
+        return self.discover_and_load()
+
+    def refresh_tools(self, server_name: str | None = None) -> None:
+        for name, server in self.servers.items():
+            if server_name is None or name == server_name:
+                refresh = getattr(server, "refresh_tools", None)
+                if callable(refresh): refresh()
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
         """Convert all loaded MCP server tools to OpenAI function schemas."""

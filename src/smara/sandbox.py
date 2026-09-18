@@ -7,6 +7,9 @@ inherits production secrets, or grants network access.
 from __future__ import annotations
 
 import subprocess
+import shutil
+import os
+import platform
 import httpx
 from dataclasses import dataclass
 
@@ -17,6 +20,52 @@ class SandboxLimits:
     memory_mb: int = 256
     cpus: float = 0.5
     pids: int = 64
+
+
+@dataclass(frozen=True)
+class WSLConfig:
+    distribution: str = "Ubuntu"
+    timeout_seconds: int = 60
+
+
+def wsl_command(command: str, config: WSLConfig = WSLConfig()) -> list[str]:
+    """Build a non-login WSL command with explicit distribution selection."""
+    if not command.strip():
+        raise ValueError("WSL command cannot be empty.")
+    distro = str(config.distribution).strip()
+    if not distro or any(ch in distro for ch in "\r\n;&|`") or len(distro) > 64:
+        raise ValueError("WSL distribution is invalid")
+    return ["wsl.exe", "--distribution", distro, "--exec", "bash", "-lc", command]
+
+
+def wsl_available(distribution: str = "Ubuntu") -> bool:
+    """Probe WSL without mutating the host or starting a long-lived shell."""
+    if platform.system().lower() != "windows" or shutil.which("wsl.exe") is None:
+        return False
+    try:
+        result = subprocess.run(["wsl.exe", "--distribution", distribution, "--exec", "true"],
+                                capture_output=True, text=True, timeout=8, env={"PATH": os.environ.get("PATH", "")}, check=False)
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def run_wsl(command: str, config: WSLConfig = WSLConfig()) -> str:
+    if not 1 <= config.timeout_seconds <= 600:
+        raise ValueError("WSL timeout is outside allowed range")
+    completed = subprocess.run(wsl_command(command, config), capture_output=True, text=True,
+                               timeout=config.timeout_seconds, env={"PATH": os.environ.get("PATH", "")}, check=False)
+    output = (completed.stdout + completed.stderr)[-20_000:]
+    if completed.returncode:
+        raise RuntimeError(f"WSL exited with code {completed.returncode}: {output}")
+    return output
+
+
+def backend_status() -> dict[str, dict[str, object]]:
+    return {
+        "docker": {"available": shutil.which("docker") is not None, "isolation": "network-none,cap-drop-all,pids-limited"},
+        "wsl": {"available": wsl_available(), "isolation": "WSL2 distribution boundary"},
+    }
 
 
 def docker_command(command: str, limits: SandboxLimits = SandboxLimits()) -> list[str]:
@@ -51,8 +100,8 @@ async def run_remote(base_url: str, token: str, command: str, limits: SandboxLim
         raise RuntimeError("Sandbox service is not configured.")
     if not command.strip():
         raise ValueError("Sandbox command cannot be empty.")
-    async with httpx.AsyncClient(timeout=limits.timeout_seconds + 5, follow_redirects=False) as response:
-        result = await response.post(
+    async with httpx.AsyncClient(timeout=limits.timeout_seconds + 5, follow_redirects=False) as client:
+        result = await client.post(
             f"{base_url.rstrip('/')}/v1/run",
             headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             json={"command": command, "timeout_seconds": limits.timeout_seconds, "memory_mb": limits.memory_mb, "cpus": limits.cpus, "pids": limits.pids},

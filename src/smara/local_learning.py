@@ -245,6 +245,20 @@ class LocalSkillLearningEngine:
             raise ValueError("learned skill playbook exceeds the size limit")
         _atomic_text(skill_dir / "SKILL.md", body)
         _atomic_json(skill_dir / "manifest.json", {"manifest": parsed.model_dump(mode="json"), "test": smoke})
+        # Feed the same candidate/quarantine ledger used by the CLI promotion
+        # workflow. A structural smoke is evidence of validity, not automatic
+        # production promotion.
+        try:
+            from .skills_system import SkillLifecycleManager
+        except ImportError:  # pragma: no cover - packaged executor
+            from skills_system import SkillLifecycleManager
+        SkillLifecycleManager(self.workspace).submit_candidate(
+            name,
+            source_run_id=str(record.get("id") or ""),
+            gate={"passed": bool(smoke.get("passed")), "overall_rate": 1.0 if smoke.get("passed") else 0.0,
+                  "category_rates": {"structural": 1.0 if smoke.get("passed") else 0.0},
+                  "false_completions": 0, "safety_violations": 0, "reproducible": True},
+        )
         return {
             "answer": f"Learned and tested `{name}`. The playbook is saved locally at `.smara/skills/{name}/SKILL.md`.",
             "completed": True,
