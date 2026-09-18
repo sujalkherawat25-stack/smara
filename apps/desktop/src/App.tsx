@@ -3803,6 +3803,7 @@ function ModelsTab({
   const [apiKey, setApiKey] = useState("");
   const [authHeader, setAuthHeader] = useState("authorization");
   const [busy, setBusy] = useState(false);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
   const credentialName = provider === "sarvam"
     ? "SMARA_MODEL_SARVAM_API_KEY"
@@ -3849,10 +3850,11 @@ function ModelsTab({
 
   async function handleSave() {
     if (!apiKey.trim() || !baseUrl.trim() || !modelName.trim()) {
-      alert("Please enter Base URL, Model Name, and API Key.");
+      setSaveNotice("Please enter Base URL, Model Name, and API Key.");
       return;
     }
     setBusy(true);
+    setSaveNotice(null);
     try {
       const id = provider.toLowerCase().replace(/[^a-z0-9]/g, "_");
       const updated = await desktop.saveModelProfile({
@@ -3866,6 +3868,9 @@ function ModelsTab({
       });
       await onSaved(updated);
       setApiKey("");
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      setSaveNotice(detail || "The model profile could not be saved. Re-enter the key and try again.");
     } finally {
       setBusy(false);
     }
@@ -3917,6 +3922,7 @@ function ModelsTab({
           <button className="primary-btn" onClick={() => void handleSave()} disabled={busy}>
             {busy ? "Saving…" : "Save & Enable Model"}
           </button>
+          {saveNotice && <div className="provider-inline-notice" role="alert">{saveNotice}</div>}
         </div>
 
         {/* Installed Profiles Card */}

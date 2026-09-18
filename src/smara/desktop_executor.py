@@ -486,7 +486,16 @@ def resolve_local_credential(name: str, path: Path | None = None) -> str:
     protected = records.get(normalized, {}).get("protected")
     if not _CREDENTIAL_NAME.fullmatch(normalized) or not isinstance(protected, str) or not protected:
         raise RuntimeError(f"Local credential '{normalized}' is not configured on this PC.")
-    return _unprotect_windows(protected)
+    try:
+        return _unprotect_windows(protected)
+    except (OSError, ValueError, UnicodeError) as exc:
+        # DPAPI secrets are bound to the Windows profile that created them.
+        # A restored profile or migrated AppData can leave a record present
+        # but unreadable.  Return a recoverable Settings message instead of a
+        # Python traceback; the user can replace only this affected key.
+        raise RuntimeError(
+            f"Local credential '{normalized}' cannot be unlocked for this Windows profile. Re-enter it in Desktop Settings."
+        ) from exc
 
 
 def _resolved_credentials(names: object, path: Path | None = None) -> dict[str, str]:
@@ -503,7 +512,12 @@ def _resolved_credentials(names: object, path: Path | None = None) -> dict[str, 
         protected = records[name].get("protected")
         if not isinstance(protected, str) or not protected:
             raise RuntimeError(f"Local credential '{name}' is invalid; save it again.")
-        resolved[name] = _unprotect_windows(protected)
+        try:
+            resolved[name] = _unprotect_windows(protected)
+        except (OSError, ValueError, UnicodeError) as exc:
+            raise RuntimeError(
+                f"Local credential '{name}' cannot be unlocked for this Windows profile. Re-enter it in Desktop Settings."
+            ) from exc
     return resolved
 
 
