@@ -464,6 +464,9 @@ def run_shared_local_turn(
         event="turn.started",
         event_payload={"request": prompt[:500]},
     )
+    if runtime_sessions.should_cancel(conversation):
+        runtime_sessions.checkpoint(conversation, status="cancelled", unresolved=["cancelled by user"], event="turn.cancelled", event_payload={"reason": "cancelled before start"})
+        return {"answer": "The local session was cancelled.", "steps": [], "completed": False, "cancelled": True, "status": "cancelled", "unresolved_items": ["cancelled by user"], "session_id": conversation, "runtime_session": runtime_sessions.snapshot(conversation)}
     if is_learn_command(prompt):
         learned = handle_learn_command(
             prompt,
@@ -486,6 +489,10 @@ def run_shared_local_turn(
             event="turn.completed" if learned.get("completed") else "turn.needs_input",
             event_payload={"learning": learned.get("learning") or {}},
         )
+        learned["status"] = learned_status
+        learned["session_id"] = conversation
+        learned["runtime_session"] = runtime_sessions.snapshot(conversation)
+        learned["event_cursor"] = learned["runtime_session"]["cursor"]
         return learned
 
     memory_hits = memory.search(prompt, workspace_id=workspace_id, limit=6)
@@ -521,7 +528,7 @@ def run_shared_local_turn(
     live_web_result: str | None = None
     live_web_error: str | None = None
     if live_query:
-        preflight_agent = LocalAutonomousAgent(state_path, max_steps=1, action_executor=action_executor)
+        preflight_agent = LocalAutonomousAgent(state_path, max_steps=1, action_executor=action_executor, cancel_check=lambda: runtime_sessions.should_cancel(conversation))
         errors: list[str] = []
         for provider in ("tavily", "exa"):
             try:
@@ -559,7 +566,7 @@ def run_shared_local_turn(
             })
     planner = OpenAICompatiblePlanner(config)
     try:
-        agent = LocalAutonomousAgent(state_path, max_steps=max(1, min(int(max_steps), 20)), action_executor=action_executor)
+        agent = LocalAutonomousAgent(state_path, max_steps=max(1, min(int(max_steps), 20)), action_executor=action_executor, cancel_check=lambda: runtime_sessions.should_cancel(conversation))
         result = agent.run_turn(_sanitize_surrogates(prompt), model_callable=planner, context=merged_context)
         result = _sanitize_surrogates(result)
         answer = str(result.get("answer") or "").strip()
@@ -616,17 +623,22 @@ def run_shared_local_turn(
         result["local_memory_hits"] = len(memory_hits)
         result["local_memory_indexed"] = True
         completed = bool(result.get("completed"))
+        cancelled = bool(result.get("cancelled")) or runtime_sessions.should_cancel(conversation)
         unresolved = result.get("unresolved_items")
         if not isinstance(unresolved, list):
             unresolved = [] if completed else ["The agent did not mark this turn complete."]
         runtime_sessions.checkpoint(
             conversation,
-            status="completed" if completed else "needs_input",
+            status="cancelled" if cancelled else ("completed" if completed else "needs_input"),
             result=result,
-            unresolved=[str(item)[:500] for item in unresolved],
-            event="turn.completed" if completed else "turn.needs_input",
+            unresolved=[str(item)[:500] for item in (unresolved if not cancelled else ["cancelled by user"])],
+            event="turn.cancelled" if cancelled else ("turn.completed" if completed else "turn.needs_input"),
             event_payload={"steps": len(result.get("steps") or []) if isinstance(result.get("steps"), list) else 0},
         )
+        result["status"] = "cancelled" if cancelled else ("completed" if completed else "needs_input")
+        result["session_id"] = conversation
+        result["runtime_session"] = runtime_sessions.snapshot(conversation)
+        result["event_cursor"] = result["runtime_session"]["cursor"]
         return result
     except Exception as exc:
         with contextlib.suppress(Exception):

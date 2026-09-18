@@ -103,6 +103,28 @@ def _runtime_session_finished(*, conversation_id: str, body: ChatRequest, status
     payload = {"error": error[:500]} if error else {"conversation_id": conversation_id}
     runtime_session_store.checkpoint(conversation_id, status=status, result=result or {}, unresolved=unresolved or [],
                                      event=f"turn.{status}", event_payload=payload)
+
+
+def _runtime_stream_frame(conversation_id: str, raw_frame: str) -> str:
+    """Persist and annotate one SSE frame for reconnect/replay clients."""
+    try:
+        raw = str(raw_frame)
+        data_line = next((line[5:].strip() for line in raw.splitlines() if line.startswith("data:")), "")
+        payload = json.loads(data_line) if data_line else {}
+    except (TypeError, ValueError, StopIteration):
+        return raw_frame
+    if not isinstance(payload, dict):
+        return raw_frame
+    event_type = str(payload.get("type") or "event")[:80]
+    # Keep the ledger useful but bounded. The final answer and evidence live in
+    # the session result/artifacts; replay needs only safe UI deltas.
+    safe_payload = dict(payload)
+    if isinstance(safe_payload.get("text"), str):
+        safe_payload["text"] = safe_payload["text"][:4_000]
+    event = runtime_session_store.append_event(conversation_id, f"stream.{event_type}", safe_payload)
+    safe_payload["session_id"] = conversation_id
+    safe_payload["sequence"] = event.sequence
+    return agent_events.frame(safe_payload)
 def _agent_runtime(model_profile: str | None = None) -> SmaraAgentRuntime:
     """Construct the runtime without importing any MemoryOS implementation."""
     resources = getattr(app.state, "runtime_resources", None)
@@ -739,12 +761,53 @@ async def conversation_turns(conversation_id: str, workspace_id: str = Query(def
 
 
 @app.get("/v1/runtime-sessions/{session_id}")
-async def runtime_session(session_id: str, user: str = Depends(account_id)):
+async def runtime_session(session_id: str, after: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=512), user: str = Depends(account_id)):
     """Canonical cross-entry-point status/resume envelope."""
     session = runtime_session_store.get(session_id)
     if session is None or session.account_id != user:
         raise HTTPException(404, "Runtime session was not found.")
-    return {"session": session.to_dict(), "events": [event.to_dict() for event in runtime_session_store.events(session_id)]}
+    try:
+        return runtime_session_store.snapshot(session_id, after=after, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.get("/v1/runtime-sessions/{session_id}/events")
+async def runtime_session_events(session_id: str, after: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=512), user: str = Depends(account_id)):
+    """Replay only the append-only runtime events after a client cursor."""
+    session = runtime_session_store.get(session_id)
+    if session is None or session.account_id != user:
+        raise HTTPException(404, "Runtime session was not found.")
+    try:
+        snapshot = runtime_session_store.snapshot(session_id, after=after, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"version": snapshot["version"], "session_id": session_id, "events": snapshot["events"], "cursor": snapshot["cursor"], "next_cursor": snapshot["next_cursor"], "has_more": snapshot["has_more"]}
+
+
+@app.post("/v1/runtime-sessions/{session_id}/cancel")
+async def cancel_runtime_session(session_id: str, reason: str = "cancelled by user", user: str = Depends(account_id)):
+    session = runtime_session_store.get(session_id)
+    if session is None or session.account_id != user:
+        raise HTTPException(404, "Runtime session was not found.")
+    return runtime_session_store.snapshot(runtime_session_store.request_cancel(session_id, reason).session_id)
+
+
+@app.post("/v1/runtime-sessions/{session_id}/resume")
+async def resume_runtime_session(session_id: str, user: str = Depends(account_id)):
+    """Acknowledge a reconnect/resume request without duplicating a turn.
+
+    Execution is started by the caller's normal chat/run endpoint using the
+    same session id; this endpoint only publishes the durable resume marker.
+    """
+    session = runtime_session_store.get(session_id)
+    if session is None or session.account_id != user:
+        raise HTTPException(404, "Runtime session was not found.")
+    try:
+        runtime_session_store.resume(session_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return runtime_session_store.snapshot(session_id)
 
 
 @app.delete("/v1/conversations/{conversation_id}", status_code=204)
@@ -760,6 +823,8 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
     """Direct chat with bounded read-only tools; writes remain durable tasks."""
     conversation_id, history, summary = await _conversation(body, user)
     _runtime_session_started(conversation_id=conversation_id, body=body, user=user)
+    if runtime_session_store.should_cancel(conversation_id):
+        raise HTTPException(409, "Runtime session was cancelled; start a new conversation to continue.")
     # In the default local-only posture personal connectors (for example the
     # GitHub token stored in Desktop) cannot be invoked by the hosted direct
     # chat registry. Route those requests into the durable approval path so
@@ -815,6 +880,9 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
                 ) if settings.hosted_user_integrations_enabled else None),
                 include_user_integrations=settings.hosted_user_integrations_enabled,
             )
+        if runtime_session_store.should_cancel(conversation_id):
+            _runtime_session_finished(conversation_id=conversation_id, body=body, status="cancelled", unresolved=["cancelled by user"])
+            raise HTTPException(409, "Runtime session was cancelled before the provider result was committed.")
         await _async_store().call(
             "append_conversation_exchange",
             conversation_id, user, body.workspace_id, body.message, turn.message, turn.model,
@@ -850,11 +918,16 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
 async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(account_id)):
     """SSE view of direct chat and bounded read-only tool progress."""
     conversation_id, history, summary = await _conversation(body, user)
+    _runtime_session_started(conversation_id=conversation_id, body=body, user=user)
     attachment_context = _attachment_context(body, user)
     async def emit():
         started_at = time.perf_counter()
         trace = getattr(request.state, "smara_timing", TimingTrace())
         trace.mark("route_started")
+        if runtime_session_store.should_cancel(conversation_id):
+            _runtime_session_finished(conversation_id=conversation_id, body=body, status="cancelled", unresolved=["cancelled by user"])
+            yield _runtime_stream_frame(conversation_id, agent_events.done(memory_used=False, tools_used=0, total_ms=0, status="cancelled", completed=False, unresolved_items=["cancelled by user"]))
+            return
         decision = route_request(
             body.message,
             has_attachments=bool(body.attachment_ids),
@@ -862,49 +935,52 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
         )
         if decision.durable_required:
             task, message = _queue_durable_chat_task(body, user)
-            yield agent_events.phase("triage")
-            yield agent_events.status("Creating an approval-gated Smara task", detail="Planning can start now; local execution will wait for your approval.")
-            yield agent_events.phase("answer")
-            yield agent_events.token(message)
+            yield _runtime_stream_frame(conversation_id, agent_events.phase("triage"))
+            yield _runtime_stream_frame(conversation_id, agent_events.status("Creating an approval-gated Smara task", detail="Planning can start now; local execution will wait for your approval."))
+            yield _runtime_stream_frame(conversation_id, agent_events.phase("answer"))
+            yield _runtime_stream_frame(conversation_id, agent_events.token(message))
             await _async_store().call(
                 "append_conversation_exchange",
                 conversation_id, user, body.workspace_id, body.message, message, None,
             )
             trace.mark("persisted")
-            yield agent_events.done(
+            _runtime_session_finished(conversation_id=conversation_id, body=body, status="waiting_approval", result={"message": message}, unresolved=["durable task awaiting approval"])
+            yield _runtime_stream_frame(conversation_id, agent_events.done(
                 memory_used=False,
                 tools_used=0,
                 total_ms=agent_events.elapsed_ms(started_at),
                 request_id=trace.trace_id,
                 timings=trace.as_dict(),
                 task_id=task["id"],
-            )
+            ))
             return
         if is_identity_memory_request(body.message):
             message = await _identity_profile_answer(account_id=user, workspace_id=body.workspace_id)
-            yield agent_events.phase("triage")
-            yield agent_events.status("Retrieving your verified profile")
-            yield agent_events.phase("answer")
-            yield agent_events.token(message)
+            yield _runtime_stream_frame(conversation_id, agent_events.phase("triage"))
+            yield _runtime_stream_frame(conversation_id, agent_events.status("Retrieving your verified profile"))
+            yield _runtime_stream_frame(conversation_id, agent_events.phase("answer"))
+            yield _runtime_stream_frame(conversation_id, agent_events.token(message))
             await _async_store().call(
                 "append_conversation_exchange",
                 conversation_id, user, body.workspace_id, body.message, message, None,
             )
             trace.mark("persisted")
-            yield agent_events.done(
+            _runtime_session_finished(conversation_id=conversation_id, body=body, status="completed", result={"message": message})
+            yield _runtime_stream_frame(conversation_id, agent_events.done(
                 memory_used=True,
                 tools_used=0,
                 total_ms=agent_events.elapsed_ms(started_at),
                 request_id=trace.trace_id,
                 timings=trace.as_dict(),
-            )
+            ))
             return
         durable_profile = await _durable_profile_context(account_id=user, workspace_id=body.workspace_id)
         try:
             runtime = _agent_runtime(body.model_profile)
         except ValueError as exc:
             kind, message = llm_errors.describe(exc, provider=settings.llm_provider)
-            yield agent_events.error(message, kind=kind)
+            _runtime_session_finished(conversation_id=conversation_id, body=body, status="failed", error=message)
+            yield _runtime_stream_frame(conversation_id, agent_events.error(message, kind=kind))
             return
         queue: asyncio.Queue[str] = asyncio.Queue()
         # A runtime may announce the answer phase before its first token, while
@@ -976,15 +1052,21 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
 
         task = asyncio.create_task(run_chat())
         try:
-            yield agent_events.status("Preparing a bounded Smara response")
+            yield _runtime_stream_frame(conversation_id, agent_events.status("Preparing a bounded Smara response"))
             trace.mark("first_status")
             while not task.done():
+                if runtime_session_store.should_cancel(conversation_id):
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                    _runtime_session_finished(conversation_id=conversation_id, body=body, status="cancelled", unresolved=["cancelled by user"])
+                    yield _runtime_stream_frame(conversation_id, agent_events.done(memory_used=False, tools_used=0, total_ms=agent_events.elapsed_ms(started_at), status="cancelled", completed=False, unresolved_items=["cancelled by user"]))
+                    return
                 try:
-                    yield await asyncio.wait_for(queue.get(), timeout=0.1)
+                    yield _runtime_stream_frame(conversation_id, await asyncio.wait_for(queue.get(), timeout=0.1))
                 except asyncio.TimeoutError:
                     continue
             while not queue.empty():
-                yield queue.get_nowait()
+                yield _runtime_stream_frame(conversation_id, queue.get_nowait())
             turn = await task
             await _async_store().call(
                 "append_conversation_exchange",
@@ -1000,13 +1082,14 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
                 assistant_message=turn.message,
             )
             trace.mark("persisted")
-            yield agent_events.done(
+            _runtime_session_finished(conversation_id=conversation_id, body=body, status="completed", result=turn.__dict__)
+            yield _runtime_stream_frame(conversation_id, agent_events.done(
                 memory_used=turn.memory_used,
                 tools_used=turn.tools_used,
                 total_ms=agent_events.elapsed_ms(started_at),
                 request_id=trace.trace_id,
                 timings=trace.as_dict(),
-            )
+            ))
         except Exception as exc:
             if not task.done():
                 task.cancel()
@@ -1019,7 +1102,9 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
                 settings.llm_provider,
                 type(exc).__name__,
             )
-            yield agent_events.error(message, kind=kind)
+            status = "cancelled" if runtime_session_store.should_cancel(conversation_id) else "failed"
+            _runtime_session_finished(conversation_id=conversation_id, body=body, status=status, error=message)
+            yield _runtime_stream_frame(conversation_id, agent_events.error(message, kind=kind))
         finally:
             if not task.done():
                 task.cancel()

@@ -96,6 +96,28 @@ export interface ChatEvent {
   unresolved_items?: string[];
   task_id?: string;
   task_ids?: string[];
+  session_id?: string;
+  event_cursor?: number;
+  sequence?: number;
+}
+
+export interface RuntimeSessionEvent {
+  session_id: string;
+  sequence: number;
+  kind: string;
+  payload: Record<string, unknown>;
+  created_at: number;
+}
+
+export interface RuntimeSessionSnapshot {
+  version: number;
+  session: Record<string, unknown>;
+  events: RuntimeSessionEvent[];
+  cursor: number;
+  next_cursor: number;
+  earliest_cursor: number;
+  has_more: boolean;
+  reconnectable: boolean;
 }
 
 export interface ChatMessage {

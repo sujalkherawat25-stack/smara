@@ -61,6 +61,9 @@ def done(
     timings: dict[str, object] | None = None,
     task_id: str | None = None,
     task_ids: list[str] | None = None,
+    status: str | None = None,
+    completed: bool | None = None,
+    unresolved_items: list[str] | None = None,
 ) -> str:
     payload: dict[str, object] = {
         "type": "done",
@@ -76,6 +79,12 @@ def done(
         payload["task_id"] = task_id
     if task_ids:
         payload["task_ids"] = [str(value)[:160] for value in task_ids[:20] if str(value).strip()]
+    if status:
+        payload["status"] = str(status)[:64]
+    if completed is not None:
+        payload["completed"] = bool(completed)
+    if unresolved_items is not None:
+        payload["unresolved_items"] = [str(value)[:500] for value in unresolved_items[:20]]
     return frame(payload)
 
 

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatHistoryTurn, CodingConventionsData, ConnectionState, DAGNodeData, DAGWorkflowData, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ProgressiveSkillDetail, ProgressiveSkillItem, RemoteStatus, ResearchMode, SearchResultItem, SemanticIndexStats, SubagentDelegationData, SubagentRolesData, SwarmTaskResultData, SymbolEvolutionData, TaskDetail, TaskMemoryActionResult, TaskMemorySearchItem, TaskMemorySnapshot, TaskMemoryStoreData, TaskSummary, TestSuiteResultData, WebScrapeData } from "./types";
+import type { ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatHistoryTurn, CodingConventionsData, ConnectionState, DAGNodeData, DAGWorkflowData, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ProgressiveSkillDetail, ProgressiveSkillItem, RemoteStatus, ResearchMode, RuntimeSessionSnapshot, SearchResultItem, SemanticIndexStats, SubagentDelegationData, SubagentRolesData, SwarmTaskResultData, SymbolEvolutionData, TaskDetail, TaskMemoryActionResult, TaskMemorySearchItem, TaskMemorySnapshot, TaskMemoryStoreData, TaskSummary, TestSuiteResultData, WebScrapeData } from "./types";
 
 export const isNativeDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -54,6 +54,9 @@ export const desktop = {
     invoke<void>("stream_chat", { args }),
   onChatEvent: (handler: (event: ChatEvent) => void): Promise<UnlistenFn> =>
     listen<ChatEvent>("smara-chat-event", (event) => handler(event.payload)),
+  runtimeSession: (sessionId: string, after: number = 0) => invoke<RuntimeSessionSnapshot>("get_runtime_session", { sessionId, after }),
+  cancelRuntimeSession: (sessionId: string, reason?: string) => invoke<RuntimeSessionSnapshot>("cancel_runtime_session", { sessionId, reason: reason || null }),
+  resumeRuntimeSession: (sessionId: string, after: number = 0) => invoke<RuntimeSessionSnapshot>("resume_runtime_session", { sessionId, after }),
   openFile: (path: string) => invoke<void>("open_file_in_default_app", { path }),
   revealFile: (path: string) => invoke<void>("reveal_file_in_explorer", { path }),
   readFilePreview: (path: string) => invoke<FilePreview>("read_file_preview", { path }),

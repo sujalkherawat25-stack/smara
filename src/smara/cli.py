@@ -1116,6 +1116,7 @@ def main(argv: list[str] | None = None) -> int:
         """Run every autonomous CLI surface through the durable engine."""
         from .autonomous_agent import SmaraAutonomousAgent,normalize_tool_profile
         from .harness import BUDGET_PROFILES, Budget, SessionEngine
+        from .runtime_session import session_store_for_workspace
         from .research_modes import select_research_lane,should_route_to_research
         active_workspace=engine.workspace
         requested_mode=getattr(parsed_args,"research_mode","auto")
@@ -1127,6 +1128,27 @@ def main(argv: list[str] | None = None) -> int:
             budget=BUDGET_PROFILES["research_deep" if selected=="deep" else "research_quick"]
         ephemeral_session = session is None and budget is None
         session=session or SessionEngine(active_workspace,budget=budget or Budget())
+        runtime_store=session_store_for_workspace(active_workspace)
+        runtime_store.create_or_get(
+            session.session_id,
+            request=prompt,
+            workspace_id=str(active_workspace),
+            account_id="local",
+            mode="cli",
+            tool_profile=requested_profile,
+            research_mode=requested_mode,
+        )
+        if runtime_store.should_cancel(session.session_id):
+            session.cancel()
+        else:
+            runtime_store.checkpoint(
+                session.session_id,
+                status="running",
+                tool_profile=requested_profile,
+                research_mode=requested_mode,
+                event="turn.resumed" if session.get("request") else "turn.started",
+                event_payload={"request": prompt[:500]},
+            )
         model_config=session.get("model_config")
         if model_config is None:
             profile=engine.active_profile
@@ -1143,14 +1165,22 @@ def main(argv: list[str] | None = None) -> int:
         if not api_key and ephemeral_session:
             answer=f"No API key configured for active model profile '{profile.get('label', profile.get('id', 'default'))}'. Configure a local provider in Settings or run 'smara models'."
             canonical=session.finish_incremental("needs_input",answer,("model provider credential is missing",))
+            runtime_store.checkpoint(session.session_id,status="needs_input",result=canonical,unresolved=canonical.get("unresolved_items") or [],event="turn.needs_input",event_payload={"reason":"missing_provider_credential"})
             from .app_adapter import application_envelope
-            payload={**canonical,**application_envelope(session,canonical)}
+            payload={**canonical,**application_envelope(session,canonical,runtime_store=runtime_store)}
             return canonical,payload
         agent=SmaraAutonomousAgent(api_key=api_key,base_url=model_config["base_url"],model=model_config["model"],auth_header=model_config.get("auth_header","authorization"),workspace_root=active_workspace,profile=tool_profile,session_engine=session,research_mode=research_mode)
-        agent_result=agent.run(prompt,max_iterations=None)
+        try:
+            agent_result=agent.run(prompt,max_iterations=None)
+        except Exception as exc:
+            status="cancelled" if runtime_store.should_cancel(session.session_id) or session.get("cancelled",False) else "failed"
+            runtime_store.checkpoint(session.session_id,status=status,unresolved=[str(exc)[:500]],event=f"turn.{status}",event_payload={"error":str(exc)[:500]})
+            raise
         payload=agent_result.get("session") or session.inspect().get("state",{}).get("result") or session.inspect()
         from .app_adapter import application_envelope
-        payload={**payload,**application_envelope(session,payload)}
+        runtime_status="cancelled" if runtime_store.should_cancel(session.session_id) else str(payload.get("status") or "needs_input")
+        runtime_store.checkpoint(session.session_id,status=runtime_status,result=payload,unresolved=payload.get("unresolved_items") or [],event=f"turn.{runtime_status}")
+        payload={**payload,**application_envelope(session,payload,runtime_store=runtime_store)}
         return agent_result,payload
 
     if direct_prompt:
@@ -1168,11 +1198,27 @@ def main(argv: list[str] | None = None) -> int:
     if cmd in {"resume", "cancel", "inspect"}:
         from .harness import SessionEngine
         session = SessionEngine(workspace, parsed_args.session_id)
-        if cmd == "cancel": session.cancel(); payload = session.inspect()
+        if cmd == "cancel":
+            from .runtime_session import session_store_for_workspace
+            runtime_store=session_store_for_workspace(workspace)
+            if runtime_store.get(parsed_args.session_id) is None:
+                state = session.inspect().get("state", {})
+                runtime_store.create_or_get(parsed_args.session_id, request=str(state.get("request") or ""), workspace_id=str(workspace), mode="cli")
+            runtime_store.request_cancel(parsed_args.session_id)
+            session.cancel(); payload = session.inspect()
         elif cmd == "resume":
             record = session.inspect(); prompt = str(record["state"].get("request") or "")
             _,payload=run_canonical(prompt,session=session)
-        else: payload = session.inspect()
+        else:
+            payload = session.inspect()
+            from .runtime_session import session_store_for_workspace
+            runtime_store=session_store_for_workspace(workspace)
+            if runtime_store.get(parsed_args.session_id) is None:
+                state = payload.get("state", {})
+                runtime_store.create_or_get(parsed_args.session_id, request=str(state.get("request") or ""), workspace_id=str(workspace), mode="cli")
+            with_runtime=runtime_store.snapshot(parsed_args.session_id)
+            payload["runtime"] = with_runtime
+            payload["event_cursor"] = with_runtime["cursor"]
         compact = payload.get("state", payload) if cmd != "resume" else payload
         print(json.dumps(payload if getattr(parsed_args, "events", False) or getattr(parsed_args, "json", False) else compact, indent=2))
         return 0 if cmd != "resume" or payload.get("status") == "completed" else 1

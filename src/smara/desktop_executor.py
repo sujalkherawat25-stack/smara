@@ -47,6 +47,7 @@ try:
     from .local_documents import build_document, is_document_operation
     from .workspace_contract import WorkspaceJobSpec, build_stage_result, validate_workspace_job, workspace_job_summary
     from .persistent_terminal import PersistentTerminalStore
+    from .runtime_session import session_store_for_state
 except ImportError:  # pragma: no cover - exercised by the packaged binary
     from desktop_integrations import LocalIntegrationCancelled, execute_local_integration, local_connector_catalog
     from local_agent import LocalTaskJournal, LocalTaskStore, decorate_local_result, journal_path, local_skill_catalog, local_tasks_path, skill_spec, validate_local_step, workspace_lock
@@ -54,6 +55,7 @@ except ImportError:  # pragma: no cover - exercised by the packaged binary
     from local_documents import build_document, is_document_operation
     from workspace_contract import WorkspaceJobSpec, build_stage_result, validate_workspace_job, workspace_job_summary
     from persistent_terminal import PersistentTerminalStore
+    from runtime_session import session_store_for_state
 
 
 MAX_FILE_BYTES = 32 * 1024 * 1024
@@ -3036,6 +3038,12 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--local-run", action="store_true", help="drain approved private local tasks and exit")
     parser.add_argument("--local-run-task", help="run one approved private local task and exit")
     parser.add_argument("--local-agent-turn", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-session-detail", help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-session-cancel", help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-session-resume", help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-after", type=int, default=0, help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-limit", type=int, default=100, help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-reason", default="cancelled by user", help=argparse.SUPPRESS)
     parser.add_argument("--python-bridge", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--skills", action="store_true", help="print the installed local skill protocol")
     parser.add_argument("--credential-list", action="store_true", help="list local credential names without values")
@@ -3244,6 +3252,21 @@ def _main(argv: list[str] | None = None) -> int:
             "allowed_roots": state.get("allowed_roots", []),
             "log": str(args.log),
         }, indent=2))
+        return 0
+    if args.runtime_session_detail or args.runtime_session_cancel or args.runtime_session_resume:
+        session_id = args.runtime_session_detail or args.runtime_session_cancel or args.runtime_session_resume
+        if not session_id or len(session_id) > 240:
+            raise SystemExit("Runtime session id is invalid.")
+        sessions = session_store_for_state(args.state)
+        try:
+            if args.runtime_session_cancel:
+                sessions.request_cancel(session_id, args.runtime_reason)
+            elif args.runtime_session_resume:
+                sessions.resume(session_id)
+            payload = sessions.snapshot(session_id, after=max(0, args.runtime_after), limit=max(1, min(args.runtime_limit, 512)))
+        except (KeyError, ValueError) as exc:
+            raise SystemExit(str(exc)) from exc
+        print(json.dumps(payload, ensure_ascii=False))
         return 0
     if args.python_bridge:
         # Bridge snippets are compiled into the trusted Tauri companion.  The

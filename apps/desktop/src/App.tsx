@@ -395,6 +395,22 @@ export default function App() {
     }).catch(() => {
       // A missing/legacy journal should leave a clean composer usable.
     });
+    // Reconnect to the shared runtime ledger as well as the transcript. This
+    // recovers a final answer if the UI restarted between the provider result
+    // and local transcript flush, and exposes an honest resumable state.
+    void desktop.runtimeSession(conversationId.current, 0).then((snapshot) => {
+      if (!active) return;
+      const session = snapshot?.session || {};
+      const result = session.result as Record<string, unknown> | undefined;
+      const answer = typeof result?.answer === "string" ? result.answer.trim() : "";
+      if (answer) {
+        setMessages((items) => items.length ? items : [{ id: `runtime-${conversationId.current}`, role: "assistant", text: answer, needsInput: session.status !== "completed", error: session.status !== "completed" ? (Array.isArray(session.unresolved) ? session.unresolved.join("; ") : "Session needs attention") : undefined }]);
+      }
+      if (session.status === "running") setNotice("Reconnected to a running Smara session. Its durable events are available for replay.");
+      if (session.status === "cancelled") setNotice("This Smara session was cancelled. Start a new turn to continue.");
+    }).catch(() => {
+      // New conversations have no runtime row yet.
+    });
     return () => { active = false; };
   }, []);
 
@@ -598,6 +614,16 @@ export default function App() {
       assistantId.current = null;
     }
   }
+
+  const cancelCurrentTurn = useCallback(async () => {
+    if (!isNativeDesktop || !streaming) return;
+    try {
+      await desktop.cancelRuntimeSession(conversationId.current, "cancelled from Desktop");
+      setNotice("Cancellation requested. Smara will stop at the next safe checkpoint.");
+    } catch (error) {
+      setNotice(`Could not cancel the current session: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [streaming]);
 
   return (
     <div className="sleek-app">
@@ -842,6 +868,7 @@ export default function App() {
               draft={draft}
               setDraft={setDraft}
               onSend={() => void send()}
+              onCancel={() => void cancelCurrentTurn()}
               streaming={streaming}
               currentExecution={currentExecution}
               currentThought={currentThought}
@@ -1216,6 +1243,7 @@ function ChatTab({
   draft,
   setDraft,
   onSend,
+  onCancel,
   streaming,
   currentExecution,
   currentThought,
@@ -1239,6 +1267,7 @@ function ChatTab({
   draft: string;
   setDraft: (val: string) => void;
   onSend: () => void;
+  onCancel: () => void;
   streaming: boolean;
   currentExecution?: string | null;
   currentThought?: string | null;
@@ -1431,11 +1460,11 @@ function ChatTab({
             <button
               type="button"
               className="btn-waveform-submit"
-              onClick={onSend}
-              disabled={!draft.trim() || streaming}
-              title="Send Prompt"
+              onClick={streaming ? onCancel : onSend}
+              disabled={!draft.trim() && !streaming}
+              title={streaming ? "Cancel current run" : "Send Prompt"}
             >
-              {streaming ? "⚙" : "〰"}
+              {streaming ? "■" : "〰"}
             </button>
           </div>
         </div>

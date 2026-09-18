@@ -826,6 +826,7 @@ class LocalAutonomousAgent:
     # can reuse the exact same ReAct loop while retaining its richer TUI/RAV
     # capability implementations.
     action_executor: Any | None = None
+    cancel_check: Any | None = None
 
     @staticmethod
     def _action_failed(result: Any) -> bool:
@@ -901,6 +902,15 @@ class LocalAutonomousAgent:
             }
 
         for iteration in range(self.max_steps):
+            if self.cancel_check is not None and self.cancel_check():
+                return {
+                    "answer": "The local session was cancelled.",
+                    "steps": steps_taken,
+                    "completed": False,
+                    "cancelled": True,
+                    "iterations": iteration,
+                    "failure_reason": "cancelled",
+                }
             response = model_callable(history)
             if not isinstance(response, dict):
                 break
@@ -936,6 +946,15 @@ class LocalAutonomousAgent:
                         "failure_reason": "repeated_action",
                     }
                 try:
+                    if self.cancel_check is not None and self.cancel_check():
+                        return {
+                            "answer": "The local session was cancelled.",
+                            "steps": steps_taken,
+                            "completed": False,
+                            "cancelled": True,
+                            "iterations": iteration,
+                            "failure_reason": "cancelled",
+                        }
                     action_result = self.execute_action(cap, payload)
                     step_record["result"] = action_result
                     step_record["ok"] = not self._action_failed(action_result)
