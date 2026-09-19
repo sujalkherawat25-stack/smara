@@ -165,3 +165,31 @@ def test_shared_turn_recovers_subject_for_follow_up_after_restart(monkeypatch, t
     )
     assert calls and "Banswara" in calls[0]["query"]
     assert result["live_web"]["query"].startswith("Is there any chance")
+
+
+def test_explicit_quick_lane_forces_bounded_live_web_preflight(monkeypatch, tmp_path: Path):
+    from smara import local_agent_runtime as runtime
+
+    calls = []
+
+    def fake_action(capability, payload):
+        calls.append((capability, payload))
+        return {
+            "action": "local_integration",
+            "provider": payload["provider"],
+            "results": [{"title": "PSF license", "url": "https://www.python.org/psf/license/", "snippet": "PSF License Agreement."}],
+            "citations": ["https://www.python.org/psf/license/"],
+        }
+
+    monkeypatch.setattr(runtime.OpenAICompatiblePlanner, "__call__", lambda self, history: {"kind": "answer", "answer": "PSF License Agreement."})
+    result = runtime.run_shared_local_turn(
+        prompt="Find the official Python Software Foundation license page.",
+        state_path=tmp_path / "desktop.json",
+        config=runtime.LocalModelConfig(base_url="http://127.0.0.1:1", model="unused"),
+        workspace_id=str(tmp_path),
+        action_executor=fake_action,
+        research_mode="quick",
+    )
+    assert calls and calls[0][1]["operation"] == "search"
+    assert calls[0][1]["query"].startswith("Find the official Python")
+    assert result["research_mode"] == "quick"

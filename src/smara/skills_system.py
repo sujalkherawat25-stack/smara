@@ -34,6 +34,18 @@ _SKILL_SECRET = re.compile(r"(?:sk-[A-Za-z0-9_-]{12,}|api[_ -]?key\s*[:=]|author
 _UNSAFE_PLAYBOOK = re.compile(r"(?:curl\s+[^\n|]+\|\s*(?:sh|bash)|rm\s+-rf|Invoke-Expression|\biex\s*\()", re.I)
 
 
+def _replace_with_retry(source: Path, target: Path) -> None:
+    """Replace atomically, tolerating short Windows file-scan locks."""
+    for attempt in range(5):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+
+
 class SkillLifecycleManager:
     """Durable, test-gated promotion state for learned/project skills.
 
@@ -58,7 +70,7 @@ class SkillLifecycleManager:
         self.root.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temporary, self.path)
+        _replace_with_retry(temporary, self.path)
 
     def _content_hash(self, name: str) -> str:
         """Hash the reviewed playbook, never a mutable display label."""

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { desktop, isNativeDesktop } from "./api";
 import type { ActivityItem, ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatMessage, CodingConventionsData, ConnectionState, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ResearchMode, SearchResultItem, SemanticIndexStats, SwarmMessageData, SwarmTaskResultData, SymbolEvolutionData, TaskSummary, TestFailureItem, TestSuiteResultData, WebScrapeData } from "./types";
 import smaraLogo from "./assets/smara-logo.svg";
@@ -566,29 +567,10 @@ export default function App() {
     setActivity((items) => [{ id: uid("start"), tone: "blue" as const, label: "Autonomous turn started" }, ...items].slice(0, 10));
 
     try {
-      if (isNativeDesktop && researchMode !== "auto") {
-        setActivity((items) => [{ id: uid("research"), tone: "blue" as const, label: `${researchMode === "deep" ? "Deep" : "Quick"} research started`, detail: "The selected research lane is running with bounded live-web evidence." }, ...items].slice(0, 10));
-        const result = await desktop.runResearch(text, researchMode);
-        const answer = typeof result?.answer === "string" && result.answer.trim()
-          ? result.answer
-          : "Research finished without a textual answer. Open the run details or report artifact for the evidence.";
-        const lane = result?.research_mode ? `\n\nLane: ${result.research_mode}` : "";
-        const completed = result?.completed !== false && (!result?.status || result.status === "completed");
-        const unresolved = Array.isArray(result?.unresolved_items) ? result.unresolved_items.filter(Boolean).join("; ") : "";
-        setMessages((items) => items.map((item) => item.id === answerId ? {
-          ...item,
-          pending: false,
-          needsInput: !completed,
-          text: `${answer}${lane}`,
-          error: completed ? undefined : (unresolved || "Research did not reach a verified completion."),
-        } : item));
-        setStreaming(false);
-        setActivity((items) => [{ id: uid("research-done"), tone: completed ? "green" as const : "amber" as const, label: completed ? "Research completed" : "Research needs input", detail: unresolved || result?.research_report_path || "Evidence and result are available in the run output." }, ...items].slice(0, 10));
-        assistantId.current = null;
-        void refreshAll();
-        return;
-      }
       if (isNativeDesktop) {
+        if (researchMode !== "auto") {
+          setActivity((items) => [{ id: uid("research"), tone: "blue" as const, label: `${researchMode === "deep" ? "Deep" : "Quick"} research started`, detail: "The selected research lane is running through the durable local session with bounded live-web evidence." }, ...items].slice(0, 10));
+        }
         const selectedModelProfile = selectedProfileId === "auto"
           ? (connection.model_profile.startsWith("local:") ? connection.model_profile : modelProfiles[0] ? `local:${modelProfiles[0].id}` : "default")
           : `local:${selectedProfileId}`;
@@ -621,8 +603,36 @@ export default function App() {
   const cancelCurrentTurn = useCallback(async () => {
     if (!isNativeDesktop || !streaming) return;
     try {
-      await desktop.cancelRuntimeSession(conversationId.current, "cancelled from Desktop");
-      setNotice("Cancellation requested. Smara will stop at the next safe checkpoint.");
+      const snapshot = await desktop.cancelRuntimeSession(conversationId.current, "cancelled from Desktop");
+      const session = snapshot?.session as { status?: string; cancel_requested?: boolean } | undefined;
+      // The cancellation command runs independently of the active worker. A
+      // short turn may complete in the small interval before the durable
+      // cancellation is recorded. Do not replace a real answer with a false
+      // "cancelled" state in that race; the queued completion event remains
+      // authoritative and will settle this message normally.
+      if (session?.status !== "cancelled" || session.cancel_requested !== true) {
+        setNotice("This turn completed before cancellation was recorded. Its completed result has been kept.");
+        return;
+      }
+      // The shared local runner observes this durable cancellation at each
+      // action boundary. Release the composer immediately instead of leaving
+      // the UI locked while an in-flight provider request reaches its bounded
+      // timeout; late events are ignored by clearing the active assistant id.
+      const target = assistantId.current;
+      assistantId.current = null;
+      pendingAssistantText.current = "";
+      setStreaming(false);
+      setCurrentExecution(null);
+      setCurrentThought(null);
+      setMessages((items) => items.map((item) => item.id === target ? {
+        ...item,
+        pending: false,
+        needsInput: true,
+        text: item.text || "Research cancelled.",
+        error: "Cancelled from Desktop. You can resume this session or start a new turn.",
+      } : item));
+      setActivity((items) => [{ id: uid("cancelled"), tone: "amber" as const, label: "Turn cancelled", detail: "The durable session was asked to stop at its next safe checkpoint." }, ...items].slice(0, 10));
+      setNotice("Cancellation requested. The composer is ready; the durable session will stop at its next safe checkpoint.");
     } catch (error) {
       setNotice(`Could not cancel the current session: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -759,11 +769,11 @@ export default function App() {
                     type="button"
                     className={`sidebar-action-row ${tab === "workspace" ? "active" : ""}`}
                     onClick={() => setTab(tab === "workspace" ? "chat" : "workspace")}
-                    title="Artifacts & Previews"
+                    title="Workspace permissions and terminal allowlist"
                   >
                     <div className="sidebar-action-left">
-                      <span className="icon">📄</span>
-                      <span>Artifacts</span>
+                      <span className="icon">📁</span>
+                      <span>Workspace</span>
                     </div>
                   </button>
 
@@ -1115,11 +1125,18 @@ export default function App() {
 // -------------------------------------------------------------
 function detectFiles(text: string): string[] {
   const matches = new Set<string>();
+  // Strip URI tokens before looking for file extensions.  The file matcher is
+  // deliberately permissive so that it finds relative workspace paths, but
+  // without this step it can extract a fragment such as `//docs.py` from
+  // `https://docs.python.org/...` and offer unsafe, nonsensical file actions.
+  const textWithoutUris = text.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s)`\]>]+/gi, " ");
   const regex = /`?([a-zA-Z0-9_\-./\\]+\.(pdf|docx|xlsx|pptx|py|rs|ts|tsx|js|jsx|json|md|txt))`?/gi;
   let m;
-  while ((m = regex.exec(text)) !== null) {
+  while ((m = regex.exec(textWithoutUris)) !== null) {
     const file = m[1].replace(/[`'"]/g, "").trim();
-    if (file && !file.startsWith("http://") && !file.startsWith("https://")) {
+    // UNC shares are never generated artifacts and should not receive an OS
+    // open/reveal affordance from model output.
+    if (file && !file.startsWith("//") && !file.startsWith("\\\\")) {
       matches.add(file);
     }
   }
@@ -1291,6 +1308,16 @@ function ChatTab({
   setAudioMuted: (val: boolean) => void;
   onOpenCapabilities: () => void;
 }) {
+  const [appVersion, setAppVersion] = useState("0.1.3");
+
+  useEffect(() => {
+    if (!isNativeDesktop) return;
+    void getVersion().then(setAppVersion).catch(() => {
+      // Keep the source release fallback when running in a non-standard
+      // WebView that does not expose the Tauri app metadata command.
+    });
+  }, []);
+
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streaming, transcriptEndRef]);
@@ -1480,7 +1507,7 @@ function ChatTab({
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ color: "#10b981" }}>● inference ready</span>
-            <span># v0.2.0</span>
+            <span># v{appVersion}</span>
           </div>
         </div>
       </div>

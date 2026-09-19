@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -25,6 +26,18 @@ logger = logging.getLogger("smara.task_memory")
 
 ENTRY_DELIMITER = "\n§\n"
 DEFAULT_MAX_CHARS = 12000
+
+
+def _replace_with_retry(source: Path, target: Path) -> None:
+    """Replace atomically, tolerating short Windows file-scan locks."""
+    for attempt in range(5):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 # Basic threat / prompt-injection patterns
 SUSPICIOUS_PATTERNS = [
@@ -183,7 +196,7 @@ class TaskMemoryStore:
         temp_file = file_path.with_name(f".{file_path.name}.{uuid.uuid4().hex}.tmp")
         try:
             temp_file.write_text(full_text, encoding="utf-8")
-            os.replace(temp_file, file_path)
+            _replace_with_retry(temp_file, file_path)
         finally:
             temp_file.unlink(missing_ok=True)
 

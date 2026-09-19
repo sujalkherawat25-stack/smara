@@ -1857,6 +1857,8 @@ async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile
         "prompt": args.message,
         "conversation_id": args.conversation_id,
         "workspace": workspace,
+        "research_mode": args.research_mode.trim(),
+        "tool_profile": args.tool_profile.trim(),
         "context": local_chat_history(&args.conversation_id),
         "model": {
             "label": profile.label,
@@ -1869,10 +1871,21 @@ async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile
     app.emit("smara-chat-event", json!({"type": "phase", "phase": "local_agent"})).map_err(|error| error.to_string())?;
     app.emit("smara-chat-event", json!({"type": "thought", "text": "Planning a bounded multi-step local run on this Desktop..."})).map_err(|error| error.to_string())?;
     let request_json = serde_json::to_string(&request).map_err(|error| error.to_string())?;
+    let research_mode = args.research_mode.trim().to_ascii_lowercase();
+    let worker_timeout = match research_mode.as_str() {
+        // Quick research is deliberately bounded. A slow or unavailable
+        // connector/provider must surface an honest retryable state, never
+        // hold the Desktop composer hostage behind the legacy one-hour turn.
+        "quick" => 75,
+        // Deep research can work for longer but is still finite and uses the
+        // same durable cancellation envelope as every local turn.
+        "deep" => 1_800,
+        _ => 300,
+    };
     let output = tauri::async_runtime::spawn_blocking(move || run_executor_with_input_timeout(
         vec!["--state".to_owned(), state_path().display().to_string(), "--local-agent-turn".to_owned()],
         &request_json,
-        3600,
+        worker_timeout,
     )).await.map_err(|error| format!("Local agent worker failed: {error}"))??;
     let result: Value = serde_json::from_str(&output).map_err(|_| "The shared local agent returned invalid JSON.".to_owned())?;
     let steps = result.get("steps").and_then(Value::as_array).cloned().unwrap_or_default();

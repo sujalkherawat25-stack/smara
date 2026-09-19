@@ -158,12 +158,19 @@ def test_agent_loop_ingests_real_pdf_table_and_validates_cell(tmp_path,monkeypat
 
 
 def test_agent_tool_reports_ocr_unavailable_without_fabricated_evidence(tmp_path):
-    from PIL import Image
-    image=tmp_path/"scan.png";Image.new("RGB",(80,30),"white").save(image)
-    agent,session=make_agent(tmp_path,"ocr")
-    plan=json.loads(agent.execute_tool("research_plan",{"question":"Read scan","nodes":[{"id":"scan","question":"What does the scan say?"}]},call_id="ocr-plan"))
-    outcome=json.loads(agent.execute_tool("research_ingest_file",{"node_id":"scan","path":"scan.png"},call_id="ocr-ingest"))
-    assert plan["status"]=="ok" and outcome=={"capability":"ocr","node_id":"scan","reason":"pytesseract is not installed","status":"unavailable"}
+    # This test asserts the unavailable branch and must not depend on a real
+    # Sarvam credential stored in the developer's desktop vault.
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr("smara.ocr_service.resolve_ocr_credentials", lambda: ("https://api.sarvam.ai", "", "sarvam-vision-1.5"))
+    try:
+        from PIL import Image
+        image=tmp_path/"scan.png";Image.new("RGB",(80,30),"white").save(image)
+        agent,session=make_agent(tmp_path,"ocr")
+        plan=json.loads(agent.execute_tool("research_plan",{"question":"Read scan","nodes":[{"id":"scan","question":"What does the scan say?"}]},call_id="ocr-plan"))
+        outcome=json.loads(agent.execute_tool("research_ingest_file",{"node_id":"scan","path":"scan.png"},call_id="ocr-ingest"))
+        assert plan["status"]=="ok" and outcome=={"capability":"ocr","node_id":"scan","reason":"pytesseract is not installed","status":"unavailable"}
+    finally:
+        monkeypatch.undo()
     assert not agent._research.index.records and agent._research.graph.nodes["scan"].state=="unresolved"
     assert session.finish_incremental("completed","invented")["status"]=="needs_input"
 

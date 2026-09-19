@@ -241,7 +241,12 @@ class WebSearchTool:
         provider = (provider_override or os.getenv("SMARA_SEARCH_PROVIDER") or "").strip().lower()
         if not provider:
             configured = getattr(settings, "search_provider", "").strip().lower()
-            if configured and (os.getenv("SMARA_SEARCH_API_KEY") or self._local_key(configured)):
+            configured_key = (
+                os.getenv("SMARA_SEARCH_API_KEY")
+                or getattr(settings, "search_api_key", "")
+                or self._local_key(configured)
+            )
+            if configured and configured_key:
                 provider = configured
             else:
                 for candidate in ["tavily", "exa", "serper", "brave"]:

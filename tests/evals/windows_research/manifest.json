@@ -3,7 +3,7 @@
   "version": 1,
   "owner": "Smara research",
   "fixture": "tests/test_w1_research_agent_integration.py",
-  "fixture_sha256": "88f8a26a02355ffd05b6122844045921adb5df8542eb22d448406b611dd09af2",
+  "fixture_sha256": "7a770e1be78e386386eb9c8195258ea63f16b7b756279ef7946cd41f7ed2d3de",
   "cases": [
     {"id":"W1-01","fixture":"direct fact accepted","validator":"exact answer and artifact-backed support","test":"tests/test_w1_research_agent_integration.py::test_agent_loop_accepts_only_supported_structured_claims[direct-fact]","definition_sha256":"04c885727da459a742ad92d3c5a3d8ac3695d8361dd91cb252386b08b7e2e65c"},
     {"id":"W1-02","fixture":"wrong number rejected","validator":"refuted and no completion","test":"tests/test_w1_research_agent_integration.py::test_agent_loop_accepts_only_supported_structured_claims[wrong-number]","definition_sha256":"0812bc7bbe81cfbe44da2dea27fc540565f03ea79add2f060104340ac64a0b1a"},

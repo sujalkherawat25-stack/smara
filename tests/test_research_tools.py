@@ -43,6 +43,9 @@ def test_search_without_provider_key_is_explicit(monkeypatch):
         "settings",
         SimpleNamespace(search_api_key="", search_provider="brave", search_url="", search_timeout_seconds=2),
     )
+    # Do not let a developer's real desktop vault turn this unit test into a
+    # live-provider request.
+    monkeypatch.setattr(research_tools.WebSearchTool, "_local_key", staticmethod(lambda _provider: ""))
 
     async def execute():
         await research_tools.WebSearchTool().search("missing provider")
@@ -362,7 +365,6 @@ def test_page_reader_ignores_javascript_and_stylesheet_noise():
                 + "</main><script>console.log('ignore me')</script></body></html>"
             ),
         )
-
     async def execute():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             return await research_tools.FetchUrlTool(client).fetch("https://example.com/report")

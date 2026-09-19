@@ -7,6 +7,7 @@ from pathlib import Path
 from smara.autonomous_agent import SmaraAutonomousAgent
 from smara.browser_sidecar import BrowserSidecarEngine
 from smara.goal_engine import GoalPlanner, GoalRunner
+from smara.self_healing import SelfHealingEngine
 
 
 def _response(content: str = "", name: str | None = None, args: dict | None = None) -> dict:
@@ -69,3 +70,37 @@ def test_goal_runner_rejects_failed_outputs_and_schedules_reverse_dag(tmp_path: 
     completed = runner.execute_goal("check", executor_fn=lambda *_: {"ok": True, "exit_code": 0}, model_reasoner=lambda _: [item.to_dict() for item in plan])
     assert completed.status == "completed"
     assert [step.id for step in completed.steps if step.status == "completed"] == ["second", "first"]
+
+
+def test_no_model_terminal_fallback_never_invents_successful_command():
+    objective = "perform a real deployment"
+    step = GoalPlanner.plan(objective)[1]
+    assert step.capability == "local_terminal"
+    assert "argv" not in step.payload
+    assert "command" not in step.payload
+    assert "recipe" not in step.payload
+
+    repaired = SelfHealingEngine().diagnose_failure(
+        "missing required parameter: argv",
+        "local_terminal",
+        {"objective": objective},
+    )
+    assert repaired["mutated_payload"] == {"objective": objective}
+
+
+def test_self_healing_treats_terminal_exit_code_as_failure():
+    calls = []
+
+    def execute(_capability, _payload, _title):
+        calls.append(True)
+        return {"action": "local_terminal", "exit_code": 7, "output": "command failed"}
+
+    result = SelfHealingEngine(max_attempts=3).execute_with_healing(
+        execute,
+        "local_terminal",
+        {"argv": ["python", "-c", "raise SystemExit(7)"]},
+        "Run the command",
+    )
+    assert calls == [True, True, True]
+    assert result["_self_healed"] is False
+    assert result["_attempts"] == 3
