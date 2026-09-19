@@ -12,6 +12,7 @@ def test_default_registry_is_read_only_and_catalogued():
     tools = default_tool_registry().describe()
     assert [tool["name"] for tool in tools] == [
         "calculate",
+        "current_date",
         "current_time",
         "integration.calendar.list",
         "integration.drive.search",
@@ -27,7 +28,19 @@ def test_default_registry_is_read_only_and_catalogued():
 
 def test_local_only_catalogue_excludes_user_integrations():
     names = {tool["name"] for tool in default_tool_registry(include_user_integrations=False).describe()}
-    assert names == {"calculate", "current_time", "research.deep", "research.fetch_url", "research.web_search"}
+    assert names == {"calculate", "current_date", "current_time", "research.deep", "research.fetch_url", "research.web_search"}
+
+
+def test_current_date_tool_uses_requested_timezone_and_is_read_only():
+    registry = default_tool_registry(include_user_integrations=False)
+
+    async def execute():
+        result = await registry.invoke("current_date", {}, ToolContext("acct_test", "workspace", timezone="UTC"))
+        assert result.ok is True
+        assert "Today is " in result.content
+        assert "UTC date:" in result.content
+
+    asyncio.run(execute())
 
 
 def test_code_graph_cannot_default_to_the_host_working_directory(tmp_path):

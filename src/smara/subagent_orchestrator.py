@@ -36,12 +36,12 @@ DELEGATE_BLOCKED_TOOLS = frozenset([
 DELEGATION_ENABLED = os.getenv("SMARA_ENABLE_DELEGATION", "").strip().lower() in {"1", "true", "yes", "on"}
 
 MODEL_ALIASES = {
-    # Historical names are kept at the public CLI boundary, but workers use
-    # the currently provisioned Sarvam identifiers when they are launched.
-    "glm5.2": "sarvam-105b",
-    "glm-5.2": "sarvam-105b",
-    "glm5.3": "glm5.3-flash",
-    "glm-5.3": "glm5.3-flash",
+    # Keep historical spellings usable while preserving the actual Sarvam V2
+    # model selected by the caller.  These are not aliases for Sarvam 105B.
+    "glm5.2": "glm5.2",
+    "glm-5.2": "glm5.2",
+    "glm5.3": "glm5.3",
+    "glm-5.3": "glm5.3",
 }
 
 

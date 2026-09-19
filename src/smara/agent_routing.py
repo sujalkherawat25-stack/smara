@@ -33,6 +33,16 @@ _TIME_RE = re.compile(
     r"what\s+time\s+(?:is\s+it|it\s+is)|tell\s+me\s+(?:the\s+)?(?:current\s+)?time)[!.?\s]*$",
     re.IGNORECASE,
 )
+_DATE_RE = re.compile(
+    r"^(?:(?:(?:what(?:'s| is)\s+(?:the\s+)?)?(?:today(?:'s)?|current)\s+date)|"
+    r"what\s+date\s+is\s+(?:it|today)|"
+    r"what\s+day\s+is\s+(?:it|today)|"
+    r"tell\s+me\s+(?:(?:today(?:'s)?|the\s+current)\s+date)|"
+    r"date\s+(?:today|now)|"
+    r"i\s+(?:think\s+)?(?:before|prior\s+to)\s+(?:searching|researching|looking\s+up)\b.*"
+    r"\b(?:know|check|verify|use|consider)\b[^\n]{0,30}\b(?:the\s+)?(?:current\s+|today'?s\s+)?date\b)[!.?\s]*$",
+    re.IGNORECASE,
+)
 _CALC_RE = re.compile(r"^(?:please\s+)?(?:calculate|compute)\s+(.+?)[!.?\s]*$", re.IGNORECASE)
 _CALC_EXPRESSION_RE = re.compile(r"^[0-9+\-*/%().\s]+$")
 _DURABLE_RE = re.compile(
@@ -95,6 +105,7 @@ _DEEP_RESEARCH_RE = re.compile(
 )
 
 _READ_TOOLS = (
+    "current_date",
     "current_time",
     "calculate",
     "execute_python",
@@ -144,6 +155,11 @@ def route_request(
     if _DURABLE_RE.search(text):
         return RouteDecision(
             "E", "durable or approval-gated work", 0.98, 3, True, (), True
+        )
+    if _DATE_RE.fullmatch(direct_text):
+        return RouteDecision(
+            "A", "exact current-date request", 0.99, 1, False, ("current_date",), False,
+            ("current_date", {}),
         )
     if _TIME_RE.fullmatch(direct_text):
         return RouteDecision(

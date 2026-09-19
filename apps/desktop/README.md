@@ -53,11 +53,13 @@ by that operator; no public Syntarus URL is hard-coded into a new install.
 
 ## Private desktop model providers
 
-Settings → Model provider → **Add provider** can store a Sarvam, Grok, or
-custom OpenAI-compatible endpoint for direct chat from this PC. Sarvam is
-pre-filled with `https://api.sarvam.ai/v2`, model
-`sarvam-105b`, and the `api-subscription-key` header; Grok is pre-filled with
-the xAI endpoint and Bearer authentication. The key is encrypted in the
+Settings → Model provider → **Add provider** can store a Sarvam 105B, Sarvam
+GLM, Grok, or custom OpenAI-compatible endpoint for direct chat from this PC.
+The Sarvam presets use `https://api.sarvam.ai/v2` and the
+`api-subscription-key` header: Sarvam 105B uses `sarvam-105b`, while the GLM
+preset uses the current `glm5.3` model. Sarvam V2 GLM access is beta-gated;
+the key must be enabled for V2 by Sarvam. Grok is pre-filled with the xAI
+endpoint and Bearer authentication. The key is encrypted in the
 Windows-account credential vault and is read only by the native desktop when a
 private chat is started. It never travels to a hosted API. Local task planning,
 research, approvals, and task history stay on this PC; a hosted profile is

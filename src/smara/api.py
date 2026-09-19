@@ -877,6 +877,7 @@ async def chat(body: ChatRequest, user: str = Depends(account_id)):
                 durable_profile_context=durable_profile,
                 attachment_context=attachment_context,
                 http_client=client,
+                timezone=body.timezone,
                 integration_runner=(connected_integration_runner(
                     store, user, client, settings.integration_master_keys
                 ) if settings.hosted_user_integrations_enabled else None),
@@ -1044,6 +1045,7 @@ async def chat_stream(request: Request, body: ChatRequest, user: str = Depends(a
                     durable_profile_context=durable_profile,
                     attachment_context=attachment_context,
                     http_client=client,
+                    timezone=body.timezone,
                     integration_runner=(connected_integration_runner(
                         store, user, client, settings.integration_master_keys
                     ) if settings.hosted_user_integrations_enabled else None),

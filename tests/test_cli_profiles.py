@@ -9,7 +9,7 @@ def test_cli_accepts_live_web_profile_aliases():
         assert args.research_mode == "auto"
 
 
-def test_cli_migrates_deprecated_sarvam_profile(tmp_path, monkeypatch):
+def test_cli_preserves_and_normalizes_sarvam_glm_profile(tmp_path, monkeypatch):
     import json
     from smara.cli import _load_local_profiles
 
@@ -31,8 +31,20 @@ def test_cli_migrates_deprecated_sarvam_profile(tmp_path, monkeypatch):
     profiles, active, _ = _load_local_profiles()
 
     assert active == "sarvam"
-    assert profiles[0]["model"] == "sarvam-105b"
-    assert profiles[0]["label"] == "Sarvam 105B"
+    assert profiles[0]["model"] == "glm5.2"
+    assert profiles[0]["label"] == "Sarvam GLM 5.2"
+
+
+def test_cli_default_profiles_include_sarvam_glm_v2(tmp_path, monkeypatch):
+    from smara.cli import _load_local_profiles
+
+    state = tmp_path / "desktop.json"
+    monkeypatch.setenv("SMARA_DESKTOP_STATE", str(state))
+    profiles, _, _ = _load_local_profiles()
+    glm = next(profile for profile in profiles if profile["id"] == "sarvam_glm")
+    assert glm["base_url"] == "https://api.sarvam.ai/v2"
+    assert glm["model"] == "glm5.3"
+    assert glm["auth_header"] == "api-subscription-key"
 
 
 def test_application_adapter_persists_canonical_live_web_profile(tmp_path, monkeypatch):

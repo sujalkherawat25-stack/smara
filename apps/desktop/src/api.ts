@@ -50,7 +50,7 @@ export const desktop = {
   modelProfiles: () => invoke<LocalModelProfile[]>("list_local_model_profiles"),
   saveModelProfile: (profile: { id: string; label: string; provider: string; base_url: string; model: string; api_key: string; auth_header?: string }) => invoke<LocalModelProfile[]>("save_local_model_profile", { profile }),
   deleteModelProfile: (id: string) => invoke<LocalModelProfile[]>("delete_local_model_profile", { id }),
-  streamChat: (args: { api_url: string; workspace: string; model_profile: string; message: string; conversation_id: string; research_mode?: ResearchMode; tool_profile?: string }) =>
+  streamChat: (args: { api_url: string; workspace: string; model_profile: string; message: string; conversation_id: string; timezone?: string; research_mode?: ResearchMode; tool_profile?: string }) =>
     invoke<void>("stream_chat", { args }),
   onChatEvent: (handler: (event: ChatEvent) => void): Promise<UnlistenFn> =>
     listen<ChatEvent>("smara-chat-event", (event) => handler(event.payload)),

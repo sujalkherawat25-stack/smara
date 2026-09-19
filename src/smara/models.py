@@ -124,6 +124,7 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = Field(default=None, max_length=160)
     model_profile: str | None = Field(default=None, min_length=1, max_length=64)
     attachment_ids: list[str] = Field(default_factory=list, max_length=10)
+    timezone: str | None = Field(default=None, max_length=64)
 
 
 class ChatResponse(BaseModel):

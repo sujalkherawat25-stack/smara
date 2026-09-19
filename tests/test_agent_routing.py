@@ -14,6 +14,9 @@ def test_route_exact_safe_requests_to_deterministic_lane():
     calc_route = route_request("calculate 6 * 7")
     assert calc_route.lane == "A"
     assert calc_route.deterministic_tool == ("calculate", {"expression": "6 * 7"})
+    date_route = route_request("what is today's date?")
+    assert date_route.lane == "A"
+    assert date_route.deterministic_tool == ("current_date", {})
 
 
 def test_route_natural_clock_and_identity_requests_reliably():
@@ -23,6 +26,13 @@ def test_route_natural_clock_and_identity_requests_reliably():
     assert identity.lane == "C"
     assert identity.memory_needed is True
     assert is_identity_memory_request("what do you remeber about me") is True
+
+
+def test_route_date_context_prompt_without_stealing_time_sensitive_searches():
+    assert route_request("i think before searching you should know the date").deterministic_tool == ("current_date", {})
+    headlines = route_request("search today's headlines")
+    assert headlines.deterministic_tool is None
+    assert headlines.lane == "D"
 
 
 def test_route_detailed_citation_requests_to_deterministic_deep_research():

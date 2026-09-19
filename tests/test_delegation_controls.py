@@ -7,8 +7,8 @@ def test_worker_model_aliases_and_default_opt_in(monkeypatch):
     monkeypatch.delenv("SMARA_ENABLE_DELEGATION", raising=False)
     module = importlib.reload(module)
     assert module.DELEGATION_ENABLED is False
-    assert module.normalize_worker_model("glm5.2") == "sarvam-105b"
-    assert module.normalize_worker_model("glm5.3") == "glm5.3-flash"
+    assert module.normalize_worker_model("glm5.2") == "glm5.2"
+    assert module.normalize_worker_model("glm5.3") == "glm5.3"
     assert module.normalize_worker_model("custom-model") == "custom-model"
 
 

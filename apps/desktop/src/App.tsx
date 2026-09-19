@@ -580,6 +580,7 @@ export default function App() {
           model_profile: selectedModelProfile,
           message: text,
           conversation_id: conversationId.current,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           research_mode: researchMode,
           tool_profile: researchMode === "auto" ? "full" : "research_web",
         });
@@ -3865,14 +3866,16 @@ function ModelsTab({
   const [busy, setBusy] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
-  const credentialName = provider === "sarvam"
-    ? "SMARA_MODEL_SARVAM_API_KEY"
-    : provider === "grok"
+  const credentialName = provider === "sarvam-glm"
+    ? "SMARA_MODEL_SARVAM_GLM_API_KEY"
+    : provider === "sarvam"
+      ? "SMARA_MODEL_SARVAM_API_KEY"
+      : provider === "grok"
       ? "SMARA_MODEL_GROK_API_KEY"
       : "";
   const credentialConfigured = credentialName ? credentials.some((item) => item.name === credentialName) : true;
 
-  function applyPreset(preset: "grok" | "sarvam" | "ollama" | "lmstudio" | "openrouter") {
+  function applyPreset(preset: "grok" | "sarvam" | "sarvam-glm" | "ollama" | "lmstudio" | "openrouter") {
     if (preset === "grok") {
       setProvider("grok");
       setLabel("Grok-3 Mini");
@@ -3884,6 +3887,12 @@ function ModelsTab({
       setLabel("Sarvam 105B");
       setBaseUrl("https://api.sarvam.ai/v2");
       setModelName("sarvam-105b");
+      setAuthHeader("api-subscription-key");
+    } else if (preset === "sarvam-glm") {
+      setProvider("sarvam-glm");
+      setLabel("Sarvam GLM 5.3");
+      setBaseUrl("https://api.sarvam.ai/v2");
+      setModelName("glm5.3");
       setAuthHeader("api-subscription-key");
     } else if (preset === "ollama") {
       setProvider("ollama");
@@ -3950,6 +3959,7 @@ function ModelsTab({
         <span className="preset-title">Quick Presets:</span>
         <button onClick={() => applyPreset("grok")}>xAI Grok-3</button>
         <button onClick={() => applyPreset("sarvam")}>Sarvam AI</button>
+        <button onClick={() => applyPreset("sarvam-glm")}>Sarvam GLM 5.3 (v2)</button>
         <button onClick={() => applyPreset("ollama")}>Ollama (Local)</button>
         <button onClick={() => applyPreset("lmstudio")}>LM Studio (Local)</button>
         <button onClick={() => applyPreset("openrouter")}>OpenRouter</button>

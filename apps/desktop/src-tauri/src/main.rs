@@ -99,6 +99,8 @@ struct ChatArgs {
     message: String,
     conversation_id: String,
     #[serde(default)]
+    timezone: String,
+    #[serde(default)]
     research_mode: String,
     #[serde(default)]
     tool_profile: String,
@@ -286,11 +288,19 @@ fn stored_local_model_profiles() -> Vec<LocalModelProfile> {
     if !profiles.is_empty() {
         let mut changed = false;
         let migrated = profiles.into_iter().map(|mut profile| {
-            if profile.id == "sarvam" {
+            if profile.provider.starts_with("sarvam") || profile.id == "sarvam" || profile.id == "sarvam_glm" {
                 let model = profile.model.to_ascii_lowercase().replace(['-', '.'], "");
-                if matches!(model.as_str(), "glm52" | "glm53" | "glm53flash") {
-                    profile.model = "sarvam-105b".to_owned();
-                    profile.label = "Sarvam 105B".to_owned();
+                let canonical_model = match model.as_str() {
+                    "glm52" => Some("glm5.2"),
+                    "glm53" => Some("glm5.3"),
+                    "glm53flash" => Some("glm5.3-flash"),
+                    _ => None,
+                };
+                if let Some(canonical_model) = canonical_model {
+                    profile.model = canonical_model.to_owned();
+                    if profile.label.eq_ignore_ascii_case("sarvam 105b") || profile.label.to_ascii_lowercase().contains("glm") {
+                        profile.label = format!("Sarvam {}", canonical_model.replace("glm", "GLM "));
+                    }
                     changed = true;
                 }
                 if profile.base_url.contains("api.sarvam.ai") && profile.base_url.ends_with("/v1") {
@@ -324,7 +334,8 @@ fn stored_local_model_profiles() -> Vec<LocalModelProfile> {
         return profiles;
     };
     let Some((label, provider, base_url, model, auth_header)) = (match id {
-        "sarvam" => Some(("Sarvam", "sarvam", "https://api.sarvam.ai/v1/chat/completions", "sarvam-105b", "api-subscription-key")),
+        "sarvam" => Some(("Sarvam 105B", "sarvam", "https://api.sarvam.ai/v2", "sarvam-105b", "api-subscription-key")),
+        "sarvam_glm" => Some(("Sarvam GLM 5.3", "sarvam-glm", "https://api.sarvam.ai/v2", "glm5.3", "api-subscription-key")),
         "grok" => Some(("Grok", "grok", "https://api.x.ai/v1/chat/completions", "grok-3-mini", "authorization")),
         _ => None,
     }) else {
@@ -1097,7 +1108,7 @@ fn local_capability_summary() -> String {
     let capabilities = if connection.capabilities.is_empty() { "no file, terminal, browser, or connector permissions yet".to_owned() }
     else { connection.capabilities.join(", ").replace('_', " ") };
     format!(
-        "This Desktop can use local time and calculations now. Enabled permissions: {capabilities}. Local tasks run with {} approval.",
+        "This Desktop can use the local date, time, and calculations now. Enabled permissions: {capabilities}. Local tasks run with {} approval.",
         if connection.approval_mode == "auto" { "automatic safe" } else { "ask-first" },
     )
 }
@@ -1105,6 +1116,28 @@ fn local_capability_summary() -> String {
 fn local_builtin_answer(message: &str) -> Option<(&'static str, String)> {
     let request = direct_local_request_text(message);
     let normalized = request.trim_matches(|character: char| matches!(character, '.' | '!' | '?')).trim();
+    let date_requests = [
+        "date",
+        "today",
+        "current date",
+        "today's date",
+        "what is today's date",
+        "what's today's date",
+        "what is the current date",
+        "what date is it",
+        "what date is today",
+        "what day is it",
+        "what day is today",
+        "tell me today's date",
+        "tell me the current date",
+        "i think before searching you should know the date",
+    ];
+    if date_requests.contains(&normalized) {
+        return Some((
+            "current_date",
+            format!("Today is {}.", Local::now().format("%A, %d %B %Y")),
+        ));
+    }
     let clock_requests = [
         "time",
         "current time",
@@ -1416,7 +1449,7 @@ async fn decide_local_task(task_id: String, approved: bool) -> Result<(), String
 
 fn normalize_provider_model(provider: &str, model: &str) -> String {
     let m_lower = model.to_lowercase().trim().to_string();
-    if provider == "sarvam" || m_lower.contains("sarvam") || m_lower.contains("glm") || m_lower.contains("gemma") {
+    if provider.starts_with("sarvam") || m_lower.contains("sarvam") || m_lower.contains("glm") || m_lower.contains("gemma") {
         if m_lower == "glm-5.2" || m_lower == "glm5.2" {
             return "glm5.2".to_string();
         }
@@ -1437,6 +1470,13 @@ fn normalize_provider_model(provider: &str, model: &str) -> String {
         }
     }
     model.trim().to_string()
+}
+
+fn add_reasoning_budget(payload: &mut Value, model: &str) {
+    let normalized = model.to_ascii_lowercase();
+    if normalized.starts_with("glm5") || normalized.starts_with("deepseek") {
+        payload["reasoning_effort"] = json!("low");
+    }
 }
 
 fn local_chat_endpoint(base_url: &str) -> String {
@@ -1546,7 +1586,8 @@ async fn try_local_json_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &L
     messages.extend(local_chat_history(&args.conversation_id));
     messages.push(json!({"role": "user", "content": args.message}));
     let model_name = normalize_provider_model(&profile.provider, &profile.model);
-    let payload = json!({"model": model_name, "messages": messages, "stream": false, "max_tokens": 2048, "temperature": 0.0});
+    let mut payload = json!({"model": model_name, "messages": messages, "stream": false, "max_tokens": 2048, "temperature": 0.0});
+    add_reasoning_budget(&mut payload, &model_name);
     let endpoint = local_chat_endpoint(&profile.base_url);
     let mut request = shared_http_client().post(endpoint).timeout(std::time::Duration::from_secs(120)).json(&payload);
     if profile.auth_header == "api-subscription-key" { request = request.header("api-subscription-key", secret); } else { request = request.bearer_auth(secret); }
@@ -1612,7 +1653,7 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
     messages.extend(local_chat_history(&args.conversation_id));
     messages.push(json!({"role": "user", "content": args.message}));
     let model_name = normalize_provider_model(&profile.provider, &profile.model);
-    let payload = json!({
+    let mut payload = json!({
         "model": model_name,
         "messages": messages,
         "tools": [tool],
@@ -1622,6 +1663,7 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
         "max_tokens": 2048,
         "temperature": 0.1,
     });
+    add_reasoning_budget(&mut payload, &model_name);
     let client = shared_http_client();
     let mut request = client.post(&endpoint).timeout(std::time::Duration::from_secs(300)).json(&payload);
     if profile.auth_header == "api-subscription-key" { request = request.header("api-subscription-key", secret); }
@@ -1673,13 +1715,14 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
         second_messages.push(json!({"role": "user", "content": user_prompt}));
         
         let model_name = normalize_provider_model(&profile.provider, &profile.model);
-        let second_payload = json!({
+        let mut second_payload = json!({
             "model": model_name,
             "messages": second_messages,
             "stream": true,
             "max_tokens": 4096,
             "temperature": 0.2,
         });
+        add_reasoning_budget(&mut second_payload, &model_name);
         
         let mut second_req = client.post(&endpoint).timeout(std::time::Duration::from_secs(120)).header("Accept", "text/event-stream").json(&second_payload);
         if profile.auth_header == "api-subscription-key" { second_req = second_req.header("api-subscription-key", secret); }
@@ -1707,13 +1750,14 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
         }
         
         if streamed.trim().is_empty() {
-            let non_stream_payload = json!({
+            let mut non_stream_payload = json!({
                 "model": model_name,
                 "messages": second_messages,
                 "stream": false,
                 "max_tokens": 4096,
                 "temperature": 0.2,
             });
+            add_reasoning_budget(&mut non_stream_payload, &model_name);
             let mut sync_req = client.post(&endpoint).timeout(std::time::Duration::from_secs(60)).json(&non_stream_payload);
             if profile.auth_header == "api-subscription-key" { sync_req = sync_req.header("api-subscription-key", secret); }
             else { sync_req = sync_req.bearer_auth(secret); }
@@ -1859,6 +1903,7 @@ async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile
         "workspace": workspace,
         "research_mode": args.research_mode.trim(),
         "tool_profile": args.tool_profile.trim(),
+        "timezone": args.timezone.trim(),
         "context": local_chat_history(&args.conversation_id),
         "model": {
             "label": profile.label,
@@ -1932,13 +1977,14 @@ async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModel
     messages.extend(local_chat_history(&args.conversation_id));
     messages.push(json!({"role": "user", "content": args.message}));
     let model_name = normalize_provider_model(&profile.provider, &profile.model);
-    let payload = json!({
+    let mut payload = json!({
         "model": model_name,
         "messages": messages,
         "stream": true,
         "max_tokens": 2048,
         "temperature": 0.2,
     });
+    add_reasoning_budget(&mut payload, &model_name);
     let client = shared_http_client();
     let mut request = client.post(endpoint).timeout(std::time::Duration::from_secs(300)).header("Accept", "text/event-stream").json(&payload);
     if profile.auth_header == "api-subscription-key" { request = request.header("api-subscription-key", &secret); }
@@ -3188,7 +3234,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{append_stream_delta, derived_local_capabilities, direct_local_request_text, evaluate_local_arithmetic, local_builtin_answer, local_delta_text, local_event_payload, normalized_api_url, normalized_pairing_code, normalized_web_url, parse_local_json_plan, preserve_local_model_profiles};
+    use super::{append_stream_delta, derived_local_capabilities, direct_local_request_text, evaluate_local_arithmetic, local_builtin_answer, local_delta_text, local_event_payload, normalize_provider_model, normalized_api_url, normalized_pairing_code, normalized_web_url, parse_local_json_plan, preserve_local_model_profiles};
     use serde_json::json;
 
     #[test]
@@ -3223,6 +3269,19 @@ mod tests {
         let (tool, answer) = local_builtin_answer("okay great, what time it is").expect("clock request");
         assert_eq!(tool, "current_time");
         assert!(answer.starts_with("The local time is "));
+    }
+
+    #[test]
+    fn local_date_is_available_without_a_model_or_hosted_connection() {
+        let (tool, answer) = local_builtin_answer("i think before searching you should know the date").expect("date request");
+        assert_eq!(tool, "current_date");
+        assert!(answer.starts_with("Today is "));
+    }
+
+    #[test]
+    fn sarvam_v2_models_are_preserved_and_normalized() {
+        assert_eq!(normalize_provider_model("sarvam-glm", "glm-5.3"), "glm5.3");
+        assert_eq!(normalize_provider_model("sarvam", "sarvam-105b"), "sarvam-105b");
     }
 
     #[test]

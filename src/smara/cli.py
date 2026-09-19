@@ -179,20 +179,25 @@ def _load_local_profiles() -> tuple[list[dict[str, Any]], str, dict[str, str]]:
         profiles = [
             {"id": "grok", "label": "Grok-3 Mini", "base_url": "https://api.x.ai/v1", "model": "grok-3-mini", "auth_header": "authorization"},
             {"id": "sarvam", "label": "Sarvam 105B", "base_url": "https://api.sarvam.ai/v2", "model": "sarvam-105b", "auth_header": "api-subscription-key"},
+            {"id": "sarvam_glm", "label": "Sarvam GLM 5.3", "base_url": "https://api.sarvam.ai/v2", "model": "glm5.3", "auth_header": "api-subscription-key"},
             {"id": "ollama", "label": "Ollama Local", "base_url": "http://localhost:11434/v1", "model": "llama3.3", "auth_header": "authorization"},
             {"id": "openrouter", "label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "model": "anthropic/claude-3.5-sonnet", "auth_header": "authorization"},
         ]
 
-    # Sarvam retired the old GLM aliases.  Migrate stale Desktop/CLI profile
-    # state in memory so a persisted profile cannot silently call a deprecated
-    # model; the user's credential remains untouched in the vault.
+    # Normalize older Sarvam profile state in memory.  GLM profiles are real
+    # V2 profiles, so preserve the selected GLM model instead of silently
+    # replacing it with Sarvam 105B; the user's credential remains untouched.
     for profile in profiles:
-        if str(profile.get("id", "")).lower() != "sarvam":
+        profile_id = str(profile.get("id", "")).lower()
+        provider = str(profile.get("provider", "")).lower()
+        if profile_id not in {"sarvam", "sarvam_glm"} and not provider.startswith("sarvam"):
             continue
         model = str(profile.get("model") or "").lower().replace("-", "").replace(".", "")
-        if model in {"glm52", "glm53", "glm53flash"}:
-            profile["model"] = "sarvam-105b"
-            profile["label"] = "Sarvam 105B"
+        canonical_model = {"glm52": "glm5.2", "glm53": "glm5.3", "glm53flash": "glm5.3-flash"}.get(model)
+        if canonical_model:
+            profile["model"] = canonical_model
+            if str(profile.get("label", "")).lower() == "sarvam 105b" or "glm" in str(profile.get("label", "")).lower():
+                profile["label"] = f"Sarvam {canonical_model.replace('glm', 'GLM ')}"
         base_url = str(profile.get("base_url") or "")
         if "api.sarvam.ai" in base_url and "/v1" in base_url and "/v2" not in base_url:
             profile["base_url"] = "https://api.sarvam.ai/v2"
@@ -205,6 +210,7 @@ def _resolve_profile_key(profile: dict[str, Any], credentials: dict[str, Any]) -
     env_keys = {
         "grok": ["SMARA_MODEL_GROK_API_KEY", "GROK_API_KEY", "XAI_API_KEY"],
         "sarvam": ["SMARA_MODEL_SARVAM_API_KEY", "SARVAM_API_KEY"],
+        "sarvam_glm": ["SMARA_MODEL_SARVAM_GLM_API_KEY", "SMARA_MODEL_SARVAM_API_KEY", "SARVAM_API_KEY"],
         "openrouter": ["SMARA_MODEL_OPENROUTER_API_KEY", "OPENROUTER_API_KEY"],
         "ollama": ["OLLAMA_API_KEY"],
     }

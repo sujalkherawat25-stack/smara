@@ -14,6 +14,7 @@ import operator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -49,6 +50,7 @@ class ToolContext:
     integration_requester: Callable[[str, str, str, str, dict[str, Any]], dict[str, Any]] | None = None
     desktop_requester: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None
     desktop_workflow_requester: Callable[[str, list[dict[str, Any]]], dict[str, Any]] | None = None
+    timezone: str | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,33 @@ class CurrentTimeTool:
 
     async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         return ToolResult(True, dt.datetime.now(dt.timezone.utc).isoformat())
+
+
+def _now_in_timezone(timezone: str | None) -> dt.datetime:
+    """Return an aware local time, falling back safely when tzdata is absent."""
+    if timezone:
+        try:
+            return dt.datetime.now(ZoneInfo(timezone))
+        except (ZoneInfoNotFoundError, ValueError):
+            pass
+    return dt.datetime.now().astimezone()
+
+
+class CurrentDateTool:
+    spec = ToolSpec(
+        "current_date",
+        "Return today's date in the user's timezone and the corresponding UTC date.",
+        {"type": "object", "properties": {}, "additionalProperties": False},
+    )
+
+    async def run(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        local = _now_in_timezone(context.timezone)
+        utc = local.astimezone(dt.timezone.utc)
+        zone_name = local.tzname() or context.timezone or "local time"
+        return ToolResult(
+            True,
+            f"Today is {local:%A, %d %B %Y} ({local.date().isoformat()}, {zone_name}). UTC date: {utc.date().isoformat()}.",
+        )
 
 
 _BINARY_OPS = {
@@ -1055,6 +1084,7 @@ def default_tool_registry(
     include_workspace_tools: bool = False,
 ) -> ToolRegistry:
     registry = ToolRegistry([
+        CurrentDateTool(),
         CurrentTimeTool(),
         CalculateTool(),
         ResearchDeepTool(http_client),

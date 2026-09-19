@@ -350,9 +350,9 @@ bounded job, polls it, downloads the result, and stores only extracted text.
 Upload limits remain 10 MB for voice, 4 MB for photos, and 20 MB for documents;
 provider errors are recorded through the normal bounded retry path.
 
-The hosted model profile example includes Sarvam `sarvam-105b` on `/v1`,
-`glm5.2` on `/v2` for deeper reasoning, and `gemma4` on `/v2` for image input.
-Only profile names cross the client boundary. GLM-5.2 and Gemma 4 require
+The hosted model profile example includes Sarvam `sarvam-105b` on `/v2`,
+`glm5.3` on `/v2` for deeper reasoning, and `gemma4` on `/v2` for image input.
+Only profile names cross the client boundary. GLM-5.3 and Gemma 4 require
 Sarvam beta access; OCR is a separate Document AI workflow rather than a chat
 profile.
 

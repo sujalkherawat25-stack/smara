@@ -484,6 +484,7 @@ class SmaraAgentRuntime:
         http_client: httpx.AsyncClient | None = None,
         integration_runner: Callable[[str, str, dict[str, Any]], Any] | None = None,
         include_user_integrations: bool = True,
+        timezone: str | None = None,
         event_hook: Callable[[str, dict[str, Any]], None] | None = None,
         token_hook: Callable[[str], None] | None = None,
     ) -> ChatTurn:
@@ -532,7 +533,13 @@ class SmaraAgentRuntime:
                 result = await registry.invoke(
                     name,
                     arguments,
-                    ToolContext(account_id, workspace_id, http_client, integration_runner=integration_runner),
+                    ToolContext(
+                        account_id,
+                        workspace_id,
+                        http_client,
+                        integration_runner=integration_runner,
+                        timezone=timezone,
+                    ),
                 )
             except ToolError as exc:
                 if event_hook:
@@ -729,7 +736,13 @@ class SmaraAgentRuntime:
                 "objective": message,
             },
             memory_context=context,
-            tool_context=ToolContext(account_id, workspace_id, http_client, integration_runner=integration_runner),
+            tool_context=ToolContext(
+                account_id,
+                workspace_id,
+                http_client,
+                integration_runner=integration_runner,
+                timezone=timezone,
+            ),
             event_hook=event_hook,
             token_hook=token_hook,
         )
