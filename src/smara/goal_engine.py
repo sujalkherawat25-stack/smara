@@ -83,6 +83,10 @@ class GoalPlanner:
         # objective and create only a bounded inspect/act/verify scaffold.
         return [
             GoalStep("step_1", "Inspect workspace", f"Inspect the workspace and gather evidence for: {objective}", "local_file_read", {"operation": "workspace_snapshot", "objective": objective}),
+            # A no-model planner cannot infer a real command from prose. Keep
+            # the action explicit and let the executor fail with a truthful
+            # missing-arguments error until a model or caller supplies argv,
+            # command, or an approved recipe.
             GoalStep("step_2", "Execute objective", f"Execute the approved actions required by: {objective}", "local_terminal", {"objective": objective}, ["step_1"]),
             GoalStep("step_3", "Verify outcome", f"Verify the deliverables and evidence for: {objective}", "local_file_read", {"operation": "workspace_snapshot", "objective": objective}, ["step_2"]),
         ]

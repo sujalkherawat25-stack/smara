@@ -437,6 +437,7 @@ def run_shared_local_turn(
     action_executor: Any | None = None,
     conversation_id: str | None = None,
     workspace_id: str = "default",
+    research_mode: str = "auto",
 ) -> dict[str, Any]:
     """Run the shared agent loop with local cross-session memory.
 
@@ -450,6 +451,10 @@ def run_shared_local_turn(
     # The specialised conversation/task stores remain intact, while resume
     # callers now get one stable id and status contract.
     runtime_sessions = session_store_for_state(state_path)
+    requested_research_mode = str(research_mode or "auto").strip().lower()
+    if requested_research_mode not in {"auto", "quick", "deep"}:
+        requested_research_mode = "auto"
+    tool_profile = "research_web" if requested_research_mode in {"quick", "deep"} else None
     runtime_sessions.create_or_get(
         conversation,
         request=prompt,
@@ -457,10 +462,14 @@ def run_shared_local_turn(
         account_id="local",
         mode="local",
         model_profile=config.label,
+        tool_profile=tool_profile,
+        research_mode=requested_research_mode,
     )
     runtime_sessions.checkpoint(
         conversation,
         status="running",
+        tool_profile=tool_profile,
+        research_mode=requested_research_mode,
         event="turn.started",
         event_payload={"request": prompt[:500]},
     )
@@ -525,6 +534,11 @@ def run_shared_local_turn(
         except (OSError, RuntimeError, TypeError, ValueError):
             pass
     live_query = _live_web_query(prompt, live_context)
+    # Explicit Quick/Deep selection is itself an instruction to gather live
+    # evidence. Do not rely on an incidental keyword such as "today" before
+    # issuing the bounded preflight search.
+    if live_query is None and requested_research_mode in {"quick", "deep"}:
+        live_query = prompt[:500]
     live_web_result: str | None = None
     live_web_error: str | None = None
     if live_query:
@@ -622,6 +636,7 @@ def run_shared_local_turn(
             pass
         result["local_memory_hits"] = len(memory_hits)
         result["local_memory_indexed"] = True
+        result["research_mode"] = requested_research_mode
         completed = bool(result.get("completed"))
         cancelled = bool(result.get("cancelled")) or runtime_sessions.should_cancel(conversation)
         unresolved = result.get("unresolved_items")

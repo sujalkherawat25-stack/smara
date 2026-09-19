@@ -379,10 +379,22 @@ class LocalAutonomousEngine:
 
             elif capability == "local_terminal":
                 from .desktop_executor import _terminal
-                res_str = _terminal(payload, [self.workspace], {})
+                state = {
+                    "terminal_allowlist": [
+                        "python", "python.exe", "pytest", "pytest.exe", "git", "git.exe",
+                        "npm", "npm.cmd", "node", "node.exe", "cargo", "cargo.exe",
+                    "smara", "smara.exe", "pwsh", "powershell", "cmd.exe", "echo"
+                    ]
+                }
+                # Do not manufacture a successful command from a natural-language
+                # objective.  The terminal executor requires an explicit argv,
+                # command, or approved recipe and will return a truthful error
+                # when the planner omitted one.
+                res_str = _terminal(dict(payload), [self.workspace], state)
                 result_data = json.loads(res_str)
                 out = result_data.get("output", "")
-                self.tui.print_tool_result(capability, result_data.get("returncode", 0) == 0, f"Output {len(out)} chars")
+                exit_code = result_data.get("exit_code", result_data.get("returncode"))
+                self.tui.print_tool_result(capability, exit_code == 0, f"Output {len(out)} chars")
 
             elif capability == "dynamic_tool_synthesize":
                 from .tool_synthesis import DynamicToolSynthesizer
@@ -1139,11 +1151,14 @@ def main(argv: list[str] | None = None) -> int:
         requested_profile=normalize_tool_profile(getattr(parsed_args,"tool_profile","full"))
         if requested_profile=="full" and (requested_mode!="auto" or should_route_to_research(prompt)):
             requested_profile="research_web"
-        if session is None and budget is None and requested_profile=="research_web":
-            selected=select_research_lane(prompt,requested_mode)[0].mode
-            budget=BUDGET_PROFILES["research_deep" if selected=="deep" else "research_quick"]
-        ephemeral_session = session is None and budget is None
-        session=session or SessionEngine(active_workspace,budget=budget or Budget())
+        if session is None and budget is None:
+            if requested_profile == "research_web":
+                selected = select_research_lane(prompt, requested_mode)[0].mode
+                budget = BUDGET_PROFILES["research_deep" if selected == "deep" else "research_quick"]
+            else:
+                budget = BUDGET_PROFILES.get("coding", Budget(1800, 240, 120, 800_000, 5))
+        ephemeral_session = session is None
+        session = session or SessionEngine(active_workspace, budget=budget)
         runtime_store=session_store_for_workspace(active_workspace)
         runtime_store.create_or_get(
             session.session_id,
@@ -1194,7 +1209,13 @@ def main(argv: list[str] | None = None) -> int:
             raise
         payload=agent_result.get("session") or session.inspect().get("state",{}).get("result") or session.inspect()
         from .app_adapter import application_envelope
-        runtime_status="cancelled" if runtime_store.should_cancel(session.session_id) else str(payload.get("status") or "needs_input")
+        raw_status = str(payload.get("status") or "needs_input")
+        if runtime_store.should_cancel(session.session_id):
+            runtime_status = "cancelled"
+        elif raw_status in {"completed", "waiting_approval", "needs_input"}:
+            runtime_status = raw_status
+        else:
+            runtime_status = "failed"
         runtime_store.checkpoint(session.session_id,status=runtime_status,result=payload,unresolved=payload.get("unresolved_items") or [],event=f"turn.{runtime_status}")
         payload={**payload,**application_envelope(session,payload,runtime_store=runtime_store)}
         return agent_result,payload
@@ -1777,7 +1798,7 @@ def main(argv: list[str] | None = None) -> int:
             tools = synthesizer.list_dynamic_tools()
             print(tui.paint(f"\n🛠️ Smara Dynamic Tool Library ({len(tools)} tools registered):\n", "BOLD"))
             if not tools:
-                print(tui.paint("  No dynamic tools synthesized yet. Create one with 'smara tool create <name> --code <code>'\n", "DIM"))
+                print(tui.paint("  No dynamic tools synthesized yet. Create one with 'smara dynamic-tool create <name> --code <code>'\n", "DIM"))
                 return 0
             for t in tools:
                 print(f"  • {tui.paint(t['name'], 'CYAN')} ({tui.paint(t.get('status', 'active'), 'GREEN')})")
@@ -1788,6 +1809,10 @@ def main(argv: list[str] | None = None) -> int:
         if tool_cmd == "create":
             name = parsed_args.name
             code = parsed_args.code
+            if code.startswith("@") or (Path(code).exists() and Path(code).is_file()):
+                code_path = Path(code.lstrip("@"))
+                if code_path.is_file():
+                    code = code_path.read_text(encoding="utf-8")
             desc = parsed_args.desc or f"Custom dynamic tool: {name}"
             tui.print_tool_start("dynamic_tool_synthesize", f"Synthesizing & verifying tool '{name}'...")
             try:

@@ -54,6 +54,12 @@ class SelfHealingEngine:
                 mutated_payload.setdefault("share_content", True)
             elif capability == "local_file_write":
                 mutated_payload.setdefault("operation", "write")
+            elif capability == "local_terminal":
+                # A prose objective is not a terminal command. Do not turn a
+                # missing argv/recipe into a synthetic successful print; keep
+                # the payload unchanged so the caller can request a real
+                # command or surface the missing input.
+                strategy = "Require an explicit argv list, bounded command, or approved recipe."
             elif capability == "local_integration":
                 mutated_payload.setdefault("provider", "tavily")
                 mutated_payload.setdefault("operation", "search")
@@ -110,9 +116,13 @@ class SelfHealingEngine:
                 elif result.get("status") == "failed":
                     is_error = True
                     err_msg = str(result.get("error") or result.get("message") or "Action status failed")
-                elif result.get("returncode", 0) != 0 and "output" in result:
+                elif (
+                    result.get("returncode", result.get("exit_code", 0)) != 0
+                    and "output" in result
+                ):
                     is_error = True
-                    err_msg = f"Non-zero return code ({result['returncode']}): {result.get('output', '')[:200]}"
+                    code = result.get("returncode", result.get("exit_code"))
+                    err_msg = f"Non-zero return code ({code}): {result.get('output', '')[:200]}"
 
             if not is_error:
                 # Succeeded!

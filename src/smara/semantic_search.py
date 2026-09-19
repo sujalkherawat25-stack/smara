@@ -238,7 +238,7 @@ class SemanticCodeSearcher:
 
         with self._get_conn() as conn:
             for root, dirs, files in os.walk(self.workspace):
-                dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "target", ".smara", "dist", "build", "tests_tmp", ".pytest_cache"}]
+                dirs[:] = [d for d in dirs if d not in {".git", ".venv", "venv", "__pycache__", "node_modules", "target", ".smara", "dist", "build", "tests_tmp", ".pytest_cache", "artifacts"}]
                 for file in files:
                     p = Path(root) / file
                     if p.suffix not in supported_exts:

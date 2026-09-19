@@ -32,28 +32,22 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
-try:
-    import win32crypt
-except ImportError:
-    win32crypt = None
-
-
 def _get_vault_secret(alias: str) -> str:
     key = os.getenv(alias, "")
     if key:
         return key
     try:
-        cred_path = Path(r"C:\Users\sujal\AppData\Roaming\Smara\credentials.json")
-        if cred_path.exists() and win32crypt:
-            with open(cred_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            entry = data.get(alias, {})
-            protected = entry.get("protected")
-            if protected:
-                import base64
-                blob = base64.b64decode(protected)
-                _, decrypted = win32crypt.CryptUnprotectData(blob, None, None, None, 0)
-                return decrypted.decode("utf-8")
+        from .desktop_executor import resolve_local_credential
+        val = resolve_local_credential(alias)
+        if val:
+            return val
+    except Exception:
+        pass
+    try:
+        from .cli import _load_local_profiles
+        _, _, creds = _load_local_profiles()
+        if alias in creds and creds[alias]:
+            return str(creds[alias])
     except Exception:
         pass
     return ""
@@ -398,7 +392,6 @@ def wikipedia_page(title_or_url: str, date_or_timestamp: str = "", action: str =
             return f"Wikipedia Extract Error: {e}"
 
 
-
 def python_execute(code: str, timeout: int = 30) -> str:
     """Execute Python code in an isolated subprocess and return output."""
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as f:
@@ -449,7 +442,6 @@ def _resolve_file_path(file_path: Path | str) -> Path:
     p = Path(file_path)
     if p.exists():
         return p
-    # Search common workspace attachment directories
     for search_dir in [Path("data"), Path("data/attachments"), Path("data/files"), Path("attachments"), Path("files"), Path("data/gaia_files")]:
         candidate = search_dir / p.name
         if candidate.exists():
@@ -539,7 +531,6 @@ def file_read(file_path: Path | str, offset: Optional[int] = None, limit: Option
         except Exception as e:
             return f"Error reading pdb: {e}"
 
-    # General text and code file handling with line numbers and offset/limit support
     try:
         content = p.read_text(encoding="utf-8", errors="replace")
         lines = content.splitlines()
@@ -581,7 +572,6 @@ def pdf_search(
 
         target_page = page or (start_page if (end_page is not None and start_page == end_page) else None)
 
-        # If query is empty or whitespace, extract page content directly
         if not (query or "").strip():
             first_idx = max(0, (target_page - 1) if target_page else (start_page - 1))
             last_idx = min(total_pages, target_page if target_page else (end_page or (first_idx + 5)))
@@ -597,7 +587,6 @@ def pdf_search(
                 img_note = f" [Contains {img_count} embedded image(s)/diagram(s)]" if img_count else ""
                 output_parts.append(f"[Physical Page {idx + 1}{img_note}]:\n{txt}")
 
-            # Reconcile printed page numbers: if target_page requested, check if any page's printed number matches
             if target_page:
                 p_str = str(target_page)
                 printed_match = None
@@ -622,7 +611,6 @@ def pdf_search(
                 return f"PDF '{p.name}' (Total pages: {total_pages}):\n\n" + "\n\n".join(output_parts)
             return f"PDF '{p.name}' has {total_pages} total pages."
 
-        # Search query across pages
         first_idx = max(0, start_page - 1)
         last_idx = min(total_pages, end_page) if end_page else total_pages
         matches = []
@@ -660,7 +648,6 @@ def zip_extract_and_read(zip_path: Path | str, target_file: Optional[str] = None
 
             extracted_files = [f for f in Path(tmp_dir).rglob("*") if f.is_file()]
             
-            # If target_file requested, find and return its content
             if target_file and target_file.strip():
                 tf_clean = target_file.strip().lower()
                 matching = [f for f in extracted_files if tf_clean in f.name.lower() or tf_clean in str(f.relative_to(tmp_dir)).lower()]
@@ -672,7 +659,6 @@ def zip_extract_and_read(zip_path: Path | str, target_file: Optional[str] = None
                     avail = [str(f.relative_to(tmp_dir)) for f in extracted_files]
                     return f"Target file '{target_file}' not found in archive. Available files: {avail}"
 
-            # Default: summarize files inside archive
             output_parts = [f"ZIP Archive '{p.name}' contains {len(extracted_files)} files:"]
             for f in extracted_files[:max_files]:
                 rel_name = str(f.relative_to(tmp_dir))
@@ -689,7 +675,6 @@ def audio_transcribe(file_path_or_url: str, model_size: str = "tiny.en") -> str:
     p = _resolve_file_path(file_path_or_url)
     if not p.exists():
         if file_path_or_url.startswith(("http://", "https://")):
-            # Download audio with yt-dlp
             try:
                 import yt_dlp
                 tmp_audio = Path(tempfile.gettempdir()) / f"audio_{int(time.time())}.mp3"
@@ -779,9 +764,7 @@ def video_inspect(
     """Inspect video: fetch transcript, search metadata, or extract frame at timestamp for visual analysis."""
     act = action.lower().strip()
 
-    # If action is transcript
     if act in ["transcript", "subtitles"]:
-        # Try YouTubeTranscriptApi for YouTube URLs first
         yt_id_match = re.search(r"(?:v=|youtu\.be/|shorts/)([a-zA-Z0-9_-]{11})", url_or_path)
         if yt_id_match:
             try:
@@ -790,10 +773,8 @@ def video_inspect(
             except Exception as exc:
                 return f"YouTube transcript unavailable: {exc}"
 
-        # Fallback: transcribe audio using Whisper
         return audio_transcribe(url_or_path)
 
-    # If action is metadata / info
     if act in ["info", "metadata"]:
         try:
             import yt_dlp
@@ -814,14 +795,12 @@ def video_inspect(
         except Exception as e:
             return f"Video info error: {e}"
 
-    # If action is frame extraction
     if act in ["frame", "screenshot"]:
         ts = timestamp_seconds or 0.0
         try:
             import cv2
             import yt_dlp
 
-            # Download short 6s segment around timestamp
             seg_start = max(0, int(ts) - 3)
             seg_end = int(ts) + 3
             prefix = f"frame_seg_{int(time.time())}"
@@ -1273,6 +1252,3 @@ def code_graph_tool(operation: str, symbol: str, workspace_root: Optional[str] =
         return json.dumps(refs, indent=2, default=str)
     else:
         return f"Unknown code graph operation: {op}. Valid operations: 'inspect_symbol', 'blast_radius', 'find_references'."
-
-
-

@@ -238,16 +238,28 @@ class WebSearchTool:
         query = query.strip()
         if not query:
             raise ResearchToolError("Research search needs a non-empty question.")
-        provider = (provider_override or os.getenv("SMARA_SEARCH_PROVIDER") or getattr(settings, "search_provider", "")).strip().lower()
+        provider = (provider_override or os.getenv("SMARA_SEARCH_PROVIDER") or "").strip().lower()
         if not provider:
-            for candidate in ["tavily", "exa", "serper", "brave"]:
-                if os.getenv("SMARA_SEARCH_API_KEY") or self._local_key(candidate):
-                    provider = candidate
-                    break
+            configured = getattr(settings, "search_provider", "").strip().lower()
+            if configured and (os.getenv("SMARA_SEARCH_API_KEY") or self._local_key(configured)):
+                provider = configured
+            else:
+                for candidate in ["tavily", "exa", "serper", "brave"]:
+                    if os.getenv("SMARA_SEARCH_API_KEY") or self._local_key(candidate):
+                        provider = candidate
+                        break
             if not provider:
-                provider = "tavily"
+                provider = configured or "tavily"
 
         api_key = api_key_override if api_key_override is not None else (os.getenv("SMARA_SEARCH_API_KEY") or getattr(settings, "search_api_key", "") or self._local_key(provider))
+        if not api_key:
+            # Fallback check across all candidate providers
+            for candidate in ["tavily", "exa", "serper", "brave"]:
+                candidate_key = self._local_key(candidate)
+                if candidate_key:
+                    provider = candidate
+                    api_key = candidate_key
+                    break
         if not api_key:
             raise ResearchToolError("Smara web-search provider is not configured.")
 

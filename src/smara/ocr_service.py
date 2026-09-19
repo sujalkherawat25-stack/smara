@@ -67,15 +67,15 @@ def resolve_ocr_credentials() -> tuple[str, str, str]:
     """Resolve active OCR base URL, API key, and model."""
     api_key = os.getenv("SARVAM_API_KEY") or os.getenv("SMARA_OCR_API_KEY") or os.getenv("SMARA_LLM_API_KEY") or ""
     if not api_key:
-        try:
-            from .desktop_executor import resolve_local_credential
-            for alias in ("SARVAM_API_KEY", "SMARA_OCR_API_KEY", "SMARA_LLM_API_KEY", "sarvam"):
+        for alias in ("SARVAM_API_KEY", "SMARA_OCR_API_KEY", "SMARA_MODEL_SARVAM_API_KEY", "SMARA_LLM_API_KEY", "sarvam"):
+            try:
+                from .desktop_executor import resolve_local_credential
                 val = resolve_local_credential(alias)
                 if val and isinstance(val, str):
                     api_key = val
                     break
-        except Exception:
-            pass
+            except Exception:
+                continue
 
     # Document AI is rooted at the host (not the chat `/v2` namespace).
     # Keep an explicit override for compatible private gateways.

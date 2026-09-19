@@ -23,28 +23,40 @@ def _file_sha(path: Path):
     except OSError: return None
 
 def workspace_revision(root: Path) -> str:
-    digest = hashlib.sha256(); ignored = {".git", ".smara", "__pycache__", ".pytest_cache", "node_modules"}
+    digest = hashlib.sha256()
+    ignored = {
+        ".git", ".smara", ".smara-undo", ".worktrees", "__pycache__",
+        ".pytest_cache", ".pytest-cache", ".pytest-tmp", ".pytest-localtemp",
+        ".pytest-audit-temp", "pytest-tmp", "tests_tmp", "my_pytest_tmp",
+        "node_modules", ".venv", "venv", "dist", "build", "target", "artifacts",
+        ".idea", ".vscode", "release"
+    }
     try:
-        files = sorted(p for p in root.rglob("*") if p.is_file() and not any(x in ignored for x in p.relative_to(root).parts))
-        for path in files:
-            rel = path.relative_to(root).as_posix().encode(); digest.update(len(rel).to_bytes(4, "big")); digest.update(rel)
-            value = _file_sha(path)
-            if value: digest.update(bytes.fromhex(value))
+        root_path = Path(root).resolve()
+        for dirpath, dirnames, filenames in os.walk(root_path):
+            dirnames[:] = [d for d in dirnames if d not in ignored and not d.startswith(".pytest")]
+            for filename in sorted(filenames):
+                p = Path(dirpath) / filename
+                rel = p.relative_to(root_path).as_posix().encode()
+                digest.update(len(rel).to_bytes(4, "big"))
+                digest.update(rel)
+                value = _file_sha(p)
+                if value: digest.update(bytes.fromhex(value))
     except OSError: pass
     return digest.hexdigest()
 
 @dataclass(frozen=True)
 class Budget:
-    wall_seconds: float = 30.0
-    tool_calls: int = 4
-    model_calls: int = 4
-    billed_tokens: int = 20_000
-    dollars: float = .10
+    wall_seconds: float = 60.0
+    tool_calls: int = 20
+    model_calls: int = 10
+    billed_tokens: int = 100_000
+    dollars: float = 1.00
     def __post_init__(self):
         if self.wall_seconds <= 0 or min(self.tool_calls, self.model_calls, self.billed_tokens) < 0 or self.dollars < 0: raise ValueError("invalid budget")
 
 BUDGET_PROFILES = {
-    "short": Budget(),
+    "short": Budget(60, 20, 10, 100_000, 1.00),
     "research_quick": Budget(120, 40, 20, 150_000, 2),
     "research_deep": Budget(1800, 400, 150, 1_500_000, 15),
     "gaia": Budget(900,160,80,400_000,3),
@@ -584,6 +596,19 @@ class SessionEngine:
             window=self.get("progress_window",[]); record=ProgressRecord(fp,call.call_id,call.name,after,result_hash(result.text),result.ok,before!=after or scope in VERIFY_SCOPES,"revision_changed" if before!=after else "evidence" if scope in VERIFY_SCOPES else "observation")
             action,reason=classify(window,record); window=([*window,asdict(record)])[-12:]; self.set("progress_window",window); self.event("progress",{**asdict(record),"action":action,"stall_reason":reason})
             if action:self.event("stall",{"call_id":call.call_id,"action":action,"reason":reason})
+            # Typed process tools return JSON through ``result.text``.  Keep
+            # that wire contract intact when the progress guard annotates a
+            # repeated poll/failure; replacing it with a prose stall message
+            # makes callers unable to observe the real exit code.
+            if call.name.startswith("process_"):
+                if action in {"recover", "stop"}:
+                    return replace(
+                        result,
+                        status="error" if action == "stop" else result.status,
+                        error_kind="stall_detected" if action == "stop" else result.error_kind,
+                        meta={**dict(result.meta), "progress_notice": "Repeated process observation stopped; use a new cursor or recovery action."},
+                    )
+                return result
             if action=="recover": return replace(result,text=result.text+"\n[SMARA: progress stalled; make one bounded, materially different recovery attempt.]")
             if action=="stop": return replace(result,status="error",text="Repeated identical failure stopped.",error_kind="stall_detected")
             return result

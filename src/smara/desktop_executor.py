@@ -2985,6 +2985,15 @@ def _run_shared_local_agent_turn(request: dict, state_path: Path) -> dict:
     if not isinstance(context, list):
         context = []
     bounded_context = [item for item in context[-16:] if isinstance(item, dict)]
+    research_mode = str(request.get("research_mode") or "auto").strip().lower()
+    if research_mode not in {"auto", "quick", "deep"}:
+        research_mode = "auto"
+    # Keep the executor-side bound aligned with the Desktop contract. The
+    # outer worker timeout remains a final guard; this shorter provider bound
+    # gives Quick research a truthful, recoverable failure instead of a stuck
+    # composer when a connector or model stops responding.
+    timeout_seconds = 45.0 if research_mode == "quick" else 300.0
+    max_steps = 8 if research_mode == "quick" else 20
     result = run_shared_local_turn(
         prompt=prompt,
         state_path=state_path,
@@ -2994,13 +3003,14 @@ def _run_shared_local_agent_turn(request: dict, state_path: Path) -> dict:
             api_key=api_key,
             auth_header=auth_header,
             label=str(model.get("label") or "private model")[:80],
-            timeout_seconds=300.0,
+            timeout_seconds=timeout_seconds,
             max_tokens=16_384,
         ),
         context=bounded_context,
-        max_steps=20,
+        max_steps=max_steps,
         conversation_id=str(request.get("conversation_id") or "local-default"),
         workspace_id=str(workspace),
+        research_mode=research_mode,
     )
     result["workspace"] = str(workspace)
     result["capabilities"] = list(state.get("capabilities") or [])
