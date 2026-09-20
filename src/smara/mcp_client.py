@@ -412,51 +412,72 @@ class MCPManager:
         self.trusted = trusted
         self.servers: Dict[str, Any] = {}
 
-    def discover_and_load(self) -> Dict[str, MCPServerProcess]:
-        """Load mcp.json or .mcp/servers.json if present."""
-        config_paths = [
-            self.workspace_root / "mcp.json",
-            self.workspace_root / ".mcp" / "servers.json",
+    def configuration_paths(self) -> list[Path]:
+        """Return supported MCP configuration files in precedence order.
+
+        ``mcp.json`` historically had precedence over the hidden workspace
+        files.  Keep that behaviour while allowing the CLI-managed
+        ``.mcp/servers.json`` file to coexist with either legacy location.
+        """
+        return [
             self.workspace_root / ".mcp.json",
+            self.workspace_root / ".mcp" / "servers.json",
+            self.workspace_root / "mcp.json",
         ]
-        
-        target_config = None
-        for p in config_paths:
-            if p.is_file():
-                target_config = p
-                break
 
-        if not target_config:
-            return self.servers
+    def configured_servers(self) -> Dict[str, Dict[str, Any]]:
+        """Load configured server definitions without starting transports.
 
+        Later files override duplicate names, so the legacy root-level
+        ``mcp.json`` remains the highest-precedence configuration.
+        Malformed files and entries are ignored here and reported by the
+        normal logging path during discovery.
+        """
+        configured: Dict[str, Dict[str, Any]] = {}
+        for target_config in self.configuration_paths():
+            if not target_config.is_file():
+                continue
+            try:
+                data = json.loads(target_config.read_text(encoding="utf-8"))
+                if not isinstance(data, dict):
+                    logger.warning("Ignoring non-object MCP config at %s", target_config)
+                    continue
+                server_defs = data.get("mcpServers") or data.get("servers") or {}
+                if not isinstance(server_defs, dict):
+                    continue
+                for name, cfg in server_defs.items():
+                    if isinstance(cfg, dict):
+                        configured[str(name)] = dict(cfg)
+            except (OSError, TypeError, ValueError) as exc:
+                logger.warning("Error loading MCP config from %s: %s", target_config, exc)
+        return configured
+
+    def discover_and_load(self) -> Dict[str, MCPServerProcess]:
+        """Load all supported MCP configurations and start trusted transports."""
         if self.trusted is False:
-            logger.warning("Ignoring MCP configuration in untrusted workspace: %s", target_config)
+            configured = [str(path) for path in self.configuration_paths() if path.is_file()]
+            if configured:
+                logger.warning("Ignoring MCP configuration in untrusted workspace: %s", ", ".join(configured))
             return self.servers
 
-        try:
-            data = json.loads(target_config.read_text(encoding="utf-8"))
-            server_defs = data.get("mcpServers") or data.get("servers") or {}
-            for name, cfg in server_defs.items():
-                if not isinstance(cfg, dict):
-                    continue
-                endpoint = cfg.get("url") or cfg.get("endpoint")
-                if endpoint:
-                    try:
-                        remote = MCPRemoteServer(name, str(endpoint), headers=cfg.get("headers") or {}, allow_private=bool(cfg.get("allow_private", False)), oauth=cfg.get("oauth") or {})
-                        if remote.start(): self.servers[name] = remote
-                    except Exception as exc:
-                        logger.warning("Error loading remote MCP server %s: %s", name, exc)
-                    continue
-                cmd = cfg.get("command")
-                if not cmd:
-                    continue
-                args = cfg.get("args", [])
-                env = cfg.get("env", {})
-                server = MCPServerProcess(name, cmd, args, env, cwd=self.workspace_root)
-                if server.start():
-                    self.servers[name] = server
-        except Exception as exc:
-            logger.warning(f"Error loading MCP config from {target_config}: {exc}")
+        for name, cfg in self.configured_servers().items():
+            endpoint = cfg.get("url") or cfg.get("endpoint")
+            if endpoint:
+                try:
+                    remote = MCPRemoteServer(name, str(endpoint), headers=cfg.get("headers") or {}, allow_private=bool(cfg.get("allow_private", False)), oauth=cfg.get("oauth") or {})
+                    if remote.start():
+                        self.servers[name] = remote
+                except Exception as exc:
+                    logger.warning("Error loading remote MCP server %s: %s", name, exc)
+                continue
+            cmd = cfg.get("command")
+            if not cmd:
+                continue
+            args = cfg.get("args", [])
+            env = cfg.get("env", {})
+            server = MCPServerProcess(name, cmd, args, env, cwd=self.workspace_root)
+            if server.start():
+                self.servers[name] = server
 
         return self.servers
 

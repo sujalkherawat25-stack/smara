@@ -234,14 +234,14 @@ class AutonomousTestFixer:
         self.runner = PytestRunner(self.workspace)
         self.code_graph = CodePropertyGraph(self.workspace)
 
-    def auto_fix(self, test_filter: str | None = None, max_iterations: int = 3) -> dict[str, Any]:
+    def auto_fix(self, test_filter: str | None = None, max_iterations: int = 3, timeout: int = 120) -> dict[str, Any]:
         """Run self-healing repair loop with snapshot rollback safety."""
         session = AtomicRefactorSession(self.workspace)
         start_t = time.time()
         iterations_log: list[dict[str, Any]] = []
 
         # Step 1: Initial Test Run
-        initial_result = self.runner.run(test_filter)
+        initial_result = self.runner.run(test_filter, timeout=timeout)
         if initial_result.success:
             return {
                 "status": "already_passing",
@@ -297,7 +297,7 @@ class AutonomousTestFixer:
                 break
 
             # Re-run tests to verify if the fix works
-            current_result = self.runner.run(test_filter)
+            current_result = self.runner.run(test_filter, timeout=timeout)
             iter_info["retest_passed"] = current_result.passed
             iter_info["retest_failed"] = current_result.failed
             iterations_log.append(iter_info)

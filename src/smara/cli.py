@@ -874,6 +874,56 @@ def _client(args: argparse.Namespace) -> httpx.Client:
     return httpx.Client(base_url=api, headers=headers, timeout=timeout)
 
 
+def _mcp_servers_config_path(workspace: Path) -> Path:
+    """Return the user-managed MCP registry for a workspace."""
+    return workspace / ".mcp" / "servers.json"
+
+
+def _mcp_add_server(workspace: Path, name: str, command: str, args: list[str], env_items: list[str], replace: bool) -> dict[str, Any]:
+    """Atomically register a stdio MCP server in the workspace registry."""
+    config_path = _mcp_servers_config_path(workspace)
+    data: dict[str, Any] = {}
+    if config_path.exists():
+        try:
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError) as exc:
+            raise ValueError(f"Invalid MCP configuration at {config_path}: {exc}") from exc
+        if not isinstance(loaded, dict):
+            raise ValueError(f"MCP configuration must be a JSON object: {config_path}")
+        data = loaded
+
+    existing = data.get("mcpServers")
+    if existing is None:
+        existing = data.get("servers", {})
+    if not isinstance(existing, dict):
+        raise ValueError("MCP configuration field 'mcpServers' must be an object")
+    if name in existing and not replace:
+        raise ValueError(f"MCP server '{name}' already exists; pass --replace to update it")
+
+    env: dict[str, str] = {}
+    for item in env_items:
+        key, separator, value = item.partition("=")
+        if not separator or not key.strip():
+            raise ValueError(f"Invalid --env value '{item}'; expected KEY=VALUE")
+        env[key.strip()] = value
+
+    data["mcpServers"] = dict(existing)
+    data["mcpServers"][name] = {"command": command, "args": list(args), "env": env}
+    data.pop("servers", None)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = config_path.with_suffix(".json.tmp")
+    temporary_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(temporary_path, config_path)
+    return {"name": name, "transport": "stdio", "command": command, "args": list(args), "config_path": str(config_path)}
+
+
+def _mcp_print(value: Any, *, json_mode: bool) -> None:
+    if json_mode:
+        print(json.dumps(value, indent=2, ensure_ascii=False, default=str))
+    else:
+        print(value)
+
+
 def build_parser() -> argparse.ArgumentParser:
     from .version import __version__
     parser = argparse.ArgumentParser(prog="smara", description="Smara Autonomous Developer CLI")
@@ -1007,6 +1057,30 @@ def build_parser() -> argparse.ArgumentParser:
     p_swarm = subparsers.add_parser("swarm", help="Autonomous Multi-Agent Swarm (Architect + Implementer + Verifier + Auditor)")
     p_swarm.add_argument("objective", nargs="+", help="High-level engineering task objective")
 
+    p_mcp = subparsers.add_parser("mcp", help="Manage configured Model Context Protocol servers")
+    mcp_sub = p_mcp.add_subparsers(dest="mcp_action")
+    mcp_list = mcp_sub.add_parser("list", help="List configured and connected MCP servers")
+    mcp_list.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    mcp_add = mcp_sub.add_parser("add", help="Register a stdio MCP server in .mcp/servers.json")
+    mcp_add.add_argument("name", help="Stable server name")
+    mcp_add.add_argument("server_command", help="Executable or command used to launch the server")
+    mcp_add.add_argument("args", nargs=argparse.REMAINDER, help="Arguments passed to the server; flags are forwarded verbatim")
+    mcp_add.add_argument("--env", action="append", default=[], help="Environment override in KEY=VALUE form (repeatable)")
+    mcp_add.add_argument("--replace", action="store_true", help="Replace an existing server with the same name")
+    mcp_health = mcp_sub.add_parser("health", help="Run non-mutating MCP transport health probes")
+    mcp_health.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    mcp_call = mcp_sub.add_parser("call", help="Invoke a connected MCP tool")
+    mcp_call.add_argument("server", help="Configured MCP server name")
+    mcp_call.add_argument("tool", help="Tool name exposed by the MCP server")
+    mcp_call.add_argument("arguments", nargs="?", default="{}", help="JSON object of tool arguments")
+    mcp_call.add_argument("--json", action="store_true", help="Emit the raw tool result as JSON")
+
+    p_test_fix = subparsers.add_parser("test-fix", help="Run pytest and safely attempt autonomous test repair")
+    p_test_fix.add_argument("test_file", nargs="*", default=[], help="Optional test file or pytest filter")
+    p_test_fix.add_argument("--timeout", type=int, default=120, help="Pytest timeout in seconds")
+    p_test_fix.add_argument("--max-iterations", type=int, default=3, help="Maximum repair iterations")
+    p_test_fix.add_argument("--json", action="store_true", help="Emit the fixer result as JSON")
+
     p_tool = subparsers.add_parser("tool", help="Invoke one safe read-only tool or custom capability")
     p_tool.add_argument("name", nargs="?", default="calculate", help="Tool name to invoke")
     p_tool.add_argument("--arguments", default="{}", help="JSON object of tool arguments")
@@ -1090,7 +1164,7 @@ def main(argv: list[str] | None = None) -> int:
 
     subcommands = {
         "graph", "search", "report", "test", "refactor", "git", "find",
-        "index", "browse", "e2e", "memory", "swarm", "models", "chat", "login",
+        "index", "browse", "e2e", "memory", "swarm", "mcp", "test-fix", "models", "chat", "login",
         "logout", "run", "research", "tasks", "tools", "plugins", "approvals",
         "devices", "desktop", "tool", "dynamic-tool", "ask", "goal", "benchmark", "resume", "cancel", "inspect", "doctor", "ocr", "skills", "backends", "gateway", "schedule"
     }
@@ -1101,21 +1175,26 @@ def main(argv: list[str] | None = None) -> int:
     plain_override = False
     cleaned_args = []
     i = 0
+    subcommand_seen = False
     while i < len(raw_args):
         arg = raw_args[i]
-        if arg in ("-m", "--model") and i + 1 < len(raw_args):
+        if not subcommand_seen and arg in subcommands:
+            subcommand_seen = True
+            cleaned_args.append(arg)
+            i += 1
+        elif not subcommand_seen and arg in ("-m", "--model") and i + 1 < len(raw_args):
             model_override = raw_args[i + 1]
             i += 2
-        elif arg.startswith("--model="):
+        elif not subcommand_seen and arg.startswith("--model="):
             model_override = arg.split("=", 1)[1]
             i += 1
-        elif arg in ("-w", "--workspace") and i + 1 < len(raw_args):
+        elif not subcommand_seen and arg in ("-w", "--workspace") and i + 1 < len(raw_args):
             workspace_override = raw_args[i + 1]
             i += 2
-        elif arg.startswith("--workspace="):
+        elif not subcommand_seen and arg.startswith("--workspace="):
             workspace_override = arg.split("=", 1)[1]
             i += 1
-        elif arg == "--plain":
+        elif not subcommand_seen and arg == "--plain":
             plain_override = True
             i += 1
         else:
@@ -1641,6 +1720,124 @@ def main(argv: list[str] | None = None) -> int:
         print()
         return 0 if result.status in ("SUCCESS", "HEALED") else 1
 
+    if cmd == "mcp":
+        from .mcp_client import MCPManager
+        from .workspace_rules import is_workspace_trusted
+
+        action = getattr(parsed_args, "mcp_action", None)
+        if not action:
+            print(tui.paint("Choose an MCP action: list, add, health, or call.", "YELLOW"))
+            return 2
+
+        if action == "add":
+            try:
+                registered = _mcp_add_server(
+                    engine.workspace,
+                    parsed_args.name,
+                    parsed_args.server_command,
+                    parsed_args.args,
+                    parsed_args.env,
+                    parsed_args.replace,
+                )
+            except (OSError, ValueError) as exc:
+                print(tui.paint(f"MCP registration failed: {exc}", "RED"))
+                return 1
+            if getattr(parsed_args, "json", False):
+                _mcp_print({"status": "registered", "server": registered}, json_mode=True)
+            else:
+                print(tui.paint(f"Registered MCP server '{parsed_args.name}' in {registered['config_path']}", "GREEN"))
+                print(f"  Transport: stdio\n  Command:   {parsed_args.server_command} {' '.join(parsed_args.args)}".rstrip())
+            return 0
+
+        trusted = is_workspace_trusted(engine.workspace)
+        manager = MCPManager(engine.workspace, trusted=trusted)
+        configured = manager.configured_servers()
+        try:
+            if action == "list":
+                connected = manager.discover_and_load()
+                rows = []
+                for name, cfg in configured.items():
+                    server = connected.get(name)
+                    rows.append({
+                        "name": name,
+                        "transport": "streamable_http" if cfg.get("url") or cfg.get("endpoint") else "stdio",
+                        "configured": True,
+                        "connected": server is not None,
+                        "tool_count": len(getattr(server, "tools", []) or []) if server else 0,
+                    })
+                for name, server in connected.items():
+                    if name not in configured:
+                        rows.append({
+                            "name": name,
+                            "transport": "streamable_http" if hasattr(server, "endpoint") else "stdio",
+                            "configured": False,
+                            "connected": True,
+                            "tool_count": len(getattr(server, "tools", []) or []),
+                        })
+                if parsed_args.json:
+                    _mcp_print({"trusted_workspace": trusted, "servers": rows}, json_mode=True)
+                else:
+                    print(tui.paint(f"\nMCP servers ({len(rows)} configured/discovered):\n", "BOLD"))
+                    if not rows:
+                        print("  No MCP servers configured.")
+                    for row in rows:
+                        state = tui.paint("connected", "GREEN") if row["connected"] else tui.paint("not connected", "YELLOW")
+                        print(f"  • {row['name']} [{row['transport']}] — {state}, {row['tool_count']} tool(s)")
+                    if not trusted and configured:
+                        print(tui.paint("\n  Workspace is untrusted; configured MCP servers were not started. Use /trust in the interactive CLI to authorize them.", "YELLOW"))
+                return 0
+
+            if action == "health":
+                manager.discover_and_load()
+                health = manager.health()
+                if parsed_args.json:
+                    _mcp_print({"trusted_workspace": trusted, "servers": health}, json_mode=True)
+                else:
+                    print(tui.paint("\nMCP health:\n", "BOLD"))
+                    if not health:
+                        print("  No connected MCP servers.")
+                    for row in health:
+                        ok = row.get("status") == "healthy"
+                        marker = tui.paint("OK", "GREEN") if ok else tui.paint("FAIL", "RED")
+                        detail = f"{row.get('transport', 'unknown')}, {row.get('tool_count', 0)} tool(s)"
+                        if row.get("latency_ms") is not None:
+                            detail += f", {row['latency_ms']} ms"
+                        if row.get("error"):
+                            detail += f": {row['error']}"
+                        print(f"  [{marker}] {row.get('name', 'unknown')} — {detail}")
+                return 0 if all(row.get("status") == "healthy" for row in health) else 1
+
+            if action == "call":
+                if not trusted:
+                    print(tui.paint("MCP call blocked: the workspace is not trusted. Use /trust before starting external MCP processes.", "RED"))
+                    return 1
+                try:
+                    arguments = json.loads(parsed_args.arguments)
+                except json.JSONDecodeError as exc:
+                    print(tui.paint(f"MCP call arguments must be a JSON object: {exc}", "RED"))
+                    return 2
+                if not isinstance(arguments, dict):
+                    print(tui.paint("MCP call arguments must be a JSON object.", "RED"))
+                    return 2
+                manager.discover_and_load()
+                server = manager.servers.get(parsed_args.server)
+                if server is None:
+                    print(tui.paint(f"MCP server '{parsed_args.server}' is not connected.", "RED"))
+                    return 1
+                result = server.call_tool(parsed_args.tool, arguments)
+                if parsed_args.json:
+                    _mcp_print(result, json_mode=True)
+                elif result.get("status") == "ok":
+                    print(result.get("output", "OK"))
+                else:
+                    print(tui.paint(f"MCP tool call failed: {result.get('error') or result.get('output', 'unknown error')}", "RED"))
+                return 0 if result.get("status") == "ok" else 1
+
+            print(tui.paint(f"Unknown MCP action: {action}", "RED"))
+            return 2
+        finally:
+            manager.shutdown()
+
     if cmd == "benchmark":
         suite = getattr(parsed_args, "suite", "gaia")
         level = getattr(parsed_args, "level", "1")
@@ -1916,6 +2113,27 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if session.status == "completed" else 1
 
     # Handle subcommands
+    if cmd == "test-fix":
+        from .test_fixer import AutonomousTestFixer
+
+        test_filter = " ".join(parsed_args.test_file) if parsed_args.test_file else None
+        print(tui.paint(f"\n⚡ Running autonomous test fixer {test_filter or '(default fast suite)'}...\n", "CYAN"))
+        fixer = AutonomousTestFixer(engine.workspace)
+        fix_res = fixer.auto_fix(test_filter, max_iterations=max(1, parsed_args.max_iterations), timeout=max(1, parsed_args.timeout))
+        if parsed_args.json:
+            _mcp_print(fix_res, json_mode=True)
+        else:
+            status = str(fix_res.get("status", "unknown"))
+            color = "GREEN" if status in {"already_passing", "healed"} else "YELLOW" if status == "unresolved_rollback" else "RED"
+            print(tui.paint(f"Status: {status}", color))
+            print(f"{fix_res.get('message', '')}")
+            print(f"Iterations: {fix_res.get('iterations_count', 0)} | Duration: {fix_res.get('duration_seconds', 0)}s")
+            for iteration in fix_res.get("iterations_log", []):
+                print(f"  • Iteration {iteration.get('iteration')}: {iteration.get('target_test')} — {iteration.get('action', 'retested')}")
+            if fix_res.get("rolled_back_files"):
+                print(tui.paint(f"Rolled back: {', '.join(fix_res['rolled_back_files'])}", "YELLOW"))
+        return 0 if fix_res.get("status") in {"already_passing", "healed"} else 1
+
     if cmd == "test":
         from .test_fixer import AutonomousTestFixer, PytestRunner
         test_filter = " ".join(parsed_args.filter) if parsed_args.filter else None
