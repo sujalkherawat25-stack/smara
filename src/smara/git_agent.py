@@ -24,6 +24,17 @@ class GitCommitItem:
     date: str
     message: str
 
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @property
+    def hash(self) -> str:
+        return self.short_hash or self.commit_hash
+
+    @property
+    def author_name(self) -> str:
+        return self.author
+
 
 @dataclass
 class GitStatusResult:
@@ -39,6 +50,10 @@ class GitStatusResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @property
+    def modified_files(self) -> list[str]:
+        return self.unstaged_files
 
 
 class GitWorkspaceManager:
@@ -255,6 +270,17 @@ class GitWorkspaceManager:
                     "message": parts[4],
                 })
         return commits
+
+    def get_commit_log(self, limit: int = 15) -> list[GitCommitItem]:
+        recents = self.get_recent_commits(limit=limit)
+        return [GitCommitItem(**c) for c in recents]
+
+    def get_branches(self) -> list[str]:
+        return self.list_branches()
+
+    def commit_changes(self, message: str, stage_all: bool = True) -> dict[str, Any]:
+        ok, out = self.commit(message, stage_all=stage_all)
+        return {"ok": ok, "output": out}
 
     def detect_conflicts(self) -> list[dict[str, Any]]:
         """Find files with actual git merge conflict markers and extract conflicting sections."""

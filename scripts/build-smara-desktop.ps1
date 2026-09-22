@@ -19,18 +19,45 @@ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
 
 Push-Location $repoRoot
 try {
-    # Keep the CLI and bundled Desktop on one source revision. A regular local
-    # wheel install avoids Hatchling's optional ``editables`` dependency, while
-    # still updating the CLI before freezing the executor below. ``--no-deps``
-    # keeps provider/browser packages untouched and ``--no-build-isolation``
-    # makes this work on restricted networks with the provisioned Hatchling.
-    & $python -m pip install . --no-deps --no-build-isolation
-    Assert-NativeSuccess 'CLI install'
-    # The executor is bundled from a file path (not ``python -m``), so the
-    # package-relative import fallback needs the sibling module directory on
-    # PyInstaller's analysis path as well.
+    # Freeze directly from this checkout. Installing a wheel into the shared
+    # developer virtualenv here shadows ``src\smara`` with a copied package,
+    # so later CLI commands and tests can silently execute stale code. The
+    # explicit source path keeps the bundle and checkout on one revision
+    # without mutating the developer environment.
     $executorDist = Join-Path $repoRoot "build\desktop-executor-$version"
-    & $python -m PyInstaller --noconfirm --clean --onefile --paths src\smara --hidden-import agent_tools --hidden-import pypdf --hidden-import docx --hidden-import openpyxl --hidden-import pptx --name smara-desktop --distpath $executorDist --workpath build\pyinstaller src\smara\desktop_executor.py
+    # Benchmark/data-science dependencies are development-only. PyInstaller
+    # otherwise discovers them through optional imports and adds roughly an
+    # entire analytics environment to the desktop executor.
+    $pyInstallerExcludes = @(
+        'pandas'
+        'pyarrow'
+        'datasets'
+        'pytest'
+        'tkinter'
+        '_tkinter'
+    )
+    $pyInstallerArgs = @(
+        '-m', 'PyInstaller'
+        '--noconfirm'
+        '--clean'
+        '--onefile'
+        '--paths', 'src\smara'
+        '--hidden-import', 'agent_tools'
+        '--hidden-import', 'pypdf'
+        '--hidden-import', 'docx'
+        '--hidden-import', 'openpyxl'
+        '--hidden-import', 'pptx'
+    )
+    foreach ($module in $pyInstallerExcludes) {
+        $pyInstallerArgs += @('--exclude-module', $module)
+    }
+    $pyInstallerArgs += @(
+        '--name', 'smara-desktop'
+        '--distpath', $executorDist
+        '--workpath', 'build\pyinstaller'
+        'src\smara\desktop_executor.py'
+    )
+    & $python @pyInstallerArgs
     Assert-NativeSuccess 'PyInstaller'
     $resourceDir = Join-Path $appRoot 'src-tauri\resources'
     New-Item -ItemType Directory -Force -Path $resourceDir | Out-Null

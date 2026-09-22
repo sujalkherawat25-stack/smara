@@ -1,4 +1,4 @@
-﻿"""Shared contracts for safe local Smara skills and task state.
+"""Shared contracts for safe local Smara skills and task state.
 
 The Desktop supports a local-first runtime as well as the hosted coordinator.
 This module keeps bounded, private task/session state on the user's machine
@@ -876,6 +876,55 @@ class LocalAutonomousAgent:
             "idempotency_key": idempotency_key,
         }
         raw_result = execute_step(step, state)
+
+    @staticmethod
+    def _action_failed(result: Any) -> bool:
+        """Return whether a structured executor result represents a failure.
+
+        Some executors intentionally return an error envelope instead of
+        raising.  Treating those as successful observations lets a model
+        invent completion after a failed local action, so the shared loop
+        normalises them here before the next planning step.
+        """
+        if not isinstance(result, dict):
+            return False
+        if result.get("error") or result.get("failure_state") in {"failed", "cancelled"}:
+            return True
+        for key in ("ok", "success"):
+            if key in result and result[key] is False:
+                return True
+        return False
+
+    @staticmethod
+    def _action_signature(capability: Any, payload: Any) -> str:
+        """Build a stable identity for repetition detection without logging secrets."""
+        try:
+            encoded = json.dumps({"capability": capability, "payload": payload}, sort_keys=True, ensure_ascii=False)
+        except (TypeError, ValueError):
+            encoded = f"{capability}:{type(payload).__name__}"
+        return hashlib.sha256(encoded.encode("utf-8", errors="replace")).hexdigest()
+
+    def execute_action(self, capability: str, payload: dict[str, Any], *, step_id: str | None = None) -> dict[str, Any]:
+        if self.action_executor is not None:
+            result = self.action_executor(capability, payload)
+            if isinstance(result, dict):
+                return result
+            return {"result": result}
+        try:
+            from smara.desktop_executor import _load_local_state, execute_step
+        except ImportError:
+            from desktop_executor import _load_local_state, execute_step
+        state = _load_local_state(self.state_path)
+        idempotency_key = f"local-auto:{uuid.uuid4().hex[:16]}"
+        step = {
+            "step_id": step_id or f"step_{uuid.uuid4().hex[:16]}",
+            "task_id": f"task_{uuid.uuid4().hex[:16]}",
+            "requires_approval": False,
+            "required_capability": capability,
+            "executor_payload": payload,
+            "idempotency_key": idempotency_key,
+        }
+        raw_result = execute_step(step, state)
         try:
             return json.loads(raw_result)
         except (ValueError, TypeError):
@@ -887,6 +936,7 @@ class LocalAutonomousAgent:
         *,
         model_callable: Any | None = None,
         context: list[dict[str, Any]] | None = None,
+        event_callback: Any | None = None,
     ) -> dict[str, Any]:
         """Execute a full multi-step turn with autonomous tool dispatch."""
         history = list(context or [])
@@ -916,6 +966,9 @@ class LocalAutonomousAgent:
                 break
             if response.get("kind") == "answer" or "answer" in response:
                 answer = response.get("answer", "")
+                if event_callback is not None:
+                    event_callback({"type": "phase", "phase": "answer"})
+                    event_callback({"type": "token", "text": answer})
                 return {
                     "answer": answer,
                     "steps": steps_taken,
@@ -925,15 +978,44 @@ class LocalAutonomousAgent:
             if response.get("kind") == "local_action" or "capability" in response:
                 cap = response.get("capability")
                 payload = response.get("payload") or {}
+                title = response.get("title", cap)
                 step_record = {
                     "iteration": iteration + 1,
-                    "title": response.get("title", cap),
+                    "title": title,
                     "capability": cap,
                     "payload": payload,
                 }
+                if event_callback is not None:
+                    event_callback({"type": "phase", "phase": "reason_act", "iteration": iteration + 1})
+                    event_callback({"type": "thought", "text": f"Step {iteration + 1}: {title}"})
+                    event_callback({"type": "tool_call", "name": cap, "preview": title, "iteration": iteration + 1})
                 signature = self._action_signature(cap, payload)
                 action_counts[signature] = action_counts.get(signature, 0) + 1
                 if action_counts[signature] > 2:
+                    if any(s.get("ok") for s in steps_taken):
+                        synth_history = list(history)
+                        synth_history.append({
+                            "role": "user",
+                            "content": (
+                                "You have gathered sufficient evidence from the local workspace. Do not execute any further actions or tool calls. "
+                                "Synthesize and present your final comprehensive answer directly in clean, structured markdown based on the findings above."
+                            ),
+                        })
+                        try:
+                            synth_resp = model_callable(synth_history)
+                            if isinstance(synth_resp, dict) and (synth_resp.get("kind") == "answer" or "answer" in synth_resp):
+                                ans = synth_resp.get("answer", "")
+                                if event_callback is not None:
+                                    event_callback({"type": "phase", "phase": "answer"})
+                                    event_callback({"type": "token", "text": ans})
+                                return {
+                                    "answer": ans,
+                                    "steps": steps_taken,
+                                    "completed": True,
+                                    "iterations": iteration + 1,
+                                }
+                        except Exception:
+                            pass
                     message = "Stopped because the planner repeated the same local action without new evidence."
                     step_record["error"] = message
                     step_record["ok"] = False
@@ -980,8 +1062,49 @@ class LocalAutonomousAgent:
                         "content": json.dumps({"error": str(exc)}, ensure_ascii=False),
                     })
                 steps_taken.append(step_record)
+                if event_callback is not None:
+                    if step_record.get("error"):
+                        prev = str(step_record["error"])[:500]
+                    elif step_record.get("result"):
+                        res_val = step_record["result"]
+                        prev = res_val if isinstance(res_val, str) else json.dumps(res_val, ensure_ascii=False)
+                        prev = prev[:500]
+                    else:
+                        prev = "Completed"
+                    event_callback({
+                        "type": "tool_result",
+                        "name": cap,
+                        "ok": step_record.get("ok", True),
+                        "preview": prev,
+                        "iteration": iteration + 1,
+                    })
             else:
                 break
+
+        if any(s.get("ok") for s in steps_taken):
+            synth_history = list(history)
+            synth_history.append({
+                "role": "user",
+                "content": (
+                    "You have gathered sufficient evidence from the local workspace. Do not execute any further actions or tool calls. "
+                    "Synthesize and present your final comprehensive answer directly in clean, structured markdown based on the findings above."
+                ),
+            })
+            try:
+                synth_resp = model_callable(synth_history)
+                if isinstance(synth_resp, dict) and (synth_resp.get("kind") == "answer" or "answer" in synth_resp):
+                    ans = synth_resp.get("answer", "")
+                    if event_callback is not None:
+                        event_callback({"type": "phase", "phase": "answer"})
+                        event_callback({"type": "token", "text": ans})
+                    return {
+                        "answer": ans,
+                        "steps": steps_taken,
+                        "completed": True,
+                        "iterations": self.max_steps,
+                    }
+            except Exception:
+                pass
 
         return {
             "answer": "The local agent reached its step limit before it could verify completion.",

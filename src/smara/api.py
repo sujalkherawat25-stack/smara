@@ -95,8 +95,8 @@ MEMORY_WRITE_TIMEOUT_SECONDS = 8.0
 
 
 def _runtime_session_started(*, conversation_id: str, body: ChatRequest, user: str) -> None:
-    runtime_session_store.create_or_get(conversation_id, request=body.message, workspace_id=body.workspace_id,
-                                        account_id=user, mode="hosted", model_profile=body.model_profile)
+    runtime_session_store.start_turn(conversation_id, request=body.message, workspace_id=body.workspace_id,
+                                     account_id=user, mode="hosted", model_profile=body.model_profile)
     runtime_session_store.checkpoint(conversation_id, status="running", event="turn.started",
                                      event_payload={"request": body.message[:500]})
 

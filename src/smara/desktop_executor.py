@@ -730,7 +730,10 @@ def _inside_root(path: Path, roots: list[Path]) -> bool:
 def _target(raw: object, roots: list[Path], *, must_exist: bool) -> Path:
     if not isinstance(raw, str) or not raw.strip():
         raise RuntimeError("A local path is required.")
-    from .path_resolver import locate_resource
+    try:
+        from smara.path_resolver import locate_resource
+    except ImportError:
+        from path_resolver import locate_resource
     # Autonomously locate the resource across workspaces and user system if needed
     located = locate_resource(raw, roots)
     if located is not None:
@@ -1174,7 +1177,10 @@ def _prepare_workspace(payload: dict, roots: list[Path], state: dict) -> str:
 def _workspace_inspect(payload: dict, roots: list[Path]) -> str:
     operation = payload.get("operation", "read_file")
     if operation in ("locate_and_read", "read_folder", "inspect_folder"):
-        from .path_resolver import locate_resource, inspect_discovered_folder
+        try:
+            from smara.path_resolver import locate_resource, inspect_discovered_folder
+        except ImportError:
+            from path_resolver import locate_resource, inspect_discovered_folder
         path_arg = payload.get("path") or payload.get("folder") or ""
         located = locate_resource(path_arg, roots)
         if not located:
@@ -2568,7 +2574,19 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
         except ImportError:
             from git_agent import GitWorkspaceManager
         operation = str(payload.get("operation") or "status")
-        ws = roots[0] if roots else Path.cwd()
+        target_path = str(payload.get("path") or payload.get("repo") or payload.get("repository") or "").strip()
+        if target_path:
+            try:
+                from smara.path_resolver import locate_resource
+            except ImportError:
+                from path_resolver import locate_resource
+            located = locate_resource(target_path, roots)
+            if located is not None and located.is_dir():
+                ws = located
+            else:
+                ws = roots[0] if roots else Path.cwd()
+        else:
+            ws = roots[0] if roots else Path.cwd()
         mgr = GitWorkspaceManager(ws)
         if operation == "status":
             st = mgr.get_status()
@@ -2578,18 +2596,20 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
             result = json.dumps({"action": "local_git", "operation": "branches", "branches": br}, ensure_ascii=False)
         elif operation == "smart_commit":
             sc = mgr.generate_smart_commit_message()
-            commit_res = mgr.commit_changes(sc.commit_message, stage_all=True)
-            result = json.dumps({"action": "local_git", "operation": "smart_commit", "message": sc.commit_message, "result": commit_res}, ensure_ascii=False)
+            commit_res = mgr.commit_changes(sc.get("title", "chore: update"), stage_all=True)
+            result = json.dumps({"action": "local_git", "operation": "smart_commit", "message": sc.get("title"), "result": commit_res}, ensure_ascii=False)
         elif operation == "commit":
             msg = str(payload.get("message") or "Update codebase")
             commit_res = mgr.commit_changes(msg, stage_all=True)
             result = json.dumps({"action": "local_git", "operation": "commit", "message": msg, "result": commit_res}, ensure_ascii=False)
         elif operation == "log":
             lim = int(payload.get("limit") or 10)
-            lg = [c.to_dict() for c in mgr.get_commit_log(limit=lim)]
+            raw_log = mgr.get_commit_log(limit=lim)
+            lg = [c.to_dict() if hasattr(c, "to_dict") else c for c in raw_log]
             result = json.dumps({"action": "local_git", "operation": "log", "commits": lg}, ensure_ascii=False)
         elif operation == "conflicts":
-            conflicts = [c.to_dict() for c in mgr.detect_conflicts()]
+            raw_conflicts = mgr.detect_conflicts()
+            conflicts = [c.to_dict() if hasattr(c, "to_dict") else c for c in raw_conflicts]
             result = json.dumps({"action": "local_git", "operation": "conflicts", "conflicts": conflicts}, ensure_ascii=False)
         else:
             result = json.dumps({"action": "local_git", "operation": operation, "error": "Unknown git operation"}, ensure_ascii=False)
@@ -2936,7 +2956,7 @@ class LocalRunner:
         return completed
 
 
-def _run_shared_local_agent_turn(request: dict, state_path: Path) -> dict:
+def _run_shared_local_agent_turn(request: dict, state_path: Path, event_callback: Any = None) -> dict:
     """Run one private multi-step agent turn for the Tauri companion.
 
     The model connection is supplied over stdin by the native UI and never
@@ -3011,6 +3031,7 @@ def _run_shared_local_agent_turn(request: dict, state_path: Path) -> dict:
         conversation_id=str(request.get("conversation_id") or "local-default"),
         workspace_id=str(workspace),
         research_mode=research_mode,
+        event_callback=event_callback,
     )
     result["workspace"] = str(workspace)
     result["capabilities"] = list(state.get("capabilities") or [])
@@ -3048,6 +3069,7 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--local-run", action="store_true", help="drain approved private local tasks and exit")
     parser.add_argument("--local-run-task", help="run one approved private local task and exit")
     parser.add_argument("--local-agent-turn", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-session-list", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--runtime-session-detail", help=argparse.SUPPRESS)
     parser.add_argument("--runtime-session-cancel", help=argparse.SUPPRESS)
     parser.add_argument("--runtime-session-resume", help=argparse.SUPPRESS)
@@ -3117,6 +3139,18 @@ def _main(argv: list[str] | None = None) -> int:
         print(json.dumps(task, ensure_ascii=False))
         return 0
     if args.local_agent_turn:
+        def emit_live_event(event: dict) -> None:
+            try:
+                line = (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8", errors="replace")
+                if hasattr(sys.stdout, "buffer"):
+                    sys.stdout.buffer.write(line)
+                    sys.stdout.buffer.flush()
+                else:
+                    sys.stdout.write(line.decode("utf-8", errors="replace"))
+                    sys.stdout.flush()
+            except Exception:
+                pass
+
         try:
             if hasattr(sys.stdin, "buffer"):
                 raw_input = sys.stdin.buffer.read()
@@ -3124,15 +3158,13 @@ def _main(argv: list[str] | None = None) -> int:
             else:
                 text_input = sys.stdin.read()
             request = json.loads(text_input)
-            result = _run_shared_local_agent_turn(request, args.state)
+            result = _run_shared_local_agent_turn(request, args.state, event_callback=emit_live_event)
         except (OSError, TypeError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
+            emit_live_event({"type": "error", "message": str(exc)})
             raise SystemExit(f"Local autonomous turn failed: {exc}") from exc
-        output_bytes = (json.dumps(result, ensure_ascii=False) + "\n").encode("utf-8", errors="replace")
-        if hasattr(sys.stdout, "buffer"):
-            sys.stdout.buffer.write(output_bytes)
-            sys.stdout.buffer.flush()
-        else:
-            sys.stdout.write(output_bytes.decode("utf-8", errors="replace"))
+        done_event = dict(result)
+        done_event["type"] = "done"
+        emit_live_event(done_event)
         return 0
     if args.skills:
         # Diagnostics must advertise the complete installed protocol.  The
@@ -3262,6 +3294,17 @@ def _main(argv: list[str] | None = None) -> int:
             "allowed_roots": state.get("allowed_roots", []),
             "log": str(args.log),
         }, indent=2))
+        return 0
+    if args.runtime_session_list:
+        sessions = session_store_for_state(args.state).list(limit=max(1, min(args.runtime_limit, 500)))
+        summaries = []
+        for session in sessions:
+            summary = session.to_dict()
+            summary["request"] = session.request[:1_000]
+            summary["result"] = {}
+            summary["unresolved"] = [str(item)[:500] for item in session.unresolved[:8]]
+            summaries.append(summary)
+        print(json.dumps(summaries, ensure_ascii=False))
         return 0
     if args.runtime_session_detail or args.runtime_session_cancel or args.runtime_session_resume:
         session_id = args.runtime_session_detail or args.runtime_session_cancel or args.runtime_session_resume

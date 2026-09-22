@@ -120,6 +120,25 @@ export interface RuntimeSessionSnapshot {
   reconnectable: boolean;
 }
 
+export interface RuntimeSessionRecord {
+  session_id: string;
+  workspace_id: string;
+  account_id: string;
+  mode: string;
+  status: string;
+  request: string;
+  model_profile?: string | null;
+  tool_profile?: string | null;
+  research_mode?: string | null;
+  result?: Record<string, unknown>;
+  unresolved: string[];
+  created_at: number;
+  updated_at: number;
+  revision: number;
+  cancel_requested: boolean;
+  cancel_reason?: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";

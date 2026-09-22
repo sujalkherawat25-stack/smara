@@ -458,10 +458,32 @@ fn command_hidden(command: &mut Command) {
     }
 }
 
+fn python_string_literal(value: &str) -> String {
+    // JSON string literals are valid Python string literals and correctly
+    // escape quotes, backslashes, control characters, and Unicode. Never
+    // interpolate UI text into executable bridge code by hand.
+    serde_json::to_string(value).expect("serializing a string cannot fail")
+}
+
 fn executor_command(args: &[String]) -> Command {
-    // Prefer the bundled executor. Older builds could select an unrelated
-    // scratch checkout when `python.exe` was on PATH, silently running stale
-    // code instead of the executor bundled with this app.
+    // Explicit override via environment variable
+    if let Some(value) = std::env::var_os("SMARA_DESKTOP_EXECUTABLE") {
+        let exe = PathBuf::from(value);
+        if exe.is_file() {
+            let mut command = Command::new(exe);
+            command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+            command.env("SMARA_DESKTOP_STATE", state_path());
+            command.env("PYTHONIOENCODING", "utf-8");
+            command.env("PYTHONUTF8", "1");
+            command.env("PYTHONLEGACYWINDOWSSTDIO", "0");
+            command_hidden(&mut command);
+            return command;
+        }
+    }
+
+    // Installed/release builds must use the executor shipped beside the app.
+    // Falling through to a checkout makes the installed product depend on a
+    // developer's working tree and can execute uncommitted or stale code.
     let direct_exe = executor_executable();
     if direct_exe.is_file() {
         let mut command = Command::new(direct_exe);
@@ -474,10 +496,8 @@ fn executor_command(args: &[String]) -> Command {
         return command;
     }
 
-    // Development fallback: use the repository's own virtualenv/source,
-    // never an unrelated checkout.  The compile-time path is only used when
-    // that source tree still exists (e.g. running the release binary from a
-    // checkout); installed builds use the bundled executor above.
+    // Development fallback: use an explicitly selected or compile-time
+    // checkout only when no bundled executor exists.
     let mut source_roots: Vec<PathBuf> = Vec::new();
     if let Some(root) = std::env::var_os("SMARA_REPO_ROOT") {
         source_roots.push(PathBuf::from(root));
@@ -492,32 +512,23 @@ fn executor_command(args: &[String]) -> Command {
         }
     }
     source_roots.dedup();
-    let python_names = [
-        "C:\\Users\\sujal\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
-        "python.exe",
-    ];
     for root in &source_roots {
         let local_python = root.join(".venv").join("Scripts").join("python.exe");
-        let python_candidates = [local_python, PathBuf::from(python_names[0])];
-        for py in python_candidates {
-            if !py.is_file() { continue; }
-            let mut command = Command::new(&py);
-            command.arg("-m").arg("smara.desktop_executor").args(args);
-            command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-            command.env("SMARA_DESKTOP_STATE", state_path());
-            command.env("PYTHONPATH", root.join("src"));
-            command.env("PYTHONIOENCODING", "utf-8");
-            command.env("PYTHONUTF8", "1");
-            command.env("PYTHONLEGACYWINDOWSSTDIO", "0");
-            command.current_dir(root);
-            command_hidden(&mut command);
-            return command;
-        }
+        if !local_python.is_file() { continue; }
+        let mut command = Command::new(&local_python);
+        command.arg("-m").arg("smara.desktop_executor").args(args);
+        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        command.env("SMARA_DESKTOP_STATE", state_path());
+        command.env("PYTHONPATH", root.join("src"));
+        command.env("PYTHONIOENCODING", "utf-8");
+        command.env("PYTHONUTF8", "1");
+        command.env("PYTHONLEGACYWINDOWSSTDIO", "0");
+        command.current_dir(root);
+        command_hidden(&mut command);
+        return command;
     }
 
-    // Last resort for a developer machine with Python on PATH.  Keep the
-    // current directory and inherited PYTHONPATH intact; this path is only a
-    // diagnostic fallback and cannot point at a hidden/stale checkout.
+    // Last resort for a developer machine with Python on PATH.
     if source_roots.is_empty() {
         let mut command = Command::new("python.exe");
         command.arg("-m").arg("smara.desktop_executor").args(args);
@@ -1927,43 +1938,149 @@ async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile
         "deep" => 1_800,
         _ => 300,
     };
-    let output = tauri::async_runtime::spawn_blocking(move || run_executor_with_input_timeout(
-        vec!["--state".to_owned(), state_path().display().to_string(), "--local-agent-turn".to_owned()],
-        &request_json,
-        worker_timeout,
-    )).await.map_err(|error| format!("Local agent worker failed: {error}"))??;
-    let result: Value = serde_json::from_str(&output).map_err(|_| "The shared local agent returned invalid JSON.".to_owned())?;
-    let steps = result.get("steps").and_then(Value::as_array).cloned().unwrap_or_default();
-    for (index, step) in steps.iter().enumerate() {
-        let capability = step.get("capability").and_then(Value::as_str).unwrap_or("local_action");
-        let title = step.get("title").and_then(Value::as_str).unwrap_or(capability);
-        let ok = step.get("ok").and_then(Value::as_bool).unwrap_or(step.get("error").is_none());
-        let iteration = step.get("iteration").and_then(Value::as_u64).unwrap_or((index + 1) as u64);
-        app.emit("smara-chat-event", json!({"type": "phase", "phase": "reason_act", "iteration": iteration})).map_err(|error| error.to_string())?;
-        app.emit("smara-chat-event", json!({"type": "thought", "text": format!("Step {iteration}: {title}")})).map_err(|error| error.to_string())?;
-        app.emit("smara-chat-event", json!({"type": "tool_call", "name": capability, "preview": title, "iteration": iteration})).map_err(|error| error.to_string())?;
-        let preview = if let Some(error) = step.get("error").and_then(Value::as_str) {
-            error.chars().take(500).collect::<String>()
-        } else if let Some(value) = step.get("result") {
-            let text = value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string());
-            text.chars().take(500).collect::<String>()
-        } else {
-            "Completed".to_owned()
-        };
-        app.emit("smara-chat-event", json!({"type": "tool_result", "name": capability, "ok": ok, "preview": preview, "iteration": iteration})).map_err(|error| error.to_string())?;
-    }
-    let answer = result.get("answer").and_then(Value::as_str).unwrap_or("The local agent completed its bounded run.").trim().to_owned();
-    let answer = strip_thinking_tags(&answer);
-    if answer.is_empty() {
-        return Err("The local agent completed without a visible answer. Retry with a more specific objective.".to_owned());
-    }
-    let _ = persist_local_chat_turn(&args.conversation_id, &args.message, &answer);
-    app.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"})).map_err(|error| error.to_string())?;
-    app.emit("smara-chat-event", json!({"type": "token", "text": answer})).map_err(|error| error.to_string())?;
-    let completed = result.get("completed").and_then(Value::as_bool).unwrap_or(false);
-    let status = result.get("status").and_then(Value::as_str).unwrap_or(if completed { "completed" } else { "needs_input" });
-    let unresolved_items = result.get("unresolved_items").cloned().unwrap_or_else(|| if completed { json!([]) } else { json!(["The agent did not mark this turn complete."]) });
-    app.emit("smara-chat-event", json!({"type": "done", "tools_used": steps.len(), "iterations": result.get("iterations").cloned().unwrap_or_else(|| json!(steps.len())), "status": status, "completed": completed, "unresolved_items": unresolved_items, "session_id": result.get("session_id").cloned().unwrap_or_else(|| json!(args.conversation_id.clone())), "event_cursor": result.get("event_cursor").cloned().unwrap_or(Value::Null)})).map_err(|error| error.to_string())?;
+    let app_handle = app.clone();
+    let conv_id = args.conversation_id.clone();
+    let user_message = args.message.clone();
+
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let mut command = executor_command(&[
+            "--state".to_owned(), state_path().display().to_string(),
+            "--local-agent-turn".to_owned(),
+        ]);
+        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        command.env("PYTHONUNBUFFERED", "1");
+        let mut child = command.spawn().map_err(|e| format!("Could not start local agent: {e}"))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(request_json.as_bytes()).map_err(|e| format!("Could not write input: {e}"))?;
+        }
+
+        let child_id = child.id();
+        let (stop_tx, stop_rx) = std::sync::mpsc::channel();
+        let timeout_handle = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(worker_timeout);
+            while std::time::Instant::now() < deadline {
+                if stop_rx.recv_timeout(std::time::Duration::from_millis(200)).is_ok() {
+                    return;
+                }
+            }
+            #[cfg(target_os = "windows")]
+            {
+                let mut kill_cmd = Command::new("taskkill.exe");
+                kill_cmd.args(["/F", "/T", "/PID", &child_id.to_string()]);
+                command_hidden(&mut kill_cmd);
+                let _ = kill_cmd.output();
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = Command::new("kill")
+                    .args(["-9", &child_id.to_string()])
+                    .output();
+            }
+        });
+
+        let stderr = child.stderr.take();
+        let err_thread = std::thread::spawn(move || {
+            let mut err_str = String::new();
+            if let Some(mut err) = stderr {
+                use std::io::Read;
+                let _ = err.read_to_string(&mut err_str);
+            }
+            err_str
+        });
+
+        let stdout = child.stdout.take().ok_or_else(|| "Could not capture stdout.".to_owned())?;
+        let reader = std::io::BufReader::new(stdout);
+        use std::io::BufRead;
+
+        let mut done_event: Option<Value> = None;
+        let mut answer_streamed = false;
+
+        for line_res in reader.lines() {
+            if let Ok(line) = line_res {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Ok(event) = serde_json::from_str::<Value>(trimmed) {
+                    if let Some(evt_type) = event.get("type").and_then(Value::as_str) {
+                        if evt_type == "done" {
+                            done_event = Some(event);
+                            continue;
+                        }
+                        if evt_type == "token" {
+                            answer_streamed = true;
+                            if let Some(tok_text) = event.get("text").and_then(Value::as_str) {
+                                let clean = strip_thinking_tags(tok_text);
+                                let mut clean_evt = event.clone();
+                                clean_evt["text"] = Value::String(clean);
+                                let _ = app_handle.emit("smara-chat-event", clean_evt);
+                                continue;
+                            }
+                        }
+                        let _ = app_handle.emit("smara-chat-event", event);
+                    } else if event.get("answer").is_some() || event.get("steps").is_some() {
+                        done_event = Some(event);
+                    }
+                }
+            }
+        }
+
+        let status = child.wait().map_err(|e| format!("Could not wait for local agent: {e}"))?;
+        let _ = stop_tx.send(());
+        let _ = timeout_handle.join();
+        let stderr_output = err_thread.join().unwrap_or_default();
+
+        if !status.success() && done_event.is_none() {
+            let err_msg = if !stderr_output.trim().is_empty() {
+                stderr_output.trim().to_owned()
+            } else {
+                "Local agent exited with error.".to_owned()
+            };
+            let _ = app_handle.emit("smara-chat-event", json!({"type": "error", "message": err_msg}));
+            return Err(err_msg);
+        }
+
+        let final_val = done_event.ok_or_else(|| {
+            if !stderr_output.trim().is_empty() {
+                stderr_output.trim().to_owned()
+            } else {
+                "The local agent completed without returning a result.".to_owned()
+            }
+        })?;
+
+        let answer = final_val.get("answer").and_then(Value::as_str).unwrap_or("").trim().to_owned();
+        let answer = strip_thinking_tags(&answer);
+
+        if !answer_streamed && !answer.is_empty() {
+            let _ = app_handle.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"}));
+            let _ = app_handle.emit("smara-chat-event", json!({"type": "token", "text": answer}));
+        }
+
+        if !answer.is_empty() {
+            let _ = persist_local_chat_turn(&conv_id, &user_message, &answer);
+        }
+
+        let steps_len = final_val.get("steps").and_then(Value::as_array).map(|a| a.len()).unwrap_or(0);
+        let completed = final_val.get("completed").and_then(Value::as_bool).unwrap_or(false);
+        let status_str = final_val.get("status").and_then(Value::as_str).unwrap_or(if completed { "completed" } else { "needs_input" });
+        let unresolved_items = final_val.get("unresolved_items").cloned().unwrap_or_else(|| {
+            if completed { json!([]) } else { json!(["The agent did not mark this turn complete."]) }
+        });
+
+        let _ = app_handle.emit("smara-chat-event", json!({
+            "type": "done",
+            "tools_used": steps_len,
+            "iterations": final_val.get("iterations").cloned().unwrap_or_else(|| json!(steps_len)),
+            "status": status_str,
+            "completed": completed,
+            "unresolved_items": unresolved_items,
+            "session_id": final_val.get("session_id").cloned().unwrap_or_else(|| json!(conv_id.clone())),
+            "event_cursor": final_val.get("event_cursor").cloned().unwrap_or(Value::Null)
+        }));
+
+        Ok(())
+    }).await.map_err(|error| format!("Local agent worker failed: {error}"))??;
     Ok(())
 }
 
@@ -2033,16 +2150,14 @@ async fn try_autonomous_memory_action(app: &AppHandle, args: &ChatArgs) -> Resul
         return Ok(None);
     }
 
-    let clean_msg = args.message.trim().replace('"', "\\\"").replace('\n', " ");
+    let message_literal = python_string_literal(args.message.trim());
     let py_code = if is_remember {
         format!(
-            "import json\nfrom smara.dual_plane_memory import DualPlaneMemoryBridge\nb = DualPlaneMemoryBridge()\nfact = b.remember_fact('User Note', \"{}\", 'user_preference')\nprint(json.dumps({{'action': 'remember', 'fact': fact}}))\n",
-            clean_msg
+            "import json\nfrom smara.dual_plane_memory import DualPlaneMemoryBridge\nb = DualPlaneMemoryBridge()\nfact = b.remember_fact('User Note', {message_literal}, 'user_preference')\nprint(json.dumps({{'action': 'remember', 'fact': fact}}))\n"
         )
     } else if is_forget {
         format!(
-            "import json\nfrom smara.dual_plane_memory import DualPlaneMemoryBridge\nb = DualPlaneMemoryBridge()\nok = b.forget_fact(\"{}\")\nprint(json.dumps({{'action': 'forget', 'ok': ok}}))\n",
-            clean_msg
+            "import json\nfrom smara.dual_plane_memory import DualPlaneMemoryBridge\nb = DualPlaneMemoryBridge()\nok = b.forget_fact({message_literal})\nprint(json.dumps({{'action': 'forget', 'ok': ok}}))\n"
         )
     } else {
         "import json\nfrom smara.dual_plane_memory import DualPlaneMemoryBridge\nb = DualPlaneMemoryBridge()\nfacts = b.list_facts()\nprint(json.dumps({'action': 'list', 'facts': facts}))\n".to_string()
@@ -2096,10 +2211,9 @@ async fn try_autonomous_resource_discovery(app: &AppHandle, args: &ChatArgs) -> 
         return Ok(None);
     }
 
-    let clean_msg = args.message.trim().replace('"', "\\\"");
+    let message_literal = python_string_literal(args.message.trim());
     let py_code = format!(
-        "import json, re\nfrom smara.path_resolver import locate_resource, inspect_discovered_folder, read_whole_file\nmsg = \"{}\"\ncand = None\nfor w in re.findall(r'[a-zA-Z0-9_\\-\\.\\/\\\\]+', msg):\n    if ('/' in w or '\\\\' in w or (w.count('.') == 1 and not w.endswith('.'))) and w.lower() not in ('...', '.', './'):\n        cand = w; break\nif not cand:\n    for w in re.findall(r'\\b[a-zA-Z0-9_\\-\\.]+\\b', msg):\n        if w.lower() not in ('is', 'folder', 'find', 'it', 'read', 'and', 'the', 'a', 'an', 'directory', 'in', 'to', 'me', 'show', 'what', 'how', 'why', 'who', 'when', 'tell', 'like', 'so', 'u', 'can', 'yourself', 'open', 'this', 'launch', 'file'):\n            cand = w; break\np = locate_resource(cand) if cand else None\nif p:\n    if p.is_dir():\n        res = inspect_discovered_folder(p)\n        res['kind'] = 'folder'\n    else:\n        res = read_whole_file(p)\n        res['kind'] = 'file'\n    print(json.dumps(res))\nelse:\n    print('null')\n",
-        clean_msg
+        "import json, re\nfrom smara.path_resolver import locate_resource, inspect_discovered_folder, read_whole_file\nmsg = {message_literal}\ncand = None\nfor w in re.findall(r'[a-zA-Z0-9_\\-\\.\\/\\\\]+', msg):\n    if ('/' in w or '\\\\' in w or (w.count('.') == 1 and not w.endswith('.'))) and w.lower() not in ('...', '.', './'):\n        cand = w; break\nif not cand:\n    for w in re.findall(r'\\b[a-zA-Z0-9_\\-\\.]+\\b', msg):\n        if w.lower() not in ('is', 'folder', 'find', 'it', 'read', 'and', 'the', 'a', 'an', 'directory', 'in', 'to', 'me', 'show', 'what', 'how', 'why', 'who', 'when', 'tell', 'like', 'so', 'u', 'can', 'yourself', 'open', 'this', 'launch', 'file'):\n            cand = w; break\np = locate_resource(cand) if cand else None\nif p:\n    if p.is_dir():\n        res = inspect_discovered_folder(p)\n        res['kind'] = 'folder'\n    else:\n        res = read_whole_file(p)\n        res['kind'] = 'file'\n    print(json.dumps(res))\nelse:\n    print('null')\n"
     );
 
     if let Ok(val) = run_python_bridge_code(&py_code).await {
@@ -2125,8 +2239,8 @@ async fn try_autonomous_resource_discovery(app: &AppHandle, args: &ChatArgs) -> 
                     answer.push_str(&format!("### 📂 Discovered Folder: `{target_name}`\n\n- **Location**: `{path_str}`\n- **Total Items**: {total}\n"));
                 }
                 if let Some(readme) = val.get("readme_content").and_then(Value::as_str) {
-                    let preview_len = readme.len().min(2500);
-                    answer.push_str(&format!("\n#### 📄 README ({} bytes read in full):\n\n{}\n", readme.len(), &readme[..preview_len]));
+                    let preview = readme.chars().take(2500).collect::<String>();
+                    answer.push_str(&format!("\n#### 📄 README ({} bytes read in full):\n\n{}\n", readme.len(), preview));
                 }
                 if let Some(items) = val.get("items").and_then(Value::as_array) {
                     answer.push_str(&format!("\n**Directory Contents ({} items sample)**:\n", items.len().min(15)));
@@ -2149,8 +2263,8 @@ async fn try_autonomous_resource_discovery(app: &AppHandle, args: &ChatArgs) -> 
                 } else if is_binary {
                     answer.push_str(&format!("### 📑 Document Located: `{target_name}`\n\n- **Location**: `{path_str}`\n- **Size**: {bytes} bytes\n- **Status**: Ready to open, preview, or reveal in folder.\n"));
                 } else {
-                    let preview_len = content.len().min(3000);
-                    answer.push_str(&format!("### 📖 Whole-File Inspection: `{target_name}`\n\n- **Path**: `{path_str}`\n- **Size**: {bytes} bytes\n- **Total Lines**: {lines} (100% read)\n\n```\n{}\n```\n", &content[..preview_len]));
+                    let preview = content.chars().take(3000).collect::<String>();
+                    answer.push_str(&format!("### 📖 Whole-File Inspection: `{target_name}`\n\n- **Path**: `{path_str}`\n- **Size**: {bytes} bytes\n- **Total Lines**: {lines} (100% read)\n\n```\n{}\n```\n", preview));
                 }
             }
 
@@ -2238,6 +2352,16 @@ fn runtime_session_command(flag: &str, session_id: &str, after: i64) -> Result<V
         "--runtime-after".to_owned(), after.max(0).to_string(),
     ])?;
     serde_json::from_str(&output).map_err(|_| "Runtime session returned invalid JSON.".to_owned())
+}
+
+#[tauri::command]
+fn list_runtime_sessions(limit: Option<i64>) -> Result<Value, String> {
+    let output = run_executor(vec![
+        "--state".to_owned(), state_path().display().to_string(),
+        "--runtime-session-list".to_owned(),
+        "--runtime-limit".to_owned(), limit.unwrap_or(50).clamp(1, 500).to_string(),
+    ])?;
+    serde_json::from_str(&output).map_err(|_| "Runtime session list returned invalid JSON.".to_owned())
 }
 
 #[tauri::command]
@@ -2440,40 +2564,38 @@ async fn run_python_bridge_code(py_code: &str) -> Result<Value, String> {
 
 #[tauri::command]
 async fn inspect_ast_graph(symbol: String) -> Result<Value, String> {
-    let sym_clean = symbol.trim().replace('"', "");
+    let symbol_literal = python_string_literal(symbol.trim());
     let py_code = format!(
-        "import json\nfrom pathlib import Path\nfrom smara.code_graph import CodePropertyGraph\ngraph = CodePropertyGraph(Path.cwd())\ngraph.index()\nsym_name = '{}'\nres = graph.inspect_symbol(sym_name)\nif res is None:\n    for k in graph.symbols:\n        if k.lower() == sym_name.lower():\n            res = graph.inspect_symbol(k)\n            sym_name = k\n            break\nif res:\n    res['blast_radius'] = graph.blast_radius(sym_name)\n    print(json.dumps(res))\nelse:\n    print(json.dumps({{'error': f'Symbol {{sym_name}} not found'}}))\n",
-        sym_clean
+        "import json\nfrom pathlib import Path\nfrom smara.code_graph import CodePropertyGraph\ngraph = CodePropertyGraph(Path.cwd())\ngraph.index()\nsym_name = {symbol_literal}\nres = graph.inspect_symbol(sym_name)\nif res is None:\n    for k in graph.symbols:\n        if k.lower() == sym_name.lower():\n            res = graph.inspect_symbol(k)\n            sym_name = k\n            break\nif res:\n    res['blast_radius'] = graph.blast_radius(sym_name)\n    print(json.dumps(res))\nelse:\n    print(json.dumps({{'error': f'Symbol {{sym_name}} not found'}}))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn run_test_suite(filter: Option<String>) -> Result<Value, String> {
-    let f_arg = filter.unwrap_or_default().replace('"', "");
+    let filter = filter.unwrap_or_default();
+    let filter_literal = python_string_literal(&filter);
     let py_code = format!(
-        "import json\nfrom smara.test_fixer import PytestRunner\nrunner = PytestRunner()\nres = runner.run('{}' if '{}' else None)\nprint(json.dumps(res.to_dict()))\n",
-        f_arg, f_arg
+        "import json\nfrom smara.test_fixer import PytestRunner\nrunner = PytestRunner()\nfilter_value = {filter_literal}\nres = runner.run(filter_value if filter_value else None)\nprint(json.dumps(res.to_dict()))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn auto_fix_tests(filter: Option<String>) -> Result<Value, String> {
-    let f_arg = filter.unwrap_or_default().replace('"', "");
+    let filter = filter.unwrap_or_default();
+    let filter_literal = python_string_literal(&filter);
     let py_code = format!(
-        "import json\nfrom smara.test_fixer import AutonomousTestFixer\nfixer = AutonomousTestFixer()\nres = fixer.auto_fix('{}' if '{}' else None)\nprint(json.dumps(res))\n",
-        f_arg, f_arg
+        "import json\nfrom smara.test_fixer import AutonomousTestFixer\nfixer = AutonomousTestFixer()\nfilter_value = {filter_literal}\nres = fixer.auto_fix(filter_value if filter_value else None)\nprint(json.dumps(res))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn rollback_refactor_snapshot(session_id: String) -> Result<Value, String> {
-    let s_clean = session_id.trim().replace('"', "");
+    let session_literal = python_string_literal(session_id.trim());
     let py_code = format!(
-        "import json\nfrom pathlib import Path\nfrom smara.refactor import SnapshotManager\nmgr = SnapshotManager()\nrestored = mgr.restore_session(mgr.snapshot_dir / '{}')\nprint(json.dumps(restored))\n",
-        s_clean
+        "import json\nfrom pathlib import Path\nfrom smara.refactor import SnapshotManager\nmgr = SnapshotManager()\nrestored = mgr.restore_session(mgr.snapshot_dir / {session_literal})\nprint(json.dumps(restored))\n"
     );
     run_python_bridge_code(&py_code).await
 }
@@ -2492,15 +2614,15 @@ async fn get_git_branches() -> Result<Value, String> {
 
 #[tauri::command]
 async fn create_git_branch(name: String) -> Result<Value, String> {
-    let clean = name.trim().replace('"', "");
-    let py_code = format!("import json\nfrom smara.git_agent import GitWorkspaceManager\nmgr = GitWorkspaceManager()\nok, msg = mgr.create_branch('{}')\nprint(json.dumps({{'ok': ok, 'msg': msg}}))\n", clean);
+    let name_literal = python_string_literal(name.trim());
+    let py_code = format!("import json\nfrom smara.git_agent import GitWorkspaceManager\nmgr = GitWorkspaceManager()\nok, msg = mgr.create_branch({name_literal})\nprint(json.dumps({{'ok': ok, 'msg': msg}}))\n");
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn switch_git_branch(name: String) -> Result<Value, String> {
-    let clean = name.trim().replace('"', "");
-    let py_code = format!("import json\nfrom smara.git_agent import GitWorkspaceManager\nmgr = GitWorkspaceManager()\nok, msg = mgr.switch_branch('{}')\nprint(json.dumps({{'ok': ok, 'msg': msg}}))\n", clean);
+    let name_literal = python_string_literal(name.trim());
+    let py_code = format!("import json\nfrom smara.git_agent import GitWorkspaceManager\nmgr = GitWorkspaceManager()\nok, msg = mgr.switch_branch({name_literal})\nprint(json.dumps({{'ok': ok, 'msg': msg}}))\n");
     run_python_bridge_code(&py_code).await
 }
 
@@ -2512,8 +2634,8 @@ async fn generate_ai_commit_message() -> Result<Value, String> {
 
 #[tauri::command]
 async fn commit_git_changes(message: String, stage_all: bool) -> Result<Value, String> {
-    let clean_msg = message.trim().replace('"', "\\\"");
-    let py_code = format!("import json\nfrom smara.git_agent import GitWorkspaceManager\nmgr = GitWorkspaceManager()\nok, msg = mgr.commit(\"{}\", stage_all={})\nprint(json.dumps({{'ok': ok, 'msg': msg}}))\n", clean_msg, if stage_all { "True" } else { "False" });
+    let message_literal = python_string_literal(message.trim());
+    let py_code = format!("import json\nfrom smara.git_agent import GitWorkspaceManager\nmgr = GitWorkspaceManager()\nok, msg = mgr.commit({message_literal}, stage_all={})\nprint(json.dumps({{'ok': ok, 'msg': msg}}))\n", if stage_all { "True" } else { "False" });
     run_python_bridge_code(&py_code).await
 }
 
@@ -2532,27 +2654,26 @@ async fn detect_git_conflicts() -> Result<Value, String> {
 
 #[tauri::command]
 async fn resolve_git_conflict(file_path: String, strategy: String) -> Result<Value, String> {
-    let clean_path = file_path.trim().replace('"', "");
-    let clean_strat = strategy.trim().replace('"', "");
-    let py_code = format!("import json\nfrom smara.git_agent import GitWorkspaceManager\nmgr = GitWorkspaceManager()\nok, msg = mgr.resolve_conflict('{}', '{}')\nprint(json.dumps({{'ok': ok, 'msg': msg}}))\n", clean_path, clean_strat);
+    let path_literal = python_string_literal(file_path.trim());
+    let strategy_literal = python_string_literal(strategy.trim());
+    let py_code = format!("import json\nfrom smara.git_agent import GitWorkspaceManager\nmgr = GitWorkspaceManager()\nok, msg = mgr.resolve_conflict({path_literal}, {strategy_literal})\nprint(json.dumps({{'ok': ok, 'msg': msg}}))\n");
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn get_file_git_diff(file_path: String) -> Result<Value, String> {
-    let clean_path = file_path.trim().replace('"', "");
+    let path_literal = python_string_literal(file_path.trim());
     let py_code = format!(
-        "import json\nfrom smara.git_agent import GitWorkspaceManager\nmgr = GitWorkspaceManager()\nres = mgr.get_file_diff('{}')\nprint(json.dumps(res))\n",
-        clean_path
+        "import json\nfrom smara.git_agent import GitWorkspaceManager\nmgr = GitWorkspaceManager()\nres = mgr.get_file_diff({path_literal})\nprint(json.dumps(res))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn semantic_search(query: String, limit: Option<usize>) -> Result<Value, String> {
-    let q_clean = query.trim().replace('"', "\\\"");
+    let query_literal = python_string_literal(query.trim());
     let lim = limit.unwrap_or(8);
-    let py_code = format!("import json\nfrom pathlib import Path\nfrom smara.vector_search import VectorCodeSearchEngine\nengine = VectorCodeSearchEngine(Path.cwd())\nres = engine.hybrid_search(\"{}\", top_k={})\nprint(json.dumps([r.to_dict() for r in res]))\n", q_clean, lim);
+    let py_code = format!("import json\nfrom pathlib import Path\nfrom smara.vector_search import VectorCodeSearchEngine\nengine = VectorCodeSearchEngine(Path.cwd())\nres = engine.hybrid_search({query_literal}, top_k={lim})\nprint(json.dumps([r.to_dict() for r in res]))\n");
     run_python_bridge_code(&py_code).await
 }
 
@@ -2564,30 +2685,30 @@ async fn rebuild_semantic_index(force: bool) -> Result<Value, String> {
 
 #[tauri::command]
 async fn scrape_web_page(url: String) -> Result<Value, String> {
-    let u_clean = url.trim().replace('"', "");
-    let py_code = format!("import json\nfrom smara.browser_sidecar import BrowserSidecarEngine\nengine = BrowserSidecarEngine()\nres = engine.scrape_dom('{}')\nprint(json.dumps(res))\n", u_clean);
+    let url_literal = python_string_literal(url.trim());
+    let py_code = format!("import json\nfrom smara.browser_sidecar import BrowserSidecarEngine\nengine = BrowserSidecarEngine()\nres = engine.scrape_dom({url_literal})\nprint(json.dumps(res))\n");
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn capture_browser_screenshot(url: String) -> Result<Value, String> {
-    let u_clean = url.trim().replace('"', "");
-    let py_code = format!("import json\nfrom smara.browser_sidecar import BrowserSidecarEngine\nengine = BrowserSidecarEngine()\nres = engine.capture_screenshot('{}')\nprint(json.dumps(res))\n", u_clean);
+    let url_literal = python_string_literal(url.trim());
+    let py_code = format!("import json\nfrom smara.browser_sidecar import BrowserSidecarEngine\nengine = BrowserSidecarEngine()\nres = engine.capture_screenshot({url_literal})\nprint(json.dumps(res))\n");
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn run_browser_e2e(suite_name: String, steps_json: String) -> Result<Value, String> {
-    let s_clean = suite_name.trim().replace('"', "\\\"");
-    let steps_clean = steps_json.trim().replace('"', "\\\"");
-    let py_code = format!("import json\nfrom smara.browser_sidecar import BrowserSidecarEngine\nengine = BrowserSidecarEngine()\nres = engine.run_e2e_suite(\"{}\", json.loads(\"{}\"))\nprint(json.dumps(res.to_dict()))\n", s_clean, steps_clean);
+    let suite_literal = python_string_literal(suite_name.trim());
+    let steps_literal = python_string_literal(steps_json.trim());
+    let py_code = format!("import json\nfrom smara.browser_sidecar import BrowserSidecarEngine\nengine = BrowserSidecarEngine()\nres = engine.run_e2e_suite({suite_literal}, json.loads({steps_literal}))\nprint(json.dumps(res.to_dict()))\n");
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn diagnose_browser_ui_component(broken_text: String) -> Result<Value, String> {
-    let b_clean = broken_text.trim().replace('"', "\\\"");
-    let py_code = format!("import json\nfrom smara.browser_sidecar import BrowserSidecarEngine\nengine = BrowserSidecarEngine()\nres = engine.diagnose_component_failure(\"{}\")\nprint(json.dumps(res))\n", b_clean);
+    let text_literal = python_string_literal(broken_text.trim());
+    let py_code = format!("import json\nfrom smara.browser_sidecar import BrowserSidecarEngine\nengine = BrowserSidecarEngine()\nres = engine.diagnose_component_failure({text_literal})\nprint(json.dumps(res))\n");
     run_python_bridge_code(&py_code).await
 }
 
@@ -2605,8 +2726,8 @@ async fn sync_dual_plane_memory(force: bool) -> Result<Value, String> {
 
 #[tauri::command]
 async fn query_dual_plane_memory(query: String) -> Result<Value, String> {
-    let clean = query.trim().replace('"', "\\\"");
-    let py_code = format!("import json\nfrom smara.dual_plane_memory import DualPlaneMemoryBridge\nbridge = DualPlaneMemoryBridge()\nres = bridge.recall(\"{}\")\nprint(json.dumps(res.to_dict()))\n", clean);
+    let query_literal = python_string_literal(query.trim());
+    let py_code = format!("import json\nfrom smara.dual_plane_memory import DualPlaneMemoryBridge\nbridge = DualPlaneMemoryBridge()\nres = bridge.recall({query_literal})\nprint(json.dumps(res.to_dict()))\n");
     run_python_bridge_code(&py_code).await
 }
 
@@ -2619,11 +2740,12 @@ async fn list_adrs() -> Result<Value, String> {
 #[tauri::command]
 async fn create_adr(title: String, context: String, decision: String, consequences: String, symbols_affected: Vec<String>) -> Result<Value, String> {
     let symbols_json = serde_json::to_string(&symbols_affected).unwrap_or_else(|_| "[]".to_string());
-    let clean_title = title.replace('"', "\\\"");
-    let clean_ctx = context.replace('"', "\\\"");
-    let clean_dec = decision.replace('"', "\\\"");
-    let clean_con = consequences.replace('"', "\\\"");
-    let py_code = format!("import json\nfrom smara.coding_memory import ADRManager\nmgr = ADRManager(None)\nsymbols = json.loads('{}')\nadr = mgr.create_adr(title=\"{}\", context=\"{}\", decision=\"{}\", consequences=\"{}\", symbols_affected=symbols)\nprint(json.dumps(adr.to_dict()))\n", symbols_json, clean_title, clean_ctx, clean_dec, clean_con);
+    let symbols_literal = python_string_literal(&symbols_json);
+    let title_literal = python_string_literal(&title);
+    let context_literal = python_string_literal(&context);
+    let decision_literal = python_string_literal(&decision);
+    let consequences_literal = python_string_literal(&consequences);
+    let py_code = format!("import json\nfrom smara.coding_memory import ADRManager\nmgr = ADRManager(None)\nsymbols = json.loads({symbols_literal})\nadr = mgr.create_adr(title={title_literal}, context={context_literal}, decision={decision_literal}, consequences={consequences_literal}, symbols_affected=symbols)\nprint(json.dumps(adr.to_dict()))\n");
     run_python_bridge_code(&py_code).await
 }
 
@@ -2635,15 +2757,15 @@ async fn get_coding_conventions() -> Result<Value, String> {
 
 #[tauri::command]
 async fn get_symbol_evolution(symbol: String) -> Result<Value, String> {
-    let clean = symbol.trim().replace('"', "\\\"");
-    let py_code = format!("import json\nfrom smara.coding_memory import ASTDiffTracker\ntracker = ASTDiffTracker(None)\nhistory = [h.to_dict() for h in tracker.get_symbol_history(\"{}\")]\nprint(json.dumps(history))\n", clean);
+    let symbol_literal = python_string_literal(symbol.trim());
+    let py_code = format!("import json\nfrom smara.coding_memory import ASTDiffTracker\ntracker = ASTDiffTracker(None)\nhistory = [h.to_dict() for h in tracker.get_symbol_history({symbol_literal})]\nprint(json.dumps(history))\n");
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn run_swarm_task(objective: String) -> Result<Value, String> {
-    let clean = objective.trim().replace('"', "\\\"");
-    let py_code = format!("import json\nfrom smara.swarm import SwarmOrchestrator\norch = SwarmOrchestrator(None)\nres = orch.run_swarm(\"{}\")\nprint(json.dumps(res.to_dict()))\n", clean);
+    let objective_literal = python_string_literal(objective.trim());
+    let py_code = format!("import json\nfrom smara.swarm import SwarmOrchestrator\norch = SwarmOrchestrator(None)\nres = orch.run_swarm({objective_literal})\nprint(json.dumps(res.to_dict()))\n");
     run_python_bridge_code(&py_code).await
 }
 
@@ -2661,23 +2783,26 @@ async fn get_dynamic_tools() -> Result<Value, String> {
 
 #[tauri::command]
 async fn run_dynamic_tool(name: String, payload: Value) -> Result<Value, String> {
-    let clean_name = name.trim().replace('"', "\\\"");
-    let payload_str = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()).replace('"', "\\\"");
+    let name_literal = python_string_literal(name.trim());
+    let payload_json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+    let payload_literal = python_string_literal(&payload_json);
     let py_code = format!(
-        "import json\nfrom smara.tool_synthesis import DynamicToolSynthesizer\ns = DynamicToolSynthesizer(None)\nres = s.execute_dynamic_tool(\"{clean_name}\", json.loads(\"{payload_str}\"))\nprint(json.dumps(res))\n"
+        "import json\nfrom smara.tool_synthesis import DynamicToolSynthesizer\ns = DynamicToolSynthesizer(None)\nres = s.execute_dynamic_tool({name_literal}, json.loads({payload_literal}))\nprint(json.dumps(res))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn synthesize_dynamic_tool(name: String, description: String, code: String, parameters: Option<Value>, sample_payload: Option<Value>) -> Result<Value, String> {
-    let clean_name = name.trim().replace('"', "\\\"");
-    let clean_desc = description.trim().replace('"', "\\\"");
-    let clean_code = code.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n");
-    let param_str = serde_json::to_string(&parameters.unwrap_or(Value::Null)).unwrap_or_else(|_| "{}".to_string()).replace('"', "\\\"");
-    let sample_str = serde_json::to_string(&sample_payload.unwrap_or(Value::Null)).unwrap_or_else(|_| "{}".to_string()).replace('"', "\\\"");
+    let name_literal = python_string_literal(name.trim());
+    let description_literal = python_string_literal(description.trim());
+    let code_literal = python_string_literal(&code);
+    let param_json = serde_json::to_string(&parameters.unwrap_or(Value::Null)).unwrap_or_else(|_| "null".to_string());
+    let sample_json = serde_json::to_string(&sample_payload.unwrap_or(Value::Null)).unwrap_or_else(|_| "null".to_string());
+    let param_literal = python_string_literal(&param_json);
+    let sample_literal = python_string_literal(&sample_json);
     let py_code = format!(
-        "import json\nfrom smara.tool_synthesis import DynamicToolSynthesizer\ns = DynamicToolSynthesizer(None)\nres = s.synthesize_tool(name=\"{clean_name}\", description=\"{clean_desc}\", code=\"{clean_code}\".replace(\"\\\\n\", \"\\n\"), parameters=json.loads(\"{param_str}\"), sample_payload=json.loads(\"{sample_str}\"))\nprint(json.dumps(res))\n"
+        "import json\nfrom smara.tool_synthesis import DynamicToolSynthesizer\ns = DynamicToolSynthesizer(None)\nres = s.synthesize_tool(name={name_literal}, description={description_literal}, code={code_literal}, parameters=json.loads({param_literal}), sample_payload=json.loads({sample_literal}))\nprint(json.dumps(res))\n"
     );
     run_python_bridge_code(&py_code).await
 }
@@ -2727,23 +2852,21 @@ async fn run_research(topic: String, research_mode: String) -> Result<Value, Str
 
 #[tauri::command]
 async fn generate_pr_draft(intent: Option<String>) -> Result<Value, String> {
-    let py_intent = intent.unwrap_or_default().replace('"', "\\\"").replace('\n', " ");
+    let intent_literal = python_string_literal(intent.unwrap_or_default().trim());
     let py_code = format!(
-        "import json\nfrom smara.git_publisher import GitPublisherEngine\ne = GitPublisherEngine()\ndraft = e.formulate_draft(\"{}\")\nprint(json.dumps(draft.to_dict()))\n",
-        py_intent
+        "import json\nfrom smara.git_publisher import GitPublisherEngine\ne = GitPublisherEngine()\ndraft = e.formulate_draft({intent_literal})\nprint(json.dumps(draft.to_dict()))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn publish_pr_branch(draft_title: String, branch_name: String, commit_message: String, body_markdown: String) -> Result<Value, String> {
-    let clean_title = draft_title.replace('"', "\\\"").replace('\n', " ");
-    let clean_branch = branch_name.replace('"', "\\\"").replace('\n', " ");
-    let clean_commit = commit_message.replace('"', "\\\"").replace('\n', "\\n");
-    let clean_body = body_markdown.replace('"', "\\\"").replace('\n', "\\n");
+    let title_literal = python_string_literal(&draft_title);
+    let branch_literal = python_string_literal(&branch_name);
+    let commit_literal = python_string_literal(&commit_message);
+    let body_literal = python_string_literal(&body_markdown);
     let py_code = format!(
-        "import json\nfrom smara.git_publisher import GitPublisherEngine, PullRequestDraft\ne = GitPublisherEngine()\ndraft = PullRequestDraft(title=\"{}\", branch_name=\"{}\", commit_message=\"{}\", body_markdown=\"{}\")\nres = e.publish_local_branch(draft)\nprint(json.dumps(res))\n",
-        clean_title, clean_branch, clean_commit, clean_body
+        "import json\nfrom smara.git_publisher import GitPublisherEngine, PullRequestDraft\ne = GitPublisherEngine()\ndraft = PullRequestDraft(title={title_literal}, branch_name={branch_literal}, commit_message={commit_literal}, body_markdown={body_literal})\nres = e.publish_local_branch(draft)\nprint(json.dumps(res))\n"
     );
     run_python_bridge_code(&py_code).await
 }
@@ -2828,23 +2951,22 @@ async fn list_learned_skills() -> Result<Value, String> {
 
 #[tauri::command]
 async fn save_learned_skill(name: String, description: String, triggers: Vec<String>, instructions: String) -> Result<Value, String> {
-    let clean_name = name.trim().replace('"', "\\\"");
-    let clean_desc = description.trim().replace('"', "\\\"");
+    let name_literal = python_string_literal(name.trim());
+    let description_literal = python_string_literal(description.trim());
     let triggers_json = serde_json::to_string(&triggers).unwrap_or_else(|_| "[]".into());
-    let clean_inst = instructions.replace('"', "\\\"").replace('\n', "\\n");
+    let triggers_literal = python_string_literal(&triggers_json);
+    let instructions_literal = python_string_literal(&instructions);
     let py_code = format!(
-        "import json\nfrom smara.skill_learner import SkillLearnerEngine\ne = SkillLearnerEngine()\ns = e.learn_skill(name=\"{}\", description=\"{}\", triggers={}, instructions_md=\"{}\")\nprint(json.dumps(s.to_dict()))\n",
-        clean_name, clean_desc, triggers_json, clean_inst
+        "import json\nfrom smara.skill_learner import SkillLearnerEngine\ne = SkillLearnerEngine()\ns = e.learn_skill(name={name_literal}, description={description_literal}, triggers=json.loads({triggers_literal}), instructions_md={instructions_literal})\nprint(json.dumps(s.to_dict()))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn delete_learned_skill(name: String) -> Result<Value, String> {
-    let clean_name = name.trim().replace('"', "");
+    let name_literal = python_string_literal(name.trim());
     let py_code = format!(
-        "import json, os, re\nfrom pathlib import Path\nclean = re.sub(r'[^a-zA-Z0-9_-]', '_', '{}'.strip().lower())\np = Path('.smara/skills') / f'{{clean}}.json'\nok = False\nif p.exists():\n    p.unlink()\n    ok = True\nprint(json.dumps({{'ok': ok}}))\n",
-        clean_name
+        "import json, os, re\nfrom pathlib import Path\nclean = re.sub(r'[^a-zA-Z0-9_-]', '_', {name_literal}.strip().lower())\np = Path('.smara/skills') / f'{{clean}}.json'\nok = False\nif p.exists():\n    p.unlink()\n    ok = True\nprint(json.dumps({{'ok': ok}}))\n"
     );
     run_python_bridge_code(&py_code).await
 }
@@ -2951,58 +3073,53 @@ fn open_benchmark_report(path: String) -> Result<bool, String> {
 
 #[tauri::command]
 async fn list_task_memory(target: String) -> Result<Value, String> {
-    let clean_target = target.trim().to_lowercase();
+    let target_literal = python_string_literal(&target.trim().to_lowercase());
     let py_code = format!(
-        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nt = '{}'\nentries = s.read_entries(t)\nprint(json.dumps({{'target': t, 'entries': entries}}))\n",
-        clean_target
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nt = {target_literal}\nentries = s.read_entries(t)\nprint(json.dumps({{'target': t, 'entries': entries}}))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn add_task_memory_entry(content: String, target: String) -> Result<Value, String> {
-    let clean_target = target.trim().to_lowercase();
-    let clean_content = content.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n");
+    let target_literal = python_string_literal(&target.trim().to_lowercase());
+    let content_literal = python_string_literal(&content);
     let py_code = format!(
-        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nres = s.add_entry(\"{}\".replace(\"\\\\n\", \"\\n\"), target=\"{}\")\nprint(json.dumps(res))\n",
-        clean_content, clean_target
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nres = s.add_entry({content_literal}, target={target_literal})\nprint(json.dumps(res))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn replace_task_memory_entry(old_substring: String, new_content: String, target: String) -> Result<Value, String> {
-    let clean_target = target.trim().to_lowercase();
-    let clean_old = old_substring.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n");
-    let clean_new = new_content.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n");
+    let target_literal = python_string_literal(&target.trim().to_lowercase());
+    let old_literal = python_string_literal(&old_substring);
+    let new_literal = python_string_literal(&new_content);
     let py_code = format!(
-        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nres = s.replace_entry(old_substring=\"{}\".replace(\"\\\\n\", \"\\n\"), new_content=\"{}\".replace(\"\\\\n\", \"\\n\"), target=\"{}\")\nprint(json.dumps(res))\n",
-        clean_old, clean_new, clean_target
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nres = s.replace_entry(old_substring={old_literal}, new_content={new_literal}, target={target_literal})\nprint(json.dumps(res))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn remove_task_memory_entry(substring: String, target: String) -> Result<Value, String> {
-    let clean_target = target.trim().to_lowercase();
-    let clean_sub = substring.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n");
+    let target_literal = python_string_literal(&target.trim().to_lowercase());
+    let substring_literal = python_string_literal(&substring);
     let py_code = format!(
-        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nres = s.remove_entry(substring=\"{}\".replace(\"\\\\n\", \"\\n\"), target=\"{}\")\nprint(json.dumps(res))\n",
-        clean_sub, clean_target
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nres = s.remove_entry(substring={substring_literal}, target={target_literal})\nprint(json.dumps(res))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn search_task_memory(query: String, target: Option<String>) -> Result<Value, String> {
-    let clean_query = query.replace('\\', "\\\\").replace('"', "\\\"");
+    let query_literal = python_string_literal(&query);
     let target_str = match target {
-        Some(t) => format!("'{}'", t.trim().to_lowercase()),
+        Some(t) => python_string_literal(&t.trim().to_lowercase()),
         None => "None".to_string(),
     };
     let py_code = format!(
-        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nres = s.search_entries(query=\"{}\", target={})\nprint(json.dumps(res))\n",
-        clean_query, target_str
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.task_memory import TaskMemoryStore\ns = TaskMemoryStore()\nres = s.search_entries(query={query_literal}, target={target_str})\nprint(json.dumps(res))\n"
     );
     run_python_bridge_code(&py_code).await
 }
@@ -3020,7 +3137,7 @@ async fn get_memory_snapshot(max_chars: Option<usize>) -> Result<Value, String> 
 #[tauri::command]
 async fn list_skills_v2(tag_filter: Option<String>) -> Result<Value, String> {
     let filter_str = match tag_filter {
-        Some(f) if !f.trim().is_empty() => format!("'{}'", f.trim().replace('"', "\\\"")),
+        Some(f) if !f.trim().is_empty() => python_string_literal(f.trim()),
         _ => "None".to_string(),
     };
     let py_code = format!(
@@ -3032,33 +3149,28 @@ async fn list_skills_v2(tag_filter: Option<String>) -> Result<Value, String> {
 
 #[tauri::command]
 async fn view_skill_v2(skill_name: String, relative_path: Option<String>) -> Result<Value, String> {
-    let clean_name = skill_name.trim().replace('"', "\\\"");
+    let name_literal = python_string_literal(skill_name.trim());
     let rel_str = match relative_path {
-        Some(p) if !p.trim().is_empty() => format!("'{}'", p.trim().replace('"', "\\\"")),
+        Some(p) if !p.trim().is_empty() => python_string_literal(p.trim()),
         _ => "None".to_string(),
     };
     let py_code = format!(
-        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillsRegistry\nr = SkillsRegistry()\nprint(json.dumps(r.view_skill(skill_name=\"{}\", relative_path={})))\n",
-        clean_name, rel_str
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillsRegistry\nr = SkillsRegistry()\nprint(json.dumps(r.view_skill(skill_name={name_literal}, relative_path={rel_str})))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn create_skill_v2(name: String, description: String, tags: Vec<String>, instructions: String) -> Result<Value, String> {
-    let clean_name = name.trim().replace('"', "\\\"");
-    let clean_desc = description.trim().replace('"', "\\\"");
+    let name_literal = python_string_literal(name.trim());
+    let description_literal = python_string_literal(description.trim());
     let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".into());
-    let clean_inst = instructions.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n");
+    let tags_literal = python_string_literal(&tags_json);
+    let instructions_literal = python_string_literal(&instructions);
     let py_code = format!(
-        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillsRegistry\nr = SkillsRegistry()\nres = r.create_skill(name=\"{}\", description=\"{}\", tags={}, instructions=\"{}\".replace(\"\\\\n\", \"\\n\"))\nprint(json.dumps(res))\n",
-        clean_name, clean_desc, tags_json, clean_inst
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillsRegistry\nr = SkillsRegistry()\nres = r.create_skill(name={name_literal}, description={description_literal}, tags=json.loads({tags_literal}), instructions={instructions_literal})\nprint(json.dumps(res))\n"
     );
     run_python_bridge_code(&py_code).await
-}
-
-fn bridge_escape(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n")
 }
 
 #[tauri::command]
@@ -3069,32 +3181,32 @@ async fn skill_lifecycle() -> Result<Value, String> {
 
 #[tauri::command]
 async fn validate_skill_v2(name: String, version: Option<String>) -> Result<Value, String> {
-    let n = bridge_escape(&name);
-    let v = version.map(|value| format!("'{}'", bridge_escape(&value))).unwrap_or_else(|| "None".to_owned());
-    let py_code = format!("import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillLifecycleManager\nprint(json.dumps(SkillLifecycleManager().validate(\"{}\", version={})))\n", n, v);
+    let n = python_string_literal(&name);
+    let v = version.map(|value| python_string_literal(&value)).unwrap_or_else(|| "None".to_owned());
+    let py_code = format!("import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillLifecycleManager\nprint(json.dumps(SkillLifecycleManager().validate({n}, version={v})))\n");
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn promote_skill_v2(name: String, version: Option<String>) -> Result<Value, String> {
-    let n = bridge_escape(&name);
-    let v = version.map(|value| format!("'{}'", bridge_escape(&value))).unwrap_or_else(|| "None".to_owned());
-    let py_code = format!("import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillLifecycleManager\nprint(json.dumps(SkillLifecycleManager().promote(\"{}\", version={})))\n", n, v);
+    let n = python_string_literal(&name);
+    let v = version.map(|value| python_string_literal(&value)).unwrap_or_else(|| "None".to_owned());
+    let py_code = format!("import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillLifecycleManager\nprint(json.dumps(SkillLifecycleManager().promote({n}, version={v})))\n");
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn revoke_skill_v2(name: String, version: Option<String>) -> Result<Value, String> {
-    let n = bridge_escape(&name);
-    let v = version.map(|value| format!("'{}'", bridge_escape(&value))).unwrap_or_else(|| "None".to_owned());
-    let py_code = format!("import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillLifecycleManager\nprint(json.dumps(SkillLifecycleManager().set_state(\"{}\", 'revoked', version={})))\n", n, v);
+    let n = python_string_literal(&name);
+    let v = version.map(|value| python_string_literal(&value)).unwrap_or_else(|| "None".to_owned());
+    let py_code = format!("import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillLifecycleManager\nprint(json.dumps(SkillLifecycleManager().set_state({n}, 'revoked', version={v})))\n");
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn rollback_skill_v2(name: String, version: String) -> Result<Value, String> {
-    let n = bridge_escape(&name); let v = bridge_escape(&version);
-    let py_code = format!("import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillLifecycleManager\nprint(json.dumps(SkillLifecycleManager().rollback(\"{}\", \"{}\")))\n", n, v);
+    let n = python_string_literal(&name); let v = python_string_literal(&version);
+    let py_code = format!("import json, sys\nsys.path.insert(0, 'src')\nfrom smara.skills_system import SkillLifecycleManager\nprint(json.dumps(SkillLifecycleManager().rollback({n}, {v})))\n");
     run_python_bridge_code(&py_code).await
 }
 
@@ -3137,60 +3249,60 @@ async fn disconnect_integration(provider: String) -> Result<Value, String> {
 
 #[tauri::command]
 async fn get_dag_workflow(workflow_id: Option<String>) -> Result<Value, String> {
-    let wid = workflow_id.unwrap_or_else(|| "smara_verification_flow".to_string());
+    let wid = python_string_literal(&workflow_id.unwrap_or_else(|| "smara_verification_flow".to_string()));
     let py_code = format!(
-        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow, DAGNode\nwf = DAGWorkflow(workflow_id=\"{}\", title=\"Smara Autonomous Verification Pipeline\")\nwf.add_node(DAGNode(id=\"inspect_env\", title=\"Inspect Environment & Working Tree\", capability=\"local_terminal\", payload={{\"command\": \"git status\"}}))\nwf.add_node(DAGNode(id=\"run_tests\", title=\"Pytest Verification Suite\", capability=\"test_suite\", depends_on=[\"inspect_env\"]))\nwf.add_node(DAGNode(id=\"ast_analysis\", title=\"AST Blast Radius & Symbol Check\", capability=\"ast_graph\", depends_on=[\"inspect_env\"]))\nwf.add_node(DAGNode(id=\"security_audit\", title=\"Sanitize Injections & Coding Conventions\", capability=\"security_audit\", depends_on=[\"run_tests\", \"ast_analysis\"]))\nwf.add_node(DAGNode(id=\"synthesis_report\", title=\"Synthesize Deployment Scorecard\", capability=\"report\", depends_on=[\"security_audit\"]))\nwf.update_node_readiness()\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n",
-        wid
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow, DAGNode\nwf = DAGWorkflow(workflow_id={wid}, title=\"Smara Autonomous Verification Pipeline\")\nwf.add_node(DAGNode(id=\"inspect_env\", title=\"Inspect Environment & Working Tree\", capability=\"local_terminal\", payload={{\"command\": \"git status\"}}))\nwf.add_node(DAGNode(id=\"run_tests\", title=\"Pytest Verification Suite\", capability=\"test_suite\", depends_on=[\"inspect_env\"]))\nwf.add_node(DAGNode(id=\"ast_analysis\", title=\"AST Blast Radius & Symbol Check\", capability=\"ast_graph\", depends_on=[\"inspect_env\"]))\nwf.add_node(DAGNode(id=\"security_audit\", title=\"Sanitize Injections & Coding Conventions\", capability=\"security_audit\", depends_on=[\"run_tests\", \"ast_analysis\"]))\nwf.add_node(DAGNode(id=\"synthesis_report\", title=\"Synthesize Deployment Scorecard\", capability=\"report\", depends_on=[\"security_audit\"]))\nwf.update_node_readiness()\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn step_dag_workflow(workflow_data: Value) -> Result<Value, String> {
-    let wf_str = serde_json::to_string(&workflow_data).unwrap_or_else(|_| "{}".to_string()).replace('\\', "\\\\").replace('"', "\\\"");
+    let wf_json = serde_json::to_string(&workflow_data).unwrap_or_else(|_| "{}".to_string());
+    let wf_literal = python_string_literal(&wf_json);
     let py_code = format!(
-        "import json, sys, time\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow\nwf = DAGWorkflow.from_dict(json.loads(\"{}\"))\ndef exec_step(n):\n    time.sleep(0.05)\n    return f'Executed {{n.id}} successfully'\nwf.step(exec_step)\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n",
-        wf_str
+        "import json, sys, time\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow\nwf = DAGWorkflow.from_dict(json.loads({wf_literal}))\ndef exec_step(n):\n    time.sleep(0.05)\n    return f'Executed {{n.id}} successfully'\nwf.step(exec_step)\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn run_dag_workflow(workflow_data: Value) -> Result<Value, String> {
-    let wf_str = serde_json::to_string(&workflow_data).unwrap_or_else(|_| "{}".to_string()).replace('\\', "\\\\").replace('"', "\\\"");
+    let wf_json = serde_json::to_string(&workflow_data).unwrap_or_else(|_| "{}".to_string());
+    let wf_literal = python_string_literal(&wf_json);
     let py_code = format!(
-        "import json, sys, time\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow\nwf = DAGWorkflow.from_dict(json.loads(\"{}\"))\ndef exec_step(n):\n    time.sleep(0.05)\n    return f'Executed {{n.id}} successfully'\nwf.run_until_complete(exec_step)\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n",
-        wf_str
+        "import json, sys, time\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow\nwf = DAGWorkflow.from_dict(json.loads({wf_literal}))\ndef exec_step(n):\n    time.sleep(0.05)\n    return f'Executed {{n.id}} successfully'\nwf.run_until_complete(exec_step)\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn retry_dag_node(workflow_data: Value, node_id: String) -> Result<Value, String> {
-    let wf_str = serde_json::to_string(&workflow_data).unwrap_or_else(|_| "{}".to_string()).replace('\\', "\\\\").replace('"', "\\\"");
-    let clean_nid = node_id.trim().replace('"', "");
+    let wf_json = serde_json::to_string(&workflow_data).unwrap_or_else(|_| "{}".to_string());
+    let wf_literal = python_string_literal(&wf_json);
+    let node_literal = python_string_literal(node_id.trim());
     let py_code = format!(
-        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow\nwf = DAGWorkflow.from_dict(json.loads(\"{}\"))\nwf.retry_node(\"{}\")\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n",
-        wf_str, clean_nid
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow\nwf = DAGWorkflow.from_dict(json.loads({wf_literal}))\nwf.retry_node({node_literal})\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
 async fn inject_dag_node(workflow_data: Value, new_node: Value, after_node_id: Option<String>, before_node_id: Option<String>) -> Result<Value, String> {
-    let wf_str = serde_json::to_string(&workflow_data).unwrap_or_else(|_| "{}".to_string()).replace('\\', "\\\\").replace('"', "\\\"");
-    let node_str = serde_json::to_string(&new_node).unwrap_or_else(|_| "{}".to_string()).replace('\\', "\\\\").replace('"', "\\\"");
+    let wf_json = serde_json::to_string(&workflow_data).unwrap_or_else(|_| "{}".to_string());
+    let node_json = serde_json::to_string(&new_node).unwrap_or_else(|_| "{}".to_string());
+    let wf_literal = python_string_literal(&wf_json);
+    let node_literal = python_string_literal(&node_json);
     let after_str = match after_node_id {
-        Some(a) => format!("'{}'", a.trim()),
+        Some(a) => python_string_literal(a.trim()),
         None => "None".to_string(),
     };
     let before_str = match before_node_id {
-        Some(b) => format!("'{}'", b.trim()),
+        Some(b) => python_string_literal(b.trim()),
         None => "None".to_string(),
     };
     let py_code = format!(
-        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow, DAGNode\nwf = DAGWorkflow.from_dict(json.loads(\"{}\"))\nnd = DAGNode.from_dict(json.loads(\"{}\"))\nwf.inject_node(nd, after_node_id={}, before_node_id={})\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n",
-        wf_str, node_str, after_str, before_str
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.dag_flow import DAGWorkflow, DAGNode\nwf = DAGWorkflow.from_dict(json.loads({wf_literal}))\nnd = DAGNode.from_dict(json.loads({node_literal}))\nwf.inject_node(nd, after_node_id={after_str}, before_node_id={before_str})\nd = wf.to_dict()\nd[\"ascii_view\"] = wf.render_ascii()\nprint(json.dumps(d))\n"
     );
     run_python_bridge_code(&py_code).await
 }
@@ -3212,29 +3324,28 @@ async fn get_subagent_roles() -> Result<Value, String> {
 
 #[tauri::command]
 async fn run_subagent_delegation(goal: String, role: String, context: Option<String>) -> Result<Value, String> {
-    let clean_goal = goal.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n");
-    let clean_role = role.trim().to_lowercase();
+    let goal_literal = python_string_literal(&goal);
+    let role_literal = python_string_literal(&role.trim().to_lowercase());
     let ctx_str = match context {
-        Some(c) => format!("\"{}\"", c.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "").replace('\n', "\\n")),
+        Some(c) => python_string_literal(&c),
         None => "None".to_string(),
     };
     let py_code = format!(
-        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.subagent_orchestrator import SubagentOrchestrator, SubagentRole\norch = SubagentOrchestrator()\ntry:\n    r = SubagentRole('{}')\nexcept Exception:\n    r = SubagentRole.GENERALIST\nres = orch.delegate(goal=\"{}\".replace(\"\\\\n\", \"\\n\"), role=r, context={})\nprint(json.dumps(res.to_dict()))\n",
-        clean_role, clean_goal, ctx_str
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.subagent_orchestrator import SubagentOrchestrator, SubagentRole\norch = SubagentOrchestrator()\ntry:\n    r = SubagentRole({role_literal})\nexcept Exception:\n    r = SubagentRole.GENERALIST\nres = orch.delegate(goal={goal_literal}, role=r, context={ctx_str})\nprint(json.dumps(res.to_dict()))\n"
     );
     run_python_bridge_code(&py_code).await
 }
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_local_chat_history, load_task_details, decide_local_task, stream_chat, get_runtime_session, cancel_runtime_session, resume_runtime_session, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile, open_file_in_default_app, reveal_file_in_explorer, read_file_preview, inspect_ast_graph, run_test_suite, auto_fix_tests, rollback_refactor_snapshot, get_git_status, get_git_branches, create_git_branch, switch_git_branch, generate_ai_commit_message, commit_git_changes, get_git_log, detect_git_conflicts, resolve_git_conflict, get_file_git_diff, semantic_search, rebuild_semantic_index, scrape_web_page, capture_browser_screenshot, run_browser_e2e, diagnose_browser_ui_component, get_dual_plane_status, sync_dual_plane_memory, query_dual_plane_memory, list_adrs, create_adr, get_coding_conventions, get_symbol_evolution, run_swarm_task, get_swarm_history, get_dynamic_tools, run_dynamic_tool, synthesize_dynamic_tool, run_goal_task, get_goal_sessions, run_deep_research, run_research, generate_pr_draft, publish_pr_branch, run_terminal_command, list_learned_skills, save_learned_skill, delete_learned_skill, run_gaia_benchmark, run_swe_benchmark, get_benchmark_scorecards, open_benchmark_report, list_task_memory, add_task_memory_entry, replace_task_memory_entry, remove_task_memory_entry, search_task_memory, get_memory_snapshot, list_skills_v2, view_skill_v2, create_skill_v2, skill_lifecycle, validate_skill_v2, promote_skill_v2, revoke_skill_v2, rollback_skill_v2, list_integration_health, begin_integration_oauth, disconnect_integration, get_dag_workflow, step_dag_workflow, run_dag_workflow, retry_dag_node, inject_dag_node, get_subagent_roles, run_subagent_delegation])
+        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_local_chat_history, load_task_details, decide_local_task, stream_chat, list_runtime_sessions, get_runtime_session, cancel_runtime_session, resume_runtime_session, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile, open_file_in_default_app, reveal_file_in_explorer, read_file_preview, inspect_ast_graph, run_test_suite, auto_fix_tests, rollback_refactor_snapshot, get_git_status, get_git_branches, create_git_branch, switch_git_branch, generate_ai_commit_message, commit_git_changes, get_git_log, detect_git_conflicts, resolve_git_conflict, get_file_git_diff, semantic_search, rebuild_semantic_index, scrape_web_page, capture_browser_screenshot, run_browser_e2e, diagnose_browser_ui_component, get_dual_plane_status, sync_dual_plane_memory, query_dual_plane_memory, list_adrs, create_adr, get_coding_conventions, get_symbol_evolution, run_swarm_task, get_swarm_history, get_dynamic_tools, run_dynamic_tool, synthesize_dynamic_tool, run_goal_task, get_goal_sessions, run_deep_research, run_research, generate_pr_draft, publish_pr_branch, run_terminal_command, list_learned_skills, save_learned_skill, delete_learned_skill, run_gaia_benchmark, run_swe_benchmark, get_benchmark_scorecards, open_benchmark_report, list_task_memory, add_task_memory_entry, replace_task_memory_entry, remove_task_memory_entry, search_task_memory, get_memory_snapshot, list_skills_v2, view_skill_v2, create_skill_v2, skill_lifecycle, validate_skill_v2, promote_skill_v2, revoke_skill_v2, rollback_skill_v2, list_integration_health, begin_integration_oauth, disconnect_integration, get_dag_workflow, step_dag_workflow, run_dag_workflow, retry_dag_node, inject_dag_node, get_subagent_roles, run_subagent_delegation])
         .run(tauri::generate_context!())
         .expect("error while running Smara Desktop");
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{append_stream_delta, derived_local_capabilities, direct_local_request_text, evaluate_local_arithmetic, local_builtin_answer, local_delta_text, local_event_payload, normalize_provider_model, normalized_api_url, normalized_pairing_code, normalized_web_url, parse_local_json_plan, preserve_local_model_profiles};
+    use super::{append_stream_delta, derived_local_capabilities, direct_local_request_text, evaluate_local_arithmetic, local_builtin_answer, local_delta_text, local_event_payload, normalize_provider_model, normalized_api_url, normalized_pairing_code, normalized_web_url, parse_local_json_plan, preserve_local_model_profiles, python_string_literal};
     use serde_json::json;
 
     #[test]
@@ -3242,6 +3353,14 @@ mod tests {
         assert_eq!(local_event_payload("data: {\"choices\":[]}"), Some("{\"choices\":[]}"));
         assert_eq!(local_event_payload("{\"choices\":[]}"), Some("{\"choices\":[]}"));
         assert_eq!(local_event_payload(": keepalive"), None);
+    }
+
+    #[test]
+    fn python_bridge_string_literals_escape_code_boundaries() {
+        let input = "notes.txt\n__import__('os').system('should-not-run')\\\"";
+        let literal = python_string_literal(input);
+        assert!(!literal.contains('\n'));
+        assert_eq!(serde_json::from_str::<String>(&literal).expect("valid literal"), input);
     }
 
     #[test]

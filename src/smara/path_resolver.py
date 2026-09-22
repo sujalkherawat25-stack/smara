@@ -70,7 +70,7 @@ def locate_resource(name: str, base_roots: list[Path] | None = None) -> Optional
         return direct_home
 
     # 4. Common standard user subfolders
-    for sub in ["Documents", "OneDrive\\Documents", "OneDrive", "Desktop", "Projects", "workspace", "code"]:
+    for sub in ["OneDrive\\Desktop", "OneDrive/Desktop", "Desktop", "Documents", "OneDrive\\Documents", "OneDrive/Documents", "OneDrive", "Projects", "workspace", "code"]:
         cand = (home / sub / clean).resolve()
         if cand.exists():
             return cand

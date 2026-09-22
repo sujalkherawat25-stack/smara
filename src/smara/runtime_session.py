@@ -179,7 +179,7 @@ class SQLiteRuntimeSessionStore:
     def _row_to_session(row: sqlite3.Row | None) -> RuntimeSession | None:
         if row is None:
             return None
-        return RuntimeSession(
+        session = RuntimeSession(
             session_id=row["session_id"], workspace_id=row["workspace_id"], account_id=row["account_id"],
             mode=row["mode"], status=row["status"], request=row["request"],
             model_profile=row["model_profile"], tool_profile=row["tool_profile"],
@@ -189,6 +189,15 @@ class SQLiteRuntimeSessionStore:
             cancel_requested=bool(row["cancel_requested"]) if "cancel_requested" in row.keys() else False,
             cancel_reason=row["cancel_reason"] if "cancel_reason" in row.keys() else None,
         )
+        if "latest_turn_json" in row.keys() and row["latest_turn_json"]:
+            latest = _decode(row["latest_turn_json"], {})
+            latest_request = str(latest.get("request") or "") if isinstance(latest, dict) else ""
+            # New rows store the full request in the envelope and a bounded
+            # prefix in the event. Only reconcile legacy rows whose request
+            # actually disagrees with the latest turn.
+            if latest_request and not session.request.startswith(latest_request):
+                session.request = latest_request
+        return session
 
     def create_or_get(
         self,
@@ -220,17 +229,72 @@ class SQLiteRuntimeSessionStore:
 
     def get(self, session_id: str) -> RuntimeSession | None:
         with self._connect() as connection:
-            row = connection.execute("SELECT * FROM runtime_sessions WHERE session_id=?", (str(session_id),)).fetchone()
+            row = connection.execute(
+                "SELECT s.*, (SELECT e.payload_json FROM runtime_session_events e "
+                "WHERE e.session_id=s.session_id AND e.kind='turn.started' ORDER BY e.sequence DESC LIMIT 1) AS latest_turn_json "
+                "FROM runtime_sessions s WHERE s.session_id=?",
+                (str(session_id),),
+            ).fetchone()
         return self._row_to_session(row)
+
+    def start_turn(
+        self,
+        session_id: str | None = None,
+        *,
+        request: str = "",
+        workspace_id: str = "default",
+        account_id: str = "local",
+        mode: str = "local",
+        model_profile: str | None = None,
+        tool_profile: str | None = None,
+        research_mode: str | None = None,
+    ) -> RuntimeSession:
+        """Create a session or refresh its envelope for a new conversation turn.
+
+        Conversation IDs are intentionally stable across Desktop turns. A new
+        turn must replace the prior request/result metadata and clear a prior
+        cancellation without discarding the append-only event history.
+        """
+        session = self.create_or_get(
+            session_id,
+            request=request,
+            workspace_id=workspace_id,
+            account_id=account_id,
+            mode=mode,
+            model_profile=model_profile,
+            tool_profile=tool_profile,
+            research_mode=research_mode,
+        )
+        now = _now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "UPDATE runtime_sessions SET workspace_id=?,account_id=?,mode=?,status='created',request=?,"
+                "model_profile=?,tool_profile=?,research_mode=?,result_json='{}',unresolved_json='[]',"
+                "cancel_requested=0,cancel_reason=NULL,updated_at=? WHERE session_id=?",
+                (
+                    str(workspace_id or "default")[:512], str(account_id or "local")[:256], str(mode or "local")[:64],
+                    str(request or "")[:20_000], model_profile, tool_profile, research_mode, now, session.session_id,
+                ),
+            )
+            row = connection.execute("SELECT * FROM runtime_sessions WHERE session_id=?", (session.session_id,)).fetchone()
+        refreshed = self._row_to_session(row)
+        if refreshed is None:  # pragma: no cover - defensive sqlite failure guard
+            raise RuntimeError("runtime session disappeared while starting a turn")
+        return refreshed
 
     def list(self, *, workspace_id: str | None = None, limit: int = 50) -> list[RuntimeSession]:
         limit = max(1, min(int(limit), 500))
-        query = "SELECT * FROM runtime_sessions"
+        query = (
+            "SELECT s.*, (SELECT e.payload_json FROM runtime_session_events e "
+            "WHERE e.session_id=s.session_id AND e.kind='turn.started' ORDER BY e.sequence DESC LIMIT 1) AS latest_turn_json "
+            "FROM runtime_sessions s"
+        )
         args: list[Any] = []
         if workspace_id is not None:
-            query += " WHERE workspace_id=?"
+            query += " WHERE s.workspace_id=?"
             args.append(str(workspace_id))
-        query += " ORDER BY updated_at DESC LIMIT ?"
+        query += " ORDER BY s.updated_at DESC LIMIT ?"
         args.append(limit)
         with self._connect() as connection:
             rows = connection.execute(query, args).fetchall()

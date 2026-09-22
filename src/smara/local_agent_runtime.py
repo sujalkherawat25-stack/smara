@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import html
 import contextlib
 from datetime import date
 from dataclasses import dataclass
@@ -19,11 +20,11 @@ import httpx
 
 
 # This is a character ceiling because the local adapter supports providers
-# with different tokenizers.  It leaves headroom for the system prompt and a
+# with different tokenizers. It leaves headroom for the system prompt and a
 # 16k-token answer while preventing a workbook, browser page, or repeated
 # tool result from silently overflowing a provider context window.
-MAX_LOCAL_HISTORY_CHARS = 160_000
-MAX_LOCAL_TOOL_OBSERVATION_CHARS = 24_000
+MAX_LOCAL_HISTORY_CHARS = 48_000
+MAX_LOCAL_TOOL_OBSERVATION_CHARS = 8_000
 
 # A private model is allowed to answer ordinary conversational questions from
 # its own knowledge, but a current/live/web request must never silently turn
@@ -105,20 +106,73 @@ def _parse_plan(text: str) -> dict[str, Any] | None:
     body = _strip_thinking(text or "").strip()
     if not body:
         return None
-    if body.startswith("```"):
-        body = re.sub(r"^```(?:json|python)?\s*", "", body, flags=re.IGNORECASE)
-        body = re.sub(r"\s*```$", "", body).strip()
 
+    # 1. XML-style <tool_call> (Sarvam / GLM compact XML format)
+    for m in re.finditer(r"<tool_call>\s*([A-Za-z_][\w.-]*)\s*([\s\S]*?)(?:</tool_call>|$)", body, re.I):
+        name = m.group(1).strip()
+        sub = m.group(2)
+        pairs = re.findall(r"<arg_key>\s*([^<]+?)\s*</arg_key>\s*<arg_value>([\s\S]*?)(?:</arg_value>|$)", sub, re.I)
+        if pairs:
+            args: dict[str, Any] = {}
+            for k, v in pairs:
+                k = k.strip()
+                v = html.unescape(v.strip())
+                try:
+                    args[k] = json.loads(v)
+                except Exception:
+                    args[k] = v
+            cap = str(args.get("capability") or args.get("action") or name).strip()
+            payload = args.get("payload") if isinstance(args.get("payload"), dict) else {k: v for k, v in args.items() if k not in {"action", "capability", "title", "objective"}}
+            if "file_path" in payload and "path" not in payload:
+                payload["path"] = payload["file_path"]
+            if cap == "local_file_read" and "operation" not in payload:
+                payload["operation"] = "read_file"
+            return {
+                "kind": "local_action",
+                "title": str(args.get("title") or f"Execute {cap}")[:160],
+                "objective": str(args.get("objective") or f"Execute {cap}")[:8_000],
+                "capability": cap,
+                "payload": payload,
+            }
+
+    # 2. JSON parsing with markdown block stripping and raw_decode / brace auto-balancing
     json_candidate = body
-    if not (body.startswith("{") and body.endswith("}")):
-        match = re.search(r"\{[\s\S]*\}", body)
-        if match:
-            json_candidate = match.group(0)
+    if json_candidate.startswith("```"):
+        json_candidate = re.sub(r"^```(?:json|python)?\s*", "", json_candidate, flags=re.IGNORECASE)
+        json_candidate = re.sub(r"\s*```$", "", json_candidate).strip()
+    json_candidate = re.sub(r"</?(?:arg_value|tool_call|arg_key)>", "", json_candidate, flags=re.IGNORECASE).strip()
 
-    try:
-        value = json.loads(json_candidate)
-    except (TypeError, ValueError):
-        value = None
+    def _sanitize_json_escapes(s: str) -> str:
+        s = re.sub(r'[A-Za-z]:\\[^"\'\s}]+', lambda m: re.sub(r'(?<!\\)\\(?!\\)', r'\\\\', m.group(0)), s)
+        s = re.sub(r'(?<!\\)\\(?![\\"/bfnrt]|u[0-9a-fA-F]{4})', r'\\\\', s)
+        return s
+
+    start_idx = json_candidate.find("{")
+    value = None
+    if start_idx != -1:
+        candidate = json_candidate[start_idx:]
+        try:
+            value, _ = json.JSONDecoder().raw_decode(candidate)
+        except (TypeError, ValueError):
+            sanitized = _sanitize_json_escapes(candidate)
+            try:
+                value, _ = json.JSONDecoder().raw_decode(sanitized)
+            except (TypeError, ValueError):
+                open_b = sanitized.count("{")
+                close_b = sanitized.count("}")
+                if open_b > close_b:
+                    sanitized += "}" * (open_b - close_b)
+                open_sq = sanitized.count("[")
+                close_sq = sanitized.count("]")
+                if open_sq > close_sq:
+                    sanitized += "]" * (open_sq - close_sq)
+                try:
+                    value, _ = json.JSONDecoder().raw_decode(sanitized)
+                except (TypeError, ValueError):
+                    try:
+                        value = json.loads(sanitized)
+                    except (TypeError, ValueError):
+                        value = None
 
     if isinstance(value, dict):
         kind = value.get("kind")
@@ -128,6 +182,10 @@ def _parse_plan(text: str) -> dict[str, Any] | None:
         if kind == "local_action":
             cap = value.get("capability") or value.get("action") or "local_terminal"
             payload = value.get("payload") if isinstance(value.get("payload"), dict) else {}
+            if "file_path" in payload and "path" not in payload:
+                payload["path"] = payload["file_path"]
+            if str(cap) == "local_file_read" and "operation" not in payload:
+                payload["operation"] = "read_file"
             title = str(value.get("title") or f"Execute {cap}")[:160]
             obj = str(value.get("objective") or f"Execute {cap}")[:8_000]
             return {
@@ -150,6 +208,11 @@ def _parse_plan(text: str) -> dict[str, Any] | None:
                     payload = value["arguments"]
                 else:
                     payload = {k: v for k, v in value.items() if k not in {"action", "capability", "tool", "title", "objective"}}
+
+            if "file_path" in payload and "path" not in payload:
+                payload["path"] = payload["file_path"]
+            if action_name.strip() == "local_file_read" and "operation" not in payload:
+                payload["operation"] = "read_file"
 
             title = str(value.get("title") or f"Execute {action_name}")[:160]
             obj = str(value.get("objective") or f"Execute {action_name}")[:8_000]
@@ -250,17 +313,37 @@ def _compact_history(history: list[dict[str, Any]], *, max_chars: int = MAX_LOCA
     """Pack complete protocol groups within a conservative local budget."""
     items = []
     for item in history:
-        if not isinstance(item,dict) or not isinstance(item.get("content"),str):continue
-        normalized=dict(item)
-        if normalized.get("role")=="tool" and not normalized.get("tool_call_id"):
-            normalized["role"]="user";normalized["_smara_local_tool"]=True
+        if not isinstance(item, dict) or not isinstance(item.get("content"), str):
+            continue
+        normalized = dict(item)
+        if len(normalized["content"]) > MAX_LOCAL_TOOL_OBSERVATION_CHARS:
+            normalized["content"] = normalized["content"][:MAX_LOCAL_TOOL_OBSERVATION_CHARS]
+        if normalized.get("role") == "tool" and not normalized.get("tool_call_id"):
+            normalized["role"] = "user"
+            normalized["_smara_local_tool"] = True
         items.append(normalized)
     try:
         from .context_packing import ModelContextProfile, pack_messages
     except ImportError:  # pragma: no cover - exercised by the bundled executable
         from context_packing import ModelContextProfile, pack_messages
-    profile = ModelContextProfile("unknown:local", max_chars + 64, 0, safety_margin=32, protocol_overhead=32)
-    return list(pack_messages(items, profile).messages)
+    try:
+        profile = ModelContextProfile("unknown:local", max_chars + 64, 0, safety_margin=32, protocol_overhead=32)
+        return list(pack_messages(items, profile).messages)
+    except Exception:
+        # Graceful fallback: keep the prompt/system and as many recent messages as fit within budget
+        if not items:
+            return []
+        kept = [items[0]]
+        budget = max_chars - len(str(items[0].get("content") or ""))
+        recent_items = []
+        for it in reversed(items[1:]):
+            c_len = len(str(it.get("content") or ""))
+            if budget - c_len < 0:
+                break
+            budget -= c_len
+            recent_items.append(it)
+        kept.extend(reversed(recent_items))
+        return kept
 
 
 def _messages_from_history(history: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -323,12 +406,11 @@ class OpenAICompatiblePlanner:
         catalog = local_skill_catalog(include_extended=True)
         capability_lines = "\n".join(f"- {item['capability']}: {item['description']}" for item in catalog)
         self.system_prompt = (
-            "You are Smara's private local autonomous planner. Work in small, "
-            "verifiable steps. Return an ordinary clean answer only when the "
-            "objective is complete. Otherwise call request_local_action exactly "
-            "once. Never claim a local action happened before its result is "
-            "provided. Keep paths inside approved workspace roots, avoid secrets, "
-            "and prefer read/inspect/test before mutating files. If evidence is "
+            "You are Smara's private local autonomous planner running directly on the user's desktop. "
+            "Work in small, verifiable steps. Return an ordinary clean markdown answer only when the "
+            "objective is complete. Otherwise call request_local_action exactly once. Never claim a "
+            "local action happened before its result is provided. Keep paths inside approved workspace roots, "
+            "avoid secrets, and prefer read/inspect/test before mutating files. If evidence is "
             "missing, say what is missing rather than guessing. Do not repeat an "
             "identical tool call after an error; repair the plan or stop clearly. "
             "For any current, weather, news, live-web, or explicit web-search "
@@ -337,6 +419,17 @@ class OpenAICompatiblePlanner:
             "never claim that live web access is unavailable when connector "
             "evidence is supplied. Cite the returned source URLs in the answer. "
             "Use local_media for approved images, audio, archives, and rich documents.\n\n"
+            "PLATFORM & OPERATING GUIDELINES (WINDOWS & LOCAL WORKSPACE):\n"
+            "- The operating system is Windows. Always use standard local paths (e.g. C:\\... or relative paths) inside approved folders. Never use Unix root paths like /workspace or /home.\n"
+            "- For inspecting directories and reading local files, ALWAYS use local_file_read:\n"
+            "  * List folder contents: {\"operation\": \"list_tree\", \"path\": \"<folder_path>\"}\n"
+            "  * Find files: {\"operation\": \"find_files\", \"path\": \"<folder_path>\", \"query\": \"<pattern>\"}\n"
+            "  * Read code/file: {\"operation\": \"read_file\", \"path\": \"<file_path>\"}\n"
+            "  * Search text in files: {\"operation\": \"search_text\", \"path\": \"<folder_path>\", \"pattern\": \"<search_text>\"}\n"
+            "- For querying Python AST symbols, definitions, callers, or blast radius, use local_graph:\n"
+            "  * Symbol lookup: {\"operation\": \"inspect_symbol\", \"symbol\": \"<name>\", \"path\": \"<folder_or_file>\"}\n"
+            "- NEVER use local_terminal with 'find', 'ls', 'cat', or shell pipes/redirects (shell operators and unauthorized binaries are prohibited by security policy). Use local_file_read instead.\n"
+            "- When you have read the necessary code files and gathered enough evidence to answer the user's objective, do NOT make redundant tool calls. Deliver the final answer directly formatted in clean, structured markdown.\n\n"
             "Cross-session local memory is supplied as a bounded system note when "
             "relevant; treat it as a hint and verify it. The user can issue `/learn "
             "<name>` after a successful workflow to save a tested declarative "
@@ -356,18 +449,42 @@ class OpenAICompatiblePlanner:
         return headers
 
     def __call__(self, history: list[dict[str, Any]]) -> dict[str, Any]:
-        messages = [{"role": "system", "content": self.system_prompt}]
-        messages.extend(_messages_from_history(history))
-        payload: dict[str, Any] = {
-            "model": self.config.model,
-            "messages": messages,
-            "tools": [_tool_schema()],
-            "tool_choice": "auto",
-            "parallel_tool_calls": False,
-            "stream": False,
-            "max_tokens": max(512, min(int(self.config.max_tokens), 16_384)),
-            "temperature": 0.1,
-        }
+        force_synthesis = False
+        last_msg = history[-1] if history else {}
+        if isinstance(last_msg, dict) and "synthesize and present your final" in str(last_msg.get("content", "")).lower():
+            force_synthesis = True
+
+        model_lower = self.config.model.lower()
+        if force_synthesis:
+            system_prompt = (
+                "You are Smara's private assistant running directly on the user's desktop. You have completed the local workspace investigation. "
+                "Synthesize and present your final comprehensive answer directly in clean, structured markdown based on the evidence above. "
+                "Do NOT make any further tool calls or return any JSON actions."
+            )
+            messages = [{"role": "system", "content": system_prompt}]
+            messages.extend(_messages_from_history(history))
+            payload: dict[str, Any] = {
+                "model": self.config.model,
+                "messages": messages,
+                "stream": False,
+                "max_tokens": max(4096, min(int(self.config.max_tokens), 16_384)),
+                "temperature": 0.2,
+            }
+        else:
+            messages = [{"role": "system", "content": self.system_prompt}]
+            messages.extend(_messages_from_history(history))
+            payload: dict[str, Any] = {
+                "model": self.config.model,
+                "messages": messages,
+                "tools": [_tool_schema()],
+                "tool_choice": "auto",
+                "parallel_tool_calls": False,
+                "stream": False,
+                "max_tokens": max(4096, min(int(self.config.max_tokens), 16_384)),
+                "temperature": 0.1,
+            }
+        if "glm5" in model_lower or "deepseek" in model_lower:
+            payload["reasoning_effort"] = "low"
         payload = _sanitize_surrogates(payload)
         response = self.client.post(self.endpoint, headers=self._headers(), json=payload)
         if response.status_code in {400, 404, 422}:
@@ -386,9 +503,11 @@ class OpenAICompatiblePlanner:
                 "model": self.config.model,
                 "messages": fallback_messages,
                 "stream": False,
-                "max_tokens": max(512, min(int(self.config.max_tokens), 16_384)),
+                "max_tokens": max(4096, min(int(self.config.max_tokens), 16_384)),
                 "temperature": 0.1,
             }
+            if "glm5" in model_lower or "deepseek" in model_lower:
+                fallback_payload["reasoning_effort"] = "low"
             fallback_payload = _sanitize_surrogates(fallback_payload)
             response = self.client.post(self.endpoint, headers=self._headers(), json=fallback_payload)
         if response.status_code in {401, 403}:
@@ -415,15 +534,55 @@ class OpenAICompatiblePlanner:
             arguments["kind"] = "local_action"
             plan = _parse_plan(json.dumps(arguments, ensure_ascii=False))
             if plan is None:
+                cap = arguments.get("capability") or arguments.get("action")
+                if cap:
+                    inner_payload = arguments.get("payload")
+                    if not isinstance(inner_payload, dict):
+                        inner_payload = {k: v for k, v in arguments.items() if k not in {"action", "capability", "title", "objective", "kind"}}
+                    if "file_path" in inner_payload and "path" not in inner_payload:
+                        inner_payload["path"] = inner_payload["file_path"]
+                    if str(cap) == "local_file_read" and "operation" not in inner_payload:
+                        inner_payload["operation"] = "read_file"
+                    plan = {
+                        "kind": "local_action",
+                        "title": str(arguments.get("title") or f"Execute {cap}")[:160],
+                        "objective": str(arguments.get("objective") or f"Execute {cap}")[:8_000],
+                        "capability": str(cap),
+                        "payload": inner_payload,
+                    }
+            if plan is None:
                 raise RuntimeError("The private model returned an incomplete local action plan.")
             return plan
 
         content = message.get("content") if isinstance(message, dict) else None
+        if not content and isinstance(message, dict) and message.get("reasoning_content"):
+            content = message.get("reasoning_content")
+
         plan = _parse_plan(content) if isinstance(content, str) else None
         if plan is not None:
             return plan
         if isinstance(content, str) and content.strip():
-            return {"kind": "answer", "answer": _strip_thinking(content)}
+            stripped = _strip_thinking(content).strip()
+            # Guard against leaking raw tool call XML or JSON as conversational answers
+            is_tool_leak = (
+                stripped.startswith("<tool_call>")
+                or "</tool_call>" in stripped
+                or "</arg_value>" in stripped
+                or (stripped.startswith("{") and ('"action"' in stripped or '"capability"' in stripped))
+                or ('{"action":' in stripped or '{"capability":' in stripped)
+            )
+            if not is_tool_leak:
+                return {"kind": "answer", "answer": stripped}
+            candidate_plan = _parse_plan(stripped)
+            if candidate_plan is not None:
+                return candidate_plan
+            # Fallback regex extraction of tool call inside stripped
+            match = re.search(r'\{[^{}]*(?:"action"|"capability")[^{}]*\}', stripped)
+            if match:
+                candidate_plan = _parse_plan(match.group(0))
+                if candidate_plan is not None:
+                    return candidate_plan
+            raise RuntimeError(f"{self.config.label} emitted an unparseable tool call: {stripped[:300]!r}")
         raise RuntimeError(f"{self.config.label} returned no answer or local action.")
 
 
@@ -438,6 +597,7 @@ def run_shared_local_turn(
     conversation_id: str | None = None,
     workspace_id: str = "default",
     research_mode: str = "auto",
+    event_callback: Any | None = None,
 ) -> dict[str, Any]:
     """Run the shared agent loop with local cross-session memory.
 
@@ -455,7 +615,7 @@ def run_shared_local_turn(
     if requested_research_mode not in {"auto", "quick", "deep"}:
         requested_research_mode = "auto"
     tool_profile = "research_web" if requested_research_mode in {"quick", "deep"} else None
-    runtime_sessions.create_or_get(
+    runtime_sessions.start_turn(
         conversation,
         request=prompt,
         workspace_id=workspace_id,
@@ -581,7 +741,7 @@ def run_shared_local_turn(
     planner = OpenAICompatiblePlanner(config)
     try:
         agent = LocalAutonomousAgent(state_path, max_steps=max(1, min(int(max_steps), 20)), action_executor=action_executor, cancel_check=lambda: runtime_sessions.should_cancel(conversation))
-        result = agent.run_turn(_sanitize_surrogates(prompt), model_callable=planner, context=merged_context)
+        result = agent.run_turn(_sanitize_surrogates(prompt), model_callable=planner, context=merged_context, event_callback=event_callback)
         result = _sanitize_surrogates(result)
         answer = str(result.get("answer") or "").strip()
         if live_web_result is not None:

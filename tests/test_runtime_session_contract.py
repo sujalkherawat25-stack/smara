@@ -1,5 +1,7 @@
+import json
 from pathlib import Path
 
+from smara.desktop_executor import _main as desktop_main
 from smara.runtime_session import RuntimeSession, SQLiteRuntimeSessionStore, session_store_for_state
 
 
@@ -21,6 +23,22 @@ def test_state_store_is_stable_sibling(tmp_path: Path):
     assert store.path.name == "runtime-sessions.sqlite3"
 
 
+def test_desktop_runtime_session_list_is_bounded_and_machine_readable(tmp_path: Path, capsys):
+    state_path = tmp_path / "state.json"
+    store = session_store_for_state(state_path)
+    store.create_or_get("older", request="first")
+    store.create_or_get("newer", request="second")
+    store.checkpoint("newer", status="completed", result={"answer": "x" * 20_000})
+
+    assert desktop_main(["--state", str(state_path), "--runtime-session-list", "--runtime-limit", "1"]) == 0
+    raw = capsys.readouterr().out
+    payload = json.loads(raw)
+    assert len(payload) == 1
+    assert payload[0]["session_id"] == "newer"
+    assert payload[0]["result"] == {}
+    assert len(raw) < 2_000
+
+
 def test_runtime_session_cancel_is_idempotent_and_wins_late_completion(tmp_path: Path):
     store = SQLiteRuntimeSessionStore(tmp_path / "sessions.sqlite3", max_events=32)
     store.create_or_get("cancel-1", request="long work")
@@ -34,6 +52,45 @@ def test_runtime_session_cancel_is_idempotent_and_wins_late_completion(tmp_path:
     assert late.unresolved == ["operator stopped it"]
     assert [event.kind for event in store.events("cancel-1")] == ["turn.started", "turn.cancel_requested", "turn.cancelled"]
     assert store.request_cancel("cancel-1").status == "cancelled"
+
+
+def test_new_turn_refreshes_stable_conversation_envelope(tmp_path: Path):
+    store = SQLiteRuntimeSessionStore(tmp_path / "sessions.sqlite3", max_events=32)
+    store.create_or_get("chat-1", request="inspect the folder", model_profile="old-model")
+    store.checkpoint("chat-1", status="completed", result={"answer": "old answer"}, event="turn.completed")
+    store.request_cancel("chat-1", "old cancellation")
+
+    refreshed = store.start_turn(
+        "chat-1",
+        request="what is today's news?",
+        model_profile="new-model",
+        research_mode="quick",
+    )
+
+    assert refreshed.request == "what is today's news?"
+    assert refreshed.model_profile == "new-model"
+    assert refreshed.research_mode == "quick"
+    assert refreshed.status == "created"
+    assert refreshed.result == {}
+    assert refreshed.unresolved == []
+    assert refreshed.cancel_requested is False
+    assert refreshed.cancel_reason is None
+
+
+def test_legacy_envelope_request_reconciles_from_latest_turn_event(tmp_path: Path):
+    store = SQLiteRuntimeSessionStore(tmp_path / "sessions.sqlite3", max_events=32)
+    store.create_or_get("legacy-chat", request="inspect the folder")
+    store.checkpoint(
+        "legacy-chat",
+        status="running",
+        event="turn.started",
+        event_payload={"request": "what is today's news?"},
+    )
+    store.checkpoint("legacy-chat", status="completed", result={"answer": "news"})
+
+    assert store.get("legacy-chat").request == "what is today's news?"
+    assert store.list(limit=1)[0].request == "what is today's news?"
+    assert store.snapshot("legacy-chat")["session"]["request"] == "what is today's news?"
 
 
 def test_runtime_snapshot_replays_after_cursor_and_reports_gap(tmp_path: Path):

@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { desktop, isNativeDesktop } from "./api";
-import type { ActivityItem, ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatMessage, CodingConventionsData, ConnectionState, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ResearchMode, SearchResultItem, SemanticIndexStats, SwarmMessageData, SwarmTaskResultData, SymbolEvolutionData, TaskSummary, TestFailureItem, TestSuiteResultData, WebScrapeData } from "./types";
+import type { ActivityItem, ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatMessage, CodingConventionsData, ConnectionState, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ResearchMode, RuntimeSessionRecord, RuntimeSessionSnapshot, SearchResultItem, SemanticIndexStats, SwarmMessageData, SwarmTaskResultData, SymbolEvolutionData, TaskSummary, TestFailureItem, TestSuiteResultData, WebScrapeData } from "./types";
 import smaraLogo from "./assets/smara-logo.svg";
 import { TaskMemoryTab } from "./components/TaskMemoryTab";
 import { ProgressiveSkillsTab } from "./components/ProgressiveSkillsTab";
 import { DAGFlowTab } from "./components/DAGFlowTab";
 import { SubagentSwarmTab } from "./components/SubagentSwarmTab";
 
-export type NavTab = "chat" | "goals" | "dag" | "swarm" | "memory" | "skills" | "search" | "browser" | "graph" | "tests" | "benchmarks" | "git" | "terminal" | "models" | "integrations" | "workspace" | "cloud";
+export type NavTab = "chat" | "studio" | "workspace" | "settings";
+export type StudioSubTab = "runs" | "dag" | "goals" | "swarm" | "memory" | "skills" | "graph" | "tests" | "git" | "benchmarks" | "browser";
+export type SettingsSubTab = "models" | "credentials";
 
 const fallbackConnection: ConnectionState = {
   runtime_mode: "local",
@@ -305,12 +307,13 @@ function renderMarkdownContent(rawText: string): JSX.Element {
       blocks.push(<MarkdownTextBlock key={`txt-${counter++}`} content={trailingText} blockKey={`b-${counter}`} />);
     }
   }
-
   return <div className="markdown-rendered-body">{blocks.length > 0 ? blocks : renderInlineMarkdown(clean)}</div>;
 }
 
 export default function App() {
   const [tab, setTab] = useState<NavTab>("chat");
+  const [studioTab, setStudioTab] = useState<StudioSubTab>("runs");
+  const [settingsTab, setSettingsTab] = useState<SettingsSubTab>("models");
   const [connection, setConnection] = useState<ConnectionState>(fallbackConnection);
   const [credentials, setCredentials] = useState<LocalCredentialSummary[]>([]);
   const [connectors, setConnectors] = useState<LocalConnectorSummary[]>([]);
@@ -325,14 +328,18 @@ export default function App() {
   const [previewFile, setPreviewFile] = useState<FilePreview | null>(null);
   const [currentExecution, setCurrentExecution] = useState<string | null>(null);
   const [currentThought, setCurrentThought] = useState<string | null>(null);
-  const [sidebarMode, setSidebarMode] = useState<"sessions" | "bots">("sessions");
-  const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
-  const [capTab, setCapTab] = useState<"dag" | "memory" | "skills" | "swarm" | "benchmarks" | "git">("dag");
   const [selectedProfileId, setSelectedProfileId] = useState("auto");
   const [researchMode, setResearchMode] = useState<ResearchMode>("auto");
-  const [audioMuted, setAudioMuted] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [activityOpen, setActivityOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState("0.1.3");
+
+  useEffect(() => {
+    if (!isNativeDesktop) return;
+    void getVersion().then(setAppVersion).catch(() => {
+      // Keep the source release fallback in preview/non-standard WebViews.
+    });
+  }, []);
 
   const handlePreview = async (filePath: string) => {
     try {
@@ -358,23 +365,31 @@ export default function App() {
     try {
       const conn = await desktop.connection();
       setConnection(conn);
-      const [creds, conns, models, tList, health] = await Promise.all([
+      const [creds, conns, models, tList] = await Promise.all([
         desktop.credentials().catch(() => []),
         desktop.connectors().catch(() => []),
         desktop.modelProfiles().catch(() => []),
         desktop.tasks().catch(() => []),
-        desktop.integrationHealth().catch(() => ({ plugins: [], plugin_health: [], mcp_health: [] })),
       ]);
       setCredentials(creds);
       setConnectors(conns);
       setModelProfiles(models);
       setTasks(tList);
-      setIntegrationHealth(health || { plugins: [], plugin_health: [], mcp_health: [] });
       setSelectedProfileId((current) => current === "auto" ? (conn.model_profile.startsWith("local:") ? conn.model_profile.slice("local:".length) : "auto") : current);
     } catch {
       setConnection(fallbackConnection);
     }
   }, []);
+
+  useEffect(() => {
+    if (settingsTab === "credentials" && isNativeDesktop) {
+      void desktop.integrationHealth().then((health) => {
+        if (health) setIntegrationHealth(health);
+      }).catch(() => {
+        setIntegrationHealth({ plugins: [], plugin_health: [], mcp_health: [] });
+      });
+    }
+  }, [settingsTab]);
 
   useEffect(() => {
     void refreshAll();
@@ -453,8 +468,9 @@ export default function App() {
     } else if (type === "phase") {
       if (event.phase === "answer") {
         setCurrentExecution(null);
+      } else if (event.phase && event.phase !== "reason_act") {
+        setActivity((items) => [{ id: uid("phase"), tone: "blue" as const, label: `Agent ${event.phase}` }, ...items].slice(0, 10));
       }
-      setActivity((items) => [{ id: uid("phase"), tone: "blue" as const, label: `Agent ${event.phase || "working"}` }, ...items].slice(0, 10));
     } else if (type === "tool_call") {
       setCurrentExecution(event.preview || event.name || "Executing tool...");
       setActivity((items) => [{ id: uid("tool"), tone: "amber" as const, label: `Executing ${event.name || "tool"}`, detail: event.preview }, ...items].slice(0, 10));
@@ -534,13 +550,16 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setShowSpotlight((prev) => !prev);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        startNewSession();
       } else if (e.key === "Escape") {
         setShowSpotlight(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [startNewSession]);
 
   async function send(message = draft) {
     const text = message.trim();
@@ -549,7 +568,8 @@ export default function App() {
     // Check if a model profile is configured
     const activeProfile = connection.model_profile;
     if (connection.runtime_mode === "local" && !activeProfile.startsWith("local:") && modelProfiles.length === 0) {
-      setTab("models");
+      setTab("settings");
+      setSettingsTab("models");
       setNotice("Please add your model API key (Grok, Sarvam, or Local Ollama) in Models before chatting.");
       return;
     }
@@ -605,13 +625,26 @@ export default function App() {
     if (!isNativeDesktop || !streaming) return;
     try {
       const snapshot = await desktop.cancelRuntimeSession(conversationId.current, "cancelled from Desktop");
-      const session = snapshot?.session as { status?: string; cancel_requested?: boolean } | undefined;
+      const session = snapshot?.session as { status?: string; cancel_requested?: boolean; result?: { answer?: string } } | undefined;
       // The cancellation command runs independently of the active worker. A
       // short turn may complete in the small interval before the durable
       // cancellation is recorded. Do not replace a real answer with a false
       // "cancelled" state in that race; the queued completion event remains
       // authoritative and will settle this message normally.
       if (session?.status !== "cancelled" || session.cancel_requested !== true) {
+        if (session?.status === "completed" && session.result?.answer) {
+          const target = assistantId.current;
+          assistantId.current = null;
+          pendingAssistantText.current = "";
+          setStreaming(false);
+          setCurrentExecution(null);
+          setCurrentThought(null);
+          setMessages((items) => items.map((item) => item.id === target ? {
+            ...item,
+            pending: false,
+            text: session.result?.answer || item.text,
+          } : item));
+        }
         setNotice("This turn completed before cancellation was recorded. Its completed result has been kept.");
         return;
       }
@@ -650,20 +683,44 @@ export default function App() {
             onClick={() => setSidebarVisible(!sidebarVisible)}
             title="Toggle Sidebar"
           >
-            ⇄
+            {sidebarVisible ? "◧" : "☰"}
           </button>
-          <span style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>Smara Desktop</span>
+          <button type="button" className="topbar-brand" onClick={() => setTab("chat")} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }} aria-label="Return to Chat">
+            <img src={smaraLogo} alt="Smara" style={{ width: 16, height: 16 }} />
+            <span style={{ fontSize: 13, color: "#f8fafc", fontWeight: 600, letterSpacing: "0.02em" }}>Smara</span>
+          </button>
+
+          {tab !== "chat" && (
+            <div className="topbar-breadcrumb">
+              <span className="crumb-sep">/</span>
+              <button
+                type="button"
+                className="topbar-back-btn"
+                onClick={() => setTab("chat")}
+                title="Return to Chat session"
+              >
+                ← Back to Chat
+              </button>
+              <span className="crumb-sep">/</span>
+              <span className="crumb-active">
+                {tab === "studio" ? `Studio : ${studioTab.toUpperCase()}` : tab === "workspace" ? "Workspace" : `Settings : ${settingsTab.toUpperCase()}`}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="sleek-topbar-right">
           <button
             type="button"
-            className="sleek-icon-btn"
-            onClick={() => setCapabilitiesOpen(true)}
-            title="Autonomous Capabilities (DAG, Memory, Skills, Swarm)"
+            className="sleek-topbar-search-btn"
+            onClick={() => setShowSpotlight(true)}
+            title="Quick Symbol Search (Ctrl+K)"
           >
-            ⚡
+            <span className="search-icon">🔍</span>
+            <span>Search symbols</span>
+            <kbd className="kbd-badge">Ctrl K</kbd>
           </button>
+
           <button
             type="button"
             className={`sleek-icon-btn ${activityOpen ? "active" : ""}`}
@@ -671,21 +728,14 @@ export default function App() {
             title={activityOpen ? "Hide live activity" : "Show live activity"}
             aria-label={activityOpen ? "Hide live activity" : "Show live activity"}
           >
-            ◌
+            <span style={{ fontSize: 13 }}>◌</span>
           </button>
+
           <button
             type="button"
-            className="sleek-icon-btn"
-            onClick={() => setAudioMuted(!audioMuted)}
-            title={audioMuted ? "Unmute Audio" : "Mute Audio"}
-          >
-            {audioMuted ? "🔇" : "🔊"}
-          </button>
-          <button
-            type="button"
-            className="sleek-icon-btn"
-            onClick={() => setTab(tab === "integrations" ? "chat" : "integrations")}
-            title="Providers, API keys, and tools"
+            className={`sleek-icon-btn ${tab === "settings" ? "active" : ""}`}
+            onClick={() => setTab(tab === "settings" ? "chat" : "settings")}
+            title="Settings & Credentials"
           >
             ⚙
           </button>
@@ -697,172 +747,108 @@ export default function App() {
         {/* Sleek Sidebar */}
         {sidebarVisible && (
           <aside className="sleek-sidebar">
-            <div className="sidebar-mode-nav">
+            <div className="sidebar-header-action">
               <button
                 type="button"
-                className={`sidebar-tab-btn ${sidebarMode === "sessions" ? "active" : ""}`}
-                onClick={() => setSidebarMode("sessions")}
+                className="sidebar-new-chat-btn"
+                onClick={startNewSession}
+                title="Start fresh session (Ctrl+N)"
               >
-                SESSIONS
-              </button>
-              <button
-                type="button"
-                className={`sidebar-tab-btn ${sidebarMode === "bots" ? "active" : ""}`}
-                onClick={() => setSidebarMode("bots")}
-              >
-                BOTS
+                <span className="icon">💬</span>
+                <span className="label">New session</span>
+                <span className="kbd-badge">Ctrl N</span>
               </button>
             </div>
 
             <div className="sidebar-content">
-              {sidebarMode === "sessions" ? (
-                <>
-                  <button
-                    type="button"
-                    className="sidebar-action-row"
-                    onClick={startNewSession}
-                    title="Start fresh session (Ctrl+N)"
-                  >
-                    <div className="sidebar-action-left">
-                      <span className="icon">💬</span>
-                      <span>New session</span>
-                    </div>
-                    <span className="kbd-badge">Ctrl N</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="sidebar-action-row"
-                    onClick={() => setCapabilitiesOpen(true)}
-                    title="Autonomous Agent Capabilities"
-                  >
-                    <div className="sidebar-action-left">
-                      <span className="icon">⚡</span>
-                      <span>Capabilities</span>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={`sidebar-action-row ${tab === "integrations" ? "active" : ""}`}
-                    onClick={() => setTab(tab === "integrations" ? "chat" : "integrations")}
-                    title="Providers, API keys, and tools"
-                  >
-                    <div className="sidebar-action-left">
-                      <span className="icon">🔐</span>
-                      <span>Providers & tools</span>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={`sidebar-action-row ${tab === "models" ? "active" : ""}`}
-                    onClick={() => setTab(tab === "models" ? "chat" : "models")}
-                    title="Model providers and encrypted API keys"
-                  >
-                    <div className="sidebar-action-left">
-                      <span className="icon">🧠</span>
-                      <span>AI models</span>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={`sidebar-action-row ${tab === "workspace" ? "active" : ""}`}
-                    onClick={() => setTab(tab === "workspace" ? "chat" : "workspace")}
-                    title="Workspace permissions and terminal allowlist"
-                  >
-                    <div className="sidebar-action-left">
-                      <span className="icon">📁</span>
-                      <span>Workspace</span>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    className={`sidebar-action-row ${tab === "goals" ? "active" : ""}`}
-                    onClick={() => setTab(tab === "goals" ? "chat" : "goals")}
-                    title="Scheduled Jobs"
-                  >
-                    <div className="sidebar-action-left">
-                      <span className="icon">⏱️</span>
-                      <span>Scheduled jobs</span>
-                    </div>
-                  </button>
-
-                  <div className="sidebar-section-divider">
-                    <span>Recent work</span>
-                    {tasks.length > 0 && <span style={{ color: "#64748b", fontWeight: 500 }}>{tasks.length}</span>}
+              <div className="sidebar-nav-group">
+                <button
+                  type="button"
+                  className={`sidebar-action-row ${tab === "chat" ? "active" : ""}`}
+                  onClick={() => setTab("chat")}
+                  title="Pair Programming & Research Chat"
+                >
+                  <div className="sidebar-action-left">
+                    <span className="icon">💬</span>
+                    <span>Chat</span>
                   </div>
+                </button>
 
-                  {tasks.length > 0 ? tasks.slice(0, 6).map((task) => (
-                    <button
-                      key={task.id}
-                      type="button"
-                      className="sidebar-task-row"
-                      onClick={() => setTab("goals")}
-                      title={`${task.title} · ${task.status}`}
-                    >
-                      <span className={`sidebar-task-dot ${task.status === "completed" ? "done" : task.status === "failed" ? "failed" : ""}`} />
-                      <span className="sidebar-task-copy">
-                        <span className="sidebar-task-title">{task.title || "Untitled task"}</span>
-                        <span className="sidebar-task-status">{task.status.replaceAll("_", " ")}</span>
-                      </span>
-                    </button>
-                  )) : (
-                    <div className="sidebar-empty-label">
-                      <span style={{ fontSize: 13, opacity: 0.6 }}>◌</span>
-                      <span>No runs yet — start with a goal</span>
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    className="sidebar-btn-subtle"
-                    onClick={() => setTab("workspace")}
-                  >
-                    <span>+</span>
-                    <span>New project</span>
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="sidebar-section-divider">
-                    <span>BOTS</span>
-                    <span style={{ cursor: "pointer", fontSize: 12 }}>+</span>
+                <button
+                  type="button"
+                  className={`sidebar-action-row ${tab === "studio" ? "active" : ""}`}
+                  onClick={() => setTab("studio")}
+                  title="Autonomous Studio (DAG, Swarm, Graph, Tests, Git, Benchmarks)"
+                >
+                  <div className="sidebar-action-left">
+                    <span className="icon">⚡</span>
+                    <span>Autonomous Studio</span>
                   </div>
+                </button>
 
-                  <div
-                    className="sidebar-bot-card active"
+                <button
+                  type="button"
+                  className={`sidebar-action-row ${tab === "workspace" ? "active" : ""}`}
+                  onClick={() => setTab("workspace")}
+                  title="Workspace permissions & terminal allowlist"
+                >
+                  <div className="sidebar-action-left">
+                    <span className="icon">📁</span>
+                    <span>Workspace</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  className={`sidebar-action-row ${tab === "settings" ? "active" : ""}`}
+                  onClick={() => setTab("settings")}
+                  title="AI Models & DPAPI Credentials"
+                >
+                  <div className="sidebar-action-left">
+                    <span className="icon">⚙️</span>
+                    <span>Settings</span>
+                  </div>
+                </button>
+              </div>
+
+              <div className="sidebar-section-divider">
+                <span>Recent Tasks</span>
+                {tasks.length > 0 && <span style={{ color: "#64748b", fontWeight: 500 }}>{tasks.length}</span>}
+              </div>
+
+              {tasks.length > 0 ? (
+                tasks.slice(0, 8).map((task) => (
+                  <button
+                    key={task.id}
+                    type="button"
+                    className="sidebar-task-row"
                     onClick={() => {
-                      setTab("chat");
-                      setSidebarMode("bots");
+                      setTab("studio");
+                      setStudioTab("goals");
                     }}
+                    title={`${task.title} · ${task.status}`}
                   >
-                    <div style={{ display: "flex", alignItems: "center" }}>
-                      <div className="bot-avatar-badge">
-                        <div className="eyes">
-                          <span className="eye" />
-                          <span className="eye" />
-                        </div>
-                      </div>
-                      <div className="bot-meta">
-                        <span className="bot-name">Smara</span>
-                        <span className="bot-status">Autonomous Agent</span>
-                      </div>
-                    </div>
-                    <span style={{ fontSize: 10, color: "#64748b" }}>now</span>
-                  </div>
-                </>
+                    <span className={`sidebar-task-dot ${task.status === "completed" ? "done" : task.status === "failed" ? "failed" : ""}`} />
+                    <span className="sidebar-task-copy">
+                      <span className="sidebar-task-title">{task.title || "Untitled task"}</span>
+                      <span className="sidebar-task-status">{task.status.replaceAll("_", " ")}</span>
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="sidebar-empty-label">
+                  <span style={{ fontSize: 13, opacity: 0.6 }}>◌</span>
+                  <span>No background runs yet</span>
+                </div>
               )}
             </div>
 
             <div className="sidebar-footer">
               <div className="sidebar-footer-profile">
                 <span className="status-dot-pulse" />
-                <span>sujal</span>
+                <span>Runtime ready</span>
               </div>
-              <span style={{ fontSize: 10, color: "#64748b" }}>ready</span>
+              <span style={{ fontSize: 10, color: "#64748b" }}>v{appVersion}</span>
             </div>
           </aside>
         )}
@@ -892,217 +878,233 @@ export default function App() {
               transcriptEndRef={transcriptEndRef}
               onPreview={handlePreview}
               onRetry={(prompt) => void send(prompt)}
-              sidebarMode={sidebarMode}
               modelProfiles={modelProfiles}
               selectedProfileId={selectedProfileId}
               setSelectedProfileId={setSelectedProfileId}
               researchMode={researchMode}
               setResearchMode={setResearchMode}
-              audioMuted={audioMuted}
-              setAudioMuted={setAudioMuted}
-              onOpenCapabilities={() => setCapabilitiesOpen(true)}
+              onSelectPrompt={(p) => {
+                setDraft(p);
+              }}
+              appVersion={appVersion}
             />
           )}
 
-          {tab === "goals" && (
-            <GoalsTab onSetNotice={setNotice} />
-          )}
+          {tab === "studio" && (
+            <div className="sub-view-container">
+              <div className="sub-view-header">
+                <div className="sub-view-left">
+                  <button type="button" className="btn-back-nav" onClick={() => setTab("chat")}>
+                    ← Back to Chat
+                  </button>
+                  <h2 className="sub-view-title">Autonomous Studio</h2>
+                </div>
+                <div className="studio-segmented-tabs">
+                  <button
+                    type="button"
+                    className={`studio-tab-pill ${studioTab === "runs" ? "active" : ""}`}
+                    onClick={() => setStudioTab("runs")}
+                  >
+                    ◉ Run Center
+                  </button>
+                  <button
+                    type="button"
+                    className={`studio-tab-pill ${studioTab === "dag" ? "active" : ""}`}
+                    onClick={() => setStudioTab("dag")}
+                  >
+                    ⚡ DAG Flow
+                  </button>
+                  <button
+                    type="button"
+                    className={`studio-tab-pill ${studioTab === "goals" ? "active" : ""}`}
+                    onClick={() => setStudioTab("goals")}
+                  >
+                    ⏱️ Goals
+                  </button>
+                  <button
+                    type="button"
+                    className={`studio-tab-pill ${studioTab === "swarm" ? "active" : ""}`}
+                    onClick={() => setStudioTab("swarm")}
+                  >
+                    🐝 Swarm
+                  </button>
+                  <button
+                    type="button"
+                    className={`studio-tab-pill ${studioTab === "memory" ? "active" : ""}`}
+                    onClick={() => setStudioTab("memory")}
+                  >
+                    🧠 Memory
+                  </button>
+                  <button
+                    type="button"
+                    className={`studio-tab-pill ${studioTab === "skills" ? "active" : ""}`}
+                    onClick={() => setStudioTab("skills")}
+                  >
+                    📚 Skills
+                  </button>
+                  <button
+                    type="button"
+                    className={`studio-tab-pill ${studioTab === "graph" ? "active" : ""}`}
+                    onClick={() => setStudioTab("graph")}
+                  >
+                    🔍 Code Graph
+                  </button>
+                  <button
+                    type="button"
+                    className={`studio-tab-pill ${studioTab === "tests" ? "active" : ""}`}
+                    onClick={() => setStudioTab("tests")}
+                  >
+                    🧪 Tests & Fixer
+                  </button>
+                  <button
+                    type="button"
+                    className={`studio-tab-pill ${studioTab === "git" ? "active" : ""}`}
+                    onClick={() => setStudioTab("git")}
+                  >
+                    🌿 Git
+                  </button>
+                  <button
+                    type="button"
+                    className={`studio-tab-pill ${studioTab === "benchmarks" ? "active" : ""}`}
+                    onClick={() => setStudioTab("benchmarks")}
+                  >
+                    🏆 Benchmarks
+                  </button>
+                  <button
+                    type="button"
+                    className={`studio-tab-pill ${studioTab === "browser" ? "active" : ""}`}
+                    onClick={() => setStudioTab("browser")}
+                  >
+                    🌐 Browser
+                  </button>
+                </div>
+              </div>
 
-          {tab === "dag" && (
-            <DAGFlowTab onSetNotice={setNotice} />
-          )}
-
-          {tab === "swarm" && (
-            <SubagentSwarmTab onSetNotice={setNotice} />
-          )}
-
-          {tab === "memory" && (
-            <TaskMemoryTab onSetNotice={setNotice} />
-          )}
-
-          {tab === "skills" && (
-            <ProgressiveSkillsTab onSetNotice={setNotice} />
-          )}
-
-          {tab === "search" && (
-            <SearchTab onPreview={handlePreview} />
-          )}
-
-          {tab === "browser" && (
-            <BrowserTab />
-          )}
-
-          {tab === "graph" && (
-            <GraphTab />
-          )}
-
-          {tab === "tests" && (
-            <TestsTab />
-          )}
-
-          {tab === "git" && (
-            <GitTab />
-          )}
-
-          {tab === "terminal" && (
-            <TerminalTab />
-          )}
-
-          {tab === "models" && (
-            <ModelsTab
-              modelProfiles={modelProfiles}
-              credentials={credentials}
-              activeModel={connection.model_profile}
-              onSelectModel={async (modelId) => {
-                await desktop.saveSettings({
-                  ...connection,
-                  model_profile: modelId,
-                  approval_mode: "auto",
-                  auto_approve_safe: true,
-                });
-                await refreshAll();
-                setNotice(`Active model updated to ${modelId}.`);
-              }}
-              onSaved={async (profiles) => {
-                setModelProfiles(profiles);
-                await refreshAll();
-                setNotice("Model profile saved successfully.");
-              }}
-              onDeleted={async (profiles) => {
-                setModelProfiles(profiles);
-                await refreshAll();
-                setNotice("Model profile removed.");
-              }}
-            />
-          )}
-
-          {tab === "integrations" && (
-            <IntegrationsTab
-              credentials={credentials}
-              connectors={connectors}
-              health={integrationHealth}
-              onSaveKey={async (name, provider, secret) => {
-                const res = await desktop.saveCredential(name, provider, secret);
-                setCredentials(res);
-                await refreshAll();
-                setNotice(`Credential ${name} saved securely in Windows DPAPI.`);
-              }}
-              onDeleteKey={async (name) => {
-                const res = await desktop.deleteCredential(name);
-                setCredentials(res);
-                await refreshAll();
-                setNotice(`Credential ${name} removed.`);
-              }}
-            />
+              <div className="sub-view-body">
+                {studioTab === "runs" && <RunCenterTab onSetNotice={setNotice} onRetry={(prompt) => { setTab("chat"); void send(prompt); }} />}
+                {studioTab === "dag" && <DAGFlowTab onSetNotice={setNotice} />}
+                {studioTab === "goals" && <GoalsTab onSetNotice={setNotice} />}
+                {studioTab === "swarm" && <SubagentSwarmTab onSetNotice={setNotice} />}
+                {studioTab === "memory" && <TaskMemoryTab onSetNotice={setNotice} />}
+                {studioTab === "skills" && <ProgressiveSkillsTab onSetNotice={setNotice} />}
+                {studioTab === "graph" && <GraphTab />}
+                {studioTab === "tests" && <TestsTab />}
+                {studioTab === "git" && <GitTab />}
+                {studioTab === "benchmarks" && <BenchmarksTab onSetNotice={setNotice} />}
+                {studioTab === "browser" && <BrowserTab />}
+              </div>
+            </div>
           )}
 
           {tab === "workspace" && (
-            <WorkspaceTab
-              connection={connection}
-              onSaved={async (roots, terminal) => {
-                const next = await desktop.saveSettings({
-                  ...connection,
-                  allowed_roots: roots,
-                  terminal_allowlist: terminal,
-                  approval_mode: "auto",
-                  auto_approve_safe: true,
-                });
-                setConnection(next);
-                setNotice("Workspace permissions saved.");
-              }}
-            />
+            <div className="sub-view-container">
+              <div className="sub-view-header">
+                <div className="sub-view-left">
+                  <button type="button" className="btn-back-nav" onClick={() => setTab("chat")}>
+                    ← Back to Chat
+                  </button>
+                  <h2 className="sub-view-title">Workspace Configuration</h2>
+                </div>
+              </div>
+              <div className="sub-view-body">
+                <WorkspaceTab
+                  connection={connection}
+                  onSaved={async (roots, terminal) => {
+                    const next = await desktop.saveSettings({
+                      ...connection,
+                      allowed_roots: roots,
+                      terminal_allowlist: terminal,
+                      approval_mode: "auto",
+                      auto_approve_safe: true,
+                    });
+                    setConnection(next);
+                    setNotice("Workspace permissions saved.");
+                  }}
+                />
+              </div>
+            </div>
           )}
 
-          {tab === "cloud" && (
-            <CloudTab
-              connection={connection}
-              onRefresh={() => void refreshAll()}
-              onSetNotice={setNotice}
-            />
-          )}
+          {tab === "settings" && (
+            <div className="sub-view-container">
+              <div className="sub-view-header">
+                <div className="sub-view-left">
+                  <button type="button" className="btn-back-nav" onClick={() => setTab("chat")}>
+                    ← Back to Chat
+                  </button>
+                  <h2 className="sub-view-title">Settings & Credentials</h2>
+                </div>
+                <div className="studio-segmented-tabs">
+                  <button
+                    type="button"
+                    className={`studio-tab-pill ${settingsTab === "models" ? "active" : ""}`}
+                    onClick={() => setSettingsTab("models")}
+                  >
+                    🧠 AI Models
+                  </button>
+                  <button
+                    type="button"
+                    className={`studio-tab-pill ${settingsTab === "credentials" ? "active" : ""}`}
+                    onClick={() => setSettingsTab("credentials")}
+                  >
+                    🔐 Providers & DPAPI
+                  </button>
+                </div>
+              </div>
 
-          {tab === "benchmarks" && (
-            <BenchmarksTab onSetNotice={setNotice} />
+              <div className="sub-view-body">
+                {settingsTab === "models" && (
+                  <ModelsTab
+                    modelProfiles={modelProfiles}
+                    credentials={credentials}
+                    activeModel={connection.model_profile}
+                    onSelectModel={async (modelId) => {
+                      await desktop.saveSettings({
+                        ...connection,
+                        model_profile: modelId,
+                        approval_mode: "auto",
+                        auto_approve_safe: true,
+                      });
+                      await refreshAll();
+                      setNotice(`Active model updated to ${modelId}.`);
+                    }}
+                    onSaved={async (profiles) => {
+                      setModelProfiles(profiles);
+                      await refreshAll();
+                      setNotice("Model profile saved successfully.");
+                    }}
+                    onDeleted={async (profiles) => {
+                      setModelProfiles(profiles);
+                      await refreshAll();
+                      setNotice("Model profile removed.");
+                    }}
+                  />
+                )}
+
+                {settingsTab === "credentials" && (
+                  <IntegrationsTab
+                    credentials={credentials}
+                    connectors={connectors}
+                    health={integrationHealth}
+                    onSaveKey={async (name, provider, secret) => {
+                      const res = await desktop.saveCredential(name, provider, secret);
+                      setCredentials(res);
+                      await refreshAll();
+                      setNotice(`Credential ${name} saved securely in Windows DPAPI.`);
+                    }}
+                    onDeleteKey={async (name) => {
+                      const res = await desktop.deleteCredential(name);
+                      setCredentials(res);
+                      await refreshAll();
+                      setNotice(`Credential ${name} removed.`);
+                    }}
+                  />
+                )}
+              </div>
+            </div>
           )}
         </main>
       </div>
-
-      {/* Capabilities Modal / Drawer */}
-      {capabilitiesOpen && (
-        <div className="capabilities-modal-overlay" onClick={() => setCapabilitiesOpen(false)}>
-          <div className="capabilities-modal-window" onClick={(e) => e.stopPropagation()}>
-            <div className="capabilities-header">
-              <div className="capabilities-tabs">
-                <button
-                  type="button"
-                  className={`cap-tab-btn ${capTab === "dag" ? "active" : ""}`}
-                  onClick={() => setCapTab("dag")}
-                >
-                  <span>⚡</span>
-                  <span>Interactive DAG Flow</span>
-                </button>
-                <button
-                  type="button"
-                  className={`cap-tab-btn ${capTab === "memory" ? "active" : ""}`}
-                  onClick={() => setCapTab("memory")}
-                >
-                  <span>🧠</span>
-                  <span>Task Memory</span>
-                </button>
-                <button
-                  type="button"
-                  className={`cap-tab-btn ${capTab === "skills" ? "active" : ""}`}
-                  onClick={() => setCapTab("skills")}
-                >
-                  <span>📚</span>
-                  <span>Progressive Skills</span>
-                </button>
-                <button
-                  type="button"
-                  className={`cap-tab-btn ${capTab === "swarm" ? "active" : ""}`}
-                  onClick={() => setCapTab("swarm")}
-                >
-                  <span>🐝</span>
-                  <span>Subagent Swarm</span>
-                </button>
-                <button
-                  type="button"
-                  className={`cap-tab-btn ${capTab === "benchmarks" ? "active" : ""}`}
-                  onClick={() => setCapTab("benchmarks")}
-                >
-                  <span>🏆</span>
-                  <span>Benchmarks</span>
-                </button>
-                <button
-                  type="button"
-                  className={`cap-tab-btn ${capTab === "git" ? "active" : ""}`}
-                  onClick={() => setCapTab("git")}
-                >
-                  <span>🌿</span>
-                  <span>Git Workspace</span>
-                </button>
-              </div>
-              <button
-                type="button"
-                className="btn-close-cap"
-                onClick={() => setCapabilitiesOpen(false)}
-                title="Close (Esc)"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="capabilities-modal-body">
-              {capTab === "dag" && <DAGFlowTab onSetNotice={setNotice} />}
-              {capTab === "memory" && <TaskMemoryTab onSetNotice={setNotice} />}
-              {capTab === "skills" && <ProgressiveSkillsTab onSetNotice={setNotice} />}
-              {capTab === "swarm" && <SubagentSwarmTab onSetNotice={setNotice} />}
-              {capTab === "benchmarks" && <BenchmarksTab onSetNotice={setNotice} />}
-              {capTab === "git" && <GitTab />}
-            </div>
-          </div>
-        </div>
-      )}
 
       {previewFile && (
         <DocumentPreviewModal
@@ -1273,17 +1275,15 @@ function ChatTab({
   transcriptEndRef,
   onPreview,
   onRetry,
-  sidebarMode,
   modelProfiles,
   selectedProfileId,
   setSelectedProfileId,
   researchMode,
   setResearchMode,
-  audioMuted,
-  setAudioMuted,
-  onOpenCapabilities,
   activityOpen,
   onToggleActivity,
+  onSelectPrompt,
+  appVersion,
 }: {
   messages: ChatMessage[];
   draft: string;
@@ -1299,157 +1299,154 @@ function ChatTab({
   transcriptEndRef: RefObject<HTMLDivElement>;
   onPreview: (path: string) => void;
   onRetry: (prompt: string) => void;
-  sidebarMode: "sessions" | "bots";
   modelProfiles: LocalModelProfile[];
   selectedProfileId: string;
   setSelectedProfileId: (val: string) => void;
   researchMode: ResearchMode;
   setResearchMode: (val: ResearchMode) => void;
-  audioMuted: boolean;
-  setAudioMuted: (val: boolean) => void;
-  onOpenCapabilities: () => void;
+  onSelectPrompt?: (val: string) => void;
+  appVersion: string;
 }) {
-  const [appVersion, setAppVersion] = useState("0.1.3");
-
-  useEffect(() => {
-    if (!isNativeDesktop) return;
-    void getVersion().then(setAppVersion).catch(() => {
-      // Keep the source release fallback when running in a non-standard
-      // WebView that does not expose the Tauri app metadata command.
-    });
-  }, []);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streaming, transcriptEndRef]);
 
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      const scrollH = textareaRef.current.scrollHeight;
+      textareaRef.current.style.height = `${Math.min(Math.max(scrollH, 24), 180)}px`;
+    }
+  }, [draft]);
+
   return (
     <div className="sleek-main-stage">
       {messages.length === 0 ? (
         <div className="sleek-hero-container">
-          {sidebarMode === "bots" ? (
-            <>
-              <div className="hero-bot-avatar">
-                <div className="eyes">
-                  <span className="eye" />
-                  <span className="eye" />
-                </div>
-              </div>
-              <h1 className="wordmark-title">SMARA</h1>
-              <p className="wordmark-subtitle">Say something to get started.</p>
-            </>
-          ) : (
-            <>
-              <h1 className="wordmark-title">SMARA AGENT</h1>
-              <p className="wordmark-subtitle">
-                Search the repo, edit files, run tests, open PRs. Tell me the goal and I'll handle the mechanical parts.
-              </p>
-            </>
-          )}
+          <div className="hero-brand-mark">
+            <img src={smaraLogo} alt="Smara" style={{ width: 44, height: 44 }} />
+          </div>
+          <h1 className="wordmark-title">SMARA</h1>
+          <p className="wordmark-subtitle">
+            Autonomous AI Pair Programmer & Research Engine. Describe your goal, inspect AST symbols, run test suites, or conduct deep web research.
+          </p>
+
+          <div className="hero-starter-grid">
+            {starterPrompts.map((item, idx) => (
+              <button
+                key={idx}
+                type="button"
+                className="hero-starter-card"
+                onClick={() => {
+                  if (onSelectPrompt) onSelectPrompt(item.prompt);
+                  else setDraft(item.prompt);
+                  if (textareaRef.current) textareaRef.current.focus();
+                }}
+              >
+                <div className="hero-starter-title">{item.title}</div>
+                <div className="hero-starter-desc">{item.desc}</div>
+              </button>
+            ))}
+          </div>
         </div>
       ) : (
         <div className="chat-stage-body">
-        <div className="transcript-feed" style={{ paddingBottom: 120 }}>
-          {messages.map((m) => {
-            const detected = m.role === "assistant" ? detectFiles(m.text) : [];
-            const retryPrompt = m.sourcePrompt;
-            return (
-              <div key={m.id} className={`message-bubble-row ${m.role === "user" ? "user-row" : "agent-row"}`}>
-                <div className="msg-avatar">{m.role === "user" ? "👤" : "⚡"}</div>
+          <div className="transcript-feed" style={{ paddingBottom: 120 }}>
+            {messages.map((m) => {
+              const detected = m.role === "assistant" ? detectFiles(m.text) : [];
+              const retryPrompt = m.sourcePrompt;
+              return (
+                <div key={m.id} className={`message-bubble-row ${m.role === "user" ? "user-row" : "agent-row"}`}>
+                  <div className="msg-avatar">{m.role === "user" ? "👤" : "⚡"}</div>
                   <div className={`msg-card ${m.failed ? "msg-failed" : ""} ${m.needsInput ? "msg-needs-input" : ""}`}>
-                  <div className="msg-header">
-                    <span className="msg-author">{m.role === "user" ? "You" : "Smara Agent"}</span>
-                  </div>
-                  <div className="msg-text">
-                    {m.role === "assistant" ? renderMarkdownContent(m.text) : m.text}
-                  </div>
-                  {detected.length > 0 && (
-                    <div className="file-action-cards-container">
-                      {detected.map((f, i) => (
-                        <FileActionCard key={i} filePath={f} onPreview={onPreview} />
-                      ))}
+                    <div className="msg-header">
+                      <span className="msg-author">{m.role === "user" ? "You" : "Smara Agent"}</span>
                     </div>
-                  )}
-                  {m.pending && (
-                    <div className="streaming-dots">
-                      <span /><span /><span />
+                    <div className="msg-text">
+                      {m.role === "assistant" ? renderMarkdownContent(m.text) : m.text}
                     </div>
-                  )}
-                  {m.error && <div className="msg-err-box">{m.error}</div>}
-                  {m.failed && retryPrompt && (
-                    <button type="button" className="message-retry-btn" onClick={() => onRetry(retryPrompt)} disabled={streaming}>
-                      ↻ Retry this turn
-                    </button>
-                  )}
+                    {detected.length > 0 && (
+                      <div className="file-action-cards-container">
+                        {detected.map((f, i) => (
+                          <FileActionCard key={i} filePath={f} onPreview={onPreview} />
+                        ))}
+                      </div>
+                    )}
+                    {m.pending && (
+                      <div className="streaming-dots">
+                        <span /><span /><span />
+                      </div>
+                    )}
+                    {m.error && <div className="msg-err-box">{m.error}</div>}
+                    {m.failed && retryPrompt && (
+                      <button type="button" className="message-retry-btn" onClick={() => onRetry(retryPrompt)} disabled={streaming}>
+                        ↻ Retry this turn
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {streaming && (
+              <div className="active-execution-pill">
+                <span className="exec-spinner">⚡</span>
+                <div className="exec-content">
+                  <div className="exec-title">{currentExecution || "Autonomous agent analyzing task..."}</div>
+                  {currentThought && <div className="exec-thought">🧠 {currentThought}</div>}
                 </div>
               </div>
-            );
-          })}
-          {streaming && (
-            <div className="active-execution-pill">
-              <span className="exec-spinner">⚡</span>
-              <div className="exec-content">
-                <div className="exec-title">{currentExecution || "Autonomous agent analyzing task..."}</div>
-                {currentThought && <div className="exec-thought">🧠 {currentThought}</div>}
-              </div>
-            </div>
-          )}
-          <div ref={transcriptEndRef} />
-        </div>
-        {activityOpen && (
-          <aside className="activity-rail" aria-label="Live activity">
-            <div className="activity-rail-header">
-              <div>
-                <span className="activity-eyebrow">RUN STATUS</span>
-                <strong>{streaming ? "Working" : "Recent activity"}</strong>
-              </div>
-              <button type="button" className="activity-close-btn" onClick={onToggleActivity} aria-label="Hide live activity">×</button>
-            </div>
-            {activity.length === 0 ? (
-              <div className="activity-empty">Tool calls and evidence will appear here while Smara works.</div>
-            ) : (
-              <div className="activity-list">
-                {activity.map((item) => (
-                  <div key={item.id} className={`activity-item activity-${item.tone}`}>
-                    <span className="activity-dot" />
-                    <div className="activity-copy">
-                      <strong>{item.label}</strong>
-                      {item.detail && <span>{item.detail}</span>}
-                    </div>
-                  </div>
-                ))}
-              </div>
             )}
-          </aside>
-        )}
+            <div ref={transcriptEndRef} />
+          </div>
+          {activityOpen && (
+            <aside className="activity-rail" aria-label="Live activity">
+              <div className="activity-rail-header">
+                <div>
+                  <span className="activity-eyebrow">RUN STATUS</span>
+                  <strong>{streaming ? "Working" : "Recent activity"}</strong>
+                </div>
+                <button type="button" className="activity-close-btn" onClick={onToggleActivity} aria-label="Hide live activity">×</button>
+              </div>
+              {activity.length === 0 ? (
+                <div className="activity-empty">Tool calls and evidence will appear here while Smara works.</div>
+              ) : (
+                <div className="activity-list">
+                  {activity.map((item) => (
+                    <div key={item.id} className={`activity-item activity-${item.tone}`}>
+                      <span className="activity-dot" />
+                      <div className="activity-copy">
+                        <strong>{item.label}</strong>
+                        {item.detail && <span>{item.detail}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </aside>
+          )}
         </div>
       )}
 
       {/* Floating Bottom Composer Dock */}
       <div className="floating-composer-container">
         <div className="floating-composer-dock">
-          <button
-            type="button"
-            className="btn-goal-context"
-            onClick={onOpenCapabilities}
-            title="Open Autonomous Capabilities & DAG Engine"
-          >
-            <span>+</span>
-            <span>{messages.length === 0 ? "Start with a goal" : "Add more context"}</span>
-          </button>
-
-          <input
-            type="text"
-            className="composer-dock-input"
+          <textarea
+            ref={textareaRef}
+            className="composer-dock-textarea"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                onSend();
+                if (!streaming && draft.trim()) {
+                  onSend();
+                }
               }
             }}
-            placeholder={messages.length === 0 ? "Ask Smara anything, describe a task, or start with a goal..." : "Send a message or follow-up..."}
+            placeholder={messages.length === 0 ? "Ask Smara anything, paste code, or describe a goal... (Shift+Enter for newline)" : "Send a message or follow-up... (Shift+Enter for newline)"}
+            rows={1}
             disabled={streaming}
           />
 
@@ -1458,57 +1455,38 @@ function ChatTab({
               <span className="composer-control-label">Lane</span>
               <select className="composer-dock-select" value={researchMode} onChange={(event) => setResearchMode(event.target.value as ResearchMode)} disabled={streaming}>
                 <option value="auto">Auto</option>
-                <option value="quick">Quick research</option>
-                <option value="deep">Deep research</option>
+                <option value="quick">Quick</option>
+                <option value="deep">Deep</option>
               </select>
             </label>
 
             <label className="composer-control" title="Choose a configured local model profile">
               <span className="composer-control-label">Model</span>
               <select className="composer-dock-select model-select" value={selectedProfileId} onChange={(event) => setSelectedProfileId(event.target.value)} disabled={streaming}>
-                <option value="auto">Automatic</option>
+                <option value="auto">Auto</option>
                 {modelProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.label || profile.model}</option>)}
               </select>
             </label>
 
             <button
               type="button"
-              className="dock-icon-action"
-              title="Voice Input"
-              onClick={() => setDraft(draft ? `${draft} [voice]` : "Explain the codebase structure")}
-            >
-              🎙️
-            </button>
-
-            <button
-              type="button"
-              className="dock-icon-action"
-              onClick={() => setAudioMuted(!audioMuted)}
-              title={audioMuted ? "Unmute Audio" : "Mute Audio"}
-            >
-              {audioMuted ? "🔇" : "🔊"}
-            </button>
-
-            <button
-              type="button"
-              className="btn-waveform-submit"
+              className={`btn-waveform-submit ${streaming ? "btn-stop-state" : ""}`}
               onClick={streaming ? onCancel : onSend}
               disabled={!draft.trim() && !streaming}
-              title={streaming ? "Cancel current run" : "Send Prompt"}
+              title={streaming ? "Stop generating (Cancel)" : "Send prompt (Enter)"}
             >
-              {streaming ? "■" : "〰"}
+              {streaming ? "■" : "↑"}
             </button>
           </div>
         </div>
 
         <div className="floating-composer-footer">
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ cursor: "pointer" }} onClick={() => setDraft("")}>⌘</span>
-            <span>sujal</span>
+            <span>Enter to send · Shift+Enter for newline</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ color: "#10b981" }}>● inference ready</span>
-            <span># v{appVersion}</span>
+            <span>v{appVersion}</span>
           </div>
         </div>
       </div>
@@ -3288,6 +3266,114 @@ function TerminalTab() {
             <span>Running subprocess command in background threadpool...</span>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// -------------------------------------------------------------
+// UNIFIED RUN CENTER
+// -------------------------------------------------------------
+function RunCenterTab({ onSetNotice, onRetry }: { onSetNotice: (msg: string) => void; onRetry: (prompt: string) => void }) {
+  const [runs, setRuns] = useState<RuntimeSessionRecord[]>([]);
+  const [selected, setSelected] = useState<RuntimeSessionSnapshot | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const items = await desktop.listRuntimeSessions(100);
+      setRuns(items);
+      if (selected?.session?.session_id) {
+        const current = await desktop.runtimeSession(String(selected.session.session_id), 0);
+        setSelected(current);
+      }
+    } catch (error) {
+      onSetNotice(`Could not load runtime sessions: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [onSetNotice, selected?.session?.session_id]);
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const inspect = async (sessionId: string) => {
+    try {
+      setSelected(await desktop.runtimeSession(sessionId, 0));
+    } catch (error) {
+      onSetNotice(`Could not inspect run: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const cancelRun = async () => {
+    const sessionId = selected?.session?.session_id;
+    if (!sessionId) return;
+    try {
+      const snapshot = await desktop.cancelRuntimeSession(String(sessionId), "cancelled from Run Center");
+      setSelected(snapshot);
+      setRuns(await desktop.listRuntimeSessions(100));
+      onSetNotice(`Run ${String(sessionId)} cancelled.`);
+    } catch (error) {
+      onSetNotice(`Could not cancel run: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const detail = selected?.session as Partial<RuntimeSessionRecord> | undefined;
+  const canCancel = detail && ["created", "running", "waiting_approval"].includes(detail.status || "");
+  const canRetry = Boolean(detail?.request) && !["created", "running"].includes(detail?.status || "");
+
+  return (
+    <div className="tab-pane-container">
+      <div className="pane-header">
+        <div>
+          <h2>◉ Unified Run Center</h2>
+          <p>One durable view of Chat, CLI, research, and autonomous runs from the canonical runtime-session ledger.</p>
+        </div>
+        <button type="button" className="btn-refresh-git" onClick={() => void refresh()} disabled={loading}>
+          {loading ? "Refreshing..." : "↻ Refresh runs"}
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 0.8fr) minmax(360px, 1.2fr)", gap: 16 }}>
+        <section className="git-timeline-section" aria-label="Runtime sessions">
+          <div className="panel-sub-header"><h4>Recent runs ({runs.length})</h4></div>
+          <div className="commit-timeline-list">
+            {runs.length === 0 ? <div className="empty-commits">No durable runtime sessions recorded yet.</div> : runs.map((run) => (
+              <button key={run.session_id} type="button" className="timeline-commit-card" onClick={() => void inspect(run.session_id)} style={{ width: "100%", textAlign: "left", cursor: "pointer" }}>
+                <span className="commit-hash-pill">{run.status.replaceAll("_", " ")}</span>
+                <span className="commit-meta-block">
+                  <span className="commit-msg-text">{run.request || run.session_id}</span>
+                  <span className="commit-author-time">
+                    {run.research_mode || "auto"} · {run.model_profile || "default model"} · {new Date(run.updated_at * 1000).toLocaleString()}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="git-timeline-section" aria-label="Selected runtime details">
+          <div className="panel-sub-header">
+            <h4>{detail ? `Run ${detail.session_id}` : "Select a run to inspect"}</h4>
+            {detail && <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" className="btn-refresh-git" disabled={!canRetry} onClick={() => onRetry(detail.request || "")}>Retry in Chat</button>
+              <button type="button" className="btn-refresh-git" disabled={!canCancel} onClick={() => void cancelRun()}>Cancel</button>
+            </div>}
+          </div>
+          {detail ? (
+            <div style={{ padding: 16, display: "grid", gap: 12 }}>
+              <div><strong>Status:</strong> {detail.status} · <strong>Revision:</strong> {detail.revision}</div>
+              <div><strong>Workspace:</strong> <code>{detail.workspace_id}</code></div>
+              <div><strong>Lane:</strong> {detail.research_mode || "auto"} · <strong>Tools:</strong> {detail.tool_profile || "default"}</div>
+              <div><strong>Request:</strong><div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{detail.request || "No request recorded."}</div></div>
+              {Boolean(detail.unresolved?.length) && <div><strong>Unresolved work:</strong><ul>{detail.unresolved?.map((item) => <li key={item}>{item}</li>)}</ul></div>}
+              <details open><summary>Result</summary><pre style={{ whiteSpace: "pre-wrap", overflow: "auto" }}>{JSON.stringify(detail.result || {}, null, 2)}</pre></details>
+              <details><summary>Event timeline ({selected?.events.length || 0})</summary><pre style={{ whiteSpace: "pre-wrap", overflow: "auto" }}>{JSON.stringify(selected?.events || [], null, 2)}</pre></details>
+            </div>
+          ) : <div className="empty-commits">Choose a run to see its result, unresolved work, controls, and event timeline.</div>}
+        </section>
       </div>
     </div>
   );
