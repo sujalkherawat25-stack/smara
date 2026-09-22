@@ -851,6 +851,17 @@ class CanonicalResearchSession:
                 question_terms = terms(node.question)
                 if not question_terms:
                     continue
+                freshness_question = bool(
+                    re.search(r"\b(?:latest|newest|most\s+recent|currently?\s+stable)\b", node.question, re.I)
+                )
+                if freshness_question:
+                    # Lexical support can prove that a historical release was
+                    # once described as "latest", but it cannot prove that it
+                    # is still latest relative to every other fetched source.
+                    # Leave time-sensitive comparisons to the provider so it
+                    # must compare the evidence set instead of auto-validating
+                    # the first strongly matching passage.
+                    continue
                 purpose_question = bool(re.search(r"\b(?:what|which)\b.+\bused\s+for\b", node.question, re.I))
                 license_name_question = bool(re.search(r"\bname\b.+\blicense\b", node.question, re.I))
                 license_fact_question = bool(re.search(r"\blicense\b", node.question, re.I))

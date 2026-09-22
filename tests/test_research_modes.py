@@ -195,6 +195,31 @@ def test_deep_controller_can_ground_ready_nodes_from_exact_fetched_sentences(tmp
     assert not result["remaining"]
 
 
+def test_auto_ground_leaves_latest_questions_for_cross_source_comparison(tmp_path):
+    engine = SessionEngine(tmp_path, "freshness-ground", budget=Budget(60, 20, 10, 100_000, 1), constrained=False)
+    engine.set("research_policy", QUICK_POLICY.to_dict())
+    session = CanonicalResearchSession(session_engine=engine)
+    session.plan(
+        "latest Python",
+        [{"id": "release", "question": "What is the latest stable Python release?"}],
+    )
+    passages = (
+        ("https://python.test/3.12", "Python 3.12.0 is the newest stable release of Python."),
+        ("https://python.test/3.14", "Python 3.14.0 is a stable release of Python."),
+    )
+    for url, text in passages:
+        session.index.add(
+            kind="fetched_passage", url=url, content=text.encode(),
+            extracted_content=text.encode(), text=text, start=0, end=len(text),
+        )
+
+    result = session.auto_resolve_from_evidence()
+
+    assert result["status"] == "no_match"
+    assert result["resolved"] == []
+    assert result["remaining"] == ["release"]
+
+
 def test_deep_source_floor_failure_stops_without_provider_retry_loop(tmp_path, monkeypatch):
     """An unreachable Deep source floor must fail closed in one bounded turn."""
     engine = SessionEngine(tmp_path, "deep-floor-stop", budget=Budget(60, 40, 10, 100_000, 1), constrained=False)

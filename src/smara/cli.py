@@ -1317,6 +1317,23 @@ def main(argv: list[str] | None = None) -> int:
         payload=diagnose(workspace)
         print(json.dumps(payload, indent=2)); return 0 if payload["ok"] else 1
 
+    if cmd == "tools":
+        from .autonomous_agent import DISABLED_TOOLS, TOOL_SCHEMAS
+
+        tools = []
+        for schema in TOOL_SCHEMAS:
+            function = schema.get("function", {})
+            name = str(function.get("name") or "").strip()
+            if not name or name in DISABLED_TOOLS:
+                continue
+            tools.append({
+                "name": name,
+                "description": str(function.get("description") or "").strip(),
+            })
+        tools.sort(key=lambda item: item["name"])
+        print(json.dumps({"count": len(tools), "tools": tools}, indent=2))
+        return 0
+
     if cmd in {"resume", "cancel", "inspect"}:
         from .harness import SessionEngine
         session = SessionEngine(workspace, parsed_args.session_id)

@@ -1,6 +1,15 @@
 from smara.cli import build_parser, main
 
 
+def test_cli_tools_lists_canonical_tools_without_entering_repl(tmp_path, capsys):
+    code = main(["--plain", "--workspace", str(tmp_path), "tools"])
+
+    assert code == 0
+    payload = __import__("json").loads(capsys.readouterr().out)
+    assert payload["count"] == len(payload["tools"])
+    assert {item["name"] for item in payload["tools"]} >= {"file_read", "research_search", "terminal"}
+
+
 def test_cli_accepts_live_web_profile_aliases():
     parser = build_parser()
     for alias in ("research-web", "research_web", "live-web"):
