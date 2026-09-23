@@ -25,7 +25,7 @@ reports/osworld_readiness.json
 dist/
 release/keys/*.private
 artifacts/
-.pytest_tmp/
+.pytest_tmp*/
 pytest-tmp/
 .pytest-*/
 scratch/
