@@ -1285,7 +1285,7 @@ def main(argv: list[str] | None = None) -> int:
             from .app_adapter import application_envelope
             payload={**canonical,**application_envelope(session,canonical,runtime_store=runtime_store)}
             return canonical,payload
-        agent=SmaraAutonomousAgent(api_key=api_key,base_url=model_config["base_url"],model=model_config["model"],auth_header=model_config.get("auth_header","authorization"),workspace_root=active_workspace,profile=tool_profile,session_engine=session,research_mode=research_mode)
+        agent=SmaraAutonomousAgent(api_key=api_key,base_url=model_config["base_url"],model=model_config["model"],auth_header=model_config.get("auth_header","authorization"),workspace_root=active_workspace,profile=tool_profile,session_engine=session,research_mode=research_mode,accept_plain_answer=ephemeral_session)
         try:
             agent_result=agent.run(prompt,max_iterations=None)
         except Exception as exc:
@@ -1332,6 +1332,20 @@ def main(argv: list[str] | None = None) -> int:
             })
         tools.sort(key=lambda item: item["name"])
         print(json.dumps({"count": len(tools), "tools": tools}, indent=2))
+        return 0
+
+    if cmd == "models":
+        profiles = [
+            {
+                "id": str(profile.get("id") or ""),
+                "label": str(profile.get("label") or ""),
+                "model": str(profile.get("model") or ""),
+                "active": profile.get("id") == engine.active_id,
+                "credential_configured": bool(_resolve_profile_key(profile, engine.credentials)),
+            }
+            for profile in engine.profiles
+        ]
+        print(json.dumps({"active_model": engine.active_id, "profiles": profiles}, indent=2))
         return 0
 
     if cmd in {"resume", "cancel", "inspect"}:

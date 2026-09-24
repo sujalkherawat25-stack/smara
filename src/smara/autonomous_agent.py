@@ -1263,6 +1263,7 @@ class SmaraAutonomousAgent:
         on_progress: Optional[Any] = None,
         session_engine: Optional[Any] = None,
         research_mode: str = "auto",
+        accept_plain_answer: bool = False,
     ):
         self.api_key = api_key or _get_api_key_from_vault_or_env()
         self.base_url = base_url
@@ -1278,6 +1279,7 @@ class SmaraAutonomousAgent:
         if str(research_mode).strip().lower() not in {"auto", "quick", "deep"}:
             raise ValueError(f"Unknown research mode '{research_mode}'.")
         self.research_mode = str(research_mode).strip().lower()
+        self.accept_plain_answer = accept_plain_answer
         self._active_research_policy = None
         self.task_planner = SmaraTaskPlanner()
         self.memory_store = get_default_memory_store()
@@ -2074,6 +2076,19 @@ class SmaraAutonomousAgent:
         } if self.toolset == "research_web" else set()
         research_recovery_tools = {"research_resolve", "research_validate", "research_report"}
 
+        def _validated_source_urls() -> list[str]:
+            """Cite passages that passed claim validation, not every fetched lead."""
+            urls: list[str] = []
+            score = self._research.validation.get("score") or {}
+            for claim in score.get("claims", ()):
+                for citation in claim.get("citations", ()):
+                    if not citation.get("supported"):
+                        continue
+                    record = self._research.index.records.get(str(citation.get("evidence_id") or ""))
+                    if record and record.canonical_url not in urls:
+                        urls.append(record.canonical_url)
+            return urls
+
         def _synthesized_validated_research_answer() -> str:
             """Build a citation-safe answer from immutable validated state.
 
@@ -2088,7 +2103,7 @@ class SmaraAutonomousAgent:
                 for item in self._research.validation.get("claims", ())
                 if str(item.get("claim") or "").strip()
             ]
-            sources = self._research.fetched_source_urls()
+            sources = _validated_source_urls()
             outcome = self._research.primary_outcome()
             if not claims or not sources or not outcome:
                 return ""
@@ -2100,12 +2115,14 @@ class SmaraAutonomousAgent:
             """Keep final quick-lane citations inside the fetched evidence set."""
             if not self._active_research_policy or self._active_research_policy.mode != "quick":
                 return answer
-            sources = self._research.fetched_source_urls()
+            sources = _validated_source_urls() if self._research.validation.get("passed") else self._research.fetched_source_urls()
             if not sources:
                 return answer
             # Remove provider-emitted URLs (which may be search-only or
             # hallucinated) and append the canonical URLs recorded by fetch.
             cleaned = re.sub(r"https?://[^\s)\]>]+", "", str(answer or ""))
+            cleaned = re.sub(r"(?im)^\s*Sources:\s*$", "", cleaned)
+            cleaned = re.sub(r"(?m)^\s*-\s*$", "", cleaned)
             cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
             cleaned += "\n\nSources:\n" + "\n".join(f"- {url}" for url in sources)
             return cleaned
@@ -3223,6 +3240,19 @@ class SmaraAutonomousAgent:
                         content = (content + "\n" if content.strip() else "") + f"FINAL ANSWER: {cand}"
                 elif not content.strip() and not _is_instruction_placeholder(reasoning):
                     content = reasoning
+
+            # Direct conversation is an answer surface: a provider's final
+            # message need not carry the autonomous loop's sentinel. Keep the
+            # normal calculation and research verification gates below.
+            if (
+                not has_final_answer
+                and self.accept_plain_answer
+                and not (self.session_engine is not None and self.session_engine.get("research_required", False))
+                and content.strip()
+                and not _is_instruction_placeholder(content.strip())
+            ):
+                content = f"FINAL ANSWER: {content.strip()}"
+                has_final_answer = True
 
             # Verification Gate: verify code modifications and calculations before confirming answer
             if has_final_answer:

@@ -10,6 +10,37 @@ def test_cli_tools_lists_canonical_tools_without_entering_repl(tmp_path, capsys)
     assert {item["name"] for item in payload["tools"]} >= {"file_read", "research_search", "terminal"}
 
 
+def test_cli_models_lists_profiles_without_credential_values(tmp_path, monkeypatch, capsys):
+    import json
+
+    monkeypatch.setenv("SMARA_DESKTOP_STATE", str(tmp_path / "desktop.json"))
+    code = main(["--plain", "--workspace", str(tmp_path), "models"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["profiles"]
+    assert any(profile["active"] for profile in payload["profiles"])
+    assert all("api_key" not in profile for profile in payload["profiles"])
+
+
+def test_cli_ask_accepts_one_plain_final_model_reply(tmp_path, monkeypatch, capsys):
+    from smara.autonomous_agent import SmaraAutonomousAgent
+
+    calls = []
+    monkeypatch.setattr("smara.cli._resolve_profile_key", lambda *_args: "fixture-key")
+
+    def reply(_self, _messages, tools=None, max_tokens=16384):
+        calls.append(1)
+        return {"choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}]}
+
+    monkeypatch.setattr(SmaraAutonomousAgent, "_call_model_api", reply)
+    code = main(["--workspace", str(tmp_path), "ask", "Reply with OK."])
+
+    assert code == 0
+    assert capsys.readouterr().out.strip() == "OK"
+    assert len(calls) == 1
+
+
 def test_cli_accepts_live_web_profile_aliases():
     parser = build_parser()
     for alias in ("research-web", "research_web", "live-web"):

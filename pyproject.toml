@@ -45,5 +45,4 @@ packages = ["src/smara"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--basetemp=build/pytest-temp"
 cache_dir = "build/pytest-cache"

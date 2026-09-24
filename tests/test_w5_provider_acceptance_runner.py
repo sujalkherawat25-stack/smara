@@ -10,7 +10,28 @@ from scripts.run_w5_provider_acceptance import (
     run_acceptance,
     sanitize_evidence_record,
     OUTPUT_RUPEES_PER_M,
+    save_atomic,
 )
+
+
+def test_atomic_evidence_save_retries_transient_windows_lock(tmp_path, monkeypatch):
+    target = tmp_path / "evidence.json"
+    original_replace = Path.replace
+    attempts = []
+
+    def locked_twice(source, destination):
+        attempts.append(source)
+        if len(attempts) < 3:
+            raise PermissionError(13, "sharing violation")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(Path, "replace", locked_twice)
+    monkeypatch.setattr("scripts.run_w5_provider_acceptance.time.sleep", lambda _seconds: None)
+
+    save_atomic(target, {"status": "complete"})
+
+    assert len(attempts) == 3
+    assert json.loads(target.read_text(encoding="utf-8")) == {"status": "complete"}
 
 
 @pytest.fixture

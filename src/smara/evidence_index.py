@@ -50,7 +50,27 @@ def _meaningful(value:str) -> list[str]:
     return [token for token in _tokens(value) if token not in _STOPWORDS]
 
 def _sentences(value:str) -> list[str]:
-    return [item.strip() for item in re.split(r"(?<=[.!?;])\s+|[\r\n]+",_normalise(value)) if item.strip()]
+    result=[]
+    for item in re.split(r"(?<=[.!?;])\s+|[\r\n]+",_normalise(value)):
+        item=item.strip()
+        if not item:
+            continue
+        # HTML extraction can flatten a whole page into one punctuation-free
+        # block. Split only oversized blocks; adjacent chunks remain available
+        # to the existing bounded passage comparison.
+        if len(item)<=2000:
+            result.append(item)
+            continue
+        chunk=""
+        for word in item.split():
+            if chunk and len(chunk)+len(word)+1>2000:
+                result.append(chunk)
+                chunk=word
+            else:
+                chunk=f"{chunk} {word}" if chunk else word
+        if chunk:
+            result.append(chunk)
+    return result
 
 def _date_keys(value:str) -> set[str]:
     """Return canonical calendar dates, accepting ISO and common prose forms."""
@@ -118,6 +138,7 @@ class EvidenceIndex:
         source_sentences=_sentences(source) or [source]
         claim_negated=any(token in _NEGATIONS for token in _tokens(claim))
         claim_quantities=_quantities(claim)
+        claim_versions=set(re.findall(r"\b\d+(?:\.\d+){1,3}\b",claim))
         claim_terms=[item for item in terms if item not in _NEGATIONS and not re.fullmatch(r"[-+]?\d+(?:[.,]\d+)*|%",item) and item not in _UNIT_ALIASES]
         claim_dates=_date_keys(claim)
         best_reason="no_single_passage_support"
@@ -166,6 +187,23 @@ class EvidenceIndex:
                 if lexical_missing:
                     best_reason=f"missing_terms:{','.join(lexical_missing[:5])}"
                     continue
+                if claim_versions and not claim_versions.issubset(set(re.findall(r"\b\d+(?:\.\d+){1,3}\b",sentence))):
+                    best_reason="version_missing"
+                    continue
+                if len(claim_versions)==1 and claim_dates and "release" in claim_terms:
+                    # Release listings place many versions and dates in one
+                    # flattened passage. A date supports the claimed version
+                    # only when it appears before the next version entry.
+                    version_matches=list(re.finditer(r"\b\d+(?:\.\d+){1,3}\b",sentence))
+                    matching_dates=set()
+                    for index, version_match in enumerate(version_matches):
+                        if version_match.group()!=next(iter(claim_versions)):
+                            continue
+                        next_start=version_matches[index+1].start() if index+1<len(version_matches) else len(sentence)
+                        matching_dates.update(_date_keys(sentence[version_match.end():next_start]))
+                    if not claim_dates.issubset(matching_dates):
+                        best_reason="release_date_mismatch"
+                        continue
                 # Polarity belongs to the sentence that anchors the match;
                 # adjacent context may legitimately contain unrelated words
                 # such as "not" and must not invert this claim.

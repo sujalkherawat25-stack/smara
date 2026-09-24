@@ -127,7 +127,17 @@ def save_atomic(target_path: Path, data: dict[str, Any]) -> None:
     temp_file = target_path.with_suffix(f".tmp.{os.getpid()}.{time.time_ns()}")
     try:
         temp_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        temp_file.replace(target_path)
+        for attempt in range(5):
+            try:
+                temp_file.replace(target_path)
+                break
+            except PermissionError:
+                # Windows scanners can briefly hold either file open during
+                # an atomic replacement. Keep the same temp file and fail if
+                # the lock persists; never fall back to an in-place write.
+                if attempt == 4:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
     finally:
         if temp_file.exists():
             try:

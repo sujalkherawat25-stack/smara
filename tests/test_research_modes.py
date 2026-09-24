@@ -330,3 +330,5 @@ def test_agent_synthesizes_validated_claim_when_validation_uses_last_iteration(t
     assert text in result["answer"]
     assert "FINAL LABEL: supported" in result["answer"]
     assert "https://source-0.test/value" in result["answer"]
+    assert "https://source-1.test/value" not in result["answer"]
+    assert "https://source-2.test/value" not in result["answer"]
