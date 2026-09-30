@@ -2,3 +2,4 @@ node_modules/
 dist/
 src-tauri/target/
 src-tauri/resources/smara-desktop.exe
+src-tauri/resources/LIVE_WEB_ACCEPTANCE_V5.json

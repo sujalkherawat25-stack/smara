@@ -13,7 +13,8 @@ def test_budget_exhaustion_does_not_falsely_complete(tmp_path, monkeypatch):
     session = SessionEngine(tmp_path, "exhaustion_test", budget=Budget(120, 2, 2, 500_000, 2), constrained=False)
     agent = SmaraAutonomousAgent(api_key="fixture", profile="coding", workspace_root=tmp_path, session_engine=session, max_iterations=2)
     
-    def mock_call(messages, tools=None):
+    def mock_call(messages, tools=None, max_tokens=16_384):
+        assert max_tokens == 16_384
         return {
             "choices": [{
                 "finish_reason": "stop",

@@ -100,6 +100,56 @@
         "status": "passed_promoted",
         "failure_summary": []
       },
+      "acceptance_pack_v5": {
+        "manifest_sha256": "ac4dc9480053d1b201eeb301db23119dd6b370f0beae42202e6071a011659884",
+        "references_sha256": "e361148289b5f7002a56ed2bdd19bd47cd8dd8517d89740a4e88e32f48511acf",
+        "runner": "scripts/run_live_web_acceptance_v5.py",
+        "provider": "sarvam",
+        "model": "glm5.3",
+        "search_provider": "exa",
+        "default_repetitions": 1,
+        "evidence": {
+          "path": "release/evidence/LIVE_WEB_ACCEPTANCE_V5.json",
+          "sha256": "415c60f759c1a1f631fdfdc50f8046ab0ce21283a8d8e4b5c33c5be32c7328cc",
+          "terminal_state": "complete",
+          "score": "14/24",
+          "rate": 0.5833,
+          "category_rates": {
+            "current_factual": 0.5,
+            "breaking_news_or_dated": 0.5,
+            "contradiction_changed_fact": 0.5,
+            "source_quality": 0.75,
+            "quantitative_analysis": 1.0,
+            "today_latest": 1.0,
+            "historical_as_of": 0.0,
+            "source_conflict": 0.0,
+            "failed_page": 0.0
+          },
+          "answer_coverage": 0.7014,
+          "citation_support": 0.7014,
+          "latency_median_seconds": 16.321,
+          "latency_mean_seconds": 24.6778,
+          "latency_p95_seconds": 95.084,
+          "false_completions": 5,
+          "safety_violations": 0,
+          "elapsed_seconds": 662.807,
+          "billed_tokens": 537428,
+          "gate_passed": false
+        },
+        "execution_status": "completed_gate_failed",
+        "failure_summary": [
+          "LW4-F01: answer_or_evidence_claim_mismatch",
+          "LW4-F03: answer_or_evidence_claim_mismatch",
+          "LW4-D03: canonical_tool_chain_incomplete",
+          "LW4-D04: canonical_tool_chain_incomplete",
+          "LW4-C01: answer_or_evidence_claim_mismatch",
+          "LW4-C02: answer_or_evidence_claim_mismatch",
+          "LW4-S03: answer_or_evidence_claim_mismatch",
+          "LW5-H01: canonical_tool_chain_incomplete",
+          "LW5-C01: canonical_tool_chain_incomplete",
+          "LW5-X01: canonical_tool_chain_incomplete"
+        ]
+      },
       "providers": [
         "tavily",
         "exa",
@@ -426,7 +476,7 @@
         "provider_calls": 0
       },
       "blocker": "matched-budget external-provider ablation not executed; SMARA_ENABLE_DELEGATION must be explicitly enabled",
-      "model_aliases": "glm5.2 -> sarvam-105b; glm5.3 -> glm5.3-flash"
+        "model_aliases": "legacy glm5.3-flash -> current Sarvam v2 model glm5.3"
     },
     "unified_runtime_sessions": {
       "status": "implemented_tested",

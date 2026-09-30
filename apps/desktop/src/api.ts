@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatHistoryTurn, CodingConventionsData, ConnectionState, DAGNodeData, DAGWorkflowData, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ProgressiveSkillDetail, ProgressiveSkillItem, RemoteStatus, ResearchMode, RuntimeSessionRecord, RuntimeSessionSnapshot, SearchResultItem, SemanticIndexStats, SubagentDelegationData, SubagentRolesData, SwarmTaskResultData, SymbolEvolutionData, TaskDetail, TaskMemoryActionResult, TaskMemorySearchItem, TaskMemorySnapshot, TaskMemoryStoreData, TaskSummary, TestSuiteResultData, WebScrapeData } from "./types";
+import type { ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatHistoryTurn, CodingConventionsData, ConnectionState, DAGNodeData, DAGWorkflowData, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ProgressiveSkillDetail, ProgressiveSkillItem, RemoteStatus, ResearchMode, ResearchWatch, RuntimeSessionRecord, RuntimeSessionSnapshot, SearchResultItem, SemanticIndexStats, SubagentDelegationData, SubagentRolesData, SwarmTaskResultData, SymbolEvolutionData, TaskDetail, TaskMemoryActionResult, TaskMemorySearchItem, TaskMemorySnapshot, TaskMemoryStoreData, TaskSummary, TestSuiteResultData, WebScrapeData } from "./types";
 
 export const isNativeDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -103,6 +103,14 @@ export const desktop = {
   // boundary (`researchMode`), otherwise the command is rejected before it
   // reaches the research runner.
   runResearch: (topic: string, researchMode: ResearchMode) => invoke<any>("run_research", { topic, researchMode }),
+  listResearchWatches: () => invoke<ResearchWatch[]>("list_research_watches"),
+  addResearchWatch: (topic: string, intervalHours: number, baseline?: Record<string, unknown>) =>
+    invoke<ResearchWatch>("add_research_watch", { topic, intervalHours, baseline: baseline || null }),
+  runResearchWatch: (watchId: string) => invoke<any>("run_research_watch", { watchId }),
+  setResearchWatchEnabled: (watchId: string, enabled: boolean) =>
+    invoke<any>("set_research_watch_enabled", { watchId, enabled }),
+  removeResearchWatch: (watchId: string) => invoke<any>("remove_research_watch", { watchId }),
+  researchWatchHistory: (watchId: string) => invoke<any[]>("research_watch_history", { watchId }),
   generatePrDraft: (intent?: string) => invoke<any>("generate_pr_draft", { intent: intent || null }),
   publishPrBranch: (draftTitle: string, branchName: string, commitMessage: string, bodyMarkdown: string) =>
     invoke<any>("publish_pr_branch", { draftTitle, branchName, commitMessage, bodyMarkdown }),
@@ -115,6 +123,7 @@ export const desktop = {
   runGaiaBenchmark: (level?: string, count?: number) => invoke<any>("run_gaia_benchmark", { level: level || null, count: count || null }),
   runSweBenchmark: () => invoke<any>("run_swe_benchmark"),
   getBenchmarkScorecards: () => invoke<any>("get_benchmark_scorecards"),
+  getResearchEvaluationScorecard: () => invoke<any>("get_research_evaluation_scorecard"),
   openBenchmarkReport: (path: string) => invoke<boolean>("open_benchmark_report", { path }),
   // Local Task Memory
   listTaskMemory: (target: "memory" | "user") => invoke<TaskMemoryStoreData>("list_task_memory", { target }),

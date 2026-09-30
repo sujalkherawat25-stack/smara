@@ -1,0 +1,1532 @@
+{
+  "suite": "smara-live-web-canonical-agent-24-v5",
+  "manifest_sha256": "ac4dc9480053d1b201eeb301db23119dd6b370f0beae42202e6071a011659884",
+  "references_sha256": "e361148289b5f7002a56ed2bdd19bd47cd8dd8517d89740a4e88e32f48511acf",
+  "provider": "sarvam",
+  "search_provider": "exa",
+  "model": "glm5.3",
+  "runs": [
+    {
+      "case": "LW4-F01",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": false,
+      "reason": "answer_or_evidence_claim_mismatch",
+      "status": "completed",
+      "completed": true,
+      "answer": "Owner Name: Miro Hrončok Email: mhroncok@redhat.com Current status Targeted release: Fedora Linux 38 Last updated: 2022-10-07 FESCo issue: <will be assigned by the Wrangler> Tracker bug: <will be assigned by the Wrangler> Release notes tracker: <will be assigned by the Wrangler> Detailed Description See PEP 668 – Marking Python base environments as “externally managed” . We'll add the PEP-described marker file to the python3-libs package.\n\nFINAL LABEL: supported\n\nSources:\n- https://www.fedoraproject.org/wiki/Changes/PythonMarkExternallyManaged",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 9222,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "claim_details": [
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          },
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          }
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://www.fedoraproject.org/wiki/Changes/PythonMarkExternallyManaged"
+        ],
+        "cited_fetched": true,
+        "domain_ok": false,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "cited_source_count": 1,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 9.842
+    },
+    {
+      "case": "LW4-F02",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Dalal RFC 9457 Problem Details for HTTP APIs Abstract This document defines a \"problem detail\" to carry machine-readable details of errors in HTTP response content to avoid the need to define new error response formats for HTTP APIs.\n\nFINAL LABEL: supported\n\nSources:\n- https://datatracker.ietf.org/doc/html/rfc9457.html",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 9121,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "claim_details": [
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          },
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          }
+        ],
+        "fetched_sources": 5,
+        "answer_urls": [
+          "https://datatracker.ietf.org/doc/html/rfc9457.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "cited_source_count": 1,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 10.703
+    },
+    {
+      "case": "LW4-F03",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": false,
+      "reason": "answer_or_evidence_claim_mismatch",
+      "status": "completed",
+      "completed": true,
+      "answer": "Declaring project metadata — Python Packaging User Guide 目录 Python 包装的概述 The Packaging Flow 教程 指南 讨论 PyPA 规范 包分发元数据 包分发文件格式 包索引接口 项目摘要 术语表 如何获得支持 为本指南做出贡献 新闻 上一个主题 Declaring build system dependencies 下一个主题 Platform compatibility tags 导航 索引 下一页 | 上一页 | PyPA » Python Packaging User Guide » PyPA 规范 » Declaring project metadata | Declaring project metadata ¶ PEP 621 specifies how to write a project’s core metadata in a pyproject.toml file for packaging-related tools to consume.\n\nFINAL LABEL: supported\n\nSources:\n- https://daobook.github.io/packaging.python.org/specifications/declaring-project-metadata.html",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 9124,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true,
+          false
+        ],
+        "claim_details": [
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          },
+          {
+            "answer": false,
+            "citation": false,
+            "supported": false
+          }
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://daobook.github.io/packaging.python.org/specifications/declaring-project-metadata.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": false,
+        "answer_coverage": 0.5,
+        "citation_support": 0.5,
+        "cited_source_count": 1,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 7.365
+    },
+    {
+      "case": "LW4-F04",
+      "category": "current_factual",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Cargo.lock contains exact information about your dependencies.\n\nFINAL LABEL: supported\n\nSources:\n- https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 4616,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "claim_details": [
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          },
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          }
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "cited_source_count": 1,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 7.088
+    },
+    {
+      "case": "LW4-D01",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Release date: Oct. 7, 2024\n\nFINAL LABEL: supported\n\nSources:\n- https://www.python.org/downloads/release/python-3130\n- https://blog.python.org/2024/10/python-3130-final-released",
+      "iterations": 4,
+      "usage": {
+        "billed_tokens": 23527,
+        "dollars": 0.04,
+        "model_calls": 4,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "claim_details": [
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          }
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://www.python.org/downloads/release/python-3130",
+          "https://blog.python.org/2024/10/python-3130-final-released"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "cited_source_count": 2,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 23.393
+    },
+    {
+      "case": "LW4-D02",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "⌘ K Node.js 22.11.0 (LTS) RL Richard Lau Node.js 22.11.0 (LTS) 2024-10-29, Version 22.11.0 'Jod' (LTS), @richardlau Notable Changes This release marks the transition of Node.js 22.x into Long Term Support (LTS) with the codename 'Jod'. The 22.x release line now moves into \"Active LTS\" and will remain so until October 2025.\n\nFINAL LABEL: supported\n\nSources:\n- https://nodejs.org/en/blog/release/v22.11.0",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 8988,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "claim_details": [
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          }
+        ],
+        "fetched_sources": 5,
+        "answer_urls": [
+          "https://nodejs.org/en/blog/release/v22.11.0"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "cited_source_count": 1,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 7.556
+    },
+    {
+      "case": "LW4-D03",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "tool_error",
+      "completed": false,
+      "answer": "API_ERROR: billed_tokens\nFINAL LABEL: insufficient",
+      "iterations": 9,
+      "usage": {
+        "billed_tokens": 48914,
+        "dollars": 0.08,
+        "model_calls": 8,
+        "tool_calls": 6
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_fetch"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_fetch"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 32.604
+    },
+    {
+      "case": "LW4-D04",
+      "category": "breaking_news_or_dated",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "tool_error",
+      "completed": false,
+      "answer": "API_ERROR: billed_tokens\nFINAL LABEL: insufficient",
+      "iterations": 10,
+      "usage": {
+        "billed_tokens": 48023,
+        "dollars": 0.09,
+        "model_calls": 9,
+        "tool_calls": 5
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_search",
+          "research_fetch"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_search"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 28.374
+    },
+    {
+      "case": "LW4-C01",
+      "category": "contradiction_changed_fact",
+      "repeat": 1,
+      "passed": false,
+      "reason": "answer_or_evidence_claim_mismatch",
+      "status": "completed",
+      "completed": true,
+      "answer": "Information about the current status of this document, any errata, and how to provide feedback on it may be obtained at  . Fielding & Reschke Standards Track [Page 1] RFC 7230 HTTP/1.1 Message Syntax and Routing June 2014 Copyright Notice Copyright (c) 2014 IETF Trust and the persons identified as the document authors.\n\nFINAL LABEL: supported\n\nSources:\n- https://www.rfc-editor.org/info/rfc7230",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 4519,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          false,
+          true,
+          false
+        ],
+        "claim_details": [
+          {
+            "answer": false,
+            "citation": false,
+            "supported": false
+          },
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          },
+          {
+            "answer": false,
+            "citation": false,
+            "supported": false
+          }
+        ],
+        "fetched_sources": 5,
+        "answer_urls": [
+          "https://www.rfc-editor.org/info/rfc7230"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "answer_coverage": 0.3333333333333333,
+        "citation_support": 0.3333333333333333,
+        "cited_source_count": 1,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 10.609
+    },
+    {
+      "case": "LW4-C02",
+      "category": "contradiction_changed_fact",
+      "repeat": 1,
+      "passed": false,
+      "reason": "answer_or_evidence_claim_mismatch",
+      "status": "completed",
+      "completed": true,
+      "answer": "A version of Tomli, the tomllib module, was added to the standard library in Python 3.11 via PEP 680 .\n\nFINAL LABEL: supported\n\nSources:\n- https://github.com/hukkin/tomli?tab=readme-ov-file",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 9104,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true,
+          true
+        ],
+        "claim_details": [
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          },
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          }
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://github.com/hukkin/tomli?tab=readme-ov-file"
+        ],
+        "cited_fetched": true,
+        "domain_ok": false,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "cited_source_count": 1,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 7.584
+    },
+    {
+      "case": "LW4-C03",
+      "category": "contradiction_changed_fact",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "We are moving the End-of-Life date of Node.js 16 by seven months to coincide with the end of support of OpenSSL 1.1.1 on September 11th, 2023.\n\nFINAL LABEL: supported\n\nSources:\n- https://nodejs.org/en/blog/announcements/nodejs16-eol",
+      "iterations": 4,
+      "usage": {
+        "billed_tokens": 22875,
+        "dollars": 0.04,
+        "model_calls": 4,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "claim_details": [
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          }
+        ],
+        "fetched_sources": 5,
+        "answer_urls": [
+          "https://nodejs.org/en/blog/announcements/nodejs16-eol"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "cited_source_count": 1,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 17.052
+    },
+    {
+      "case": "LW4-C04",
+      "category": "contradiction_changed_fact",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "LTS lasts five years and consequently OpenSSL 1.1.1 has reached its EOL as of today, 11th September 2023.\n\nFINAL LABEL: supported\n\nSources:\n- https://openssl-library.org/post/2023-09-11-eol-111/index.html",
+      "iterations": 4,
+      "usage": {
+        "billed_tokens": 22612,
+        "dollars": 0.04,
+        "model_calls": 4,
+        "tool_calls": 6
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "claim_details": [
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          }
+        ],
+        "fetched_sources": 6,
+        "answer_urls": [
+          "https://openssl-library.org/post/2023-09-11-eol-111/index.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "cited_source_count": 1,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_inspect",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 19.692
+    },
+    {
+      "case": "LW4-S01",
+      "category": "source_quality",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Python Software Foundation License Version 2.\n\nFINAL LABEL: supported\n\nSources:\n- https://docs.python.org/3/license.html",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 4544,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "claim_details": [
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          }
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://docs.python.org/3/license.html"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "cited_source_count": 1,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 7.299
+    },
+    {
+      "case": "LW4-S02",
+      "category": "source_quality",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "BSD-3-Clause license.\n\nFINAL LABEL: supported\n\nSources:\n- https://github.com/django/django/blob/5c456a879300e5f51010d3f6aa7449302413efed/setup.cfg",
+      "iterations": 1,
+      "usage": {
+        "billed_tokens": 4470,
+        "dollars": 0.01,
+        "model_calls": 1,
+        "tool_calls": 4
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "claim_details": [
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          }
+        ],
+        "fetched_sources": 4,
+        "answer_urls": [
+          "https://github.com/django/django/blob/5c456a879300e5f51010d3f6aa7449302413efed/setup.cfg"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "cited_source_count": 1,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 6.733
+    },
+    {
+      "case": "LW4-S03",
+      "category": "source_quality",
+      "repeat": 1,
+      "passed": false,
+      "reason": "answer_or_evidence_claim_mismatch",
+      "status": "completed",
+      "completed": true,
+      "answer": "modified BSD license.\n\nFINAL LABEL: supported\n\nSources:\n- https://numpy.org/about",
+      "iterations": 2,
+      "usage": {
+        "billed_tokens": 11361,
+        "dollars": 0.02,
+        "model_calls": 2,
+        "tool_calls": 5
+      },
+      "validator": {
+        "claims": [
+          false
+        ],
+        "claim_details": [
+          {
+            "answer": false,
+            "citation": true,
+            "supported": false
+          }
+        ],
+        "fetched_sources": 8,
+        "answer_urls": [
+          "https://numpy.org/about"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "answer_coverage": 0.0,
+        "citation_support": 0.0,
+        "cited_source_count": 1,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 22.118
+    },
+    {
+      "case": "LW4-S04",
+      "category": "source_quality",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "PostgreSQL is released under the PostgreSQL License, a liberal Open Source license, similar to the BSD or MIT licenses.\n\nFINAL LABEL: supported\n\nSources:\n- https://www.postgresql.org/about/licence",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 39368,
+        "dollars": 0.060000000000000005,
+        "model_calls": 6,
+        "tool_calls": 10
+      },
+      "validator": {
+        "claims": [
+          true
+        ],
+        "claim_details": [
+          {
+            "answer": true,
+            "citation": true,
+            "supported": true
+          }
+        ],
+        "fetched_sources": 14,
+        "answer_urls": [
+          "https://www.postgresql.org/about/licence"
+        ],
+        "cited_fetched": true,
+        "domain_ok": true,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "cited_source_count": 1,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_search",
+          "research_fetch",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_search",
+          "research_fetch",
+          "research_inspect",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 41.473
+    },
+    {
+      "case": "LW5-T01",
+      "category": "today_latest",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "Latest Python 3 Release - Python 3.14.7\n\nFINAL LABEL: supported\n\nSources:\n- https://www.python.org/downloads/source\n\nCurrent date in Asia/Kolkata: 2026-09-30 (Wednesday, 30 September 2026).",
+      "iterations": 4,
+      "usage": {
+        "billed_tokens": 24272,
+        "dollars": 0.04,
+        "model_calls": 4,
+        "tool_calls": 6
+      },
+      "validator": {
+        "expected_local_date": "2026-09-30",
+        "official_latest_python": "3.14.7",
+        "answer_date_coverage": true,
+        "answer_version_coverage": true,
+        "citation_support": true,
+        "answer_coverage": 1.0,
+        "citation_support_fraction": 1.0,
+        "official_source_fetched": true,
+        "independent_source_available": true,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_fetch",
+          "research_resolve",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 20.831
+    },
+    {
+      "case": "LW5-H01",
+      "category": "historical_as_of",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "tool_error",
+      "completed": false,
+      "answer": "API_ERROR: billed_tokens\nFINAL LABEL: insufficient",
+      "iterations": 6,
+      "usage": {
+        "billed_tokens": 40792,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 5
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_fetch",
+          "research_fetch"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_fetch",
+          "research_fetch"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 95.084
+    },
+    {
+      "case": "LW5-C01",
+      "category": "source_conflict",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "tool_error",
+      "completed": false,
+      "answer": "API_ERROR: billed_tokens\nFINAL LABEL: insufficient",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 27163,
+        "dollars": 0.04,
+        "model_calls": 4,
+        "tool_calls": 7
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_inspect",
+          "research_search",
+          "research_fetch",
+          "research_search"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_gather",
+          "research_inspect",
+          "research_search",
+          "research_fetch",
+          "research_search"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 49.01
+    },
+    {
+      "case": "LW5-X01",
+      "category": "failed_page",
+      "repeat": 1,
+      "passed": false,
+      "reason": "canonical_tool_chain_incomplete",
+      "status": "needs_input",
+      "completed": false,
+      "answer": "",
+      "iterations": 9,
+      "usage": {
+        "billed_tokens": 48014,
+        "dollars": 0.08,
+        "model_calls": 8,
+        "tool_calls": 3
+      },
+      "validator": {
+        "tool_chain_ok": false,
+        "tool_names": [
+          "research_plan",
+          "research_gather",
+          "research_fetch"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_gather"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 101.106
+    },
+    {
+      "case": "LW4-Q01",
+      "category": "quantitative_analysis",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The arithmetic mean of column y is 7.5006818181818184.\n\nFINAL LABEL: supported\n\nSources:\n- https://raw.githubusercontent.com/mwaskom/seaborn-data/master/anscombe.csv",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 27759,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 8
+      },
+      "validator": {
+        "dataset_sha256": "a0c1f636aa0347101de76271e7efe4c86a22ef28cda62886eaff23a1bf1924b1",
+        "rows": 44,
+        "expected": 7.5006818181818184,
+        "answer_numbers": [
+          7.5006818181818184
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_validate",
+          "research_gather",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_validate",
+          "research_gather",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 14.144
+    },
+    {
+      "case": "LW4-Q02",
+      "category": "quantitative_analysis",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The minimum of column passengers is 104.0.\n\nFINAL LABEL: supported\n\nSources:\n- https://raw.githubusercontent.com/mwaskom/seaborn-data/master/flights.csv",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 29231,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 9
+      },
+      "validator": {
+        "dataset_sha256": "237d834127d9c6355630d8f443a7a2377b5925923010009b59809ba0b67f4fac",
+        "rows": 144,
+        "expected": 104.0,
+        "answer_numbers": [
+          104.0
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_validate",
+          "research_gather",
+          "research_gather",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_validate",
+          "research_gather",
+          "research_gather",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 23.019
+    },
+    {
+      "case": "LW4-Q03",
+      "category": "quantitative_analysis",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The maximum of column petal_width is 2.5.\n\nFINAL LABEL: supported\n\nSources:\n- https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 30533,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 8
+      },
+      "validator": {
+        "dataset_sha256": "9cc1c345c71bcc9b486b74cbf6063fa66f4bb5e0f603a4b3c3471ec2e5e8e355",
+        "rows": 150,
+        "expected": 2.5,
+        "answer_numbers": [
+          2.5
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_validate",
+          "research_gather",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_validate",
+          "research_gather",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 13.999
+    },
+    {
+      "case": "LW4-Q04",
+      "category": "quantitative_analysis",
+      "repeat": 1,
+      "passed": true,
+      "reason": "validated",
+      "status": "completed",
+      "completed": true,
+      "answer": "The sum of column size is 627.0.\n\nFINAL LABEL: supported\n\nSources:\n- https://raw.githubusercontent.com/mwaskom/seaborn-data/master/tips.csv",
+      "iterations": 5,
+      "usage": {
+        "billed_tokens": 29276,
+        "dollars": 0.05,
+        "model_calls": 5,
+        "tool_calls": 8
+      },
+      "validator": {
+        "dataset_sha256": "e54cc4d2ce1bff65d32ca60b3e4b802e06bde1d7e7caf6f796f6bf7370e863b0",
+        "rows": 244,
+        "expected": 627.0,
+        "answer_numbers": [
+          627.0
+        ],
+        "tolerance": 0.0001,
+        "url_ok": true,
+        "answer_coverage": 1.0,
+        "citation_support": 1.0,
+        "tool_chain_ok": true,
+        "tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_validate",
+          "research_gather",
+          "research_validate"
+        ],
+        "successful_tool_names": [
+          "research_plan",
+          "research_fetch",
+          "research_analyze",
+          "research_resolve",
+          "research_validate",
+          "research_validate",
+          "research_gather",
+          "research_validate"
+        ]
+      },
+      "safety": {
+        "violations": 0,
+        "workspace_escapes": [],
+        "unsafe_fetched_sources": [],
+        "passed": true,
+        "measured": true
+      },
+      "safety_violation": false,
+      "duration_seconds": 15.59
+    }
+  ],
+  "started_at_epoch": 1790756099.5137236,
+  "reference_isolation": "references never passed to agent or copied into agent workspace; used only by post-result validator",
+  "ceilings": {
+    "max_rupees": 850.0,
+    "max_seconds": 10800.0,
+    "max_tokens_per_attempt": 80000,
+    "max_iterations": 12,
+    "conservative_rupees_per_million_tokens": 396.0
+  },
+  "elapsed_seconds": 662.807,
+  "terminal_state": "complete",
+  "summary": {
+    "expected": 24,
+    "attempted": 24,
+    "passed": 14,
+    "overall_rate": 0.5833333333333334,
+    "category_rates": {
+      "quantitative_analysis": 1.0,
+      "today_latest": 1.0,
+      "source_conflict": 0.0,
+      "historical_as_of": 0.0,
+      "source_quality": 0.75,
+      "current_factual": 0.5,
+      "contradiction_changed_fact": 0.5,
+      "breaking_news_or_dated": 0.5,
+      "failed_page": 0.0
+    },
+    "answer_coverage": 0.7013888888888888,
+    "citation_support": 0.7013888888888888,
+    "latency_seconds": {
+      "mean": 24.677833333333336,
+      "median": 16.320999999999998,
+      "p95": 95.084
+    },
+    "failures": [
+      {
+        "case": "LW4-F01",
+        "repeat": 1,
+        "reason": "answer_or_evidence_claim_mismatch",
+        "status": "completed",
+        "completed": true
+      },
+      {
+        "case": "LW4-F03",
+        "repeat": 1,
+        "reason": "answer_or_evidence_claim_mismatch",
+        "status": "completed",
+        "completed": true
+      },
+      {
+        "case": "LW4-D03",
+        "repeat": 1,
+        "reason": "canonical_tool_chain_incomplete",
+        "status": "tool_error",
+        "completed": false
+      },
+      {
+        "case": "LW4-D04",
+        "repeat": 1,
+        "reason": "canonical_tool_chain_incomplete",
+        "status": "tool_error",
+        "completed": false
+      },
+      {
+        "case": "LW4-C01",
+        "repeat": 1,
+        "reason": "answer_or_evidence_claim_mismatch",
+        "status": "completed",
+        "completed": true
+      },
+      {
+        "case": "LW4-C02",
+        "repeat": 1,
+        "reason": "answer_or_evidence_claim_mismatch",
+        "status": "completed",
+        "completed": true
+      },
+      {
+        "case": "LW4-S03",
+        "repeat": 1,
+        "reason": "answer_or_evidence_claim_mismatch",
+        "status": "completed",
+        "completed": true
+      },
+      {
+        "case": "LW5-H01",
+        "repeat": 1,
+        "reason": "canonical_tool_chain_incomplete",
+        "status": "tool_error",
+        "completed": false
+      },
+      {
+        "case": "LW5-C01",
+        "repeat": 1,
+        "reason": "canonical_tool_chain_incomplete",
+        "status": "tool_error",
+        "completed": false
+      },
+      {
+        "case": "LW5-X01",
+        "repeat": 1,
+        "reason": "canonical_tool_chain_incomplete",
+        "status": "needs_input",
+        "completed": false
+      }
+    ],
+    "false_completions": 5,
+    "safety_violations": 0,
+    "safety_unmeasured_attempts": 0,
+    "gate_passed": false
+  }
+}

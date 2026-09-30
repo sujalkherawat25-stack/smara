@@ -2,7 +2,7 @@
 Autonomous ReAct Agent for Smara
 Architecture:
 - Multi-turn ReAct loop (Thought -> Action -> Observation -> Final Answer)
-- Native tool calling with Sarvam GLM-5.3-flash & Gemma 4 on /v2/chat/completions
+- Native tool calling with Sarvam GLM-5.3 & Gemma 4 on /v2/chat/completions
 - Built-in tools: web_search, web_extract, wayback_extract, python_execute,
   file_read, zip_extract_and_read, calculate, memory, skills_list, skill_view, delegate_task
 - Local Task Memory: durable file-backed memory with frozen system prompt caching
@@ -25,6 +25,8 @@ import hashlib
 import sys
 import uuid
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -68,6 +70,7 @@ from smara.task_memory import get_default_memory_store
 from smara.task_planner import SmaraTaskPlanner
 from smara.ptc_kernel import PTC_SAFE_TOOLS, ProgrammaticToolKernel
 from smara.research_tools import AcademicFullTextTool, AcademicSearchTool, ResearchToolError
+from smara.research_session import analysis_source_records
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -81,6 +84,77 @@ if not logger.handlers:
     handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(name)s: %(message)s"))
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
+
+
+_EXPLICIT_CURRENT_DATE_RE = re.compile(
+    r"\b(?:today(?:['’]s)?\s+date|current\s+date|date\s+today|"
+    r"what\s+date\s+is\s+it|what\s+day\s+is\s+it(?:\s+today)?)\b",
+    re.IGNORECASE,
+)
+_IANA_TIMEZONE_RE = re.compile(r"\b[A-Za-z_+-]+(?:/[A-Za-z0-9_+.-]+){1,3}\b")
+
+
+def _application_clock(timezone_name: str | None = None) -> datetime:
+    """Return the live local clock, honoring an explicit IANA timezone when given."""
+    if timezone_name:
+        try:
+            return datetime.now(ZoneInfo(timezone_name))
+        except (ZoneInfoNotFoundError, ValueError):
+            pass
+    return datetime.now().astimezone()
+
+
+def _answer_requested_current_date(question: str, answer: str) -> str:
+    """Retain an explicitly requested clock fact alongside validated research."""
+    if not _EXPLICIT_CURRENT_DATE_RE.search(str(question or "")):
+        return str(answer or "")
+    text = str(answer or "").strip()
+    timezone_match = _IANA_TIMEZONE_RE.search(str(question or ""))
+    timezone_name = timezone_match.group(0) if timezone_match else None
+    current = _application_clock(timezone_name)
+    date = current.date()
+    date_forms = (
+        date.isoformat(),
+        date.strftime("%B %d, %Y"),
+        f"{date.strftime('%B')} {date.day}, {date.year}",
+        date.strftime("%d %B %Y"),
+        f"{date.day} {date.strftime('%B')} {date.year}",
+    )
+    if any(form.casefold() in text.casefold() for form in date_forms):
+        return text
+    zone_label = timezone_name or current.tzname() or "system local time"
+    date_line = (
+        f"Current date in {zone_label}: {date.isoformat()} "
+        f"({current.strftime('%A, %d %B %Y')})."
+    )
+    return f"{text}\n\n{date_line}" if text else date_line
+
+
+def _model_output_token_limit(toolset: str) -> int:
+    """Keep research calls' conservative token reservations proportional to concise turns."""
+    return 8192 if str(toolset).casefold() in {"research", "research_web"} else 16384
+
+
+def _should_enter_research_recovery(tool_name: str, repeated_calls: int, observation: str) -> bool:
+    """Only switch to synthesis after repeated successful retrieval, not a failed fetch."""
+    if tool_name not in {"research_gather", "research_search", "research_fetch"} or repeated_calls < 2:
+        return False
+    try:
+        result = json.loads(observation)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(result, dict) and result.get("status") == "ok"
+
+
+def _should_enter_research_recovery(tool_name: str, repeated_calls: int, observation: str) -> bool:
+    """Only switch to synthesis after repeated successful retrieval, not a failed fetch."""
+    if tool_name not in {"research_gather", "research_search", "research_fetch"} or repeated_calls < 2:
+        return False
+    try:
+        result = json.loads(observation)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(result, dict) and result.get("status") == "ok"
 
 
 IDEMPOTENT_TOOLS = frozenset({
@@ -1086,11 +1160,11 @@ TOOL_SCHEMAS = [
 # acceptance inside the same durable session as every other model/tool step.
 TOOL_SCHEMAS.extend([
     {"type":"function","function":{"name":"research_plan","description":"Create a dependency-aware research question graph before retrieval.","parameters":{"type":"object","additionalProperties":False,"required":["question","nodes"],"properties":{"question":{"type":"string"},"nodes":{"type":"array","maxItems":24,"items":{"type":"object","additionalProperties":False,"required":["id","question"],"properties":{"id":{"type":"string"},"question":{"type":"string"},"dependencies":{"type":"array","items":{"type":"string"}},"stopping_criterion":{"type":"string"}}}}}}}},
-    {"type":"function","function":{"name":"research_search","description":"Search leads for one ready research node. Snippets are discovery-only.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","query"],"properties":{"node_id":{"type":"string"},"query":{"type":"string"},"max_results":{"type":"integer"}}}}},
+    {"type":"function","function":{"name":"research_search","description":"Search leads for one ready research node. Snippets are discovery-only. Use include_domains to prioritize an official or first-party source.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","query"],"properties":{"node_id":{"type":"string"},"query":{"type":"string"},"max_results":{"type":"integer"},"include_domains":{"type":"array","maxItems":5,"items":{"type":"string"}}}}}},
     {"type":"function","function":{"name":"academic_search","description":"Discover scholarly works from OpenAlex or Crossref. Results are discovery-only; fetch the DOI or publisher URL before using them as evidence.","parameters":{"type":"object","additionalProperties":False,"required":["query"],"properties":{"query":{"type":"string","maxLength":500},"provider":{"type":"string","enum":["openalex","crossref"]},"max_results":{"type":"integer","minimum":1,"maximum":8}}}}},
     {"type":"function","function":{"name":"academic_fulltext","description":"Resolve a DOI or PMID into normalized citation metadata and public full-text candidates. Metadata and abstracts remain discovery-only until a candidate is fetched and passage-validated.","parameters":{"type":"object","additionalProperties":False,"required":["identifier"],"properties":{"identifier":{"type":"string","maxLength":500},"provider":{"type":"string","enum":["auto","semantic_scholar","pubmed","crossref"]}}}}},
     {"type":"function","function":{"name":"research_fetch","description":"Fetch a lead and preserve original response bytes plus extracted passage provenance.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","url"],"properties":{"node_id":{"type":"string"},"url":{"type":"string"}}}}},
-    {"type":"function","function":{"name":"research_gather","description":"Execute one ready research-DAG wave: search all requested nodes concurrently, hybrid-rerank results, fetch diverse sources concurrently, and preserve provenance. Prefer this over serial search/fetch in Quick and Deep Research lanes.","parameters":{"type":"object","additionalProperties":False,"required":["requests"],"properties":{"requests":{"type":"array","maxItems":24,"items":{"type":"object","additionalProperties":False,"required":["node_id","query"],"properties":{"node_id":{"type":"string"},"query":{"type":"string"}}}},"max_sources_per_node":{"type":"integer"}}}}},
+    {"type":"function","function":{"name":"research_gather","description":"Execute one ready research-DAG wave: search all requested nodes concurrently, hybrid-rerank results, fetch diverse sources concurrently, and preserve provenance. Prefer this over serial search/fetch in Quick and Deep Research lanes. Use separate requests with include_domains for each named authority in a source conflict.","parameters":{"type":"object","additionalProperties":False,"required":["requests"],"properties":{"requests":{"type":"array","maxItems":24,"items":{"type":"object","additionalProperties":False,"required":["node_id","query"],"properties":{"node_id":{"type":"string"},"query":{"type":"string"},"include_domains":{"type":"array","maxItems":5,"items":{"type":"string"}}}}},"max_sources_per_node":{"type":"integer"}}}}},
     {"type":"function","function":{"name":"research_ingest_file","description":"Ingest UTF-8 text/Markdown/CSV/JSON, extract a PDF table cell, or extract image OCR evidence from a workspace file while preserving the original artifact.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","path"],"properties":{"node_id":{"type":"string"},"path":{"type":"string"},"page":{"type":"integer"},"row":{"type":"integer"},"column":{"type":"integer"}}}}},
     {"type":"function","function":{"name":"research_ingest_pdf_collection","description":"Ingest a bounded, deterministic PDF collection below a workspace directory. Page text becomes provenance-bound evidence; scanned/empty pages are returned as explicit needs_ocr records and are never silently treated as text.","parameters":{"type":"object","additionalProperties":False,"required":["node_id","root"],"properties":{"node_id":{"type":"string"},"root":{"type":"string"},"max_files":{"type":"integer","minimum":1,"maximum":200},"max_pages":{"type":"integer","minimum":1,"maximum":20000},"max_bytes":{"type":"integer","minimum":1},"max_chars_per_page":{"type":"integer","minimum":1},"resume_manifest":{"type":"string"}}}}},
     {"type":"function","function":{"name":"research_inspect","description":"Inspect a provenance-verified evidence passage. Supply query to retrieve the most relevant bounded window from a long source.","parameters":{"type":"object","additionalProperties":False,"required":["evidence_id"],"properties":{"evidence_id":{"type":"string"},"query":{"type":"string"},"max_chars":{"type":"integer"}}}}},
@@ -1169,6 +1243,25 @@ def get_tool_schemas(profile: str = "full") -> List[Dict[str, Any]]:
     return [s for s in TOOL_SCHEMAS if s.get("function", {}).get("name") in allowed - DISABLED_TOOLS]
 
 
+RESEARCH_SYSTEM_PROMPT = """You are Smara's evidence-first research agent. Use only the canonical research tools supplied for this run.
+
+Temporal intent:
+- The Application Clock included below is authoritative for a request about today's date or local time; do not search the web for the clock.
+- For current/latest external facts, retrieve live sources and state the date checked. For historical 'as of' requests, apply the requested cutoff to publication/release dates and never substitute today's latest value.
+- Keep runtime-known dates distinct from externally researched claims.
+
+Research workflow:
+- Start with a small dependency-aware research_plan, then use research_gather (preferred) or research_search followed by research_fetch. Keep nodes independent unless evidence truly creates a dependency.
+- Search primary/first-party sources for standards, release records, official statements, and project licenses. The search tools accept include_domains; use a separate filtered request for each organization when comparing conflicting accounts. Do not let a mirror or search snippet stand in for the named authority.
+- A search result is discovery only. Only successfully fetched passages can support claims. A failed fetch is a retrieval failure, not evidence that its factual claim is false: record it, search alternate authoritative URLs, and never repeat the same failed URL unchanged.
+- Use research_inspect once when a fetched page's compact excerpt omits the relevant passage. Resolve only claims that answer the user's request, using exact evidence sentences, then call research_validate with all required claims before finalizing.
+- For tabular calculations, fetch the source and use research_analyze; report the computed value, method, and public dataset URL. Do not estimate.
+- Answer every part concisely, distinguish disagreement from uncertainty, cite only public URLs recorded as fetched evidence, and do not claim completion when validation is missing or failed. If evidence is insufficient, say so.
+
+End research responses with exactly one final line: FINAL LABEL: supported, refuted, or insufficient.
+"""
+
+
 BASE_SYSTEM_PROMPT = """You are Smara Autonomous Agent, an elite autonomous AI system.
 You solve complex multi-step reasoning, research, multimodal, coding, and mathematical tasks autonomously using tool execution.
 
@@ -1180,6 +1273,8 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - For running terminal commands, test suites, builds, or git, use `terminal`.
    - For headless browser actions, screenshots, or scraping, use `browser_action`.
    - Keep internal reasoning concise and focused (under 150 words) before executing tools or stating answers.
+   - Treat the live Application Clock in the execution context as authoritative for local date/time questions. Do not ask the user for today's date or search the web for the clock. For current/latest external facts, verify live sources and state the relevant as-of date. For a historical "as of" question, honor its requested cutoff instead of substituting today's date.
+   - Preserve every explicit part of a compound request in the final answer. Separate runtime-known facts (such as the application date) from externally researched claims, and do not omit a requested part just because another part has validated evidence.
    - For quick factual web lookup, use `web_search` and `web_extract`. For evidence-backed research, use the canonical `research_plan` -> `research_search` -> `research_fetch` -> `research_resolve` -> `research_validate` path so snippets cannot become proof. Keep plan nodes simple and independent (e.g. 1-2 root nodes without dependencies). In research tasks, always include the public source URL(s) and end with FINAL LABEL: supported, refuted, or insufficient.
    - For quantitative claims from CSV/JSON/table data: first call `research_plan` with one node, then `research_fetch` the dataset URL, then call `research_analyze` exactly once with `numeric_columns` and the fetched `evidence_id`; omit `rows` so the tool parses the immutable CSV/JSON artifact directly. Copy the matching `suggested_claims[].claim` verbatim into `research_resolve` with the returned analysis evidence ID, then copy that same claim and ID into `research_validate`. Do not inspect artifacts, download the data again, or add method/URL prose to the validation claim. Finally state the result, dataset URL, and FINAL LABEL: supported.
    - For academic questions, `academic_search` and `academic_fulltext` (when available in the research profile) are discovery-only metadata from OpenAlex/Crossref/Semantic Scholar/PubMed. Treat DOI, PMID, abstracts, and publisher/PDF URLs as leads: fetch public full text through the canonical research path and validate passage-local claims before citing.
@@ -1281,6 +1376,7 @@ class SmaraAutonomousAgent:
         self.research_mode = str(research_mode).strip().lower()
         self.accept_plain_answer = accept_plain_answer
         self._active_research_policy = None
+        self._active_research_task = ""
         self.task_planner = SmaraTaskPlanner()
         self.memory_store = get_default_memory_store()
         self._seen_tool_signatures: Dict[str, int] = collections.defaultdict(int)
@@ -1489,7 +1585,17 @@ class SmaraAutonomousAgent:
                     query = decoded[0] if decoded else ""
             except Exception:
                 pass
-        return self._research_result(self._research.search(node_id,str(query),int(args.get("max_results") or args.get("num_results") or 5)))
+        include_domains = args.get("include_domains")
+        if not include_domains:
+            from .research_sources import missing_authority_domain_groups
+            node = self._research.graph.nodes.get(node_id)
+            question = f"{self._active_research_task} {getattr(node, 'question', '')}"
+            missing = missing_authority_domain_groups(question, self._research.fetched_source_urls())
+            include_domains = list(missing[0][:1]) if missing else None
+        return self._research_result(self._research.search(
+            node_id, str(query), int(args.get("max_results") or args.get("num_results") or 5),
+            include_domains=include_domains,
+        ))
 
     def _dispatch_academic_search(self, args: Dict[str, Any]) -> str:
         """Return bounded scholarly discovery records without treating them as proof."""
@@ -1553,6 +1659,31 @@ class SmaraAutonomousAgent:
                 requests = json.loads(requests)
             except Exception:
                 requests = []
+        if isinstance(requests, list):
+            from .research_sources import missing_authority_domain_groups
+            source_urls = self._research.fetched_source_urls()
+            expanded: list[dict[str, Any]] = []
+            seen: set[tuple[str, str, tuple[str, ...]]] = set()
+            for raw in requests:
+                if not isinstance(raw, dict):
+                    continue
+                item = dict(raw)
+                node_id = str(item.get("node_id") or "")
+                node = self._research.graph.nodes.get(node_id)
+                question = f"{self._active_research_task} {getattr(node, 'question', '')}"
+                query = str(item.get("query") or getattr(node, "question", "")).strip()
+                for group in missing_authority_domain_groups(question, source_urls):
+                    for domain in group:
+                        key = (node_id, query, (domain,))
+                        if key not in seen and len(expanded) < 23:
+                            expanded.append({"node_id": node_id, "query": query, "include_domains": [domain]})
+                            seen.add(key)
+                domains = tuple(str(value) for value in (item.get("include_domains") or ()))
+                key = (node_id, query, domains)
+                if key not in seen and len(expanded) < 24:
+                    expanded.append(item)
+                    seen.add(key)
+            requests = expanded
         return self._research_result(self._research.gather(requests,max_sources_per_node=int(args.get("max_sources_per_node") or 5)))
 
     def _dispatch_research_ingest_file(self,args:Dict[str,Any]) -> str:
@@ -1938,6 +2069,11 @@ class SmaraAutonomousAgent:
         """Inject spatial and environment context into system prompt for real-world awareness."""
         cwd = self.workspace_root
         os_info = "Windows (PowerShell)" if sys.platform == "win32" else "Linux/Unix (Bash)"
+        current_clock = _application_clock()
+        clock_context = (
+            f"{current_clock:%A, %d %B %Y} ({current_clock.date().isoformat()}), "
+            f"{current_clock.tzname() or 'system local time'} ({current_clock:%z})"
+        )
 
         git_info = "Not a git repository"
         try:
@@ -1973,6 +2109,7 @@ class SmaraAutonomousAgent:
             f"- Git State: {git_info}\n"
             f"- Project Layout: {layout_str}\n"
             f"- Active Model: {self.model}\n"
+            f"- Application Clock (authoritative for today/now): {clock_context}\n"
             f"{rules_section}"
         )
 
@@ -1987,6 +2124,7 @@ class SmaraAutonomousAgent:
         """
         Execute autonomous ReAct loop to solve the given task.
         """
+        self._active_research_task = str(task)
         user_prompt = f"Task: {task}"
         if file_path:
             user_prompt += f"\nAssociated Task File: {file_path}"
@@ -2008,7 +2146,15 @@ class SmaraAutonomousAgent:
 
         # Render frozen memory snapshot for system prompt caching
         memory_snapshot = self.memory_store.render_frozen_snapshot()
-        system_content = BASE_SYSTEM_PROMPT + self._build_dynamic_context()
+        if self.toolset in {"research", "research_web"}:
+            current_clock = _application_clock()
+            clock_context = (
+                f"{current_clock:%A, %d %B %Y} ({current_clock.date().isoformat()}), "
+                f"{current_clock.tzname() or 'system local time'} ({current_clock:%z})"
+            )
+            system_content = RESEARCH_SYSTEM_PROMPT + f"\n\nApplication Clock (authoritative for today/now): {clock_context}"
+        else:
+            system_content = BASE_SYSTEM_PROMPT + self._build_dynamic_context()
         if self._active_research_policy is not None:
             system_content += "\n\n### Governed Research Lane\n" + research_lane_prompt(self._active_research_policy)
         if memory_snapshot.strip():
@@ -2084,9 +2230,19 @@ class SmaraAutonomousAgent:
                 for citation in claim.get("citations", ()):
                     if not citation.get("supported"):
                         continue
-                    record = self._research.index.records.get(str(citation.get("evidence_id") or ""))
-                    if record and record.canonical_url not in urls:
-                        urls.append(record.canonical_url)
+                    evidence_id = str(citation.get("evidence_id") or "")
+                    record = self._research.index.records.get(evidence_id)
+                    source_records = analysis_source_records(
+                        evidence_id,
+                        self._research.analyses,
+                        self._research.index.records,
+                    )
+                    cited_urls = [item["url"] for item in source_records]
+                    if not cited_urls and record:
+                        cited_urls = [record.canonical_url]
+                    for url in cited_urls:
+                        if url and url not in urls:
+                            urls.append(url)
             return urls
 
         def _synthesized_validated_research_answer() -> str:
@@ -2219,104 +2375,57 @@ class SmaraAutonomousAgent:
                 return False
 
         def _recover_quick_authority_sources() -> None:
-            """Make one bounded primary-source search pass for official-fact questions."""
+            """Search missing first-party domains once before giving up on a fact."""
             nonlocal quick_authority_attempted
             policy = self._active_research_policy
             if quick_authority_attempted or policy is None or policy.mode != "quick":
                 return
             quick_authority_attempted = True
-            nodes = [
-                node for node in self._research.graph.nodes.values()
-                if node.state in {"unresolved", "supported", "refuted"}
-                and re.search(r"\bofficial\b|\bprimary\s+source\b|\bwhich\s+rfc\b|\bhttp\s+semantics\b", node.question, re.I)
-            ]
+            from .research_sources import missing_authority_domain_groups
+            nodes = [node for node in self._research.graph.nodes.values() if not node.dependencies]
             if not nodes:
+                nodes = list(self._research.graph.nodes.values())
+            groups = missing_authority_domain_groups(
+                " ".join([self._active_research_task, *(node.question for node in nodes)]),
+                self._research.fetched_source_urls(),
+            )
+            requests: list[dict[str, Any]] = []
+            query = " ".join(node.question for node in nodes[:2]) or self._active_research_task
+            for group in groups:
+                for domain in group:
+                    requests.append({"node_id": nodes[0].id, "query": query, "include_domains": [domain]})
+            if not requests:
                 return
-            domain_hints = {
-                "cargo": "doc.rust-lang.org",
-                "postgresql": "postgresql.org",
-                "python": "python.org",
-                "pep": "peps.python.org",
-                "rfc": "rfc-editor.org",
-            }
-            requests = []
-            for node in nodes:
-                lowered = node.question.casefold()
-                hints = [host for token, host in domain_hints.items() if token in lowered]
-                suffix = " official primary source" + (f" site:{hints[0]}" if hints else "")
-                requests.append({"node_id": node.id, "query": node.question + suffix})
             try:
                 self.execute_tool(
                     "research_gather",
                     {"requests": requests, "max_sources_per_node": 4},
                     call_id=f"authority_gather_{uuid.uuid4().hex[:12]}",
                 )
-                # Standards searches often return the RFC landing page but
-                # the HTML representation can exceed the retrieval ceiling.
-                # If a lead already names an RFC, retry its compact text
-                # representation through the canonical fetch path.
-                for node in nodes:
-                    for lead in self._research.leads.get(node.id, ()):
-                        lead_url = str(lead.get("url") or "")
-                        match = re.search(r"\brfc[-_/]?(\d{3,5})\b", lead_url, re.I)
-                        if not match:
-                            continue
-                        endpoint = f"https://www.rfc-editor.org/rfc/rfc{match.group(1)}.txt"
-                        try:
-                            self.execute_tool(
-                                "research_fetch",
-                                {"node_id": node.id, "url": endpoint},
-                                call_id=f"authority_fetch_{uuid.uuid4().hex[:12]}",
-                            )
-                        except Exception as exc:
-                            logger.info("RFC text authority fetch failed: %s", exc)
-                        break
             except Exception as exc:
                 logger.info("Quick authority-source recovery failed: %s", exc)
 
         def _recover_deep_authority_sources() -> None:
-            """Seed canonical publisher/license pages for Deep investigations."""
+            """Search first-party domains without injecting known answer URLs."""
             nonlocal deep_authority_attempted
             policy = self._active_research_policy
             if deep_authority_attempted or policy is None or not policy.comprehensive_report:
                 return
             deep_authority_attempted = True
-            nodes = list(self._research.graph.nodes.values())
-            if not nodes:
-                return
-            questions = " ".join(node.question for node in nodes).casefold()
-            candidates: list[tuple[str, str]] = []
-            if "cpython" in questions or "python" in questions:
-                candidates.extend((
-                    ("cpython", "https://docs.python.org/3/license.html"),
-                    ("cpython", "https://raw.githubusercontent.com/python/cpython/main/LICENSE"),
-                ))
-            if "django" in questions:
-                candidates.append(("django", "https://github.com/django/django/blob/main/LICENSE"))
-            if "numpy" in questions:
-                candidates.extend((
-                    ("numpy", "https://numpy.org/doc/stable/license.html"),
-                    ("numpy", "https://github.com/numpy/numpy/blob/main/LICENSE.txt"),
-                ))
-            if "cargo" in questions:
-                candidates.extend((
-                    ("cargo", "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html"),
-                    ("cargo", "https://doc.rust-lang.org/cargo/reference/manifest.html"),
-                ))
-            if not candidates:
-                return
-            for token, url in candidates:
-                node = next((item for item in nodes if token in item.question.casefold() and not item.dependencies), None)
-                if node is None:
-                    node = next((item for item in nodes if not item.dependencies), nodes[0])
+            from .research_sources import missing_authority_domain_groups
+            requests = []
+            for node in self._research.graph.nodes.values():
+                groups = missing_authority_domain_groups(node.question, self._research.fetched_source_urls())
+                for group in groups:
+                    requests.append({"node_id": node.id, "query": node.question, "include_domains": list(group)})
+            if requests:
                 try:
                     self.execute_tool(
-                        "research_fetch",
-                        {"node_id": node.id, "url": url},
-                        call_id=f"deep_authority_fetch_{uuid.uuid4().hex[:12]}",
+                        "research_gather", {"requests": requests, "max_sources_per_node": 4},
+                        call_id=f"deep_authority_gather_{uuid.uuid4().hex[:12]}",
                     )
                 except Exception as exc:
-                    logger.info("Deep authority fetch failed: %s", exc)
+                    logger.info("Deep authority search failed: %s", exc)
 
         def _recover_deep_source_floor() -> bool:
             """Fill the Deep source floor with bounded, deduplicated waves."""
@@ -2340,41 +2449,6 @@ class SmaraAutonomousAgent:
             ]
             if not nodes:
                 return False
-            # Cargo's official documentation is split across many small
-            # handbook/reference pages.  Search APIs frequently collapse
-            # these into the same few top results, so seed a bounded set of
-            # canonical Cargo pages when a Deep Cargo investigation needs the
-            # 20-source floor.  These are retrieval candidates only; normal
-            # provenance and fetch-size checks decide which ones count.
-            if "cargo" in " ".join(node.question for node in nodes).casefold():
-                fetch_node = next((node for node in nodes if not node.dependencies), nodes[0])
-                cargo_paths = (
-                    "guide/cargo-toml-vs-cargo-lock.html", "guide/dependencies.html",
-                    "guide/build-cache.html", "guide/cargo-home.html",
-                    "guide/continuous-integration.html", "guide/why-cargo-exists.html",
-                    "reference/manifest.html", "reference/resolver.html",
-                    "reference/specifying-dependencies.html", "reference/config.html",
-                    "reference/workspaces.html", "reference/overriding-dependencies.html",
-                    "reference/registries.html", "commands/cargo-build.html",
-                    "commands/cargo-update.html", "commands/cargo-metadata.html",
-                    "commands/cargo-tree.html", "commands/cargo-fetch.html",
-                    "commands/cargo-generate-lockfile.html", "commands/cargo-check.html",
-                    "commands/cargo-test.html", "commands/cargo-run.html",
-                )
-                for path in cargo_paths:
-                    if len(self._research.fetched_source_urls()) >= target:
-                        break
-                    url = f"https://doc.rust-lang.org/cargo/{path}"
-                    if url in self._research.fetched_source_urls():
-                        continue
-                    try:
-                        self.execute_tool(
-                            "research_fetch",
-                            {"node_id": fetch_node.id, "url": url},
-                            call_id=f"cargo_floor_fetch_{uuid.uuid4().hex[:12]}",
-                        )
-                    except Exception as exc:
-                        logger.info("Cargo source-floor fetch failed: %s", exc)
             angles = (
                 " official primary source",
                 " standards document",
@@ -2384,12 +2458,7 @@ class SmaraAutonomousAgent:
                 " implementation guide",
                 " historical context",
                 " metadata and references",
-                " RFC Editor citation",
                 " official bibliography",
-                " standards track status",
-                " section 1 introduction",
-                " obsoleted specifications appendix",
-                " HTTP Working Group specification",
                 " errata and updates",
                 " canonical HTML document",
             )
@@ -2698,7 +2767,11 @@ class SmaraAutonomousAgent:
                 active_tools = get_tool_schemas(self.toolset)
 
             try:
-                resp = self._call_model_api(messages, tools=active_tools)
+                resp = self._call_model_api(
+                    messages,
+                    tools=active_tools,
+                    max_tokens=_model_output_token_limit(self.toolset),
+                )
             except Exception as e:
                 logger.error(f"Failed calling Model API: {e}")
                 # If the provider times out after it has already completed
@@ -2850,8 +2923,7 @@ class SmaraAutonomousAgent:
                     if (
                         self.session_engine is not None
                         and self.session_engine.get("research_required", False)
-                        and fn_name in {"research_gather", "research_fetch", "research_search", "research_inspect", "research_resolve", "research_validate"}
-                        and (call_count >= 2 or "not found" in raw_obs.lower() or "unresolved dependencies" in raw_obs.lower())
+                        and _should_enter_research_recovery(fn_name, call_count, raw_obs)
                     ):
                         research_recovery_mode = True
                     if fn_name == "research_validate" and call_count >= 2:
@@ -2862,6 +2934,11 @@ class SmaraAutonomousAgent:
                     guidance = ""
                     if fn_name == "research_resolve" and ("supported" in raw_obs or "ok" in raw_obs):
                         guidance = "\n[Research Guidance: Node resolved. Run research_validate on your resolved claims to verify evidence coverage, then deliver your concise answer with source URLs.]\n"
+                    elif fn_name == "research_fetch" and '"status": "error"' in raw_obs:
+                        guidance = (
+                            "\n[Research Guidance: This URL failed to fetch and has been recorded as a retrieval failure, not factual evidence. "
+                            "Do not retry the same URL unchanged. Search or fetch alternate authoritative sources, then resolve and validate using only successful fetched passages.]\n"
+                        )
                     elif fn_name == "research_validate" and ("passed" in raw_obs or "validated" in raw_obs):
                         if self._active_research_policy is not None and self._active_research_policy.comprehensive_report:
                             guidance = "\n[Research Guidance: Validation passed. Now call research_report with the comprehensive Markdown report. Only after its artifact is preserved may you deliver the final answer.]\n"
@@ -2940,6 +3017,21 @@ class SmaraAutonomousAgent:
                     )
                     _record_auto_ground(auto_grounded)
                     auto_resolved_nodes = bool(auto_grounded.get("resolved"))
+                    if auto_grounded.get("candidates"):
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "Retrieved passages are candidates, not answers. "
+                                "Check that each passage answers its planned question, "
+                                "then call research_resolve with a concise answer and "
+                                "the correct evidence IDs. Never infer relevance from "
+                                "lexical support alone. Candidate references: "
+                                + json.dumps([
+                                    {"node_id": item["node_id"], "evidence_id": item["evidence_id"]}
+                                    for item in auto_grounded["candidates"]
+                                ])
+                            ),
+                        })
                     logger.info("Deep auto-ground result: %s", json.dumps(auto_grounded, sort_keys=True)[:1200])
                     if auto_resolved_nodes:
                         trace.append({
@@ -3485,6 +3577,7 @@ class SmaraAutonomousAgent:
                     })
 
         if raw_concluding:
+            raw_concluding = _answer_requested_current_date(task, raw_concluding)
             if self.session_engine is not None and self.session_engine.get("research_required",False):
                 final_answer = raw_concluding.strip()
                 outcome = self._research.primary_outcome() if hasattr(self, "_research") else ""

@@ -29,7 +29,7 @@ def test_auto_router_selects_bounded_fact_and_broad_investigation():
     assert not should_route_to_research("Implement the latest parser fix and run tests")
 
 
-def test_auto_router_extracts_bounded_question_from_multiline_harness_prompt():
+def test_auto_router_does_not_treat_negative_report_constraint_as_request():
     prompt = (
         "As of 2026-09-13, answer this live-web research question: According to Cargo's official documentation, what is Cargo.lock used for?\n"
         "Use the canonical research_plan, then prefer research_gather; research_search plus research_fetch is the compatible fallback.\n"
@@ -39,6 +39,8 @@ def test_auto_router_extracts_bounded_question_from_multiline_harness_prompt():
     assert policy == QUICK_POLICY
     assert decision["selected"] == "quick"
     assert decision["score"] < 3
+    ordinary = prompt.replace("As of 2026-09-13, answer this live-web research question: ", "")
+    assert select_research_lane(ordinary)[0] == policy
 
 
 def test_hybrid_ranking_fuses_relevance_authority_and_provider_order():
@@ -170,7 +172,7 @@ def test_validation_repairs_stale_provider_evidence_id_from_fetched_passage(tmp_
     assert result["repaired_evidence"][0]["to"] == [record.id]
 
 
-def test_deep_controller_can_ground_ready_nodes_from_exact_fetched_sentences(tmp_path):
+def test_controller_candidates_do_not_resolve_even_exact_fetched_sentences(tmp_path):
     engine = SessionEngine(tmp_path, "auto-ground", budget=Budget(60, 20, 10, 100_000, 1), constrained=False)
     engine.set("research_policy", DEEP_POLICY.to_dict())
     session = CanonicalResearchSession(session_engine=engine)
@@ -190,9 +192,11 @@ def test_deep_controller_can_ground_ready_nodes_from_exact_fetched_sentences(tmp
         extracted_content=text.encode(), text=text, start=0, end=len(text),
     )
     result = session.auto_resolve_from_evidence()
-    assert result["status"] == "ok"
-    assert {item["node_id"] for item in result["resolved"]} == {"title", "scope"}
-    assert not result["remaining"]
+    assert result["status"] == "needs_resolution"
+    assert result["resolved"] == []
+    assert result["remaining"] == ["title", "scope"]
+    assert result["candidates"][0]["node_id"] == "title"
+    assert not session.claims
 
 
 def test_auto_ground_leaves_latest_questions_for_cross_source_comparison(tmp_path):
@@ -215,9 +219,22 @@ def test_auto_ground_leaves_latest_questions_for_cross_source_comparison(tmp_pat
 
     result = session.auto_resolve_from_evidence()
 
-    assert result["status"] == "no_match"
+    assert result["status"] == "needs_resolution"
     assert result["resolved"] == []
     assert result["remaining"] == ["release"]
+
+
+def test_wrong_pep_cannot_be_auto_promoted_to_answer(tmp_path):
+    engine = SessionEngine(tmp_path, "wrong-pep", budget=Budget(60, 20, 10, 100_000, 1), constrained=False)
+    session = CanonicalResearchSession(session_engine=engine)
+    session.plan("Project metadata", [{"id": "title", "question": "What is the exact title of PEP 621?"}])
+    text = "PEP 725 stores external dependency metadata in pyproject.toml."
+    session.index.add(kind="fetched_passage", url="https://peps.python.org/pep-0725/",
+                      content=text.encode(), extracted_content=text.encode(), text=text, start=0, end=len(text))
+    result = session.auto_resolve_from_evidence()
+    assert not result["resolved"]
+    assert result["remaining"] == ["title"]
+    assert not session.claims
 
 
 def test_deep_source_floor_failure_stops_without_provider_retry_loop(tmp_path, monkeypatch):

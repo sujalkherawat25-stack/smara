@@ -16,6 +16,7 @@ from .research_eval import ClaimCheck, score_claims
 from .research_graph import ResearchGraph, ResearchNode
 from .research_modes import QUICK_POLICY
 from .research_ranking import hybrid_rank
+from .research_sources import normalize_search_domains
 from .research_tools import FetchUrlTool, WebSearchTool
 from .pdf_collection import PdfCollectionError, scan_pdf_collection
 
@@ -35,6 +36,30 @@ def _run(coro):
     # objects remain on their original stable owner thread.
     with concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="smara-research-io") as pool:
         return pool.submit(asyncio.run, coro).result()
+
+
+def analysis_source_records(
+    analysis_evidence_id: str,
+    analyses: Iterable[Mapping[str, Any]],
+    evidence_records: Mapping[str, Any],
+) -> list[dict[str, str]]:
+    """Resolve a derived analysis citation to its original fetched web datasets."""
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for analysis in analyses:
+        if str(analysis.get("analysis_evidence_id") or "") != str(analysis_evidence_id):
+            continue
+        for source_id in analysis.get("evidence_ids", ()):
+            ident = str(source_id)
+            record = evidence_records.get(ident)
+            if isinstance(record, Mapping):
+                url = str(record.get("canonical_url") or record.get("url") or "")
+            else:
+                url = str(getattr(record, "canonical_url", "") or getattr(record, "url", ""))
+            if url.startswith(("https://", "http://")) and url not in seen:
+                result.append({"evidence_id": ident, "url": url})
+                seen.add(url)
+    return result
 
 
 class CanonicalResearchSession:
@@ -141,7 +166,7 @@ class CanonicalResearchSession:
         self._save("research_planned", {"question": question, "node_ids": added})
         return {"status": "ok", "ready": [node.id for node in self.graph.ready()], "graph": self.graph.to_dict()}
 
-    def search(self, node_id: str, query: str, max_results: int = 5) -> dict[str, Any]:
+    def search(self, node_id: str, query: str, max_results: int = 5, *, include_domains: Iterable[str] | None = None) -> dict[str, Any]:
         node = self.graph.nodes.get(node_id)
         if node is None:
             raise ResearchStateError("unknown research node")
@@ -149,7 +174,11 @@ class CanonicalResearchSession:
         if not deps_satisfied:
             unmet = [dep for dep in node.dependencies if not (self.graph.nodes.get(dep) and self.graph.nodes[dep].state == "supported")]
             raise ResearchStateError(f"Research node '{node_id}' has unresolved dependencies: {unmet}. Resolve them first with research_resolve, or define nodes without dependencies.")
-        hits = _run(self.searcher.search(query, max_results=max_results))
+        domains = normalize_search_domains(include_domains)
+        if domains:
+            hits = _run(self.searcher.search(query, max_results=max_results, include_domains=domains))
+        else:
+            hits = _run(self.searcher.search(query, max_results=max_results))
         records = []
         for hit in hits:
             evidence = self.index.add(
@@ -162,7 +191,7 @@ class CanonicalResearchSession:
             records.append({**asdict(hit), "evidence_id": evidence.id})
         self.leads.setdefault(node_id, []).extend(records)
         self.validation = {}
-        self._save("research_searched", {"node_id": node_id, "query": query, "lead_count": len(records)})
+        self._save("research_searched", {"node_id": node_id, "query": query, "include_domains": domains, "lead_count": len(records)})
         return {"status": "ok", "node_id": node_id, "leads": records}
 
     def _lane_policy(self) -> dict[str, Any]:
@@ -246,7 +275,11 @@ class CanonicalResearchSession:
             async def search_one(item):
                 try:
                     async with semaphore:
-                        hits = await self.searcher.search(item["query"], max_results=8)
+                        domains = normalize_search_domains(item.get("include_domains"))
+                        if domains:
+                            hits = await self.searcher.search(item["query"], max_results=8, include_domains=domains)
+                        else:
+                            hits = await self.searcher.search(item["query"], max_results=8)
                     return item, hybrid_rank(item["query"], hits, per_node)
                 except Exception as exc:
                     return item, exc
@@ -307,6 +340,9 @@ class CanonicalResearchSession:
         sources = self.fetched_source_urls()
         artifact_id = self._save("research_gathered", {
             "lane": policy["mode"], "node_ids": [item["node_id"] for item in items],
+            "queries": [{"node_id": item["node_id"], "query": item["query"],
+                         "include_domains": normalize_search_domains(item.get("include_domains"))}
+                        for item in items],
             "fetched_in_wave": sum(len(value["evidence"]) for value in node_results.values()),
             "source_count": len(sources), "search_errors": search_errors,
         })
@@ -810,245 +846,38 @@ class CanonicalResearchSession:
         }
 
     def auto_resolve_from_evidence(self, *, max_passages_per_node: int = 2, min_score: float = 0.0) -> dict[str, Any]:
-        """Ground unresolved nodes from exact fetched passages only.
+        """Offer retrieval candidates without treating text overlap as an answer.
 
-        This is a deterministic controller fallback for providers that stall
-        after retrieval.  It never invents a claim: each candidate is an exact
-        sentence (or bounded line) copied from an immutable fetched passage,
-        and ``resolve`` still applies the normal lexical, polarity, quantity,
-        and provenance checks.  Nodes are processed in dependency waves so a
-        provider-created DAG can converge without another unbounded model loop.
+        Kept for controller compatibility. Only explicit research_resolve calls
+        may resolve nodes: an exact quote can be supported yet irrelevant to the
+        user's question. Candidate ranking is topic-neutral and never inserts
+        canonical answers or changes the evidence graph.
         """
-        stop_words = {
-            "what", "which", "when", "where", "who", "how", "does", "did", "is", "are", "was", "were",
-            "the", "a", "an", "and", "or", "of", "to", "for", "from", "in", "on", "by", "with", "as",
-            "according", "official", "exact", "title", "purpose", "role", "use", "current",
-            "earlier", "family", "provide", "including", "explain", "compare", "comprehensive", "report",
-        }
-
-        def terms(value: str) -> list[str]:
-            return [
-                token for token in re.findall(r"[a-z0-9][a-z0-9._/-]{1,}", str(value or "").casefold())
-                if token not in stop_words
-            ]
-
-        records = [
-            (ident, record)
-            for ident, record in self.index.records.items()
-            if record.kind in {"fetched_passage", "pdf_page", "pdf_table", "image_ocr"}
-            and str(record.text or "").strip()
-        ]
-        if not records:
-            return {"status": "no_evidence", "resolved": [], "remaining": [node.id for node in self.graph.nodes.values() if node.state == "unresolved"]}
-
-        resolved: list[dict[str, Any]] = []
-        # Iterate waves because resolving a supported prerequisite can make a
-        # dependent node ready in the same controller pass.
-        progress = True
-        while progress:
-            progress = False
-            for node in self.graph.ready():
-                question_terms = terms(node.question)
-                if not question_terms:
+        candidates: list[dict[str, Any]] = []
+        for node in self.graph.ready():
+            question_terms = set(re.findall(r"\b\w{3,}\b", node.question.casefold()))
+            ranked: list[tuple[float, str, str]] = []
+            for ident, record in self.index.records.items():
+                if record.kind not in {"fetched_passage", "pdf_page", "pdf_table", "image_ocr"}:
                     continue
-                freshness_question = bool(
-                    re.search(r"\b(?:latest|newest|most\s+recent|currently?\s+stable)\b", node.question, re.I)
-                )
-                if freshness_question:
-                    # Lexical support can prove that a historical release was
-                    # once described as "latest", but it cannot prove that it
-                    # is still latest relative to every other fetched source.
-                    # Leave time-sensitive comparisons to the provider so it
-                    # must compare the evidence set instead of auto-validating
-                    # the first strongly matching passage.
+                text = str(record.text or "").strip()
+                if not text:
                     continue
-                purpose_question = bool(re.search(r"\b(?:what|which)\b.+\bused\s+for\b", node.question, re.I))
-                license_name_question = bool(re.search(r"\bname\b.+\blicense\b", node.question, re.I))
-                license_fact_question = bool(re.search(r"\blicense\b", node.question, re.I))
-                rfc_semantics_question = bool(
-                    re.search(r"\bwhich\s+rfc\b", node.question, re.I)
-                    and re.search(r"\bhttp\s+semantics\b", node.question, re.I)
-                )
-                exact_dependency_question = bool(
-                    re.search(r"\bexact\b.+\bdependenc", node.question, re.I)
-                    or re.search(r"\bdependenc.+\bexact\b", node.question, re.I)
-                )
-                exact_title_question = bool(re.search(r"\bexact\s+title\b", node.question, re.I))
-                # A few high-value fact forms have a stable, concise claim
-                # that is easier to validate than a navigation-heavy page
-                # excerpt.  Synthesize it only when the immutable passage
-                # contains the corresponding lexical anchors and the normal
-                # evidence judge supports the wording.
-                canonical_claim = ""
-                canonical_markers: tuple[str, ...] = ()
-                lowered_question = node.question.casefold()
-                if (exact_dependency_question or purpose_question) and "cargo.lock" in lowered_question:
-                    canonical_claim = "Cargo.lock contains exact information about your dependencies."
-                    canonical_markers = ("cargo.lock", "exact information", "dependenc")
-                elif rfc_semantics_question:
-                    canonical_claim = "RFC 9110 - HTTP Semantics"
-                    canonical_markers = ("rfc 9110", "http semantics")
-                elif exact_title_question and re.search(r"\brfc\s*[-#]?9110\b", lowered_question, re.I):
-                    # RFC text sources commonly spell the identifier as
-                    # "Request for Comments: 9110" rather than repeating the
-                    # literal token "RFC 9110".  The title is still
-                    # authoritative when the identifier and title phrase are
-                    # present in the same immutable passage.
-                    canonical_claim = "RFC 9110 - HTTP Semantics"
-                    canonical_markers = ("9110", "http semantics")
-                elif license_fact_question and "cpython" in lowered_question:
-                    canonical_claim = "Python Software Foundation License Version 2."
-                    canonical_markers = ("python software foundation license", "psf license")
-                elif license_fact_question and "django" in lowered_question:
-                    canonical_claim = "BSD-3-Clause license."
-                    canonical_markers = ("bsd-3-clause", "bsd 3-clause")
-                elif license_fact_question and "numpy" in lowered_question:
-                    canonical_claim = "modified BSD license."
-                    canonical_markers = ("modified bsd", "bsd-3-clause", "bsd 3-clause")
-                if canonical_claim:
-                    for ident, record in records:
-                        lowered_text = str(record.text or "").casefold()
-                        marker_match = (
-                            any(marker in lowered_text for marker in canonical_markers)
-                            if license_fact_question
-                            else all(marker in lowered_text for marker in canonical_markers)
-                        )
-                        if not marker_match:
-                            continue
-                        if self.index.judge(ident, canonical_claim, require_fetched=True).state != "supported":
-                            continue
-                        result = self.resolve(node.id, canonical_claim, [ident])
-                        state = str((result.get("resolution") or {}).get("state") or "")
-                        if state == "supported":
-                            resolved.append({"node_id": node.id, "claim": canonical_claim, "evidence_id": ident, "score": 2.0})
-                            progress = True
-                            break
-                    if any(item.get("node_id") == node.id for item in resolved):
-                        continue
-                candidates: list[tuple[float, str, str]] = []
-                for ident, record in records:
-                    raw_sentences = [
-                        item.strip() for item in re.split(r"(?<=[.!?])\s+|\n+", str(record.text))
-                        if item.strip()
-                    ]
-                    # Keep candidate extraction bounded even for very large
-                    # pages; the evidence index remains the source of truth.
-                    sentence_windows: list[str] = []
-                    bounded_sentences = raw_sentences[:4000]
-                    for sentence_index, _sentence in enumerate(bounded_sentences):
-                        for width in range(1, 4):
-                            end_index = sentence_index + width
-                            if end_index > len(bounded_sentences):
-                                break
-                            window = " ".join(bounded_sentences[sentence_index:end_index]).strip()
-                            if len(window) >= 20 and len(window) <= 2400:
-                                sentence_windows.append(window)
-                    for sentence in sentence_windows:
-                        sentence_terms = set(terms(sentence))
-                        # For purpose questions, a sentence that merely
-                        # mentions the identifier in an unrelated example
-                        # (for example, a resolver/version anecdote) is not a
-                        # useful answer.  Require purpose/lockfile language
-                        # in addition to the identifier before considering it
-                        # for deterministic grounding.
-                        if purpose_question:
-                            purpose_markers = (
-                                "used for", "used to", "records", "contains",
-                                "exact information", "exact dependenc", "lockfile",
-                                "dependencies", "dependency information",
-                            )
-                            if not any(marker in sentence.casefold() for marker in purpose_markers):
-                                continue
-                        if license_name_question:
-                            license_markers = (
-                                "postgresql license", "license is", "called", "name is",
-                                "software license:", "license named",
-                            )
-                            if not any(marker in sentence.casefold() for marker in license_markers):
-                                continue
-                        if license_fact_question:
-                            license_fact_markers = (
-                                "licensed under", "license:", "license file", "software license",
-                                "psf", "python software foundation license", "psf license", "bsd", "apache", "mit license", "gpl", "modified bsd",
-                                "postgresql license", "license terms", "license agreement",
-                            )
-                            if not any(marker in sentence.casefold() for marker in license_fact_markers):
-                                continue
-                        if rfc_semantics_question:
-                            # Do not ground a "which RFC defines HTTP
-                            # Semantics" node from a generic HTTP paragraph
-                            # or an unrelated RFC number.  The candidate must
-                            # contain the requested title phrase and an RFC
-                            # identifier in the same bounded passage.
-                            lowered_sentence = sentence.casefold()
-                            rfc_match = re.search(r"\brfc\s*[-#]?(\d{3,5})\b", sentence, re.I)
-                            title_match = re.search(r"http\s+semantics", lowered_sentence)
-                            close_to_title = bool(
-                                title_match
-                                and rfc_match
-                                and abs(title_match.start() - rfc_match.start()) <= 80
-                            )
-                            if not close_to_title:
-                                continue
-                        if exact_dependency_question:
-                            exact_markers = (
-                                "exact information", "exact dependenc", "exact version",
-                                "which revision", "version information",
-                            )
-                            if not any(marker in sentence.casefold() for marker in exact_markers):
-                                continue
-                        if exact_title_question:
-                            lowered_question = node.question.casefold()
-                            if "rfc" in lowered_question and re.search(r"\brfc\s*[-#]?\d{3,5}\b", node.question, re.I):
-                                title_markers = ("http semantics", "problem details", "http/1.1", "http semantics")
-                            elif "pep" in lowered_question:
-                                title_markers = ("storing project metadata", "pyproject.toml")
-                            else:
-                                title_markers = ()
-                            if title_markers and not any(marker in sentence.casefold() for marker in title_markers):
-                                continue
-                        overlap = sum(token in sentence_terms for token in question_terms)
-                        # Require at least two meaningful question terms when
-                        # available.  A single generic overlap (for example,
-                        # ``Cargo.lock`` in a sentence about version-control
-                        # policy) is not enough to ground the requested fact;
-                        # leave that node for provider refinement instead.
-                        if overlap < min(2, len(set(question_terms))):
-                            continue
-                        score = overlap / max(1, len(set(question_terms)))
-                        # Prefer concise passages and exact question phrases,
-                        # while keeping source order deterministic.
-                        phrase_bonus = 0.25 if str(node.question).casefold().strip() in sentence.casefold() else 0.0
-                        # Identifier questions (RFC/PEP versions, issue
-                        # numbers, standards, etc.) should prefer a passage
-                        # that actually contains the identifier instead of a
-                        # nearby generic definition sentence.
-                        identifier_bonus = 0.0
-                        if re.search(r"\b(?:rfc|pep|iso|std)\b", str(node.question), re.I):
-                            if re.search(r"\b(?:rfc|pep|iso|std)\s*[-#]?\d{2,6}\b", sentence, re.I):
-                                identifier_bonus = 0.4
-                        version_bonus = 0.0
-                        if re.search(r"\b(?:version|release|added|introduced|new in)\b", str(node.question), re.I):
-                            if re.search(r"\b(?:new in|version|release(?:d)?|introduced)\b[^.\n]{0,80}\b\d+(?:\.\d+)+", sentence, re.I):
-                                version_bonus = 0.4
-                        length_penalty = min(len(sentence), 1200) / 12000
-                        candidates.append((score + phrase_bonus + identifier_bonus + version_bonus - length_penalty, ident, sentence))
-                candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
-                for _score, ident, sentence in candidates[: max(1, int(max_passages_per_node))]:
-                    if float(_score) < float(min_score):
-                        continue
-                    judgment = self.index.judge(ident, sentence, require_fetched=True)
-                    if judgment.state != "supported":
-                        continue
-                    result = self.resolve(node.id, sentence, [ident])
-                    state = str((result.get("resolution") or {}).get("state") or "")
-                    if state == "supported":
-                        resolved.append({"node_id": node.id, "claim": sentence, "evidence_id": ident, "score": round(float(_score), 4)})
-                        progress = True
-                        break
-
+                text_terms = set(re.findall(r"\b\w{3,}\b", text.casefold()))
+                score = len(question_terms & text_terms) / max(1, len(question_terms))
+                if score >= min_score and score > 0:
+                    ranked.append((score, ident, text[:1200]))
+            ranked.sort(key=lambda item: (-item[0], item[1]))
+            for score, ident, passage in ranked[:max(1, int(max_passages_per_node))]:
+                candidates.append({
+                    "node_id": node.id, "evidence_id": ident,
+                    "passage": passage, "score": round(score, 4),
+                })
         remaining = [node.id for node in self.graph.nodes.values() if node.state in {"unresolved", "blocked"}]
-        return {"status": "ok" if resolved else "no_match", "resolved": resolved, "remaining": remaining}
+        return {
+            "status": "needs_resolution" if candidates else "no_match",
+            "resolved": [], "remaining": remaining, "candidates": candidates,
+        }
 
     def validate(self, claims: Iterable[Mapping[str, Any]], *, require_complete: bool = True) -> dict[str, Any]:
         requested = [dict(item) for item in claims]
@@ -1101,7 +930,15 @@ class CanonicalResearchSession:
         if repaired:
             self.validation["repaired_evidence"] = repaired
         artifact_id = self._save("research_validated", {"passed": passed, "claim_count": len(checks), "unresolved_nodes": unresolved})
-        return {"status": "ok", "passed": passed, "research_state_artifact_id": artifact_id, **self.validation}
+        return {
+            "status": "ok", "passed": passed, "research_state_artifact_id": artifact_id,
+            **self.validation,
+            "next_step": (
+                "Call research_resolve for each unresolved node with a concise answer and evidence IDs, "
+                "then validate again. Passage support alone does not resolve planned questions."
+                if unresolved else "Review the validation score before giving your final answer."
+            ),
+        }
 
     def write_report(self, title: str, markdown: str) -> dict[str, Any]:
         """Persist a comprehensive deep-research report after claim validation."""

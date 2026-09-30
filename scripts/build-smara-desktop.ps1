@@ -47,6 +47,9 @@ try {
         '--hidden-import', 'docx'
         '--hidden-import', 'openpyxl'
         '--hidden-import', 'pptx'
+        '--hidden-import', 'smara.research_watch'
+        '--hidden-import', 'smara.app_adapter'
+        '--hidden-import', 'smara.research_chat'
     )
     foreach ($module in $pyInstallerExcludes) {
         $pyInstallerArgs += @('--exclude-module', $module)
@@ -62,6 +65,7 @@ try {
     $resourceDir = Join-Path $appRoot 'src-tauri\resources'
     New-Item -ItemType Directory -Force -Path $resourceDir | Out-Null
     Copy-Item -LiteralPath (Join-Path $executorDist 'smara-desktop.exe') -Destination (Join-Path $resourceDir 'smara-desktop.exe') -Force
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'release\evidence\LIVE_WEB_ACCEPTANCE_V5.json') -Destination (Join-Path $resourceDir 'LIVE_WEB_ACCEPTANCE_V5.json') -Force
 } finally {
     Pop-Location
 }

@@ -80,11 +80,12 @@ def select_research_lane(question: str, requested: ResearchMode | str = "auto") 
     raw_question = str(question or "").strip()
     normalized = re.sub(r"\s+", " ", raw_question).strip()
 
-    # Extract the underlying one-line target before collapsing whitespace.
-    # The acceptance harness appends detailed instructions on following lines;
-    # scoring those instructions made bounded facts look like deep reports.
-    scaffold_match = re.search(r"answer this live-web research question:\s*([^\r\n]+)", raw_question, re.I)
-    target_text = scaffold_match.group(1).strip() if scaffold_match else normalized
+    # Negative directives are constraints, not requested deliverables. Apply
+    # the same rule to every prompt; never recognise evaluation scaffolding.
+    target_text = " ".join(
+        part for part in re.split(r"(?<=[.!?])\s+|\n+", raw_question)
+        if not re.match(r"^\s*(?:do not|don't|never|avoid)\b", part, re.I)
+    ).strip() or normalized
     lowered = target_text.casefold()
     if requested_value != "auto":
         policy = POLICIES[requested_value]
@@ -132,12 +133,14 @@ def research_lane_prompt(policy: ResearchPolicy) -> str:
     if policy.mode == "quick":
         return (
             "QUICK RESEARCH lane: answer a bounded question with 1-4 research nodes and 3-8 diverse fetched sources. "
-            "Prefer research_gather for parallel retrieval, resolve every required claim, validate, then answer concisely. "
+            "Prefer research_gather for parallel retrieval, use include_domains for first-party sources, recover from failed URLs with alternate pages, "
+            "resolve every required claim, validate, then answer concisely. "
             "Do not expand into a comprehensive report unless evidence forces the auto-router to be reconsidered."
         )
     return (
         "DEEP RESEARCH lane: build an adaptive dependency DAG with multiple perspectives and explicit stopping criteria. "
-        "Use research_gather in parallel waves, obtain at least 20 diverse fetched sources, add follow-up or contradiction nodes as evidence changes the investigation, "
+        "Use research_gather in parallel waves, prefer first-party sources using include_domains, recover from failed URLs with alternate pages, "
+        "obtain at least 20 diverse fetched sources, add follow-up or contradiction nodes as evidence changes the investigation, "
         "resolve and validate all material claims, then call research_report to preserve a comprehensive Markdown report before finalizing. "
         "Keep the DAG bounded to the useful questions needed for the user's request (normally no more than six nodes); "
         "keep the validated claim set limited to the claims requested by the user (do not add incidental bibliographic facts); "

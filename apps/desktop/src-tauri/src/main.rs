@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter};
@@ -293,7 +293,7 @@ fn stored_local_model_profiles() -> Vec<LocalModelProfile> {
                 let canonical_model = match model.as_str() {
                     "glm52" => Some("glm5.2"),
                     "glm53" => Some("glm5.3"),
-                    "glm53flash" => Some("glm5.3-flash"),
+                    "glm53flash" => Some("glm5.3"),
                     _ => None,
                 };
                 if let Some(canonical_model) = canonical_model {
@@ -829,6 +829,16 @@ fn run_executor_with_input_timeout_in_dir(args: Vec<String>, input: &str, timeou
     }
     command.stdin(Stdio::piped());
     let mut child = command.spawn().map_err(|error| format!("Could not start the local executor input: {error}"))?;
+    let mut stdout_pipe = child.stdout.take().ok_or("Executor stdout is unavailable")?;
+    let mut stderr_pipe = child.stderr.take().ok_or("Executor stderr is unavailable")?;
+    let stdout_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout_pipe.read_to_end(&mut bytes).map(|_| bytes)
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stderr_pipe.read_to_end(&mut bytes).map(|_| bytes)
+    });
     child.stdin.take().ok_or_else(|| "Could not open the local executor input.".to_owned())?.write_all(input.as_bytes()).map_err(|error| format!("Could not send local executor input: {error}"))?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_seconds.max(1));
     let mut timed_out = false;
@@ -844,13 +854,17 @@ fn run_executor_with_input_timeout_in_dir(args: Vec<String>, input: &str, timeou
             Err(error) => return Err(format!("Could not inspect the local executor: {error}")),
         }
     }
-    let output = child.wait_with_output().map_err(|error| format!("Could not finish the local executor request: {error}"))?;
+    let status = child.wait().map_err(|error| format!("Could not finish the local executor request: {error}"))?;
+    let stdout_bytes = stdout_reader.join().map_err(|_| "Executor stdout reader failed".to_owned())?
+        .map_err(|error| error.to_string())?;
+    let stderr_bytes = stderr_reader.join().map_err(|_| "Executor stderr reader failed".to_owned())?
+        .map_err(|error| error.to_string())?;
     if timed_out {
         return Err(format!("The local executor exceeded its {timeout_seconds}s deadline and was stopped."));
     }
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    if !output.status.success() { return Err(if stderr.is_empty() { stdout } else { stderr }); }
+    let stdout = String::from_utf8_lossy(&stdout_bytes).trim().to_owned();
+    let stderr = String::from_utf8_lossy(&stderr_bytes).trim().to_owned();
+    if !status.success() { return Err(if stderr.is_empty() { stdout } else { stderr }); }
     Ok(stdout)
 }
 
@@ -1468,7 +1482,7 @@ fn normalize_provider_model(provider: &str, model: &str) -> String {
             return "glm5.3".to_string();
         }
         if m_lower == "glm-5.3-flash" || m_lower == "glm5.3-flash" {
-            return "glm5.3-flash".to_string();
+            return "glm5.3".to_string();
         }
         if m_lower == "gemma-4-31b" || m_lower == "gemma-4" || m_lower == "gemma4" || m_lower == "gemma" {
             return "gemma4".to_string();
@@ -1932,11 +1946,11 @@ async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile
         // Quick research is deliberately bounded. A slow or unavailable
         // connector/provider must surface an honest retryable state, never
         // hold the Desktop composer hostage behind the legacy one-hour turn.
-        "quick" => 75,
+        "quick" => 240,
         // Deep research can work for longer but is still finite and uses the
         // same durable cancellation envelope as every local turn.
-        "deep" => 1_800,
-        _ => 300,
+        "deep" => 1_860,
+        _ => 1_860,
     };
     let app_handle = app.clone();
     let conv_id = args.conversation_id.clone();
@@ -2076,7 +2090,8 @@ async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile
             "completed": completed,
             "unresolved_items": unresolved_items,
             "session_id": final_val.get("session_id").cloned().unwrap_or_else(|| json!(conv_id.clone())),
-            "event_cursor": final_val.get("event_cursor").cloned().unwrap_or(Value::Null)
+            "event_cursor": final_val.get("event_cursor").cloned().unwrap_or(Value::Null),
+            "research_review": final_val.get("research_review").cloned().unwrap_or(Value::Null)
         }));
 
         Ok(())
@@ -2507,50 +2522,11 @@ fn run_python_bridge_code_sync(py_code: &str) -> Result<Value, String> {
         .or_else(|| current_connection().allowed_roots.first().map(PathBuf::from))
         .filter(|path| path.is_dir());
     let bridge_args = vec!["--state".to_owned(), state_path().display().to_string(), "--python-bridge".to_owned()];
-    if let Ok(raw) = run_executor_with_input_timeout_in_dir(bridge_args, py_code, 120, bridge_cwd.as_deref()) {
-        if let Ok(value) = serde_json::from_str::<Value>(raw.trim()) {
-            return Ok(value);
-        }
-    }
-
-    let python_candidates = [
-        "python",
-        "python.exe",
-        "C:\\Users\\sujal\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
-    ];
-
-    let configured_root = smara_repo_root().or_else(|| current_connection().allowed_roots.first().map(PathBuf::from)).ok_or_else(|| {
-        "Smara source repository is unavailable for this panel. Configure an allowed workspace folder in Desktop Settings.".to_owned()
-    })?;
-    let cwd = configured_root.as_path();
-
-    let mut last_err = String::from("No Python executable succeeded");
-
-    for py in python_candidates {
-        let mut cmd = Command::new(py);
-        cmd.arg("-c").arg(py_code);
-        cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        cmd.env("PYTHONPATH", format!("src;{};{}\\\\src", cwd.display(), cwd.display()));
-        cmd.env("PYTHONIOENCODING", "utf-8");
-        cmd.env("PYTHONUTF8", "1");
-        cmd.env("PYTHONLEGACYWINDOWSSTDIO", "0");
-        cmd.current_dir(cwd);
-        command_hidden(&mut cmd);
-        
-        if let Ok(output) = cmd.output() {
-            let stdout_str = String::from_utf8_lossy(&output.stdout);
-            let stderr_str = String::from_utf8_lossy(&output.stderr);
-            if let Ok(val) = serde_json::from_str::<Value>(stdout_str.trim()) {
-                return Ok(val);
-            }
-            if !output.status.success() {
-                last_err = format!("Python error (exit {}): {}", output.status, stderr_str.trim());
-            } else if !stdout_str.trim().is_empty() {
-                last_err = format!("Invalid JSON output: {}", stdout_str.trim());
-            }
-        }
-    }
-    Err(if last_err.is_empty() { "The Desktop bridge returned no JSON output.".to_owned() } else { last_err })
+    // The executor already selects bundled or development Python before it
+    // starts. Never rerun a snippet after an error: it may have saved state or
+    // incurred model costs before failing. Allow time beyond the 120s lane.
+    let raw = run_executor_with_input_timeout_in_dir(bridge_args, py_code, 300, bridge_cwd.as_deref())?;
+    serde_json::from_str::<Value>(raw.trim()).map_err(|error| format!("Desktop bridge returned invalid JSON: {error}"))
 }
 
 async fn run_python_bridge_code(py_code: &str) -> Result<Value, String> {
@@ -2851,6 +2827,60 @@ async fn run_research(topic: String, research_mode: String) -> Result<Value, Str
 }
 
 #[tauri::command]
+async fn list_research_watches() -> Result<Value, String> {
+    let py_code = "import json, sys\nsys.path.insert(0, 'src')\nfrom pathlib import Path\nfrom smara.research_watch import ResearchWatchStore\nprint(json.dumps(ResearchWatchStore(Path.cwd()).list()))\n";
+    run_python_bridge_code(py_code).await
+}
+
+#[tauri::command]
+async fn add_research_watch(topic: String, interval_hours: f64, baseline: Option<Value>) -> Result<Value, String> {
+    let topic_literal = python_string_literal(topic.trim());
+    let baseline_json = serde_json::to_string(&baseline.unwrap_or(Value::Null)).map_err(|error| error.to_string())?;
+    let baseline_literal = python_string_literal(&baseline_json);
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom pathlib import Path\nfrom smara.research_watch import ResearchWatchStore\nstore = ResearchWatchStore(Path.cwd())\nbaseline = json.loads({baseline_literal})\nprint(json.dumps(store.add({topic_literal}, {interval_hours}, baseline=baseline if baseline else None)))\n"
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn run_research_watch(watch_id: String) -> Result<Value, String> {
+    let id_literal = python_string_literal(watch_id.trim());
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom pathlib import Path\nfrom smara.research_watch import ResearchWatchStore\nresult = ResearchWatchStore(Path.cwd()).run({id_literal}, force=True)\nprint(json.dumps(result))\n"
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn set_research_watch_enabled(watch_id: String, enabled: bool) -> Result<Value, String> {
+    let id_literal = python_string_literal(watch_id.trim());
+    let enabled_value = if enabled { "True" } else { "False" };
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom pathlib import Path\nfrom smara.research_watch import ResearchWatchStore\nstore = ResearchWatchStore(Path.cwd())\nstore.set_enabled({id_literal}, {enabled_value})\nprint(json.dumps({{'id': {id_literal}, 'enabled': {enabled_value}}}))\n"
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn remove_research_watch(watch_id: String) -> Result<Value, String> {
+    let id_literal = python_string_literal(watch_id.trim());
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom pathlib import Path\nfrom smara.research_watch import ResearchWatchStore\nstore = ResearchWatchStore(Path.cwd())\nstore.remove({id_literal})\nprint(json.dumps({{'id': {id_literal}, 'removed': True, 'history_retained': True}}))\n"
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn research_watch_history(watch_id: String) -> Result<Value, String> {
+    let id_literal = python_string_literal(watch_id.trim());
+    let py_code = format!(
+        "import json, sys\nsys.path.insert(0, 'src')\nfrom pathlib import Path\nfrom smara.research_watch import ResearchWatchStore\nprint(json.dumps(ResearchWatchStore(Path.cwd()).history({id_literal})))\n"
+    );
+    run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
 async fn generate_pr_draft(intent: Option<String>) -> Result<Value, String> {
     let intent_literal = python_string_literal(intent.unwrap_or_default().trim());
     let py_code = format!(
@@ -3042,6 +3072,36 @@ async fn get_benchmark_scorecards() -> Result<Value, String> {
         "gaia": benchmark_scorecard("GAIA Level 1 (strict)", &reports.join("gaia_fair_level1_results.json")),
         "swe_bench": benchmark_scorecard("SWE-bench style repo repair", &reports.join("swe_bench_results.json")),
         "desktop": benchmark_scorecard("GAIA shared-runtime desktop evaluation", &reports.join("gaia_fair_level1_results.json")),
+    }))
+}
+
+#[tauri::command]
+async fn get_research_evaluation_scorecard() -> Result<Value, String> {
+    let base = smara_repo_root().unwrap_or_else(|| PathBuf::from("."));
+    let checkout_report = base.join("release").join("evidence").join("LIVE_WEB_ACCEPTANCE_V5.json");
+    let bundled_report = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|parent|
+        parent.join("resources").join("LIVE_WEB_ACCEPTANCE_V5.json")));
+    let path = if checkout_report.is_file() { checkout_report }
+        else { bundled_report.unwrap_or(checkout_report) };
+    let report = match fs::read_to_string(&path) {
+        Ok(text) => match serde_json::from_str::<Value>(&text) {
+            Ok(value) => value,
+            Err(error) => return Err(format!("Research evaluation report is invalid JSON: {error}")),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(json!({"status":"not_run", "report_path":path.display().to_string()}));
+        }
+        Err(error) => return Err(format!("Could not read research evaluation report: {error}")),
+    };
+    Ok(json!({
+        "status": if report.get("summary").is_some() { "completed" } else { "in_progress" },
+        "suite": report.get("suite").cloned().unwrap_or(Value::Null),
+        "model": report.get("model").cloned().unwrap_or(Value::Null),
+        "provider": report.get("provider").cloned().unwrap_or(Value::Null),
+        "terminal_state": report.get("terminal_state").cloned().unwrap_or(Value::Null),
+        "summary": report.get("summary").cloned().unwrap_or(Value::Null),
+        "report_path": path.display().to_string(),
+        "started_at_epoch": report.get("started_at_epoch").cloned().unwrap_or(Value::Null),
     }))
 }
 
@@ -3338,7 +3398,15 @@ async fn run_subagent_delegation(goal: String, role: String, context: Option<Str
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_local_chat_history, load_task_details, decide_local_task, stream_chat, list_runtime_sessions, get_runtime_session, cancel_runtime_session, resume_runtime_session, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile, open_file_in_default_app, reveal_file_in_explorer, read_file_preview, inspect_ast_graph, run_test_suite, auto_fix_tests, rollback_refactor_snapshot, get_git_status, get_git_branches, create_git_branch, switch_git_branch, generate_ai_commit_message, commit_git_changes, get_git_log, detect_git_conflicts, resolve_git_conflict, get_file_git_diff, semantic_search, rebuild_semantic_index, scrape_web_page, capture_browser_screenshot, run_browser_e2e, diagnose_browser_ui_component, get_dual_plane_status, sync_dual_plane_memory, query_dual_plane_memory, list_adrs, create_adr, get_coding_conventions, get_symbol_evolution, run_swarm_task, get_swarm_history, get_dynamic_tools, run_dynamic_tool, synthesize_dynamic_tool, run_goal_task, get_goal_sessions, run_deep_research, run_research, generate_pr_draft, publish_pr_branch, run_terminal_command, list_learned_skills, save_learned_skill, delete_learned_skill, run_gaia_benchmark, run_swe_benchmark, get_benchmark_scorecards, open_benchmark_report, list_task_memory, add_task_memory_entry, replace_task_memory_entry, remove_task_memory_entry, search_task_memory, get_memory_snapshot, list_skills_v2, view_skill_v2, create_skill_v2, skill_lifecycle, validate_skill_v2, promote_skill_v2, revoke_skill_v2, rollback_skill_v2, list_integration_health, begin_integration_oauth, disconnect_integration, get_dag_workflow, step_dag_workflow, run_dag_workflow, retry_dag_node, inject_dag_node, get_subagent_roles, run_subagent_delegation])
+        .setup(|_app| {
+            std::thread::spawn(|| loop {
+                let code = "import json, sys\nsys.path.insert(0, 'src')\nfrom pathlib import Path\ndb = Path.cwd() / '.smara' / 'research_watch.sqlite3'\nresults = []\nif db.exists():\n from smara.research_watch import ResearchWatchStore\n results = ResearchWatchStore(Path.cwd()).run_due(limit=1)\nprint(json.dumps({'processed': len(results)}))\n";
+                let _ = run_python_bridge_code_sync(code);
+                std::thread::sleep(std::time::Duration::from_secs(60));
+            });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_local_chat_history, load_task_details, decide_local_task, stream_chat, list_runtime_sessions, get_runtime_session, cancel_runtime_session, resume_runtime_session, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile, open_file_in_default_app, reveal_file_in_explorer, read_file_preview, inspect_ast_graph, run_test_suite, auto_fix_tests, rollback_refactor_snapshot, get_git_status, get_git_branches, create_git_branch, switch_git_branch, generate_ai_commit_message, commit_git_changes, get_git_log, detect_git_conflicts, resolve_git_conflict, get_file_git_diff, semantic_search, rebuild_semantic_index, scrape_web_page, capture_browser_screenshot, run_browser_e2e, diagnose_browser_ui_component, get_dual_plane_status, sync_dual_plane_memory, query_dual_plane_memory, list_adrs, create_adr, get_coding_conventions, get_symbol_evolution, run_swarm_task, get_swarm_history, get_dynamic_tools, run_dynamic_tool, synthesize_dynamic_tool, run_goal_task, get_goal_sessions, run_deep_research, run_research, list_research_watches, add_research_watch, run_research_watch, set_research_watch_enabled, remove_research_watch, research_watch_history, generate_pr_draft, publish_pr_branch, run_terminal_command, list_learned_skills, save_learned_skill, delete_learned_skill, run_gaia_benchmark, run_swe_benchmark, get_benchmark_scorecards, get_research_evaluation_scorecard, open_benchmark_report, list_task_memory, add_task_memory_entry, replace_task_memory_entry, remove_task_memory_entry, search_task_memory, get_memory_snapshot, list_skills_v2, view_skill_v2, create_skill_v2, skill_lifecycle, validate_skill_v2, promote_skill_v2, revoke_skill_v2, rollback_skill_v2, list_integration_health, begin_integration_oauth, disconnect_integration, get_dag_workflow, step_dag_workflow, run_dag_workflow, retry_dag_node, inject_dag_node, get_subagent_roles, run_subagent_delegation])
         .run(tauri::generate_context!())
         .expect("error while running Smara Desktop");
 }
@@ -3400,6 +3468,7 @@ mod tests {
     #[test]
     fn sarvam_v2_models_are_preserved_and_normalized() {
         assert_eq!(normalize_provider_model("sarvam-glm", "glm-5.3"), "glm5.3");
+        assert_eq!(normalize_provider_model("sarvam-glm", "glm5.3-flash"), "glm5.3");
         assert_eq!(normalize_provider_model("sarvam", "sarvam-105b"), "sarvam-105b");
     }
 

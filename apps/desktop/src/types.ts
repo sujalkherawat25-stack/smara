@@ -2,6 +2,18 @@ export type Screen = "chat" | "activity" | "settings";
 
 export type ResearchMode = "auto" | "quick" | "deep";
 
+export interface ResearchWatch {
+  id: string;
+  topic: string;
+  workspace: string;
+  interval_seconds: number;
+  next_run_at: number;
+  enabled: boolean;
+  running: boolean;
+  last_run_at?: number | null;
+  last_error?: string | null;
+}
+
 export interface ConnectionState {
   runtime_mode: "local" | "cloud";
   api_url: string;
@@ -99,6 +111,7 @@ export interface ChatEvent {
   session_id?: string;
   event_cursor?: number;
   sequence?: number;
+  research_review?: ResearchReview | null;
 }
 
 export interface RuntimeSessionEvent {
@@ -148,6 +161,27 @@ export interface ChatMessage {
   needsInput?: boolean;
   error?: string;
   sourcePrompt?: string;
+  researchReview?: ResearchReview | null;
+}
+
+export interface ResearchReview {
+  passed: boolean;
+  claim_count?: number;
+  supported_claims?: number;
+  evidence_coverage?: number;
+  note?: string;
+  claims: {
+    claim: string;
+    supported: boolean;
+    citations: {
+      evidence_id: string;
+      url: string;
+      supported: boolean;
+      retrieved_at?: string;
+      passage?: string;
+    }[];
+  }[];
+  failures: { url: string; error: string }[];
 }
 
 export interface ChatHistoryTurn {

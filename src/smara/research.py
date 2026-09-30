@@ -31,7 +31,10 @@ _DISCOVERY_ONLY_HOSTS = {
 _PRIMARY_ROOTS = {
     "anthropic.com", "bnbchain.org", "cloud.google.com", "developers.google.com",
     "github.com", "microsoft.com", "nvidia.com", "okta.com", "openai.com",
-    "perplexity.ai", "snowflake.com", "x.ai",
+    "perplexity.ai", "snowflake.com", "x.ai", "python.org", "ietf.org",
+    "rfc-editor.org", "git-scm.com", "nodejs.org", "rust-lang.org",
+    "openssl.org", "redhat.com", "numpy.org", "djangoproject.com",
+    "postgresql.org",
 }
 _REPUTABLE_REPORTING_ROOTS = {
     "apnews.com", "bloomberg.com", "reuters.com", "techcrunch.com",

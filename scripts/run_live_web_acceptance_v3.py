@@ -30,10 +30,10 @@ def main() -> int:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--max-rupees", type=float, help="hard ceiling; defaults to Rs 80 for smoke or Rs 850 for full")
     parser.add_argument("--max-seconds", type=float, help="cumulative ceiling; defaults to 30 minutes for smoke or 3 hours for full")
-    parser.add_argument("--max-tokens-per-attempt", type=int, default=750000)
+    parser.add_argument("--max-tokens-per-attempt", type=int, default=80_000)
     parser.add_argument("--max-iterations", type=int, default=12, help="bounded model/tool iterations per attempt")
     parser.add_argument("--repetitions", type=int, help="repetitions for a bounded diagnostic run")
-    parser.add_argument("--model", default="glm5.3-flash")
+    parser.add_argument("--model", default="glm5.3")
     parser.add_argument("--search-provider", choices=("exa", "tavily", "brave", "serper"), default="exa")
     parser.add_argument(
         "--prompt-search-key",

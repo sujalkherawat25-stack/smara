@@ -12,7 +12,7 @@ from smara.harness import Budget, SessionEngine
 
 
 BASE_URL = "https://api.sarvam.ai/v2"
-MODEL = "glm5.3-flash"
+MODEL = "glm5.3"
 
 
 def agent(root: Path, session_id: str, key: str, profile: str, calls: int) -> tuple[SmaraAutonomousAgent, SessionEngine]:

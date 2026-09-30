@@ -6,10 +6,11 @@ import httpx
 import pytest
 
 from smara.autonomous_agent import get_tool_schemas
+from smara.app_adapter import _research_review
 from smara.harness import SessionEngine
 from smara.research import fetch_public_source
 from smara.research_analysis import ResearchAnalysisError,analyze_tabular
-from smara.research_session import CanonicalResearchSession,ResearchStateError
+from smara.research_session import CanonicalResearchSession,ResearchStateError,analysis_source_records
 
 
 ROWS=[
@@ -131,3 +132,46 @@ def test_safe_fetch_still_rejects_binary_content(monkeypatch):
             return await fetch_public_source(client,"https://data.example/binary")
     with pytest.raises(ValueError,match="Unsupported source content type"):
         asyncio.run(execute())
+def test_analysis_citation_expands_to_original_fetched_dataset_url():
+    records = {
+        "dataset-a": SimpleNamespace(canonical_url="https://example.test/data.csv"),
+        "dataset-b": SimpleNamespace(canonical_url="https://example.test/data.csv"),
+        "local": SimpleNamespace(canonical_url="file:///workspace/data.csv"),
+    }
+    analyses = [{"analysis_evidence_id": "analysis-id", "evidence_ids": ["dataset-a", "dataset-b", "local"]}]
+
+    assert analysis_source_records("analysis-id", analyses, records) == [
+        {"evidence_id": "dataset-a", "url": "https://example.test/data.csv"}
+    ]
+
+
+def test_claim_review_links_derived_analysis_to_original_dataset():
+    source_url = "https://example.test/data.csv"
+    snapshot = {
+        "evidence": {"records": [
+            {"id": "dataset-id", "kind": "fetched_passage", "canonical_url": source_url,
+             "text": "value\n2.5", "text_sha256": "dataset-hash", "retrieved_at": "2026-09-30T00:00:00Z"},
+            {"id": "analysis-id", "kind": "fetched_passage", "canonical_url": "analysis://dataset-hash",
+             "text": f"The maximum is 2.5. Sources: {source_url}", "text_sha256": "analysis-hash",
+             "retrieved_at": "2026-09-30T00:00:01Z"},
+        ], "failures": []},
+        "analyses": [{"analysis_evidence_id": "analysis-id", "evidence_ids": ["dataset-id"]}],
+        "validation": {"passed": True, "score": {"claim_count": 1, "supported_claims": 1,
+            "evidence_precision": 1.0, "evidence_coverage": 1.0, "claims": [{
+                "claim": "The maximum is 2.5.", "supported": True,
+                "citations": [{"evidence_id": "analysis-id", "supported": True, "state": "supported"}],
+            }]}},
+    }
+
+    class SnapshotSession:
+        def resolve_artifact(self, _artifact_id):
+            return json.dumps(snapshot)
+
+    review = _research_review(SnapshotSession(), {"research_state_artifact_id": "snapshot-id"})
+    citation = review["claims"][0]["citations"][0]
+    source_evidence = next(item for item in review["evidence"] if item["evidence_id"] == "dataset-id")
+    assert citation["url"] == source_url
+    assert citation["evidence_url"] == "analysis://dataset-hash"
+    assert citation["kind"] == "derived_analysis"
+    assert citation["source_urls"] == [source_url]
+    assert source_evidence["cited"] is True

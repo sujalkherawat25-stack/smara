@@ -193,7 +193,9 @@ def _load_local_profiles() -> tuple[list[dict[str, Any]], str, dict[str, str]]:
         if profile_id not in {"sarvam", "sarvam_glm"} and not provider.startswith("sarvam"):
             continue
         model = str(profile.get("model") or "").lower().replace("-", "").replace(".", "")
-        canonical_model = {"glm52": "glm5.2", "glm53": "glm5.3", "glm53flash": "glm5.3-flash"}.get(model)
+        # Sarvam's current /v2 model ID is `glm5.3`; normalize profiles saved
+        # by older builds that used the now-rejected `glm5.3-flash` alias.
+        canonical_model = {"glm52": "glm5.2", "glm53": "glm5.3", "glm53flash": "glm5.3"}.get(model)
         if canonical_model:
             profile["model"] = canonical_model
             if str(profile.get("label", "")).lower() == "sarvam 105b" or "glm" in str(profile.get("label", "")).lower():
@@ -1097,8 +1099,26 @@ def build_parser() -> argparse.ArgumentParser:
     p_trun.add_argument("name", help="Tool name to execute")
     p_trun.add_argument("payload", nargs="?", default="{}", help="JSON payload string")
 
-    p_research = subparsers.add_parser("research", help="Deep Autonomous Market Research & Intelligence Engine")
-    p_research.add_argument("topic", nargs="+", help="Research topic or market to analyze")
+    p_research = subparsers.add_parser("research", help="Run the canonical evidence-validated research workflow")
+    p_research.add_argument("topic", nargs="+", help="Research question")
+    p_research.add_argument("--research-mode", choices=["auto", "quick", "deep"], default="auto", help="Research lane (auto selects from the request)")
+    p_research.add_argument("--json", action="store_true", help="Emit the durable result and claim-to-source review as JSON")
+
+    p_research_watch = subparsers.add_parser("research-watch", help="Schedule recurring canonical research refreshes")
+    research_watch_sub = p_research_watch.add_subparsers(dest="research_watch_action")
+    research_watch_sub.add_parser("list", help="List saved research watches")
+    watch_add = research_watch_sub.add_parser("add", help="Create a recurring refresh (first run is due immediately)")
+    watch_add.add_argument("topic", nargs="+", help="Research question to refresh")
+    watch_add.add_argument("--every-hours", type=float, default=24, help="Refresh interval: 1 hour to 1 year")
+    watch_run = research_watch_sub.add_parser("run", help="Run one watch now")
+    watch_run.add_argument("watch_id")
+    research_watch_sub.add_parser("run-due", help="Run all currently due watches")
+    for action in ("pause", "resume", "remove", "history"):
+        item = research_watch_sub.add_parser(action)
+        item.add_argument("watch_id")
+    watch_serve = research_watch_sub.add_parser("serve", help="Keep due refreshes running while this process stays open")
+    watch_serve.add_argument("--poll-seconds", type=float, default=60)
+    p_research_watch.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     p_goal = subparsers.add_parser("goal", help="Manage long-horizon goal sessions")
     p_goal.add_argument("goal_action", nargs="?", default="list", choices=["list", "status", "resume"])
@@ -1166,7 +1186,7 @@ def main(argv: list[str] | None = None) -> int:
         "graph", "search", "report", "test", "refactor", "git", "find",
         "index", "browse", "e2e", "memory", "swarm", "mcp", "test-fix", "models", "chat", "login",
         "logout", "run", "research", "tasks", "tools", "plugins", "approvals",
-        "devices", "desktop", "tool", "dynamic-tool", "ask", "goal", "benchmark", "resume", "cancel", "inspect", "doctor", "ocr", "skills", "backends", "gateway", "schedule"
+        "devices", "desktop", "tool", "dynamic-tool", "ask", "goal", "benchmark", "resume", "cancel", "inspect", "doctor", "ocr", "skills", "backends", "gateway", "schedule", "research-watch"
     }
 
     # Extract top-level flags before checking for direct prompt
@@ -1347,6 +1367,63 @@ def main(argv: list[str] | None = None) -> int:
         ]
         print(json.dumps({"active_model": engine.active_id, "profiles": profiles}, indent=2))
         return 0
+
+    if cmd == "research":
+        from .app_adapter import run_canonical_task
+        prompt = " ".join(parsed_args.topic).strip()
+        payload = run_canonical_task(prompt, workspace=workspace, tool_profile="research_web",
+                                     research_mode=getattr(parsed_args, "research_mode", "auto"))
+        if parsed_args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(str(payload.get("answer") or (payload.get("result") or {}).get("answer") or ""))
+            review = payload.get("research_review") or {}
+            if review.get("claim_count"):
+                print(f"\nEvidence review: {review.get('supported_claims', 0)}/{review['claim_count']} claims supported; {len(review.get('evidence', []))} fetched passages.")
+            report_path = payload.get("research_report_path")
+            if report_path:
+                print(f"Research report: {report_path}")
+        return 0 if payload.get("status") == "completed" else 1
+
+    if cmd == "research-watch":
+        from .research_watch import ResearchWatchStore
+        action = getattr(parsed_args, "research_watch_action", None) or "list"
+        watches = ResearchWatchStore(workspace)
+        try:
+            if action == "list":
+                payload = watches.list()
+            elif action == "add":
+                payload = watches.add(" ".join(parsed_args.topic), parsed_args.every_hours)
+            elif action == "run":
+                payload = watches.run(parsed_args.watch_id)
+                if payload is None:
+                    raise ValueError("watch is missing, paused, or already running")
+            elif action == "run-due":
+                payload = watches.run_due()
+            elif action == "pause":
+                watches.set_enabled(parsed_args.watch_id, False); payload = {"status": "paused", "id": parsed_args.watch_id}
+            elif action == "resume":
+                watches.set_enabled(parsed_args.watch_id, True); payload = {"status": "resumed", "id": parsed_args.watch_id}
+            elif action == "remove":
+                watches.remove(parsed_args.watch_id); payload = {"status": "removed", "id": parsed_args.watch_id, "history_retained": True}
+            elif action == "history":
+                payload = watches.history(parsed_args.watch_id)
+            else:
+                poll_seconds = max(5.0, float(parsed_args.poll_seconds))
+                print(json.dumps({"status": "serving", "poll_seconds": poll_seconds, "workspace": str(workspace)}, indent=2), flush=True)
+                try:
+                    while True:
+                        due = watches.run_due()
+                        if due:
+                            print(json.dumps({"refreshes": due}, ensure_ascii=False), flush=True)
+                        time.sleep(poll_seconds)
+                except KeyboardInterrupt:
+                    return 0
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 0
+        except (KeyError, ValueError) as exc:
+            print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False, indent=2))
+            return 1
 
     if cmd in {"resume", "cancel", "inspect"}:
         from .harness import SessionEngine

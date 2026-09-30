@@ -3008,6 +3008,20 @@ def _run_shared_local_agent_turn(request: dict, state_path: Path, event_callback
     research_mode = str(request.get("research_mode") or "auto").strip().lower()
     if research_mode not in {"auto", "quick", "deep"}:
         research_mode = "auto"
+    from smara.research_modes import should_route_to_research
+    if not learn_command and (research_mode != "auto" or should_route_to_research(prompt)):
+        from smara.research_chat import run_research_chat
+        result = run_research_chat(
+            prompt=prompt, state_path=state_path, workspace=workspace, model={
+                "base_url": base_url, "model": model_name, "api_key": api_key,
+                "auth_header": auth_header, "label": str(model.get("label") or "private model"),
+            }, context=bounded_context,
+            conversation_id=str(request.get("conversation_id") or "local-default"),
+            research_mode=research_mode, event_callback=event_callback,
+        )
+        result["workspace"] = str(workspace)
+        result["capabilities"] = list(state.get("capabilities") or [])
+        return result
     # Keep the executor-side bound aligned with the Desktop contract. The
     # outer worker timeout remains a final guard; this shorter provider bound
     # gives Quick research a truthful, recoverable failure instead of a stuck

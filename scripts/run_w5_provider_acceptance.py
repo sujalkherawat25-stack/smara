@@ -32,10 +32,10 @@ REF_PATH_V3 = ROOT / "tests/evals/windows_acceptance_v3/references.json"
 EVIDENCE_PATH_V3 = ROOT / "release/evidence/W5_PROVIDER_ACCEPTANCE_V3_2026-09-12.json"
 
 BASE_URL = "https://api.sarvam.ai/v2"
-MODEL = "glm5.3-flash"
+MODEL = "glm5.3"
 MAX_RUPEES = 150.0
 MAX_SECONDS = 90 * 60
-OUTPUT_RUPEES_PER_M = 45.0
+OUTPUT_RUPEES_PER_M = 396.0
 SCHEMA_VERSION = 2
 ENGINE_VERSION = "h2-local-2"
 

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { desktop, isNativeDesktop } from "./api";
-import type { ActivityItem, ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatMessage, CodingConventionsData, ConnectionState, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ResearchMode, RuntimeSessionRecord, RuntimeSessionSnapshot, SearchResultItem, SemanticIndexStats, SwarmMessageData, SwarmTaskResultData, SymbolEvolutionData, TaskSummary, TestFailureItem, TestSuiteResultData, WebScrapeData } from "./types";
+import type { ActivityItem, ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatMessage, CodingConventionsData, ConnectionState, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ResearchMode, ResearchWatch, RuntimeSessionRecord, RuntimeSessionSnapshot, SearchResultItem, SemanticIndexStats, SwarmMessageData, SwarmTaskResultData, SymbolEvolutionData, TaskSummary, TestFailureItem, TestSuiteResultData, WebScrapeData } from "./types";
 import smaraLogo from "./assets/smara-logo.svg";
 import { TaskMemoryTab } from "./components/TaskMemoryTab";
 import { ProgressiveSkillsTab } from "./components/ProgressiveSkillsTab";
 import { DAGFlowTab } from "./components/DAGFlowTab";
 import { SubagentSwarmTab } from "./components/SubagentSwarmTab";
+import { ResearchReviewPanel } from "./components/ResearchReviewPanel";
 
 export type NavTab = "chat" | "studio" | "workspace" | "settings";
 export type StudioSubTab = "runs" | "dag" | "goals" | "swarm" | "memory" | "skills" | "graph" | "tests" | "git" | "benchmarks" | "browser";
@@ -178,7 +179,14 @@ function MarkdownTextBlock({ content, blockKey }: { content: string; blockKey: s
     const lk = `${blockKey}-l${idx}`;
 
     if (!trimmed) {
-      flushList(lk);
+      // Markdown permits blank lines between items in a loose list. Keep the
+      // current list open when the next non-empty line has the same marker;
+      // otherwise each `1.` item becomes a separate ordered list numbered 1.
+      const nextContent = lines.slice(idx + 1).find((candidate) => candidate.trim())?.trim() ?? "";
+      const continuesList = inList && (listOrdered
+        ? /^\d+\.\s+/.test(nextContent)
+        : /^[*-]\s+/.test(nextContent));
+      if (!continuesList) flushList(lk);
       return;
     }
 
@@ -413,17 +421,24 @@ export default function App() {
       if (restored.length) setMessages(restored);
     }).catch(() => {
       // A missing/legacy journal should leave a clean composer usable.
-    });
+    }).then(() => desktop.runtimeSession(conversationId.current, 0)).then((snapshot) => {
     // Reconnect to the shared runtime ledger as well as the transcript. This
     // recovers a final answer if the UI restarted between the provider result
     // and local transcript flush, and exposes an honest resumable state.
-    void desktop.runtimeSession(conversationId.current, 0).then((snapshot) => {
       if (!active) return;
       const session = snapshot?.session || {};
       const result = session.result as Record<string, unknown> | undefined;
       const answer = typeof result?.answer === "string" ? result.answer.trim() : "";
       if (answer) {
-        setMessages((items) => items.length ? items : [{ id: `runtime-${conversationId.current}`, role: "assistant", text: answer, needsInput: session.status !== "completed", error: session.status !== "completed" ? (Array.isArray(session.unresolved) ? session.unresolved.join("; ") : "Session needs attention") : undefined }]);
+        const review = result?.research_review as ChatMessage["researchReview"];
+        const request = typeof session.request === "string" ? session.request : undefined;
+        setMessages((items) => {
+          const last = items.map((item) => item.role).lastIndexOf("assistant");
+          if (last >= 0 && items[last].text.trim() === answer) {
+            return items.map((item, index) => index === last ? { ...item, researchReview: review, sourcePrompt: request } : item);
+          }
+          return [...items, { id: `runtime-${conversationId.current}`, role: "assistant", text: answer, researchReview: review, sourcePrompt: request, needsInput: session.status !== "completed", error: session.status !== "completed" ? (Array.isArray(session.unresolved) ? session.unresolved.join("; ") : "Session needs attention") : undefined }];
+        });
       }
       if (session.status === "running") setNotice("Reconnected to a running Smara session. Its durable events are available for replay.");
       if (session.status === "cancelled") setNotice("This Smara session was cancelled. Start a new turn to continue.");
@@ -489,6 +504,7 @@ export default function App() {
         ...item,
         pending: false,
         needsInput: !completed,
+        researchReview: event.research_review,
         error: completed ? undefined : (unresolved || "The agent did not mark this turn complete."),
       } : item));
       setActivity((items) => [
@@ -1310,7 +1326,8 @@ function ChatTab({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const feed = transcriptEndRef.current?.parentElement;
+    if (feed) feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
   }, [messages, streaming, transcriptEndRef]);
 
   useEffect(() => {
@@ -1353,7 +1370,7 @@ function ChatTab({
         </div>
       ) : (
         <div className="chat-stage-body">
-          <div className="transcript-feed" style={{ paddingBottom: 120 }}>
+          <div className="transcript-feed">
             {messages.map((m) => {
               const detected = m.role === "assistant" ? detectFiles(m.text) : [];
               const retryPrompt = m.sourcePrompt;
@@ -1367,6 +1384,9 @@ function ChatTab({
                     <div className="msg-text">
                       {m.role === "assistant" ? renderMarkdownContent(m.text) : m.text}
                     </div>
+                    {m.role === "assistant" && m.researchReview && (
+                      <ResearchReviewPanel review={m.researchReview} topic={m.sourcePrompt} answer={m.text} />
+                    )}
                     {detected.length > 0 && (
                       <div className="file-action-cards-container">
                         {detected.map((f, i) => (
@@ -2071,22 +2091,96 @@ function BrowserTab() {
   const [researchTopic, setResearchTopic] = useState("market condition of inference compute");
   const [researchMode, setResearchMode] = useState<ResearchMode>("auto");
   const [researchResult, setResearchResult] = useState<any | null>(null);
+  const [completedResearchTopic, setCompletedResearchTopic] = useState("");
+  const [researchWatches, setResearchWatches] = useState<ResearchWatch[]>([]);
+  const [watchIntervalHours, setWatchIntervalHours] = useState(24);
+  const [watchBusyId, setWatchBusyId] = useState<string | null>(null);
+  const [watchNotice, setWatchNotice] = useState<string | null>(null);
+  const [watchHistory, setWatchHistory] = useState<any[]>([]);
+  const [selectedWatchHistory, setSelectedWatchHistory] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [healing, setHealing] = useState(false);
   const [healNotice, setHealNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const loadResearchWatches = useCallback(async () => {
+    if (!isNativeDesktop) return;
+    try {
+      setResearchWatches(await desktop.listResearchWatches());
+    } catch (err: any) {
+      setWatchNotice(err?.message || String(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadResearchWatches();
+  }, [loadResearchWatches]);
 
   const handleRunResearch = async () => {
     if (!researchTopic.trim()) return;
     setLoading(true);
     setActionError(null);
     try {
-      const res = await desktop.runResearch(researchTopic.trim(), researchMode);
+      const topic = researchTopic.trim();
+      const res = await desktop.runResearch(topic, researchMode);
       setResearchResult(res);
+      setCompletedResearchTopic(topic);
     } catch (err: any) {
       setActionError(err?.message || String(err));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAddResearchWatch = async () => {
+    if (!completedResearchTopic || !researchResult || !isNativeDesktop) return;
+    setWatchBusyId("create");
+    setWatchNotice(null);
+    try {
+      await desktop.addResearchWatch(completedResearchTopic, watchIntervalHours, researchResult);
+      setWatchNotice(`Scheduled a ${watchIntervalHours}-hour research refresh for this baseline.`);
+      await loadResearchWatches();
+    } catch (err: any) {
+      setWatchNotice(err?.message || String(err));
+    } finally {
+      setWatchBusyId(null);
+    }
+  };
+
+  const handleRunResearchWatch = async (watchId: string) => {
+    setWatchBusyId(watchId);
+    setWatchNotice(null);
+    try {
+      const result = await desktop.runResearchWatch(watchId);
+      setWatchNotice(result?.diff?.summary || `Refresh ${result?.status || "finished"}.`);
+      setSelectedWatchHistory(watchId);
+      setWatchHistory(await desktop.researchWatchHistory(watchId));
+      await loadResearchWatches();
+    } catch (err: any) {
+      setWatchNotice(err?.message || String(err));
+    } finally {
+      setWatchBusyId(null);
+    }
+  };
+
+  const handleToggleResearchWatch = async (watch: ResearchWatch) => {
+    setWatchBusyId(watch.id);
+    try {
+      await desktop.setResearchWatchEnabled(watch.id, !watch.enabled);
+      await loadResearchWatches();
+    } catch (err: any) {
+      setWatchNotice(err?.message || String(err));
+    } finally {
+      setWatchBusyId(null);
+    }
+  };
+
+  const handleResearchWatchHistory = async (watchId: string) => {
+    try {
+      setWatchHistory(await desktop.researchWatchHistory(watchId));
+      setSelectedWatchHistory(watchId);
+    } catch (err: any) {
+      setWatchNotice(err?.message || String(err));
     }
   };
 
@@ -2465,12 +2559,106 @@ function BrowserTab() {
 
                 <div className="research-summary-grid">
                   <div><span>Run status</span><strong>{researchResult.status || "completed"}</strong></div>
-                  <div><span>Sources / evidence</span><strong>{researchResult.evidence_count ?? researchResult.progress?.length ?? "—"}</strong></div>
+                  <div><span>Sources / evidence</span><strong>{researchResult.research_review?.evidence?.length ?? researchResult.evidence_count ?? researchResult.progress?.length ?? "—"}</strong></div>
                   <div><span>Unresolved work</span><strong>{researchResult.unresolved_work?.length || 0}</strong></div>
                   <div><span>Resume</span><strong>{researchResult.resume?.command ? "Available" : "Not needed"}</strong></div>
                 </div>
 
-                <div>
+                {isNativeDesktop && <section className="research-watch-panel" aria-label="Recurring research refreshes">
+                  <div className="panel-sub-header">
+                    <h4>🔁 Recurring refreshes</h4>
+                    <span>Saved in this workspace</span>
+                  </div>
+                  <p>Smara reruns this question through the same cited research workflow, then compares claims and source fingerprints with the baseline. Automatic refreshes run while Desktop is open; use <code>smara research-watch serve</code> to keep them running after you close it.</p>
+                  {completedResearchTopic && <div className="research-watch-create-row">
+                    <span>Refresh this completed research:</span>
+                    <select value={watchIntervalHours} onChange={(event) => setWatchIntervalHours(Number(event.target.value))} aria-label="Research refresh interval">
+                      <option value={24}>Daily</option>
+                      <option value={168}>Weekly</option>
+                      <option value={720}>Monthly (30 days)</option>
+                    </select>
+                    <button type="button" className="btn-browser-action" onClick={() => void handleAddResearchWatch()} disabled={watchBusyId === "create"}>
+                      {watchBusyId === "create" ? "Scheduling…" : "Watch this research"}
+                    </button>
+                  </div>}
+                  {watchNotice && <p className="research-watch-notice">{watchNotice}</p>}
+                  {researchWatches.length > 0 ? <div className="research-watch-list">
+                    {researchWatches.map((watch) => <article key={watch.id} className="research-watch-item">
+                      <div className="research-watch-heading">
+                        <strong>{watch.topic}</strong>
+                        <span className={`task-status-pill ${watch.enabled ? "status-complete" : "status-warning"}`}>{watch.enabled ? (watch.running ? "REFRESHING" : "ACTIVE") : "PAUSED"}</span>
+                      </div>
+                      <small>Every {Math.round(watch.interval_seconds / 3600)}h · next refresh {watch.enabled ? new Date(watch.next_run_at * 1000).toLocaleString() : "paused"}{watch.last_error ? ` · last error: ${watch.last_error}` : ""}</small>
+                      <div className="research-watch-actions">
+                        <button type="button" onClick={() => void handleRunResearchWatch(watch.id)} disabled={!watch.enabled || watchBusyId === watch.id}>{watchBusyId === watch.id ? "Refreshing…" : "Refresh now"}</button>
+                        <button type="button" onClick={() => void handleToggleResearchWatch(watch)} disabled={watchBusyId === watch.id}>{watch.enabled ? "Pause" : "Resume"}</button>
+                        <button type="button" onClick={() => void handleResearchWatchHistory(watch.id)}>Recent changes</button>
+                      </div>
+                      {selectedWatchHistory === watch.id && watchHistory[0] && <div className="research-watch-diff">
+                        <strong>{watchHistory[0].diff?.summary || watchHistory[0].status}</strong>
+                        {watchHistory[0].diff?.staleness_note && <small>{watchHistory[0].diff.staleness_note}</small>}
+                        {([...[...(watchHistory[0].diff?.new_claims || [])].map((value: string) => ["New claim", value]),
+                           ...[...(watchHistory[0].diff?.unsupported_claims || [])].map((value: string) => ["Now unsupported", value]),
+                           ...[...(watchHistory[0].diff?.not_repeated_claims || [])].map((value: string) => ["Not repeated · review", value]),
+                           ...[...(watchHistory[0].diff?.sources_changed || [])].map((value: string) => ["Changed source", value]),
+                           ...[...(watchHistory[0].diff?.sources_added || [])].map((value: string) => ["New source", value])]
+                        ).map(([label, value]: string[], index: number) => <p key={`${label}-${index}`}><b>{label}:</b> {value}</p>)}
+                        {(watchHistory[0].diff?.supporting_sources || []).length > 0 && <p className="research-watch-sources"><b>Supporting sources:</b> {(watchHistory[0].diff.supporting_sources as string[]).map((source) => <span key={source}><a href={source} target="_blank" rel="noreferrer">{new URL(source).hostname}</a></span>)}</p>}
+                      </div>}
+                    </article>)}
+                  </div> : <p className="research-review-empty">No recurring refreshes yet.</p>}
+                </section>}
+
+                {researchResult.research_review && (
+                  <section className="research-review-panel" aria-label="Claim to source review">
+                    <div className="panel-sub-header">
+                      <h4>🔎 Claim-to-source review</h4>
+                      <span className={`task-status-pill ${researchResult.research_review.passed ? "status-complete" : "status-warning"}`}>
+                        {researchResult.research_review.passed ? "VALIDATED" : "REVIEW NEEDED"}
+                      </span>
+                    </div>
+                    <p style={{ color: "#94a3b8", margin: "4px 0 12px", fontSize: 12 }}>
+                      {researchResult.research_review.supported_claims ?? 0}/{researchResult.research_review.claim_count ?? 0} claims supported · {Math.round((researchResult.research_review.evidence_coverage ?? 0) * 100)}% claim coverage · deterministic passage checks are a review signal.
+                    </p>
+                    {(researchResult.research_review.claims || []).map((claim: any, index: number) => (
+                      <article key={`${index}-${claim.claim}`} className="research-review-claim">
+                        <div className="research-review-claim-title">
+                          <span>{claim.supported ? "✓" : "!"}</span>
+                          <strong>{claim.claim || "Unlabeled claim"}</strong>
+                        </div>
+                        {(claim.citations || []).length ? (
+                          <div className="research-review-citations">
+                            {claim.citations.map((citation: any, citationIndex: number) => (
+                              <div key={`${citation.evidence_id}-${citationIndex}`} className="research-review-citation">
+                                <div className="research-review-source-line">
+                                  <span className={citation.supported ? "research-support-badge supported" : "research-support-badge insufficient"}>
+                                    {citation.supported ? "Supports claim" : citation.state || "Insufficient"}
+                                  </span>
+                                  {citation.source_urls?.length
+                                    ? citation.source_urls.map((source: string) => <a key={source} href={source} target="_blank" rel="noreferrer">{source}</a>)
+                                    : <a href={citation.url} target="_blank" rel="noreferrer">{citation.url}</a>}
+                                  <span>{citation.kind === "derived_analysis" ? "Derived analysis · fetched dataset" : citation.kind} · {citation.retrieved_at ? new Date(citation.retrieved_at).toLocaleString() : "retrieval time unknown"}</span>
+                                </div>
+                                <blockquote>{citation.passage || "No passage excerpt was saved."}</blockquote>
+                                {citation.reason && <small>Check: {citation.reason}</small>}
+                              </div>
+                            ))}
+                          </div>
+                        ) : <p className="research-review-empty">No source passage was linked to this claim.</p>}
+                      </article>
+                    ))}
+                    {(researchResult.research_review.failures || []).length > 0 && (
+                      <details className="research-review-failures">
+                        <summary>{researchResult.research_review.failures.length} source fetch failure(s)</summary>
+                        {researchResult.research_review.failures.map((failure: any, index: number) => (
+                          <p key={`${failure.url}-${index}`}><a href={failure.url} target="_blank" rel="noreferrer">{failure.url}</a> — {failure.error}</p>
+                        ))}
+                      </details>
+                    )}
+                  </section>
+                )}
+
+                {researchResult.analysis?.competitive_matrix?.length > 0 && <div>
                   <h4 style={{ color: "#f8fafc", marginBottom: "8px" }}>🏆 Structured findings</h4>
                   <div style={{ overflowX: "auto" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
@@ -2496,9 +2684,9 @@ function BrowserTab() {
                       </tbody>
                     </table>
                   </div>
-                </div>
+                </div>}
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                {(researchResult.analysis?.market_drivers?.length > 0 || researchResult.analysis?.headwinds?.length > 0) && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                   <div style={{ background: "rgba(34, 197, 94, 0.05)", border: "1px solid rgba(34, 197, 94, 0.2)", borderRadius: "8px", padding: "12px" }}>
                     <h4 style={{ color: "#4ade80", margin: "0 0 8px 0" }}>⚡ Structural Market Drivers</h4>
                     <ul style={{ margin: 0, paddingLeft: "18px", fontSize: "13px", color: "#cbd5e1", lineHeight: 1.6 }}>
@@ -2516,7 +2704,7 @@ function BrowserTab() {
                       ))}
                     </ul>
                   </div>
-                </div>
+                </div>}
               </div>
             )}
 
@@ -5122,6 +5310,7 @@ function CloudTab({
 // -------------------------------------------------------------
 function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => void }) {
   const [scorecards, setScorecards] = useState<any>(null);
+  const [researchEvaluation, setResearchEvaluation] = useState<any>(null);
   const [runningSuite, setRunningSuite] = useState<string | null>(null);
   const [runLog, setRunLog] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<string>("all");
@@ -5129,8 +5318,9 @@ function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => voi
 
   const loadScorecards = useCallback(async () => {
     try {
-      const data = await desktop.getBenchmarkScorecards();
+      const [data, researchData] = await Promise.all([desktop.getBenchmarkScorecards(), desktop.getResearchEvaluationScorecard()]);
       setScorecards(data);
+      setResearchEvaluation(researchData);
     } catch (e: any) {
       console.error("Failed to load scorecards:", e);
     }
@@ -5222,6 +5412,19 @@ function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => voi
   const scoreText = (card: any) => card?.status === "completed" ? `${card.passed ?? 0} / ${card.total ?? 0}` : "Not run";
   const accuracyText = (card: any) => card?.status === "completed" && card.accuracy_percent != null ? `${card.accuracy_percent}%` : "No score yet";
   const statusText = (card: any) => card?.status === "completed" ? "COMPLETED" : "NOT RUN";
+  const researchEvalPassed = researchEvaluation?.terminal_state === "complete" && researchEvaluation?.summary?.gate_passed === true;
+  const researchEvalStatus = researchEvaluation?.status === "not_run"
+    ? "NOT RUN"
+    : researchEvaluation?.status === "in_progress"
+      ? "IN PROGRESS"
+      : researchEvaluation?.terminal_state === "complete"
+        ? (researchEvalPassed ? "PASS" : "GATE FAILED")
+        : "PARTIAL / REVIEW";
+  const researchEvalStatusClass = researchEvaluation?.status === "in_progress"
+    ? "status-warning"
+    : researchEvaluation?.terminal_state === "complete"
+      ? (researchEvalPassed ? "status-complete" : "status-failed")
+      : "status-warning";
 
   return (
     <div className="benchmarks-tab-container">
@@ -5242,6 +5445,27 @@ function BenchmarksTab({ onSetNotice }: { onSetNotice: (n: string | null) => voi
           </div>
         </div>
       </div>
+
+      <section className="research-eval-scorecard">
+        <div className="panel-sub-header">
+          <div><h3>🌐 Live research trust scorecard</h3><p>{researchEvaluation?.suite || "24-case maintained web evaluation"} · {researchEvaluation?.model || "not run yet"}</p></div>
+          <span className={`task-status-pill ${researchEvalStatusClass}`}>{researchEvalStatus}</span>
+        </div>
+        {researchEvaluation?.summary ? <>
+          <div className="research-eval-metrics">
+            <div><span>Tasks passed</span><strong>{researchEvaluation.summary.passed ?? 0}/{researchEvaluation.summary.expected ?? 0}</strong></div>
+            <div><span>Citation support</span><strong>{Math.round((researchEvaluation.summary.citation_support ?? 0) * 100)}%</strong></div>
+            <div><span>Answer coverage</span><strong>{Math.round((researchEvaluation.summary.answer_coverage ?? 0) * 100)}%</strong></div>
+            <div><span>Latency median / p95</span><strong>{Number(researchEvaluation.summary.latency_seconds?.median ?? 0).toFixed(1)}s / {Number(researchEvaluation.summary.latency_seconds?.p95 ?? 0).toFixed(1)}s</strong></div>
+            <div><span>Failures</span><strong>{researchEvaluation.summary.failures?.length ?? 0}</strong></div>
+          </div>
+          {(researchEvaluation.summary.failures || []).length > 0 && <details className="research-eval-failures">
+            <summary>Inspect failed cases</summary>
+            {(researchEvaluation.summary.failures as any[]).map((failure, index) => <p key={`${failure.case}-${index}`}><b>{failure.case}</b> · {failure.reason}</p>)}
+          </details>}
+        </> : <p>{researchEvaluation?.status === "in_progress" ? "A real evaluation report exists; final metrics will appear when the run completes." : "No live research evaluation report exists yet. Run scripts/run_live_web_acceptance_v5.py to create one."}</p>}
+        {researchEvaluation?.report_path && <button className="bench-btn bench-btn-outline" onClick={() => void desktop.openFile(researchEvaluation.report_path)}>Open evaluation report</button>}
+      </section>
 
       {/* 3 Main Scorecards */}
       <div className="benchmarks-cards-grid">

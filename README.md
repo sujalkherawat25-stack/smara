@@ -306,8 +306,24 @@ source, verifies the usable evidence, and writes a cited Markdown artifact.
 
 - `GET /v1/research/{task_id}/evidence` returns the durable evidence ledger.
 - `GET /v1/tasks/{task_id}/artifacts` returns the cited report artifact.
-- `smara research "question"` creates a research task; `smara task evidence <id>`
-  prints its source ledger from PowerShell or a terminal.
+- `smara research "question"`, Desktop research chat, and the Research workspace use the same
+  durable canonical research runner. The CLI prints claim-to-source receipts;
+  Desktop exposes the same excerpts and source-fetch failures for review.
+- `smara research-watch add "question" --every-hours 24` records a baseline
+  and schedules daily refreshes. Use `smara research-watch list`, `run <id>`,
+  `history <id>`, `pause <id>`, or `resume <id>` to manage them. Refresh history
+  records changed/unsupported claims and source fingerprints; an omitted claim
+  or source is explicitly a review candidate, not proof it became false. Desktop
+  checks due refreshes while open; run `smara research-watch serve` to keep
+  them running after closing the app.
+- Run the maintained 24-task, real-model live-web suite with
+  `python scripts/run_live_web_acceptance_v5.py`. Its sealed references stay
+  validator-only, and its report includes answer coverage, citation support,
+  latency, and failed attempts; Desktop's Benchmarks scorecard reads that report.
+  A diagnostic subset is not a full-suite pass. The recorded September 30
+  ten-task recheck failed (2/10 passed); do not treat this build as
+  research-release-qualified. Exact passage support does not prove that a
+  claim answers the question; retrieval candidates never auto-resolve nodes.
 
 Each verified source also records transparent quality signals: publication-date
 presence, HTTPS use, configured domain policy, and deterministic token-level

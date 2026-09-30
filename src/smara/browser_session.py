@@ -104,7 +104,10 @@ class CanonicalBrowserSession:
         if ident and ident in self.backend.sessions:
             with contextlib.suppress(Exception):self.backend.cancel(ident)
         self.browser_session_id=None
-        if self.engine is not None:self.engine.set("browser_handle",None);self.engine.event("browser_cancelled",{})
+        if self.engine is not None:
+            self.engine.set("browser_handle", None)
+            if ident:
+                self.engine.event("browser_cancelled", {})
 
     def shutdown(self) -> None:
         self.cancel()
