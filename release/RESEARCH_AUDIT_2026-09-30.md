@@ -67,3 +67,24 @@ There is no green real-model result for the final build.
 
 Do not create a new research-qualified release/tag or advertise head-to-head
 industry parity from these results.
+
+## Local deployment verification
+
+Source commit `04e9b38` was pushed non-force to `origin/main`. The rebuilt
+0.1.3 installer completed with exit code 0 in the existing local installation.
+No settings/conversation directory was deleted or uninstalled. Previous
+launcher/resources were backed up under
+`build/desktop-install-backup-b53953ad254d470a9cb4d9d6fc542a02`.
+
+The installed executor and scorecard match their source artifacts byte for
+byte. The installed launcher differs from the Cargo target by exactly three
+bytes: Tauri's bundle marker changes from `UNK` to `NSS`. Normalising that
+single marker proves all remaining bytes match.
+
+- Installer SHA-256: `43817ae5a2cdbe3a218b737b791eb134c3b291ec4d4c52502a5c3b6ffb041ddd`
+- Installed launcher SHA-256: `997c1ab87206927bb40725762afef69be5a844f4fa946cf5baf69ab4f4f8ba63`
+- Installed executor SHA-256: `190f1643915a3fae469c91e6e81a21fe4e81dffb7f790626156454eda4219730`
+
+The actual installed executor passed the isolated frozen probe. Both the
+repository virtualenv and system PATH CLI import the updated source checkout.
+The native app was smoke-launched; this is not full interactive visual QA.
