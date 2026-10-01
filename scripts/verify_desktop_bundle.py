@@ -16,6 +16,8 @@ import smara.research_watch as watches
 import smara.app_adapter
 import smara.research_chat
 import smara.research_completeness
+from smara.harness import SessionEngine
+assert 'question_sha256' in SessionEngine.finish_incremental.__code__.co_consts, 'Stale completeness receipt guard'
 assert getattr(sys, 'frozen', False), 'Executor must be frozen'
 assert Path(watches.__file__).is_relative_to(Path(sys._MEIPASS)), 'Watch module came from a checkout'
 with tempfile.TemporaryDirectory() as directory:
