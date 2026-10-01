@@ -21,7 +21,7 @@ from smara.completion_quality import final_answer_reports_unresolved_work
 from smara.git_agent import GitWorkspaceManager
 from smara.autonomous_agent import SmaraAutonomousAgent
 from smara.version import __version__
-assert __version__ == '0.1.4', 'Stale executor release'
+assert __version__ == '0.1.5', 'Stale executor release'
 assert '--diff-filter=U' in repr(GitWorkspaceManager.detect_conflicts.__code__.co_consts), 'Stale recursive Git conflict scanner'
 assert final_answer_reports_unresolved_work('The feature was left unimplemented.'), 'Missing completion guard'
 assert final_answer_reports_unresolved_work('needs_input — policy.txt is absent.'), 'Missing explicit status guard'
@@ -46,6 +46,12 @@ with tempfile.TemporaryDirectory() as directory:
  for i in range(20):
   agent._record_coding_discovery('file_read', {'path':str(i)}, str(i))
  assert agent._coding_read_only_streak == 1, 'Distinct review reads treated as stalled'
+ from smara.long_context import context_excerpt
+ from smara.agent_tools import file_read
+ long_text = 'x' * 50000 + 'bundle_tail'
+ context_excerpt(long_text, workspace)
+ archived = next((workspace / '.smara' / 'long-context').glob('*.txt'))
+ assert json.loads(file_read(archived, start_char=50000))['content'] == 'bundle_tail', 'Long-context tail lost'
  store = watches.ResearchWatchStore(directory)
  try:
   store.add('invalid interval', 0.001)

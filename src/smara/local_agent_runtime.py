@@ -23,7 +23,7 @@ import httpx
 # with different tokenizers. It leaves headroom for the system prompt and a
 # 16k-token answer while preventing a workbook, browser page, or repeated
 # tool result from silently overflowing a provider context window.
-MAX_LOCAL_HISTORY_CHARS = 48_000
+MAX_LOCAL_HISTORY_CHARS = 128_000
 MAX_LOCAL_TOOL_OBSERVATION_CHARS = 8_000
 
 # A private model is allowed to answer ordinary conversational questions from
@@ -135,7 +135,7 @@ def _parse_plan(text: str) -> dict[str, Any] | None:
             return {
                 "kind": "local_action",
                 "title": str(args.get("title") or f"Execute {cap}")[:160],
-                "objective": str(args.get("objective") or f"Execute {cap}")[:8_000],
+                "objective": str(args.get("objective") or f"Execute {cap}"),
                 "capability": cap,
                 "payload": payload,
             }
@@ -192,7 +192,7 @@ def _parse_plan(text: str) -> dict[str, Any] | None:
             if str(cap) == "local_file_read" and "operation" not in payload:
                 payload["operation"] = "read_file"
             title = str(value.get("title") or f"Execute {cap}")[:160]
-            obj = str(value.get("objective") or f"Execute {cap}")[:8_000]
+            obj = str(value.get("objective") or f"Execute {cap}")
             return {
                 "kind": "local_action",
                 "title": title,
@@ -220,7 +220,7 @@ def _parse_plan(text: str) -> dict[str, Any] | None:
                 payload["operation"] = "read_file"
 
             title = str(value.get("title") or f"Execute {action_name}")[:160]
-            obj = str(value.get("objective") or f"Execute {action_name}")[:8_000]
+            obj = str(value.get("objective") or f"Execute {action_name}")
             return {
                 "kind": "local_action",
                 "title": title,
@@ -321,12 +321,15 @@ def _compact_history(history: list[dict[str, Any]], *, max_chars: int = MAX_LOCA
         if not isinstance(item, dict) or not isinstance(item.get("content"), str):
             continue
         normalized = dict(item)
-        if len(normalized["content"]) > MAX_LOCAL_TOOL_OBSERVATION_CHARS:
-            normalized["content"] = normalized["content"][:MAX_LOCAL_TOOL_OBSERVATION_CHARS]
         if normalized.get("role") == "tool" and not normalized.get("tool_call_id"):
             normalized["role"] = "user"
             normalized["_smara_local_tool"] = True
         items.append(normalized)
+    # Keep the original objective even after many tool calls.
+    for item in items:
+        if item.get('role') == 'user' and not item.get('_smara_local_tool'):
+            item['_smara_mandatory'] = True
+            break
     try:
         from .context_packing import ModelContextProfile, pack_messages
     except ImportError:  # pragma: no cover - exercised by the bundled executable
@@ -334,27 +337,17 @@ def _compact_history(history: list[dict[str, Any]], *, max_chars: int = MAX_LOCA
     try:
         profile = ModelContextProfile("unknown:local", max_chars + 64, 0, safety_margin=32, protocol_overhead=32)
         return list(pack_messages(items, profile).messages)
-    except Exception:
-        # Graceful fallback: keep the prompt/system and as many recent messages as fit within budget
-        if not items:
-            return []
-        kept = [items[0]]
-        budget = max_chars - len(str(items[0].get("content") or ""))
-        recent_items = []
-        for it in reversed(items[1:]):
-            c_len = len(str(it.get("content") or ""))
-            if budget - c_len < 0:
-                break
-            budget -= c_len
-            recent_items.append(it)
-        kept.extend(reversed(recent_items))
-        return kept
+    except Exception as exc:
+        raise RuntimeError('The required task context does not fit this model request. Full text remains stored locally; no message was silently shortened.') from exc
 
 
-def _messages_from_history(history: list[dict[str, Any]]) -> list[dict[str, str]]:
+def _messages_from_history(history: list[dict[str, Any]], workspace: Path | None = None) -> list[dict[str, str]]:
     """Map the shared loop history to a provider-neutral chat transcript."""
     messages: list[dict[str, str]] = []
-    for item in _compact_history(history):
+    from smara.long_context import context_excerpt
+    prepared = [{**item, 'content': context_excerpt(str(item.get('content') or ''), workspace or Path.cwd(), local=True)}
+                for item in history if isinstance(item, dict)]
+    for item in _compact_history(prepared):
         if not isinstance(item, dict):
             continue
         role = item.get("role")
@@ -366,9 +359,9 @@ def _messages_from_history(history: list[dict[str, Any]]) -> list[dict[str, str]
             # tool-call IDs. Present results as a bounded user-visible turn so
             # Ollama, Sarvam, GLM, and other compatible gateways all accept it.
             name = str(item.get("name") or "local tool")
-            messages.append({"role": "user", "content": f"[Result from {name}]\n{content[:MAX_LOCAL_TOOL_OBSERVATION_CHARS]}"})
+            messages.append({"role": "user", "content": f"[Result from {name}]\n{content}"})
         elif role in {"user", "assistant", "system"}:
-            messages.append({"role": role, "content": content[:MAX_LOCAL_TOOL_OBSERVATION_CHARS]})
+            messages.append({"role": role, "content": content})
     return messages
 
 
@@ -404,8 +397,9 @@ def _tool_schema() -> dict[str, Any]:
 class OpenAICompatiblePlanner:
     """Synchronous model callable used by ``LocalAutonomousAgent``."""
 
-    def __init__(self, config: LocalModelConfig):
+    def __init__(self, config: LocalModelConfig, workspace: Path | None = None):
         self.config = config
+        self.workspace = workspace or Path.cwd()
         self.endpoint = _endpoint(config.base_url)
         self.client = httpx.Client(timeout=httpx.Timeout(config.timeout_seconds, connect=15.0))
         catalog = local_skill_catalog(include_extended=True)
@@ -467,7 +461,7 @@ class OpenAICompatiblePlanner:
                 "Do NOT make any further tool calls or return any JSON actions."
             )
             messages = [{"role": "system", "content": system_prompt}]
-            messages.extend(_messages_from_history(history))
+            messages.extend(_messages_from_history(history, self.workspace))
             payload: dict[str, Any] = {
                 "model": self.config.model,
                 "messages": messages,
@@ -477,7 +471,7 @@ class OpenAICompatiblePlanner:
             }
         else:
             messages = [{"role": "system", "content": self.system_prompt}]
-            messages.extend(_messages_from_history(history))
+            messages.extend(_messages_from_history(history, self.workspace))
             payload: dict[str, Any] = {
                 "model": self.config.model,
                 "messages": messages,
@@ -503,7 +497,7 @@ class OpenAICompatiblePlanner:
                 " or {\"kind\":\"answer\",\"answer\":string}."
             )
             fallback_messages = [{"role": "system", "content": fallback_prompt}]
-            fallback_messages.extend(_messages_from_history(history))
+            fallback_messages.extend(_messages_from_history(history, self.workspace))
             fallback_payload = {
                 "model": self.config.model,
                 "messages": fallback_messages,
@@ -523,6 +517,40 @@ class OpenAICompatiblePlanner:
             message = body["choices"][0]["message"]
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise RuntimeError(f"{self.config.label} returned an invalid chat response.") from exc
+
+        # Continue a provider-limited prose answer without throwing its first
+        # part away. Each request remains finite; unfinished output is explicit.
+        continuation_messages = list(payload['messages'])
+        parts = [message['content']] if isinstance(message.get('content'), str) and not message.get('tool_calls') else []
+        for _ in range(8):
+            choice = body['choices'][0]
+            if not parts or message.get('tool_calls') or not isinstance(message.get('content'), str):
+                break
+            if choice.get('finish_reason') != 'length':
+                break
+            continuation_messages.extend([
+                {'role': 'assistant', 'content': message['content']},
+                {'role': 'user', 'content': 'Continue the unfinished answer exactly where it stopped. Do not restart, repeat prior sections, or call tools. Preserve the requested format.'},
+            ])
+            next_payload = {key: value for key, value in payload.items()
+                            if key not in {'tools', 'tool_choice', 'parallel_tool_calls'}}
+            next_payload['messages'] = continuation_messages
+            try:
+                response = self.client.post(self.endpoint, headers=self._headers(), json=_sanitize_surrogates(next_payload))
+                response.raise_for_status()
+                body = response.json()
+                message = body['choices'][0]['message']
+            except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
+                return {'kind': 'answer', 'answer': ''.join(parts), 'completed': False,
+                        'failure_reason': 'output_continuation_failed',
+                        'unresolved_items': ['The provider could not continue. The partial answer is preserved; retry to continue.']}
+            parts.append(str(message.get('content') or ''))
+        if parts:
+            if body['choices'][0].get('finish_reason') == 'length':
+                return {'kind': 'answer', 'answer': ''.join(parts), 'completed': False,
+                        'failure_reason': 'output_continuation_limit',
+                        'unresolved_items': ['The answer is preserved but still unfinished. Ask to continue.']}
+            message = {**message, 'content': ''.join(parts)}
 
         calls = message.get("tool_calls") if isinstance(message, dict) else None
         if isinstance(calls, list) and calls:
@@ -551,7 +579,7 @@ class OpenAICompatiblePlanner:
                     plan = {
                         "kind": "local_action",
                         "title": str(arguments.get("title") or f"Execute {cap}")[:160],
-                        "objective": str(arguments.get("objective") or f"Execute {cap}")[:8_000],
+                        "objective": str(arguments.get("objective") or f"Execute {cap}"),
                         "capability": str(cap),
                         "payload": inner_payload,
                     }
@@ -750,7 +778,7 @@ def run_shared_local_turn(
                     "failure and ask the user to update the local web credential if needed."
                 ),
             })
-    planner = OpenAICompatiblePlanner(config)
+    planner = OpenAICompatiblePlanner(config, workspace=Path(workspace_id) if Path(workspace_id).is_dir() else Path.cwd())
     try:
         agent = LocalAutonomousAgent(state_path, max_steps=max(1, min(int(max_steps), 20)), action_executor=action_executor, cancel_check=lambda: runtime_sessions.should_cancel(conversation))
         result = agent.run_turn(_sanitize_surrogates(prompt), model_callable=planner, context=merged_context, event_callback=event_callback)

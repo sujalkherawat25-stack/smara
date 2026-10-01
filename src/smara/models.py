@@ -23,7 +23,7 @@ class TaskStepInput(BaseModel):
 
 class TaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
-    objective: str = Field(min_length=1, max_length=20_000)
+    objective: str = Field(min_length=1)
     workspace_id: str = Field(default="default", min_length=1, max_length=128)
     requires_approval: bool = True
     steps: list[TaskStepInput] = Field(default_factory=lambda: [TaskStepInput(name="agent.execute")], min_length=1, max_length=100)
@@ -53,14 +53,14 @@ class TaskView(BaseModel):
     # Hosted tasks are authorised in Smara Web.  Desktop tasks are authorised
     # by the paired device only; the hosted service merely plans and audits.
     approval_mode: Literal["hosted", "desktop"] = "hosted"
-    result: str | None = Field(default=None, max_length=20_000)
+    result: str | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class ScheduleCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
-    objective: str = Field(min_length=1, max_length=20_000)
+    objective: str = Field(min_length=1)
     workspace_id: str = Field(default="default", min_length=1, max_length=128)
     interval_seconds: int = Field(ge=60, le=2_592_000)
     starts_at: datetime | None = None
@@ -119,7 +119,7 @@ class SkillTeachRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     """A short conversational turn; durable work belongs in TaskCreate."""
-    message: str = Field(min_length=1, max_length=20_000)
+    message: str = Field(min_length=1)
     workspace_id: str = Field(default="default", min_length=1, max_length=128)
     conversation_id: str | None = Field(default=None, max_length=160)
     model_profile: str | None = Field(default=None, min_length=1, max_length=64)
@@ -165,7 +165,7 @@ class AccountDeletionRequest(BaseModel):
 
 class ResearchTaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
-    question: str = Field(min_length=5, max_length=20_000)
+    question: str = Field(min_length=5)
     workspace_id: str = Field(default="default", min_length=1, max_length=128)
     sources: list[AnyHttpUrl] = Field(default_factory=list, max_length=12)
 
@@ -230,7 +230,7 @@ class ExecutorClaim(BaseModel):
 
 
 class ExecutorComplete(BaseModel):
-    result: str = Field(min_length=1, max_length=20_000)
+    result: str = Field(min_length=1)
 
 
 class ExecutorFailure(BaseModel):

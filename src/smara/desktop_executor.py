@@ -791,7 +791,12 @@ def _read_file(payload: dict, roots: list[Path]) -> str:
         start_line = payload.get("start_line")
         end_line = payload.get("end_line")
         with_line_numbers = payload.get("line_numbers") is True
-        if start_line is not None or end_line is not None:
+        if payload.get('start_char') is not None:
+            start = max(0, int(payload['start_char']))
+            end = min(len(raw_text), start + max(1, min(int(payload.get('max_chars') or 12000), 32000)))
+            result.update(content=raw_text[start:end], start_char=start, total_chars=len(raw_text),
+                          next_start_char=end if end < len(raw_text) else None)
+        elif start_line is not None or end_line is not None:
             lines = raw_text.splitlines()
             s_idx = max(1, int(start_line)) if start_line is not None else 1
             e_idx = min(len(lines), int(end_line)) if end_line is not None else len(lines)

@@ -53,10 +53,11 @@ def _get_vault_secret(alias: str) -> str:
     return ""
 
 
-def _truncate_output(text: str, max_chars: int = 16000) -> str:
+def _truncate_output(text: str, max_chars: int = 16000, workspace: Optional[Path] = None) -> str:
     if len(text) > max_chars:
-        half = max_chars // 2
-        return text[:half] + f"\n\n... [Output truncated: {len(text)-max_chars} characters omitted to preserve context window] ...\n\n" + text[-half:]
+        from smara.long_context import context_excerpt
+        prefix = text.split('\n', 1)[0] + '\n' if text.startswith('[Exit Code:') else ''
+        return prefix + context_excerpt(text, workspace or Path.cwd(), inline_chars=max_chars)
     return text
 
 
@@ -421,11 +422,11 @@ def python_execute(code: str, timeout: int = 30) -> str:
         if result.returncode != 0:
             msg = f"Process exited with code {result.returncode}:\n{err or out}"
             if len(msg) > 16000:
-                msg = msg[:8000] + f"\n\n... [Output truncated: {len(msg)-16000} characters omitted to preserve context window] ...\n\n" + msg[-8000:]
+                msg = _truncate_output(msg)
             return msg
         res = out or "(Script executed successfully with no stdout output)"
         if len(res) > 16000:
-            res = res[:8000] + f"\n\n... [Output truncated: {len(res)-16000} characters omitted to preserve context window] ...\n\n" + res[-8000:]
+            res = _truncate_output(res)
         return res
     except subprocess.TimeoutExpired:
         return f"Execution timed out after {timeout} seconds."
@@ -449,13 +450,21 @@ def _resolve_file_path(file_path: Path | str) -> Path:
     return p
 
 
-def file_read(file_path: Path | str, offset: Optional[int] = None, limit: Optional[int] = None, max_chars: int = 12000) -> str:
+def file_read(file_path: Path | str, offset: Optional[int] = None, limit: Optional[int] = None, max_chars: int = 12000, start_char: Optional[int] = None) -> str:
     """Extract content from files. Supports line-range windowing for code/text files, and multi-format document parsing."""
     p = _resolve_file_path(file_path)
     if not p.exists():
         return f"Error: File not found at {file_path}"
 
     ext = p.suffix.lower()
+    if start_char is not None:
+        with p.open(encoding='utf-8', errors='replace', newline='') as stream:
+            text = stream.read()
+        start = max(0, int(start_char))
+        end = min(len(text), start + max(1, min(int(max_chars), 32000)))
+        return json.dumps({'file_path': str(p), 'content': text[start:end],
+                           'start_char': start, 'next_start_char': end if end < len(text) else None,
+                           'total_chars': len(text)}, ensure_ascii=False)
 
     if ext in [".png", ".jpg", ".jpeg", ".webp"]:
         return image_inspect(str(p), prompt="Transcribe all visible text, numbers, labels, diagrams, and content in this image in detail.")
@@ -1085,7 +1094,7 @@ def terminal_execute(command: str, cwd: Optional[str] = None, timeout: int = 45)
             output_parts.append("(Command executed with no stdout/stderr output)")
 
         full_res = f"{status_msg}\n" + "\n\n".join(output_parts)
-        return _truncate_output(full_res, max_chars=16000)
+        return _truncate_output(full_res, max_chars=16000, workspace=cmd_cwd)
     except subprocess.TimeoutExpired:
         return f"Command execution timed out after {timeout} seconds: '{command}'"
     except Exception as e:

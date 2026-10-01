@@ -85,7 +85,7 @@ class RuntimeSession:
         self.workspace_id = str(self.workspace_id or "default")[:512]
         self.account_id = str(self.account_id or "local")[:256]
         self.mode = str(self.mode or "local")[:64]
-        self.request = str(self.request or "")[:20_000]
+        self.request = str(self.request or "")
         self.cancel_requested = bool(self.cancel_requested)
         if self.cancel_reason is not None:
             self.cancel_reason = str(self.cancel_reason)[:500]
@@ -219,7 +219,7 @@ class SQLiteRuntimeSessionStore:
                 "(session_id,workspace_id,account_id,mode,status,request,model_profile,tool_profile,research_mode,result_json,unresolved_json,created_at,updated_at,revision,schema_version) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (sid, str(workspace_id or "default")[:512], str(account_id or "local")[:256], str(mode or "local")[:64],
-                 "created", str(request or "")[:20_000], model_profile, tool_profile, research_mode, "{}", "[]", now, now, 0, SESSION_SCHEMA_VERSION),
+                 "created", str(request or ""), model_profile, tool_profile, research_mode, "{}", "[]", now, now, 0, SESSION_SCHEMA_VERSION),
             )
             row = connection.execute("SELECT * FROM runtime_sessions WHERE session_id=?", (sid,)).fetchone()
         session = self._row_to_session(row)
@@ -274,7 +274,7 @@ class SQLiteRuntimeSessionStore:
                 "cancel_requested=0,cancel_reason=NULL,updated_at=? WHERE session_id=?",
                 (
                     str(workspace_id or "default")[:512], str(account_id or "local")[:256], str(mode or "local")[:64],
-                    str(request or "")[:20_000], model_profile, tool_profile, research_mode, now, session.session_id,
+                    str(request or ""), model_profile, tool_profile, research_mode, now, session.session_id,
                 ),
             )
             row = connection.execute("SELECT * FROM runtime_sessions WHERE session_id=?", (session.session_id,)).fetchone()

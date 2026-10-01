@@ -34,7 +34,7 @@ def memory_path_for_state(state_path: Path | str) -> Path:
 
 
 def _redact(text: str) -> str:
-    return _SECRET_RE.sub("[REDACTED]", str(text)[:MAX_TURN_CHARS])
+    return _SECRET_RE.sub("[REDACTED]", str(text))
 
 
 def _workspace_key(value: object) -> str:

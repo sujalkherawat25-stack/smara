@@ -488,11 +488,11 @@ class LocalTaskStore:
             handle.close()
 
     @staticmethod
-    def _clean_text(value: object, *, field: str, limit: int) -> str:
+    def _clean_text(value: object, *, field: str, limit: int | None) -> str:
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{field} is required")
         value = value.strip()
-        if len(value) > limit:
+        if limit is not None and len(value) > limit:
             raise ValueError(f"{field} exceeds the {limit} character limit")
         return value
 
@@ -508,7 +508,7 @@ class LocalTaskStore:
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         title = self._clean_text(title, field="title", limit=160)
-        objective = self._clean_text(objective, field="objective", limit=8_000)
+        objective = self._clean_text(objective, field="objective", limit=None)
         if approval_mode not in {"ask", "auto"}:
             raise ValueError("approval_mode must be 'ask' or 'auto'")
         if required_capability is not None:
@@ -940,7 +940,7 @@ class LocalAutonomousAgent:
     ) -> dict[str, Any]:
         """Execute a full multi-step turn with autonomous tool dispatch."""
         history = list(context or [])
-        history.append({"role": "user", "content": prompt})
+        history.append({"role": "user", "content": prompt, "_smara_mandatory": True})
         steps_taken: list[dict[str, Any]] = []
         action_counts: dict[str, int] = {}
 
@@ -972,8 +972,10 @@ class LocalAutonomousAgent:
                 return {
                     "answer": answer,
                     "steps": steps_taken,
-                    "completed": True,
+                    "completed": response.get('completed', True),
                     "iterations": iteration + 1,
+                    "failure_reason": response.get('failure_reason'),
+                    "unresolved_items": response.get('unresolved_items', []),
                 }
             if response.get("kind") == "local_action" or "capability" in response:
                 cap = response.get("capability")

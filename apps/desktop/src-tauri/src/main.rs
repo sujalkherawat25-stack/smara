@@ -246,25 +246,11 @@ fn persist_local_chat_turn(conversation_id: &str, user_message: &str, assistant_
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    turns.push(json!({"role": "user", "content": user_message.trim().chars().take(12_000).collect::<String>()}));
-    turns.push(json!({"role": "assistant", "content": assistant_message.trim().chars().take(12_000).collect::<String>()}));
-    // Keep the most recent 16 messages and a hard character ceiling. The
-    // model request is bounded even if a provider returns a very long answer.
-    if turns.len() > 16 {
-        turns = turns.split_off(turns.len() - 16);
-    }
-    let mut total = 0usize;
-    let mut bounded = Vec::with_capacity(turns.len());
-    for turn in turns.into_iter().rev() {
-        let content_len = turn.get("content").and_then(Value::as_str).map(str::len).unwrap_or(0);
-        if total + content_len > 24_000 && !bounded.is_empty() {
-            break;
-        }
-        total += content_len;
-        bounded.push(turn);
-    }
-    bounded.reverse();
-    object.insert(conversation_id.to_owned(), Value::Array(bounded));
+    turns.push(json!({"role": "user", "content": user_message}));
+    turns.push(json!({"role": "assistant", "content": assistant_message}));
+    // Persistence is lossless. Bound provider context separately, never the
+    // user's saved transcript or visible answer.
+    object.insert(conversation_id.to_owned(), Value::Array(turns));
     write_json(&local_chat_history_path(), &root)
 }
 
@@ -1684,7 +1670,7 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
                 "required": ["title", "objective", "capability", "payload"],
                 "properties": {
                     "title": {"type": "string", "maxLength": 160},
-                    "objective": {"type": "string", "maxLength": 8000},
+                    "objective": {"type": "string"},
                     "capability": {"type": "string", "enum": connection.capabilities},
                     "payload": {
                         "type": "object",
@@ -2175,11 +2161,19 @@ async fn stream_local_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModel
     Ok(())
 }
 
+fn is_memory_list_command(message: &str) -> bool {
+    matches!(message.to_lowercase().trim().trim_end_matches(['?', '.', '!']),
+        "show memory" | "show memories" | "show my memory" | "show my memories" |
+        "show stored memories" | "show all memories" | "list memory" | "list memories" |
+        "list my memories" | "list saved memories" | "what do you remember" |
+        "/memory" | "/memories")
+}
+
 async fn try_autonomous_memory_action(app: &AppHandle, args: &ChatArgs) -> Result<Option<()>, String> {
     let msg_lower = args.message.to_lowercase();
     let is_remember = msg_lower.starts_with("remember ") || msg_lower.starts_with("remember:") || msg_lower.starts_with("please remember");
     let is_forget = msg_lower.starts_with("forget ") || msg_lower.starts_with("forget:") || msg_lower.starts_with("please forget");
-    let is_list = (msg_lower.contains("memory") || msg_lower.contains("memories")) && (msg_lower.contains("show") || msg_lower.contains("list") || msg_lower.contains("what do you remember"));
+    let is_list = is_memory_list_command(&args.message);
 
     if !is_remember && !is_forget && !is_list {
         return Ok(None);
@@ -3464,6 +3458,13 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn memory_listing_requires_an_explicit_command_not_pasted_prose() {
+        assert!(super::is_memory_list_command("Show my memories?"));
+        assert!(super::is_memory_list_command("/memory"));
+        assert!(!super::is_memory_list_command("Show how memory helps pilots. List the tradeoffs and build a plan."));
+        assert!(!super::is_memory_list_command(&"memory show list ".repeat(2000)));
+    }
     use super::{append_stream_delta, derived_local_capabilities, direct_local_request_text, evaluate_local_arithmetic, local_builtin_answer, local_delta_text, local_event_payload, normalize_provider_model, normalized_api_url, normalized_pairing_code, normalized_web_url, parse_local_json_plan, preserve_local_model_profiles, python_string_literal};
     use serde_json::json;
 

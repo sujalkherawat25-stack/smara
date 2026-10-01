@@ -402,10 +402,13 @@ def _compact_conversation_history(
     return packed
 
 
-def _offload_massive_result(content: str, call_id: str, max_chars: int = 4000) -> str:
+def _offload_massive_result(content: str, call_id: str, max_chars: int = 4000, workspace: Optional[Path] = None) -> str:
     """If tool output is massive, persist full output to cache directory and return a clean excerpt."""
     if len(content) <= max_chars:
         return content
+    if workspace is not None:
+        from smara.long_context import context_excerpt
+        return context_excerpt(content, workspace, inline_chars=max_chars)
     try:
         cache_dir = Path("data/cache")
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -638,6 +641,10 @@ TOOL_SCHEMAS = [
                         "type": "integer",
                         "description": "Maximum characters to return (default 12000).",
                         "default": 12000
+                    },
+                    "start_char": {
+                        "type": "integer", "minimum": 0,
+                        "description": "Read a zero-based character range instead of lines. Use next_start_char to page through long text, including a single long line."
                     }
                 },
                 "required": ["file_path"]
@@ -1796,7 +1803,7 @@ class SmaraAutonomousAgent:
             admitted = self._execution_broker.path(fp)
         except Exception as exc:
             return f"File Read Error: policy_denied: {exc}"
-        return file_read(str(admitted), offset=offset, limit=limit, max_chars=max_chars)
+        return file_read(str(admitted), offset=offset, limit=limit, max_chars=max_chars, start_char=args.get('start_char'))
 
     def _dispatch_list_directory(self, args: Dict[str, Any]) -> str:
         p = args.get("path") or "."
@@ -1984,40 +1991,47 @@ class SmaraAutonomousAgent:
     def _call_model_api(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, max_tokens: int = 16384) -> Dict[str, Any]:
         """Perform HTTP POST request to OpenAI-compatible chat completions with Three-Zone Context Compaction."""
         from smara.context_packing import ContextOverflow, ModelContextProfile, pack_messages
+        capacity = 1_048_576 if urllib.parse.urlparse(self.base_url).hostname == 'api.sarvam.ai' and self.model == 'glm5.3' else 131072
         profile = ModelContextProfile(
             tokenizer_id=f"unknown:{self.model}",
-            input_capacity=int(os.getenv("SMARA_MODEL_CONTEXT_TOKENS", "131072")),
+            input_capacity=int(os.getenv("SMARA_MODEL_CONTEXT_TOKENS", str(capacity))),
             output_reserve=max_tokens,
         )
         # Code observations must remain intact while they fit. The protocol-safe
         # token packer drops complete old exchanges when necessary; lossy excerpts
         # otherwise make the model reread missing function bodies indefinitely.
         compacted = ([dict(message) for message in messages]
-                     if self.toolset in {"coding", "swe", "worker_coding"}
+                     if self.toolset in {"coding", "swe", "worker_coding"} or any(message.get('_smara_mandatory') for message in messages)
                      else _compact_conversation_history(
                          messages,
                          max_chars=int(os.getenv("SMARA_CONTEXT_MAX_CHARS", "45000")),
                          planner=self.task_planner,
                      ))
+        if 'file_read' in self._admitted_tool_names:
+            from smara.long_context import context_excerpt
+            compacted = [{**message, 'content': context_excerpt(str(message.get('content') or ''), self.workspace_root)}
+                         if message.get('role') != 'system' else message for message in compacted]
         try:
             packed = pack_messages(compacted, profile, tools=tools or ())
         except ContextOverflow:
-            emergency = _compact_conversation_history(compacted, max_chars=18000, planner=self.task_planner)
+            emergency = [dict(message) for message in compacted]
             for msg in emergency:
                 c = str(msg.get("content") or "")
-                if msg.get("role") != "system" and len(c) > 1000:
+                if msg.get("role") != "system" and not msg.get('_smara_mandatory') and len(c) > 1000:
                     msg["content"] = c[:500] + f"\n... [Compacted {len(c)-800} chars] ...\n" + c[-300:]
             try:
                 packed = pack_messages(emergency, profile, tools=tools or ())
             except ContextOverflow:
                 profile_emergency = ModelContextProfile(
                     tokenizer_id=f"unknown:{self.model}",
-                    input_capacity=int(os.getenv("SMARA_MODEL_CONTEXT_TOKENS", "131072")),
+                    input_capacity=int(os.getenv("SMARA_MODEL_CONTEXT_TOKENS", str(capacity))),
                     output_reserve=max(2048, min(max_tokens, 4096)),
                     safety_margin=64,
                 )
                 packed = pack_messages(emergency, profile_emergency, tools=tools or ())
-        compacted_messages = list(packed.messages)
+                max_tokens = profile_emergency.output_reserve
+        compacted_messages = [{key: value for key, value in message.items() if not key.startswith('_smara_')}
+                              for message in packed.messages]
         self._report_progress("context_packed", {"input_tokens": packed.input_tokens, "accounting_quality": packed.accounting_quality, "omitted_messages": packed.omitted_messages})
 
         payload: Dict[str, Any] = {
@@ -2197,7 +2211,7 @@ class SmaraAutonomousAgent:
         if file_path:
             user_prompt += f"\nAssociated Task File: {file_path}"
         if file_content:
-            user_prompt += f"\nFile Text Content Snippet:\n{file_content[:4000]}"
+            user_prompt += f"\nAttached File Text:\n{file_content}"
 
         lane_decision = None
         if self.toolset == "research_web":
@@ -2246,7 +2260,7 @@ class SmaraAutonomousAgent:
                 if r in ("user", "assistant") and c:
                     messages.append({"role": r, "content": c})
 
-        messages.append({"role": "user", "content": user_prompt})
+        messages.append({"role": "user", "content": user_prompt, "_smara_mandatory": True})
         if self.session_engine is not None:
             self.session_engine.begin_incremental(task)
             if self.toolset in {"research", "research_web"}:self.session_engine.set("research_required",True)
@@ -3058,7 +3072,7 @@ class SmaraAutonomousAgent:
                     elif fn_name == "research_report" and '"status": "ok"' in raw_obs:
                         guidance = "\n[Research Guidance: Comprehensive report artifact preserved. Deliver a concise completion summary with its artifact path and FINAL LABEL.]\n"
                     inline_limit = 32000 if self.toolset in {"coding", "swe", "worker_coding"} else 4000
-                    obs = stall_note + _offload_massive_result(raw_obs, call_id=call_id, max_chars=inline_limit) + guidance
+                    obs = stall_note + _offload_massive_result(raw_obs, call_id=call_id, max_chars=inline_limit, workspace=self.workspace_root) + guidance
                     self._report_progress("tool_end", {"iteration": iteration, "tool": fn_name, "observation": obs})
                     return tc, fn_name, parsed_args, call_id, obs
 

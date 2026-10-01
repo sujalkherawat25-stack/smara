@@ -343,7 +343,7 @@ export default function App() {
   const [codingMode, setCodingMode] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [activityOpen, setActivityOpen] = useState(false);
-  const [appVersion, setAppVersion] = useState("0.1.4");
+  const [appVersion, setAppVersion] = useState("0.1.5");
 
   useEffect(() => {
     if (!isNativeDesktop) return;
