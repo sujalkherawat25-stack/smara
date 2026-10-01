@@ -1,7 +1,6 @@
 """Smart Git Workspace & Autonomous Branching Agent."""
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 from dataclasses import asdict, dataclass, field
@@ -72,7 +71,9 @@ class GitWorkspaceManager:
                 encoding="utf-8",
                 errors="replace",
             )
-            return res.returncode, res.stdout.strip(), res.stderr.strip()
+            # Porcelain status uses leading spaces to distinguish staged from
+            # unstaged changes. Never strip the first record's status column.
+            return res.returncode, res.stdout.rstrip(), res.stderr.strip()
         except FileNotFoundError:
             return 127, "", "git executable not found in PATH"
 
@@ -283,28 +284,18 @@ class GitWorkspaceManager:
         return {"ok": ok, "output": out}
 
     def detect_conflicts(self) -> list[dict[str, Any]]:
-        """Find files with actual git merge conflict markers and extract conflicting sections."""
-        conflicts = []
-        for root, dirs, files in os.walk(self.workspace):
-            # Prune ignored directories in place
-            dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "target", ".smara", "dist", "build"}]
-            for file in files:
-                p = Path(root) / file
-                if p.suffix in {".py", ".ts", ".tsx", ".rs", ".js", ".json", ".md", ".css"}:
-                    try:
-                        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-                        has_start = any(l.startswith("<<<<<<< ") for l in lines)
-                        has_sep = any(l.startswith("=======") for l in lines)
-                        has_end = any(l.startswith(">>>>>>> ") for l in lines)
-                        if has_start and has_sep and has_end:
-                            rel = str(p.relative_to(self.workspace))
-                            conflicts.append({
-                                "file": rel,
-                                "path": str(p),
-                            })
-                    except Exception:
-                        pass
-        return conflicts
+        """Report Git's unmerged index entries, never scan unrelated folders.
+
+        This also includes binary and delete/modify conflicts, which need not
+        contain text markers. Marker examples in documentation aren't conflicts.
+        """
+        if not self.is_git_repo():
+            return []
+        code, out, err = self._run_git(["diff", "--name-only", "--diff-filter=U", "-z", "--"])
+        if code != 0:
+            raise RuntimeError(err or "Could not inspect Git conflicts")
+        return [{"file": name, "path": str(self.workspace / name)}
+                for name in out.split("\0") if name]
 
     def resolve_conflict(self, file_path: str, strategy: str = "ours") -> tuple[bool, str]:
         """Resolve conflict markers by choosing 'ours', 'theirs', or clean merge."""

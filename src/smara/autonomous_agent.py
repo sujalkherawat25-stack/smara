@@ -1261,6 +1261,7 @@ You solve complex multi-step reasoning, research, multimodal, coding, and mathem
    - For multi-step tasks (3+ steps) or complex coding/research trajectories, maintain a task checklist via `todo`. Active tasks survive context compaction.
    - For creating files, use `file_write`. For surgical edits on existing files, always use `patch`.
    - For running terminal commands, test suites, builds, or git, use `terminal`.
+   - For coding, when required project-specific requirements or policy are absent after checking the relevant files and saved local notes, stop and ask for the exact missing facts. Start the final answer with `needs_input`; do not keep searching unchanged files, invent policy, or treat tests of a placeholder as finished implementation.
    - For headless browser actions, screenshots, or scraping, use `browser_action`.
    - Keep internal reasoning concise and focused (under 150 words) before executing tools or stating answers.
    - Treat the live Application Clock in the execution context as authoritative for local date/time questions. Do not ask the user for today's date or search the web for the clock. For current/latest external facts, verify live sources and state the relevant as-of date. For a historical "as of" question, honor its requested cutoff instead of substituting today's date.
@@ -2193,7 +2194,12 @@ class SmaraAutonomousAgent:
                     self.session_engine.event("research_lane_selected", lane_decision)
             saved_messages = self.session_engine.get("agent_messages")
             if isinstance(saved_messages, list) and saved_messages:
-                messages = saved_messages
+                messages = list(saved_messages)
+                prior_result = self.session_engine.get("result", {})
+                if isinstance(prior_result, dict) and prior_result.get("status") == "needs_input":
+                    self.session_engine.resume_clock()
+                    messages.append({"role": "user", "content": "Resume the original objective. The user may have supplied missing files or requirements since the prior run. Reinspect the current workspace before relying on earlier missing-file observations. Keep the original scope and verification requirements; do not assume missing information has been supplied."})
+                    self.session_engine.checkpoint(messages, {"phase": "model", "resumed_from": "needs_input"})
             else:
                 self.session_engine.checkpoint(messages, {"phase": "model", "iteration": 0})
 

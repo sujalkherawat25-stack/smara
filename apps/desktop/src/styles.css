@@ -577,7 +577,8 @@ body {
   min-height: 24px;
   max-height: 180px;
   line-height: 22px;
-  overflow-y: auto;
+  overflow-y: hidden;
+  color-scheme: dark;
 }
 
 .composer-dock-input::placeholder,
@@ -6333,3 +6334,9 @@ body {
 .research-eval-metrics strong { color: #e2e8f0; margin-top: 5px; font-size: 15px; }
 .research-eval-failures { color: #cbd5e1; font-size: 12px; margin: 10px 0; }
 .research-eval-failures p { overflow-wrap: anywhere; }
+.coding-workflow-bar { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 18px; border-bottom: 1px solid #292b33; }
+.coding-workflow-bar button { border: 1px solid #343640; border-radius: 7px; padding: 7px 11px; background: #17191f; color: #dbe2ef; cursor: pointer; }
+.coding-workflow-bar button:first-child { flex: 1; min-width: 160px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.coding-workflow-bar button:focus-visible { outline: 2px solid #9c7bf2; }
+.active-workspace-card { margin-bottom: 18px; }
+.active-workspace-card input { width: 100%; box-sizing: border-box; }

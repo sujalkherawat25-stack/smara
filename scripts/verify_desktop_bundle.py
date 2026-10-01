@@ -18,7 +18,12 @@ import smara.research_chat
 import smara.research_completeness
 from smara.harness import SessionEngine, verification_scope_for_command
 from smara.completion_quality import final_answer_reports_unresolved_work
+from smara.git_agent import GitWorkspaceManager
+assert '--diff-filter=U' in repr(GitWorkspaceManager.detect_conflicts.__code__.co_consts), 'Stale recursive Git conflict scanner'
 assert final_answer_reports_unresolved_work('The feature was left unimplemented.'), 'Missing completion guard'
+assert final_answer_reports_unresolved_work('needs_input — policy.txt is absent.'), 'Missing explicit status guard'
+assert final_answer_reports_unresolved_work('Not implemented — no approved policy.'), 'Missing unimplemented status guard'
+assert final_answer_reports_unresolved_work('Implementation blocked pending the policy facts.'), 'Missing blocked status guard'
 assert not final_answer_reports_unresolved_work('Added validation for missing input.'), 'Completion guard false positive'
 assert verification_scope_for_command('& "C:/Program Files/Python/python.exe" -m unittest discover') == 'focused', 'Quoted test runner lost its receipt'
 assert verification_scope_for_command('pytest || echo passed') == 'none', 'Masked test exit accepted'

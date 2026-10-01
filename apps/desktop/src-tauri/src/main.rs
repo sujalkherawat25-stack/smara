@@ -750,8 +750,28 @@ fn smara_repo_root() -> Option<PathBuf> {
 #[tauri::command]
 fn load_connection() -> ConnectionState { current_connection() }
 
+fn selected_workspace_dir(workspace: &str, roots: &[String]) -> Result<Option<PathBuf>, String> {
+    let requested = workspace.trim();
+    let path = if requested.is_empty() || requested == "default" {
+        match roots.first() { Some(root) => PathBuf::from(root), None => return Ok(None) }
+    } else {
+        let path = PathBuf::from(requested);
+        if !path.is_absolute() { return Err("Active coding folder must be an absolute path.".to_owned()); }
+        path
+    };
+    let canonical = fs::canonicalize(&path).map_err(|error| format!("Active coding folder is unavailable: {error}"))?;
+    if !canonical.is_dir() { return Err("Active coding folder must be a directory.".to_owned()); }
+    if !roots.iter().filter_map(|root| fs::canonicalize(root).ok()).any(|root| canonical.starts_with(root)) {
+        return Err("Active coding folder must be inside an approved folder.".to_owned());
+    }
+    Ok(Some(canonical))
+}
+
 #[tauri::command]
 fn save_settings(settings: LocalSettings) -> Result<ConnectionState, String> {
+    if settings.runtime_mode.trim() != "cloud" {
+        selected_workspace_dir(&settings.workspace, &settings.allowed_roots)?;
+    }
     let api_url = normalized_api_url(&settings.api_url);
     if !(api_url.starts_with("http://") || api_url.starts_with("https://")) { return Err("Smara API URL must start with http:// or https://".to_owned()); }
     let web_url = normalized_web_url(&api_url, &settings.web_url);
@@ -2518,9 +2538,10 @@ fn run_python_bridge_code_sync(py_code: &str) -> Result<Value, String> {
     // checkout or a system Python.  Route the exact same trusted bridge
     // snippets through that bundled runtime first; this keeps Skills, Memory,
     // Research, Git and report panels working after installation.
-    let bridge_cwd = smara_repo_root()
-        .or_else(|| current_connection().allowed_roots.first().map(PathBuf::from))
-        .filter(|path| path.is_dir());
+    let connection = current_connection();
+    let requested = if connection.runtime_mode == "local" { connection.workspace.as_str() } else { "default" };
+    let bridge_cwd = selected_workspace_dir(requested, &connection.allowed_roots)?
+        .or_else(smara_repo_root);
     let bridge_args = vec!["--state".to_owned(), state_path().display().to_string(), "--python-bridge".to_owned()];
     // The executor already selects bundled or development Python before it
     // starts. Never rerun a snippet after an error: it may have saved state or
@@ -2624,7 +2645,7 @@ async fn get_git_log(limit: Option<usize>) -> Result<Value, String> {
 
 #[tauri::command]
 async fn detect_git_conflicts() -> Result<Value, String> {
-    let py_code = "import json\nfrom smara.git_agent import GitWorkspaceManager\nmgr = GitWorkspaceManager()\nprint(json.dumps([c.to_dict() for c in mgr.detect_conflicts()]))\n";
+    let py_code = "import json\nfrom smara.git_agent import GitWorkspaceManager\nmgr = GitWorkspaceManager()\nprint(json.dumps(mgr.detect_conflicts()))\n";
     run_python_bridge_code(py_code).await
 }
 
@@ -2922,7 +2943,9 @@ async fn run_terminal_command(command: String, cwd: Option<String>) -> Result<Va
     }
     let requested_cwd = cwd.unwrap_or_default();
     let working_dir = if requested_cwd.trim().is_empty() {
-        connection.allowed_roots.first().cloned().ok_or_else(|| "Choose an allowed workspace folder before using the terminal.".to_owned())?
+        selected_workspace_dir(&connection.workspace, &connection.allowed_roots)?
+            .ok_or_else(|| "Choose an allowed workspace folder before using the terminal.".to_owned())?
+            .display().to_string()
     } else {
         requested_cwd.trim().to_owned()
     };
@@ -3443,6 +3466,20 @@ fn main() {
 mod tests {
     use super::{append_stream_delta, derived_local_capabilities, direct_local_request_text, evaluate_local_arithmetic, local_builtin_answer, local_delta_text, local_event_payload, normalize_provider_model, normalized_api_url, normalized_pairing_code, normalized_web_url, parse_local_json_plan, preserve_local_model_profiles, python_string_literal};
     use serde_json::json;
+
+    #[test]
+    fn coding_workspace_selection_is_scoped_and_never_silently_falls_back() {
+        let root = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let child = root.join("src");
+        let roots = vec![root.display().to_string()];
+        assert_eq!(super::selected_workspace_dir("default", &roots).unwrap(), Some(root.clone()));
+        assert_eq!(super::selected_workspace_dir(&child.display().to_string(), &roots).unwrap(), Some(child.canonicalize().unwrap()));
+        assert!(super::selected_workspace_dir("relative-path", &roots).is_err());
+        assert!(super::selected_workspace_dir(&root.parent().unwrap().display().to_string(), &roots).is_err());
+        assert!(super::selected_workspace_dir(&root.join("missing-workspace").display().to_string(), &roots).is_err());
+        assert!(super::selected_workspace_dir(&root.join("Cargo.toml").display().to_string(), &roots).is_err());
+        assert_eq!(super::selected_workspace_dir("default", &[]).unwrap(), None);
+    }
 
     #[test]
     fn research_scorecard_selects_newest_full_suite_not_newer_smoke() {

@@ -5,6 +5,16 @@ from pathlib import Path
 
 import pytest
 
+
+def test_invalid_explicit_coding_workspace_never_falls_back_to_another_folder(tmp_path, monkeypatch):
+    import smara.desktop_executor as executor
+    approved = tmp_path / "approved"
+    approved.mkdir()
+    monkeypatch.setattr(executor, "_load_local_state", lambda _: {"allowed_roots": [str(approved)]})
+    for requested in [tmp_path, approved / "missing"]:
+        with pytest.raises(RuntimeError, match="Requested coding workspace"):
+            executor._run_shared_local_agent_turn({"prompt": "Inspect code", "workspace": str(requested)}, tmp_path / "state.json")
+
 from smara.desktop_executor import (
     DesktopRunner,
     ExecutionCancelled,

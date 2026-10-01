@@ -34,6 +34,28 @@ def test_explicit_unfinished_answer_cannot_complete_durable_session(tmp_path, mo
     assert result["session"]["unresolved_items"]
 
 
+def test_needs_input_resume_reinspects_workspace_and_preserves_budget(tmp_path, monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr("smara.harness.time.time", lambda: now[0])
+    session = SessionEngine(tmp_path, "resume-policy", budget=Budget(60, 5, 5, 500_000, 1))
+    session.begin_incremental("Implement policy")
+    session.checkpoint([{"role": "user", "content": "Implement policy"}], {"phase": "model"})
+    now[0] += 5
+    session.finish_incremental("needs_input", "The policy is missing.", ("missing policy",))
+    now[0] += 3600
+    assert session._elapsed_wall() == 5
+    requests = []
+    def respond(request, **kwargs):
+        requests.append(json.loads(request.data))
+        return Response(final_response("Inspected current files; still need your policy."), "resume")
+    monkeypatch.setattr("urllib.request.urlopen", respond)
+    SmaraAutonomousAgent(api_key="fake", workspace_root=tmp_path, session_engine=session).run("Implement policy", max_iterations=2)
+    assert "Reinspect the current workspace" in requests[0]["messages"][-1]["content"]
+    assert session.get("usage")["model_calls"] == 1
+    assert session.get("budget")["wall_seconds"] == 60
+    assert session.get("paused_seconds") == 3600
+
+
 def test_real_loop_journals_edit_failed_test_repair_and_pass(tmp_path: Path, monkeypatch):
     (tmp_path / "test_calc.py").write_text("from calc import value\n\ndef test_value(): assert value() == 2\n")
     python = str(Path(sys.executable))

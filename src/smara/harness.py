@@ -681,6 +681,9 @@ class SessionEngine:
                         or review.get("question_sha256") != hashlib.sha256(str(self.get("request", "")).encode()).hexdigest()
                         or review.get("report_artifact_id") != self.get("research_report_artifact_id")):
                         status="needs_input";unresolved=tuple(unresolved)+("question completeness review missing, failed, or stale",)
+            if status == "needs_input" and self.get("paused_at") is None:
+                self.set("paused_at", time.time())
+                self.event("paused", {"reason": "waiting_for_input", "elapsed_wall": self._elapsed_wall()})
             receipts=[r[0] for r in self.db.execute("SELECT result FROM calls WHERE result IS NOT NULL ORDER BY position")]; verification=tuple(json.loads(item) for item in receipts); result=RunResult(status,answer,(),verification,self.get("usage",{}),tuple(unresolved),self.session_id,self.session_id,self.VERSION).to_dict(); self.set("result",result); self.event("finished",{"status":status,"unresolved_items":list(unresolved)}); return result
     def continue_run(self,executor):
         if self.get("cancelled",False): return self.finish("cancelled",(),("cancelled by user",))

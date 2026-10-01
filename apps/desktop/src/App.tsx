@@ -41,34 +41,34 @@ const fallbackConnection: ConnectionState = {
 
 const starterPrompts = [
   {
-    title: "🏆 Official GAIA Multimodal Benchmark",
-    desc: "Run strict multi-hop reasoning, document, and audio tasks with reproducible scoring",
-    prompt: "Run the official GAIA Level 1 benchmark evaluation and show detailed accuracy scorecards.",
+    title: "Fix a bug",
+    desc: "Reproduce the failure, make a focused fix, and verify it",
+    prompt: "Inspect this workspace, identify a reproducible bug, make a minimal fix, and run the relevant tests. Explain the changed files and actual test results.",
   },
   {
-    title: "📄 Multimodal Document QA & Analysis",
-    desc: "Extract tables, text, and embedded figures from complex PDF & Office documents",
-    prompt: "Inspect the latest recorded GAIA evaluation report and summarize the actual findings.",
+    title: "Explain this project",
+    desc: "Understand the architecture, entry points, and test commands",
+    prompt: "Read this workspace and explain its architecture, main entry points, and how to run its tests. Do not modify files.",
   },
   {
-    title: "🧪 SWE-bench Verified Bug Auto-Fixer",
-    desc: "Run terminal test suites, parse failures, compute AST blast radius and self-heal",
+    title: "Run tests",
+    desc: "Run the project tests and report actual failures",
     prompt: "Run the full pytest test suite and report any warnings or failure diagnoses.",
   },
   {
-    title: "⚡ AST Code Graph Refactor",
+    title: "Refactor safely",
     desc: "Inspect symbol hierarchy, blast radius, and execute precision edits",
     prompt: "Inspect the symbol graph in our codebase, compute the blast radius for changes, and run tests.",
   },
   {
-    title: "🔍 Deep Web Research & Synthesis",
+    title: "Research a question",
     desc: "Search Exa & Tavily for agent benchmarks and synthesize primary evidence",
     prompt: "Research AI agent industry trends (2025-2026), explain graph engineering in simple words, and cite primary sources.",
   },
   {
-    title: "🌿 Git Workspace & Smart Commits",
-    desc: "Inspect working tree diffs, staging status, and generate AI commit messages",
-    prompt: "Inspect Git workspace status and commit changes with AI message.",
+    title: "Review changes",
+    desc: "Inspect the diff and risks without committing anything",
+    prompt: "Review this workspace's Git diff for bugs and unintended changes. Report findings; do not modify, stage, commit, or push anything.",
   },
 ];
 
@@ -340,6 +340,7 @@ export default function App() {
   const [currentThought, setCurrentThought] = useState<string | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState("auto");
   const [researchMode, setResearchMode] = useState<ResearchMode>("auto");
+  const [codingMode, setCodingMode] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [activityOpen, setActivityOpen] = useState(false);
   const [appVersion, setAppVersion] = useState("0.1.3");
@@ -637,7 +638,7 @@ export default function App() {
           conversation_id: conversationId.current,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           research_mode: researchMode,
-          tool_profile: researchMode === "auto" ? "full" : "research_web",
+          tool_profile: codingMode ? "coding" : researchMode === "auto" ? "full" : "research_web",
         });
       } else {
         setMessages((items) => items.map((item) => item.id === answerId ? {
@@ -895,7 +896,13 @@ export default function App() {
           )}
 
           {tab === "chat" && (
-            <ChatTab
+            <><div className="coding-workflow-bar" aria-label="Coding workflow">
+              <button type="button" disabled={streaming} onClick={() => setTab("workspace")} title={connection.workspace}>
+                Folder: {connection.workspace === "default" ? connection.allowed_roots[0] || "Choose workspace" : connection.workspace}
+              </button>
+              <button type="button" onClick={() => { setTab("studio"); setStudioTab("git"); }}>Review changes</button>
+              <button type="button" onClick={() => { setTab("studio"); setStudioTab("tests"); }}>Verify tests</button>
+            </div><ChatTab
               messages={messages}
               draft={draft}
               setDraft={setDraft}
@@ -915,11 +922,13 @@ export default function App() {
               setSelectedProfileId={setSelectedProfileId}
               researchMode={researchMode}
               setResearchMode={setResearchMode}
+              codingMode={codingMode}
+              setCodingMode={setCodingMode}
               onSelectPrompt={(p) => {
                 setDraft(p);
               }}
               appVersion={appVersion}
-            />
+            /></>
           )}
 
           {tab === "studio" && (
@@ -1041,16 +1050,17 @@ export default function App() {
               <div className="sub-view-body">
                 <WorkspaceTab
                   connection={connection}
-                  onSaved={async (roots, terminal) => {
+                  onSaved={async (workspace, roots, terminal) => {
+                    if (streaming) throw new Error("Stop the current turn before changing its workspace.");
                     const next = await desktop.saveSettings({
                       ...connection,
                       allowed_roots: roots,
+                      workspace,
                       terminal_allowlist: terminal,
-                      approval_mode: "auto",
-                      auto_approve_safe: true,
                     });
                     setConnection(next);
-                    setNotice("Workspace permissions saved.");
+                    startNewSession();
+                    setNotice("Workspace saved. Started a fresh conversation for this folder; earlier history is preserved.");
                   }}
                 />
               </div>
@@ -1394,6 +1404,8 @@ function ChatTab({
   setSelectedProfileId,
   researchMode,
   setResearchMode,
+  codingMode,
+  setCodingMode,
   activityOpen,
   onToggleActivity,
   onSelectPrompt,
@@ -1418,6 +1430,8 @@ function ChatTab({
   setSelectedProfileId: (val: string) => void;
   researchMode: ResearchMode;
   setResearchMode: (val: ResearchMode) => void;
+  codingMode: boolean;
+  setCodingMode: (val: boolean) => void;
   onSelectPrompt?: (val: string) => void;
   appVersion: string;
 }) {
@@ -1433,6 +1447,7 @@ function ChatTab({
       textareaRef.current.style.height = "auto";
       const scrollH = textareaRef.current.scrollHeight;
       textareaRef.current.style.height = `${Math.min(Math.max(scrollH, 24), 180)}px`;
+      textareaRef.current.style.overflowY = scrollH > 180 ? "auto" : "hidden";
     }
   }, [draft]);
 
@@ -1569,12 +1584,13 @@ function ChatTab({
           />
 
           <div className="composer-dock-actions">
-            <label className="composer-control" title="Choose the research lane">
-              <span className="composer-control-label">Lane</span>
-              <select className="composer-dock-select" value={researchMode} onChange={(event) => setResearchMode(event.target.value as ResearchMode)} disabled={streaming}>
+            <label className="composer-control" title="Choose coding or a research mode">
+              <span className="composer-control-label">Mode</span>
+              <select aria-label="Task mode" className="composer-dock-select" value={codingMode ? "coding" : researchMode} onChange={(event) => { setCodingMode(event.target.value === "coding"); setResearchMode(event.target.value === "coding" ? "auto" : event.target.value as ResearchMode); }} disabled={streaming}>
                 <option value="auto">Auto</option>
-                <option value="quick">Quick</option>
-                <option value="deep">Deep</option>
+                <option value="coding">Coding</option>
+                <option value="quick">Quick research</option>
+                <option value="deep">Deep research</option>
               </select>
             </label>
 
@@ -2988,6 +3004,16 @@ function GitTab() {
   useEffect(() => {
     void refreshGit();
   }, []);
+
+  if (!loading && status?.is_repo === false) {
+    return <div className="tab-pane-container git-pane-container">
+      <div className="pane-header"><h2>Review changes</h2>
+        <button type="button" className="btn-refresh-git" onClick={refreshGit}>Refresh Git</button>
+      </div>
+      <p>The selected folder is not a Git repository. Return to Chat and choose your project using Folder.</p>
+      {actionNotice && <p role="alert" className="graph-error-banner">{actionNotice}</p>}
+    </div>;
+  }
 
   return (
     <div className="tab-pane-container git-pane-container">
@@ -4910,10 +4936,19 @@ function WorkspaceTab({
   onSaved,
 }: {
   connection: ConnectionState;
-  onSaved: (roots: string[], terminal: string[]) => Promise<void>;
+  onSaved: (workspace: string, roots: string[], terminal: string[]) => Promise<void>;
 }) {
+  const [workspace, setWorkspace] = useState(connection.workspace === "default" ? connection.allowed_roots[0] || "" : connection.workspace);
   const [roots, setRoots] = useState(connection.allowed_roots.join("\n"));
   const [terminal, setTerminal] = useState(connection.terminal_allowlist.join("\n"));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const saveWorkspace = async () => {
+    setSaving(true); setError(null);
+    try { await onSaved(workspace.trim(), splitLines(roots), splitLines(terminal)); }
+    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setSaving(false); }
+  };
 
   return (
     <div className="tab-pane-container">
@@ -4924,12 +4959,19 @@ function WorkspaceTab({
         </div>
         <button
           className="primary-btn"
-          onClick={() => void onSaved(splitLines(roots), splitLines(terminal))}
+          onClick={() => void saveWorkspace()}
+          disabled={saving || !workspace.trim() || !isNativeDesktop}
         >
-          Save Workspace
+          {saving ? "Saving…" : "Use this workspace"}
         </button>
       </div>
 
+      {error && <p role="alert" className="graph-error-banner">{error}</p>}
+      <div className="config-card active-workspace-card">
+        <h3>Active coding folder</h3>
+        <p className="card-subtext">Chat, change review, and tests use this folder. It must exist inside an approved folder. Existing approval settings stay unchanged.</p>
+        <input aria-label="Active coding folder" value={workspace} onChange={(event) => setWorkspace(event.target.value)} placeholder="Full path to your project" disabled={saving} />
+      </div>
       <div className="cards-grid">
         <div className="config-card">
           <h3>Approved Folders</h3>

@@ -2973,10 +2973,11 @@ def _run_shared_local_agent_turn(request: dict, state_path: Path, event_callback
     roots = _roots(state)
     requested_workspace = request.get("workspace")
     workspace = roots[0]
-    if isinstance(requested_workspace, str) and requested_workspace.strip():
+    if isinstance(requested_workspace, str) and requested_workspace.strip() not in {"", "default"}:
         candidate = Path(requested_workspace).expanduser().resolve()
-        if any(candidate == root or root in candidate.parents for root in roots):
-            workspace = candidate
+        if not candidate.is_dir() or not any(candidate == root or root in candidate.parents for root in roots):
+            raise RuntimeError("Requested coding workspace must be an existing directory inside an approved root.")
+        workspace = candidate
     model = request.get("model")
     # ``/learn`` is a local control command and can synthesize a playbook from
     # the last completed run without contacting a model. Keep it usable when
