@@ -1380,6 +1380,12 @@ def main(argv: list[str] | None = None) -> int:
             review = payload.get("research_review") or {}
             if review.get("claim_count"):
                 print(f"\nEvidence review: {review.get('supported_claims', 0)}/{review['claim_count']} claims supported; {len(review.get('evidence', []))} fetched passages.")
+            completeness = review.get("completeness") or {}
+            if completeness:
+                print(f"Question completeness: {completeness.get('status', 'unavailable')} ({completeness.get('reason', '')})")
+                for requirement in completeness.get("requirements", []):
+                    if not requirement.get("addressed"):
+                        print(f"  Missing or partial: {requirement.get('requirement', '')}")
             report_path = payload.get("research_report_path")
             if report_path:
                 print(f"Research report: {report_path}")

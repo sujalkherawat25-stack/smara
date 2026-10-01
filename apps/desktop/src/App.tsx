@@ -7,7 +7,7 @@ import { TaskMemoryTab } from "./components/TaskMemoryTab";
 import { ProgressiveSkillsTab } from "./components/ProgressiveSkillsTab";
 import { DAGFlowTab } from "./components/DAGFlowTab";
 import { SubagentSwarmTab } from "./components/SubagentSwarmTab";
-import { ResearchReviewPanel } from "./components/ResearchReviewPanel";
+import { ResearchReviewPanel, ResearchCompletenessReview } from "./components/ResearchReviewPanel";
 
 export type NavTab = "chat" | "studio" | "workspace" | "settings";
 export type StudioSubTab = "runs" | "dag" | "goals" | "swarm" | "memory" | "skills" | "graph" | "tests" | "git" | "benchmarks" | "browser";
@@ -2614,12 +2614,13 @@ function BrowserTab() {
                     <div className="panel-sub-header">
                       <h4>🔎 Claim-to-source review</h4>
                       <span className={`task-status-pill ${researchResult.research_review.passed ? "status-complete" : "status-warning"}`}>
-                        {researchResult.research_review.passed ? "VALIDATED" : "REVIEW NEEDED"}
+                        {researchResult.research_review.passed ? "PASSAGE CHECKS PASSED" : "REVIEW NEEDED"}
                       </span>
                     </div>
                     <p style={{ color: "#94a3b8", margin: "4px 0 12px", fontSize: 12 }}>
                       {researchResult.research_review.supported_claims ?? 0}/{researchResult.research_review.claim_count ?? 0} claims supported · {Math.round((researchResult.research_review.evidence_coverage ?? 0) * 100)}% claim coverage · deterministic passage checks are a review signal.
                     </p>
+                    <ResearchCompletenessReview review={researchResult.research_review} />
                     {(researchResult.research_review.claims || []).map((claim: any, index: number) => (
                       <article key={`${index}-${claim.claim}`} className="research-review-claim">
                         <div className="research-review-claim-title">

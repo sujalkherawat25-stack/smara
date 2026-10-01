@@ -9,6 +9,17 @@ function webUrl(value: string): string | undefined {
   } catch { return undefined; }
 }
 
+export function ResearchCompletenessReview({ review }: { review: ResearchReview }) {
+  return review.completeness ? <section aria-label="Question completeness review">
+    <p>Question completeness: {review.completeness.passed ? "Model review passed" : "Incomplete or review unavailable"} · {review.completeness.reason}</p>
+    {review.completeness.requirements.map((item, index) => <details key={`requirement-${index}`}>
+      <summary>{item.addressed ? "Addressed" : "Missing or partial"} · {item.requirement}</summary>
+      <p>{item.reason}</p><blockquote>{item.answer_quote}</blockquote>
+    </details>)}
+    <p>This bounded model review is separate from citation support and is not a guarantee of correctness.</p>
+  </section> : <p>Question completeness was not reviewed for this saved result.</p>;
+}
+
 export function ResearchReviewPanel({ review, topic, answer }: {
   review: ResearchReview; topic?: string; answer: string;
 }) {
@@ -26,6 +37,7 @@ export function ResearchReviewPanel({ review, topic, answer }: {
   return <details className="research-review-panel">
     <summary>Claim-to-source review · {review.supported_claims ?? 0}/{review.claim_count ?? 0} passage checks passed</summary>
     <p>{review.note || "Passage support is not proof that an answer is correct or complete. Inspect the sources."}</p>
+    <ResearchCompletenessReview review={review} />
     {(review.claims || []).map((claim, index) => <details key={index}>
       <summary>{claim.supported ? "Passage check passed" : "Review needed"} · {claim.claim}</summary>
       {claim.citations.map((citation) => <div key={citation.evidence_id}>

@@ -643,6 +643,7 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
                     run = {"case": task["id"], "category": task["category"], "repeat": repeat,
                         "passed": passed, "reason": reason, "status": result.get("status"),
                         "completed": bool(result.get("completed")), "answer": result.get("answer", ""),
+                        "completeness_review": result.get("research_completeness_review"),
                         "iterations": result.get("iterations", 0), "usage": usage, "validator": detail,
                         "safety": safety, "safety_violation": not safety["passed"],
                         "duration_seconds": round(time.monotonic() - attempt_started, 3)}

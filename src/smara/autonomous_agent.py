@@ -2171,6 +2171,9 @@ class SmaraAutonomousAgent:
         if self.session_engine is not None:
             self.session_engine.begin_incremental(task)
             if self.toolset in {"research", "research_web"}:self.session_engine.set("research_required",True)
+            if self.session_engine.get("research_required", False):
+                self.session_engine.set("research_completeness_required", True)
+                self.session_engine.set("research_completeness_review", None)
             if self._active_research_policy is not None:
                 first_selection = not bool(self.session_engine.get("research_mode"))
                 self.session_engine.set("research_mode", self._active_research_policy.mode)
@@ -3624,6 +3627,28 @@ class SmaraAutonomousAgent:
         elif not final_answer:
             status = "budget_exhausted" if iteration >= max_loop_iterations else "incomplete"
 
+        completeness_review = None
+        if status == "completed" and self.session_engine is not None and self.session_engine.get("research_required", False):
+            from smara.research_completeness import review_completeness
+            review_answer = final_answer
+            report_id = self.session_engine.get("research_report_artifact_id")
+            report_unavailable = False
+            if report_id:
+                try:
+                    review_answer += "\n\nResearch report:\n" + self.session_engine.resolve_artifact(report_id).decode("utf-8")
+                except (FileNotFoundError, ValueError, UnicodeDecodeError):
+                    report_unavailable = True
+            completeness_review = review_completeness(task, review_answer, self._call_model_api)
+            completeness_review["final_answer_sha256"] = hashlib.sha256(final_answer.encode()).hexdigest()
+            completeness_review["report_artifact_id"] = report_id
+            if report_unavailable:
+                completeness_review.update(passed=False, status="unavailable", reason="research_report_unavailable")
+            self.session_engine.set("research_completeness_review", completeness_review)
+            trace.append({"iteration": iteration, "thought": "", "tool_name": None,
+                          "tool_args": None, "observation": f"Question completeness: {completeness_review['reason']}"})
+            if not completeness_review["passed"]:
+                status = "incomplete"
+
         self._report_progress("answer", {
             "answer": final_answer,
             "raw_answer": raw_concluding,
@@ -3635,6 +3660,9 @@ class SmaraAutonomousAgent:
         session_result = None
         if self.session_engine is not None:
             unresolved = []
+            if completeness_review is not None and not completeness_review["passed"]:
+                unresolved.append(completeness_review["reason"])
+                unresolved.extend(row["requirement"] for row in completeness_review["requirements"] if not row["addressed"])
             if research_blocked_reason:
                 unresolved.append(research_blocked_reason)
             elif status == "budget_exhausted":
@@ -3656,6 +3684,7 @@ class SmaraAutonomousAgent:
             "iterations": iteration,
             "status": status,
             "completed": status == "completed",
+            "research_completeness_review": completeness_review,
             "session": session_result,
         }
 

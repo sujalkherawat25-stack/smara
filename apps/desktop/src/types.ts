@@ -166,6 +166,12 @@ export interface ChatMessage {
 
 export interface ResearchReview {
   passed: boolean;
+  completeness?: {
+    passed: boolean;
+    status: string;
+    reason: string;
+    requirements: { requirement: string; addressed: boolean; answer_quote: string; reason: string }[];
+  } | null;
   claim_count?: number;
   supported_claims?: number;
   evidence_coverage?: number;

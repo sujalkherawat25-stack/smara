@@ -15,6 +15,7 @@ from pathlib import Path
 import smara.research_watch as watches
 import smara.app_adapter
 import smara.research_chat
+import smara.research_completeness
 assert getattr(sys, 'frozen', False), 'Executor must be frozen'
 assert Path(watches.__file__).is_relative_to(Path(sys._MEIPASS)), 'Watch module came from a checkout'
 with tempfile.TemporaryDirectory() as directory:

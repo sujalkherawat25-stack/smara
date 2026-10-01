@@ -329,6 +329,11 @@ def test_agent_synthesizes_validated_claim_when_validation_uses_last_iteration(t
         agent,
         "_call_model_api",
         lambda messages, tools=None, max_tokens=16384: {
+            "choices": [{"finish_reason": "stop", "message": {"content": json.dumps({
+                "passed": True, "requirements": [{"requirement": "verified value", "addressed": True,
+                    "answer_quote": text, "reason": "Scripted independent review response"}],
+            })}}]
+        } if max_tokens == 2048 else {
             "choices": [{
                 "message": {
                     "tool_calls": [{

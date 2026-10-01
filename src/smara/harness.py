@@ -650,6 +650,13 @@ class SessionEngine:
                     try:self.resolve_artifact(research_artifact)
                     except (FileNotFoundError,ValueError):research_valid=False
                 if not research_valid:status="needs_input";unresolved=tuple(unresolved)+("required research claims lack current artifact-backed validation",)
+                if self.get("research_completeness_required", False):
+                    review = self.get("research_completeness_review") or {}
+                    if (review.get("passed") is not True
+                        or review.get("final_answer_sha256") != hashlib.sha256(answer.encode()).hexdigest()
+                        or review.get("question_sha256") != hashlib.sha256(str(self.get("request", "")).encode()).hexdigest()
+                        or review.get("report_artifact_id") != self.get("research_report_artifact_id")):
+                        status="needs_input";unresolved=tuple(unresolved)+("question completeness review missing, failed, or stale",)
             receipts=[r[0] for r in self.db.execute("SELECT result FROM calls WHERE result IS NOT NULL ORDER BY position")]; verification=tuple(json.loads(item) for item in receipts); result=RunResult(status,answer,(),verification,self.get("usage",{}),tuple(unresolved),self.session_id,self.session_id,self.VERSION).to_dict(); self.set("result",result); self.event("finished",{"status":status,"unresolved_items":list(unresolved)}); return result
     def continue_run(self,executor):
         if self.get("cancelled",False): return self.finish("cancelled",(),("cancelled by user",))

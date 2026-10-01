@@ -53,7 +53,8 @@ def test_quick_lane_recovers_after_provider_timeout_with_validated_state(tmp_pat
     agent = SmaraAutonomousAgent(api_key="fixture", profile="research_web", workspace_root=tmp_path, session_engine=engine, research_mode="quick")
     monkeypatch.setattr(agent, "_call_model_api", lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError("provider timeout")))
     result = agent.run("What is the verified value?", max_iterations=1)
-    assert result["status"] == "completed"
+    assert result["status"] == "needs_input"
+    assert engine.get("research_completeness_review")["status"] == "unavailable"
     assert claim in result["answer"]
 
 
@@ -73,6 +74,7 @@ def test_deep_lane_recovers_report_after_provider_timeout(tmp_path, monkeypatch)
     agent = SmaraAutonomousAgent(api_key="fixture", profile="research_web", workspace_root=tmp_path, session_engine=engine, research_mode="deep")
     monkeypatch.setattr(agent, "_call_model_api", lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError("provider timeout")))
     result = agent.run("What is the verified value?", max_iterations=1)
-    assert result["status"] == "completed"
+    assert result["status"] == "needs_input"
+    assert engine.get("research_completeness_review")["status"] == "unavailable"
     assert claim in result["answer"]
     assert engine.get("research_report_artifact_id")
