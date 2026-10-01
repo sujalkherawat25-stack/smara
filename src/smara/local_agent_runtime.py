@@ -48,6 +48,11 @@ _LIVE_WEB_REFUSALS = (
 # Keep both import modes working so the packaged binary can start without a
 # Python package context.
 try:
+    from .completion_quality import final_answer_reports_unresolved_work
+except ImportError:  # pragma: no cover - frozen executor import mode
+    from smara.completion_quality import final_answer_reports_unresolved_work
+
+try:
     from .local_agent import LocalAutonomousAgent, local_skill_catalog
     from .local_conversation_memory import SQLiteConversationMemory
     from .local_learning import LocalSkillLearningEngine, handle_learn_command, is_learn_command
@@ -805,6 +810,15 @@ def run_shared_local_turn(
         result["local_memory_indexed"] = True
         result["research_mode"] = requested_research_mode
         completed = bool(result.get("completed"))
+        if completed and final_answer_reports_unresolved_work(str(result.get("answer") or "")):
+            completed = False
+            result["completed"] = False
+            result["status"] = "needs_input"
+            unresolved = result.get("unresolved_items")
+            if not isinstance(unresolved, list):
+                unresolved = []
+            unresolved.append("The final answer says requested work remains incomplete or requires missing information.")
+            result["unresolved_items"] = unresolved
         cancelled = bool(result.get("cancelled")) or runtime_sessions.should_cancel(conversation)
         unresolved = result.get("unresolved_items")
         if not isinstance(unresolved, list):

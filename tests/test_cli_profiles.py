@@ -183,3 +183,18 @@ def test_cli_run_auto_routes_deep_research_without_profile_flag(tmp_path, monkey
     assert observed["toolset"] == "research_web"
     assert observed["budget"].wall_seconds == 1800
     assert "ok" in capsys.readouterr().out
+
+
+def test_cli_explicit_coding_profile_uses_coding_budget(tmp_path, monkeypatch, capsys):
+    from smara.autonomous_agent import SmaraAutonomousAgent
+    from smara.harness import BUDGET_PROFILES
+
+    observed = {}
+    def fake_run(self, task, max_iterations):
+        observed.update(toolset=self.toolset, budget=self.session_engine.budget)
+        return {"session": {"status": "completed", "answer": "ok", "unresolved_items": []}}
+
+    monkeypatch.setattr(SmaraAutonomousAgent, "run", fake_run)
+    assert main(["run", "Implement a parser", "--workspace", str(tmp_path), "--tool-profile", "coding"]) == 0
+    assert observed["toolset"] == "coding"
+    assert observed["budget"] == BUDGET_PROFILES["coding"]

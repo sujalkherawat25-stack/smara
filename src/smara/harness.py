@@ -14,6 +14,7 @@ REUSABLE_READ_TOOLS = {"read_file", "file_read", "list_directory", "search_files
 _LIVE_PROCESSES: dict[str, subprocess.Popen] = {}
 _LIVE_PROCESS_LOGS: dict[str, Any] = {}
 _LIVE_PROCESS_JOBS: dict[str, Any] = {}
+_COMMAND_TOKEN_RE = re.compile(r'''^\s*(?:&\s*)?(?:"([^"]+)"|'([^']+)'|([^\s]+))(.*)$''', re.DOTALL)
 
 def _now(): return datetime.now(timezone.utc).isoformat()
 def _json(value): return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
@@ -21,6 +22,29 @@ def _sha(data: bytes): return hashlib.sha256(data).hexdigest()
 def _file_sha(path: Path):
     try: return _sha(path.read_bytes())
     except OSError: return None
+
+def verification_scope_for_command(command: str) -> str:
+    """Recognize a test runner only when it is the command being executed.
+
+    Deliberately reject shell wrappers such as ``echo pytest``: their zero
+    exit code is not evidence that a test suite ran.
+    """
+    match = _COMMAND_TOKEN_RE.match(str(command or ""))
+    if not match:
+        return "none"
+    executable = re.split(r"[/\\]", next(part for part in match.groups()[:3] if part))[-1].lower()
+    arguments = match.group(4)
+    # A following shell command can hide the runner's failing exit code.
+    unquoted_arguments = re.sub(r'''"[^"]*"|'[^']*' ''', "", arguments, flags=re.VERBOSE)
+    if re.search(r"[;&|\r\n]", unquoted_arguments):
+        return "none"
+    if re.fullmatch(r"python(?:\d+(?:\.\d+)*)?(?:\.exe)?|py(?:\.exe)?", executable):
+        return "focused" if re.match(r"\s+-m\s+(?:pytest|unittest)(?:\s|$)", arguments, re.I) else "none"
+    if executable in {"pytest", "pytest.exe", "py.test", "py.test.exe"}:
+        return "focused"
+    if executable in {"npm", "npm.cmd", "cargo", "cargo.exe", "go", "go.exe"}:
+        return "focused" if re.match(r"\s+test(?:\s|$)", arguments, re.I) else "none"
+    return "none"
 
 def workspace_revision(root: Path) -> str:
     digest = hashlib.sha256()
@@ -699,4 +723,4 @@ class SessionEngine:
         if prior!=result:self.event("finished",{"status":status,"unresolved_items":list(unresolved)})
         return result
 
-__all__=["ArtifactStore","Budget","BUDGET_PROFILES","Evidence","ProcessSupervisor","RunEvent","RunRequest","RunResult","SchemaError","SessionBusy","SessionEngine","ToolBroker","ToolCall","ToolResult","workspace_revision"]
+__all__=["ArtifactStore","Budget","BUDGET_PROFILES","Evidence","ProcessSupervisor","RunEvent","RunRequest","RunResult","SchemaError","SessionBusy","SessionEngine","ToolBroker","ToolCall","ToolResult","verification_scope_for_command","workspace_revision"]

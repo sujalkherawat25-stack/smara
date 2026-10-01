@@ -16,7 +16,12 @@ import smara.research_watch as watches
 import smara.app_adapter
 import smara.research_chat
 import smara.research_completeness
-from smara.harness import SessionEngine
+from smara.harness import SessionEngine, verification_scope_for_command
+from smara.completion_quality import final_answer_reports_unresolved_work
+assert final_answer_reports_unresolved_work('The feature was left unimplemented.'), 'Missing completion guard'
+assert not final_answer_reports_unresolved_work('Added validation for missing input.'), 'Completion guard false positive'
+assert verification_scope_for_command('& "C:/Program Files/Python/python.exe" -m unittest discover') == 'focused', 'Quoted test runner lost its receipt'
+assert verification_scope_for_command('pytest || echo passed') == 'none', 'Masked test exit accepted'
 assert 'question_sha256' in SessionEngine.finish_incremental.__code__.co_consts, 'Stale completeness receipt guard'
 assert getattr(sys, 'frozen', False), 'Executor must be frozen'
 assert Path(watches.__file__).is_relative_to(Path(sys._MEIPASS)), 'Watch module came from a checkout'
@@ -35,7 +40,7 @@ with tempfile.TemporaryDirectory() as directory:
  assert len(store.history(watch['id'])) == 20
  store.remove(watch['id'])
  assert not store.get(watch['id'])['enabled']
-print(json.dumps({'frozen':True, 'checkout_required':False, 'watch_storage':'passed', 'canonical_adapter_import':'passed'}))
+print(json.dumps({'frozen':True, 'checkout_required':False, 'watch_storage':'passed', 'canonical_adapter_import':'passed', 'completion_guard':'passed', 'test_receipts':'passed'}))
 """
 
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { desktop, isNativeDesktop } from "./api";
-import type { ActivityItem, ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatMessage, CodingConventionsData, ConnectionState, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ResearchMode, ResearchWatch, RuntimeSessionRecord, RuntimeSessionSnapshot, SearchResultItem, SemanticIndexStats, SwarmMessageData, SwarmTaskResultData, SymbolEvolutionData, TaskSummary, TestFailureItem, TestSuiteResultData, WebScrapeData } from "./types";
+import type { ActivityItem, ADRData, ASTSymbolInspection, AutoFixResultData, BrowserScreenshotData, BrowserStepResultData, ChatEvent, ChatMessage, CodingConventionsData, ConnectionState, DualPlaneRecallData, DualPlaneStatusData, E2ESuiteResultData, FilePreview, GitCommitData, GitConflictData, GitSmartCommitData, GitStatusData, LocalConnectorSummary, LocalCredentialSummary, LocalModelProfile, ResearchMode, ResearchWatch, RuntimeSessionRecord, RuntimeSessionSnapshot, SearchResultItem, SemanticIndexStats, SwarmMessageData, SwarmTaskResultData, SymbolEvolutionData, TaskDetail, TaskSummary, TestFailureItem, TestSuiteResultData, WebScrapeData } from "./types";
 import smaraLogo from "./assets/smara-logo.svg";
 import { TaskMemoryTab } from "./components/TaskMemoryTab";
 import { ProgressiveSkillsTab } from "./components/ProgressiveSkillsTab";
@@ -328,6 +328,8 @@ export default function App() {
   const [integrationHealth, setIntegrationHealth] = useState<any>({ plugins: [], plugin_health: [], mcp_health: [] });
   const [modelProfiles, setModelProfiles] = useState<LocalModelProfile[]>([]);
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
+  const [taskDetailDialog, setTaskDetailDialog] = useState<{ title: string; loading: boolean; detail?: TaskDetail; error?: string } | null>(null);
+  const taskDetailRequest = useRef(0);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [draft, setDraft] = useState("");
@@ -357,6 +359,22 @@ export default function App() {
       setNotice(`Could not preview file: ${err?.message || String(err)}`);
     }
   };
+
+  const openTaskDetails = async (task: TaskSummary) => {
+    const request = ++taskDetailRequest.current;
+    const title = task.title || "Task details";
+    setTaskDetailDialog({ title, loading: true });
+    try {
+      const detail = await desktop.taskDetails(task.id);
+      if (request === taskDetailRequest.current) setTaskDetailDialog({ title, loading: false, detail });
+    } catch (error) {
+      if (request === taskDetailRequest.current) setTaskDetailDialog({ title, loading: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+  const closeTaskDetails = useCallback(() => {
+    ++taskDetailRequest.current;
+    setTaskDetailDialog(null);
+  }, []);
 
   const assistantId = useRef<string | null>(null);
   const pendingAssistantText = useRef("");
@@ -563,6 +581,7 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (taskDetailDialog) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setShowSpotlight((prev) => !prev);
@@ -575,7 +594,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [startNewSession]);
+  }, [startNewSession, taskDetailDialog]);
 
   async function send(message = draft) {
     const text = message.trim();
@@ -838,10 +857,7 @@ export default function App() {
                     key={task.id}
                     type="button"
                     className="sidebar-task-row"
-                    onClick={() => {
-                      setTab("studio");
-                      setStudioTab("goals");
-                    }}
+                    onClick={() => void openTaskDetails(task)}
                     title={`${task.title} · ${task.status}`}
                   >
                     <span className={`sidebar-task-dot ${task.status === "completed" ? "done" : task.status === "failed" ? "failed" : ""}`} />
@@ -1129,6 +1145,10 @@ export default function App() {
         />
       )}
 
+      {taskDetailDialog && (
+        <TaskDetailModal state={taskDetailDialog} onClose={closeTaskDetails} />
+      )}
+
       {showSpotlight && (
         <SpotlightSearchModal
           onClose={() => setShowSpotlight(false)}
@@ -1140,6 +1160,84 @@ export default function App() {
 }
 
 // -------------------------------------------------------------
+function TaskDetailModal({
+  state,
+  onClose,
+}: {
+  state: { title: string; loading: boolean; detail?: TaskDetail; error?: string };
+  onClose: () => void;
+}) {
+  const task = state.detail?.task;
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const stringify = (value: unknown) => {
+    if (typeof value === "string") {
+      try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
+    }
+    return JSON.stringify(value, null, 2);
+  };
+  const error = (task as (TaskSummary & { error?: string }) | undefined)?.error;
+
+  useEffect(() => {
+    const previous = document.activeElement;
+    closeRef.current?.focus();
+    return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
+  }, [onClose]);
+
+  return (
+    <div className="task-detail-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section ref={dialogRef} className="task-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="task-detail-title" onKeyDown={(event) => {
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
+        if (event.key === "Tab") {
+          const controls = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), summary, a[href], [tabindex="0"]') || []);
+          const first = controls[0], last = controls[controls.length - 1];
+          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+        }
+      }}>
+        <header className="task-detail-header">
+          <div>
+            <span className="task-detail-eyebrow">TASK HISTORY</span>
+            <h2 id="task-detail-title">{state.title}</h2>
+            {task && <span className="sidebar-task-status">{task.status?.replaceAll("_", " ") || "status unavailable"}</span>}
+          </div>
+          <button ref={closeRef} type="button" className="btn-close-modal" aria-label="Close task details" onClick={onClose}>×</button>
+        </header>
+        <div className="task-detail-content">
+          {state.loading && <p role="status">Loading task details…</p>}
+          {state.error && <p className="task-detail-error" role="alert">Could not load this task: {state.error}</p>}
+          {task && (
+            <>
+              <div className="task-detail-section">
+                <h3>What was requested</h3>
+                <p>{task.objective || task.title || "No task description was saved."}</p>
+              </div>
+              {(task.result || error) && (
+                <div className="task-detail-section">
+                  <h3>{error ? "Task error" : "Result"}</h3>
+                  <pre>{stringify(error || task.result)}</pre>
+                </div>
+              )}
+              <details className="task-detail-section">
+                <summary>Steps ({state.detail?.steps?.length || 0})</summary>
+                <pre>{stringify(state.detail?.steps || [])}</pre>
+              </details>
+              <details className="task-detail-section">
+                <summary>Activity ({state.detail?.events?.length || 0})</summary>
+                <pre>{stringify(state.detail?.events || [])}</pre>
+              </details>
+              <details className="task-detail-section">
+                <summary>Files ({state.detail?.artifacts?.length || 0})</summary>
+                <pre>{stringify(state.detail?.artifacts || [])}</pre>
+              </details>
+            </>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 // FILE DETECTION & FILE ACTION CARD
 // -------------------------------------------------------------
 function detectFiles(text: string): string[] {

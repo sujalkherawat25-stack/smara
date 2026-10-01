@@ -66,6 +66,7 @@ from smara.agent_tools import (
     search_files,
     code_graph_tool,
 )
+from smara.completion_quality import final_answer_reports_unresolved_work
 from smara.task_memory import get_default_memory_store
 from smara.task_planner import SmaraTaskPlanner
 from smara.ptc_kernel import PTC_SAFE_TOOLS, ProgrammaticToolKernel
@@ -1494,11 +1495,11 @@ class SmaraAutonomousAgent:
         return f"Patch applied successfully: {result.text}" if result.ok else f"Patch Error: {result.error_kind}: {result.text}"
 
     def _dispatch_terminal(self, args: Dict[str, Any]) -> str:
-        from smara.harness import ToolCall
+        from smara.harness import ToolCall, verification_scope_for_command
         cmd = args.get("command") or args.get("cmd") or ""
         timeout = args.get("timeout", 45)
         argv = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", cmd] if sys.platform == "win32" else ["/bin/bash", "-c", cmd]
-        scope = "full" if re.search(r"(?:^|\s)(?:pytest|npm\s+test|cargo\s+test|go\s+test)(?:\s|$)", cmd, re.I) else "none"
+        scope = verification_scope_for_command(cmd)
         result = self._execution_broker.dispatch(ToolCall(uuid.uuid4().hex, "run_process", {"argv": argv, "cwd": args.get("cwd") or ".", "timeout_seconds": timeout, "evidence_scope": scope}, str(self.workspace_root)))
         return f"[Exit Code: {result.exit_code}]\n{result.text}" if result.exit_code is not None else f"Error: {result.error_kind}: {result.text}"
 
@@ -1905,7 +1906,9 @@ class SmaraAutonomousAgent:
                 exit_match = re.search(r"\[Exit Code:\s*(-?\d+)\]", output)
                 exit_code = int(exit_match.group(1)) if exit_match else None
                 scope = "none"
-                if tool_name == "terminal" and re.search(r"(?:^|\s)(?:pytest|npm\s+test|cargo\s+test|go\s+test)(?:\s|$)", str(tool_args.get("command") or tool_args.get("cmd") or ""), re.I): scope = "full"
+                if tool_name == "terminal":
+                    from smara.harness import verification_scope_for_command
+                    scope = verification_scope_for_command(str(tool_args.get("command") or tool_args.get("cmd") or ""))
                 meta={"evidence_scope":scope}
                 if tool_name.startswith("process_"):
                     try:
@@ -3618,10 +3621,13 @@ class SmaraAutonomousAgent:
         # result as tool_error so acceptance gates cannot count it as a false
         # completion.
         provider_error = raw_concluding.startswith("API_ERROR:")
+        unresolved_final_answer = status == "completed" and final_answer_reports_unresolved_work(final_answer)
         if provider_budget_exhausted:
             status = "budget_exhausted"
         elif provider_error:
             status = "tool_error"
+        elif unresolved_final_answer:
+            status = "needs_input"
         elif research_blocked_reason:
             # Research gates fail closed when a required source floor is not
             # reachable; expose the precise remediation instead of reporting
@@ -3667,6 +3673,8 @@ class SmaraAutonomousAgent:
         session_result = None
         if self.session_engine is not None:
             unresolved = []
+            if unresolved_final_answer:
+                unresolved.append("The final answer says requested work remains incomplete or requires missing information.")
             if completeness_review is not None and not completeness_review["passed"]:
                 unresolved.append(completeness_review["reason"])
                 unresolved.extend(row["requirement"] for row in completeness_review["requirements"] if not row["addressed"])

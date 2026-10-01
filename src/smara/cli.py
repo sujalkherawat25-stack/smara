@@ -935,7 +935,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dev-account", default=os.getenv("SMARA_DEV_ACCOUNT", ""), help="development only")
     parser.add_argument("--request-timeout", default="30", help="HTTP read timeout in seconds")
     parser.add_argument("--workspace", "-w", default="default", help="Workspace root path")
-    parser.add_argument("--model", "-m", help="Select model profile (grok, sarvam, ollama, openrouter)")
+    parser.add_argument("--model", "-m", help="Select model profile (grok, sarvam, sarvam_glm, ollama, openrouter)")
     parser.add_argument("--plain", action="store_true", help="Disable ANSI color styling")
     parser.add_argument("--hosted", action="store_true", help="Use legacy hosted cloud client")
 
@@ -955,7 +955,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--no-approval", action="store_true")
     run.add_argument("--prompt-file", help="Read a headless session prompt from a file")
     run.add_argument("--json", action="store_true", help="Emit durable session result JSON")
-    run.add_argument("--budget-profile", default="auto", help="Budget profile; auto selects the governed Quick or Deep Research budget")
+    run.add_argument("--budget-profile", default="auto", help="Budget profile; auto uses research budgets for research, the coding budget for coding, and the short budget otherwise")
     run.add_argument(
         "--tool-profile",
         choices=["full", "research", "research-web", "research_web", "live-web", "coding"],
@@ -1474,6 +1474,8 @@ def main(argv: list[str] | None = None) -> int:
                 parsed_args.tool_profile="research_web"
             if effective_profile == "research_web":
                 budget_profile = "research_deep" if select_research_lane(prompt, parsed_args.research_mode)[0].mode == "deep" else "research_quick"
+            elif effective_profile == "coding":
+                budget_profile = "coding"
             else:
                 budget_profile = "short"
         if budget_profile not in BUDGET_PROFILES:

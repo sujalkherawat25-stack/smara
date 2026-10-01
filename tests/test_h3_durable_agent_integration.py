@@ -25,6 +25,15 @@ def final_response(answer="done"):
     return {"choices": [{"finish_reason": "stop", "message": {"content": f"FINAL ANSWER: {answer}"}}], "usage": {"total_tokens": 50}}
 
 
+def test_explicit_unfinished_answer_cannot_complete_durable_session(tmp_path, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: Response(final_response("The feature was left unimplemented."), "unfinished"))
+    session = SessionEngine(tmp_path, "unfinished", budget=Budget(60, 5, 5, 500_000, 1))
+    result = SmaraAutonomousAgent(api_key="fake", workspace_root=tmp_path, session_engine=session).run("Implement the parser", max_iterations=2)
+    assert result["completed"] is False
+    assert result["status"] == result["session"]["status"] == "needs_input"
+    assert result["session"]["unresolved_items"]
+
+
 def test_real_loop_journals_edit_failed_test_repair_and_pass(tmp_path: Path, monkeypatch):
     (tmp_path / "test_calc.py").write_text("from calc import value\n\ndef test_value(): assert value() == 2\n")
     python = str(Path(sys.executable))

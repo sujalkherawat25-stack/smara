@@ -2,10 +2,30 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import pytest
 from pathlib import Path
 
 from smara.local_agent import LocalAutonomousAgent
 from smara.local_agent_runtime import _compact_history, _live_web_fallback_answer, _live_web_query
+
+
+@pytest.mark.parametrize("answer,completed", [
+    ("The feature was left unimplemented.", False),
+    ("Added validation for missing input.", True),
+])
+def test_shared_turn_persists_honest_completion(monkeypatch, tmp_path, answer, completed):
+    from smara import local_agent_runtime as runtime
+
+    monkeypatch.setattr(runtime.OpenAICompatiblePlanner, "__call__", lambda self, history: {"kind": "answer", "answer": answer})
+    result = runtime.run_shared_local_turn(
+        prompt="Explain the parser change", state_path=tmp_path / "desktop.json",
+        config=runtime.LocalModelConfig(base_url="http://127.0.0.1:1", model="unused"),
+        workspace_id=str(tmp_path),
+    )
+    assert result["completed"] is completed
+    expected = "completed" if completed else "needs_input"
+    assert result["status"] == expected
+    assert result["runtime_session"]["session"]["status"] == expected
 
 
 def test_packaged_top_level_import_can_compact_history():
