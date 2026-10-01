@@ -1146,7 +1146,7 @@ def list_directory(path: str = ".", max_depth: int = 2) -> str:
     if not root.is_dir():
         return f"Error: Path is not a directory: {path}"
 
-    ignored = {".git", "node_modules", "__pycache__", ".pytest_cache", ".venv", "target", "build", "dist", ".gradle", ".idea"}
+    ignored = {".git", ".smara", "node_modules", "__pycache__", ".pytest_cache", ".venv", "target", "build", "dist", ".gradle", ".idea"}
     lines = [f"[Directory: {root.name}]"]
 
     def _walk(curr: Path, depth: int, prefix: str):
@@ -1184,6 +1184,7 @@ def search_files(query: str, path: str = ".", is_regex: bool = False, max_matche
     rg_path = shutil.which("rg")
     if rg_path:
         cmd = [rg_path, "--line-number", "--no-heading", "--color=never", "--max-count", str(max_matches)]
+        cmd.extend(["--glob", "!.smara/**"])
         if not is_regex:
             cmd.append("--fixed-strings")
         cmd.extend([query, str(root)])
@@ -1199,7 +1200,7 @@ def search_files(query: str, path: str = ".", is_regex: bool = False, max_matche
 
     pattern = re.compile(query if is_regex else re.escape(query), re.IGNORECASE)
     matches = []
-    ignored = {".git", "node_modules", "__pycache__", ".pytest_cache", ".venv", "target", "build", "dist", ".gradle"}
+    ignored = {".git", ".smara", "node_modules", "__pycache__", ".pytest_cache", ".venv", "target", "build", "dist", ".gradle"}
     for curr_root, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in ignored and not d.startswith(".pytest-")]
         for fname in files:

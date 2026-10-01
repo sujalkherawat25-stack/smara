@@ -299,8 +299,16 @@ class GitWorkspaceManager:
 
     def resolve_conflict(self, file_path: str, strategy: str = "ours") -> tuple[bool, str]:
         """Resolve conflict markers by choosing 'ours', 'theirs', or clean merge."""
-        p = self.workspace / file_path if not Path(file_path).is_absolute() else Path(file_path)
-        if not p.exists():
+        if not isinstance(file_path, str) or not file_path.strip():
+            return False, "Conflict path must be a non-empty string"
+        try:
+            candidate = Path(file_path)
+            p = (candidate if candidate.is_absolute() else self.workspace / candidate).resolve()
+        except (OSError, ValueError):
+            return False, "Conflict path could not be resolved"
+        if not p.is_relative_to(self.workspace):
+            return False, "Access denied: conflict path is outside the workspace"
+        if not p.is_file():
             return False, f"File {file_path} not found"
 
         content = p.read_text(encoding="utf-8", errors="replace")

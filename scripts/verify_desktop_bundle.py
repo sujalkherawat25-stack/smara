@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 
-PROBE = """
+PROBE = r"""
 import json, sys, tempfile
 from pathlib import Path
 import smara.research_watch as watches
@@ -19,6 +19,9 @@ import smara.research_completeness
 from smara.harness import SessionEngine, verification_scope_for_command
 from smara.completion_quality import final_answer_reports_unresolved_work
 from smara.git_agent import GitWorkspaceManager
+from smara.autonomous_agent import SmaraAutonomousAgent
+from smara.version import __version__
+assert __version__ == '0.1.4', 'Stale executor release'
 assert '--diff-filter=U' in repr(GitWorkspaceManager.detect_conflicts.__code__.co_consts), 'Stale recursive Git conflict scanner'
 assert final_answer_reports_unresolved_work('The feature was left unimplemented.'), 'Missing completion guard'
 assert final_answer_reports_unresolved_work('needs_input — policy.txt is absent.'), 'Missing explicit status guard'
@@ -31,6 +34,18 @@ assert 'question_sha256' in SessionEngine.finish_incremental.__code__.co_consts,
 assert getattr(sys, 'frozen', False), 'Executor must be frozen'
 assert Path(watches.__file__).is_relative_to(Path(sys._MEIPASS)), 'Watch module came from a checkout'
 with tempfile.TemporaryDirectory() as directory:
+ root = Path(directory)
+ workspace = root / 'project'
+ workspace.mkdir()
+ outside = root / 'outside.txt'
+ text = '<<<<<<< HEAD\nprivate\n=======\nother\n>>>>>>> branch\n'
+ outside.write_text(text)
+ ok, _ = GitWorkspaceManager(workspace).resolve_conflict('../outside.txt')
+ assert not ok and outside.read_text() == text, 'Conflict resolver escaped workspace'
+ agent = SmaraAutonomousAgent(api_key='probe', toolset='coding', workspace_root=workspace)
+ for i in range(20):
+  agent._record_coding_discovery('file_read', {'path':str(i)}, str(i))
+ assert agent._coding_read_only_streak == 1, 'Distinct review reads treated as stalled'
  store = watches.ResearchWatchStore(directory)
  try:
   store.add('invalid interval', 0.001)
