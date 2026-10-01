@@ -51,7 +51,7 @@ class Settings:
     database_url: str = os.getenv("SMARA_DATABASE_URL", "")
     database_path: str = os.getenv("SMARA_DATABASE_PATH", "./data/smara.db")
     syntarus_api_key: str = _secret("SYNTARUS_API_KEY")
-    syntarus_base_url: str = os.getenv("SYNTARUS_BASE_URL", "https://ai.syntarus.com/v1")
+    syntarus_base_url: str = os.getenv("SYNTARUS_BASE_URL", "https://ai.syntarus.com/syntarus-api/v1")
     syntarus_health_url: str = os.getenv("SMARA_SYNTARUS_HEALTH_URL", "")
     dev_mode: bool = os.getenv("SMARA_DEV_MODE", "false").lower() == "true"
     gateway_signing_secret: str = _secret("SMARA_GATEWAY_SIGNING_SECRET")

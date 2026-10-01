@@ -239,6 +239,12 @@ class PersistentTerminalStore:
             return self._public(entry, output="", done=False)
 
     def _read_output(self, entry: dict[str, Any], *, max_chars: int) -> str:
+        pending_text = str(entry.pop("pending_output", ""))
+        if pending_text:
+            entry["pending_output"] = pending_text[max_chars:]
+            if len(pending_text) >= max_chars:
+                return pending_text[:max_chars]
+            return pending_text + self._read_output(entry, max_chars=max_chars - len(pending_text))
         path = Path(str(entry.get("log_path") or ""))
         if not path.is_file():
             return ""
@@ -247,13 +253,31 @@ class PersistentTerminalStore:
             offset = max(0, min(int(entry.get("offset") or 0), size))
             with path.open("rb") as handle:
                 handle.seek(offset)
-                data = handle.read(max(0, size - offset))
+                data = handle.read(min(max(0, size - offset), max_chars * 4))
         except (OSError, ValueError):
             return ""
-        entry["offset"] = offset + len(data)
+        import codecs
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        text = decoder.decode(data, final=len(data) == size - offset)
+        pending, _ = decoder.getstate()
+        returned = text[:max_chars]
+        consumed = len(data) - len(pending)
+        if len(text) > max_chars:
+            # Count bytes up to the returned character boundary, even for
+            # malformed UTF-8. Never advance over output not returned.
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            produced = 0
+            consumed = 0
+            for byte in data:
+                chunk = decoder.decode(bytes([byte]), final=False)
+                produced += len(chunk)
+                consumed += 1
+                if produced >= len(returned):
+                    entry["pending_output"] = text[len(returned):produced]
+                    break
+        entry["offset"] = offset + consumed
         entry["bytes"] = size
-        text = data.decode("utf-8", errors="replace")
-        return text[:max_chars]
+        return returned
 
     def poll(self, session_id: str, *, max_chars: int = MAX_POLL_CHARS) -> dict[str, Any]:
         session_id = self._validate_session_id(session_id)
@@ -301,7 +325,8 @@ class PersistentTerminalStore:
             output = self._read_output(entry, max_chars=max_chars)
             entry["updated_at"] = _timestamp()
             self._write(entries)
-            done = entry.get("status") in TERMINAL_STATUSES
+            more_output = entry.get("offset", 0) < entry.get("bytes", 0) or bool(entry.get("pending_output"))
+            done = entry.get("status") in TERMINAL_STATUSES and not more_output
             return self._public(entry, output=output, done=done)
 
     def cancel(self, session_id: str, *, reason: str = "cancelled on Desktop") -> dict[str, Any]:
@@ -372,6 +397,7 @@ class PersistentTerminalStore:
             "output": output[:MAX_POLL_CHARS],
             "output_offset": entry.get("offset", 0),
             "output_bytes": entry.get("bytes", 0),
+            "has_more_output": entry.get("offset", 0) < entry.get("bytes", 0) or bool(entry.get("pending_output")),
             "proof": "Output is read from a local bounded session log; no terminal stream is uploaded implicitly.",
         }
 

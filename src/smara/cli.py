@@ -1015,7 +1015,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Local Autonomous Subcommands
     p_memory = subparsers.add_parser("memory", help="Dual-Plane Memory Bridge (Local SQLite + Continuum/Syntarus)")
-    p_memory.add_argument("memory_action", nargs="?", default="status", choices=["status", "sync", "search", "adr", "history", "conventions"], help="Memory action")
+    p_memory.add_argument("memory_action", nargs="?", default="status", choices=["status", "configure", "sync", "search", "adr", "history", "conventions"], help="Memory action")
     p_memory.add_argument("query", nargs="*", default=[], help="Search query or sub-action for memory recall")
     p_memory.add_argument("--limit", type=int, default=5, help="Result limit")
 
@@ -1694,6 +1694,15 @@ def main(argv: list[str] | None = None) -> int:
         from .dual_plane_memory import DualPlaneMemoryBridge
         bridge = DualPlaneMemoryBridge(engine.workspace)
         action = parsed_args.memory_action
+
+        if action == "configure":
+            identity = " ".join(parsed_args.query).strip()
+            if not identity or len(identity) > 240:
+                print("Use smara memory configure <stable-non-secret-user-id>")
+                return 1
+            (bridge.smara_dir / "syntarus.json").write_text(json.dumps({"user_id": identity}), encoding="utf-8")
+            print("Memory identity saved for this workspace. Automatic coding recall remains local-only.")
+            return 0
 
         if action == "status":
             st = bridge.get_status()

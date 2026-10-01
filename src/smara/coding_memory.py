@@ -282,33 +282,8 @@ class ADRManager:
         self._ensure_bootstrap_adrs()
 
     def _ensure_bootstrap_adrs(self) -> None:
-        """Seed initial foundational ADRs if none exist."""
-        existing = list(self.adr_dir.glob("*.json"))
-        if not existing:
-            adr1 = ArchitectureDecisionRecord(
-                id="0001",
-                title="Dual-Plane Memory Architecture (SQLite Local + Continuum Cloud)",
-                date="2026-09-03",
-                status="Accepted",
-                context="Smara needs instant offline code symbol and lexical vector search without internet or Docker dependencies, while preserving high-level architectural knowledge across devices.",
-                decision="Implement a Dual-Plane Memory Bridge where Plane 1 stores 2,410+ dense vector embeddings locally in SQLite with zero latency, and Plane 2 syncs long-term decisions to the Continuum LoCoMo 85+ Graph Engine.",
-                consequences="Offline operations remain fast (<5ms); architectural patterns and conventions persist across agent turns.",
-                symbols_affected=["DualPlaneMemoryBridge", "SemanticCodeSearcher", "SyntarusMemory"],
-                source="bootstrap",
-            )
-            adr2 = ArchitectureDecisionRecord(
-                id="0002",
-                title="Zero-Approval Friction Model for Autonomous Pairing",
-                date="2026-09-03",
-                status="Accepted",
-                context="Autonomous development velocity is hindered if every read, syntax check, or test execution blocks for user confirmation.",
-                decision="Allow autonomous execution for safe internal tools (AST inspection, pytest runner, headless browser assertions, local semantic search) with strict sandboxing and atomic rollback snapshots.",
-                consequences="Developer flow is uninterrupted; multi-file edits are reversible in 1-click.",
-                symbols_affected=["AutonomousRefactoringEngine", "AutonomousTestFixer", "DesktopRunner"],
-                source="bootstrap",
-            )
-            self.save_adr(adr1)
-            self.save_adr(adr2)
+        """New workspaces start without invented architecture decisions."""
+        return
 
     def save_adr(self, adr: ArchitectureDecisionRecord) -> Path:
         json_path = self.adr_dir / f"ADR-{adr.id}.json"
@@ -481,7 +456,7 @@ class CodingMemoryEngine:
 
     def generate_coding_context(self, query: str) -> str:
         """Synthesizes code-specialized memory context (ADRs, symbol changes, conventions) for agent prompts."""
-        adrs = self.adr_manager.list_adrs()
+        adrs = [adr for adr in self.adr_manager.list_adrs() if adr.source != "bootstrap"]
         conventions = self.convention_learner.get_conventions()
 
         sections: list[str] = []

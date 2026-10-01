@@ -4920,7 +4920,7 @@ function CloudTab({
     try {
       if (isNativeDesktop) {
         const res = await desktop.syncDualPlaneMemory(true);
-        onSetNotice(`✓ Synced ${res.synced_count || 0} architectural memories to Continuum at ${res.last_sync_time || "now"}`);
+        onSetNotice(`Accepted ${res.synced_count || 0} memory writes for processing. ${res.note || "Recall is not yet verified."}`);
         await fetchStatus();
       } else {
         onSetNotice("The native Smara Desktop runtime is required to sync memory planes.");
@@ -5016,7 +5016,7 @@ function CloudTab({
       <div className="pane-header">
         <div>
           <h2>🧠 Dual-Plane Memory Bridge</h2>
-          <p>Unifies offline local SQLite vector storage with the Continuum / Syntarus LoCoMo 85+ Graph & Temporal Engine.</p>
+          <p>Local code recall and saved notes, with optional workspace-scoped Syntarus memory. Cloud access requires SYNTARUS_API_KEY and SMARA_USER_ID.</p>
         </div>
         <button
           type="button"
@@ -5066,21 +5066,21 @@ function CloudTab({
           <div className="plane-card-header">
             <div className="plane-title-box">
               <span className="plane-badge badge-purple">PLANE 2</span>
-              <h3>Continuum Memory Engine (LoCoMo 85+)</h3>
+              <h3>Syntarus shared memory</h3>
             </div>
             <span className={`status-pill ${dualStatus?.plane_2_continuum?.status === "connected" ? "pill-active" : "pill-standby"}`}>
               {dualStatus?.plane_2_continuum?.status?.toUpperCase() || "NOT CONNECTED"}
             </span>
           </div>
-          <p className="plane-desc">Qdrant dense vectors + Neo4j knowledge graphs + temporal decay for cross-session architecture and conventions.</p>
+          <p className="plane-desc">Explicitly saved notes are queued for processing. A successful upload is not proof of successful recall.</p>
           <div className="plane-stats-row">
             <div className="stat-box">
               <span className="stat-num">{dualStatus?.total_memories_synced ?? 0}</span>
-              <span className="stat-lbl">Memories Synced</span>
+              <span className="stat-lbl">Writes Accepted</span>
             </div>
             <div className="stat-box">
               <span className="stat-num">—</span>
-              <span className="stat-lbl">LoCoMo Score</span>
+              <span className="stat-lbl">Recall Quality — Not Measured</span>
             </div>
             <div className="stat-box">
               <span className="stat-num">{dualStatus?.last_sync_time ? "Synced" : "Not synced"}</span>
