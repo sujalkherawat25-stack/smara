@@ -146,17 +146,6 @@ def _should_enter_research_recovery(tool_name: str, repeated_calls: int, observa
     return isinstance(result, dict) and result.get("status") == "ok"
 
 
-def _should_enter_research_recovery(tool_name: str, repeated_calls: int, observation: str) -> bool:
-    """Only switch to synthesis after repeated successful retrieval, not a failed fetch."""
-    if tool_name not in {"research_gather", "research_search", "research_fetch"} or repeated_calls < 2:
-        return False
-    try:
-        result = json.loads(observation)
-    except (TypeError, ValueError):
-        return False
-    return isinstance(result, dict) and result.get("status") == "ok"
-
-
 IDEMPOTENT_TOOLS = frozenset({
     "programmatic_tool_call",
     "web_search",
@@ -1982,6 +1971,11 @@ class SmaraAutonomousAgent:
         }
         if tools:
             payload["tools"] = tools
+        # Sarvam GLM defaults to maximum reasoning when this field is omitted.
+        # Keep bounded lookups economical; deeper work retains higher effort.
+        if urllib.parse.urlparse(self.base_url).hostname == "api.sarvam.ai" and self.model == "glm5.3":
+            mode = getattr(self._active_research_policy, "mode", None)
+            payload["reasoning_effort"] = "low" if mode == "quick" else "high"
 
         data = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
@@ -2050,6 +2044,9 @@ class SmaraAutonomousAgent:
                 retry_wait(delay)
                 if self.session_engine is not None:self.session_engine.reserve_model_retry(reservation_id)
             except Exception as e:
+                from smara.harness import BudgetExceeded
+                if isinstance(e, BudgetExceeded):
+                    raise
                 logger.warning(f"Model API Request Error (attempt {attempt+1}): {e}")
                 retries = attempt + 1
                 if attempt == 2:
@@ -2587,7 +2584,11 @@ class SmaraAutonomousAgent:
             ]
             if not evidence_ids:
                 return {"passed": False}
-            nodes = [node for node in self._research.graph.nodes.values() if node.state in {"unresolved", "supported", "refuted"}]
+            nodes = list(self._research.graph.nodes.values())
+            # A final paragraph cannot safely stand in for every question of
+            # a multi-node investigation. Reconcile only a single-question DAG.
+            if len(nodes) != 1:
+                return {"passed": False, "reason": "explicit_node_resolution_required"}
             for node in nodes:
                 try:
                     self.execute_tool(
@@ -2818,9 +2819,16 @@ class SmaraAutonomousAgent:
                     provider_budget_exhausted = type(e).__name__ == "BudgetExceeded"
                 break
 
-            choice = resp.get("choices", [{}])[0]
+            choices = resp.get("choices") if isinstance(resp, dict) else None
+            if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+                raw_concluding = "API_ERROR: provider returned no valid completion choices"
+                break
+            choice = choices[0]
             finish_reason = choice.get("finish_reason")
-            msg = choice.get("message", {})
+            msg = choice.get("message") or {}
+            if not isinstance(msg, dict):
+                raw_concluding = "API_ERROR: provider returned an invalid completion message"
+                break
             content = msg.get("content") or ""
             reasoning = msg.get("reasoning_content") or ""
             tool_calls = msg.get("tool_calls") or []
@@ -2931,15 +2939,23 @@ class SmaraAutonomousAgent:
                     if fn_name in {"patch", "file_write"} and _tool_result_succeeded(raw_obs):
                         _mark_mutation(parsed_args)
                     _record_verification(fn_name, raw_obs)
+                    try:
+                        research_result = json.loads(raw_obs)
+                    except (TypeError, ValueError):
+                        research_result = {}
+                    if not isinstance(research_result, dict):
+                        research_result = {}
                     guidance = ""
-                    if fn_name == "research_resolve" and ("supported" in raw_obs or "ok" in raw_obs):
+                    if fn_name == "research_resolve" and (research_result.get("resolution") or {}).get("state") in {"supported", "refuted"}:
                         guidance = "\n[Research Guidance: Node resolved. Run research_validate on your resolved claims to verify evidence coverage, then deliver your concise answer with source URLs.]\n"
+                    elif fn_name == "research_resolve":
+                        guidance = "\n[Research Guidance: Node NOT resolved. Inspect the judgment reasons; revise the claim to the precise supported fact or fetch better evidence. Do not validate an unresolved node as if it passed.]\n"
                     elif fn_name == "research_fetch" and '"status": "error"' in raw_obs:
                         guidance = (
                             "\n[Research Guidance: This URL failed to fetch and has been recorded as a retrieval failure, not factual evidence. "
                             "Do not retry the same URL unchanged. Search or fetch alternate authoritative sources, then resolve and validate using only successful fetched passages.]\n"
                         )
-                    elif fn_name == "research_validate" and ("passed" in raw_obs or "validated" in raw_obs):
+                    elif fn_name == "research_validate" and research_result.get("passed") is True:
                         if self._active_research_policy is not None and self._active_research_policy.comprehensive_report:
                             guidance = "\n[Research Guidance: Validation passed. Now call research_report with the comprehensive Markdown report. Only after its artifact is preserved may you deliver the final answer.]\n"
                         else:
@@ -3592,15 +3608,15 @@ class SmaraAutonomousAgent:
         # result as tool_error so acceptance gates cannot count it as a false
         # completion.
         provider_error = raw_concluding.startswith("API_ERROR:")
-        if provider_error:
+        if provider_budget_exhausted:
+            status = "budget_exhausted"
+        elif provider_error:
             status = "tool_error"
         elif research_blocked_reason:
             # Research gates fail closed when a required source floor is not
             # reachable; expose the precise remediation instead of reporting
             # a misleading completion or exhausting the provider budget.
             status = "needs_input"
-        elif provider_budget_exhausted:
-            status = "budget_exhausted"
         elif verification_failed:
             status = "tool_error"
         elif pending_verification:

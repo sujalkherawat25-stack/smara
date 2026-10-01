@@ -66,6 +66,12 @@ try {
     New-Item -ItemType Directory -Force -Path $resourceDir | Out-Null
     Copy-Item -LiteralPath (Join-Path $executorDist 'smara-desktop.exe') -Destination (Join-Path $resourceDir 'smara-desktop.exe') -Force
     Copy-Item -LiteralPath (Join-Path $repoRoot 'release\evidence\LIVE_WEB_ACCEPTANCE_V5.json') -Destination (Join-Path $resourceDir 'LIVE_WEB_ACCEPTANCE_V5.json') -Force
+    Get-ChildItem -Path (Join-Path $repoRoot 'release\evidence\LIVE_WEB_ACCEPTANCE_V5*.json') -File | ForEach-Object {
+        $smaraReportMetadata = Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json
+        if ($smaraReportMetadata.selected_task_count -eq 24 -or $smaraReportMetadata.summary.expected -eq 24) {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $resourceDir $_.Name) -Force
+        }
+    }
 } finally {
     Pop-Location
 }

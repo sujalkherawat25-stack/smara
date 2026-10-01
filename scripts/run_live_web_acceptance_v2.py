@@ -514,7 +514,8 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
              base_url: str = "https://api.sarvam.ai/v2/chat/completions", model: str = "glm5.3",
              search_provider: str = "exa", resume: bool = False,
              max_tokens_per_attempt: int = 150_000, task_ids: set[str] | None = None,
-             max_iterations: int = 12, retry_failed: bool = False) -> tuple[dict[str, Any], int]:
+             max_iterations: int = 12, retry_failed: bool = False,
+             allow_budget_extension: bool = False) -> tuple[dict[str, Any], int]:
     if repetitions is not None and repetitions < 1:
         raise ValueError("repetitions must be positive")
     if max_rupees <= 0 or max_seconds <= 0 or max_tokens_per_attempt <= 0 or max_iterations <= 0:
@@ -543,8 +544,23 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
             report["model"] = model
             report["search_provider"] = search_provider
         declared = report.get("ceilings") or {}
-        if declared and (float(declared.get("max_rupees", max_rupees)) != float(max_rupees) or float(declared.get("max_seconds", max_seconds)) != float(max_seconds) or int(declared.get("max_iterations", max_iterations)) != int(max_iterations)):
-            raise ValueError("resume ceilings differ from the original run")
+        if declared:
+            same_other_limits = (
+                float(declared.get("max_seconds", max_seconds)) == float(max_seconds)
+                and int(declared.get("max_iterations", max_iterations)) == int(max_iterations)
+                and int(declared.get("max_tokens_per_attempt", max_tokens_per_attempt)) == int(max_tokens_per_attempt)
+            )
+            old_rupees = float(declared.get("max_rupees", max_rupees))
+            if not same_other_limits or (old_rupees != float(max_rupees) and not (allow_budget_extension and float(max_rupees) > old_rupees)):
+                raise ValueError("resume ceilings differ; a larger spend ceiling requires explicit allow_budget_extension")
+            if old_rupees != float(max_rupees):
+                report.setdefault("budget_extensions", []).append({
+                    "from_rupees": old_rupees, "to_rupees": float(max_rupees),
+                    "at_epoch": time.time(), "reason": "explicit caller-approved extension",
+                })
+                report["ceilings"]["max_rupees"] = float(max_rupees)
+        report.pop("summary", None)
+        report.pop("terminal_state", None)
     else:
         report = {
             "suite": pack["suite"], "manifest_sha256": manifest_sha, "references_sha256": references_sha,
@@ -558,6 +574,8 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
             "elapsed_seconds": 0.0,
         }
     os.environ["SMARA_SEARCH_PROVIDER"] = search_provider
+    report["selected_task_count"] = len(tasks)
+    report["repetitions"] = reps
     # A resumed diagnostic can explicitly retry only failed attempts.  Remove
     # those stale records before appending replacements so the final evidence
     # remains a sealed one-record-per-(case,repeat) matrix.

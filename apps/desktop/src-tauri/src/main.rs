@@ -3081,8 +3081,13 @@ async fn get_research_evaluation_scorecard() -> Result<Value, String> {
     let checkout_report = base.join("release").join("evidence").join("LIVE_WEB_ACCEPTANCE_V5.json");
     let bundled_report = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|parent|
         parent.join("resources").join("LIVE_WEB_ACCEPTANCE_V5.json")));
-    let path = if checkout_report.is_file() { checkout_report }
-        else { bundled_report.unwrap_or(checkout_report) };
+    let directories = [
+        checkout_report.parent().map(Path::to_path_buf),
+        bundled_report.as_ref().and_then(|path| path.parent().map(Path::to_path_buf)),
+    ];
+    let path = latest_full_research_report(&directories.into_iter().flatten().collect::<Vec<_>>())
+        .unwrap_or_else(|| if checkout_report.is_file() { checkout_report }
+            else { bundled_report.unwrap_or(checkout_report) });
     let report = match fs::read_to_string(&path) {
         Ok(text) => match serde_json::from_str::<Value>(&text) {
             Ok(value) => value,
@@ -3094,7 +3099,9 @@ async fn get_research_evaluation_scorecard() -> Result<Value, String> {
         Err(error) => return Err(format!("Could not read research evaluation report: {error}")),
     };
     Ok(json!({
-        "status": if report.get("summary").is_some() { "completed" } else { "in_progress" },
+        "status": if report.get("summary").is_none() { "in_progress" }
+            else if report.get("terminal_state").and_then(Value::as_str) == Some("complete") { "completed" }
+            else { "stopped" },
         "suite": report.get("suite").cloned().unwrap_or(Value::Null),
         "model": report.get("model").cloned().unwrap_or(Value::Null),
         "provider": report.get("provider").cloned().unwrap_or(Value::Null),
@@ -3103,6 +3110,27 @@ async fn get_research_evaluation_scorecard() -> Result<Value, String> {
         "report_path": path.display().to_string(),
         "started_at_epoch": report.get("started_at_epoch").cloned().unwrap_or(Value::Null),
     }))
+}
+
+fn latest_full_research_report(directories: &[PathBuf]) -> Option<PathBuf> {
+    let mut selected: Option<(f64, PathBuf)> = None;
+    for directory in directories {
+        let Ok(entries) = fs::read_dir(directory) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|value| value.to_str()) else { continue };
+            if !name.starts_with("LIVE_WEB_ACCEPTANCE_V5") || !name.ends_with(".json") { continue; }
+            let Some(report) = fs::read_to_string(&path).ok().and_then(|text| serde_json::from_str::<Value>(&text).ok()) else { continue };
+            let full = report.get("selected_task_count").and_then(Value::as_u64) == Some(24)
+                || report.pointer("/summary/expected").and_then(Value::as_u64) == Some(24);
+            if !full { continue; }
+            let started = report.get("started_at_epoch").and_then(Value::as_f64).unwrap_or(0.0);
+            if selected.as_ref().map_or(true, |(time, _)| started > *time) {
+                selected = Some((started, path));
+            }
+        }
+    }
+    selected.map(|(_, path)| path)
 }
 
 #[tauri::command]
@@ -3415,6 +3443,21 @@ fn main() {
 mod tests {
     use super::{append_stream_delta, derived_local_capabilities, direct_local_request_text, evaluate_local_arithmetic, local_builtin_answer, local_delta_text, local_event_payload, normalize_provider_model, normalized_api_url, normalized_pairing_code, normalized_web_url, parse_local_json_plan, preserve_local_model_profiles, python_string_literal};
     use serde_json::json;
+
+    #[test]
+    fn research_scorecard_selects_newest_full_suite_not_newer_smoke() {
+        let root = std::env::temp_dir().join(format!("smara-scorecard-{}-{}",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir(&root).unwrap();
+        let old = root.join("LIVE_WEB_ACCEPTANCE_V5.json");
+        let current = root.join("LIVE_WEB_ACCEPTANCE_V5_current.json");
+        let subset = root.join("LIVE_WEB_ACCEPTANCE_V5_subset.json");
+        std::fs::write(&old, json!({"started_at_epoch":1, "summary":{"expected":24}}).to_string()).unwrap();
+        std::fs::write(&current, json!({"started_at_epoch":2, "selected_task_count":24}).to_string()).unwrap();
+        std::fs::write(&subset, json!({"started_at_epoch":3, "summary":{"expected":2}}).to_string()).unwrap();
+        assert_eq!(super::latest_full_research_report(&[root.clone()]), Some(current));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn local_stream_accepts_sse_and_plain_json_lines() {

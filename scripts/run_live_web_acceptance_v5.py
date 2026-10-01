@@ -25,6 +25,7 @@ EVIDENCE = ROOT / "release/evidence/LIVE_WEB_ACCEPTANCE_V5.json"
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the 24-case canonical live-web research evaluation v5")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--allow-budget-extension", action="store_true", help="explicitly permit a larger spend ceiling when resuming")
     parser.add_argument("--retry-failed", action="store_true", help="when resuming, replace failed attempts and permit a model change")
     parser.add_argument("--max-rupees", type=float, default=850.0, help="hard conservative spend ceiling")
     parser.add_argument("--max-seconds", type=float, default=10800.0, help="cumulative runtime ceiling")
@@ -56,6 +57,7 @@ def main() -> int:
     report, code = run_gate(
         key=key, pack_path=PACK, ref_path=REFS, evidence_path=args.evidence_path,
         repetitions=args.repetitions, smoke=False, resume=args.resume, retry_failed=args.retry_failed,
+        allow_budget_extension=args.allow_budget_extension,
         max_rupees=args.max_rupees, max_seconds=args.max_seconds,
         max_tokens_per_attempt=args.max_tokens_per_attempt, max_iterations=args.max_iterations,
         model=args.model, search_provider=args.search_provider,
