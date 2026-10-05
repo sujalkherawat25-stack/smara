@@ -1,8 +1,10 @@
-"""Offline H0 regressions for the legacy CLI execution spine."""
+"""Scripted-model H0 regressions; terminal-success coverage needs real Docker."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
+
+import pytest
 
 from smara.autonomous_agent import SmaraAutonomousAgent
 from smara.browser_sidecar import BrowserSidecarEngine
@@ -33,6 +35,10 @@ def test_failed_test_cannot_complete_or_be_cleared_by_command_text(tmp_path: Pat
 
 
 def test_mutating_batch_is_serialized_and_test_receipt_matches_current_revision(tmp_path: Path):
+    from smara.sandbox import docker_engine_status
+    docker = docker_engine_status()
+    if not docker.get("engine_available") or not docker.get("linux_containers"):
+        pytest.skip("Real Docker Linux-container execution is required for a passing test receipt.")
     agent = SmaraAutonomousAgent(api_key="fake", workspace_root=tmp_path)
     responses = iter([
         {"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": [

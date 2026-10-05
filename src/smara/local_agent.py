@@ -90,7 +90,7 @@ LOCAL_SKILLS: dict[str, LocalSkillSpec] = {
         artifact_schema={"type": "array", "items": {"type": "object"}},
     ),
     "local_browser": LocalSkillSpec(
-        "local_browser", "Inspect or download from an explicitly approved domain.", _ANY_OBJECT,
+        "local_browser", "Inspect or download from an explicitly approved domain. Use operation='inspect_text' to read webpage content, READMEs, or online docs into context.", _ANY_OBJECT,
         timeout_seconds=30, max_output_bytes=16_000, max_artifact_bytes=50 * 1024 * 1024,
         result_schema={"type": "object", "required": ["action", "operation", "proof"]},
         artifact_schema={"type": "object", "properties": {"source_url": {"type": "string"}}},

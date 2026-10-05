@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { desktop, isNativeDesktop } from "../api";
 import type { SubagentDelegationData, SubagentRolesData, SwarmTaskResultData } from "../types";
 
-export function SubagentSwarmTab({ onSetNotice }: { onSetNotice: (msg: string) => void }) {
+export function SubagentSwarmTab({ onSetNotice, workspace }: { onSetNotice: (msg: string) => void; workspace: string }) {
   const [rolesData, setRolesData] = useState<SubagentRolesData | null>(null);
   const [selectedRole, setSelectedRole] = useState("researcher");
   const [goal, setGoal] = useState("");
@@ -55,11 +55,15 @@ export function SubagentSwarmTab({ onSetNotice }: { onSetNotice: (msg: string) =
       if (!isNativeDesktop) {
         throw new Error("Subagent delegation requires running inside the Smara Desktop native application.");
       }
-      const res = await desktop.runSubagentDelegation(goal.trim(), selectedRole, context.trim() || undefined);
+      const res = await desktop.runSubagentDelegation(goal.trim(), selectedRole, workspace, context.trim() || undefined);
       setDelegationHistory((prev) => [res, ...prev]);
-      onSetNotice(`✓ Delegated task '${res.task_id}' completed with status ${res.status}`);
-      setGoal("");
-      setContext("");
+      onSetNotice(res.status === "SUCCESS"
+        ? `Delegated task '${res.task_id}' completed.`
+        : `Delegated task '${res.task_id}' did not complete: ${res.error || res.status}`);
+      if (res.status === "SUCCESS") {
+        setGoal("");
+        setContext("");
+      }
     } catch (err: any) {
       onSetNotice(`Delegation error: ${err?.message || String(err)}`);
     } finally {
@@ -81,15 +85,17 @@ export function SubagentSwarmTab({ onSetNotice }: { onSetNotice: (msg: string) =
       if (!isNativeDesktop) {
         throw new Error("Swarm orchestration requires running inside the Smara Desktop native application.");
       }
-      const res = await desktop.runSwarmTask(swarmObjective.trim());
+      const res = await desktop.runSwarmTask(swarmObjective.trim(), workspace);
       setSwarmResult(res);
       setAgentStates({
-        architect: "completed",
-        implementer: "completed",
-        verifier: "completed",
-        auditor: "completed",
+        architect: res.architect_plan ? "completed" : "failed",
+        implementer: res.status === "SUCCESS" ? "completed" : "failed",
+        verifier: res.status === "SUCCESS" ? "completed" : "failed",
+        auditor: res.audit_passed ? "completed" : "failed",
       });
-      onSetNotice(`✓ Swarm completed: ${res.status} in ${res.duration_ms}ms`);
+      onSetNotice(res.status === "SUCCESS"
+        ? `Swarm completed in ${res.duration_ms}ms.`
+        : `Swarm did not complete: ${res.status}. Review the result before retrying.`);
     } catch (err: any) {
       onSetNotice(`Swarm error: ${err?.message || String(err)}`);
     } finally {
@@ -104,10 +110,12 @@ export function SubagentSwarmTab({ onSetNotice }: { onSetNotice: (msg: string) =
         <div>
           <h2>🐝 Autonomous Swarm Teamwork & Subagent Orchestration</h2>
           <p>
-            Isolated child contexts, strict tool safety gating, parallel thread pooling, and token-saving parent synthesis.
+            Bounded workers, separate contexts, reviewable patches, and shared parent budgets.
           </p>
         </div>
       </div>
+
+      <p role="note">Delegation is opt-in: start Smara with SMARA_ENABLE_DELEGATION=1 to enable workers. Worker results still require review; a failed run is not a completed task.</p>
 
       {/* Safety Architecture Overview Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px", marginBottom: "16px" }}>
@@ -117,7 +125,7 @@ export function SubagentSwarmTab({ onSetNotice }: { onSetNotice: (msg: string) =
             <strong style={{ fontSize: "13px", color: "#34d399" }}>Tool Safety Gating</strong>
           </div>
           <p style={{ margin: 0, fontSize: "11.5px", color: "#94a3b8" }}>
-            Children stripped of <code>delegate_task</code>, <code>memory</code>, <code>dag_flow</code> to eliminate infinite recursion and injection.
+            Children cannot recursively use <code>delegate_task</code>, <code>memory</code>, or <code>dag_flow</code>. Tool restrictions do not eliminate prompt-injection risk.
           </p>
         </div>
 

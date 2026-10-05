@@ -272,10 +272,12 @@ class WebSearchTool:
         if not search_url:
             raise ResearchToolError(f"Unsupported Smara search provider: {provider}.")
         count = max(1, min(self.max_results, int(max_results)))
-        domains = [str(domain).strip().lower() for domain in (include_domains or []) if str(domain).strip()]
+        from .research_sources import normalize_search_domains
+        domains = normalize_search_domains(include_domains)
         search_query = query
-        if domains:
-            search_query = f"{query} " + " ".join(f"site:{domain}" for domain in domains[:5])
+        if domains and provider in {"brave", "serper"}:
+            selectors = " OR ".join(f"site:{domain}" for domain in domains)
+            search_query = f"{query} " + (f"({selectors})" if len(domains) > 1 else selectors)
         owns_client = self._http is None
         client = self._http or httpx.AsyncClient(timeout=settings.search_timeout_seconds)
         try:
@@ -302,7 +304,8 @@ class WebSearchTool:
                 if depth not in {"basic", "advanced"}:
                     depth = "advanced"
                 tavily_payload = json.dumps(
-                    {"api_key": api_key, "query": search_query, "search_depth": depth, "max_results": count, "include_answer": False, "include_raw_content": False},
+                    {"api_key": api_key, "query": query, "search_depth": depth, "max_results": count, "include_answer": False, "include_raw_content": False,
+                     **({"include_domains": domains} if domains else {})},
                     separators=(",", ":"),
                 ).encode("utf-8")
                 response = await client.post(
@@ -318,10 +321,11 @@ class WebSearchTool:
                     search_url,
                     headers={"x-api-key": api_key, "Content-Type": "application/json"},
                     json={
-                        "query": search_query,
+                        "query": query,
                         "type": "auto",
                         "numResults": count,
                         "contents": {"highlights": {"maxCharacters": 1200}},
+                        **({"includeDomains": domains} if domains else {}),
                     },
                 )
                 response.raise_for_status()
@@ -347,6 +351,9 @@ class WebSearchTool:
             url = hit.url.strip()
             parsed = urlparse(url)
             if not url or url in seen or parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                continue
+            host = parsed.hostname.lower().rstrip(".")
+            if domains and not any(host == domain or host.endswith("." + domain) for domain in domains):
                 continue
             canonical = canonical_source_url(url)
             if canonical in seen:

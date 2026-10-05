@@ -60,7 +60,7 @@ def run_script(monkeypatch,agent,script,iterations=15):
         payload=json.loads(_args[0].data)
         if payload["messages"][0]["content"].startswith("You are an independent research answer-completeness reviewer"):
             data=json.loads(payload["messages"][1]["content"])
-            review={"passed":True,"requirements":[{"requirement":"Provide the browser fixture finding","addressed":True,"answer_quote":data["answer"],"reason":"Scripted review fixture; semantic rejection has separate tests"}]}
+            review={"passed":True,"requirements":[{"requirement":"Provide the browser fixture finding","addressed":True,"evidence_supported":True,"answer_quote":data["answer"],"reason":"Scripted review fixture; semantic rejection has separate tests"}]}
             return Response({"choices":[{"finish_reason":"stop","message":{"content":json.dumps(review)}}],"usage":{"total_tokens":10}},"review")
         index=cursor["value"];cursor["value"]+=1;return Response(script(agent,index),index)
     monkeypatch.setattr("urllib.request.urlopen",urlopen)

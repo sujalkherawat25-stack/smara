@@ -428,6 +428,11 @@ class OpenAICompatiblePlanner:
             "- For querying Python AST symbols, definitions, callers, or blast radius, use local_graph:\n"
             "  * Symbol lookup: {\"operation\": \"inspect_symbol\", \"symbol\": \"<name>\", \"path\": \"<folder_or_file>\"}\n"
             "- NEVER use local_terminal with 'find', 'ls', 'cat', or shell pipes/redirects (shell operators and unauthorized binaries are prohibited by security policy). Use local_file_read instead.\n"
+            "- For fetching, inspecting, and reading web pages, GitHub repositories, or online documentation, ALWAYS use local_browser:\n"
+            "  * Read webpage text & content: {\"operation\": \"inspect_text\", \"url\": \"<url>\"}\n"
+            "  * Inspect DOM elements: {\"operation\": \"inspect_dom\", \"url\": \"<url>\"}\n"
+            "  * Scrape page: {\"operation\": \"scrape\", \"url\": \"<url>\"}\n"
+            "  * IMPORTANT: The 'open' operation only launches a URL in an external desktop window for human viewing and returns no text. To actually READ or VERIFY webpage content in context, you MUST use operation='inspect_text'. Never assume a page is empty or 404 without calling inspect_text.\n"
             "- When you have read the necessary code files and gathered enough evidence to answer the user's objective, do NOT make redundant tool calls. Deliver the final answer directly formatted in clean, structured markdown.\n\n"
             "Cross-session local memory is supplied as a bounded system note when "
             "relevant; treat it as a hint and verify it. The user can issue `/learn "
@@ -620,6 +625,45 @@ class OpenAICompatiblePlanner:
 
 
 def run_shared_local_turn(
+    *, prompt: str, state_path: Any, config: LocalModelConfig,
+    context: list[dict[str, Any]] | None = None, max_steps: int = 20,
+    action_executor: Any | None = None, conversation_id: str | None = None,
+    workspace_id: str = "default", research_mode: str = "auto", event_callback: Any | None = None,
+    approval_mode: str = "auto", approval_handler: Any | None = None,
+) -> dict[str, Any]:
+    from smara.session_protocol import SessionProtocol
+    store = session_store_for_state(state_path)
+    conversation = str(conversation_id or "local-default")[:160]
+    store.create_or_get(conversation, request=prompt, workspace_id=workspace_id)
+    turn = SessionProtocol(store).begin(conversation, prompt, notify=event_callback,
+                                       approval_mode=approval_mode, approval_handler=approval_handler)
+    executor = action_executor or LocalAutonomousAgent(state_path, max_steps=1).execute_action
+    def event(event):
+        if event.get("type") == "token":
+            turn.text_delta(str(event.get("text") or ""))
+        if event_callback:
+            event_callback({**event, "session_id": conversation, "turn_id": turn.turn_id})
+    def execute(capability, payload):
+        import copy
+        arguments = copy.deepcopy(payload)
+        return turn.execute(capability, arguments, lambda: executor(capability, arguments))
+    try:
+        result = _run_shared_local_turn(prompt=prompt, state_path=state_path, config=config,
+            context=context, max_steps=max_steps, action_executor=execute, conversation_id=conversation,
+            workspace_id=workspace_id, research_mode=research_mode, event_callback=event,
+            protocol_turn_id=turn.turn_id)
+        turn.finish(str(result.get("status") or "needs_input"), str(result.get("answer") or ""))
+        result["turn_id"] = turn.turn_id
+        result["protocol"] = turn.protocol.snapshot(conversation)
+        result["runtime_session"] = store.snapshot(conversation)
+        return result
+    except Exception:
+        store.checkpoint(conversation, status="failed", unresolved=["Local turn failed"], expected_turn_id=turn.turn_id)
+        turn.finish("failed")
+        raise
+
+
+def _run_shared_local_turn(
     *,
     prompt: str,
     state_path: Any,
@@ -631,6 +675,7 @@ def run_shared_local_turn(
     workspace_id: str = "default",
     research_mode: str = "auto",
     event_callback: Any | None = None,
+    protocol_turn_id: str | None = None,
 ) -> dict[str, Any]:
     """Run the shared agent loop with local cross-session memory.
 
@@ -686,6 +731,7 @@ def run_shared_local_turn(
         runtime_sessions.checkpoint(
             conversation,
             status=learned_status,
+            expected_turn_id=protocol_turn_id,
             result=learned,
             unresolved=[] if learned.get("completed") else [str((learned.get("learning") or {}).get("status") or "learning did not complete")],
             event="turn.completed" if learned.get("completed") else "turn.needs_input",
@@ -854,6 +900,7 @@ def run_shared_local_turn(
         runtime_sessions.checkpoint(
             conversation,
             status="cancelled" if cancelled else ("completed" if completed else "needs_input"),
+            expected_turn_id=protocol_turn_id,
             result=result,
             unresolved=[str(item)[:500] for item in (unresolved if not cancelled else ["cancelled by user"])],
             event="turn.cancelled" if cancelled else ("turn.completed" if completed else "turn.needs_input"),
@@ -869,6 +916,7 @@ def run_shared_local_turn(
             runtime_sessions.checkpoint(
                 conversation,
                 status="failed",
+                expected_turn_id=protocol_turn_id,
                 unresolved=[str(exc)[:500]],
                 event="turn.failed",
                 event_payload={"error": str(exc)[:500]},

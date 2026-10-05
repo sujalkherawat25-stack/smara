@@ -1490,7 +1490,7 @@ def _write_file_unlocked(payload: dict, roots: list[Path], state: dict | None = 
             doc_payload["operation"] = "create_xlsx"
         elif raw_path.endswith(".pptx"):
             doc_payload["operation"] = "create_pptx"
-            
+
         if "sections" not in doc_payload or not doc_payload["sections"]:
             content = str(payload.get("content") or "")
             if content.strip():
@@ -1726,6 +1726,9 @@ def _emit_progress(progress_hook, message: str) -> None:
 
 def _stop_process(process: subprocess.Popen) -> None:
     """Stop a process tree when a cancellation or time limit arrives."""
+    from .sandbox import container_name_from_argv, stop_workspace_container
+    arguments = process.args if isinstance(process.args, (list, tuple)) else []
+    stop_workspace_container(container_name_from_argv(arguments))
     if process.poll() is not None:
         return
     if os.name == "nt":
@@ -1875,13 +1878,22 @@ def _terminal_launch_context(payload: dict, roots: list[Path], state: dict) -> t
 
 def _terminal_unlocked(payload: dict, roots: list[Path], state: dict, *, checkpoint=None, progress_hook=None) -> str:
     argv, recipe, cwd, safe_env, injected, before_files = _terminal_launch_context(payload, roots, state)
+    if injected:
+        raise RuntimeError("Terminal credential aliases are not passed into isolated containers. Use an approved Smara integration for credentialed access.")
     executable = Path(argv[0]).name.lower()
     process_store = _persistent_terminal_store(state, roots)
     if process_store.has_active(cwd):
         raise RuntimeError("A persistent terminal session is already running in this workspace; poll or cancel it first.")
     _emit_progress(progress_hook, f"{recipe or 'Terminal'} started: {executable}")
+    from .sandbox import SandboxLimits, build_workspace_docker_argv
+    workspace = _workspace_for_target(cwd, roots)
+    container_argv = build_workspace_docker_argv(
+        argv, workspace, cwd,
+        limits=SandboxLimits(timeout_seconds=MAX_COMMAND_SECONDS, memory_mb=2048, cpus=2.0, pids=128),
+        env=safe_env,
+    )
     process = subprocess.Popen(
-        argv, cwd=cwd, env=safe_env, shell=False,
+        container_argv, cwd=workspace, env=safe_env, shell=False,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
     )
     lines: queue.Queue[str | None] = queue.Queue()
@@ -1928,6 +1940,8 @@ def _terminal_unlocked(payload: dict, roots: list[Path], state: dict, *, checkpo
     finally:
         if process.poll() is None:
             _stop_process(process)
+        from .sandbox import container_name_from_argv, stop_workspace_container
+        stop_workspace_container(container_name_from_argv(container_argv))
     output = "".join(output_parts)
     # A command can accidentally echo an injected token. Redact every known
     # value before anything is returned to the hosted task ledger or log.
@@ -1940,6 +1954,7 @@ def _terminal_unlocked(payload: dict, roots: list[Path], state: dict, *, checkpo
     result: dict[str, object] = {
         "action": "local_terminal", "argv": argv, "credential_env": sorted(injected),
         "exit_code": process.returncode, "output": output[:MAX_OUTPUT_CHARS],
+        "isolation": "Docker Linux container; workspace-only write access; network disabled; resource limits enforced",
         "recipe": recipe, "artifacts": artifacts,
     }
     if before_files is not None and changed_files is not None:
@@ -1984,14 +1999,21 @@ def _persistent_terminal(payload: dict, roots: list[Path], state: dict, *, progr
         return json.dumps(result, ensure_ascii=False)
 
     if payload.get("credential_env"):
-        raise RuntimeError("Persistent terminal sessions cannot receive credential aliases; use a bounded one-shot command instead.")
+        raise RuntimeError("Persistent terminal sessions cannot receive credential aliases; use an approved Smara integration for credentialed access.")
     argv, recipe, cwd, safe_env, _injected, _before_files = _terminal_launch_context(payload, roots, state)
+    max_seconds = payload.get("max_seconds", payload.get("timeout_seconds", 900))
+    if not isinstance(max_seconds, int) or isinstance(max_seconds, bool) or not 1 <= max_seconds <= 3600:
+        raise RuntimeError("max_seconds must be an integer between 1 and 3600.")
+    from .sandbox import SandboxLimits, build_workspace_docker_argv
+    workspace = _workspace_for_target(cwd, roots)
+    sandbox_argv = build_workspace_docker_argv(
+        argv, workspace, cwd,
+        limits=SandboxLimits(timeout_seconds=max_seconds, memory_mb=2048, cpus=2.0, pids=128),
+        env=safe_env,
+    )
     if store.has_active(cwd):
         raise RuntimeError("A persistent terminal session is already running in this workspace; poll or cancel it first.")
-    max_seconds = payload.get("max_seconds", payload.get("timeout_seconds", 900))
-    if not isinstance(max_seconds, int) or isinstance(max_seconds, bool):
-        raise RuntimeError("max_seconds must be an integer.")
-    result = store.start(argv, cwd=cwd, env=safe_env, executable=recipe or Path(argv[0]).name, max_seconds=max_seconds)
+    result = store.start(sandbox_argv, cwd=workspace, env=safe_env, executable=recipe or Path(argv[0]).name, max_seconds=max_seconds)
     _emit_progress(progress_hook, f"Persistent terminal session started: {result.get('session_id')}")
     return json.dumps(result, ensure_ascii=False)
 
@@ -2258,11 +2280,21 @@ def _browser_handoff(payload: dict, url: str, hostname: str, *, progress_hook=No
 
 def _browser(payload: dict, state: dict, roots: list[Path], *, checkpoint=None, progress_hook=None) -> str:
     url, hostname = _allowed_browser_url(payload.get("url"), state)
-    operation = payload.get("operation", "open")
+    operation = str(payload.get("operation") or "").strip().lower() or "inspect_text"
     if operation == "open":
         if not webbrowser.open(url, new=0, autoraise=False):
             raise RuntimeError("The operating system did not accept the browser request.")
-        return json.dumps({"action": "local_browser", "operation": "open", "url": url, "opened": True})
+        return json.dumps({
+            "action": "local_browser",
+            "operation": "open",
+            "url": url,
+            "opened": True,
+            "note": (
+                "Page launched in an external desktop browser window for user viewing. "
+                "This operation does not extract webpage text. To read, inspect, or verify "
+                "the page content or README in context, call local_browser with operation='inspect_text'."
+            ),
+        }, ensure_ascii=False)
     if operation == "download":
         return _browser_download(payload, roots, state, checkpoint=checkpoint, progress_hook=progress_hook)
     if operation == "handoff":
@@ -2441,12 +2473,12 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
             from code_graph import CodePropertyGraph
         operation = str(payload.get("operation") or "inspect_symbol")
         symbol = str(payload.get("symbol") or "")
-        
+
         # Graph analysis is local file access too: only inspect explicitly
         # approved roots.  Never fall back to the process working directory
         # or an agent scratch path, which could silently widen the boundary.
         candidates = list(roots)
-        
+
         graph = None
         res = None
         for candidate in candidates:
@@ -2472,12 +2504,12 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
                 res = graph.blast_radius(symbol)
             elif operation == "find_references":
                 res = graph.find_references(symbol)
-        
+
         # If inspecting a symbol and it was found, also attach blast radius so the agent has complete evidence
         if operation == "inspect_symbol" and isinstance(res, dict):
             blast = graph.blast_radius(symbol)
             res["blast_radius"] = blast
-            
+
         result = json.dumps({"action": "local_graph", "operation": operation, "symbol": symbol, "result": res}, ensure_ascii=False)
     elif capability == "dynamic_tool_synthesize":
         from smara.tool_synthesis import DynamicToolSynthesizer
@@ -2509,14 +2541,9 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
         timeout = min(float(payload.get("timeout_seconds", 30)), 120.0)
         _emit_progress(progress_hook, "Initializing ephemeral micro-sandbox container")
         with tempfile.TemporaryDirectory(prefix="smara_sandbox_") as tmp_sandbox:
-            run_cmd = command if isinstance(command, list) else ["powershell", "-NoProfile", "-Command", str(command)]
-            res = subprocess.run(
-                run_cmd,
-                cwd=tmp_sandbox,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
+            from smara.sandbox import run_workspace_command
+            run_cmd = command if isinstance(command, list) else ["sh", "-lc", str(command)]
+            res = run_workspace_command(run_cmd, Path(tmp_sandbox), timeout=max(1, int(timeout)))
             result = json.dumps({
                 "action": "sandbox_execute",
                 "sandbox_path": tmp_sandbox,
@@ -2524,6 +2551,7 @@ def execute_step(step: dict, state: dict, *, checkpoint=None, progress_hook=None
                 "stdout": res.stdout[:50_000],
                 "stderr": res.stderr[:50_000],
                 "isolated": True,
+                "isolation": "docker",
             }, ensure_ascii=False)
     elif capability == "local_python":
         try:
@@ -2972,9 +3000,10 @@ def _run_shared_local_agent_turn(request: dict, state_path: Path, event_callback
     if not isinstance(request, dict):
         raise RuntimeError("Local agent request must be an object.")
     prompt = request.get("prompt")
-    if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 12_000:
-        raise RuntimeError("Local agent prompt is empty or too long.")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise RuntimeError("Local agent prompt is empty.")
     state = _load_local_state(state_path)
+    approval_mode = str(state.get("approval_mode") or "ask")
     roots = _roots(state)
     requested_workspace = request.get("workspace")
     workspace = roots[0]
@@ -2997,7 +3026,8 @@ def _run_shared_local_agent_turn(request: dict, state_path: Path, event_callback
     if not isinstance(model, dict):
         if not learn_command:
             raise RuntimeError("Local agent model configuration is missing.")
-        model = {}
+        else:
+            model = {}
     base_url = model.get("base_url")
     model_name = model.get("model")
     if learn_command and (not isinstance(base_url, str) or not base_url.strip() or not isinstance(model_name, str) or not model_name.strip()):
@@ -3005,6 +3035,8 @@ def _run_shared_local_agent_turn(request: dict, state_path: Path, event_callback
         model_name = "local-skill-learning"
     if not isinstance(base_url, str) or not base_url.strip() or not isinstance(model_name, str) or not model_name.strip():
         raise RuntimeError("Local agent model endpoint or model name is missing.")
+    if not base_url.startswith(("http://", "https://")):
+        raise RuntimeError("Smara's own harness requires an HTTP(S) model endpoint, not an external CLI engine.")
     api_key = model.get("api_key") if isinstance(model.get("api_key"), str) else ""
     auth_header = model.get("auth_header") if model.get("auth_header") in {"authorization", "api-subscription-key"} else "authorization"
     context = request.get("context")
@@ -3024,6 +3056,7 @@ def _run_shared_local_agent_turn(request: dict, state_path: Path, event_callback
             }, context=bounded_context,
             conversation_id=str(request.get("conversation_id") or "local-default"),
             research_mode=research_mode, event_callback=event_callback,
+            approval_mode=approval_mode,
         )
         result["workspace"] = str(workspace)
         result["capabilities"] = list(state.get("capabilities") or [])
@@ -3052,6 +3085,7 @@ def _run_shared_local_agent_turn(request: dict, state_path: Path, event_callback
         workspace_id=str(workspace),
         research_mode=research_mode,
         event_callback=event_callback,
+        approval_mode=approval_mode,
     )
     result["workspace"] = str(workspace)
     result["capabilities"] = list(state.get("capabilities") or [])
@@ -3089,6 +3123,8 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--local-run", action="store_true", help="drain approved private local tasks and exit")
     parser.add_argument("--local-run-task", help="run one approved private local task and exit")
     parser.add_argument("--local-agent-turn", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--session-protocol", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--session-workspace", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--runtime-session-list", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--runtime-session-detail", help=argparse.SUPPRESS)
     parser.add_argument("--runtime-session-cancel", help=argparse.SUPPRESS)
@@ -3108,6 +3144,36 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--connector-revoke", help="disconnect one local connector and remove its local credential")
     parser.add_argument("--log", type=Path, default=default_log_path(), help="rotating desktop log path")
     args = parser.parse_args(argv)
+    if args.session_protocol:
+        from smara.session_protocol import SessionProtocol
+        request = json.load(sys.stdin)
+        if not isinstance(request, dict):
+            raise ValueError("Session request must be an object")
+        sessions = session_store_for_state(args.state)
+        if args.session_workspace:
+            from smara.runtime_session import session_store_for_workspace
+            selected = args.session_workspace.resolve()
+            roots = _roots(_load_local_state(args.state))
+            if not selected.is_dir() or not any(selected == root or root in selected.parents for root in roots):
+                raise ValueError("Session workspace must be inside an approved root")
+            sessions = session_store_for_workspace(selected)
+        protocol = SessionProtocol(sessions)
+        if request.get("method") == "turn/resume":
+            from smara.app_adapter import resume_canonical_task
+            params = request.get("params") or {}
+            thread_id = str(params.get("thread_id") or "")
+            record = sessions.get(thread_id)
+            if record is None:
+                raise ValueError("Resume thread does not exist")
+            selected = Path(record.workspace_id).resolve()
+            roots = _roots(_load_local_state(args.state))
+            if not selected.is_dir() or not any(selected == root or root in selected.parents for root in roots):
+                raise ValueError("Resume workspace must be inside an approved root")
+            result = resume_canonical_task(thread_id, selected, protocol=protocol, approval_mode="ask")
+        else:
+            result = protocol.dispatch(str(request.get("method") or ""), request.get("params"))
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
     # Read-only diagnostics must not depend on a writable log directory. This
     # also keeps their stdout machine-readable for support bundles.
     if args.journal_status:
@@ -3334,6 +3400,8 @@ def _main(argv: list[str] | None = None) -> int:
         try:
             if args.runtime_session_cancel:
                 sessions.request_cancel(session_id, args.runtime_reason)
+                from smara.session_protocol import SessionProtocol
+                SessionProtocol(sessions).interrupt(session_id)
             elif args.runtime_session_resume:
                 sessions.resume(session_id)
             payload = sessions.snapshot(session_id, after=max(0, args.runtime_after), limit=max(1, min(args.runtime_limit, 512)))
@@ -3403,4 +3471,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     raise SystemExit(main())

@@ -57,13 +57,15 @@ def test_needs_input_resume_reinspects_workspace_and_preserves_budget(tmp_path, 
 
 
 def test_real_loop_journals_edit_failed_test_repair_and_pass(tmp_path: Path, monkeypatch):
+    from smara.sandbox import docker_engine_status
+    if not docker_engine_status().get("engine_available"):
+        pytest.skip("Docker is required for actual test execution")
     (tmp_path / "test_calc.py").write_text("from calc import value\n\ndef test_value(): assert value() == 2\n")
-    python = str(Path(sys.executable))
     sequence = iter([
         tool_response("write", "file_write", {"path": "calc.py", "content": "def value():\n    return 1\n"}),
-        tool_response("fail", "terminal", {"command": f"& '{python}' -m pytest -q", "timeout": 30}),
+        tool_response("fail", "terminal", {"command": "python3 -m pytest -q --basetemp=/tmp/smara-tests", "timeout": 30}),
         tool_response("repair", "patch", {"path": "calc.py", "old_string": "return 1", "new_string": "return 2"}),
-        tool_response("pass", "terminal", {"command": f"& '{python}' -m pytest -q", "timeout": 30}),
+        tool_response("pass", "terminal", {"command": "python3 -m pytest -q --basetemp=/tmp/smara-tests", "timeout": 30}),
         final_response(),
     ])
     requests = []

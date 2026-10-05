@@ -56,8 +56,14 @@ def test_agent_execute_tool_dispatch():
 
         # 3. Test terminal tool dispatch
         term_res = agent.execute_tool("terminal", {"command": "echo SmaraAgentTerminal"})
-        assert "SmaraAgentTerminal" in term_res
-        assert "[Exit Code: 0]" in term_res
+        from smara.sandbox import docker_engine_status
+        docker = docker_engine_status()
+        if docker.get("engine_available") and docker.get("linux_containers"):
+            assert "SmaraAgentTerminal" in term_res
+            assert "[Exit Code: 0]" in term_res
+        else:
+            assert "Docker Engine is not reachable" in term_res
+            assert "[Exit Code: 0]" not in term_res
 
 
 def test_tool_admission_and_workspace_boundary_are_enforced(tmp_path: Path):

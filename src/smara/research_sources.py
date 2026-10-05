@@ -21,8 +21,8 @@ _DOMAIN_RE = re.compile(
 _AUTHORITY_RULES: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
     (re.compile(r"\b(?:PEP(?:\s*[-#]?\s*\d+)?|Python Enhancement Proposal)\b", re.I), ("peps.python.org",)),
     (re.compile(r"\bRFC(?:\s*[-#]?\s*\d+)?\b|\bRequest for Comments\b", re.I), ("rfc-editor.org", "ietf.org")),
-    (re.compile(r"\bOpenSSL\b", re.I), ("openssl.org",)),
-    (re.compile(r"\b(?:Red\s*Hat|RHEL)\b", re.I), ("access.redhat.com",)),
+    (re.compile(r"\bOpenSSL\b", re.I), ("openssl.org", "openssl-library.org")),
+    (re.compile(r"\b(?:Red\s*Hat|RHEL)\b", re.I), ("redhat.com",)),
     (re.compile(r"\bOpenAI\b", re.I), ("openai.com",)),
     (re.compile(r"\bGit(?:\s+\d|[- ]SCM)\b", re.I), ("git-scm.com",)),
     (re.compile(r"\bNode\.?js\b", re.I), ("nodejs.org",)),
@@ -57,15 +57,18 @@ def normalize_search_domains(value: object) -> list[str]:
 def authority_domain_groups(question: str) -> list[tuple[str, ...]]:
     """Return first-party host groups relevant to named authorities in a query."""
     text = str(question or "")
-    groups: list[tuple[str, ...]] = []
+    matches: list[tuple[int, tuple[str, ...]]] = []
     has_pep = bool(_AUTHORITY_RULES[0][0].search(text))
     has_rfc = bool(_AUTHORITY_RULES[1][0].search(text))
     for index, (pattern, domains) in enumerate(_AUTHORITY_RULES):
         if index == 11 and (has_pep or has_rfc):
             continue
-        if pattern.search(text) and domains not in groups:
-            groups.append(domains)
-    return groups
+        match = pattern.search(text)
+        if match and not any(domains == item[1] for item in matches):
+            matches.append((match.start(), domains))
+    # The named publisher at the start of a node must be tried before a
+    # library/product mentioned later as the subject of its policy.
+    return [domains for _, domains in sorted(matches, key=lambda item: item[0])]
 
 
 def missing_authority_domain_groups(question: str, source_urls: list[str]) -> list[tuple[str, ...]]:

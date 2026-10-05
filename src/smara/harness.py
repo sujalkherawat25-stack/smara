@@ -1,7 +1,7 @@
 """Durable, brokered execution spine shared by CLI and benchmarks."""
 from __future__ import annotations
 
-import contextlib, hashlib, json, os, re, signal, sqlite3, subprocess, tempfile, threading, time, uuid
+import contextlib, hashlib, json, os, re, signal, sqlite3, subprocess, tempfile, threading, time, uuid, weakref
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +14,8 @@ REUSABLE_READ_TOOLS = {"read_file", "file_read", "list_directory", "search_files
 _LIVE_PROCESSES: dict[str, subprocess.Popen] = {}
 _LIVE_PROCESS_LOGS: dict[str, Any] = {}
 _LIVE_PROCESS_JOBS: dict[str, Any] = {}
+_PROCESS_ROOT_LOCKS = weakref.WeakValueDictionary()
+_PROCESS_ROOT_LOCKS_GUARD = threading.Lock()
 _COMMAND_TOKEN_RE = re.compile(r'''^\s*(?:&\s*)?(?:"([^"]+)"|'([^']+)'|([^\s]+))(.*)$''', re.DOTALL)
 
 def _now(): return datetime.now(timezone.utc).isoformat()
@@ -199,7 +201,24 @@ TOOL_SCHEMAS={
 }
 
 class ProcessSupervisor:
-    def __init__(self,root): self.root=Path(root); self.root.mkdir(parents=True,exist_ok=True); self.processes=_LIVE_PROCESSES; self.logs=_LIVE_PROCESS_LOGS; self.jobs=_LIVE_PROCESS_JOBS; self.lock=threading.RLock()
+    def __init__(self,root):
+        self.root=Path(root).resolve(); self.root.mkdir(parents=True,exist_ok=True)
+        self.processes=_LIVE_PROCESSES; self.logs=_LIVE_PROCESS_LOGS; self.jobs=_LIVE_PROCESS_JOBS
+        # Reconnected supervisors and the original deadline watcher share state.
+        with _PROCESS_ROOT_LOCKS_GUARD:
+            self.lock = _PROCESS_ROOT_LOCKS.get(self.root)
+            if self.lock is None:
+                self.lock = threading.RLock()
+                _PROCESS_ROOT_LOCKS[self.root] = self.lock
+    @staticmethod
+    def _save_metadata(path,meta):
+        fd,temporary=tempfile.mkstemp(prefix="process-",suffix=".tmp",dir=path.parent)
+        try:
+            with os.fdopen(fd,"w",encoding="utf-8") as handle:
+                handle.write(_json(meta)); handle.flush(); os.fsync(handle.fileno())
+            os.replace(temporary,path)
+        finally:
+            with contextlib.suppress(OSError): os.unlink(temporary)
     @staticmethod
     def creation(): return ((getattr(subprocess,"CREATE_NEW_PROCESS_GROUP",0)|getattr(subprocess,"CREATE_NO_WINDOW",0),None) if os.name=="nt" else (0,os.setsid))
     def require_owned(self,ident):
@@ -207,7 +226,7 @@ class ProcessSupervisor:
             raise PolicyDenied("invalid process handle")
         if not (self.root/f"{ident}.json").is_file():
             raise PolicyDenied("process belongs to another session or is unknown")
-    def start(self,argv,cwd,env,timeout):
+    def start(self,argv,cwd,env,timeout,*,one_shot=False):
         with self.lock:
             ident=f"proc_{uuid.uuid4().hex[:24]}"; log=self.root/f"{ident}.log"; handle=log.open("w+b"); flags,preexec=self.creation()
             proc=subprocess.Popen(argv,cwd=str(cwd),env=env,stdin=subprocess.PIPE,stdout=handle,stderr=subprocess.STDOUT,shell=False,creationflags=flags,preexec_fn=preexec)
@@ -215,13 +234,17 @@ class ProcessSupervisor:
                 job=self._windows_job(proc)
                 if job:self.jobs[ident]=job
             self.processes[ident]=proc; self.logs[ident]=handle
-            meta={"process_id":ident,"pid":proc.pid,"cwd":str(cwd),"argv":argv,"started_at":_now(),"timeout_seconds":timeout,"log_path":str(log),"status":"running","cancellation_status":None}
-            (self.root/f"{ident}.json").write_text(_json(meta),encoding="utf-8")
+            from .sandbox import container_name_from_argv
+            meta={"process_id":ident,"pid":proc.pid,"cwd":str(cwd),"argv":argv,"sandbox_container":container_name_from_argv(argv),"started_at":_now(),"timeout_seconds":timeout,"log_path":str(log),"status":"running","cancellation_status":None,"one_shot":one_shot}
+            self._save_metadata(self.root/f"{ident}.json",meta)
             def enforce_deadline():
                 try: proc.wait(timeout=timeout)
                 except subprocess.TimeoutExpired:
                     (self.root/f"{ident}.timeout").touch()
                     self.cancel(ident)
+                finally:
+                    if not one_shot and (self.root/f"{ident}.json").is_file():
+                        with contextlib.suppress(OSError): self.poll(ident)
             threading.Thread(target=enforce_deadline,name=f"deadline-{ident}",daemon=True).start()
             return meta
     def poll(self,ident,cursor=0,max_chars=16000):
@@ -238,9 +261,15 @@ class ProcessSupervisor:
             code=proc.poll()
             expired=(self.root/f"{ident}.timeout").exists()
             if expired and code is None:
-                self.kill(proc);code=proc.poll();meta["timed_out"]=True
+                self.kill(proc,meta.get("sandbox_container"));code=proc.poll();meta["timed_out"]=True
             if code is not None and ident in self.logs:
-                with contextlib.suppress(Exception):self.logs[ident].flush()
+                handle = self.logs.pop(ident)
+                with contextlib.suppress(OSError): handle.flush(); handle.close()
+            if code is not None and ident in self.jobs:
+                job=self.jobs.pop(ident)
+                if os.name=="nt":
+                    import ctypes
+                    with contextlib.suppress(OSError): ctypes.windll.kernel32.CloseHandle(job)
             raw=log.read_bytes() if log.exists() else raw; chunk=raw[cursor:cursor+limit].decode(errors="replace"); next_cursor=min(len(raw),cursor+limit)
 
             stored_cancel=meta.get("cancellation_status")
@@ -253,6 +282,7 @@ class ProcessSupervisor:
             else: current_status="failed"
 
             meta["status"]=current_status; meta["exit_code"]=code; meta["done"]=code is not None or current_status in ("completed","failed","cancelled","already_completed","timed_out")
+            self._save_metadata(meta_path,meta)
             return {**meta,"status":current_status,"done":meta["done"],"exit_code":code,"output":chunk,"cursor":next_cursor,"log_size":len(raw),"reconnectable":True}
     def write(self,ident,text):
         with self.lock:
@@ -261,7 +291,10 @@ class ProcessSupervisor:
             if proc is None or proc.poll() is not None or proc.stdin is None: raise RuntimeError("process is not running")
             proc.stdin.write(text.encode()); proc.stdin.flush(); return self.poll(ident)
     @classmethod
-    def kill(cls,proc):
+    def kill(cls,proc,container_name=None):
+        if container_name:
+            from .sandbox import stop_workspace_container
+            stop_workspace_container(container_name)
         if proc.poll() is not None:return
         if os.name=="nt": subprocess.run(["taskkill","/PID",str(proc.pid),"/T","/F"],capture_output=True,check=False)
         else:
@@ -283,13 +316,13 @@ class ProcessSupervisor:
             proc=self.processes.get(ident)
             if proc is None:
                 meta["status"]="cancellation_uncertain"; meta["done"]=False; meta["cancellation_status"]="cancellation_uncertain"
-                meta_path.write_text(_json(meta),encoding="utf-8")
+                self._save_metadata(meta_path,meta)
                 return {**self.poll(ident),"status":"cancellation_uncertain","done":False,"cancellation_status":"cancellation_uncertain","termination_attempted":False,"tree_terminated":False,"observed_exit_code":None}
 
             poll_before=proc.poll()
             if poll_before is not None and not expired:
                 meta["status"]="already_completed"; meta["done"]=True; meta["exit_code"]=poll_before; meta["cancellation_status"]="already_completed"; meta["termination_attempted"]=False; meta["tree_terminated"]=False; meta["observed_exit_code"]=poll_before
-                meta_path.write_text(_json(meta),encoding="utf-8")
+                self._save_metadata(meta_path,meta)
                 return {**self.poll(ident),"status":"already_completed","done":True,"exit_code":poll_before,"cancellation_status":"already_completed","termination_attempted":False,"tree_terminated":False,"observed_exit_code":poll_before}
 
             termination_attempted=True
@@ -299,7 +332,7 @@ class ProcessSupervisor:
                 with contextlib.suppress(Exception):
                     ctypes.windll.kernel32.TerminateJobObject(job,1)
                     ctypes.windll.kernel32.CloseHandle(job)
-            self.kill(proc)
+            self.kill(proc,meta.get("sandbox_container"))
             with contextlib.suppress(subprocess.TimeoutExpired): proc.wait(timeout=5)
             poll_after=proc.poll()
             if poll_after is not None:
@@ -308,7 +341,7 @@ class ProcessSupervisor:
                 tree_terminated=False; status="cancellation_uncertain"; cancel_status="cancellation_uncertain"
 
             meta["status"]=status; meta["done"]=(poll_after is not None); meta["exit_code"]=poll_after; meta["cancellation_status"]=cancel_status; meta["termination_attempted"]=termination_attempted; meta["tree_terminated"]=tree_terminated; meta["observed_exit_code"]=poll_after
-            meta_path.write_text(_json(meta),encoding="utf-8")
+            self._save_metadata(meta_path,meta)
             return {**self.poll(ident),"status":status,"done":meta["done"],"exit_code":poll_after,"cancellation_status":cancel_status,"termination_attempted":termination_attempted,"tree_terminated":tree_terminated,"observed_exit_code":poll_after}
     @staticmethod
     def _windows_job(proc):
@@ -335,10 +368,11 @@ class ProcessSupervisor:
         return job
 
 class ToolBroker:
-    def __init__(self,workspace,capability_grant,*,constrained=True,allowed_env=("PATH","SYSTEMROOT","WINDIR","TEMP","TMP","PATHEXT"),process_root=None):
-        self.workspace=Path(workspace).resolve(strict=True); self.grant=frozenset(capability_grant); self.constrained=constrained; self.allowed_env=frozenset(x.upper() for x in allowed_env)
+    def __init__(self,workspace,capability_grant,*,constrained=True,sandboxed=False,read_only=False,allowed_env=("PATH","SYSTEMROOT","WINDIR","TEMP","TMP","PATHEXT"),process_root=None):
+        self.workspace=Path(workspace).resolve(strict=True); self.grant=frozenset(capability_grant); self.constrained=constrained; self.sandboxed=bool(sandboxed); self.read_only=bool(read_only); self.allowed_env=frozenset(x.upper() for x in allowed_env)
         self.processes=ProcessSupervisor(process_root or self.workspace/".smara"/"processes"); self.mutation_lock=threading.RLock()
     def path(self,raw,mutation=False):
+        if mutation and self.read_only: raise PolicyDenied("verification workspace is read-only")
         candidate=Path(raw); candidate=candidate if candidate.is_absolute() else self.workspace/candidate; resolved=candidate.resolve(strict=False)
         if resolved!=self.workspace and self.workspace not in resolved.parents: raise PolicyDenied("path escapes workspace")
         ancestor=resolved if resolved.exists() else next((p for p in resolved.parents if p.exists()),None)
@@ -384,18 +418,32 @@ class ToolBroker:
         if not count: raise ValueError("expected text not found")
         if count>1 and not a.get("replace_all",False): raise ValueError("expected text not unique")
         return self.atomic(path,old.replace(a["old"],a["new"],-1 if a.get("replace_all") else 1),a.get("expected_sha256"))
-    def process_args(self,a):
-        if self.constrained: raise PolicyDenied("terminal needs explicit unrestricted-local grant or external sandbox")
+    def process_args(self,a,*,interactive=False):
+        if self.constrained and not self.sandboxed: raise PolicyDenied("terminal needs explicit isolated sandbox execution")
         cwd=self.path(a.get("cwd","."));
         if not cwd.is_dir(): raise SchemaError("cwd must be directory")
-        return list(a["argv"]),cwd,self.env(a.get("env")),max(.1,min(float(a.get("timeout_seconds",45)),3600))
+        timeout=max(.1,min(float(a.get("timeout_seconds",45)),3600))
+        env=self.env(a.get("env"))
+        argv=list(a["argv"])
+        if self.sandboxed:
+            from .sandbox import SandboxLimits, build_workspace_docker_argv
+            limits=SandboxLimits(timeout_seconds=max(1,int(timeout)),memory_mb=2048,cpus=2.0,pids=128)
+            argv=build_workspace_docker_argv(argv,self.workspace,cwd,limits=limits,interactive=interactive,env=env,read_only_workspace=self.read_only)
+            cwd=self.workspace
+            env={key: value for key,value in os.environ.items() if key in {"SYSTEMROOT","WINDIR","TEMP","TMP","PATH"}}
+        return argv,cwd,env,timeout
     def do_run_process(self,a):
-        argv,cwd,env,timeout=self.process_args(a); flags,preexec=ProcessSupervisor.creation(); proc=subprocess.Popen(argv,cwd=str(cwd),env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,stdin=subprocess.DEVNULL,shell=False,creationflags=flags,preexec_fn=preexec)
-        try: output=proc.communicate(timeout=timeout)[0].decode(errors="replace")
-        except subprocess.TimeoutExpired: ProcessSupervisor.kill(proc); raise
-        return {"status":"ok" if proc.returncode==0 else "error","text":output[-16000:],"exit_code":proc.returncode,"error_kind":None if proc.returncode==0 else "nonzero_exit","meta":{"evidence_scope":a.get("evidence_scope","none")}}
+        argv,cwd,env,timeout=self.process_args(a)
+        meta=self.processes.start(argv,cwd,env,timeout,one_shot=True)
+        ident=meta["process_id"];proc=self.processes.processes[ident]
+        try: proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self.processes.cancel(ident); raise
+        self.processes.poll(ident)
+        output=Path(meta["log_path"]).read_text(encoding="utf-8",errors="replace")
+        return {"status":"ok" if proc.returncode==0 else "error","text":output[-16000:],"exit_code":proc.returncode,"error_kind":None if proc.returncode==0 else "nonzero_exit","meta":{"evidence_scope":a.get("evidence_scope","none"),"process_id":ident,"log_path":meta["log_path"],"output_chars":len(output),"inline_truncated":len(output)>16000}}
     def do_process_start(self,a):
-        argv,cwd,env,timeout=self.process_args(a); meta=self.processes.start(argv,cwd,env,timeout); return {"text":_json(meta),"meta":meta}
+        argv,cwd,env,timeout=self.process_args(a,interactive=True); meta=self.processes.start(argv,cwd,env,timeout); return {"text":_json(meta),"meta":meta}
     def do_process_poll(self,a):
         state=self.processes.poll(a["process_id"],a.get("cursor",0),a.get("max_chars",16000)); return {"status":"ok" if state.get("exit_code") in (None,0) else "error","text":state.pop("output",""),"exit_code":state.get("exit_code"),"meta":state}
     def do_process_write(self,a):
@@ -405,6 +453,10 @@ class ToolBroker:
 
 class SessionEngine:
     VERSION="h2-local-2"; SCHEMA_VERSION=2
+    WEB_ONLY_TOOLS = frozenset({
+        "research_plan", "research_search", "research_fetch", "research_inspect",
+        "research_gather", "research_analyze", "research_resolve", "research_validate", "research_report",
+    })
     def __init__(self,workspace,session_id=None,*,budget=None,capability_grant=None,constrained=True):
         self.workspace=Path(workspace).resolve()
         if not self.workspace.is_dir(): raise ValueError("workspace must exist")
@@ -416,6 +468,19 @@ class SessionEngine:
         self.db.execute("PRAGMA journal_mode=WAL"); self.db.execute("PRAGMA synchronous=FULL"); self.migrate()
         self.budget=budget or Budget(); self.broker=ToolBroker(self.workspace,capability_grant or TOOL_SCHEMAS.keys(),constrained=constrained,process_root=self.root/self.session_id/"processes")
         self._runtime_cancellers=[]
+    def current_workspace_revision(self) -> str:
+        """Web-only tools use immutable evidence, not unrelated workspace files.
+
+        Research reports live in the content-addressed artifact store. Coding,
+        local ingestion and mixed sessions retain full file-revision checks.
+        Never reuse this marker after any non-web action has been admitted.
+        """
+        if (self.get("tool_profile") == "research_web"
+            and not self.get("full_workspace_revision_required", False)
+            and all(name in self.WEB_ONLY_TOOLS for (name,) in self.db.execute("SELECT DISTINCT name FROM calls"))):
+            return "web-only:no-workspace-files"
+        return workspace_revision(self.workspace)
+
     def register_canceller(self,callback):
         if callback not in self._runtime_cancellers:self._runtime_cancellers.append(callback)
     def migrate(self):
@@ -438,6 +503,36 @@ class SessionEngine:
             paused_at=self.get("paused_at")
             if paused_at is not None:
                 self.set("paused_seconds",float(self.get("paused_seconds",0.0))+max(0.0,time.time()-float(paused_at)));self.set("paused_at",None);self.event("resumed",{"elapsed_wall":self._elapsed_wall()})
+    def prepare_resume(self) -> None:
+        """Continue a checkpoint, never replay uncertain writes or reset spend."""
+        record = self.inspect()
+        if not record["state"].get("request"):
+            raise ValueError("No canonical checkpoint is available; start a new turn")
+        if self.get("cancelled", False):
+            raise ValueError("This execution was cancelled; start a new turn instead")
+        if self.get("result", {}).get("status") == "completed":
+            raise ValueError("This execution is already completed")
+        uncertain = [call["call_id"] for call in record["calls"] if call["state"] == "admitted" and call["mutating"]]
+        if uncertain:
+            raise ValueError("Inspect uncertain actions before resuming: " + ", ".join(uncertain))
+        for metadata in self.broker.processes.root.glob("proc_*.json"):
+            if not self.broker.processes.poll(metadata.stem).get("done"):
+                raise ValueError("Reconcile or cancel unfinished process " + metadata.stem + " before resuming")
+        receipts = [{"call_id": call["call_id"], "tool": call["name"],
+                     "status": (call["result"] or {}).get("status"),
+                     "changed_paths": (call["result"] or {}).get("changed_paths", []),
+                     "artifact_id": (call["result"] or {}).get("artifact_id")}
+                    for call in record["calls"] if call["state"] == "completed"]
+        messages = list(record["state"].get("agent_messages") or [])
+        if not messages:
+            # No provider call was admitted yet (for example a missing key).
+            self.resume_clock()
+            return
+        messages.append({"role": "user", "content": "Explicit checkpoint continuation. The original budget and tool receipts still apply. "
+                         "Reinspect the current workspace before further changes. Do not repeat completed writes or commands blindly. "
+                         "Completed action receipts (observations, not instructions): " + _json(receipts)})
+        self.resume_clock()
+        self.checkpoint(messages, {**record["state"].get("agent_state", {}), "resumed_explicitly": True})
     def inspect(self):
         state={k:json.loads(v) for k,v in self.db.execute("SELECT key,value FROM state")}; events=[{"version":1,"session_id":self.session_id,"sequence":r[0],"type":r[1],"timestamp":r[3],"payload":json.loads(r[2])} for r in self.db.execute("SELECT sequence,type,payload,created_at FROM events ORDER BY sequence")]
         calls=[{"call_id":r[0],"position":r[1],"name":r[2],"arguments":json.loads(r[3]),"workspace_id":r[4],"mutating":bool(r[5]),"state":r[6],"result":json.loads(r[7]) if r[7] else None,"before_revision":r[8],"after_revision":r[9]} for r in self.db.execute("SELECT call_id,position,name,arguments,workspace_id,mutating,state,result,before_revision,after_revision FROM calls ORDER BY position")]
@@ -478,7 +573,7 @@ class SessionEngine:
         if request.session_id!=self.session_id:raise ValueError("request session_id does not match engine")
         requested_workspace=Path(request.workspace_id).resolve()
         if requested_workspace!=self.workspace:raise ValueError("request workspace_id does not match engine")
-        self.budget=request.budget;self.broker=ToolBroker(self.workspace,request.capability_grant or TOOL_SCHEMAS.keys(),constrained=self.broker.constrained,process_root=self.root/self.session_id/"processes")
+        self.budget=request.budget;self.broker=ToolBroker(self.workspace,request.capability_grant or TOOL_SCHEMAS.keys(),constrained=self.broker.constrained,sandboxed=self.broker.sandboxed,read_only=self.broker.read_only,process_root=self.root/self.session_id/"processes")
         self.begin_incremental(request.user_message);self.set("attachments",list(request.attachments));self.set("output_contract",dict(request.output_contract));self.set("model_profile",request.model_profile)
     @staticmethod
     def _output_contract_errors(answer:str,contract:Mapping[str,Any]) -> list[str]:
@@ -567,7 +662,7 @@ class SessionEngine:
             if isinstance(browser_handle,Mapping):supplied_handles.append(dict(browser_handle))
             supplied_research=state.get("research_artifact_ids",())
             research_ids=tuple(dict.fromkeys([*[str(item) for item in supplied_research],*([str(self.get("research_state_artifact_id"))] if self.get("research_state_artifact_id") else [])]))
-            continuation=ContinuationState(objective=str(self.get("request", "")),constraints=tuple(state.get("constraints",())),acceptance_criteria=tuple(state.get("acceptance_criteria",())),tasks=tuple(state.get("tasks",())),decisions=tuple(state.get("decisions",())),unresolved_questions=tuple(state.get("unresolved_questions",())),changed_paths=tuple(sorted({path for call in calls for path in ((call.get("result") or {}).get("changed_paths") or [])})),workspace_revision=workspace_revision(self.workspace),failed_evidence_ids=tuple(row[0] for row in evidence if not row[1]),passing_evidence_ids=tuple(row[0] for row in evidence if row[1]),research_artifact_ids=research_ids,pending_call_ids=tuple(call["call_id"] for call in calls if call["state"]=="pending"),uncertain_call_ids=tuple(call["call_id"] for call in calls if call["state"]=="admitted" and call["mutating"]),active_handles=tuple([*process_handles.values(),*supplied_handles]),usage=usage,remaining_budget=remaining,next_action=str(state.get("next_action") or state.get("phase") or "model"),parent_checkpoint_id=self.get("continuation_artifact_id"))
+            continuation=ContinuationState(objective=str(self.get("request", "")),constraints=tuple(state.get("constraints",())),acceptance_criteria=tuple(state.get("acceptance_criteria",())),tasks=tuple(state.get("tasks",())),decisions=tuple(state.get("decisions",())),unresolved_questions=tuple(state.get("unresolved_questions",())),changed_paths=tuple(sorted({path for call in calls for path in ((call.get("result") or {}).get("changed_paths") or [])})),workspace_revision=self.current_workspace_revision(),failed_evidence_ids=tuple(row[0] for row in evidence if not row[1]),passing_evidence_ids=tuple(row[0] for row in evidence if row[1]),research_artifact_ids=research_ids,pending_call_ids=tuple(call["call_id"] for call in calls if call["state"]=="pending"),uncertain_call_ids=tuple(call["call_id"] for call in calls if call["state"]=="admitted" and call["mutating"]),active_handles=tuple([*process_handles.values(),*supplied_handles]),usage=usage,remaining_budget=remaining,next_action=str(state.get("next_action") or state.get("phase") or "model"),parent_checkpoint_id=self.get("continuation_artifact_id"))
             artifact_id,_=self.artifact_store.put_json(continuation.to_dict()); self.set("continuation_artifact_id",artifact_id); self.event("checkpoint",{"message_count":len(messages),"state_sha256":_sha(_json(state).encode()),"continuation_artifact_id":artifact_id,"parent_checkpoint_id":continuation.parent_checkpoint_id})
     def resolve_artifact(self,artifact_id: str) -> bytes:
         matches=list(self.artifacts.glob(f"{artifact_id}.*"))
@@ -580,11 +675,13 @@ class SessionEngine:
         """Journal one real model-emitted call before executing it."""
         with _SessionLock(self.lock_path):
             from smara.progress import ProgressRecord, classify, fingerprint, result_hash
+            if call.name not in self.WEB_ONLY_TOOLS:
+                self.set("full_workspace_revision_required", True)
             if self.get("cancelled",False):raise BudgetExceeded("cancelled")
             if self.get("paused_at") is not None:raise BudgetExceeded("paused")
             budget=Budget(**self.get("budget",asdict(self.budget)))
             if self._elapsed_wall()>=budget.wall_seconds:raise BudgetExceeded("wall_seconds")
-            current_revision=workspace_revision(self.workspace); fp=fingerprint(call.name,call.arguments,current_revision)
+            current_revision=self.current_workspace_revision(); fp=fingerprint(call.name,call.arguments,current_revision)
             cache=self.get("receipt_cache",{})
             if call.name in REUSABLE_READ_TOOLS and fp in cache:
                 cached={k:v for k,v in cache[fp].items() if k!="artifact_id"}; cached["call_id"]=call.call_id
@@ -609,10 +706,10 @@ class SessionEngine:
                 pos=self.db.execute("SELECT COALESCE(MAX(position),-1)+1 FROM calls").fetchone()[0]; self.db.execute("INSERT INTO calls VALUES(?,?,?,?,?,?,?,NULL,NULL,NULL)",(call.call_id,pos,call.name,_json(call.arguments),call.workspace_id,int(call.name in MUTATING_TOOLS or call.name in {"patch","file_write","terminal","python_execute"}),"pending"))
             usage=self.get("usage",{})
             if int(usage.get("tool_calls",0))+1>budget.tool_calls: raise BudgetExceeded("tool_calls")
-            usage["tool_calls"]=int(usage.get("tool_calls",0))+1; self.set("usage",usage); before=workspace_revision(self.workspace); self.db.execute("UPDATE calls SET state='admitted',before_revision=? WHERE call_id=?",(before,call.call_id)); self.event("tool_admitted",{"call_id":call.call_id,"name":call.name,"arguments_sha256":_sha(_json(call.arguments).encode())})
+            usage["tool_calls"]=int(usage.get("tool_calls",0))+1; self.set("usage",usage); before=self.current_workspace_revision(); self.db.execute("UPDATE calls SET state='admitted',before_revision=? WHERE call_id=?",(before,call.call_id)); self.event("tool_admitted",{"call_id":call.call_id,"name":call.name,"arguments_sha256":_sha(_json(call.arguments).encode())})
             result=executor({"call_id":call.call_id,"name":call.name,"arguments":dict(call.arguments),**dict(call.arguments)})
             if not isinstance(result,ToolResult) or result.call_id!=call.call_id: result=ToolResult(call.call_id,"error","invalid executor result",error_kind="invalid_result")
-            receipt=asdict(result); aid,_=self.artifact_store.put_json(receipt); receipt["artifact_id"]=aid; after=result.after_revision or workspace_revision(self.workspace); self.db.execute("UPDATE calls SET state='completed',result=?,after_revision=? WHERE call_id=?",(_json(receipt),after,call.call_id)); self.event("tool_result",{**receipt,"source_artifact_id":aid})
+            receipt=asdict(result); aid,_=self.artifact_store.put_json(receipt); receipt["artifact_id"]=aid; after=result.after_revision or self.current_workspace_revision(); self.db.execute("UPDATE calls SET state='completed',result=?,after_revision=? WHERE call_id=?",(_json(receipt),after,call.call_id)); self.event("tool_result",{**receipt,"source_artifact_id":aid})
             scope=str(result.meta.get("evidence_scope","none"))
             if scope in VERIFY_SCOPES:
                 ev=Evidence(uuid.uuid4().hex,call.call_id,"test",scope,after,result.ok,aid,_now()); self.db.execute("INSERT INTO evidence VALUES(?,?,?,?,?,?,?,?)",(ev.id,ev.call_id,ev.kind,ev.scope,ev.subject_revision,int(ev.passed),ev.source_artifact_id,ev.created_at)); self.event("evidence",asdict(ev))
@@ -642,11 +739,13 @@ class SessionEngine:
             if status=="completed":
                 for metadata in self.broker.processes.root.glob("proc_*.json"):
                     process=self.broker.processes.poll(metadata.stem)
+                    if process.get("one_shot") and process.get("done"):
+                        continue
                     if process["status"] not in ("completed","cancelled","already_completed"):
                         process_errors.append(f"process {metadata.stem} is {process['status']}; reconcile before completion")
                 if process_errors:
                     status="needs_input";unresolved=tuple(unresolved)+tuple(process_errors)
-            revision=workspace_revision(self.workspace); mutated=self.db.execute("SELECT COUNT(*) FROM calls WHERE mutating=1 AND state='completed' AND COALESCE(before_revision,'')<>COALESCE(after_revision,'')").fetchone()[0]>0; verified=self.db.execute("SELECT COUNT(*) FROM evidence WHERE passed=1 AND subject_revision=? AND scope IN ('focused','full')",(revision,)).fetchone()[0]>0
+            revision=self.current_workspace_revision(); mutated=self.db.execute("SELECT COUNT(*) FROM calls WHERE mutating=1 AND state='completed' AND COALESCE(before_revision,'')<>COALESCE(after_revision,'')").fetchone()[0]>0; verified=self.db.execute("SELECT COUNT(*) FROM evidence WHERE passed=1 AND subject_revision=? AND scope IN ('focused','full')",(revision,)).fetchone()[0]>0
             contract=self.get("output_contract",{})
             contract_errors=self._output_contract_errors(answer,contract)
             artifact_verified=False
@@ -698,7 +797,7 @@ class SessionEngine:
             if self.get("cancelled",False): return self.finish("cancelled",receipts,("cancelled by user",))
             if self.get("paused_at") is not None:return self.finish("interrupted",receipts,("session is paused",))
             if self._elapsed_wall()>=budget.wall_seconds or int(usage.get("tool_calls",0))>=budget.tool_calls: self.event("budget_exhausted",{}); return self.finish("budget_exhausted",receipts,("budget exhausted",))
-            usage["tool_calls"]=int(usage.get("tool_calls",0))+1; self.set("usage",usage); before=workspace_revision(self.workspace)
+            usage["tool_calls"]=int(usage.get("tool_calls",0))+1; self.set("usage",usage); before=self.current_workspace_revision()
             self.db.execute("UPDATE calls SET state='admitted',before_revision=? WHERE call_id=?",(before,rec["call_id"])); self.event("tool_admitted",{"call_id":rec["call_id"],"name":rec["name"],"arguments_sha256":_sha(_json(rec["arguments"]).encode())})
             call=ToolCall(rec["call_id"],rec["name"],rec["arguments"],rec["workspace_id"])
             try:
@@ -707,14 +806,14 @@ class SessionEngine:
                     compat={"call_id":call.call_id,"name":call.name,"arguments":dict(call.arguments),**dict(call.arguments)}; result=executor(compat)
                     if not isinstance(result,ToolResult) or result.call_id!=call.call_id: raise TypeError("executor returned invalid ToolResult")
             except KeyboardInterrupt: self.event("interrupted",{"call_id":call.call_id}); raise
-            except Exception as exc: result=ToolResult(call.call_id,"error",f"{type(exc).__name__}: {exc}",error_kind=type(exc).__name__,before_revision=before,after_revision=workspace_revision(self.workspace))
-            receipt=asdict(result); aid,_=self.artifact_store.put_json(receipt); receipt["artifact_id"]=aid; after=result.after_revision or workspace_revision(self.workspace)
+            except Exception as exc: result=ToolResult(call.call_id,"error",f"{type(exc).__name__}: {exc}",error_kind=type(exc).__name__,before_revision=before,after_revision=self.current_workspace_revision())
+            receipt=asdict(result); aid,_=self.artifact_store.put_json(receipt); receipt["artifact_id"]=aid; after=result.after_revision or self.current_workspace_revision()
             self.db.execute("UPDATE calls SET state='completed',result=?,after_revision=? WHERE call_id=?",(_json(receipt),after,call.call_id)); self.event("tool_result",{**receipt,"source_artifact_id":aid}); receipts.append(receipt)
             scope=str(result.meta.get("evidence_scope","none"))
             if scope in VERIFY_SCOPES:
                 ev=Evidence(uuid.uuid4().hex,call.call_id,"test",scope,after,result.ok,aid,_now()); self.db.execute("INSERT INTO evidence VALUES(?,?,?,?,?,?,?,?)",(ev.id,ev.call_id,ev.kind,ev.scope,ev.subject_revision,int(ev.passed),ev.source_artifact_id,ev.created_at)); self.event("evidence",asdict(ev))
             if not result.ok: return self.finish("denied" if result.status=="denied" else "cancelled" if result.status=="cancelled" else "tool_error",receipts,(result.error_kind or result.status,))
-        revision=workspace_revision(self.workspace); mutated=self.db.execute("SELECT COUNT(*) FROM calls WHERE mutating=1 AND state='completed' AND COALESCE(before_revision,'')<>COALESCE(after_revision,'')").fetchone()[0]>0; passing=self.db.execute("SELECT COUNT(*) FROM evidence WHERE passed=1 AND subject_revision=? AND scope IN ('focused','full')",(revision,)).fetchone()[0]>0
+        revision=self.current_workspace_revision(); mutated=self.db.execute("SELECT COUNT(*) FROM calls WHERE mutating=1 AND state='completed' AND COALESCE(before_revision,'')<>COALESCE(after_revision,'')").fetchone()[0]>0; passing=self.db.execute("SELECT COUNT(*) FROM evidence WHERE passed=1 AND subject_revision=? AND scope IN ('focused','full')",(revision,)).fetchone()[0]>0
         if mutated and not passing: return self.finish("needs_input",receipts,("workspace changes are unverified at current revision",))
         return self.finish("completed",receipts,())
     def finish(self,status,receipts,unresolved):

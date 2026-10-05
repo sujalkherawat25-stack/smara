@@ -50,11 +50,12 @@ export const desktop = {
   modelProfiles: () => invoke<LocalModelProfile[]>("list_local_model_profiles"),
   saveModelProfile: (profile: { id: string; label: string; provider: string; base_url: string; model: string; api_key: string; auth_header?: string }) => invoke<LocalModelProfile[]>("save_local_model_profile", { profile }),
   deleteModelProfile: (id: string) => invoke<LocalModelProfile[]>("delete_local_model_profile", { id }),
-  streamChat: (args: { api_url: string; workspace: string; model_profile: string; message: string; conversation_id: string; timezone?: string; research_mode?: ResearchMode; tool_profile?: string }) =>
+  streamChat: (args: { api_url: string; workspace: string; model_profile: string; message: string; conversation_id: string; request_id?: string; timezone?: string; research_mode?: ResearchMode; tool_profile?: string }) =>
     invoke<void>("stream_chat", { args }),
   onChatEvent: (handler: (event: ChatEvent) => void): Promise<UnlistenFn> =>
     listen<ChatEvent>("smara-chat-event", (event) => handler(event.payload)),
   listRuntimeSessions: (limit: number = 50) => invoke<RuntimeSessionRecord[]>("list_runtime_sessions", { limit }),
+  sessionRequest: <T = unknown>(method: string, params: Record<string, unknown> = {}, workspace?: string) => invoke<T>("session_protocol", { method, params, workspace: workspace || null }),
   runtimeSession: (sessionId: string, after: number = 0) => invoke<RuntimeSessionSnapshot>("get_runtime_session", { sessionId, after }),
   cancelRuntimeSession: (sessionId: string, reason?: string) => invoke<RuntimeSessionSnapshot>("cancel_runtime_session", { sessionId, reason: reason || null }),
   resumeRuntimeSession: (sessionId: string, after: number = 0) => invoke<RuntimeSessionSnapshot>("resume_runtime_session", { sessionId, after }),
@@ -89,8 +90,8 @@ export const desktop = {
     invoke<ADRData>("create_adr", { title, context, decision, consequences, symbolsAffected }),
   getCodingConventions: () => invoke<CodingConventionsData>("get_coding_conventions"),
   getSymbolEvolution: (symbol: string) => invoke<SymbolEvolutionData[]>("get_symbol_evolution", { symbol }),
-  runSwarmTask: (objective: string) => invoke<SwarmTaskResultData>("run_swarm_task", { objective }),
-  getSwarmHistory: () => invoke<SwarmTaskResultData[]>("get_swarm_history"),
+  runSwarmTask: (objective: string, workspace: string) => invoke<SwarmTaskResultData>("run_swarm_task", { objective, workspace }),
+  getSwarmHistory: (workspace: string) => invoke<SwarmTaskResultData[]>("get_swarm_history", { workspace }),
   getDynamicTools: () => invoke<any[]>("get_dynamic_tools"),
   runDynamicTool: (name: string, payload: any = {}) => invoke<any>("run_dynamic_tool", { name, payload }),
   synthesizeDynamicTool: (name: string, description: string, code: string, parameters: any = {}, samplePayload: any = {}) =>
@@ -160,8 +161,6 @@ export const desktop = {
     invoke<DAGWorkflowData>("inject_dag_node", { workflowData, newNode, afterNodeId: afterNodeId || null, beforeNodeId: beforeNodeId || null }),
   // Subagent Swarm Orchestrator
   getSubagentRoles: () => invoke<SubagentRolesData>("get_subagent_roles"),
-  runSubagentDelegation: (goal: string, role: string, context?: string) =>
-    invoke<SubagentDelegationData>("run_subagent_delegation", { goal, role, context: context || null }),
+  runSubagentDelegation: (goal: string, role: string, workspace: string, context?: string) =>
+    invoke<SubagentDelegationData>("run_subagent_delegation", { goal, role, workspace, context: context || null }),
 };
-
-

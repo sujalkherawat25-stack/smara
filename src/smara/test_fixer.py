@@ -57,60 +57,31 @@ class PytestRunner:
     """Executes pytest and parses structured test results."""
 
     def __init__(self, workspace_root: Path | None = None, python_exe: str | None = None):
-        if workspace_root is None and not (Path.cwd() / "tests").exists():
-            cfg_path = Path.home() / "AppData" / "Roaming" / "Smara" / "desktop.json"
-            if cfg_path.exists():
-                try:
-                    import json
-                    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-                    for r in cfg.get("allowed_roots", []):
-                        p = Path(r)
-                        if (p / "tests").exists():
-                            workspace_root = p
-                            break
-                except Exception:
-                    pass
         self.workspace = (workspace_root or Path.cwd()).resolve()
         self.python_exe = python_exe or sys.executable
 
     def run(self, test_filter: str | None = None, timeout: int = 120) -> TestSuiteResult:
         """Run pytest with structured output parsing."""
-        basetemp = self.workspace / "tests_tmp"
-        basetemp.mkdir(parents=True, exist_ok=True)
         cmd = [
-            self.python_exe,
+            "python3",
             "-m",
             "pytest",
             "-v",
             "--tb=short",
-            f"--basetemp={basetemp}",
+            "--basetemp=/tmp/smara-pytest",
         ]
         if test_filter and test_filter.strip():
             if test_filter.strip().lower() != "all":
                 cmd.extend(test_filter.split())
         else:
-            # Default to fast core unit tests for snappy feedback (<1.5s)
-            cmd.extend([
-                "tests/test_tool_synthesis.py",
-                "tests/test_self_healing.py",
-                "tests/test_path_resolver.py",
-            ])
-
-        env = os.environ.copy()
-        env["PYTHONPATH"] = f"src;{self.workspace / 'src'};{env.get('PYTHONPATH', '')}"
+            if not (self.workspace / "tests").is_dir():
+                raise ValueError("Choose a project with a tests folder or supply a specific test path.")
+            cmd.append("tests")
 
         start_t = time.time()
         try:
-            proc = subprocess.run(
-                cmd,
-                cwd=str(self.workspace),
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                encoding="utf-8",
-                errors="replace",
-            )
+            from .sandbox import run_workspace_command
+            proc = run_workspace_command(cmd, self.workspace, timeout=timeout)
             raw_out = proc.stdout + ("\n" + proc.stderr if proc.stderr else "")
             duration = time.time() - start_t
             return self._parse_output(raw_out, duration, proc.returncode == 0)
@@ -163,13 +134,13 @@ class PytestRunner:
 
         # Extract specific failure blocks
         failures: list[TestFailure] = []
-        
+
         # Regex matching individual failure blocks: __________________ test_name __________________
         block_matches = list(re.finditer(r"_{3,}\s*([\w_]+)\s*_{3,}(.*?)(?=(?:_{3,}\s*[\w_]+\s*_{3,})|=+ short test summary|=+$)", output, flags=re.DOTALL))
         for m in block_matches:
             test_name = m.group(1).strip()
             block_content = m.group(2).strip()
-            
+
             # Find file and line: e.g. "tests/test_x.py:42: in test_something" or "tests/test_x.py:6: AssertionError"
             file_match = re.search(r"([\w./\\]+\.py):(\d+):", block_content)
             fpath = file_match.group(1) if file_match else ""
@@ -280,7 +251,7 @@ class AutonomousTestFixer:
                 break
 
             orig_code = target_source_path.read_text(encoding="utf-8")
-            
+
             # Formulate heuristic or model repair
             fixed_code = self._generate_repair(orig_code, failure, target_source_path)
             if fixed_code == orig_code:
@@ -349,7 +320,7 @@ class AutonomousTestFixer:
     def _generate_repair(self, code: str, failure: TestFailure, target_file: Path) -> str:
         """Heuristic & Pattern-based repair engine for common Python errors."""
         err = failure.assertion_error
-        
+
         # 1. Fix missing return / NoneType mismatch
         if "assert None ==" in err or "AssertionError: None" in err:
             # Try to locate function and ensure value return

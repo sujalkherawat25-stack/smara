@@ -301,7 +301,7 @@ class LocalAutonomousEngine:
                 from .code_graph import CodePropertyGraph
                 operation = payload.get("operation", "inspect_symbol")
                 symbol = payload.get("symbol", "")
-                
+
                 # Check candidate paths
                 graph = CodePropertyGraph(self.workspace)
                 graph.index()
@@ -314,7 +314,7 @@ class LocalAutonomousEngine:
                             if len(g.symbols) > 0:
                                 graph = g
                                 break
-                
+
                 if operation == "inspect_symbol":
                     res = graph.inspect_symbol(symbol)
                 elif operation == "blast_radius":
@@ -323,10 +323,10 @@ class LocalAutonomousEngine:
                     res = graph.find_references(symbol)
                 else:
                     res = graph.inspect_symbol(symbol)
-                
+
                 if operation == "inspect_symbol" and isinstance(res, dict):
                     res["blast_radius"] = graph.blast_radius(symbol)
-                
+
                 result_data = {"action": "local_graph", "operation": operation, "symbol": symbol, "result": res}
                 summary = f"Indexed {len(graph.symbols)} symbols; inspected {symbol}" if res else f"Symbol '{symbol}' not found"
                 self.tui.print_tool_result(capability, res is not None, summary)
@@ -334,10 +334,10 @@ class LocalAutonomousEngine:
             elif capability == "local_integration":
                 from .desktop_executor import resolve_local_credential
                 from .desktop_integrations import execute_local_integration
-                
+
                 def _cred_resolver(keys: list[str]) -> dict[str, str]:
                     return {k: resolve_local_credential(k) for k in keys}
-                
+
                 res_str = execute_local_integration(payload, _cred_resolver)
                 result_data = json.loads(res_str)
                 count = len(result_data.get("results", []))
@@ -640,7 +640,7 @@ def _interactive_repl(engine: LocalAutonomousEngine, canonical_runner=None) -> N
     """Claude Code inspired interactive terminal REPL."""
     tui = engine.tui
     approval_mode = "auto"
-    
+
     try:
         from .prompt_editor import SmaraPromptSession
         prompt_session = SmaraPromptSession(engine.workspace)
@@ -651,6 +651,7 @@ def _interactive_repl(engine: LocalAutonomousEngine, canonical_runner=None) -> N
         if canonical_runner is None:
             engine.run_turn(prompt)
             return
+        engine.approval_mode = "ask" if approval_mode == "interactive" else "auto"
         agent_result, payload = canonical_runner(prompt)
         print(str(payload.get("answer") or agent_result.get("answer") or ""))
 
@@ -940,6 +941,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hosted", action="store_true", help="Use legacy hosted cloud client")
 
     subparsers = parser.add_subparsers(dest="command", help="Quick subcommands")
+    subparsers.add_parser("app-server", help="Run the versioned local session protocol over JSONL stdin/stdout")
+    protocol_parser = subparsers.add_parser("session", help="Read/replay/interrupt a thread or answer an approval through JSON stdin")
+    protocol_parser.add_argument("method", choices=["initialize", "thread/create", "thread/list", "thread/read", "thread/events", "thread/resume", "turn/interrupt", "approval/list", "approval/respond"])
 
     # Hosted CLI compatibility subcommands
     ask = subparsers.add_parser("ask", help="short direct conversation")
@@ -953,6 +957,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--title", default="Smara task")
     run.add_argument("--workspace", default="default")
     run.add_argument("--no-approval", action="store_true")
+    run.add_argument("--approval-mode", choices=["auto", "ask"], default="auto", help="Ask before tool execution that can change files or run commands")
     run.add_argument("--prompt-file", help="Read a headless session prompt from a file")
     run.add_argument("--json", action="store_true", help="Emit durable session result JSON")
     run.add_argument("--budget-profile", default="auto", help="Budget profile; auto uses research budgets for research, the coding budget for coding, and the short budget otherwise")
@@ -1155,6 +1160,11 @@ def build_parser() -> argparse.ArgumentParser:
     skill_reuse.add_argument("name"); skill_reuse.add_argument("query"); skill_reuse.add_argument("--version")
 
     subparsers.add_parser("backends", help="probe Docker and WSL execution backends")
+    sandbox_parser = subparsers.add_parser("sandbox", help="Prepare or inspect the local coding toolchain")
+    sandbox_sub = sandbox_parser.add_subparsers(dest="sandbox_action", required=True)
+    sandbox_sub.add_parser("status", help="Inspect Docker and cached coding images")
+    sandbox_build = sandbox_sub.add_parser("build", help="Build Python, pytest, Git, Bash and Node tools with project dependencies")
+    sandbox_build.add_argument("--image", default="smara-coding:local")
     gateway_cmd = subparsers.add_parser("gateway", help="inspect or process the local message gateway")
     gateway_sub = gateway_cmd.add_subparsers(dest="gateway_action")
     gateway_sub.add_parser("status")
@@ -1186,7 +1196,7 @@ def main(argv: list[str] | None = None) -> int:
         "graph", "search", "report", "test", "refactor", "git", "find",
         "index", "browse", "e2e", "memory", "swarm", "mcp", "test-fix", "models", "chat", "login",
         "logout", "run", "research", "tasks", "tools", "plugins", "approvals",
-        "devices", "desktop", "tool", "dynamic-tool", "ask", "goal", "benchmark", "resume", "cancel", "inspect", "doctor", "ocr", "skills", "backends", "gateway", "schedule", "research-watch"
+        "devices", "desktop", "tool", "dynamic-tool", "ask", "goal", "benchmark", "resume", "cancel", "inspect", "doctor", "ocr", "skills", "backends", "sandbox", "gateway", "schedule", "research-watch", "app-server", "session"
     }
 
     # Extract top-level flags before checking for direct prompt
@@ -1240,6 +1250,20 @@ def main(argv: list[str] | None = None) -> int:
     tui = TerminalRenderer(plain=parsed_args.plain)
     ws_arg = getattr(parsed_args, "workspace", None)
     workspace = Path(ws_arg).resolve() if (ws_arg and ws_arg != "default") else Path.cwd()
+    if parsed_args.command == "app-server":
+        from .app_server import serve
+        import contextlib
+        output = sys.stdout
+        with contextlib.redirect_stdout(sys.stderr):
+            serve(workspace, sys.stdin, output, model_profile=parsed_args.model)
+        return 0
+    if parsed_args.command == "session":
+        from .runtime_session import session_store_for_workspace
+        from .session_protocol import SessionProtocol
+        params = json.load(sys.stdin)
+        result = SessionProtocol(session_store_for_workspace(workspace)).dispatch(parsed_args.method, params)
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
     engine = LocalAutonomousEngine(workspace_root=workspace, tui=tui)
 
     if parsed_args.model:
@@ -1274,6 +1298,16 @@ def main(argv: list[str] | None = None) -> int:
             tool_profile=requested_profile,
             research_mode=requested_mode,
         )
+        from .session_protocol import SessionProtocol
+        def approve_action(action):
+            if not sys.stdin.isatty():
+                return "deny"
+            print(f"Approve this action? {json.dumps(action['action'], ensure_ascii=False)}", file=sys.stderr)
+            print("Allow [y/N]: ", end="", file=sys.stderr, flush=True)
+            return "allow" if input().strip().lower() in {"y", "yes"} else "deny"
+        protocol_turn = SessionProtocol(runtime_store).begin(session.session_id, prompt,
+            approval_mode=getattr(engine, "approval_mode", getattr(parsed_args, "approval_mode", "auto")), approval_handler=approve_action)
+        protocol_turn.bind_execution(session.session_id, active_workspace)
         if runtime_store.should_cancel(session.session_id):
             session.cancel()
         else:
@@ -1301,16 +1335,18 @@ def main(argv: list[str] | None = None) -> int:
         if not api_key and ephemeral_session:
             answer=f"No API key configured for active model profile '{profile.get('label', profile.get('id', 'default'))}'. Configure a local provider in Settings or run 'smara models'."
             canonical=session.finish_incremental("needs_input",answer,("model provider credential is missing",))
-            runtime_store.checkpoint(session.session_id,status="needs_input",result=canonical,unresolved=canonical.get("unresolved_items") or [],event="turn.needs_input",event_payload={"reason":"missing_provider_credential"})
+            runtime_store.checkpoint(session.session_id,status="needs_input",result=canonical,unresolved=canonical.get("unresolved_items") or [],event="turn.needs_input",event_payload={"reason":"missing_provider_credential"},expected_turn_id=protocol_turn.turn_id)
+            protocol_turn.finish("needs_input", answer)
             from .app_adapter import application_envelope
             payload={**canonical,**application_envelope(session,canonical,runtime_store=runtime_store)}
             return canonical,payload
-        agent=SmaraAutonomousAgent(api_key=api_key,base_url=model_config["base_url"],model=model_config["model"],auth_header=model_config.get("auth_header","authorization"),workspace_root=active_workspace,profile=tool_profile,session_engine=session,research_mode=research_mode,accept_plain_answer=ephemeral_session)
+        agent=SmaraAutonomousAgent(api_key=api_key,base_url=model_config["base_url"],model=model_config["model"],auth_header=model_config.get("auth_header","authorization"),workspace_root=active_workspace,profile=tool_profile,session_engine=session,research_mode=research_mode,accept_plain_answer=ephemeral_session,protocol_turn=protocol_turn,on_progress=protocol_turn.progress)
         try:
             agent_result=agent.run(prompt,max_iterations=None)
         except Exception as exc:
             status="cancelled" if runtime_store.should_cancel(session.session_id) or session.get("cancelled",False) else "failed"
-            runtime_store.checkpoint(session.session_id,status=status,unresolved=[str(exc)[:500]],event=f"turn.{status}",event_payload={"error":str(exc)[:500]})
+            runtime_store.checkpoint(session.session_id,status=status,unresolved=[str(exc)[:500]],event=f"turn.{status}",event_payload={"error":str(exc)[:500]},expected_turn_id=protocol_turn.turn_id)
+            protocol_turn.finish(status)
             raise
         payload=agent_result.get("session") or session.inspect().get("state",{}).get("result") or session.inspect()
         from .app_adapter import application_envelope
@@ -1321,8 +1357,11 @@ def main(argv: list[str] | None = None) -> int:
             runtime_status = raw_status
         else:
             runtime_status = "failed"
-        runtime_store.checkpoint(session.session_id,status=runtime_status,result=payload,unresolved=payload.get("unresolved_items") or [],event=f"turn.{runtime_status}")
+        runtime_store.checkpoint(session.session_id,status=runtime_status,result=payload,unresolved=payload.get("unresolved_items") or [],event=f"turn.{runtime_status}",expected_turn_id=protocol_turn.turn_id)
+        protocol_turn.finish(runtime_status, str(payload.get("answer") or ""))
         payload={**payload,**application_envelope(session,payload,runtime_store=runtime_store)}
+        payload["turn_id"] = protocol_turn.turn_id
+        payload["protocol"] = protocol_turn.protocol.snapshot(session.session_id)
         return agent_result,payload
 
     if direct_prompt:
@@ -1444,6 +1483,7 @@ def main(argv: list[str] | None = None) -> int:
             session.cancel(); payload = session.inspect()
         elif cmd == "resume":
             record = session.inspect(); prompt = str(record["state"].get("request") or "")
+            session.prepare_resume()
             _,payload=run_canonical(prompt,session=session)
         else:
             payload = session.inspect()
@@ -1564,7 +1604,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Title: {tui.paint(msg, 'BOLD')}")
                 if ai_data.get("description"):
                     print(f"Details:\n{ai_data['description']}")
-            
+
             ok, res_msg = mgr.commit(msg)
             if ok:
                 print(tui.paint(f"\n✓ Committed: {msg}\n", "GREEN"))
@@ -1635,7 +1675,7 @@ def main(argv: list[str] | None = None) -> int:
         url = parsed_args.url
         tui.print_tool_start("local_browser", f"Scraping '{url}' with native headless Chromium...")
         scrape_res = engine_sidecar.scrape_url(url)
-        
+
         if scrape_res["success"]:
             tui.print_tool_result("local_browser", True, f"Loaded '{scrape_res['title']}' in {scrape_res['duration_ms']}ms")
             print(tui.paint(f"\n🌐 Page: {scrape_res['title']}", "BOLD"))
@@ -1661,7 +1701,7 @@ def main(argv: list[str] | None = None) -> int:
         from .browser_sidecar import BrowserSidecarEngine
         engine_sidecar = BrowserSidecarEngine(engine.workspace)
         suite_path = parsed_args.suite
-        
+
         if suite_path and Path(suite_path).exists():
             suite_data = json.loads(Path(suite_path).read_text(encoding="utf-8"))
             suite_name = suite_data.get("name", "Custom E2E Suite")
@@ -1709,7 +1749,7 @@ def main(argv: list[str] | None = None) -> int:
         if action == "status":
             st = bridge.get_status()
             print(tui.paint("\n🧠 Smara Dual-Plane Memory Bridge Status:\n", "BOLD"))
-            
+
             p1 = st.plane_1_local
             print(f"  {tui.paint('● Plane 1 (Local):', 'CYAN')} {p1.name}")
             print(f"    Status: {tui.paint(p1.status.upper(), 'GREEN' if p1.status == 'active' else 'YELLOW')} | Symbols: {p1.items_count}")
@@ -1820,7 +1860,8 @@ def main(argv: list[str] | None = None) -> int:
         from .swarm import SwarmOrchestrator
         objective = " ".join(parsed_args.objective)
         print(tui.paint(f"\n🐝 Starting Smara Multi-Agent Swarm: '{objective}'\n", "BOLD"))
-        orchestrator = SwarmOrchestrator(engine.workspace)
+        orchestrator = SwarmOrchestrator(engine.workspace, model_settings={**engine.active_profile,
+            "api_key": _resolve_profile_key(engine.active_profile, engine.credentials)})
 
         def on_event(name, role, detail):
             role_colors = {
@@ -1834,7 +1875,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {icon} [{tui.paint(role.value.upper(), c)}] {detail}")
 
         result = orchestrator.run_swarm(objective, on_event=on_event)
-        
+
         status_color = "GREEN" if result.status == "SUCCESS" else "YELLOW"
         print(tui.paint(f"\n✓ Swarm Session {result.session_id} Complete [{result.status}] ({result.duration_ms}ms):\n", status_color))
         print(f"  • Scoped Symbols:  {', '.join(result.architect_plan.target_symbols) if result.architect_plan else 'None'}")
@@ -2083,6 +2124,12 @@ def main(argv: list[str] | None = None) -> int:
         from .sandbox import backend_status
         print(json.dumps(backend_status(), indent=2)); return 0
 
+    if cmd == "sandbox":
+        from .sandbox import backend_status
+        from .sandbox_image import build_coding_image
+        payload = build_coding_image(engine.workspace, parsed_args.image) if parsed_args.sandbox_action == "build" else backend_status()
+        print(json.dumps(payload, indent=2)); return 0
+
     if cmd == "gateway":
         from .local_gateway import GatewayLedger, LocalGateway
         ledger = GatewayLedger(engine.workspace / ".smara" / "gateway.sqlite3")
@@ -2171,17 +2218,17 @@ def main(argv: list[str] | None = None) -> int:
         from .deep_research import DeepResearchEngine
         topic = " ".join(parsed_args.topic)
         print(tui.paint(f"\n🌐 Starting Autonomous Market Intelligence Deep Dive: '{topic}'\n", "BOLD"))
-        
+
         d_engine = DeepResearchEngine(engine.workspace)
         tui.print_thought("Formulating multi-vector research hypotheses and competitive parameters...")
         tui.print_tool_start("deep_research", f"Deep analysis for: {topic}")
         res = d_engine.run_full_pipeline(topic)
         tui.print_tool_result("deep_research", True, f"Synthesized {res['sources_count']} sources")
-        
+
         print(tui.paint(f"\n✓ Market Intelligence Report Compiled Successfully!\n", "GREEN"))
         print(f"  • Deliverable: {tui.paint(res['report_path'], 'BOLD')}")
         print(f"  • Key Tiers:   {len(res['analysis']['competitive_matrix'])} competitive tiers analyzed\n")
-        
+
         print(tui.paint("📋 Executive Summary:", "BOLD"))
         print(f"  {res['analysis']['executive_summary']}\n")
         return 0
@@ -2262,16 +2309,16 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == "test":
         from .test_fixer import AutonomousTestFixer, PytestRunner
         test_filter = " ".join(parsed_args.filter) if parsed_args.filter else None
-        
+
         tui.print_tool_start("local_terminal", f"Running pytest {test_filter or ''}")
         runner = PytestRunner(engine.workspace)
         result = runner.run(test_filter)
         tui.print_tool_result("local_terminal", result.success, f"{result.passed} passed, {result.failed} failed, {result.errors} errors in {result.duration_seconds:.2f}s")
-        
+
         if result.success:
             print(tui.paint(f"\n✓ All {result.passed} tests passed successfully!\n", "GREEN"))
             return 0
-        
+
         print(tui.paint(f"\n✗ {result.failed} tests failed:\n", "RED"))
         for f in result.failures:
             print(f"  • {f.test_id} ({f.file_path}:{f.line_number or '?'})")

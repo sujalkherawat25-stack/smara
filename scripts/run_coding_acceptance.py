@@ -132,7 +132,7 @@ def run_suite(root, model, selected=None):
             (workspace/'requirements.txt').write_text('pandas==2.2.3\nhttpx==0.28.1\n',encoding='utf-8')
         baseline = probe(workspace, hidden)
         os.chdir(workspace)
-        prompt = request + f"\nWorkspace: {workspace}. Use the installed Python interpreter {sys.executable} to run python -m unittest discover -v as a standalone command. Preserve test_existing.py. You may edit source and add regression tests. Do not install packages, use the network, or touch files outside this workspace."
+        prompt = request + f"\nWorkspace: {workspace}. Commands run in a Linux workspace container. Use python3 -m unittest discover -v as a standalone command. Preserve test_existing.py. You may edit source and add regression tests. Do not install packages, use the network, or touch files outside this workspace."
         payload, exit_code, elapsed, log = invoke_cli(workspace, prompt, model)
         (root/(name+'-cli.log')).write_text(log,encoding='utf-8')
         initial_status = payload.get('status')

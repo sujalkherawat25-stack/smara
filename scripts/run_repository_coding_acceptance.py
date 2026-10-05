@@ -67,7 +67,7 @@ def main():
                    for p in (workspace/'tests').rglob('*.py')}
         before=(workspace/target).read_text(encoding='utf-8')
         baseline=run_probe(workspace,checks)
-        prompt=request+f'\nWorkspace: {workspace}. Target: {target}. Work only in this snapshot. Preserve existing tests; add new tests. Run focused tests with {sys.executable}. No package installs, network, commits, or pushes. The evaluator will review the diff.'
+        prompt=request+f'\nWorkspace: {workspace}. Target: {target}. Work only in this snapshot. Preserve existing tests; add new tests. Commands execute in a Linux workspace container; use python3 -m pytest with --basetemp=/tmp/smara-tests. No package installs, network, commits, or pushes. The evaluator will review the diff.'
         previous=Path.cwd();os.chdir(workspace)
         try: payload,exit_code,elapsed,log=invoke_cli(workspace,prompt,'sarvam_glm')
         finally: os.chdir(previous)

@@ -99,6 +99,8 @@ struct ChatArgs {
     message: String,
     conversation_id: String,
     #[serde(default)]
+    request_id: String,
+    #[serde(default)]
     timezone: String,
     #[serde(default)]
     research_mode: String,
@@ -1921,6 +1923,15 @@ async fn try_local_agent_turn(app: &AppHandle, args: &ChatArgs, profile: &LocalM
     Ok(None)
 }
 
+fn scoped_chat_event(mut event: Value, conversation_id: &str, request_id: &str) -> Value {
+    if !event.is_object() { return event; }
+    event["session_id"] = Value::String(conversation_id.to_owned());
+    if !request_id.is_empty() {
+        event["request_id"] = Value::String(request_id.to_owned());
+    }
+    event
+}
+
 async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile: &LocalModelProfile, secret: &str) -> Result<(), String> {
     let connection = current_connection();
     let workspace = if args.workspace.trim().is_empty() || args.workspace.trim() == "default" {
@@ -1944,8 +1955,14 @@ async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile
             "auth_header": profile.auth_header,
         },
     });
-    app.emit("smara-chat-event", json!({"type": "phase", "phase": "local_agent"})).map_err(|error| error.to_string())?;
-    app.emit("smara-chat-event", json!({"type": "thought", "text": "Planning a bounded multi-step local run on this Desktop..."})).map_err(|error| error.to_string())?;
+    let start_label = match args.research_mode.trim() {
+        "deep" => "Starting deep research",
+        "quick" => "Starting quick research",
+        _ => "Starting local task",
+    };
+    app.emit("smara-chat-event", scoped_chat_event(json!({"type": "status", "label": start_label,
+        "text": "Preparing the durable session. Progress will appear as each step starts."}),
+        &args.conversation_id, &args.request_id)).map_err(|error| error.to_string())?;
     let request_json = serde_json::to_string(&request).map_err(|error| error.to_string())?;
     let research_mode = args.research_mode.trim().to_ascii_lowercase();
     let worker_timeout = match research_mode.as_str() {
@@ -1960,6 +1977,7 @@ async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile
     };
     let app_handle = app.clone();
     let conv_id = args.conversation_id.clone();
+    let request_id = args.request_id.clone();
     let user_message = args.message.clone();
 
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
@@ -2023,6 +2041,7 @@ async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile
                     continue;
                 }
                 if let Ok(event) = serde_json::from_str::<Value>(trimmed) {
+                    let event = scoped_chat_event(event, &conv_id, &request_id);
                     if let Some(evt_type) = event.get("type").and_then(Value::as_str) {
                         if evt_type == "done" {
                             done_event = Some(event);
@@ -2057,7 +2076,7 @@ async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile
             } else {
                 "Local agent exited with error.".to_owned()
             };
-            let _ = app_handle.emit("smara-chat-event", json!({"type": "error", "message": err_msg}));
+            let _ = app_handle.emit("smara-chat-event", scoped_chat_event(json!({"type": "error", "message": err_msg}), &conv_id, &request_id));
             return Err(err_msg);
         }
 
@@ -2073,8 +2092,8 @@ async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile
         let answer = strip_thinking_tags(&answer);
 
         if !answer_streamed && !answer.is_empty() {
-            let _ = app_handle.emit("smara-chat-event", json!({"type": "phase", "phase": "answer"}));
-            let _ = app_handle.emit("smara-chat-event", json!({"type": "token", "text": answer}));
+            let _ = app_handle.emit("smara-chat-event", scoped_chat_event(json!({"type": "phase", "phase": "answer"}), &conv_id, &request_id));
+            let _ = app_handle.emit("smara-chat-event", scoped_chat_event(json!({"type": "token", "text": answer}), &conv_id, &request_id));
         }
 
         if !answer.is_empty() {
@@ -2090,6 +2109,7 @@ async fn stream_shared_local_agent_chat(app: AppHandle, args: &ChatArgs, profile
 
         let _ = app_handle.emit("smara-chat-event", json!({
             "type": "done",
+            "request_id": request_id,
             "tools_used": steps_len,
             "iterations": final_val.get("iterations").cloned().unwrap_or_else(|| json!(steps_len)),
             "status": status_str,
@@ -2754,16 +2774,24 @@ async fn get_symbol_evolution(symbol: String) -> Result<Value, String> {
 }
 
 #[tauri::command]
-async fn run_swarm_task(objective: String) -> Result<Value, String> {
+async fn run_swarm_task(objective: String, workspace: String) -> Result<Value, String> {
+    let connection = current_connection();
+    let root = selected_workspace_dir(&workspace, &connection.allowed_roots)?
+        .ok_or_else(|| "Choose an approved project before running a swarm.".to_owned())?;
+    let root_literal = python_string_literal(&root.display().to_string());
     let objective_literal = python_string_literal(objective.trim());
-    let py_code = format!("import json\nfrom smara.swarm import SwarmOrchestrator\norch = SwarmOrchestrator(None)\nres = orch.run_swarm({objective_literal})\nprint(json.dumps(res.to_dict()))\n");
+    let py_code = format!("import json\nfrom pathlib import Path\nfrom smara.swarm import SwarmOrchestrator\norch = SwarmOrchestrator(Path({root_literal}))\nres = orch.run_swarm({objective_literal})\nprint(json.dumps(res.to_dict()))\n");
     run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
-async fn get_swarm_history() -> Result<Value, String> {
-    let py_code = "import json\nfrom smara.swarm import SwarmOrchestrator\norch = SwarmOrchestrator(None)\nprint(json.dumps(orch.get_session_history()))\n";
-    run_python_bridge_code(py_code).await
+async fn get_swarm_history(workspace: String) -> Result<Value, String> {
+    let connection = current_connection();
+    let root = selected_workspace_dir(&workspace, &connection.allowed_roots)?
+        .ok_or_else(|| "Choose an approved project to view its swarm history.".to_owned())?;
+    let root_literal = python_string_literal(&root.display().to_string());
+    let py_code = format!("import json\nfrom pathlib import Path\nfrom smara.swarm import SwarmOrchestrator\norch = SwarmOrchestrator(Path({root_literal}))\nprint(json.dumps(orch.get_session_history()))\n");
+    run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
@@ -2839,6 +2867,23 @@ async fn run_research(topic: String, research_mode: String) -> Result<Value, Str
         "import json\nfrom smara.app_adapter import run_canonical_task\nres = run_canonical_task({topic_json}, tool_profile='research_web', research_mode='{mode}', budget_profile='{budget}')\nprint(json.dumps(res))\n"
     );
     run_python_bridge_code(&py_code).await
+}
+
+#[tauri::command]
+async fn session_protocol(method: String, params: Value, workspace: Option<String>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut args = vec!["--state".to_owned(), state_path().display().to_string(), "--session-protocol".to_owned()];
+        if let Some(workspace) = workspace {
+            let connection = current_connection();
+            let root = selected_workspace_dir(&workspace, &connection.allowed_roots)?
+                .ok_or_else(|| "Select a workspace to inspect its CLI sessions.".to_owned())?;
+            args.extend(["--session-workspace".to_owned(), root.display().to_string()]);
+        }
+        let input = serde_json::to_string(&json!({"method": method, "params": params})).map_err(|e| e.to_string())?;
+        let timeout = if method == "turn/resume" { 1800 } else { 300 };
+        let output = run_executor_with_input_timeout(args, &input, timeout)?;
+        serde_json::from_str(&output).map_err(|_| "Session protocol returned invalid JSON.".to_owned())
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -2948,46 +2993,12 @@ async fn run_terminal_command(command: String, cwd: Option<String>) -> Result<Va
     if !allowed {
         return Err("Terminal working folder must be inside an allowed Desktop root.".to_owned());
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut cmd = std::process::Command::new("powershell");
-        cmd.args(["-NoProfile", "-Command", &command]);
-        cmd.current_dir(&canonical_cwd);
-        command_hidden(&mut cmd);
-        let start = std::time::Instant::now();
-        let mut child = cmd.spawn().map_err(|err| format!("Failed to execute command: {err}"))?;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-        let mut timed_out = false;
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) if std::time::Instant::now() >= deadline => {
-                    timed_out = true;
-                    let _ = child.kill();
-                    break;
-                }
-                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
-                Err(error) => return Err(format!("Failed to inspect terminal command: {error}")),
-            }
-        }
-        let output = child.wait_with_output().map_err(|error| format!("Failed to finish command: {error}"))?;
-        if timed_out {
-            return Err("Terminal command exceeded the 120s deadline and was stopped.".to_owned());
-        }
-        let duration = start.elapsed().as_millis();
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        let exit_code = output.status.code().unwrap_or(if output.status.success() { 0 } else { 1 });
-        Ok(json!({
-            "exit_code": exit_code,
-            "stdout": stdout,
-            "stderr": stderr,
-            "duration_ms": duration,
-            "command": command,
-            "working_directory": canonical_cwd.display().to_string(),
-        }))
-    })
-    .await
-    .map_err(|e| format!("Join error: {e}"))?
+    let command_literal = python_string_literal(&command);
+    let cwd_literal = python_string_literal(&canonical_cwd.display().to_string());
+    let py_code = format!(
+        "import json,time\nfrom pathlib import Path\nfrom smara.sandbox import run_workspace_command\nstart=time.monotonic()\nresult=run_workspace_command(['sh','-lc',{command_literal}],Path({cwd_literal}),timeout=120)\nprint(json.dumps({{'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr,'duration_ms':int((time.monotonic()-start)*1000),'command':{command_literal},'working_directory':{cwd_literal},'isolation':'docker'}}))\n"
+    );
+    run_python_bridge_code(&py_code).await
 }
 
 #[tauri::command]
@@ -3428,7 +3439,11 @@ async fn get_subagent_roles() -> Result<Value, String> {
 }
 
 #[tauri::command]
-async fn run_subagent_delegation(goal: String, role: String, context: Option<String>) -> Result<Value, String> {
+async fn run_subagent_delegation(goal: String, role: String, context: Option<String>, workspace: String) -> Result<Value, String> {
+    let connection = current_connection();
+    let root = selected_workspace_dir(&workspace, &connection.allowed_roots)?
+        .ok_or_else(|| "Choose an approved project before delegating.".to_owned())?;
+    let root_literal = python_string_literal(&root.display().to_string());
     let goal_literal = python_string_literal(&goal);
     let role_literal = python_string_literal(&role.trim().to_lowercase());
     let ctx_str = match context {
@@ -3436,7 +3451,7 @@ async fn run_subagent_delegation(goal: String, role: String, context: Option<Str
         None => "None".to_string(),
     };
     let py_code = format!(
-        "import json, sys\nsys.path.insert(0, 'src')\nfrom smara.subagent_orchestrator import SubagentOrchestrator, SubagentRole\norch = SubagentOrchestrator()\ntry:\n    r = SubagentRole({role_literal})\nexcept Exception:\n    r = SubagentRole.GENERALIST\nres = orch.delegate(goal={goal_literal}, role=r, context={ctx_str})\nprint(json.dumps(res.to_dict()))\n"
+        "import json, uuid\nfrom pathlib import Path\nfrom smara.subagent_orchestrator import SubagentOrchestrator, SubagentRole\nfrom smara.swarm import _worker_config\nfrom smara.harness import SessionEngine, BUDGET_PROFILES\nroot = Path({root_literal})\ncfg = _worker_config()\nsession = SessionEngine(root, 'delegation_' + uuid.uuid4().hex, budget=BUDGET_PROFILES['coding'])\nsession.begin_incremental({goal_literal})\ntry:\n orch = SubagentOrchestrator(api_key=cfg['api_key'], base_url=cfg['base_url'], default_model=cfg['model'], auth_header=cfg.get('auth_header', 'authorization'), workspace_root=root, root_session=session)\n res = orch.delegate(goal={goal_literal}, role=SubagentRole({role_literal}), context={ctx_str}, timeout=240)\n print(json.dumps(res.to_dict()))\nfinally:\n session.close()\n"
     );
     run_python_bridge_code(&py_code).await
 }
@@ -3451,13 +3466,26 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_local_chat_history, load_task_details, decide_local_task, stream_chat, list_runtime_sessions, get_runtime_session, cancel_runtime_session, resume_runtime_session, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile, open_file_in_default_app, reveal_file_in_explorer, read_file_preview, inspect_ast_graph, run_test_suite, auto_fix_tests, rollback_refactor_snapshot, get_git_status, get_git_branches, create_git_branch, switch_git_branch, generate_ai_commit_message, commit_git_changes, get_git_log, detect_git_conflicts, resolve_git_conflict, get_file_git_diff, semantic_search, rebuild_semantic_index, scrape_web_page, capture_browser_screenshot, run_browser_e2e, diagnose_browser_ui_component, get_dual_plane_status, sync_dual_plane_memory, query_dual_plane_memory, list_adrs, create_adr, get_coding_conventions, get_symbol_evolution, run_swarm_task, get_swarm_history, get_dynamic_tools, run_dynamic_tool, synthesize_dynamic_tool, run_goal_task, get_goal_sessions, run_deep_research, run_research, list_research_watches, add_research_watch, run_research_watch, set_research_watch_enabled, remove_research_watch, research_watch_history, generate_pr_draft, publish_pr_branch, run_terminal_command, list_learned_skills, save_learned_skill, delete_learned_skill, run_gaia_benchmark, run_swe_benchmark, get_benchmark_scorecards, get_research_evaluation_scorecard, open_benchmark_report, list_task_memory, add_task_memory_entry, replace_task_memory_entry, remove_task_memory_entry, search_task_memory, get_memory_snapshot, list_skills_v2, view_skill_v2, create_skill_v2, skill_lifecycle, validate_skill_v2, promote_skill_v2, revoke_skill_v2, rollback_skill_v2, list_integration_health, begin_integration_oauth, disconnect_integration, get_dag_workflow, step_dag_workflow, run_dag_workflow, retry_dag_node, inject_dag_node, get_subagent_roles, run_subagent_delegation])
+        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_local_chat_history, load_task_details, decide_local_task, stream_chat, session_protocol, list_runtime_sessions, get_runtime_session, cancel_runtime_session, resume_runtime_session, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile, open_file_in_default_app, reveal_file_in_explorer, read_file_preview, inspect_ast_graph, run_test_suite, auto_fix_tests, rollback_refactor_snapshot, get_git_status, get_git_branches, create_git_branch, switch_git_branch, generate_ai_commit_message, commit_git_changes, get_git_log, detect_git_conflicts, resolve_git_conflict, get_file_git_diff, semantic_search, rebuild_semantic_index, scrape_web_page, capture_browser_screenshot, run_browser_e2e, diagnose_browser_ui_component, get_dual_plane_status, sync_dual_plane_memory, query_dual_plane_memory, list_adrs, create_adr, get_coding_conventions, get_symbol_evolution, run_swarm_task, get_swarm_history, get_dynamic_tools, run_dynamic_tool, synthesize_dynamic_tool, run_goal_task, get_goal_sessions, run_deep_research, run_research, list_research_watches, add_research_watch, run_research_watch, set_research_watch_enabled, remove_research_watch, research_watch_history, generate_pr_draft, publish_pr_branch, run_terminal_command, list_learned_skills, save_learned_skill, delete_learned_skill, run_gaia_benchmark, run_swe_benchmark, get_benchmark_scorecards, get_research_evaluation_scorecard, open_benchmark_report, list_task_memory, add_task_memory_entry, replace_task_memory_entry, remove_task_memory_entry, search_task_memory, get_memory_snapshot, list_skills_v2, view_skill_v2, create_skill_v2, skill_lifecycle, validate_skill_v2, promote_skill_v2, revoke_skill_v2, rollback_skill_v2, list_integration_health, begin_integration_oauth, disconnect_integration, get_dag_workflow, step_dag_workflow, run_dag_workflow, retry_dag_node, inject_dag_node, get_subagent_roles, run_subagent_delegation])
         .run(tauri::generate_context!())
         .expect("error while running Smara Desktop");
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn local_chat_events_are_bound_to_the_original_request() {
+        let event = super::scoped_chat_event(serde_json::json!({"type": "done", "session_id": "internal"}), "chat", "old-turn");
+        assert_eq!(event["session_id"], "chat");
+        assert_eq!(event["request_id"], "old-turn");
+        assert_eq!(event["type"], "done");
+    }
+
+    #[test]
+    fn unrelated_json_output_cannot_panic_the_chat_bridge() {
+        assert_eq!(super::scoped_chat_event(serde_json::json!([1, 2]), "chat", "turn"), serde_json::json!([1, 2]));
+    }
+
     #[test]
     fn memory_listing_requires_an_explicit_command_not_pasted_prose() {
         assert!(super::is_memory_list_command("Show my memories?"));

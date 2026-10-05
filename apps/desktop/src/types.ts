@@ -91,6 +91,7 @@ export interface TaskDetail {
 }
 
 export interface ChatEvent {
+  request_id?: string;
   type?: string;
   text?: string;
   phase?: string;
@@ -112,6 +113,7 @@ export interface ChatEvent {
   event_cursor?: number;
   sequence?: number;
   research_review?: ResearchReview | null;
+  event?: { thread_id: string; turn_id: string; sequence: number; kind: string; payload: Record<string, unknown> };
 }
 
 export interface RuntimeSessionEvent {
@@ -131,6 +133,27 @@ export interface RuntimeSessionSnapshot {
   earliest_cursor: number;
   has_more: boolean;
   reconnectable: boolean;
+  protocol?: SessionProtocolSnapshot;
+}
+
+export interface SessionApproval {
+  approval_id: string;
+  turn_id: string;
+  item_id: string;
+  action_sha256: string;
+  action: { name: string; arguments: Record<string, unknown> };
+}
+
+export interface SessionProtocolSnapshot {
+  version: number;
+  thread_id: string;
+  cursor: number;
+  has_more: boolean;
+  turns: { turn_id: string; status: string; created_at: number }[];
+  can_resume?: boolean;
+  items: { item_id: string; kind: string; status: string; payload: Record<string, unknown> }[];
+  pending_approvals: SessionApproval[];
+  events: { sequence: number; kind: string; turn_id: string; payload: Record<string, unknown> }[];
 }
 
 export interface RuntimeSessionRecord {
@@ -546,6 +569,3 @@ export interface SubagentDelegationData {
   tools_used: string[];
   error?: string | null;
 }
-
-
-

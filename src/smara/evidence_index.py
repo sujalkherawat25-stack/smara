@@ -14,7 +14,7 @@ from datetime import datetime,timezone
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urljoin
-from .research import canonical_source_url
+from .research import canonical_source_url, restricted_content_reason
 
 EvidenceKind=Literal["search_snippet","fetched_passage","pdf_page","pdf_table","image_ocr"]
 ClaimState=Literal["supported","refuted","insufficient"]
@@ -113,6 +113,8 @@ class ClaimJudgment:
 @dataclass(frozen=True)
 class EvidenceRecord:
     id:str; kind:EvidenceKind; canonical_url:str; redirect_chain:tuple[str,...]; retrieved_at:str; content_sha256:str; extraction_version:str; text:str; start:int|None=None; end:int|None=None; page:int|None=None; bbox:tuple[float,float,float,float]|None=None; row:int|None=None; column:int|None=None; confidence:float=1.0; text_sha256:str=""; source_artifact_id:str|None=None; extraction_sha256:str=""; extraction_artifact_id:str|None=None
+    published_at: str | None = None
+    source_title: str = ""
 
 class EvidenceIndex:
     def __init__(self,artifact_store=None): self.records={}; self.content_publications={};self.artifact_store=artifact_store;self.failures=[]
@@ -130,6 +132,8 @@ class EvidenceIndex:
     def judge(self,evidence_id:str,claim_text:str,*,require_fetched=True) -> ClaimJudgment:
         record=self.records[evidence_id]; passage_hash=record.text_sha256
         if require_fetched and record.kind=="search_snippet":return ClaimJudgment("insufficient","snippet_is_discovery_only",evidence_id,passage_hash)
+        if record.kind=="fetched_passage" and record.canonical_url.startswith(("http://", "https://")) and restricted_content_reason(record.text):
+            return ClaimJudgment("insufficient","restricted_source_content",evidence_id,passage_hash)
         source=_normalise(record.text); claim=_normalise(claim_text)
         if not source:return ClaimJudgment("insufficient","empty_evidence",evidence_id,passage_hash)
         if record.kind=="image_ocr" and record.confidence<0.8:return ClaimJudgment("insufficient","uncertain_ocr",evidence_id,passage_hash)
@@ -207,7 +211,19 @@ class EvidenceIndex:
                 # Polarity belongs to the sentence that anchors the match;
                 # adjacent context may legitimately contain unrelated words
                 # such as "not" and must not invert this claim.
-                anchor_tokens=_tokens(source_sentences[sentence_index])
+                # A verbatim multi-sentence claim can itself contain mixed
+                # polarity. Comparing that whole quote only to its first
+                # sentence incorrectly refutes an identical fetched passage.
+                # Require the entire bounded window, not a substring that
+                # could discard a qualifier or negation.
+                if claim.rstrip(".") == passage.rstrip("."):
+                    return ClaimJudgment("supported", "verbatim_bounded_passage", evidence_id, passage_hash)
+                # Anchor polarity to the sentence containing the claim's
+                # terms, not an unrelated leading sentence of the window.
+                # Otherwise a positive heading can hide a negated assertion
+                # in the next sentence and produce false support.
+                anchor=max(_sentences(passage), key=lambda item: len(set(claim_terms) & set(_tokens(item))))
+                anchor_tokens=_tokens(anchor)
                 sentence_negated=any(token in _NEGATIONS for token in anchor_tokens)
                 if claim_negated!=sentence_negated:
                     refuted_reason="negation_conflict"

@@ -3,8 +3,8 @@
   "version": 1,
   "owner": "Smara research",
   "fixture": "tests/test_w1_research_agent_integration.py",
-  "fixture_sha256": "232a48b751901cd8006b7af0073bd935a7828b0a9413489c76a1fb489044cb44",
-  "fixture_protocol": "Independent completeness-review response added; case definitions and validators unchanged",
+  "fixture_sha256": "559439e45a67ec4ad8046bc5528cb1f76d97650c7b8659a9810c520ef374af26",
+  "fixture_protocol": "Independent completeness-review fixture explicitly reports evidence_supported; case definitions and validators unchanged",
   "cases": [
     {"id":"W1-01","fixture":"direct fact accepted","validator":"exact answer and artifact-backed support","test":"tests/test_w1_research_agent_integration.py::test_agent_loop_accepts_only_supported_structured_claims[direct-fact]","definition_sha256":"04c885727da459a742ad92d3c5a3d8ac3695d8361dd91cb252386b08b7e2e65c"},
     {"id":"W1-02","fixture":"wrong number rejected","validator":"refuted and no completion","test":"tests/test_w1_research_agent_integration.py::test_agent_loop_accepts_only_supported_structured_claims[wrong-number]","definition_sha256":"0812bc7bbe81cfbe44da2dea27fc540565f03ea79add2f060104340ac64a0b1a"},

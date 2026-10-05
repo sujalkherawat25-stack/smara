@@ -394,29 +394,10 @@ def wikipedia_page(title_or_url: str, date_or_timestamp: str = "", action: str =
 
 
 def python_execute(code: str, timeout: int = 30) -> str:
-    """Execute Python code in an isolated subprocess and return output."""
-    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as f:
-        f.write(code)
-        temp_path = f.name
-
+    """Execute Python in the workspace-only, network-disabled container."""
     try:
-        proc_env = os.environ.copy()
-        py_dir = str(Path(sys.executable).parent)
-        py_scripts = str(Path(sys.executable).parent / ("Scripts" if sys.platform == "win32" else "bin"))
-        current_path = proc_env.get("PATH", "")
-        proc_env["PATH"] = f"{py_scripts}{os.pathsep}{py_dir}{os.pathsep}{current_path}"
-        proc_env["PYTHONUNBUFFERED"] = "1"
-        proc_env["PYTHONIOENCODING"] = "utf-8"
-
-        result = subprocess.run(
-            [sys.executable, temp_path],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            encoding="utf-8",
-            errors="replace",
-            env=proc_env
-        )
+        from .sandbox import run_workspace_command
+        result = run_workspace_command(["python3", "-c", code], Path.cwd(), timeout=timeout)
         out = result.stdout.strip()
         err = result.stderr.strip()
         if result.returncode != 0:
@@ -432,11 +413,6 @@ def python_execute(code: str, timeout: int = 30) -> str:
         return f"Execution timed out after {timeout} seconds."
     except Exception as e:
         return f"Execution error: {e}"
-    finally:
-        try:
-            os.remove(temp_path)
-        except OSError:
-            pass
 
 
 def _resolve_file_path(file_path: Path | str) -> Path:
@@ -656,7 +632,7 @@ def zip_extract_and_read(zip_path: Path | str, target_file: Optional[str] = None
                 zf.extractall(tmp_dir)
 
             extracted_files = [f for f in Path(tmp_dir).rglob("*") if f.is_file()]
-            
+
             if target_file and target_file.strip():
                 tf_clean = target_file.strip().lower()
                 matching = [f for f in extracted_files if tf_clean in f.name.lower() or tf_clean in str(f.relative_to(tmp_dir)).lower()]
@@ -970,7 +946,7 @@ def delegate_task_tool(goal: str, context: Optional[str] = None, role: str = "ge
     return json.dumps(res.to_dict(), indent=2)
 
 
-def dag_flow_tool(action: str, workflow_data: Optional[str] = None) -> str:
+def dag_flow_tool(action: str, workflow_data: Optional[str] = None, *, executor=None) -> str:
     """Execute or inspect an interactive DAG workflow."""
     from smara.dag_flow import DAGWorkflow, DAGNode
     act = action.lower().strip()
@@ -982,6 +958,15 @@ def dag_flow_tool(action: str, workflow_data: Optional[str] = None) -> str:
             def node_runner(node: DAGNode):
                 cap = (node.capability or "").lower().strip()
                 p = node.payload or {}
+                if executor is not None:
+                    name = {"python": "python_execute", "search": "web_search", "calc": "calculate", "extract": "web_extract", "read": "file_read"}.get(cap, cap)
+                    if name in {"dag_flow", "delegate_task", "programmatic_tool_call"}:
+                        raise ValueError("Nested delegation or workflow execution is not allowed")
+                    result = executor(name, p)
+                    exit_match = re.search(r"\[Exit Code:\s*(-?\d+)\]", str(result))
+                    if (exit_match and int(exit_match.group(1)) != 0) or str(result).startswith(("Denied:", "Error:", "Execution error:", "Python execution error:")):
+                        raise RuntimeError(str(result))
+                    return result
                 if cap in ["python", "python_execute"]:
                     return python_execute(p.get("code", ""))
                 elif cap in ["web_search", "search"]:
@@ -994,7 +979,7 @@ def dag_flow_tool(action: str, workflow_data: Optional[str] = None) -> str:
                     return file_read(p.get("file_path", ""))
                 elif cap in ["pdf_search"]:
                     return pdf_search(p.get("pdf_path", ""), query=p.get("query", ""))
-                return f"Executed capability {node.capability} on payload {p}"
+                raise ValueError(f"Unsupported DAG capability: {node.capability}")
 
             summary = wf.run_until_complete(node_runner)
             return json.dumps(summary, indent=2)
@@ -1052,35 +1037,14 @@ def patch_file_tool(
 
 
 def terminal_execute(command: str, cwd: Optional[str] = None, timeout: int = 45) -> str:
-    """Execute a system shell command (PowerShell on Windows, bash on Unix) with timeout and output capture."""
+    """Execute a Linux shell command in the approved workspace sandbox."""
     cmd_cwd = Path(cwd).resolve() if cwd else Path.cwd()
     if not cmd_cwd.exists():
         return f"Error: Working directory does not exist: {cwd}"
 
     try:
-        proc_env = os.environ.copy()
-        py_dir = str(Path(sys.executable).parent)
-        py_scripts = str(Path(sys.executable).parent / ("Scripts" if sys.platform == "win32" else "bin"))
-        current_path = proc_env.get("PATH", "")
-        proc_env["PATH"] = f"{py_scripts}{os.pathsep}{py_dir}{os.pathsep}{current_path}"
-        proc_env["PYTHONUNBUFFERED"] = "1"
-        proc_env["PYTHONIOENCODING"] = "utf-8"
-
-        if sys.platform == "win32":
-            shell_cmd = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command]
-        else:
-            shell_cmd = ["/bin/bash", "-c", command]
-
-        res = subprocess.run(
-            shell_cmd,
-            cwd=str(cmd_cwd),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            encoding="utf-8",
-            errors="replace",
-            env=proc_env
-        )
+        from .sandbox import run_workspace_command
+        res = run_workspace_command(["sh", "-lc", command], cmd_cwd, timeout=timeout)
         out = res.stdout.strip()
         err = res.stderr.strip()
         status_msg = f"[Exit Code: {res.returncode}]"

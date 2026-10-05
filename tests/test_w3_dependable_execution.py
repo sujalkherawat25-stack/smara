@@ -26,7 +26,16 @@ def test_w3_typed_process_tools_and_repair_validator(tmp_path):
     assert validate_json(bad,required_fields=["answer"],expected={"answer":42}).passed
 
 
+def _require_docker_linux_processes():
+    import pytest
+    from smara.sandbox import docker_engine_status
+    status = docker_engine_status()
+    if not status.get("engine_available") or not status.get("linux_containers"):
+        pytest.skip("A reachable Docker Linux-container engine is required for process integration tests.")
+
+
 def test_w3_failed_process_is_not_success(tmp_path):
+    _require_docker_linux_processes()
     value,_=agent(tmp_path);out=invoke(value,"process_start",{"argv":[sys.executable,"-c","raise SystemExit(7)"],"cwd":"."});pid=out["meta"]["process_id"]
     for _ in range(50):
         state=invoke(value,"process_poll",{"process_id":pid,"cursor":0,"max_chars":100})
@@ -42,6 +51,7 @@ def test_w3_user_edit_conflict_is_preserved(tmp_path):
 
 
 def test_w3_unicode_space_cwd_and_csv_content(tmp_path):
+    _require_docker_linux_processes()
     work=tmp_path/"ü space";work.mkdir();value,_=agent(tmp_path)
     out=invoke(value,"process_start",{"argv":[sys.executable,"-c","from pathlib import Path;Path('x.csv').write_text('name,value\\nalpha,42\\n',encoding='utf-8')"],"cwd":"ü space"});pid=out["meta"]["process_id"]
     for _ in range(50):
@@ -52,6 +62,7 @@ def test_w3_unicode_space_cwd_and_csv_content(tmp_path):
 
 
 def test_w3_interactive_stdin_and_cursor_chunks(tmp_path):
+    _require_docker_linux_processes()
     value,_=agent(tmp_path);code="x=input();print('reply:'+x,flush=True)";start=invoke(value,"process_start",{"argv":[sys.executable,"-u","-c",code],"cwd":"."});pid=start["meta"]["process_id"]
     invoke(value,"process_stdin",{"process_id":pid,"text":"hello\n"})
     for _ in range(50):

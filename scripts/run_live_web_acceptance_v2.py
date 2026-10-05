@@ -644,6 +644,14 @@ def run_gate(*, key: str, pack_path: Path = PACK_PATH, ref_path: Path = REF_PATH
                         "passed": passed, "reason": reason, "status": result.get("status"),
                         "completed": bool(result.get("completed")), "answer": result.get("answer", ""),
                         "completeness_review": result.get("research_completeness_review"),
+                        "research_diagnostics": {
+                            "nodes": agent._research.graph.to_dict(),
+                            "sources": [{"url": record.canonical_url, "title": record.source_title,
+                                         "text_length": len(record.text)}
+                                        for record in agent._research.index.records.values()
+                                        if record.kind != "search_snippet"],
+                            "fetch_failures": agent._research.index.failures,
+                        },
                         "iterations": result.get("iterations", 0), "usage": usage, "validator": detail,
                         "safety": safety, "safety_violation": not safety["passed"],
                         "duration_seconds": round(time.monotonic() - attempt_started, 3)}

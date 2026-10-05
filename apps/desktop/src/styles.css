@@ -5137,7 +5137,17 @@ body {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
+
+.run-progress-meta { color: #94a3b8; font-size: 12px; }
+.long-user-message > summary { cursor: pointer; color: #cbd5e1; white-space: normal; }
+.long-message-content { max-height: 360px; overflow: auto; margin-top: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.run-progress-warning { color: #fbbf24; font-size: 12px; margin: 5px 0 0; line-height: 1.5; }
+.run-activity-toggle { flex-shrink: 0; border: 1px solid #334155; border-radius: 8px; padding: 6px 10px; background: #141922; color: #e2e8f0; cursor: pointer; }
+@media (max-width: 700px) { .active-execution-pill { flex-wrap: wrap; } }
 
 .exec-title {
   font-size: 13px;
@@ -6340,3 +6350,6 @@ body {
 .coding-workflow-bar button:focus-visible { outline: 2px solid #9c7bf2; }
 .active-workspace-card { margin-bottom: 18px; }
 .active-workspace-card input { width: 100%; box-sizing: border-box; }
+.session-approval-panel { margin: 12px 0; padding: 16px; border: 1px solid #a17b37; border-radius: 12px; background: #201d17; }
+.session-approval-panel pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.session-approval-panel button { margin-right: 8px; padding: 8px 12px; }

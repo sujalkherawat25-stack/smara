@@ -26,7 +26,7 @@ def test_account_store_preserves_google_account_and_telegram_link(tmp_path):
 
 
 def test_native_session_is_revocable(tmp_path, monkeypatch):
-    settings = replace(auth.settings, session_secret="unit-test-secret", accounts_database_url="", database_path=str(tmp_path / "accounts.db"))
+    settings = replace(auth.settings, session_secret="unit-test-secret-at-least-32-bytes", accounts_database_url="", database_path=str(tmp_path / "accounts.db"))
     store = AccountStore(database_path=settings.database_path)
     store.ensure_schema()
     monkeypatch.setattr(auth, "settings", settings)
@@ -36,4 +36,3 @@ def test_native_session_is_revocable(tmp_path, monkeypatch):
     assert auth.verify_session_cookie(token) == account["id"]
     store.delete_session(token and __import__("jwt").decode(token, settings.session_secret, algorithms=["HS256"], options={"verify_aud": False})["jti"])
     assert auth.verify_session_cookie(token) is None
-

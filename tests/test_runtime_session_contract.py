@@ -1,8 +1,23 @@
 import json
+import sqlite3
+import pytest
 from pathlib import Path
 
 from smara.desktop_executor import _main as desktop_main
 from smara.runtime_session import RuntimeSession, SQLiteRuntimeSessionStore, session_store_for_state
+
+
+def test_runtime_connection_closes_on_success_and_failure(tmp_path: Path):
+    store = SQLiteRuntimeSessionStore(tmp_path / "sessions.sqlite3")
+    with store._connect() as connection:
+        connection.execute("SELECT 1")
+    with pytest.raises(sqlite3.ProgrammingError):
+        connection.execute("SELECT 1")
+    with pytest.raises(RuntimeError):
+        with store._connect() as failed_connection:
+            raise RuntimeError("abort transaction")
+    with pytest.raises(sqlite3.ProgrammingError):
+        failed_connection.execute("SELECT 1")
 
 
 def test_runtime_session_lifecycle_and_events(tmp_path: Path):

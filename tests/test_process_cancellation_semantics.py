@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import time
 from pathlib import Path
@@ -117,21 +117,21 @@ def test_uncertain_cancellation_blocks_finalization(tmp_path: Path):
     handle = supervisor.start([sys.executable, "-c", "import time; time.sleep(30)"], tmp_path, None, 40)["process_id"]
 
     # Simulate failed kill where process poll remains None
-    with patch.object(ProcessSupervisor, "kill", lambda self, proc: None), \
-         patch.object(supervisor.processes[handle], "poll", return_value=None):
-        cancel_res = supervisor.cancel(handle)
-        assert cancel_res["status"] == "cancellation_uncertain"
-        assert cancel_res["cancellation_status"] == "cancellation_uncertain"
-        assert cancel_res["tree_terminated"] is False
+    try:
+        with patch.object(ProcessSupervisor, "kill", lambda self, proc, container_name=None: None), \
+             patch.object(supervisor.processes[handle], "poll", return_value=None):
+            cancel_res = supervisor.cancel(handle)
+            assert cancel_res["status"] == "cancellation_uncertain"
+            assert cancel_res["cancellation_status"] == "cancellation_uncertain"
+            assert cancel_res["tree_terminated"] is False
 
-    # Finalization must be rejected because process is not confirmed reconciled
-    finish_res = engine.finish_incremental("completed", "all done")
-    assert finish_res["status"] == "needs_input"
-    assert any("cancellation_uncertain" in item for item in finish_res["unresolved_items"])
-
-    # Clean up real process
-    supervisor.cancel(handle)
-    engine.close()
+        # Finalization must be rejected because process is not confirmed reconciled
+        finish_res = engine.finish_incremental("completed", "all done")
+        assert finish_res["status"] == "needs_input"
+        assert any("cancellation_uncertain" in item for item in finish_res["unresolved_items"])
+    finally:
+        supervisor.cancel(handle)
+        engine.close()
 
 
 def test_idempotent_running_cancellation(tmp_path: Path):

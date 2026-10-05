@@ -20,13 +20,19 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Iterator, Mapping
 
 
 SESSION_SCHEMA_VERSION = 1
 SESSION_STATUSES = frozenset(
     {"created", "running", "waiting_approval", "completed", "failed", "cancelled", "needs_input"}
 )
+SESSION_STATUS_ALIASES = {
+    "budget_exhausted": "failed",
+    "tool_error": "failed",
+    "provider_error": "failed",
+    "interrupted": "failed",
+}
 TERMINAL_SESSION_STATUSES = frozenset({"completed", "failed", "cancelled", "needs_input"})
 
 
@@ -77,6 +83,8 @@ class RuntimeSession:
     cancel_reason: str | None = None
 
     def __post_init__(self) -> None:
+        if self.status in SESSION_STATUS_ALIASES:
+            self.status = SESSION_STATUS_ALIASES[self.status]
         if self.status not in SESSION_STATUSES:
             raise ValueError(f"invalid runtime session status: {self.status}")
         self.session_id = str(self.session_id).strip()[:160]
@@ -119,12 +127,17 @@ class SQLiteRuntimeSessionStore:
         self.timeout = max(1.0, float(timeout))
         self._init()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextlib.contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(str(self.path), timeout=self.timeout)
-        connection.row_factory = sqlite3.Row
-        connection.execute(f"PRAGMA busy_timeout={int(self.timeout * 1000)}")
-        connection.execute("PRAGMA foreign_keys=ON")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute(f"PRAGMA busy_timeout={int(self.timeout * 1000)}")
+            connection.execute("PRAGMA foreign_keys=ON")
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _init(self) -> None:
         with self._connect() as connection:
@@ -347,15 +360,22 @@ class SQLiteRuntimeSessionStore:
         research_mode: str | None = None,
         event: str | None = None,
         event_payload: Mapping[str, Any] | None = None,
+        expected_turn_id: str | None = None,
     ) -> RuntimeSession:
-        if status is not None and status not in SESSION_STATUSES:
-            raise ValueError(f"invalid runtime session status: {status}")
+        if status is not None:
+            status = SESSION_STATUS_ALIASES.get(status, status)
+            if status not in SESSION_STATUSES:
+                raise ValueError(f"invalid runtime session status: {status}")
         now = _now()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute("SELECT * FROM runtime_sessions WHERE session_id=?", (session_id,)).fetchone()
             if row is None:
                 raise KeyError(session_id)
+            if expected_turn_id is not None:
+                latest = connection.execute("SELECT turn_id,status FROM protocol_turns WHERE thread_id=? ORDER BY created_at DESC LIMIT 1", (session_id,)).fetchone()
+                if latest is None or latest[0] != expected_turn_id or latest[1] not in {"running", "waiting_approval"}:
+                    return self._row_to_session(row)
             revision = int(row["revision"])
             cancel_requested = bool(row["cancel_requested"]) if "cancel_requested" in row.keys() else False
             next_status = status or row["status"]
@@ -457,7 +477,7 @@ class SQLiteRuntimeSessionStore:
         if requested and first and requested < first - 1:
             raise ValueError(f"event cursor {requested} is no longer replayable; earliest is {first}")
         next_cursor = events[-1].sequence if events else requested
-        return {
+        snapshot = {
             "version": SESSION_SCHEMA_VERSION,
             "session": session.to_dict(),
             "events": [event.to_dict() for event in events],
@@ -467,6 +487,9 @@ class SQLiteRuntimeSessionStore:
             "has_more": bool(events and events[-1].sequence < session.revision),
             "reconnectable": session.status not in {"failed", "cancelled"} or bool(events),
         }
+        from smara.session_protocol import SessionProtocol
+        snapshot["protocol"] = SessionProtocol(self).snapshot(session_id)
+        return snapshot
 
     def first_sequence(self, session_id: str) -> int:
         with self._connect() as connection:

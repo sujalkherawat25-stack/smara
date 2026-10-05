@@ -8,7 +8,15 @@ import pytest
 from smara.agent_tools import terminal_execute, file_write, browser_action_tool
 
 
+def _require_docker_linux():
+    from smara.sandbox import docker_engine_status
+    status = docker_engine_status()
+    if not status.get("engine_available") or not status.get("linux_containers"):
+        pytest.skip("A reachable Docker Linux-container engine is required for terminal integration tests.")
+
+
 def test_terminal_execute_basic():
+    _require_docker_linux()
     cmd = "echo SmaraTerminalReady"
     out = terminal_execute(cmd)
     assert "[Exit Code: 0]" in out
@@ -16,14 +24,12 @@ def test_terminal_execute_basic():
 
 
 def test_terminal_execute_with_cwd():
+    _require_docker_linux()
     with tempfile.TemporaryDirectory() as tmpdir:
         test_file = Path(tmpdir) / "marker.txt"
         test_file.write_text("marker_content", encoding="utf-8")
 
-        if sys.platform == "win32":
-            cmd = "Get-Content marker.txt"
-        else:
-            cmd = "cat marker.txt"
+        cmd = "cat marker.txt"
 
         out = terminal_execute(cmd, cwd=tmpdir)
         assert "[Exit Code: 0]" in out
@@ -82,10 +88,12 @@ def test_browser_action_screenshot(monkeypatch):
 
 
 def test_terminal_python_alignment():
-    """Verify terminal_execute prioritizes the current sys.executable environment."""
+    """Verify commands use the container interpreter, not the host virtualenv."""
+    _require_docker_linux()
     out = terminal_execute("python -c \"import sys; print(sys.executable)\"")
     assert "[Exit Code: 0]" in out
-    assert str(Path(sys.executable).resolve()).lower() in out.lower()
+    assert "/usr/local/bin/python" in out
+    assert str(Path(sys.executable).resolve()).lower() not in out.lower()
 
 
 def test_final_answer_placeholder_rejection():
@@ -120,4 +128,3 @@ def test_pdf_search_empty_query_page_extraction():
             assert "Total pages: 2" in res
         except ImportError:
             pytest.skip("pypdf not installed")
-

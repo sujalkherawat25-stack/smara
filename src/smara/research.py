@@ -138,6 +138,19 @@ class _TextExtractor(HTMLParser):
             if self._in_title: self.title += (" " if self.title else "") + cleaned
 
 
+def restricted_content_reason(text: str) -> str | None:
+    """Detect explicit article access gates, not ordinary account navigation."""
+    normalized = re.sub(r"\s+", " ", str(text or "")).casefold()
+    gate = re.search(r"\b(?:subscriber[- ](?:exclusive|only) content|subscription required to (?:read|view)|"
+                     r"subscribe to (?:continue reading|read (?:the )?full)|sign in to (?:read|view) (?:the )?full)", normalized)
+    if gate and re.search(r"\b(?:log in for full access|sign in to (?:read|view)|subscribe to|subscription (?:provides|is required)|"
+                          r"purchase (?:a )?subscription)\b", normalized[gate.start():gate.end() + 700]):
+        return "restricted_source_content: full article requires subscription/login; find an alternate public first-party policy, documentation or advisory. Do not use the title/teaser as proof of hidden content."
+    if normalized.startswith(("access denied", "verify you are human", "just a moment")) and len(normalized) < 2000:
+        return "restricted_source_content: access/bot challenge returned instead of the requested article; find an alternate public first-party source."
+    return None
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -319,6 +332,10 @@ async def fetch_public_source(client: httpx.AsyncClient, initial_url: str) -> Re
         if len(excerpt) < minimum_chars:
             raise ValueError("Source did not contain enough readable text to cite.")
         title = extracted.title.strip()[:500] or urlparse(str(response.url)).hostname or initial_url
+        if "html" in content_type:
+            access_problem = restricted_content_reason(excerpt)
+            if access_problem:
+                raise ValueError(access_problem)
         return RetrievedSource(title, excerpt, hashlib.sha256(raw).hexdigest(), _now(), extracted.published_at, raw, str(response.url), tuple(redirect_chain), content_type)
     raise ValueError("Source exceeded the redirect limit.")
 

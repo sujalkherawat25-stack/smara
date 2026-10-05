@@ -25,7 +25,9 @@ def test_chat_routes_selected_model_and_persists_real_review_contract(tmp_path, 
     assert calls[0][2]["context_history"][0]["content"] == "Earlier turn"
     assert result["research_review"] == review
     assert result["completed"] is False
-    assert events[0]["type"] == "tool_call"
+    assert events[0]["type"] == "session_event"
+    assert events[0]["event"]["kind"] == "turn.started"
+    assert any(event["type"] == "tool_call" for event in events)
     snapshot = session_store_for_state(state).snapshot("chat-1")
     assert snapshot["session"]["result"]["research_review"] == review
     assert "secret-unit-test" not in str(snapshot)
@@ -71,3 +73,54 @@ def test_canonical_adapter_uses_desktop_model_without_persisting_key(tmp_path, m
         assert "secret-unit-test" not in str(session.inspect())
     finally:
         session.close()
+
+
+def test_research_progress_exposes_provider_wait_answer_and_real_tool_failures(tmp_path, monkeypatch):
+    events = []
+
+    def run(prompt, workspace, **kwargs):
+        progress = kwargs["on_progress"]
+        progress("context_packed", {"input_tokens": 1200})
+        progress("model_request", {"attempt": 1, "timeout_seconds": 90})
+        progress("model_retry", {"attempt": 2})
+        progress("thought", {"thought": "Private provider reasoning must not become a status message"})
+        progress("tool_end", {"tool": "research_fetch", "observation": '{"status":"error"}'})
+        progress("tool_end", {"tool": "research_validate", "observation": '{"status":"ok","passed":false}'})
+        progress("tool_end", {"tool": "research_search", "observation": '{"status":"ok"}'})
+        progress("answer", {"answer": "The real result from this deterministic test."})
+        return {"session_id": "research-1", "status": "needs_input", "answer": "The real result from this deterministic test.",
+                "research_review": None, "research_mode": "deep", "unresolved_work": ["No live provider in unit test"]}
+
+    monkeypatch.setattr(research_chat, "run_canonical_task", run)
+    research_chat.run_research_chat(prompt="Explain database history", state_path=tmp_path / "state.json",
+        workspace=tmp_path, model={"model": "test"}, context=[], conversation_id="progress",
+        research_mode="deep", event_callback=events.append)
+    labels = [event.get("label") for event in events if event["type"] == "status"]
+    assert "Waiting for model response" in labels
+    assert "Retrying model request" in labels
+    assert "Private provider reasoning" not in str(events)
+    results = [event["ok"] for event in events if event["type"] == "tool_result"]
+    assert results == [False, False, True]
+    tokens = [event["text"] for event in events if event["type"] == "token"]
+    assert tokens == ["The real result from this deterministic test."]
+
+
+def test_chat_handles_budget_exhausted_status_gracefully(tmp_path, monkeypatch):
+    state = tmp_path / "state.json"
+    def run_budget_exhausted(prompt, workspace, **kwargs):
+        return {
+            "session_id": "exhausted-1", "status": "budget_exhausted",
+            "answer": "Research stopped at budget limit.",
+            "research_review": None, "research_mode": "quick",
+            "unresolved_work": ["budget exhausted"],
+        }
+    monkeypatch.setattr(research_chat, "run_canonical_task", run_budget_exhausted)
+    result = research_chat.run_research_chat(
+        prompt="Research enterprise memory", state_path=state, workspace=tmp_path,
+        model={"model": "test"}, context=[], conversation_id="budget-exhausted",
+        research_mode="quick",
+    )
+    assert result["status"] == "failed"
+    assert result["answer"] == "Research stopped at budget limit."
+    snapshot = session_store_for_state(state).snapshot("budget-exhausted")
+    assert snapshot["session"]["status"] == "failed"

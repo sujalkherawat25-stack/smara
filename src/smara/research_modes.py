@@ -35,8 +35,8 @@ _DEEP_PHRASES = (
     "literature review", "market landscape", "competitive landscape", "due diligence",
     "multi-perspective", "all major", "state of the art", "white paper",
 )
-_COMPARATIVE = re.compile(r"\b(compare|comparison|versus|vs\.?|trade[- ]?offs?|alternatives?)\b", re.I)
-_ANALYTICAL = re.compile(r"\b(causes?|effects?|risks?|trends?|strategy|forecast|evaluate|investigate|analy[sz]e)\b", re.I)
+_COMPARATIVE = re.compile(r"\b(compare|comparison|versus|vs\.?|trade[- ]?offs?|alternatives?|differ(?:ence|ent)?|either|better)\b", re.I)
+_ANALYTICAL = re.compile(r"\b(causes?|effects?|risks?|trends?|strategy|forecast|evaluate|investigate|analy[sz]e|architectur(?:e|al)|recommend(?:ation)?|best practices?|pros and cons)\b", re.I)
 _REPORT_LENGTH = re.compile(r"\b(?:[2-9]\d{3,}\s*(?:words?|tokens?)|(?:\d{2,}|[2-9])\s*pages?)\b", re.I)
 _BROAD_REPORT = re.compile(r"\b(comprehensive|detailed|full|exhaustive)\b.{0,80}\b(report|analysis|brief|investigation)\b", re.I)
 _QUICK_PREFIX = re.compile(r"^\s*(who|what|when|where|which|is|are|does|did|how many|how much)\b", re.I)

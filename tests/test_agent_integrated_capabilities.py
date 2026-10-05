@@ -46,14 +46,27 @@ def test_integrated_tools(tmp_path: Path, monkeypatch):
 
     # 3. Test DAG Flow Tool
     wf = DAGWorkflow(title="Test Tool DAG")
-    wf.add_node(DAGNode(id="n1", title="Init", capability="init"))
-    wf.add_node(DAGNode(id="n2", title="Process", capability="proc", depends_on=["n1"]))
+    wf.add_node(DAGNode(id="n1", title="Calculate", capability="calculate", payload={"expression": "2+2"}))
+    wf.add_node(DAGNode(id="n2", title="Calculate again", capability="calculate", payload={"expression": "3+3"}, depends_on=["n1"]))
 
     dag_res = json.loads(dag_flow_tool("create_and_run", workflow_data=json.dumps(wf.to_dict())))
     assert dag_res["is_complete"] is True
     assert dag_res["has_failures"] is False
 
     print("All integrated capability tests passed successfully!")
+
+
+def test_dag_nonzero_exit_blocks_dependent_node():
+    workflow = DAGWorkflow(title="Failed verification")
+    workflow.add_node(DAGNode(id="test", title="Test", capability="terminal", payload={"command": "run-tests"}))
+    workflow.add_node(DAGNode(id="next", title="Dependent", capability="calculate", payload={"expression": "2+2"}, depends_on=["test"]))
+    calls = []
+    def execute(name, payload):
+        calls.append(name)
+        return "[Exit Code: 1]\nVerification failed"
+    result = json.loads(dag_flow_tool("run", workflow.to_dict(), executor=execute))
+    assert result["has_failures"]
+    assert calls and set(calls) == {"terminal"}  # bounded retries, never the dependent node
 
 
 if __name__ == "__main__":

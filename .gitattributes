@@ -1,0 +1,13 @@
+# Sealed evaluation digests are byte-level checks, including after Windows checkout.
+tests/evals/**/manifest.json text eol=lf
+tests/evals/**/references.json text eol=lf
+tests/evals/inventory.json text eol=lf
+tests/test_h3_reliability_cases.py text eol=lf
+tests/test_h4_research_graph.py text eol=lf
+tests/test_w1_research_agent_integration.py text eol=lf
+tests/test_h5_managed_browser.py text eol=lf
+tests/test_w2_browser_agent_integration.py text eol=lf
+tests/test_w3_dependable_execution.py text eol=lf
+tests/test_w4_windows_readiness.py text eol=lf
+tests/test_w5_windows_acceptance.py text eol=lf
+tests/test_h5_isolated_desktop_contract.py text eol=lf

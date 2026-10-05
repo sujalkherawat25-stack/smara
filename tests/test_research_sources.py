@@ -27,14 +27,19 @@ def test_official_domain_hints_are_discovery_only_and_topic_based(question, expe
 
 def test_conflicting_organizations_get_separate_authority_groups():
     question = "Compare OpenSSL upstream end of life with Red Hat RHEL 8 support."
-    assert authority_domain_groups(question) == [("openssl.org",), ("access.redhat.com",)]
+    assert authority_domain_groups(question) == [("openssl.org", "openssl-library.org"), ("redhat.com",)]
 
 
 def test_existing_first_party_evidence_only_suppresses_its_matching_group():
     question = "OpenSSL upstream and Red Hat RHEL 8 support"
     assert missing_authority_domain_groups(question, ["https://www.openssl.org/source/old/1.1.1/"]) == [
-        ("access.redhat.com",)
+        ("redhat.com",)
     ]
+
+
+def test_named_vendor_is_discovered_before_its_upstream_product():
+    assert authority_domain_groups("Red Hat official policy on OpenSSL packages") == [
+        ("redhat.com",), ("openssl.org", "openssl-library.org")]
 
 
 @pytest.mark.parametrize("value", ["example.com site:bad.com", "https://example.com", "localhost", ["ok.org", "bad host"]])

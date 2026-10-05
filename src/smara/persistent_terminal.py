@@ -13,6 +13,7 @@ import ctypes
 import json
 import os
 import re
+import signal
 import subprocess
 import tempfile
 import threading
@@ -68,7 +69,7 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _stop_pid(pid: int) -> None:
+def _stop_pid(pid: int, process: subprocess.Popen | None = None) -> None:
     """Terminate a process tree without invoking a shell."""
     if not _pid_alive(pid):
         return
@@ -82,14 +83,23 @@ def _stop_pid(pid: int) -> None:
             )
     else:
         with contextlib.suppress(OSError):
-            os.kill(pid, 15)
+            os.killpg(pid, signal.SIGTERM)
+    if process is not None and process.poll() is None:
+        with contextlib.suppress(OSError):
+            process.terminate()
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline and _pid_alive(pid):
         time.sleep(0.05)
     if _pid_alive(pid):
         if os.name != "nt":
             with contextlib.suppress(OSError):
-                os.kill(pid, 9)
+                os.killpg(pid, signal.SIGKILL)
+        if process is not None:
+            with contextlib.suppress(OSError):
+                process.kill()
+    if process is not None:
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+            process.wait(timeout=2)
 
 
 def _safe_value(value: object) -> str:
@@ -126,6 +136,27 @@ class PersistentTerminalStore:
         self.allowed_roots = tuple(Path(item).expanduser().resolve() for item in allowed_roots)
         self._lock = threading.RLock()
 
+    @contextlib.contextmanager
+    def _locked(self):
+        # Watchdogs, UI polls and fresh bridge processes share this journal.
+        # An instance-local mutex alone allows one writer to lose another's update.
+        from .harness import _SessionLock, SessionBusy
+        with self._lock:
+            guard = _SessionLock(self.log_dir / "sessions.lock")
+            deadline = time.monotonic() + 15
+            while True:
+                try:
+                    guard.__enter__()
+                    break
+                except SessionBusy:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.05)
+            try:
+                yield
+            finally:
+                guard.__exit__(None, None, None)
+
     def _read(self) -> list[dict[str, Any]]:
         try:
             if self.metadata_path.stat().st_size > MAX_METADATA_BYTES:
@@ -140,6 +171,13 @@ class PersistentTerminalStore:
     def _write(self, entries: list[dict[str, Any]]) -> None:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         _atomic_write(self.metadata_path, entries[:MAX_SESSIONS])
+
+    @staticmethod
+    def _stop_sandbox(entry: dict[str, Any]) -> None:
+        from .sandbox import container_name_from_argv, stop_workspace_container
+        argv = entry.get("argv")
+        if isinstance(argv, list):
+            stop_workspace_container(container_name_from_argv(argv))
 
     @staticmethod
     def _find(entries: list[dict[str, Any]], session_id: str) -> dict[str, Any] | None:
@@ -181,7 +219,7 @@ class PersistentTerminalStore:
         cwd = self._validate_cwd(cwd)
         if not isinstance(max_seconds, int) or isinstance(max_seconds, bool) or not 1 <= max_seconds <= MAX_SESSION_SECONDS:
             raise ValueError(f"max_seconds must be between 1 and {MAX_SESSION_SECONDS}")
-        with self._lock:
+        with self._locked():
             entries = self._read()
             # Serialize only within this approved workspace. Independent
             # workspaces must be able to host their own long-running task.
@@ -212,6 +250,7 @@ class PersistentTerminalStore:
                     stderr=subprocess.STDOUT,
                     shell=False,
                     creationflags=creationflags,
+                    start_new_session=os.name != "nt",
                 )
             except (OSError, subprocess.SubprocessError):
                 log_handle.close()
@@ -236,7 +275,60 @@ class PersistentTerminalStore:
                 "exit_code": None,
             }
             self._write([entry] + [item for item in entries if item.get("id") != session_id])
+            threading.Thread(target=self._watch, args=(session_id, process),
+                             name=f"terminal-deadline-{session_id}", daemon=True).start()
             return self._public(entry, output="", done=False)
+
+    def _refresh(self, entry: dict[str, Any]) -> None:
+        if entry.get("status") != "running":
+            return
+        session_id = entry["id"]
+        process = _PROCESS_HANDLES.get(session_id)
+        code = process.poll() if process is not None else entry.get("exit_code")
+        # The owned Popen handle is authoritative. A PID liveness probe can
+        # observe exit just after poll() returned None; declaring 'finished'
+        # in that interval would permanently lose the genuine exit receipt.
+        alive = code is None if process is not None else _pid_alive(self._pid(entry))
+        try:
+            elapsed = time.time() - datetime.fromisoformat(entry["started_at"]).timestamp()
+            log_size = Path(entry["log_path"]).stat().st_size
+        except (OSError, ValueError, TypeError):
+            elapsed, log_size = 0, 0
+        reason = ("output_limit" if log_size > MAX_OUTPUT_BYTES else
+                  "expired" if elapsed >= int(entry.get("max_seconds") or MAX_SESSION_SECONDS) else None)
+        if alive and reason:
+            self._stop_sandbox(entry)
+            _stop_pid(self._pid(entry), process)
+            code = process.poll() if process is not None else None
+            alive = code is None if process is not None else _pid_alive(self._pid(entry))
+            entry["status"] = "cancellation_uncertain" if alive else reason
+        elif not alive:
+            self._stop_sandbox(entry)
+            entry["status"] = ("expired" if reason == "expired" and code in {124, 137, 143} else
+                               "completed" if code == 0 else "failed" if code is not None else "finished")
+        if entry["status"] != "running":
+            entry["exit_code"] = code
+            entry["updated_at"] = _timestamp()
+            _PROCESS_HANDLES.pop(session_id, None)
+
+    def _watch(self, session_id: str, process: subprocess.Popen) -> None:
+        # Enforce time/output limits and record genuine exit status without a poll.
+        # Docker also has its own deadline if this owning process exits.
+        while True:
+            time.sleep(0.1)
+            try:
+                with self._locked():
+                    entries = self._read()
+                    entry = self._find(entries, session_id)
+                    if entry is None or entry.get("status") != "running":
+                        return
+                    self._refresh(entry)
+                    if entry.get("status") != "running":
+                        self._write(entries)
+                        return
+            except (OSError, RuntimeError):
+                if process.poll() is not None:
+                    return
 
     def _read_output(self, entry: dict[str, Any], *, max_chars: int) -> str:
         pending_text = str(entry.pop("pending_output", ""))
@@ -282,46 +374,12 @@ class PersistentTerminalStore:
     def poll(self, session_id: str, *, max_chars: int = MAX_POLL_CHARS) -> dict[str, Any]:
         session_id = self._validate_session_id(session_id)
         max_chars = max(1, min(int(max_chars), MAX_POLL_CHARS))
-        with self._lock:
+        with self._locked():
             entries = self._read()
             entry = self._find(entries, session_id)
             if entry is None:
                 raise KeyError(session_id)
-            started = entry.get("started_at")
-            elapsed = 0.0
-            try:
-                elapsed = max(0.0, time.time() - datetime.fromisoformat(str(started)).timestamp())
-            except (TypeError, ValueError, OverflowError):
-                pass
-            pid = self._pid(entry)
-            alive = _pid_alive(pid)
-            process = _PROCESS_HANDLES.get(session_id)
-            exit_code = process.poll() if process is not None else entry.get("exit_code")
-            if exit_code is not None:
-                entry["exit_code"] = exit_code
-            try:
-                log_size = Path(str(entry.get("log_path") or "")).stat().st_size
-            except OSError:
-                log_size = 0
-            if entry.get("status") == "running" and log_size > MAX_OUTPUT_BYTES:
-                _stop_pid(pid)
-                entry["status"] = "output_limit"
-                entry["updated_at"] = _timestamp()
-                alive = False
-            if entry.get("status") == "running" and elapsed > int(entry.get("max_seconds") or MAX_SESSION_SECONDS):
-                _stop_pid(pid)
-                entry["status"] = "expired"
-                entry["updated_at"] = _timestamp()
-                alive = False
-            elif entry.get("status") == "running" and not alive:
-                # A restarted Desktop cannot recover a Popen return code. In
-                # the same process, preserve the true exit status; otherwise
-                # expose ``finished`` rather than inventing success.
-                entry["status"] = (
-                    "completed" if exit_code == 0 else "failed" if exit_code is not None else "finished"
-                )
-                entry["updated_at"] = _timestamp()
-                _PROCESS_HANDLES.pop(session_id, None)
+            self._refresh(entry)
             output = self._read_output(entry, max_chars=max_chars)
             entry["updated_at"] = _timestamp()
             self._write(entries)
@@ -331,30 +389,30 @@ class PersistentTerminalStore:
 
     def cancel(self, session_id: str, *, reason: str = "cancelled on Desktop") -> dict[str, Any]:
         session_id = self._validate_session_id(session_id)
-        with self._lock:
+        with self._locked():
             entries = self._read()
             entry = self._find(entries, session_id)
             if entry is None:
                 raise KeyError(session_id)
             if entry.get("status") == "running":
-                _stop_pid(self._pid(entry))
-                entry["status"] = "cancelled"
+                self._stop_sandbox(entry)
+                _stop_pid(self._pid(entry), _PROCESS_HANDLES.get(session_id))
+                entry["status"] = "cancellation_uncertain" if _pid_alive(self._pid(entry)) else "cancelled"
                 entry["cancel_reason"] = str(reason)[:240]
                 entry["updated_at"] = _timestamp()
                 _PROCESS_HANDLES.pop(session_id, None)
             output = self._read_output(entry, max_chars=MAX_POLL_CHARS)
             self._write(entries)
-            return self._public(entry, output=output, done=True)
+            return self._public(entry, output=output, done=entry["status"] in TERMINAL_STATUSES)
 
     def list(self) -> list[dict[str, Any]]:
-        with self._lock:
+        with self._locked():
             entries = self._read()
             changed = False
             for entry in entries:
-                if entry.get("status") == "running" and not _pid_alive(self._pid(entry)):
-                    entry["status"] = "lost"
-                    entry["updated_at"] = _timestamp()
-                    changed = True
+                before = entry.get("status")
+                self._refresh(entry)
+                changed = changed or entry.get("status") != before
             if changed:
                 self._write(entries)
             return [self._public(entry, output="", done=entry.get("status") in TERMINAL_STATUSES) for entry in entries]
@@ -362,16 +420,15 @@ class PersistentTerminalStore:
     def has_active(self, cwd: Path | None = None) -> bool:
         """Return whether a live session exists, optionally for one workspace."""
         candidate = cwd.expanduser().resolve() if cwd is not None else None
-        with self._lock:
+        with self._locked():
             active = False
             entries = self._read()
             changed = False
             for entry in entries:
                 if entry.get("status") != "running":
                     continue
-                if not _pid_alive(self._pid(entry)):
-                    entry["status"] = "lost"
-                    entry["updated_at"] = _timestamp()
+                self._refresh(entry)
+                if entry.get("status") != "running":
                     changed = True
                     continue
                 if candidate is None or Path(str(entry.get("cwd") or "")).resolve() == candidate:

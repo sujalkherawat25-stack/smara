@@ -321,7 +321,16 @@ def test_desktop_workspace_filename_search_is_bounded(tmp_path: Path):
     assert result["truncated"] is True
 
 
+def _require_docker_linux_terminal():
+    import pytest
+    from smara.sandbox import docker_engine_status
+    status = docker_engine_status()
+    if not status.get("engine_available") or not status.get("linux_containers"):
+        pytest.skip("A reachable Docker Linux-container engine is required for terminal integration tests.")
+
+
 def test_desktop_terminal_requires_allowlist_and_rejects_shell_operators(tmp_path: Path):
+    _require_docker_linux_terminal()
     state = {"capabilities": ["local_terminal"], "allowed_roots": [str(tmp_path)], "terminal_allowlist": ["python"]}
     result = json.loads(execute_step({"required_capability": "local_terminal", "executor_payload": {"argv": ["python", "-c", "print(2+2)"], "cwd": str(tmp_path)}}, state))
     assert result["exit_code"] == 0
@@ -331,6 +340,7 @@ def test_desktop_terminal_requires_allowlist_and_rejects_shell_operators(tmp_pat
 
 
 def test_desktop_named_recipe_reports_artifact_metadata_and_rejects_unknown_recipe(tmp_path: Path):
+    _require_docker_linux_terminal()
     (tmp_path / "sample.py").write_text("value = 2\n", encoding="utf-8")
     report = tmp_path / "report.txt"
     report.write_text("local report\n", encoding="utf-8")
@@ -351,6 +361,7 @@ def test_desktop_named_recipe_reports_artifact_metadata_and_rejects_unknown_reci
 
 
 def test_desktop_recipe_collects_changed_files_when_git_is_allowlisted(tmp_path: Path):
+    _require_docker_linux_terminal()
     subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True, capture_output=True)
     (tmp_path / "sample.py").write_text("print('recipe')\n", encoding="utf-8")
     state = {"capabilities": ["local_terminal"], "allowed_roots": [str(tmp_path)], "terminal_allowlist": ["python", "git"]}
@@ -363,6 +374,7 @@ def test_desktop_recipe_collects_changed_files_when_git_is_allowlisted(tmp_path:
 
 
 def test_desktop_terminal_observes_cancellation_before_completion(tmp_path: Path):
+    _require_docker_linux_terminal()
     state = {"capabilities": ["local_terminal"], "allowed_roots": [str(tmp_path)], "terminal_allowlist": ["python"]}
     progress: list[str] = []
     with pytest.raises(ExecutionCancelled, match="cancelled"):
@@ -374,6 +386,7 @@ def test_desktop_terminal_observes_cancellation_before_completion(tmp_path: Path
 
 
 def test_persistent_terminal_session_can_poll_after_manager_recreation(tmp_path: Path):
+    _require_docker_linux_terminal()
     import sys
     import time
 
@@ -416,6 +429,7 @@ def test_persistent_terminal_session_can_poll_after_manager_recreation(tmp_path:
 
 
 def test_persistent_terminal_session_cancellation_is_tree_safe_and_visible(tmp_path: Path):
+    _require_docker_linux_terminal()
     import sys
 
     state = {
@@ -433,6 +447,8 @@ def test_persistent_terminal_session_cancellation_is_tree_safe_and_visible(tmp_p
             "max_seconds": 30,
         },
     }, state))
+    import time
+    time.sleep(1.5)
     cancelled = json.loads(execute_step({
         "required_capability": "local_terminal",
         "executor_payload": {"session_action": "cancel", "session_id": started["session_id"], "reason": "test cancellation"},
@@ -469,7 +485,7 @@ def test_persistent_terminal_rejects_credentials_and_lists_sessions(tmp_path: Pa
     assert listed["sessions"] == []
 
 
-def test_local_credential_vault_injects_only_requested_alias_and_redacts_output(monkeypatch, tmp_path: Path):
+def test_local_credential_vault_does_not_inject_secrets_into_sandbox(monkeypatch, tmp_path: Path):
     vault = tmp_path / "credentials.json"
     monkeypatch.setenv("SMARA_DESKTOP_CREDENTIALS", str(vault))
     secret = "local-only-test-secret"
@@ -478,17 +494,16 @@ def test_local_credential_vault_injects_only_requested_alias_and_redacts_output(
     assert local_credential_summaries()[0]["name"] == "TAVILY_API_KEY"
     assert resolve_local_credential("TAVILY_API_KEY") == secret
     state = {"capabilities": ["local_terminal"], "allowed_roots": [str(tmp_path)], "terminal_allowlist": ["python"]}
-    result = json.loads(execute_step({
-        "required_capability": "local_terminal",
-        "executor_payload": {
-            "argv": ["python", "-c", "import os; print(os.environ['TAVILY_API_KEY'])"],
-            "cwd": str(tmp_path),
-            "credential_env": ["TAVILY_API_KEY"],
-        },
-    }, state))
-    assert secret not in result["output"]
-    assert "REDACTED LOCAL CREDENTIAL" in result["output"]
-    assert result["credential_env"] == ["TAVILY_API_KEY"]
+    with pytest.raises(RuntimeError, match="credential aliases are not passed") as denied:
+        execute_step({
+            "required_capability": "local_terminal",
+            "executor_payload": {
+                "argv": ["python", "-c", "import os; print(os.environ['TAVILY_API_KEY'])"],
+                "cwd": str(tmp_path),
+                "credential_env": ["TAVILY_API_KEY"],
+            },
+        }, state)
+    assert secret not in str(denied.value)
     assert delete_local_credential("TAVILY_API_KEY") is True
     assert local_credential_summaries() == []
 

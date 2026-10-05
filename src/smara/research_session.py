@@ -18,6 +18,7 @@ from .research_modes import QUICK_POLICY
 from .research_ranking import hybrid_rank
 from .research_sources import normalize_search_domains
 from .research_tools import FetchUrlTool, WebSearchTool
+from .research import restricted_content_reason
 from .pdf_collection import PdfCollectionError, scan_pdf_collection
 
 
@@ -122,6 +123,8 @@ class CanonicalResearchSession:
             self.engine.set("research_validation", self.validation)
             if event_type == "research_validated":
                 self.engine.set("research_validated_state_artifact_id", artifact_id)
+            elif event_type == "research_planned":
+                self.engine.set("research_validated_state_artifact_id", None)
             self.engine.event(event_type, {**dict(payload), "research_state_artifact_id": artifact_id})
         elif self.state_path:
             self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -130,20 +133,26 @@ class CanonicalResearchSession:
             temporary.replace(self.state_path)
         return artifact_id
 
-    def plan(self, question: str, nodes: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    def plan(self, question: str, nodes: Iterable[Mapping[str, Any]], *, replace_plan: bool = False) -> dict[str, Any]:
         question = str(question).strip()
         if not question:
             raise ResearchStateError("research question is required")
+        if not isinstance(replace_plan, bool):
+            raise ResearchStateError("replace_plan must be a boolean")
         pending = [dict(item) for item in nodes]
         if not pending:
             pending = [{"id": "answer", "question": question, "dependencies": []}]
         planned_ids = {str(item.get("id") or "").strip() for item in pending}
+        if len(planned_ids) != len(pending):
+            raise ResearchStateError("duplicate research node ids")
         max_nodes = int(self._lane_policy()["max_nodes"])
-        if len(set(self.graph.nodes) | planned_ids) > max_nodes:
+        candidate = ResearchGraph(max_nodes=max_nodes) if replace_plan else ResearchGraph.from_dict(self.graph.to_dict())
+        candidate.max_nodes = max_nodes
+        if len(set(candidate.nodes) | planned_ids) > max_nodes:
             raise ResearchStateError(f"research plan exceeds {max_nodes} nodes for the active lane")
         added = []
         while pending:
-            ready = [item for item in pending if set(item.get("dependencies", ())) <= set(self.graph.nodes) | set(added)]
+            ready = [item for item in pending if set(item.get("dependencies", ())) <= set(candidate.nodes)]
             if not ready:
                 raise ResearchStateError("research plan has missing or cyclic dependencies")
             for item in ready:
@@ -151,8 +160,8 @@ class CanonicalResearchSession:
                 node_question = str(item.get("question") or "").strip()
                 if not ident or not node_question:
                     raise ResearchStateError("every research node needs id and question")
-                if ident not in self.graph.nodes:
-                    self.graph.add(
+                if ident not in candidate.nodes:
+                    candidate.add(
                         ResearchNode(
                             ident,
                             node_question,
@@ -162,9 +171,16 @@ class CanonicalResearchSession:
                     )
                 added.append(ident)
                 pending.remove(item)
+        removed_ids = sorted(set(self.graph.nodes) - set(candidate.nodes))
+        self.graph = candidate
+        if replace_plan:
+            self.claims = []
         self.validation = {}
-        self._save("research_planned", {"question": question, "node_ids": added})
-        return {"status": "ok", "ready": [node.id for node in self.graph.ready()], "graph": self.graph.to_dict()}
+        self._save("research_planned", {"question": question, "node_ids": added,
+                                       "replace_plan": replace_plan, "removed_node_ids": removed_ids})
+        return {"status": "ok", "ready": [node.id for node in self.graph.ready()], "graph": self.graph.to_dict(),
+                "replaced": replace_plan, "removed_node_ids": removed_ids,
+                "retained_evidence_count": len(self.index.records), "retained_failure_count": len(self.index.failures)}
 
     def search(self, node_id: str, query: str, max_results: int = 5, *, include_domains: Iterable[str] | None = None) -> dict[str, Any]:
         node = self.graph.nodes.get(node_id)
@@ -209,6 +225,7 @@ class CanonicalResearchSession:
             for record in self.index.records.values()
             if record.kind in {"fetched_passage", "pdf_page", "pdf_table", "image_ocr"}
             and record.canonical_url.startswith(("http://", "https://", "file://"))
+            and not (record.kind == "fetched_passage" and record.canonical_url.startswith(("http://", "https://")) and restricted_content_reason(record.text))
         })
 
     def gather(self, requests: Iterable[Mapping[str, Any]], *, max_sources_per_node: int = 5) -> dict[str, Any]:
@@ -219,8 +236,13 @@ class CanonicalResearchSession:
             items = [{"node_id": node.id, "query": node.question} for node in self.graph.ready()]
         if not items:
             raise ResearchStateError("research gather has no ready nodes")
-        if len(items) > int(policy["max_nodes"]):
+        # Several discovery queries/domain alternatives may target one DAG
+        # node. Count nodes, not queries, against the graph ceiling; keep the
+        # query wave separately bounded so expansion cannot grow unbounded.
+        if len({str(item.get("node_id") or "") for item in items}) > int(policy["max_nodes"]):
             raise ResearchStateError("research gather exceeds lane node limit")
+        if len(items) > min(24, int(policy["max_nodes"]) * 5):
+            raise ResearchStateError("research gather exceeds bounded query wave limit")
         # Providers often emit a whole DAG wave in one gather call, including
         # nodes whose prerequisites are not resolved yet.  Rejecting the
         # entire request strands the ready roots and causes a model to repeat
@@ -280,30 +302,68 @@ class CanonicalResearchSession:
                             hits = await self.searcher.search(item["query"], max_results=8, include_domains=domains)
                         else:
                             hits = await self.searcher.search(item["query"], max_results=8)
-                    return item, hybrid_rank(item["query"], hits, per_node)
+                    return item, hybrid_rank(item["query"], hits, min(8, per_node + 2))
                 except Exception as exc:
                     return item, exc
 
             searched = await asyncio.gather(*(search_one(item) for item in items))
             selected: list[tuple[dict[str, Any], Any]] = []
-            selected_urls = set(existing_urls)
+            from .research import canonical_source_url
+            selected_urls = set(existing_urls) | {failure["canonical_url"] for failure in self.index.failures}
+            candidates: dict[str, list[tuple[dict[str, Any], Any]]] = {}
             for item, result in searched:
                 if isinstance(result, Exception):
                     continue
-                for hit in result:
-                    if hit.url not in selected_urls and len(selected) < remaining_capacity:
-                        selected.append((item, hit))
-                        selected_urls.add(hit.url)
+                candidates.setdefault(item["node_id"], []).extend((item, hit) for hit in result)
+
+            def choose_next(pool):
+                while pool:
+                    item, hit = pool.pop(0)
+                    canonical = canonical_source_url(hit.url)
+                    if canonical not in selected_urls:
+                        selected_urls.add(canonical)
+                        return item, hit
+                return None
+
+            # Alternate domains for an early node must not consume the whole
+            # source ceiling before another requested organization is tried.
+            for _ in range(per_node):
+                for pool in candidates.values():
+                    if len(selected) >= remaining_capacity:
+                        break
+                    candidate = choose_next(pool)
+                    if candidate:
+                        selected.append(candidate)
 
             async def fetch_one(item, hit):
                 try:
                     async with semaphore:
                         source = await self.fetcher.fetch(hit.url)
+                        access_problem = restricted_content_reason(source.excerpt)
+                        if access_problem:
+                            raise ValueError(access_problem)
                     return item, hit, source
                 except Exception as exc:
                     return item, hit, exc
 
             fetched = await asyncio.gather(*(fetch_one(item, hit) for item, hit in selected))
+            # One bounded replacement wave uses already-discovered alternatives.
+            # Failed pages remain failures, never promoted snippets or retried unchanged.
+            failed_by_node = {}
+            for item, hit, result in fetched:
+                if isinstance(result, Exception):
+                    failed_by_node[item["node_id"]] = failed_by_node.get(item["node_id"], 0) + 1
+            replacements = []
+            replacement_capacity = remaining_capacity - sum(not isinstance(result, Exception) for _, _, result in fetched)
+            for node_id, pool in candidates.items():
+                for _ in range(min(2, failed_by_node.get(node_id, 0))):
+                    if len(replacements) >= replacement_capacity:
+                        break
+                    candidate = choose_next(pool)
+                    if candidate:
+                        replacements.append(candidate)
+            if replacements:
+                fetched.extend(await asyncio.gather(*(fetch_one(item, hit) for item, hit in replacements)))
             return searched, fetched
 
         searched, fetched = _run(execute_wave())
@@ -331,6 +391,7 @@ class CanonicalResearchSession:
                 kind="fetched_passage", url=result.final_url or hit.url,
                 redirect_chain=result.redirect_chain, content=raw, extracted_content=extracted,
                 text=result.excerpt, start=0, end=len(result.excerpt), extraction_version="html-text-v1",
+                published_at=result.published_at, source_title=result.title or hit.title,
             )
             node_results[item["node_id"]]["evidence"].append({
                 "evidence_id": record.id, "url": record.canonical_url, "title": result.title or hit.title,
@@ -366,6 +427,13 @@ class CanonicalResearchSession:
         requested_url = str(url or "").rstrip("/")
         for existing in self.index.records.values():
             if existing.kind in {"fetched_passage", "pdf_page", "pdf_table", "image_ocr"} and existing.canonical_url.rstrip("/") == requested_url:
+                access_problem = restricted_content_reason(existing.text) if existing.kind == "fetched_passage" and existing.canonical_url.startswith(("http://", "https://")) else None
+                if access_problem:
+                    self.validation = {}
+                    if not any(item["canonical_url"] == existing.canonical_url and "restricted_source_content" in item["error"] for item in self.index.failures):
+                        self.index.record_failure(url, access_problem)
+                    self._save("research_fetch_failed", {"node_id": node_id, "url": url, "error": access_problem})
+                    return {"status": "error", "node_id": node_id, "url": url, "error": access_problem, "deduplicated": True}
                 evidence = asdict(existing)
                 evidence["text_length"] = len(existing.text)
                 evidence["text"] = existing.text[:2400]
@@ -373,12 +441,15 @@ class CanonicalResearchSession:
                     "status": "ok",
                     "node_id": node_id,
                     "evidence": evidence,
-                    "title": getattr(existing, "title", ""),
-                    "published_at": getattr(existing, "published_at", None),
+                    "title": existing.source_title,
+                    "published_at": existing.published_at,
                     "deduplicated": True,
                 }
         try:
             source = _run(self.fetcher.fetch(url))
+            access_problem = restricted_content_reason(source.excerpt)
+            if access_problem:
+                raise ValueError(access_problem)
         except Exception as exc:
             self.index.record_failure(url, str(exc))
             self._save("research_fetch_failed", {"node_id": node_id, "url": url, "error": str(exc)})
@@ -395,6 +466,7 @@ class CanonicalResearchSession:
             start=0,
             end=len(source.excerpt),
             extraction_version="html-text-v1",
+            published_at=source.published_at, source_title=source.title,
         )
         self.validation = {}
         self._save(
@@ -500,11 +572,11 @@ class CanonicalResearchSession:
                 try:
                     import pytesseract
                     from PIL import Image
-                except ImportError:
+                    data = pytesseract.image_to_data(Image.open(candidate), output_type=pytesseract.Output.DICT)
+                except (ImportError, Exception):
                     self.index.record_failure(source_url, "OCR extractor unavailable")
                     self._save("research_extraction_unavailable", {"node_id": node_id, "capability": "ocr", "path": candidate.name})
                     return {"status": "unavailable", "capability": "ocr", "reason": "pytesseract is not installed", "node_id": node_id}
-                data = pytesseract.image_to_data(Image.open(candidate), output_type=pytesseract.Output.DICT)
                 words = [str(item).strip() for item in data.get("text", ()) if str(item).strip()]
                 confidences = [float(item) for item in data.get("conf", ()) if str(item).replace(".", "", 1).lstrip("-").isdigit() and float(item) >= 0]
                 text = " ".join(words)
@@ -1033,6 +1105,9 @@ class CanonicalResearchSession:
         for check in self.validation.get("score", {}).get("claims", ()):
             for citation in check.get("citations", ()):
                 if citation.get("supported"):
+                    cited_record = self.index.records.get(str(citation.get("evidence_id")))
+                    if cited_record and cited_record.kind == "fetched_passage" and cited_record.canonical_url.startswith(("http://", "https://")) and restricted_content_reason(cited_record.text):
+                        return False, "restricted_source_content"
                     valid, reason = self.index.validate_artifact(str(citation.get("evidence_id")))
                     if not valid:
                         return False, reason

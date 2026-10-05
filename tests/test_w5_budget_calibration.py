@@ -12,7 +12,7 @@ def test_budget_exhaustion_does_not_falsely_complete(tmp_path, monkeypatch):
     """When budget is exhausted, even if state is valid, completed is False."""
     session = SessionEngine(tmp_path, "exhaustion_test", budget=Budget(120, 2, 2, 500_000, 2), constrained=False)
     agent = SmaraAutonomousAgent(api_key="fixture", profile="coding", workspace_root=tmp_path, session_engine=session, max_iterations=2)
-    
+
     def mock_call(messages, tools=None, max_tokens=16_384):
         assert max_tokens == 16_384
         return {
@@ -25,7 +25,7 @@ def test_budget_exhaustion_does_not_falsely_complete(tmp_path, monkeypatch):
                 }
             }]
         }
-    
+
     monkeypatch.setattr(agent, "_call_model_api", mock_call)
     result = agent.run("Task that cannot finish in 2 iterations", max_iterations=2)
     assert not result["completed"]
@@ -43,6 +43,11 @@ def test_todo_planning_turn_guard(tmp_path):
 
 def test_cancellation_canary_deterministic_flow(tmp_path):
     """Process cancellation safely terminates process tree within budget."""
+    import pytest
+    from smara.sandbox import docker_engine_status
+    status = docker_engine_status()
+    if not status.get("engine_available") or not status.get("linux_containers"):
+        pytest.skip("A reachable Docker Linux-container engine is required for cancellation integration tests.")
     canary = tmp_path / "orphan_test.txt"
     script = tmp_path / "script.py"
     script.write_text(f"import time, pathlib\ntime.sleep(15)\npathlib.Path(r'{canary}').write_text('bad')\n", encoding="utf-8")
@@ -57,4 +62,3 @@ def test_cancellation_canary_deterministic_flow(tmp_path):
     cancel_resp = json.loads(agent.execute_tool("process_cancel", {"process_id": proc_id}))
     assert cancel_resp["status"] == "cancelled"
     assert not canary.exists()
-

@@ -8,6 +8,9 @@ import { ProgressiveSkillsTab } from "./components/ProgressiveSkillsTab";
 import { DAGFlowTab } from "./components/DAGFlowTab";
 import { SubagentSwarmTab } from "./components/SubagentSwarmTab";
 import { ResearchReviewPanel, ResearchCompletenessReview } from "./components/ResearchReviewPanel";
+import { SessionApprovalPanel } from "./components/SessionApprovalPanel";
+import { RunProgressPanel } from "./components/RunProgressPanel";
+import { matchesChatRequest } from "./chatRunState";
 
 export type NavTab = "chat" | "studio" | "workspace" | "settings";
 export type StudioSubTab = "runs" | "dag" | "goals" | "swarm" | "memory" | "skills" | "graph" | "tests" | "git" | "benchmarks" | "browser";
@@ -338,12 +341,13 @@ export default function App() {
   const [previewFile, setPreviewFile] = useState<FilePreview | null>(null);
   const [currentExecution, setCurrentExecution] = useState<string | null>(null);
   const [currentThought, setCurrentThought] = useState<string | null>(null);
+  const [lastProgressAt, setLastProgressAt] = useState(Date.now());
   const [selectedProfileId, setSelectedProfileId] = useState("auto");
   const [researchMode, setResearchMode] = useState<ResearchMode>("auto");
   const [codingMode, setCodingMode] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [activityOpen, setActivityOpen] = useState(false);
-  const [appVersion, setAppVersion] = useState("0.1.5");
+  const [appVersion, setAppVersion] = useState("0.1.6");
 
   useEffect(() => {
     if (!isNativeDesktop) return;
@@ -378,6 +382,7 @@ export default function App() {
   }, []);
 
   const assistantId = useRef<string | null>(null);
+  const chatListenerReady = useRef<Promise<boolean> | null>(null);
   const pendingAssistantText = useRef("");
   const assistantFrame = useRef<number | null>(null);
   const conversationId = useRef(initialConversationId());
@@ -437,14 +442,14 @@ export default function App() {
           role: turn.role,
           text: turn.content,
         }));
-      if (restored.length) setMessages(restored);
+      if (restored.length) setMessages((items) => items.length ? items : restored);
     }).catch(() => {
       // A missing/legacy journal should leave a clean composer usable.
     }).then(() => desktop.runtimeSession(conversationId.current, 0)).then((snapshot) => {
     // Reconnect to the shared runtime ledger as well as the transcript. This
     // recovers a final answer if the UI restarted between the provider result
     // and local transcript flush, and exposes an honest resumable state.
-      if (!active) return;
+      if (!active || assistantId.current) return;
       const session = snapshot?.session || {};
       const result = session.result as Record<string, unknown> | undefined;
       const answer = typeof result?.answer === "string" ? result.answer.trim() : "";
@@ -493,7 +498,18 @@ export default function App() {
     const target = assistantId.current;
     if (!target) return;
     const type = event.type || "status";
-    if (type === "token" && event.text) {
+    if (!matchesChatRequest(event, conversationId.current, target)) return;
+    setLastProgressAt(Date.now());
+    if (type === "session_event") {
+      if (event.event?.thread_id !== conversationId.current) return;
+      if (event.event.kind === "approval.requested") setCurrentExecution("Waiting for your approval");
+      return;
+    }
+    if (type === "status") {
+      setCurrentExecution(event.label || event.text || "Working");
+      setCurrentThought(event.label ? event.text || null : null);
+      setActivity((items) => [{ id: uid("status"), tone: "blue" as const, label: event.label || "Progress", detail: event.text }, ...items].slice(0, 10));
+    } else if (type === "token" && event.text) {
       pendingAssistantText.current += event.text;
       queueAssistantText(pendingAssistantText.current);
     } else if (type === "thought" && event.text) {
@@ -506,11 +522,13 @@ export default function App() {
         setActivity((items) => [{ id: uid("phase"), tone: "blue" as const, label: `Agent ${event.phase}` }, ...items].slice(0, 10));
       }
     } else if (type === "tool_call") {
-      setCurrentExecution(event.preview || event.name || "Executing tool...");
+      setCurrentExecution(`Running ${event.name || "tool"}`);
+      setCurrentThought(event.preview || null);
       setActivity((items) => [{ id: uid("tool"), tone: "amber" as const, label: `Executing ${event.name || "tool"}`, detail: event.preview }, ...items].slice(0, 10));
     } else if (type === "tool_result") {
       const tone: ActivityItem["tone"] = event.ok ? "green" : "red";
-      setCurrentExecution(null);
+      setCurrentExecution("Preparing the next step");
+      setCurrentThought(null);
       setActivity((items) => [{ id: uid("result"), tone, label: `${event.name || "Tool"} ${event.ok ? "completed" : "failed"}`, detail: event.preview }, ...items].slice(0, 10));
     } else if (type === "done") {
       flushAssistantText();
@@ -556,9 +574,13 @@ export default function App() {
     if (!isNativeDesktop) return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    void desktop.onChatEvent((event) => chatEventHandler.current(event)).then((dispose) => {
+    chatListenerReady.current = desktop.onChatEvent((event) => chatEventHandler.current(event)).then((dispose) => {
       if (disposed) dispose();
       else unlisten = dispose;
+      return !disposed;
+    }).catch(() => {
+      setNotice("Could not connect to live task events. Restart Desktop before sending a task.");
+      return false;
     });
     return () => {
       disposed = true;
@@ -599,7 +621,7 @@ export default function App() {
 
   async function send(message = draft) {
     const text = message.trim();
-    if (!text || streaming) return;
+    if (!text || streaming || assistantId.current) return;
 
     // Check if a model profile is configured
     const activeProfile = connection.model_profile;
@@ -611,6 +633,7 @@ export default function App() {
     }
 
     setDraft("");
+    setNotice(null);
     const answerId = uid("assistant");
     assistantId.current = answerId;
     pendingAssistantText.current = "";
@@ -620,10 +643,14 @@ export default function App() {
       { id: answerId, role: "assistant", text: "", pending: true, sourcePrompt: text },
     ]);
     setStreaming(true);
+    setLastProgressAt(Date.now());
+    setCurrentExecution(codingMode ? "Starting coding task" : researchMode === "deep" ? "Starting deep research" : researchMode === "quick" ? "Starting quick research" : "Starting task");
+    setCurrentThought(null);
     setActivity((items) => [{ id: uid("start"), tone: "blue" as const, label: "Autonomous turn started" }, ...items].slice(0, 10));
 
     try {
       if (isNativeDesktop) {
+        if (!await chatListenerReady.current) throw new Error("Live task events are unavailable. Restart Desktop and retry.");
         if (researchMode !== "auto") {
           setActivity((items) => [{ id: uid("research"), tone: "blue" as const, label: `${researchMode === "deep" ? "Deep" : "Quick"} research started`, detail: "The selected research lane is running through the durable local session with bounded live-web evidence." }, ...items].slice(0, 10));
         }
@@ -636,10 +663,27 @@ export default function App() {
           model_profile: selectedModelProfile,
           message: text,
           conversation_id: conversationId.current,
+          request_id: answerId,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           research_mode: researchMode,
           tool_profile: codingMode ? "coding" : researchMode === "auto" ? "full" : "research_web",
         });
+        // Recover a missing completion notification from the durable result.
+        // An IPC call ending is not itself proof that the task succeeded.
+        if (assistantId.current === answerId) {
+          const snapshot = await desktop.runtimeSession(conversationId.current);
+          if (assistantId.current !== answerId) return;
+          const session = snapshot.session;
+          const result = session.result as Record<string, unknown> | undefined;
+          if (!["completed", "failed", "needs_input", "cancelled"].includes(String(session.status))) {
+            throw new Error("The task connection ended without a final result. Inspect the saved run before retrying.");
+          }
+          if (typeof result?.answer === "string") pendingAssistantText.current = result.answer;
+          chatEventHandler.current({ type: "done", status: String(session.status), completed: session.status === "completed",
+            request_id: answerId, session_id: conversationId.current,
+            research_review: result?.research_review as ChatEvent["research_review"],
+            unresolved_items: Array.isArray(session.unresolved) ? session.unresolved.map(String) : [] });
+        }
       } else {
         setMessages((items) => items.map((item) => item.id === answerId ? {
           ...item,
@@ -647,20 +691,27 @@ export default function App() {
           failed: true,
           text: "The native Smara Desktop runtime is required for local execution. Open the installed Desktop app instead of the preview page.",
         } : item));
+        assistantId.current = null;
         setStreaming(false);
       }
     } catch (error) {
+      if (assistantId.current !== answerId) return;
+      flushAssistantText();
       setStreaming(false);
+      setCurrentExecution(null);
+      setCurrentThought(null);
       const msg = error instanceof Error ? error.message : String(error);
-      setMessages((items) => items.map((item) => item.id === answerId ? { ...item, pending: false, failed: true, text: msg } : item));
+      setMessages((items) => items.map((item) => item.id === answerId ? { ...item, pending: false, failed: true, text: item.text || msg, error: item.text ? msg : undefined } : item));
       assistantId.current = null;
     }
   }
 
   const cancelCurrentTurn = useCallback(async () => {
     if (!isNativeDesktop || !streaming) return;
+    const cancellingRequest = assistantId.current;
     try {
       const snapshot = await desktop.cancelRuntimeSession(conversationId.current, "cancelled from Desktop");
+      if (assistantId.current !== cancellingRequest) return;
       const session = snapshot?.session as { status?: string; cancel_requested?: boolean; result?: { answer?: string } } | undefined;
       // The cancellation command runs independently of the active worker. A
       // short turn may complete in the small interval before the durable
@@ -903,6 +954,7 @@ export default function App() {
               <button type="button" onClick={() => { setTab("studio"); setStudioTab("git"); }}>Review changes</button>
               <button type="button" onClick={() => { setTab("studio"); setStudioTab("tests"); }}>Verify tests</button>
             </div><ChatTab
+              threadId={conversationId.current}
               messages={messages}
               draft={draft}
               setDraft={setDraft}
@@ -911,6 +963,7 @@ export default function App() {
               streaming={streaming}
               currentExecution={currentExecution}
               currentThought={currentThought}
+              lastProgressAt={lastProgressAt}
               activity={activity}
               activityOpen={activityOpen}
               onToggleActivity={() => setActivityOpen((open) => !open)}
@@ -1022,10 +1075,10 @@ export default function App() {
               </div>
 
               <div className="sub-view-body">
-                {studioTab === "runs" && <RunCenterTab onSetNotice={setNotice} onRetry={(prompt) => { setTab("chat"); void send(prompt); }} />}
+                {studioTab === "runs" && <RunCenterTab workspace={connection.workspace} onSetNotice={setNotice} onRetry={(prompt) => { setTab("chat"); void send(prompt); }} />}
                 {studioTab === "dag" && <DAGFlowTab onSetNotice={setNotice} />}
                 {studioTab === "goals" && <GoalsTab onSetNotice={setNotice} />}
-                {studioTab === "swarm" && <SubagentSwarmTab onSetNotice={setNotice} />}
+                {studioTab === "swarm" && <SubagentSwarmTab workspace={connection.workspace} onSetNotice={setNotice} />}
                 {studioTab === "memory" && <TaskMemoryTab onSetNotice={setNotice} />}
                 {studioTab === "skills" && <ProgressiveSkillsTab onSetNotice={setNotice} />}
                 {studioTab === "graph" && <GraphTab />}
@@ -1279,7 +1332,7 @@ function FileActionCard({
 }) {
   const [copied, setCopied] = useState(false);
   const ext = filePath.split(".").pop()?.toLowerCase() || "";
-  
+
   let icon = "📄";
   let badgeText = ext.toUpperCase();
   if (ext === "pdf") {
@@ -1387,6 +1440,7 @@ function DocumentPreviewModal({
 // CHAT TAB
 // -------------------------------------------------------------
 function ChatTab({
+  threadId,
   messages,
   draft,
   setDraft,
@@ -1395,6 +1449,7 @@ function ChatTab({
   streaming,
   currentExecution,
   currentThought,
+  lastProgressAt,
   activity,
   transcriptEndRef,
   onPreview,
@@ -1412,6 +1467,7 @@ function ChatTab({
   appVersion,
 }: {
   messages: ChatMessage[];
+  threadId: string;
   draft: string;
   setDraft: (val: string) => void;
   onSend: () => void;
@@ -1419,6 +1475,7 @@ function ChatTab({
   streaming: boolean;
   currentExecution?: string | null;
   currentThought?: string | null;
+  lastProgressAt: number;
   activity: ActivityItem[];
   activityOpen: boolean;
   onToggleActivity: () => void;
@@ -1495,7 +1552,12 @@ function ChatTab({
                       <span className="msg-author">{m.role === "user" ? "You" : "Smara Agent"}</span>
                     </div>
                     <div className="msg-text">
-                      {m.role === "assistant" ? renderMarkdownContent(m.text) : m.text}
+                      {m.role === "assistant" ? renderMarkdownContent(m.text) : m.text.length > 8000 ? (
+                        <details className="long-user-message">
+                          <summary>Show full message ({m.text.length.toLocaleString()} characters)</summary>
+                          <div className="long-message-content">{m.text}</div>
+                        </details>
+                      ) : m.text}
                     </div>
                     {m.role === "assistant" && m.researchReview && (
                       <ResearchReviewPanel review={m.researchReview} topic={m.sourcePrompt} answer={m.text} />
@@ -1523,14 +1585,10 @@ function ChatTab({
               );
             })}
             {streaming && (
-              <div className="active-execution-pill">
-                <span className="exec-spinner">⚡</span>
-                <div className="exec-content">
-                  <div className="exec-title">{currentExecution || "Autonomous agent analyzing task..."}</div>
-                  {currentThought && <div className="exec-thought">🧠 {currentThought}</div>}
-                </div>
-              </div>
+              <RunProgressPanel title={currentExecution || "Preparing the next step"} detail={currentThought}
+                lastProgressAt={lastProgressAt} activityOpen={activityOpen} onToggleActivity={onToggleActivity} />
             )}
+            <SessionApprovalPanel threadId={threadId} active={streaming} />
             <div ref={transcriptEndRef} />
           </div>
           {activityOpen && (
@@ -3587,18 +3645,30 @@ function TerminalTab() {
 // -------------------------------------------------------------
 // UNIFIED RUN CENTER
 // -------------------------------------------------------------
-function RunCenterTab({ onSetNotice, onRetry }: { onSetNotice: (msg: string) => void; onRetry: (prompt: string) => void }) {
+function RunCenterTab({ workspace, onSetNotice, onRetry }: { workspace: string; onSetNotice: (msg: string) => void; onRetry: (prompt: string) => void }) {
   const [runs, setRuns] = useState<RuntimeSessionRecord[]>([]);
   const [selected, setSelected] = useState<RuntimeSessionSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
+  const [storage, setStorage] = useState<"desktop" | "workspace">("desktop");
+  const [resuming, setResuming] = useState(false);
+  const protocolWorkspace = storage === "workspace" ? workspace : undefined;
+  const readRun = useCallback(async (sessionId: string) => {
+    if (!protocolWorkspace) return desktop.runtimeSession(sessionId, 0);
+    const response = await desktop.sessionRequest<import("./types").SessionProtocolSnapshot & { thread: RuntimeSessionRecord }>("thread/read", { thread_id: sessionId }, protocolWorkspace);
+    return { version: 1, session: { ...response.thread }, events: [], cursor: response.cursor,
+      next_cursor: response.cursor, earliest_cursor: 0, has_more: response.has_more,
+      reconnectable: true, protocol: response } as RuntimeSessionSnapshot;
+  }, [protocolWorkspace]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const items = await desktop.listRuntimeSessions(100);
+      const items = protocolWorkspace
+        ? (await desktop.sessionRequest<{ threads: RuntimeSessionRecord[] }>("thread/list", { limit: 100 }, protocolWorkspace)).threads
+        : await desktop.listRuntimeSessions(100);
       setRuns(items);
       if (selected?.session?.session_id) {
-        const current = await desktop.runtimeSession(String(selected.session.session_id), 0);
+        const current = await readRun(String(selected.session.session_id));
         setSelected(current);
       }
     } catch (error) {
@@ -3606,15 +3676,15 @@ function RunCenterTab({ onSetNotice, onRetry }: { onSetNotice: (msg: string) => 
     } finally {
       setLoading(false);
     }
-  }, [onSetNotice, selected?.session?.session_id]);
+  }, [onSetNotice, selected?.session?.session_id, protocolWorkspace, readRun]);
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [storage]);
 
   const inspect = async (sessionId: string) => {
     try {
-      setSelected(await desktop.runtimeSession(sessionId, 0));
+      setSelected(await readRun(sessionId));
     } catch (error) {
       onSetNotice(`Could not inspect run: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -3624,9 +3694,11 @@ function RunCenterTab({ onSetNotice, onRetry }: { onSetNotice: (msg: string) => 
     const sessionId = selected?.session?.session_id;
     if (!sessionId) return;
     try {
-      const snapshot = await desktop.cancelRuntimeSession(String(sessionId), "cancelled from Run Center");
+      if (protocolWorkspace) await desktop.sessionRequest("turn/interrupt", { thread_id: String(sessionId) }, protocolWorkspace);
+      else await desktop.cancelRuntimeSession(String(sessionId), "cancelled from Run Center");
+      const snapshot = await readRun(String(sessionId));
       setSelected(snapshot);
-      setRuns(await desktop.listRuntimeSessions(100));
+      await refresh();
       onSetNotice(`Run ${String(sessionId)} cancelled.`);
     } catch (error) {
       onSetNotice(`Could not cancel run: ${error instanceof Error ? error.message : String(error)}`);
@@ -3634,6 +3706,20 @@ function RunCenterTab({ onSetNotice, onRetry }: { onSetNotice: (msg: string) => 
   };
 
   const detail = selected?.session as Partial<RuntimeSessionRecord> | undefined;
+  const hasCheckpoint = Boolean(selected?.protocol?.items.some(item => item.kind === "execution_checkpoint"));
+  const resumeRun = async () => {
+    if (!detail?.session_id) return;
+    setResuming(true);
+    try {
+      await desktop.sessionRequest("turn/resume", { thread_id: detail.session_id }, protocolWorkspace);
+      await inspect(String(detail.session_id));
+      onSetNotice("Checkpoint continuation finished. Inspect the result and verification below.");
+    } catch (error) {
+      onSetNotice(`Could not resume checkpoint: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setResuming(false);
+    }
+  };
   const canCancel = detail && ["created", "running", "waiting_approval"].includes(detail.status || "");
   const canRetry = Boolean(detail?.request) && !["created", "running"].includes(detail?.status || "");
 
@@ -3644,6 +3730,9 @@ function RunCenterTab({ onSetNotice, onRetry }: { onSetNotice: (msg: string) => 
           <h2>◉ Unified Run Center</h2>
           <p>One durable view of Chat, CLI, research, and autonomous runs from the canonical runtime-session ledger.</p>
         </div>
+        <select aria-label="Run source" value={storage} onChange={event => { setSelected(null); setStorage(event.target.value as "desktop" | "workspace"); }}>
+          <option value="desktop">Desktop chats</option><option value="workspace">Workspace CLI runs</option>
+        </select>
         <button type="button" className="btn-refresh-git" onClick={() => void refresh()} disabled={loading}>
           {loading ? "Refreshing..." : "↻ Refresh runs"}
         </button>
@@ -3671,6 +3760,7 @@ function RunCenterTab({ onSetNotice, onRetry }: { onSetNotice: (msg: string) => 
           <div className="panel-sub-header">
             <h4>{detail ? `Run ${detail.session_id}` : "Select a run to inspect"}</h4>
             {detail && <div style={{ display: "flex", gap: 8 }}>
+              {hasCheckpoint && <button type="button" className="btn-refresh-git" disabled={resuming || !selected?.protocol?.can_resume} onClick={() => void resumeRun()}>{resuming ? "Resuming…" : "Resume checkpoint"}</button>}
               <button type="button" className="btn-refresh-git" disabled={!canRetry} onClick={() => onRetry(detail.request || "")}>Retry in Chat</button>
               <button type="button" className="btn-refresh-git" disabled={!canCancel} onClick={() => void cancelRun()}>Cancel</button>
             </div>}
@@ -3682,6 +3772,11 @@ function RunCenterTab({ onSetNotice, onRetry }: { onSetNotice: (msg: string) => 
               <div><strong>Lane:</strong> {detail.research_mode || "auto"} · <strong>Tools:</strong> {detail.tool_profile || "default"}</div>
               <div><strong>Request:</strong><div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{detail.request || "No request recorded."}</div></div>
               {Boolean(detail.unresolved?.length) && <div><strong>Unresolved work:</strong><ul>{detail.unresolved?.map((item) => <li key={item}>{item}</li>)}</ul></div>}
+              <SessionApprovalPanel threadId={String(detail.session_id)} active={Boolean(canCancel)} workspace={protocolWorkspace} />
+              {selected?.protocol && <div aria-label="Turn timeline">
+                {selected.protocol.turns.map(turn => <p key={turn.turn_id}>{new Date(turn.created_at * 1000).toLocaleString()} · {turn.status.replaceAll("_", " ")}</p>)}
+                {selected.protocol.items.map(item => <details key={item.item_id}><summary>{item.kind.replaceAll("_", " ")} · {item.status}</summary><pre style={{ whiteSpace: "pre-wrap", overflow: "auto" }}>{JSON.stringify(item.payload, null, 2)}</pre></details>)}
+              </div>}
               <details open><summary>Result</summary><pre style={{ whiteSpace: "pre-wrap", overflow: "auto" }}>{JSON.stringify(detail.result || {}, null, 2)}</pre></details>
               <details><summary>Event timeline ({selected?.events.length || 0})</summary><pre style={{ whiteSpace: "pre-wrap", overflow: "auto" }}>{JSON.stringify(selected?.events || [], null, 2)}</pre></details>
             </div>

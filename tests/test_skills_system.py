@@ -36,10 +36,11 @@ Always pull before push.
 
         # Tier 1 test
         skills = registry.list_skills()
-        assert len(skills) == 1
-        assert skills[0]["name"] == "git-workflow"
-        assert skills[0]["version"] == "1.2.0"
-        assert "git" in skills[0]["tags"]
+        workspace_skills = [skill for skill in skills if skill["source"] == "workspace"]
+        assert len(workspace_skills) == 1
+        assert workspace_skills[0]["name"] == "git-workflow"
+        assert workspace_skills[0]["version"] == "1.2.0"
+        assert "git" in workspace_skills[0]["tags"]
 
         # Tag filter test
         assert len(registry.list_skills(tag_filter="vcs")) == 1
