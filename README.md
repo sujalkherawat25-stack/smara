@@ -1,5 +1,22 @@
 # Smara
 
+## Native-source migration candidate (2026-10-08)
+
+The complete public Codex source is now part of this repository at
+`vendor/codex`, pinned in `native/UPSTREAM.json`. Smara's new CLI entry point and
+Desktop candidate use a source-built `smara-native` Rust runtime, not an installed
+Codex CLI or a rewritten Python agent loop. See [native/README.md](native/README.md)
+for source attribution, build instructions, acceptance gates, and migration limits.
+
+Build with `scripts/build-smara-native.ps1`; use `smara source-status` to inspect
+the source revision/build availability. The old CLI is explicitly accessible as
+`smara legacy ...` or `smara-legacy ...`. Existing data/credentials are preserved.
+Do not replace the installed Desktop or publish a release until the broader
+real-provider, worker, recovery and Windows sandbox acceptance gates pass. The
+development CLI can be registered with `python -m pip install --no-deps
+--no-build-isolation -e .` after building the native candidate. The service descriptions below describe the retained legacy
+control plane, not proof that those workflows have been migrated to Rust.
+
 Smara is the independent agent control plane. It owns tasks, approvals, task
 events, desktop execution requests, and public research. Private integrations
 run on the paired desktop rather than the hosted VM. Long-term memory is accessed **only** via

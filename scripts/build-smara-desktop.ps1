@@ -12,6 +12,8 @@ function Assert-NativeSuccess([string]$step) {
 $appRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\apps\desktop')).Path
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $version = (Get-Content -LiteralPath (Join-Path $repoRoot 'release\VERSION') -Raw).Trim()
+# A Desktop build may never silently ship the old engine as its native core.
+& (Join-Path $PSScriptRoot 'build-smara-native.ps1')
 $python = Join-Path $repoRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
     throw "Smara virtualenv Python was not found at $python"
@@ -50,6 +52,9 @@ try {
         '--hidden-import', 'smara.research_watch'
         '--hidden-import', 'smara.app_adapter'
         '--hidden-import', 'smara.research_chat'
+        '--hidden-import', 'smara.native_runtime'
+        '--hidden-import', 'smara.native_provider'
+        '--hidden-import', 'smara.native_tools'
     )
     foreach ($module in $pyInstallerExcludes) {
         $pyInstallerArgs += @('--exclude-module', $module)
@@ -65,6 +70,11 @@ try {
     $resourceDir = Join-Path $appRoot 'src-tauri\resources'
     New-Item -ItemType Directory -Force -Path $resourceDir | Out-Null
     Copy-Item -LiteralPath (Join-Path $executorDist 'smara-desktop.exe') -Destination (Join-Path $resourceDir 'smara-desktop.exe') -Force
+    $nativeResourceDir = Join-Path $resourceDir 'native'
+    New-Item -ItemType Directory -Force -Path $nativeResourceDir | Out-Null
+    foreach ($nativeResource in @('smara-native.exe', 'codex-windows-sandbox-setup.exe', 'codex-command-runner.exe', 'LICENSE', 'NOTICE', 'UPSTREAM.json')) {
+        Copy-Item -LiteralPath (Join-Path $repoRoot "native\dist\$nativeResource") -Destination (Join-Path $nativeResourceDir $nativeResource) -Force
+    }
     Copy-Item -LiteralPath (Join-Path $repoRoot 'release\evidence\LIVE_WEB_ACCEPTANCE_V5.json') -Destination (Join-Path $resourceDir 'LIVE_WEB_ACCEPTANCE_V5.json') -Force
     Get-ChildItem -Path (Join-Path $repoRoot 'release\evidence\LIVE_WEB_ACCEPTANCE_V5*.json') -File | ForEach-Object {
         $smaraReportMetadata = Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json
@@ -78,8 +88,8 @@ try {
 
 Push-Location $appRoot
 try {
-    npm install
-    Assert-NativeSuccess 'npm install'
+    npm ci
+    Assert-NativeSuccess 'npm ci'
     npm run build
     Assert-NativeSuccess 'frontend build'
     Push-Location src-tauri

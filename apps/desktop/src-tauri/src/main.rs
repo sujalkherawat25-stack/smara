@@ -12,6 +12,9 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter};
 
+mod native_runtime;
+use native_runtime::{native_send, native_start, native_status, native_stop};
+
 // The installed companion is local-first.  A hosted endpoint is only used
 // after an explicit cloud pairing/configuration; it must never be injected by
 // a fresh install or by a stale beta state file.
@@ -152,6 +155,10 @@ struct LocalModelProfileInput {
 }
 
 fn app_data_dir() -> PathBuf {
+    // Candidate/testing data must not migrate or overwrite the installed app.
+    if let Some(value) = std::env::var_os("SMARA_DESKTOP_DATA_DIR") {
+        return PathBuf::from(value);
+    }
     if let Some(value) = std::env::var_os("APPDATA") {
         return PathBuf::from(value).join("Smara");
     }
@@ -3458,17 +3465,16 @@ async fn run_subagent_delegation(goal: String, role: String, context: Option<Str
 
 fn main() {
     tauri::Builder::default()
-        .setup(|_app| {
-            std::thread::spawn(|| loop {
-                let code = "import json, sys\nsys.path.insert(0, 'src')\nfrom pathlib import Path\ndb = Path.cwd() / '.smara' / 'research_watch.sqlite3'\nresults = []\nif db.exists():\n from smara.research_watch import ResearchWatchStore\n results = ResearchWatchStore(Path.cwd()).run_due(limit=1)\nprint(json.dumps({'processed': len(results)}))\n";
-                let _ = run_python_bridge_code_sync(code);
-                std::thread::sleep(std::time::Duration::from_secs(60));
-            });
-            Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_local_chat_history, load_task_details, decide_local_task, stream_chat, session_protocol, list_runtime_sessions, get_runtime_session, cancel_runtime_session, resume_runtime_session, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile, open_file_in_default_app, reveal_file_in_explorer, read_file_preview, inspect_ast_graph, run_test_suite, auto_fix_tests, rollback_refactor_snapshot, get_git_status, get_git_branches, create_git_branch, switch_git_branch, generate_ai_commit_message, commit_git_changes, get_git_log, detect_git_conflicts, resolve_git_conflict, get_file_git_diff, semantic_search, rebuild_semantic_index, scrape_web_page, capture_browser_screenshot, run_browser_e2e, diagnose_browser_ui_component, get_dual_plane_status, sync_dual_plane_memory, query_dual_plane_memory, list_adrs, create_adr, get_coding_conventions, get_symbol_evolution, run_swarm_task, get_swarm_history, get_dynamic_tools, run_dynamic_tool, synthesize_dynamic_tool, run_goal_task, get_goal_sessions, run_deep_research, run_research, list_research_watches, add_research_watch, run_research_watch, set_research_watch_enabled, remove_research_watch, research_watch_history, generate_pr_draft, publish_pr_branch, run_terminal_command, list_learned_skills, save_learned_skill, delete_learned_skill, run_gaia_benchmark, run_swe_benchmark, get_benchmark_scorecards, get_research_evaluation_scorecard, open_benchmark_report, list_task_memory, add_task_memory_entry, replace_task_memory_entry, remove_task_memory_entry, search_task_memory, get_memory_snapshot, list_skills_v2, view_skill_v2, create_skill_v2, skill_lifecycle, validate_skill_v2, promote_skill_v2, revoke_skill_v2, rollback_skill_v2, list_integration_health, begin_integration_oauth, disconnect_integration, get_dag_workflow, step_dag_workflow, run_dag_workflow, retry_dag_node, inject_dag_node, get_subagent_roles, run_subagent_delegation])
-        .run(tauri::generate_context!())
-        .expect("error while running Smara Desktop");
+        // Legacy research schedules remain saved but are not automatically
+        // executed through a second runtime while native migration is active.
+        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, load_connection, save_settings, check_connection, login_cli, pair_desktop, start_executor, stop_executor, pause_executor, resume_executor, revoke_executor, read_log, load_tasks, load_local_chat_history, load_task_details, decide_local_task, stream_chat, session_protocol, list_runtime_sessions, get_runtime_session, cancel_runtime_session, resume_runtime_session, open_web, list_local_credentials, save_local_credential, delete_local_credential, list_local_connectors, revoke_local_connector, list_local_model_profiles, save_local_model_profile, delete_local_model_profile, open_file_in_default_app, reveal_file_in_explorer, read_file_preview, inspect_ast_graph, run_test_suite, auto_fix_tests, rollback_refactor_snapshot, get_git_status, get_git_branches, create_git_branch, switch_git_branch, generate_ai_commit_message, commit_git_changes, get_git_log, detect_git_conflicts, resolve_git_conflict, get_file_git_diff, semantic_search, rebuild_semantic_index, scrape_web_page, capture_browser_screenshot, run_browser_e2e, diagnose_browser_ui_component, get_dual_plane_status, sync_dual_plane_memory, query_dual_plane_memory, list_adrs, create_adr, get_coding_conventions, get_symbol_evolution, run_swarm_task, get_swarm_history, get_dynamic_tools, run_dynamic_tool, synthesize_dynamic_tool, run_goal_task, get_goal_sessions, run_deep_research, run_research, list_research_watches, add_research_watch, run_research_watch, set_research_watch_enabled, remove_research_watch, research_watch_history, generate_pr_draft, publish_pr_branch, run_terminal_command, list_learned_skills, save_learned_skill, delete_learned_skill, run_gaia_benchmark, run_swe_benchmark, get_benchmark_scorecards, get_research_evaluation_scorecard, open_benchmark_report, list_task_memory, add_task_memory_entry, replace_task_memory_entry, remove_task_memory_entry, search_task_memory, get_memory_snapshot, list_skills_v2, view_skill_v2, create_skill_v2, skill_lifecycle, validate_skill_v2, promote_skill_v2, revoke_skill_v2, rollback_skill_v2, list_integration_health, begin_integration_oauth, disconnect_integration, get_dag_workflow, step_dag_workflow, run_dag_workflow, retry_dag_node, inject_dag_node, get_subagent_roles, run_subagent_delegation])
+        .build(tauri::generate_context!())
+        .expect("error while building Smara Desktop")
+        .run(|_app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                let _ = native_runtime::stop_current();
+            }
+        });
 }
 
 #[cfg(test)]

@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/openai/codex",
+  "commit": "14c8b7771ab2b617a131f5d8e55e98d18e56ed09",
+  "imported_on": "2026-10-08",
+  "source_directory": "vendor/codex",
+  "license": "Apache-2.0",
+  "local_modifications": [
+    "codex-rs/cli/Cargo.toml: add smara-native executable using the original CLI entry point",
+    "codex-rs/cli/src/main.rs: identify the fork and block OpenAI product installer/update/cloud commands",
+    "codex-rs/utils/home-dir/src/lib.rs: isolate the default runtime home from the user's Codex account",
+    "codex-rs/models-manager/src/model_info.rs and model_info_tests.rs: expose native freeform patch for foreign models and honor explicit provider context metadata without a fabricated fallback hard maximum"
+  ]
+}

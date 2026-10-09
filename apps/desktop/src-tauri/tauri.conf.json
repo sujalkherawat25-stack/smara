@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Smara Desktop",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "identifier": "com.syntarus.smara.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -29,10 +29,10 @@
     "active": true,
     "targets": "all",
     "icon": ["icons/icon.ico", "icons/icon.icns", "icons/icon.png"],
-    "resources": ["resources/smara-desktop.exe", "resources/LIVE_WEB_ACCEPTANCE_V5*.json"],
+    "resources": ["resources/smara-desktop.exe", "resources/LIVE_WEB_ACCEPTANCE_V5*.json", "resources/native/"],
     "category": "Utility",
     "shortDescription": "A private, approval-first desktop companion for Smara",
-    "longDescription": "Smara Desktop keeps local files, browser sessions, and terminal work on your PC while the hosted Smara agent plans and monitors approved tasks.",
+    "longDescription": "Smara Desktop runs Smara's source-owned native agent harness on your PC with your selected model provider, saved sessions, explicit approvals and workspace sandboxing. Public research and local-memory readers are opt-in. Legacy settings and history remain available separately.",
     "windows": {
       "nsis": {
         "startMenuFolder": "Smara",

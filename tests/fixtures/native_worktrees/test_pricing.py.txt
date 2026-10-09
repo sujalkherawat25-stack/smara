@@ -1,0 +1,16 @@
+import unittest
+from pricing import discounted_total
+
+class PricingTests(unittest.TestCase):
+    def test_normal(self):
+        self.assertEqual(discounted_total(100, 10), 90)
+    def test_no_discount(self):
+        self.assertEqual(discounted_total(30, 0), 30)
+    def test_full_discount(self):
+        self.assertEqual(discounted_total(30, 100), 0)
+    def test_invalid(self):
+        with self.assertRaises(ValueError):
+            discounted_total(10, 101)
+
+if __name__ == "__main__":
+    unittest.main()

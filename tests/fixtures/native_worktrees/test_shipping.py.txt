@@ -1,0 +1,16 @@
+import unittest
+from shipping import shipping_cost
+
+class ShippingTests(unittest.TestCase):
+    def test_first_kg(self):
+        self.assertEqual(shipping_cost(0.5), 5)
+    def test_exact_second_kg(self):
+        self.assertEqual(shipping_cost(2), 7)
+    def test_fraction(self):
+        self.assertEqual(shipping_cost(2.1), 9)
+    def test_invalid(self):
+        with self.assertRaises(ValueError):
+            shipping_cost(0)
+
+if __name__ == "__main__":
+    unittest.main()

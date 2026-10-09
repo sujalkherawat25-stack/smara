@@ -1,0 +1,3 @@
+The synthetic team has one test laptop and no production credentials.
+Storage changes must preserve existing conversations.
+Do not ship until a restart/resume test and rollback test pass.

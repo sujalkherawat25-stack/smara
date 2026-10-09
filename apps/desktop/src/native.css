@@ -1,0 +1,33 @@
+.native-app { height: 100vh; display: flex; flex-direction: column; background: #101216; color: #e6e9ef; font: 15px/1.5 system-ui, sans-serif; }
+.native-app header { display: flex; align-items: center; gap: 20px; padding: 16px 24px; border-bottom: 1px solid #30343e; }
+.native-app header span { flex: 1; color: #a0a9b8; font-size: 13px; }
+.native-app button, .native-app input, .native-app select, .native-app textarea { font: inherit; color: inherit; background: #1b202a; border: 1px solid #394354; border-radius: 8px; padding: 9px 12px; }
+.native-app button { cursor: pointer; } .native-app button:disabled { opacity: .45; cursor: default; }
+.native-app button:hover:not(:disabled), .native-app button.selected { background: #29384d; border-color: #6f9ddb; }
+.native-layout { flex: 1; display: flex; min-height: 0; }
+.native-layout aside { width: 250px; flex-shrink: 0; padding: 20px; overflow-y: auto; border-right: 1px solid #30343e; }
+.native-layout aside button { display: block; width: 100%; text-align: left; margin-bottom: 10px; overflow-wrap: anywhere; }
+.native-layout aside p { color: #98a4b5; font-size: 12px; }
+.native-layout main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.native-connection { display: flex; align-items: end; gap: 12px; padding: 16px 24px; border-bottom: 1px solid #30343e; }
+.native-connection label:first-child { flex: 1; } .native-connection label { display: flex; flex-direction: column; font-size: 12px; gap: 5px; }
+.native-connection input { width: 100%; box-sizing: border-box; } .native-connection select { max-width: 220px; }
+.native-transcript { flex: 1; overflow-y: auto; padding: 24px; min-height: 0; }
+.native-item { max-width: 1000px; margin: 0 auto 18px; padding: 18px 20px; border: 1px solid #303846; border-radius: 12px; background: #191e27; }
+.native-item.user, .native-item.userMessage { background: #242039; border-color: #514372; }
+.native-item small { color: #a8b7cf; text-transform: capitalize; }
+.native-app pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0 0; font: inherit; }
+.native-item.commandExecution pre, .native-approval pre { font: 13px/1.6 ui-monospace, monospace; }
+.native-empty { max-width: 680px; margin: 70px auto; color: #adb9ca; } .native-empty h1 { color: #eef3fa; font-size: 28px; }
+.native-layout footer { padding: 16px 24px; border-top: 1px solid #30343e; background: #101216; }
+.native-layout footer form { display: flex; gap: 12px; max-width: 1000px; margin: auto; align-items: end; }
+.native-layout footer textarea { flex: 1; min-width: 0; resize: vertical; max-height: 40vh; }
+.native-layout footer small { display: block; max-width: 1000px; margin: 6px auto 0; color: #a1b4ce; }
+.native-warning, .native-error { margin: 12px 24px 0; padding: 12px 16px; border-radius: 8px; background: #382c17; color: #f9db97; }
+.native-error { background: #391c22; color: #ffbac7; }
+.native-approval { max-width: 1000px; margin: 18px auto; padding: 20px; border: 1px solid #c6a354; border-radius: 12px; background: #292516; }
+.native-approval button { margin: 12px 8px 0 0; }
+.native-legacy-banner { padding: 8px 16px; background: #3b2d15; color: #ffe4a5; }
+.native-tools-choice { padding: 8px 24px; font-size: 12px; color: #aab9ce; }
+.native-tools-choice input { width: auto; margin-right: 6px; }
+@media (max-width: 1000px) { .native-layout aside { width: 190px; } .native-connection { flex-wrap: wrap; } .native-app header span { display: none; } }

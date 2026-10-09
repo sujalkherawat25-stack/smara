@@ -34,6 +34,15 @@ from pathlib import Path
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 
+# Native migration transport entry point. This runs before the legacy executor
+# is imported, so native Desktop turns cannot accidentally enter its agent loop.
+if __name__ == "__main__" and sys.argv[1:] == ["--native-app-server"]:
+    from smara.native_runtime import serve_bootstrap
+    raise SystemExit(serve_bootstrap())
+if __name__ == "__main__" and sys.argv[1:2] == ["--native-tools"]:
+    from smara.native_tools import main as tools_main
+    raise SystemExit(tools_main(sys.argv[2:]))
+
 import httpx
 
 # The executor runs both as ``smara.desktop_executor`` in tests and as a
@@ -3454,6 +3463,13 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, OSError):
             pass
     try:
+        arguments = list(sys.argv[1:] if argv is None else argv)
+        if arguments[:1] == ["--native-tools"]:
+            from smara.native_tools import main as tools_main
+            return tools_main(arguments[1:])
+        if arguments == ["--native-app-server"]:
+            from smara.native_runtime import serve_bootstrap
+            return serve_bootstrap()
         return _main(argv)
     except RuntimeError as exc:
         print(f"Smara Desktop: {exc}", file=sys.stderr)

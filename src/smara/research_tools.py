@@ -219,8 +219,8 @@ class WebSearchTool:
         direct=os.getenv(alias,"")
         if direct:return direct
         try:
-            from .desktop_executor import resolve_local_credential
-            value=resolve_local_credential(alias)
+            from .native_profiles import resolve_credential
+            value=resolve_credential(alias)
             return value if isinstance(value,str) else ""
         except Exception:
             return ""

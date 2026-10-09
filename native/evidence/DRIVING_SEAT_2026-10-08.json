@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-08",
+  "upstream_commit": "14c8b7771ab2b617a131f5d8e55e98d18e56ed09",
+  "scope": "Development native runtime; not an installed Desktop release",
+  "provider": "sarvam_glm",
+  "model": "glm5.3",
+  "private_code_uploaded": false,
+  "coding_cli": {
+    "status": "passed",
+    "provider_requests": 6,
+    "native_commands": 4,
+    "actual_command_exit_codes": [0, 0, 1, 0],
+    "original_tests_unchanged": true,
+    "original_tests_passed": 5,
+    "independent_extra_cases_passed": true,
+    "elapsed_seconds": 35.24,
+    "full_local_report": "build/native-coding-cli-2026-10-08.json"
+  },
+  "coding_desktop_protocol_and_restart": {
+    "status": "passed",
+    "provider_requests": 6,
+    "native_commands": 4,
+    "actual_command_exit_codes": [0, 0, 1, 0],
+    "original_tests_unchanged": true,
+    "original_tests_passed": 5,
+    "fresh_process_history_resume": true,
+    "resume_added_inference_requests": 0,
+    "visual_desktop_test": false,
+    "elapsed_seconds": 38.5,
+    "full_local_report": "build/native-coding-restart-final-2026-10-08.json"
+  },
+  "two_read_only_workers": {
+    "status": "passed",
+    "actual_native_workers_spawned": 2,
+    "actual_native_workers_completed": 2,
+    "provider_requests": 9,
+    "peak_overlapping_provider_streams_including_parent": 3,
+    "inputs_unchanged": true,
+    "elapsed_seconds": 29.96,
+    "worktree_isolation_certified": false,
+    "crash_recovery_certified": false,
+    "full_local_report": "build/native-parallel-final-2026-10-08.json",
+    "earlier_answer_coverage_failure_preserved": "build/native-parallel-2026-10-08.json"
+  },
+  "regressions": {
+    "focused_python_passed": 83,
+    "focused_python_failed": 0,
+    "focused_python_skipped": 0,
+    "frontend_passed": 9,
+    "frontend_build": "passed",
+    "tauri_cargo_check": "passed",
+    "full_upstream_suite_run": false,
+    "full_legacy_suite_run": false,
+    "python_report": "build/native-driving-seat-audit-final.xml"
+  },
+  "deployment": {
+    "installed_desktop_replaced": false,
+    "pushed": false,
+    "release_published": false
+  }
+}

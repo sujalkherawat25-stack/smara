@@ -1,0 +1,3 @@
+Project Harrier uses a local-first desktop client.
+The prototype can search indexed text, but its storage migration is unfinished.
+The next milestone is a safe local upgrade with a rollback path.

@@ -30,3 +30,12 @@ pytest-tmp/
 .pytest-*/
 scratch/
 .worktrees/
+vendor/codex/codex-rs/target/
+vendor/codex/node_modules/
+/native/dist/
+# Public upstream source, not Smara credentials or local editor settings.
+# The generic secrets/ and global .vscode rules must not omit imported crates.
+!vendor/codex/codex-rs/secrets/
+!vendor/codex/codex-rs/secrets/**
+!vendor/codex/.vscode/
+!vendor/codex/.vscode/**

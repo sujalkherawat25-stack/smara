@@ -7,6 +7,7 @@ import ipaddress
 import json
 import re
 import socket
+from typing import TYPE_CHECKING
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -15,7 +16,8 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlsplit, urlu
 import httpx
 
 from .config import settings
-from .store import TaskStore
+if TYPE_CHECKING:
+    from .store import TaskStore
 
 MAX_SOURCE_BYTES = 1_000_000
 MAX_EXCERPT_CHARS = 16_000
