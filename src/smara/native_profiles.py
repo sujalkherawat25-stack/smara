@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import tempfile
 
 
 def state_path() -> Path:
@@ -29,8 +30,9 @@ def load_profiles(path: Path | None = None):
     path = path or state_path()
     state = read_object(path)
     preferences = read_object(path.parent / "desktop-ui.json")
-    profiles = state.get("model_profiles") or preferences.get("local_model_profiles") or []
-    selected = str(preferences.get("model_profile") or state.get("active_model") or "").removeprefix("local:")
+    native = read_object(path.parent / "native-settings.json")
+    profiles = native.get("model_profiles", state.get("model_profiles") or preferences.get("local_model_profiles") or [])
+    selected = str(native.get("active_model", preferences.get("model_profile") or state.get("active_model") or "")).removeprefix("local:")
     if not isinstance(profiles, list) or any(not isinstance(item, dict) for item in profiles):
         raise RuntimeError("Invalid native model profiles")
     vault_path = Path(os.getenv("SMARA_DESKTOP_CREDENTIALS", str(path.parent / "credentials.json")))
@@ -64,15 +66,52 @@ def resolve_credential(name: str, credentials: dict | None = None) -> str:
     if credentials is None:
         path = Path(os.getenv("SMARA_DESKTOP_CREDENTIALS", str(state_path().parent / "credentials.json")))
         credentials = read_object(path)
-    value = next((credentials[key] for key in (name, name.upper(), name.lower()) if key in credentials), None)
-    if isinstance(value, str):
-        return value
-    if isinstance(value, dict) and isinstance(value.get("protected"), str):
-        try:
-            return unprotect(value["protected"])
-        except (OSError, ValueError, UnicodeError):
-            return ""  # An unreadable alias must not prevent trying another.
+    for key in dict.fromkeys((name, name.upper(), name.lower())):
+        value = credentials.get(key)
+        if isinstance(value, str) and value:
+            return value
+        if isinstance(value, dict) and isinstance(value.get("protected"), str):
+            try:
+                clear = unprotect(value["protected"])
+                if clear:
+                    return clear
+            except (OSError, ValueError, UnicodeError):
+                continue  # One stale alias must not mask a readable alias.
     return ""
+
+
+def write_object(path: Path, value: dict) -> None:
+    """Atomic private metadata/vault replacement; never truncate on failure."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+        json.dump(value, handle, ensure_ascii=False, indent=2)
+    try:
+        if os.name != "nt":
+            temporary.chmod(0o600)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def protect(value: str) -> str:
+    """DPAPI protection, compatible with the existing Windows vault."""
+    if os.name != "nt":
+        raise RuntimeError("Credential storage currently requires Windows DPAPI; use environment keys on other systems")
+    import ctypes
+    from ctypes import wintypes
+    class Blob(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+    raw = value.encode("utf-8")
+    buffer = ctypes.create_string_buffer(raw)
+    source = Blob(len(raw), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_byte)))
+    encrypted = Blob()
+    if not ctypes.windll.crypt32.CryptProtectData(ctypes.byref(source), None, None, None, None, 1, ctypes.byref(encrypted)):
+        raise ctypes.WinError()
+    try:
+        return base64.b64encode(ctypes.string_at(encrypted.pbData, encrypted.cbData)).decode("ascii")
+    finally:
+        ctypes.windll.kernel32.LocalFree(encrypted.pbData)
 
 
 def resolve_profile_key(profile: dict, credentials: dict) -> str:

@@ -4,6 +4,11 @@ version = "0.1.9"
 description = "Smara's lightweight local executor companion"
 authors = ["Syntarus"]
 edition = "2021"
+autobins = false
+
+[[bin]]
+name = "smara-desktop"
+path = "src/native_main.rs"
 
 [build-dependencies]
 tauri-build = { version = "2.4", features = [] }

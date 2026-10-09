@@ -89,6 +89,12 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
             "mcp_servers.smara_readers.startup_timeout_sec": 30,
             "mcp_servers.smara_readers.tool_timeout_sec": 45,
         })
+        # MCP children do not inherit arbitrary environment variables. Pass
+        # vault/settings *paths*, never secret values in native -c arguments.
+        from .native_profiles import state_path
+        settings["mcp_servers.smara_readers.env.SMARA_DESKTOP_STATE"] = str(state_path().resolve())
+        if os.getenv("SMARA_DESKTOP_CREDENTIALS"):
+            settings["mcp_servers.smara_readers.env.SMARA_DESKTOP_CREDENTIALS"] = str(Path(os.environ["SMARA_DESKTOP_CREDENTIALS"]).resolve())
     if browser_origins:
         from .native_browser import configured_origins, TOOLS as browser_tools
         configured_origins(browser_origins)
@@ -155,7 +161,7 @@ def print_smara_help() -> None:
     print("  smara --smara-browser-origin URL   Opt in to an exact public DOM-browser origin (repeatable)")
     print("  smara schedule --help              Manage paused-by-default, bounded read-only jobs")
     print("  smara tools-serve --workspace DIR  Serve read-only MCP primitives on stdio")
-    print("  smara legacy [args]                Explicit old-engine access (not in portable CLI)")
+    print("  smara settings                    Show native project/model/search setup (no secret values)")
     print("\nThis fork uses its own source-built binary, not an installed Codex. Integration")
     print("readers do not provide browser actions. DOM browser actions need explicit origin opt-in")
     print("and native confirmation; personal browser, host computer and company-write automation remain unavailable.")
@@ -233,6 +239,11 @@ def serve_bootstrap(input_stream=None, output_stream=None) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    if args == ["settings"]:
+        from .native_management import bootstrap
+        configure_protocol_stdio(sys.stdin, sys.stdout)
+        print(json.dumps(bootstrap(), ensure_ascii=False, indent=2))
+        return 0
     if args[:1] == ["schedule"]:
         from .native_schedule import main as schedule_main
         try:
@@ -261,11 +272,8 @@ def main(argv: list[str] | None = None) -> int:
     if workers_enabled:
         args.remove("--smara-workers")
     if args and args[0] == "legacy":
-        if getattr(sys, "frozen", False):
-            print("The native portable CLI does not bundle the legacy engine. Use smara-legacy from the Python package for migration tools.", file=sys.stderr)
-            return 1
-        from .cli import main as legacy_main
-        return legacy_main(args[1:])
+        print("The old execution engine is retired. Use native Smara; historical data remains unchanged.", file=sys.stderr)
+        return 1
     if args == ["source-status"]:
         manifest = source_manifest()
         try:

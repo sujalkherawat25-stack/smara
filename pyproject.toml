@@ -37,8 +37,7 @@ browser = ["playwright>=1.55,<2"]
 
 [project.scripts]
 smara = "smara.native_runtime:main"
-smara-legacy = "smara.cli:main"
-smara-desktop = "smara.desktop_executor:main"
+smara-desktop = "smara.native_management:main"
 smara-migrate = "smara.migrations:main"
 
 [tool.hatch.build.targets.wheel]

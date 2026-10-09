@@ -27,6 +27,10 @@ foreach ($smaraPayloadFile in $smaraPayloadFiles) {
     }
 }
 $smaraDesktopTarget = Join-Path $env:LOCALAPPDATA 'Smara Desktop'
+$smaraCliTarget = Join-Path $env:LOCALAPPDATA "Programs\Smara CLI\$smaraVersion"
+if (Get-Process -Name 'smara' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq (Join-Path $smaraCliTarget 'smara.exe') }) {
+    throw 'Close the installed CLI before upgrading; active work is not terminated.'
+}
 if (Get-Process -Name 'smara-desktop' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq (Join-Path $smaraDesktopTarget 'smara-desktop.exe') }) {
     throw 'Close the installed Desktop before upgrading; active work is not terminated.'
 }
@@ -34,14 +38,28 @@ if (Get-Process -Name 'smara-desktop' -ErrorAction SilentlyContinue | Where-Obje
 # The NSIS uninstall step must not be the only copy of those files.
 $smaraBackup = Join-Path $env:LOCALAPPDATA ('Smara-backups\desktop-pre-' + $smaraVersion + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 if (Test-Path -LiteralPath $smaraDesktopTarget) {
+    if ((Get-Item -LiteralPath $smaraDesktopTarget).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'Review Desktop install-directory links before backup or replacement.'
+    }
     if (Get-ChildItem -LiteralPath $smaraDesktopTarget -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) {
         throw 'Review install-directory links before backup; do not copy outside data.'
     }
     New-Item -ItemType Directory -Path (Split-Path $smaraBackup) -Force | Out-Null
     Copy-Item -LiteralPath $smaraDesktopTarget -Destination $smaraBackup -Recurse -Force
 }
+$smaraCliBackup = Join-Path $env:LOCALAPPDATA ('Smara-backups\cli-pre-' + $smaraVersion + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+if (Test-Path -LiteralPath $smaraCliTarget) {
+    if ((Get-Item -LiteralPath $smaraCliTarget).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'Review CLI install-directory links before backup.'
+    }
+    if (Get-ChildItem -LiteralPath $smaraCliTarget -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) {
+        throw 'Review CLI directory links before backup; do not copy outside data.'
+    }
+    New-Item -ItemType Directory -Path (Split-Path $smaraCliBackup) -Force | Out-Null
+    Copy-Item -LiteralPath $smaraCliTarget -Destination $smaraCliBackup -Recurse -Force
+}
 $smaraStateHashes = @{}
-foreach ($smaraStateFile in @('desktop.json', 'desktop-ui.json', 'credentials.json')) {
+foreach ($smaraStateFile in @('desktop.json', 'desktop-ui.json', 'credentials.json', 'native-settings.json')) {
     $smaraStatePath = Join-Path $env:APPDATA "Smara\$smaraStateFile"
     if (Test-Path -LiteralPath $smaraStatePath) {
         $smaraStateHashes[$smaraStatePath] = (Get-FileHash -LiteralPath $smaraStatePath).Hash
@@ -84,17 +102,20 @@ foreach ($smaraStatePath in $smaraStateHashes.Keys) {
         throw 'Existing state changed during installation; review before launching.'
     }
 }
-$smaraCliTarget = Join-Path $env:LOCALAPPDATA "Programs\Smara CLI\$smaraVersion"
 New-Item -ItemType Directory -Path (Join-Path $smaraCliTarget 'native') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $smaraCliSource 'smara.exe') -Destination $smaraCliTarget -Force
 foreach ($smaraPayloadFile in $smaraPayloadFiles) {
     Copy-Item -LiteralPath (Join-Path $smaraCliSource "native\$smaraPayloadFile") -Destination (Join-Path $smaraCliTarget 'native') -Force
 }
 $smaraUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if (-not (($smaraUserPath -split ';') -contains $smaraCliTarget)) {
-    [Environment]::SetEnvironmentVariable('Path', "$smaraCliTarget;$smaraUserPath", 'User')
-}
+$smaraOtherPathEntries = @($smaraUserPath -split ';' | Where-Object {
+    $_ -and -not $_.TrimEnd('\').Equals($smaraCliTarget.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)
+})
+# A pre-existing entry can sit behind an older CLI. Put this tested candidate
+# first without removing unrelated entries or old recoverable installations.
+[Environment]::SetEnvironmentVariable('Path', (@($smaraCliTarget) + $smaraOtherPathEntries) -join ';', 'User')
 Write-Host "Installed Desktop $smaraVersion at $smaraDesktopTarget"
 Write-Host "Installed CLI at $smaraCliTarget. Open a new terminal for its updated PATH."
 Write-Host "Previous Desktop, including its install-directory skills, is preserved at $smaraBackup"
+if (Test-Path -LiteralPath $smaraCliBackup) { Write-Host "Previous same-version CLI is preserved at $smaraCliBackup" }
 Write-Host 'Existing Desktop preferences and protected credentials are unchanged.'

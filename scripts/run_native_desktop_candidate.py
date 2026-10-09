@@ -165,9 +165,9 @@ def main():
     if server:
         # Exercise the same protected-vault IPC as the real Desktop, without
         # reading or changing the user's vault or weakening credential checks.
-        from smara.desktop_executor import _protect_windows
+        from smara.native_profiles import protect
         vault = data / "credentials.json"
-        vault.write_text(json.dumps({"SMARA_OFFLINE_TEST_CREDENTIAL": {"protected": _protect_windows("synthetic-loopback-only")}}), encoding="utf-8")
+        vault.write_text(json.dumps({"SMARA_OFFLINE_TEST_CREDENTIAL": {"protected": protect("synthetic-loopback-only")}}), encoding="utf-8")
         env["SMARA_DESKTOP_CREDENTIALS"] = str(vault)
     binary = (args.binary or root / "apps/desktop/src-tauri/target/debug/smara-desktop.exe").resolve()
     process = subprocess.Popen([str(binary)], env=env,

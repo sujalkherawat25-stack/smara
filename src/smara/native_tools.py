@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections import OrderedDict
-from dataclasses import asdict
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -125,15 +124,14 @@ class NativeTools:
         if name == "current_time":
             return {"utc": datetime.now(timezone.utc).isoformat(), "local": datetime.now().astimezone().isoformat()}
         if name == "web_search":
-            from .research_tools import WebSearchTool
+            from .native_search import web_search
             count = arguments.get("max_results", 5)
             if not 1 <= count <= 8:
                 raise ValueError("max_results must be 1..8")
-            hits = await WebSearchTool(self.client).search(arguments["query"], max_results=count)
-            return {"results": [asdict(hit) for hit in hits], "discovery_only": True}
+            return await web_search(arguments["query"], count, self.client)
         if name == "academic_search":
-            from .research_tools import AcademicSearchTool
-            return {"results": await AcademicSearchTool(self.client).search(arguments["query"]), "discovery_only": True}
+            from .native_search import academic_search
+            return await academic_search(arguments["query"], self.client)
         if name == "fetch_url":
             return await self.fetch(arguments["url"])
         if name == "source_page":
@@ -190,7 +188,9 @@ def serve(workspace, input_stream=None, output_stream=None):
                     result = {"content": [{"type": "text", "text": json.dumps(value, ensure_ascii=False)}], "isError": False}
                 except Exception as exc:
                     # Withhold raw provider responses/credential-bearing URLs.
-                    result = {"content": [{"type": "text", "text": "Tool failed: " + type(exc).__name__}], "isError": True}
+                    from .native_search import SearchError
+                    detail = str(exc) if isinstance(exc, SearchError) else "Tool failed: " + type(exc).__name__ + ". Check tool arguments or choose another public source."
+                    result = {"content": [{"type": "text", "text": detail}], "isError": True}
             else:
                 raise ValueError("Unsupported MCP method")
             reply = {"jsonrpc": "2.0", "id": identifier, "result": result}

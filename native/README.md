@@ -17,8 +17,10 @@ Upstream names inside the code are retained for attribution and maintainability.
 Run `powershell -File scripts/build-smara-native.ps1` from the repository root.
 For a debug acceptance candidate use `-Profile dev`; production packaging always
 uses the release profile. `smara source-status` is offline. New `smara` commands
-delegate to our own compiled Rust binary; `smara legacy ...` is explicit legacy
-access, never an automatic fallback. The Desktop candidate connects directly to
+delegate to our own compiled Rust binary. The primary CLI no longer dispatches
+`legacy`, and its package does not include the old engine. The Desktop compiles
+`src/native_main.rs`, not the archived broad execution bridge, and packages a
+thin native transport/settings companion. The Desktop candidate connects directly to
 the native JSON-RPC thread/turn protocol, rather than converting it into the old
 Python session protocol. Native sessions use a separate `Smara/native-runtime`
 home so neither old Smara history nor this machine's Codex account is overwritten.
@@ -35,7 +37,17 @@ Cargo check alone does not prove OS-level isolation.
 The pre-migration implementation is recoverable on local branch
 `codex/pre-source-migration-20261008` at `343ee23`. Existing untracked files,
 credentials, user documents, conversations, and local databases are not deleted.
-Legacy Python code is retained until native replacement acceptance passes.
+Historical Python source/data is retained for recovery and compatibility tests;
+it is not selectable or bundled as the primary app's execution engine.
+
+The native project registry and selected model/search provider live in
+`Smara/native-settings.json`. Existing `desktop.json`, `desktop-ui.json` and
+DPAPI vault files are read for compatibility, not overwritten during bootstrap.
+Projects have separate native conversation lists; cross-project resume is
+rejected, and project switches reset optional tool/worker/browser choices.
+Secrets are saved through private stdin and DPAPI, never metadata or UI storage.
+Native search uses provider-bound endpoints and readable missing-key/auth/quota
+errors; it does not silently switch a deliberately selected provider.
 
 Only public source is imported. The commercial desktop UI and hosted services
 are not supplied by this repository. Smara's Desktop remains its own UI.

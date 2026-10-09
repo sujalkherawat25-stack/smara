@@ -9,8 +9,11 @@ Codex CLI or a rewritten Python agent loop. See [native/README.md](native/README
 for source attribution, build instructions, acceptance gates, and migration limits.
 
 Build with `scripts/build-smara-native.ps1`; use `smara source-status` to inspect
-the source revision/build availability. The old CLI is explicitly accessible as
-`smara legacy ...` or `smara-legacy ...`. Existing data/credentials are preserved.
+the source revision/build availability. The primary CLI and Desktop now use only
+the native engine; the old CLI dispatch and legacy Desktop panels are retired.
+Existing data/credentials are preserved. `smara settings` shows native project,
+model and search readiness without returning credential values. The Desktop has
+separate local projects and native Models / Tools & credentials settings.
 Do not replace the installed Desktop or publish a release until the broader
 real-provider, worker, recovery and Windows sandbox acceptance gates pass. The
 development CLI can be registered with `python -m pip install --no-deps

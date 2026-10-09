@@ -35,8 +35,7 @@ pub fn native_status() -> Value {
     }
 }
 
-#[tauri::command]
-pub fn native_start(app: AppHandle, workspace: String, profile_id: String, tools_enabled: Option<bool>, workers_enabled: Option<bool>, browser_origins: Option<Vec<String>>) -> Result<Value, String> {
+fn start_session(app: AppHandle, workspace: String, profile_id: String, tools_enabled: Option<bool>, workers_enabled: Option<bool>, browser_origins: Option<Vec<String>>) -> Result<Value, String> {
     let mut lock = session().lock().map_err(|_| "Native session lock failed")?;
     if let Some(running) = lock.as_mut() {
         if running.process.try_wait().map_err(|_| "Cannot inspect native process")?.is_none() {
@@ -47,29 +46,34 @@ pub fn native_start(app: AppHandle, workspace: String, profile_id: String, tools
         *lock = None;
     }
     let native_binary = binary()?;
-    let connection = super::current_connection();
+    let connection = super::current_connection()?;
     let root = super::selected_workspace_dir(&workspace, &connection.allowed_roots)?
         .ok_or("Choose an existing workspace folder")?;
-    let mut matches = super::stored_local_model_profiles().into_iter()
+    let mut matches = super::stored_local_model_profiles()?.into_iter()
         .filter(|profile| profile.id == profile_id).collect::<Vec<_>>();
     if matches.len() != 1 { return Err("Select one unambiguous configured model in Settings".into()); }
     let profile = matches.remove(0);
     let secret = super::resolve_local_secret(&profile.credential_name)?;
     let generation = format!("native-{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default());
     let mut command = super::executor_command(&["--native-app-server".into()]);
-    command.stdin(Stdio::piped()).current_dir(&root);
+    // Metadata requests intentionally discard stderr. The long-lived
+    // transport instead needs its own pipe, drained below without logging
+    // secrets or mistaking stderr for native protocol output.
+    command.stdin(Stdio::piped()).stderr(Stdio::piped()).current_dir(&root);
     let mut process = command.spawn().map_err(|error| format!("Cannot start native transport: {error}"))?;
-    let mut input = process.stdin.take().ok_or("Native transport stdin is missing")?;
+    let pipes = (process.stdin.take(), process.stdout.take(), process.stderr.take());
+    let (Some(mut input), Some(output), Some(errors)) = pipes else {
+        let _ = process.kill(); let _ = process.wait();
+        return Err("Native transport stdio pipes are missing".into());
+    };
     let config = json!({"binary": native_binary, "workspace": root,
         "home": super::app_data_dir().join("native-runtime"), "model": profile.model,
-        "base_url": profile.base_url, "api_key": secret, "auth_header": profile.auth_header,
+        "base_url": profile.base_url, "api_key": secret, "auth_header": profile.auth_header, "context_window": profile.context_window,
         "tools_enabled": tools_enabled.unwrap_or(false), "workers_enabled": workers_enabled.unwrap_or(false), "browser_origins": browser_origins.unwrap_or_default()});
     if writeln!(input, "{config}").and_then(|_| input.flush()).is_err() {
         let _ = process.kill(); let _ = process.wait();
         return Err("Cannot configure native transport".into());
     }
-    let output = process.stdout.take().ok_or("Native transport stdout is missing")?;
-    let errors = process.stderr.take().ok_or("Native transport stderr is missing")?;
     let event_generation = generation.clone();
     std::thread::spawn(move || {
         for line in BufReader::new(output).lines() {
@@ -84,6 +88,13 @@ pub fn native_start(app: AppHandle, workspace: String, profile_id: String, tools
     std::thread::spawn(move || { for _line in BufReader::new(errors).lines() {} });
     *lock = Some(NativeSession { process, input: Some(input), generation: generation.clone() });
     Ok(json!({"generation": generation, "sourceOwned": true}))
+}
+
+#[tauri::command]
+pub async fn native_start(app: AppHandle, workspace: String, profile_id: String, tools_enabled: Option<bool>, workers_enabled: Option<bool>, browser_origins: Option<Vec<String>>) -> Result<Value, String> {
+    // Frozen settings/DPAPI/process startup must not block the GUI thread.
+    tauri::async_runtime::spawn_blocking(move || start_session(app, workspace, profile_id, tools_enabled, workers_enabled, browser_origins))
+        .await.map_err(|_| "Native startup worker failed".to_owned())?
 }
 
 #[tauri::command]
@@ -140,4 +151,15 @@ pub async fn native_stop(generation: String) -> Result<(), String> {
 pub fn stop_current() -> Result<(), String> {
     // Only application exit, not a client RPC, can stop without generation.
     stop_session(None)
+}
+
+pub fn with_disconnected<T>(operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    // Hold the same lock as native_start to close the check/start race.
+    let mut lock = session().lock().map_err(|_| "Native session lock failed")?;
+    if let Some(running) = lock.as_mut() {
+        if running.process.try_wait().map_err(|_| "Cannot inspect native process")?.is_none() {
+            return Err("Disconnect before changing project, model or tool settings".into());
+        }
+    }
+    operation()
 }

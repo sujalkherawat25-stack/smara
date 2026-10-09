@@ -32,7 +32,7 @@
     "resources": ["resources/smara-desktop.exe", "resources/LIVE_WEB_ACCEPTANCE_V5*.json", "resources/native/"],
     "category": "Utility",
     "shortDescription": "A private, approval-first desktop companion for Smara",
-    "longDescription": "Smara Desktop runs Smara's source-owned native agent harness on your PC with your selected model provider, saved sessions, explicit approvals and workspace sandboxing. Public research and local-memory readers are opt-in. Legacy settings and history remain available separately.",
+    "longDescription": "Smara Desktop runs its source-owned native agent harness with your selected model provider, separate local projects, saved sessions, explicit approvals and workspace sandboxing. Native settings manage DPAPI-protected credentials. Public research, local-memory readers, isolated workers and public DOM browsing are opt-in. Historical data remains untouched; old execution engines are not included.",
     "windows": {
       "nsis": {
         "startMenuFolder": "Smara",
