@@ -12,6 +12,8 @@ if (-not $smaraInstaller.StartsWith($smaraBundleRoot + '\', [StringComparison]::
 }
 $smaraCliSource = Join-Path $smaraRoot 'build\native-cli-candidate'
 $smaraDesktopSource = Join-Path $smaraRoot 'apps\desktop\src-tauri\target\release\smara-desktop.exe'
+. (Join-Path $PSScriptRoot 'smara-install-validation.ps1')
+$smaraDesktopExpectedHash = Get-SmaraNsisPayloadHash -Path $smaraDesktopSource
 if ((Get-Item -LiteralPath $smaraDesktopSource).VersionInfo.FileVersion -ne $smaraVersion) {
     throw 'Desktop binary version does not match release/VERSION.'
 }
@@ -50,8 +52,18 @@ if (-not $smaraInstallProcess.WaitForExit(60000)) {
     throw 'Installer outcome is unknown after 60 seconds; inspect it before retrying.'
 }
 if ($smaraInstallProcess.ExitCode -ne 0) { throw "Installer failed: $($smaraInstallProcess.ExitCode)" }
-if ((Get-FileHash -LiteralPath (Join-Path $smaraDesktopTarget 'smara-desktop.exe')).Hash -ne (Get-FileHash -LiteralPath $smaraDesktopSource).Hash) {
+if ((Get-FileHash -LiteralPath (Join-Path $smaraDesktopTarget 'smara-desktop.exe')).Hash -ne $smaraDesktopExpectedHash) {
     throw 'Installed Desktop does not match the tested release binary.'
+}
+foreach ($smaraPayloadFile in $smaraPayloadFiles) {
+    if ((Get-FileHash -LiteralPath (Join-Path $smaraDesktopTarget "resources\native\$smaraPayloadFile")).Hash -ne
+        (Get-FileHash -LiteralPath (Join-Path $smaraRoot "native\dist\$smaraPayloadFile")).Hash) {
+        throw "Installed Desktop payload mismatch: $smaraPayloadFile"
+    }
+}
+if ((Get-FileHash -LiteralPath (Join-Path $smaraDesktopTarget 'resources\smara-desktop.exe')).Hash -ne
+    (Get-FileHash -LiteralPath (Join-Path $smaraRoot 'apps\desktop\src-tauri\resources\smara-desktop.exe')).Hash) {
+    throw 'Installed executor does not match the tested frozen executor.'
 }
 $smaraOldSkills = Join-Path $smaraBackup '.smara'
 if (Test-Path -LiteralPath $smaraOldSkills) {

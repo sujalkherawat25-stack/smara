@@ -5,8 +5,8 @@
 The development candidate runs Smara's own copy of the Codex Rust harness with
 Sarvam, not a second Python agent loop or a separately installed Codex. Actual
 coding, parallel execution, saved sessions, research readers and bounded
-read-only scheduling have narrow acceptance evidence. The installed Desktop
-has **not** been replaced, and this is **not** a published production release.
+read-only scheduling have narrow acceptance evidence. Desktop and portable CLI
+**v0.1.9 are installed locally**; this is **not** a published production release.
 
 Branch: `codex/source-runtime-migration`. Upstream pin:
 `14c8b7771ab2b617a131f5d8e55e98d18e56ed09`. The original Apache-2.0 LICENSE,
@@ -15,8 +15,10 @@ No private code/documents or Syntarus memory were uploaded by these probes.
 
 ## Current regression/build gates
 
-- Latest full Smara Python suite: **1,283 passed, two skipped**, 472.23 seconds.
-  Evidence: `build/native-v019-final-full-2026-10-09.xml`.
+- Latest full Smara Python suite: **1,286 passed, two skipped**, 591.23 seconds,
+  including the new installer regressions, after local installation.
+  Evidence: `build/native-v019-installed-final-full-2026-10-09.xml`.
+  The earlier 1,283/2 final-source report remains separately preserved.
   Docker Linux-engine checks now execute instead of skipping. The two remaining
   skips require unavailable Windows symbolic-link privileges, not Docker.
   Separate real Windows directory-junction checks both pass; they complement,
@@ -42,8 +44,10 @@ No private code/documents or Syntarus memory were uploaded by these probes.
 - Copied Rust model-info tests: nine passed in the earlier context-metadata
   check. This is **not** the full upstream Rust suite.
 - `git diff --check` passed for tracked edits. The import and new migration
-  files were committed locally as `83fee68`; no push, installer cutover or public
-  release has occurred at this point. Package/install results must be added below.
+  files were committed as `83fee68`. Verified package/security follow-up `c46716f`
+  was pushed normally and atomically to `origin/main` and
+  `origin/codex/source-runtime-migration`; both remote heads were read back.
+  No public release or tag was created. Install outcomes are recorded below.
 
 ## v0.1.9 package/install follow-up
 
@@ -61,11 +65,11 @@ The first release build failed with Windows metadata-mapping errors under high
 compiler concurrency. With build jobs bounded (default two), the optimized
 native release build passed in **91 minutes 13 seconds**. `smara-native.exe`
 is 336,086,528 bytes; the two required Windows helpers are also release-built.
-Desktop packaging passed; installed-path gates remain pending. No debug binary
+Desktop packaging and installed-path protocol/CLI gates passed. No debug binary
 is represented as a verified release build. The maintained installer verifies matching native
 payload hashes, backs up old install-directory data, checks that preferences and
 protected credentials are unchanged, and installs a versioned portable CLI.
-Actual install/push outcomes must be recorded after they happen.
+Actual install/push outcomes are recorded below.
 The final frozen CLI wrapper (still with the debug native payload at this
 checkpoint) passed all eight checks, including Unicode memory and public RFC
 fetching: `build/native-cli-wrapper-final-source-2026-10-09.json`. The final
@@ -124,6 +128,48 @@ Frozen executor SHA-256:
 CLI wrapper SHA-256:
 `afa3877f2ad726da5a61999fcbb356426c7cb1b25e171386930200f14069b01a`.
 These hashes identify the measured local candidate, not a public signed release.
+
+### Installed candidate and remaining visual gate
+
+- Desktop v0.1.9 installed at `%LOCALAPPDATA%\Smara Desktop`; CLI installed at
+  `%LOCALAPPDATA%\Programs\Smara CLI\0.1.9`. New CLI directory is first on user
+  PATH; restart the terminal to use it. Old Python-installed CLI remains intact.
+- First installer verification stopped after NSIS wrote the new Desktop: the
+  installed GUI differs from Cargo's restored executable by exactly three bytes,
+  the upstream Tauri marker `__TAURI_BUNDLE_TYPE_VAR_UNK` → `..._NSS`. The checker
+  now computes only that exact expected patch and requires an exact SHA-256
+  match; no arbitrary differences are allowed. Three new regression cases pass,
+  covering marker identity/tampering and missing/duplicate markers. The actual
+  installed binary matches this derived expected hash:
+  `623b12da301f0ddfd18ac81a00181234d843d9ff5559a7cc448a15aba03192b0`.
+- Installation rerun succeeded. Installed native/helper/license/provenance and
+  frozen-executor hashes match the tested source payloads. Existing install-folder
+  skills were restored/hash-checked; Desktop preferences and protected credentials
+  were unchanged. The original **v0.1.8** backup remains at
+  `%LOCALAPPDATA%\Smara-backups\desktop-pre-0.1.9-20261009-112823`;
+  the retry's v0.1.9 backup is separate (`...-113353`).
+- Actual installed CLI passed all eight checks with public RFC fetching:
+  `build/native-cli-installed-v019-2026-10-09.json`.
+- Actual installed frozen executor/runtime passed Unicode, native patch, denied
+  command, history resume/list/shutdown checks with four scripted local requests:
+  `build/native-protocol-installed-v019-2026-10-09.json`. Zero paid requests.
+- **Installed GUI visual Send/Stop/resume is incomplete.** The Windows helper
+  repeatedly failed with `foreground window did not report a process id`,
+  including after the user brought the app forward. No UI clicks were issued.
+  The isolated offline fixture received zero requests and recorded zero native
+  turns. Its failed/not-exercised report is retained as
+  `build/native-desktop-installed-offline/stop-report.json`; it is not rewritten
+  as a pass. Only the owned isolated GUI process was closed; the normal installed
+  app was then reopened without the test fixture. This is a helper/environment
+  limitation, not evidence that installed GUI cancellation passed or failed.
+- Final full-suite rerun including the new installer regressions passed:
+  **1,286 passed, two Windows symbolic-link-privilege skips**, 591.23 seconds.
+  Docker tests executed; no original failures or blocked visual report were
+  deleted or converted into passes.
+
+The earlier debug-GUI checks below remain historical evidence, not a substitute
+for the blocked installed-release visual gate. Human security-control testing,
+broader sandbox/worker/browser/research gates and a public release remain separate.
 
 ## Actual Desktop checks
 
@@ -203,11 +249,12 @@ denied command not executed, native tool results/history, resume/list/graceful
 shutdown passed with four scripted provider requests. This is not paid-model
 quality or general OS sandbox certification.
 
-## Packaging candidates
+## Earlier packaging candidates (historical, not the installed release payload)
 
 - Rebuilt portable wrapper: `build/native-cli-candidate/smara.exe`,
   **22,271,545 bytes**. Adjacent debug native/helper binaries add roughly 412 MB;
-  **the entire package is not 22 MB**. Release-profile slimming remains.
+  **the entire package is not 22 MB**. These are the earlier debug-payload sizes;
+  the installed candidate uses the release payload measured above.
 - Native offline help now documents readers, schedules, provenance and explicit
   legacy access without reading model profiles or triggering inference.
 - Rebuilt frozen CLI passed source ownership, provenance, Unicode memory,
@@ -222,8 +269,9 @@ quality or general OS sandbox certification.
   selects Smara's own native binary. The wheel does **not** bundle Rust binaries
   or prove a fresh machine can install all dependencies offline.
 - Desktop production frontend, frozen executor, optimized native/helpers and
-  release-profile NSIS installer rebuilt and checked as recorded above. Install
-  and push outcomes are pending at this checkpoint; no public release or tag.
+  release-profile NSIS installer rebuilt and checked as recorded above. Desktop
+  and CLI installed, source pushed; installed visual gate remains incomplete.
+  No public release or tag.
 
 ## Remaining sequence — do not call the migration finished
 
@@ -241,9 +289,9 @@ quality or general OS sandbox certification.
 4. Broader real-model research/coding, long-history/output, provider capability
    and maintained quality evaluations. Configured context metadata is not proof
    that million-token workloads succeeded.
-5. Release-profile binaries plus Windows helpers, Desktop installer and install
-   acceptance, then authorized commit/push/release. Existing history/credentials
-   must stay intact. Company operations require separately approved scopes and
+5. Complete the installed-release visual gate before a broader public release.
+   Source push, release-profile binaries/helpers and local install/protocol gates
+   are done. Existing history/credentials remain intact. Company operations require separately approved scopes and
    outcome/idempotency gates; do not enable them as part of this cutover.
 
 ## Reproduce bounded/offline gates
@@ -258,7 +306,8 @@ python -m scripts.run_packaged_cli_acceptance --live-fetch
 python -m scripts.run_native_wheel_acceptance
 ```
 
-Use the repository virtualenv. GUI checks need the frontend dev server at port
-1420; public-fetch acceptance uses the public internet but no paid model. Real
+Use the repository virtualenv. Debug GUI checks need the frontend dev server at
+port 1420; an explicit installed `--binary` needs no dev server. Public-fetch
+acceptance uses the public internet but no paid model. Real
 provider runners require explicit scope/budget approval. Failed original reports
 should remain visible alongside any recheck.
