@@ -34,6 +34,19 @@ def tool(payload, suffix):
     return matches[0]["name"]
 
 
+def remaining_worker_targets(payload, children):
+    """Do not wait again on an already completed first finisher."""
+    observed = set()
+    for message in payload["messages"]:
+        if message["role"] != "tool":
+            continue
+        result = json.loads(message["content"])
+        if isinstance(result.get("status"), dict):
+            observed.update(identifier for identifier, status in result["status"].items()
+                            if isinstance(status, dict) and "completed" in status)
+    return [child["agent_id"] for child in children if child["agent_id"] not in observed]
+
+
 def main():
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
@@ -97,13 +110,20 @@ def main():
                     calls = [(tool(payload, "wait_agent"), {"targets": [result["agent_id"] for result in results], "timeout_ms": 60000})]
                 elif label == "parent" and position == 3:
                     # First-completion wait need not deliver both workers.
-                    calls = [(tool(payload, "wait_agent"), {"targets": [result["agent_id"] for result in child_paths.values()], "timeout_ms": 60000})]
+                    remaining = remaining_worker_targets(payload, child_paths.values())
+                    calls = [(tool(payload, "wait_agent"), {"targets": remaining or [result["agent_id"] for result in child_paths.values()], "timeout_ms": 60000})]
                 elif label == "parent" and position == 5:
                     calls = [(tool(payload, "resume_agent"), {"id": result["agent_id"]}) for result in child_paths.values()]
                 elif label == "parent" and position == 6:
                     calls = [(tool(payload, "send_input"), {"target": result["agent_id"], "message": f"OFFLINE WORKER {name}: cold resume; verify existing checkout only, no patch replay"}) for name, result in child_paths.items()]
-                elif label == "parent" and position in (7, 8):
+                elif label == "parent" and position == 7:
                     calls = [(tool(payload, "wait_agent"), {"targets": [result["agent_id"] for result in child_paths.values()], "timeout_ms": 60000})]
+                elif label == "parent" and position == 8:
+                    # Only this new turn's wait result counts; earlier worker
+                    # completions belong to the pre-restart turn.
+                    latest_wait = next(message for message in reversed(payload["messages"]) if message["role"] == "tool")
+                    remaining = remaining_worker_targets({"messages": [latest_wait]}, child_paths.values())
+                    calls = [(tool(payload, "wait_agent"), {"targets": remaining or [result["agent_id"] for result in child_paths.values()], "timeout_ms": 60000})]
                 else:
                     results = [text(message["content"]) for message in payload["messages"] if message["role"] == "tool"]
                     if label != "parent" and position in (3, 5) and not any("OUTSIDE_WRITE_BLOCKED" in result and f"fixed-{label}" in result for result in results):

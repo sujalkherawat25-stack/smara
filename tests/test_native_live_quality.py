@@ -147,3 +147,17 @@ def test_test_client_grants_only_declared_public_read_scope(tool, args, allowed)
 def test_unexpected_escalations_are_denied():
     assert scoped_decision({"method": "item/commandExecution/requestApproval"}) == {"decision": "decline"}
     assert scoped_decision({"method": "item/permissions/requestApproval"})["permissions"] == {}
+
+
+@pytest.mark.parametrize("second_status", [None, {"completed": "finished"}, "running", {"errored": "failed"}])
+def test_offline_worker_wait_does_not_repeat_first_finisher(second_status):
+    import json
+    from scripts.run_native_isolated_workers_acceptance import remaining_worker_targets
+
+    statuses = {"first": {"completed": "finished"}}
+    if second_status is not None:
+        statuses["second"] = second_status
+    payload = {"messages": [{"role": "user", "content": "fixture"},
+                            {"role": "tool", "content": json.dumps({"agent_id": "first"})},
+                            {"role": "tool", "content": json.dumps({"status": statuses, "timed_out": False})}]}
+    assert remaining_worker_targets(payload, [{"agent_id": "first"}, {"agent_id": "second"}]) == ([] if isinstance(second_status, dict) and "completed" in second_status else ["second"])

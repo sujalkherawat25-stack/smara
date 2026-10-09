@@ -45,6 +45,8 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
     if not workspace.is_dir():
         raise ValueError("Workspace must be an existing directory")
     home.mkdir(parents=True, exist_ok=True)
+    tool_args = (["--native-tools"] if getattr(sys, "frozen", False) else ["-m", "smara.native_tools"])
+    tool_args += ["--workspace", str(workspace.resolve())]
     settings = {
         "model_provider": "smara_chat_adapter",
         "model": adapter.endpoint.model,
@@ -66,6 +68,9 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         "features.apps": False,
         # Even disabled MCP entries are transport-validated by the native core.
         # Keep a valid, inert local transport; never inherit an ambient enable.
+        "mcp_servers.smara_readers.enabled": False,
+        "mcp_servers.smara_readers.command": sys.executable,
+        "mcp_servers.smara_readers.args": tool_args,
         "mcp_servers.smara_browser.enabled": False,
         "mcp_servers.smara_browser.command": sys.executable,
         "mcp_servers.smara_browser.args": (["--native-browser"] if getattr(sys, "frozen", False) else ["-m", "smara.native_browser"]),
@@ -76,11 +81,8 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         settings["model_context_window"] = adapter.endpoint.effective_context_window
         settings["model_auto_compact_token_limit"] = int(adapter.endpoint.effective_context_window * .8)
     if tools_enabled:
-        tool_args = (["--native-tools"] if getattr(sys, "frozen", False) else ["-m", "smara.native_tools"])
-        tool_args += ["--workspace", str(workspace.resolve())]
         settings.update({
-            "mcp_servers.smara_readers.command": sys.executable,
-            "mcp_servers.smara_readers.args": tool_args,
+            "mcp_servers.smara_readers.enabled": True,
             "mcp_servers.smara_readers.env.PYTHONIOENCODING": "utf-8",
             "mcp_servers.smara_readers.env.PYTHONUTF8": "1",
             "mcp_servers.smara_readers.required": True,
@@ -107,7 +109,9 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         })
         for entry in browser_tools:
             settings[f'mcp_servers.smara_browser.tools.{entry["name"]}.approval_mode'] = "prompt"
-    argv = [part for key, value in settings.items() for part in ("-c", key + "=" + json.dumps(value))]
+    # TOML rejects JSON's surrogate-pair escapes for non-BMP characters. Keep
+    # Unicode literal so emoji/non-Latin workspace paths survive native parsing.
+    argv = [part for key, value in settings.items() for part in ("-c", key + "=" + json.dumps(value, ensure_ascii=False))]
     environment = dict(os.environ)
     environment["CODEX_HOME"] = str(home.resolve())
     environment["SMARA_NATIVE_WIRE_TOKEN"] = adapter.token

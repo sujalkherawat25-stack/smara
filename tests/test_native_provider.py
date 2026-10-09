@@ -167,14 +167,35 @@ def test_provider_context_metadata_is_explicit_not_gpt_fallback():
         ChatEndpoint("http://127.0.0.1", "custom", "", context_window=True)
 
 
-def test_reader_launch_is_opt_in_and_has_valid_toml_overrides(tmp_path):
+@pytest.mark.parametrize("frozen", [False, True])
+@pytest.mark.parametrize("saved_enabled", [False, True])
+def test_reader_launch_is_opt_in_and_has_valid_toml_overrides(tmp_path, monkeypatch, frozen, saved_enabled):
+    import sys
+    import tomllib
+
+    monkeypatch.setattr(sys, "frozen", frozen, raising=False)
+    workspace = tmp_path / "workspace स्मारा 😀"
+    workspace.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    saved = home / "config.toml"
+    saved.write_text('[mcp_servers.smara_readers]\nenabled = ' + str(saved_enabled).lower() + '\ncommand = "saved-transport"\n', encoding="utf-8")
+    original = saved.read_bytes()
     adapter = ResponsesAdapter(ChatEndpoint("http://127.0.0.1", "custom", ""))
     try:
-        off, _ = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path)
-        assert not any("mcp_servers.smara_readers" in option for option in off)
-        on, _ = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path, tools_enabled=True)
+        off, _ = launch_options(adapter, home=home, workspace=workspace)
+        on, _ = launch_options(adapter, home=home, workspace=workspace, tools_enabled=True)
+        expected_args = (["--native-tools"] if frozen else ["-m", "smara.native_tools"]) + ["--workspace", str(workspace.resolve())]
+        for options, enabled in ((off, False), (on, True)):
+            overrides = tomllib.loads("\n".join(options[1::2]))["mcp_servers"]["smara_readers"]
+            assert overrides["enabled"] is enabled
+            assert overrides["command"] == sys.executable
+            assert overrides["args"] == expected_args
+        assert 'mcp_servers.smara_readers.enabled=false' in off
+        assert 'mcp_servers.smara_readers.enabled=true' in on
         assert 'mcp_servers.smara_readers.env.PYTHONIOENCODING="utf-8"' in on
         assert "features.plugins=false" in on
+        assert saved.read_bytes() == original
     finally:
         adapter.server.server_close()
         adapter.client.close()

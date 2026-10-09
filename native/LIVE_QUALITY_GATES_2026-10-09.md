@@ -1,5 +1,9 @@
 # Follow-up: real workers, Desktop visual checks and frozen browser
 
+For the newer optimized payload and package follow-up, see
+[`PACKAGE_GATES_2026-10-10.md`](PACKAGE_GATES_2026-10-10.md). Results below retain
+their original tested scope and date.
+
 ## What passed
 
 The real Sarvam GLM 5.3 parent delegated two **fresh isolated coding workers**

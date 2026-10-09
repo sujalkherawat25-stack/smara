@@ -12,6 +12,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import threading
+import tomllib
 
 from smara.native_provider import ChatEndpoint, ResponsesAdapter
 from scripts.native_session import NativeSession
@@ -66,7 +67,28 @@ def main():
             workspace.mkdir()
             home = Path(temporary) / "home"
             home.mkdir()
-            (home / "config.toml").write_text('[mcp_servers.smara_readers]\ndefault_tools_approval_mode = "prompt"\n', encoding="utf-8")
+            saved_config = home / "config.toml"
+            saved_config.write_text('[mcp_servers.smara_readers]\nenabled = true\ncommand = "unused-saved-reader-transport"\ndefault_tools_approval_mode = "prompt"\n', encoding="utf-8")
+            original_config = saved_config.read_bytes()
+            # The real native configuration loader must honor the current
+            # opt-out, not an enabled entry retained from an earlier launch.
+            with ResponsesAdapter(ChatEndpoint(f"http://127.0.0.1:{provider.server_port}/v1", "offline-mcp-protocol", "")) as adapter:
+                session = NativeSession(adapter, workspace, home, tools_enabled=False, timeout=60)
+                try:
+                    session.initialize()
+                    effective = session.rpc("config/read", {"includeLayers": False})["config"]["mcp_servers"]["smara_readers"]
+                    thread = session.rpc("thread/start", {"cwd": str(workspace), "approvalPolicy": "on-request", "sandbox": "workspace-write"})["thread"]["id"]
+                    inventory = session.rpc("mcpServerStatus/list", {"threadId": thread})["data"]
+                    readers_disabled = effective["enabled"] is False and not any(server["name"] == "smara_readers" and server.get("tools") for server in inventory)
+                    saved_readers_unchanged = tomllib.loads(saved_config.read_text(encoding="utf-8"))["mcp_servers"]["smara_readers"] == tomllib.loads(original_config.decode("utf-8"))["mcp_servers"]["smara_readers"]
+                    report["reader_opt_out_observation"] = {"config_read_enabled": effective["enabled"], "inventory": [{"name": server["name"], "tool_count": len(server.get("tools", {}))} for server in inventory], "saved_config_bytes_unchanged": saved_config.read_bytes() == original_config, "saved_reader_settings_unchanged": saved_readers_unchanged}
+                    assert readers_disabled and saved_readers_unchanged and not requests, "Saved readers opt-in leaked into an opted-out launch"
+                finally:
+                    session.close()
+                    session = None
+            # Conversely, the explicit current opt-in must override a saved
+            # disabled entry while preserving its per-tool approval policy.
+            saved_config.write_text('[mcp_servers.smara_readers]\nenabled = false\ndefault_tools_approval_mode = "prompt"\n', encoding="utf-8")
 
             def decide(message):
                 assert message["method"] == "mcpServer/elicitation/request", "Unexpected authorization type"
@@ -107,7 +129,9 @@ def main():
                     local = datetime.fromisoformat(clock["local"])
                     replay = json.loads(results[1])
                     replayed_clock = any(part.get("text") == json.dumps(clock, ensure_ascii=False) for part in replay)
-                    checks = {"three_native_confirmations": len(approvals) == 3,
+                    checks = {"saved_reader_opt_in_did_not_override_current_opt_out": readers_disabled,
+                              "explicit_reader_opt_in_overrode_saved_disabled_entry": len(items) == 3,
+                              "three_native_confirmations": len(approvals) == 3,
                               "denial_did_not_execute_clock": len(items) == 3 and all(items[index].get("status") == "failed" and not items[index].get("result") for index in (0, 2)),
                               "allowed_clock_returned_actual_time": items[1].get("status") == "completed" and utc.utcoffset().total_seconds() == 0 and abs((datetime.now(timezone.utc) - utc).total_seconds()) < 60 and abs((local - utc).total_seconds()) < 1,
                               "actual_clock_replayed_to_model": replayed_clock,
