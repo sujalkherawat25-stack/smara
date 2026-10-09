@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.run_native_desktop_candidate import candidate_directory, clock_fixture_response
+from scripts.run_native_desktop_candidate import candidate_directory, clock_fixture_response, denied_clock_item
 from scripts.run_native_live_workers_browser import BudgetClient, PUBLIC_URL, browser_prompt, coding_prompt, scoped_decision, complete_ledger_usage
 
 
@@ -28,6 +28,16 @@ def test_offline_clock_fixture_requests_only_clock_and_never_grants_it():
         clock_fixture_response(request, 3)
     assert clock_fixture_response({"messages": [{"role": "tool", "content": "user rejected MCP tool call"}]}, 2)[2]
     assert not clock_fixture_response({"messages": [{"role": "tool", "content": '{"utc":"actual time"}'}]}, 2)[2]
+
+
+@pytest.mark.parametrize("change", [{}, {"type": "mcp_tool_call_end"}, {"server": "other"},
+                                  {"arguments": {"extra": True}}, {"status": "completed"},
+                                  {"result": {"content": []}}, {"error": {"message": "transport error"}}])
+def test_clock_deny_requires_actual_durable_rejection(change):
+    item = {"type": "McpToolCall", "server": "smara_readers", "tool": "current_time", "arguments": {},
+            "status": "failed", "error": {"message": "user rejected MCP tool call"}}
+    item.update(change)
+    assert denied_clock_item(item) == (not change)
 
 
 def test_budget_is_shared_and_enforced_before_outbound_calls():

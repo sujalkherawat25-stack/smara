@@ -24,14 +24,14 @@ fixture-cache cleanup were denied; the workers completed without those grants.
 | Real-model public DOM browser | Passed all 8 checks in 3 requests; answer independently reviewed against the retrieved primary documentation | `native-live-workers-browser-20261009-browser.json`, browser section |
 | First real run | Retained interrupted/failed result, not relabeled a pass | `native-live-workers-browser-20261009-attempt1.json` |
 | Full Python regression | 1,312 passed, 2 skipped, 561.51 seconds | `native-next-full-20261009.xml` |
-| Latest acceptance-runner tests | 17 passed, including the offline clock fixture's request-only/no-grant guard | `tests/test_native_live_quality.py`; separately rerun after full-suite collection |
-| Final focused native regression | 90 passed, 1 Windows symlink-privilege skip, 12.92 seconds | `native-all-followup-20261009.xml` |
+| Latest acceptance-runner tests | 24 passed, including the offline clock request-only/no-grant guard and exact durable denial validation | `tests/test_native_live_quality.py`; separately rerun after full-suite collection |
+| Latest focused native regression | 97 passed, 1 Windows symlink-privilege skip, 15.85 seconds | `native-durable-clock-all-20261009.xml`; earlier 90-test result also retained |
 | Desktop source unit tests/build | 25 passed; production TypeScript/Vite build passed | `npm test`, `npm run build` |
 | Source native Desktop debug build | Passed, locked/offline | `apps/desktop/src-tauri/target/debug/smara-desktop.exe` |
 | Installed v0.1.9 visual protocol check | Send, active streaming, Stop, Disconnect, reconnect and same-thread resume passed | `native-desktop-installed-offline-f12ffd7e1ea1422e9af1cf8557f74107/stop-report.json` |
 | New source UI visual protocol check | Same checks passed; new opt-ins visible and left off | `native-desktop-offline-17ec47fec1a146dea0434c2c70c7a488/stop-report.json` |
 | Frozen CLI browser/driver | All 6 checks passed; actual page, grounding, cached paging, owned close | `frozen-browser-check-0812c1aa41594b29a86bfec11efb156a/report.json` |
-| Final secret pattern gate | Zero unclassified findings/skips; 153 reviewed public/synthetic matches, 11,836 reachable blobs and 11,594 workspace files considered | `secret-audit-live-quality-human-final-20261009.json` |
+| Latest pre-push secret pattern gate | Zero unclassified findings/skips; 153 reviewed public/synthetic matches, 11,843 reachable blobs and 11,594 workspace files considered | `secret-audit-clock-ledger-fix-pre-push-20261009.json` |
 
 Computer Use capture recovered after explicitly activating the selected Smara
 window. These were actual Windows app interactions, not a DOM-only substitute.
@@ -103,6 +103,8 @@ was not needed or used; the tighter INR 300 ceiling remained in force.
 3. The user has now authorized committing/pushing this verified runner and
    documentation batch, plus building and installing after the remaining gates.
    Authorization is not a claim that the human Deny check or installation passed.
+   Source batch `2778dec` was pushed atomically to both `origin/main` and
+   `origin/codex/source-runtime-migration`; both GitHub secret-audit jobs passed.
 4. Next feature work remains vision-capable disposable computer use, then native
    claim/source review and paused-by-default research refresh outcomes. No
    personal-login browsing, host automation or company-write autonomy is implied.
@@ -139,3 +141,8 @@ report is preserved under
 `native-desktop-offline-38c39aac80374d909b085998dd8ade3f/clock-deny-report.json`.
 It is **not** evidence of a human Deny pass. A new packaged-candidate fixture
 will be used for the outstanding human check.
+Before that rerun, the fixture ledger reader was corrected to inspect the
+persisted `item_completed` / `McpToolCall` item, rather than a live transport
+notification that native rollouts do not store. It requires the exact rejected
+clock scope, failed status, no result and native rejection error; other failures
+do not count as a Deny. Failed fixture checks now also return a nonzero exit code.

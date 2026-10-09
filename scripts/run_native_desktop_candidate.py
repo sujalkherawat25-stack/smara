@@ -36,6 +36,14 @@ def clock_fixture_response(request, position):
     raise ValueError("Offline clock fixture allows only two local requests")
 
 
+def denied_clock_item(item):
+    """Read the durable native item, not an unpersisted transport notification."""
+    return (item.get("type") == "McpToolCall" and item.get("server") == "smara_readers"
+            and item.get("tool") == "current_time" and item.get("arguments") == {}
+            and item.get("status") == "failed" and item.get("result") is None
+            and item.get("error") == {"message": "user rejected MCP tool call"})
+
+
 def offline_provider(clock=False):
     """Declared stream fixture, not a model/answer or tool-result substitute."""
     counters = {"requests": 0, "completed_streams": 0, "closed_streams": 0,
@@ -185,8 +193,8 @@ def main():
                     payload = record.get("payload", {})
                     if record.get("type") == "event_msg" and payload.get("type") in {"task_started", "task_complete", "turn_aborted"}:
                         events.append({"type": payload["type"], "turn_id": payload.get("turn_id"), "reason": payload.get("reason")})
-                    if args.offline_clock_deny and record.get("type") == "event_msg" and payload.get("type") == "mcp_tool_call_end":
-                        clock_calls.append({"invocation": payload.get("invocation"), "result": payload.get("result")})
+                    if args.offline_clock_deny and record.get("type") == "event_msg" and payload.get("type") == "item_completed" and payload.get("item", {}).get("type") == "McpToolCall":
+                        clock_calls.append(payload["item"])
             checks = {"one_local_request": counters["requests"] == 1,
                       "stream_closed_before_completion": counters["closed_streams"] == 1 and counters["completed_streams"] == 0,
                       "one_native_turn": sum(event["type"] == "task_started" for event in events) == 1,
@@ -195,7 +203,7 @@ def main():
             if args.offline_clock_deny:
                 checks = {"two_local_requests": counters["requests"] == counters["completed_streams"] == 2,
                           "no_fixture_errors": counters["fixture_errors"] == 0,
-                          "native_clock_denied": len(clock_calls) == 1 and clock_calls[0]["invocation"] == {"server": "smara_readers", "tool": "current_time", "arguments": {}} and clock_calls[0]["result"] == {"Err": "user rejected MCP tool call"},
+                          "native_clock_denied": len(clock_calls) == 1 and denied_clock_item(clock_calls[0]),
                           "rejection_reached_provider": counters["clock_rejection_observed"],
                           "one_completed_native_turn": [entry["type"] for entry in events] == ["task_started", "task_complete"]}
             report = {"status": "passed" if all(checks.values()) else "failed", "scope": "offline clock/native denial, human GUI action separately verified" if args.offline_clock_deny else "offline stream/native-ledger cancellation, not real-model quality",
@@ -204,7 +212,8 @@ def main():
             report_name = "clock-deny-report.json" if args.offline_clock_deny else "stop-report.json"
             (candidate / report_name).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
             print(json.dumps(report), flush=True)
+        return 0 if report["status"] == "passed" else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
