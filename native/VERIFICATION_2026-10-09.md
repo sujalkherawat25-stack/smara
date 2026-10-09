@@ -42,7 +42,7 @@ No private code/documents or Syntarus memory were uploaded by these probes.
 - Copied Rust model-info tests: nine passed in the earlier context-metadata
   check. This is **not** the full upstream Rust suite.
 - `git diff --check` passed for tracked edits. The import and new migration
-  files are ready for a local source commit; no push, installer cutover or public
+  files were committed locally as `83fee68`; no push, installer cutover or public
   release has occurred at this point. Package/install results must be added below.
 
 ## v0.1.9 package/install follow-up
@@ -51,23 +51,79 @@ The user explicitly authorized remaining tests, push and a local candidate
 install. Package metadata is aligned at **0.1.9**, distinguishing the migration
 from installed 0.1.8. Native upstream development `--version` is not fabricated.
 
-All **9,064 public imported source files** are staged, including the Rust
+All **9,064 public imported source files** are committed, including the Rust
 `secrets` crate accidentally excluded by the repository's generic ignore rule
 and three upstream editor files. No build targets, binaries, credentials, user
-history, personal CSVs or unrelated reports are staged. Original source notices
+history, personal CSVs or unrelated reports were committed. Original source notices
 are preserved. This is still not the complete upstream Rust test suite.
 
 The first release build failed with Windows metadata-mapping errors under high
-compiler concurrency. Build jobs are now bounded (default two); release/package
-and installed-path gates are still running. No debug binary will be represented
-as a verified release build. The maintained installer verifies matching native
+compiler concurrency. With build jobs bounded (default two), the optimized
+native release build passed in **91 minutes 13 seconds**. `smara-native.exe`
+is 336,086,528 bytes; the two required Windows helpers are also release-built.
+Desktop packaging passed; installed-path gates remain pending. No debug binary
+is represented as a verified release build. The maintained installer verifies matching native
 payload hashes, backs up old install-directory data, checks that preferences and
 protected credentials are unchanged, and installs a versioned portable CLI.
 Actual install/push outcomes must be recorded after they happen.
+The final frozen CLI wrapper (still with the debug native payload at this
+checkpoint) passed all eight checks, including Unicode memory and public RFC
+fetching: `build/native-cli-wrapper-final-source-2026-10-09.json`. The final
+source bootstrap also passed native patch/command-denial/Unicode/session/shutdown
+checks with four scripted local provider requests:
+`build/native-protocol-final-source-2026-10-09.json`. Neither checkpoint is the
+pending release-payload or installed-path gate; both used zero paid requests.
 Only the validated generated `vendor/codex/codex-rs/target/debug/incremental`
 cache (23,072,420,278 bytes) was removed for build disk pressure. Cargo can
 regenerate it; source, debug binaries, release artifacts and user/Docker data
 were retained.
+
+### Release-payload acceptance
+
+- Frozen CLI with the actual release payload: all eight checks passed, including
+  Unicode memory, public RFC fetching and no legacy loop.
+  `build/native-cli-release-gate-2026-10-09.json`.
+- Newly frozen Desktop executor plus release payload: native patch, denied
+  command not executed, Unicode workspace/stream, history resume, listing and
+  graceful shutdown passed with four scripted requests.
+  `build/native-protocol-release-package-2026-10-09.json`.
+- Native MCP deny/allow-once/deny: all six checks passed, six scripted requests,
+  real local clock, no persistent grant, no GUI security-control clicks.
+  `build/native-mcp-release-gate-2026-10-09.json`.
+- Windows unelevated write-boundary probe passed: selected workspace write
+  succeeded and sibling-folder write was denied. No elevated setup, and not a
+  certification of network or all path escapes.
+- Native Stop and crash recovery both passed, including prevention of an actual
+  delayed terminal-child write and no replay/false completion after resume.
+  `build/native-recovery-release-gate-2026-10-09.json`.
+- Bounded **real Sarvam GLM 5.3** release-runtime transport check passed:
+  `17 × 23 = 391`; one request, 9,048 input tokens and 17 output tokens reported
+  by the native engine. This is synthetic arithmetic/transport, not coding or
+  deep-research quality certification. No private files or memory sent.
+
+Packaging found a high-severity transitive `source-map-js` advisory. Only its
+compatible lockfile entry was updated from 1.2.1 to patched 1.2.2; no forced
+major dependency upgrades. The refreshed lockfile audit reports zero advisories.
+An incremental install reported the patched tree while its physical package
+still reported 1.2.1. A clean `npm ci --ignore-scripts` fixed that mismatch:
+physical version 1.2.2, **22 frontend tests passed**, production build passed,
+and actual clean-tree audit reports zero advisories. Every generated frontend
+asset was hash-compared with the packaged assets and is byte-identical. Thus
+the existing newly built installer carries the same verified UI; the build-only
+source-map dependency itself is not shipped in the Desktop.
+Advisory: [GHSA-68fv-2mgg-jv7q](https://github.com/advisories/GHSA-68fv-2mgg-jv7q).
+
+The release-profile Tauri build and NSIS packaging passed. GUI file version is
+0.1.9. Installer: `apps/desktop/src-tauri/target/release/bundle/nsis/Smara Desktop_0.1.9_x64-setup.exe`,
+178,925,580 bytes, SHA-256
+`e8c159f32d6d8a8dae681ea495136714ffe9b2fcf035ea7dd29f4e89ceddcc98`.
+Native release SHA-256:
+`704df013cd9013cb9e5eb7078d43e21612b5e77d7deaacacfa8af169fa263a1c`.
+Frozen executor SHA-256:
+`439e17980208ff62311c1bf177beec50c10e2433bd8a74d5f37e967a4e8a4562`.
+CLI wrapper SHA-256:
+`afa3877f2ad726da5a61999fcbb356426c7cb1b25e171386930200f14069b01a`.
+These hashes identify the measured local candidate, not a public signed release.
 
 ## Actual Desktop checks
 
@@ -165,8 +221,9 @@ quality or general OS sandbox certification.
 - That wheel smoke **reuses existing interpreter dependencies** and explicitly
   selects Smara's own native binary. The wheel does **not** bundle Rust binaries
   or prove a fresh machine can install all dependencies offline.
-- Desktop production frontend and debug backend rebuilt; no release-profile
-  NSIS candidate, install, commit, tag, push or public release was performed.
+- Desktop production frontend, frozen executor, optimized native/helpers and
+  release-profile NSIS installer rebuilt and checked as recorded above. Install
+  and push outcomes are pending at this checkpoint; no public release or tag.
 
 ## Remaining sequence — do not call the migration finished
 

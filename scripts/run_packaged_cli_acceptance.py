@@ -47,7 +47,7 @@ def main():
         checks["frozen_schedule_cli_loads"] = result.returncode == 0 and json.loads(result.stdout) == []
     result = subprocess.run([str(binary), "legacy", "--help"], capture_output=True, text=True, encoding="utf-8", timeout=30)
     checks["legacy_loop_not_bundled_or_entered"] = result.returncode == 1 and "does not bundle the legacy engine" in result.stderr
-    report = {"status": "passed" if all(checks.values()) else "failed", "binary": str(binary), "checks": checks, "paid_provider_requests": 0, "public_network_fetch": args.live_fetch, "installed_or_published": False}
+    report = {"status": "passed" if all(checks.values()) else "failed", "binary": str(binary), "checks": checks, "paid_provider_requests": 0, "public_network_fetch": args.live_fetch, "runner_installs_or_publishes": False}
     report_name = "native-packaged-cli-live-2026-10-09.json" if args.live_fetch else "native-packaged-cli-2026-10-09.json"
     target = (args.report or root / "build" / report_name).resolve()
     if not target.is_relative_to((root / "build").resolve()):

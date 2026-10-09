@@ -139,7 +139,7 @@ def main():
                       "no_false_native_completion": not any(event["type"] == "task_complete" for event in events)}
             report = {"status": "passed" if all(checks.values()) else "failed", "scope": "offline stream/native-ledger cancellation, not real-model quality",
                       "gui_actions_machine_verified": False, "offline_provider": counters, "native_events": events, "checks": checks,
-                      "paid_requests": 0, "installed_or_published": False}
+                      "paid_requests": 0, "binary": str(binary), "runner_installs_or_publishes": False}
             (candidate / "stop-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
             print(json.dumps(report), flush=True)
 

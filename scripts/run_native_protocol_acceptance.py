@@ -27,8 +27,12 @@ def main() -> int:
     parser.add_argument("--console-entrypoint", action="store_true", help="Launch the installed development smara-desktop console entry point")
     parser.add_argument("--executor", type=Path, help="Test an explicitly selected frozen or installed Desktop executor")
     parser.add_argument("--native-binary", type=Path, help="Test the adjacent release runtime instead of the checkout candidate")
+    parser.add_argument("--report", type=Path, help="Retain package/installed acceptance evidence inside build")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
+    report_path = args.report.resolve() if args.report else None
+    if report_path and not report_path.is_relative_to((root / "build").resolve()):
+        raise ValueError("Keep acceptance reports inside build")
     binary = (args.native_binary or root / "native" / "dist" / "smara-native.exe").resolve()
     if not binary.is_file():
         raise SystemExit("Build the source-native executable before acceptance")
@@ -180,10 +184,13 @@ def main() -> int:
             assert isinstance(listed["data"], list), "Invalid thread listing"
             send({"method": "smara/shutdown"})
             assert process.wait(timeout=55) == 0, "Native shutdown was not graceful"
-            print(json.dumps({"status": "passed", "binary": str(binary), "thread_id": started["thread"]["id"],
+            report = {"status": "passed", "binary": str(binary), "thread_id": started["thread"]["id"],
                 "entrypoint": str(args.executor.resolve()) if args.executor else ("smara-desktop" if args.console_entrypoint else "python-bootstrap"),
                 "handshake": bool(handshake), "checks": checks + ["thread_list", "transport_shutdown"],
-                "scripted_provider_requests": len(provider_requests), "patch_approvals_granted": len(accepted_patch_callbacks), "paid_inference": False, "os_sandbox_isolation_tested": False}))
+                "scripted_provider_requests": len(provider_requests), "patch_approvals_granted": len(accepted_patch_callbacks), "paid_inference": False, "os_sandbox_isolation_tested": False}
+            if report_path:
+                report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+            print(json.dumps(report))
         finally:
             if process.poll() is None:
                 # Even a failed acceptance should enter native cleanup before
