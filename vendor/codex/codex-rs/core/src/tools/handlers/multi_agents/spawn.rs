@@ -108,7 +108,29 @@ async fn handle_spawn_agent(
     )
     .await
     .map_err(FunctionCallError::RespondToModel)?;
-    let config = prepared.config;
+    let mut config = prepared.config;
+    let (worktree, environments) = if args.worktree {
+        if args.fork_context
+            || step_context
+                .environments
+                .single_local_environment()
+                .is_none()
+        {
+            return Err(FunctionCallError::RespondToModel(
+                "Isolated workers require fresh history and one ready local environment".into(),
+            ));
+        }
+        let path = crate::agent::worktree::create(&mut config)
+            .await
+            .map_err(FunctionCallError::RespondToModel)?;
+        let environments = step_context
+            .environments
+            .for_isolated_worker(&config)
+            .map_err(FunctionCallError::RespondToModel)?;
+        (Some(path.to_string_lossy().into_owned()), environments)
+    } else {
+        (None, step_context.environments.clone())
+    };
     let fork_mode = args.fork_context.then_some(SpawnAgentForkMode::FullHistory);
     let result = session
         .services
@@ -131,7 +153,7 @@ async fn handle_spawn_agent(
                 parent_turn_id: Some(turn.sub_id.clone()),
                 root_turn_id: turn.turn_metadata_state.root_turn_id(),
                 turn_trigger: turn.turn_metadata_state.current_turn_trigger(),
-                environments: Some(step_context.environments.clone()),
+                environments: Some(environments),
                 multi_agent_v2_usage_hints: None,
                 cyber_access_program: turn.cyber_access_program,
             },
@@ -206,6 +228,7 @@ async fn handle_spawn_agent(
     Ok(SpawnAgentResult {
         agent_id: new_thread_id.to_string(),
         nickname,
+        worktree,
     })
 }
 
@@ -224,12 +247,16 @@ struct SpawnAgentArgs {
     reasoning_effort: Option<ReasoningEffort>,
     #[serde(default)]
     fork_context: bool,
+    #[serde(default)]
+    worktree: bool,
 }
 
 #[derive(Debug, Serialize)]
 pub(crate) struct SpawnAgentResult {
     agent_id: String,
     nickname: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    worktree: Option<String>,
 }
 
 impl ToolOutput for SpawnAgentResult {

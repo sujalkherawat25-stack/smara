@@ -1,6 +1,23 @@
 /** Presentation only; native Rust owns execution and permissions. */
 export type ViewItem = { id: string; kind: string; text: string; status?: string };
 export type NativeTurn = { id: string; status: string; items: Record<string, unknown>[] };
+export type WorkerView = { id: string; status: string; cwd?: string };
+/** Only workers named by the selected parent's native collaboration items. */
+export function mergeWorkers(workers: WorkerView[], item: Record<string, unknown>): WorkerView[] {
+  if (item.type !== "collabAgentToolCall" || !Array.isArray(item.receiverThreadIds)) return workers;
+  const states = item.agentsStates as Record<string, { status?: string }> | undefined;
+  const result = [...workers];
+  for (const id of item.receiverThreadIds) {
+    if (typeof id !== "string" || !id) continue;
+    const index = result.findIndex(worker => worker.id === id);
+    const previous = index < 0 ? undefined : result[index];
+    // Completing a spawn/wait tool is not evidence that a worker completed.
+    const status = states?.[id]?.status ?? previous?.status ?? "status unknown";
+    const next = { ...previous, id, status };
+    if (index < 0) result.push(next); else result[index] = next;
+  }
+  return result;
+}
 export function threadLabel(thread: { name?: string | null; preview?: string }): string {
   return (thread.name?.trim() || thread.preview?.trim() || "New conversation").replace(/\s+/g, " ").slice(0, 96);
 }

@@ -8,6 +8,7 @@
     "codex-rs/cli/Cargo.toml: add smara-native executable using the original CLI entry point",
     "codex-rs/cli/src/main.rs: identify the fork and block OpenAI product installer/update/cloud commands",
     "codex-rs/utils/home-dir/src/lib.rs: isolate the default runtime home from the user's Codex account",
-    "codex-rs/models-manager/src/model_info.rs and model_info_tests.rs: expose native freeform patch for foreign models and honor explicit provider context metadata without a fabricated fallback hard maximum"
+    "codex-rs/models-manager/src/model_info.rs and model_info_tests.rs: expose native freeform patch for foreign models and honor explicit provider context metadata without a fabricated fallback hard maximum",
+    "codex-rs/core and worktree: opt-in V1 coding workers in committed-HEAD detached Git checkouts, intersect parent permissions, rebind local executor roots, and restore only registered original checkouts after a cold restart; no automatic merge or cleanup"
   ]
 }

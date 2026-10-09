@@ -30,4 +30,7 @@
 .native-legacy-banner { padding: 8px 16px; background: #3b2d15; color: #ffe4a5; }
 .native-tools-choice { padding: 8px 24px; font-size: 12px; color: #aab9ce; }
 .native-tools-choice input { width: auto; margin-right: 6px; }
+.native-workers { max-width: 1000px; margin: 0 auto 18px; padding: 16px; border: 1px solid #394e6e; border-radius: 12px; }
+.native-workers > div { margin-top: 10px; overflow-wrap: anywhere; }
+.native-workers button { font-size: 12px; margin-left: 8px; }
 @media (max-width: 1000px) { .native-layout aside { width: 190px; } .native-connection { flex-wrap: wrap; } .native-app header span { display: none; } }

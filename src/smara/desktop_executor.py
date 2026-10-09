@@ -42,6 +42,9 @@ if __name__ == "__main__" and sys.argv[1:] == ["--native-app-server"]:
 if __name__ == "__main__" and sys.argv[1:2] == ["--native-tools"]:
     from smara.native_tools import main as tools_main
     raise SystemExit(tools_main(sys.argv[2:]))
+if __name__ == "__main__" and sys.argv[1:2] == ["--native-browser"]:
+    from smara.native_browser import main as browser_main
+    raise SystemExit(browser_main(sys.argv[2:]))
 
 import httpx
 
@@ -3467,6 +3470,9 @@ def main(argv: list[str] | None = None) -> int:
         if arguments[:1] == ["--native-tools"]:
             from smara.native_tools import main as tools_main
             return tools_main(arguments[1:])
+        if arguments[:1] == ["--native-browser"]:
+            from smara.native_browser import main as browser_main
+            return browser_main(arguments[1:])
         if arguments == ["--native-app-server"]:
             from smara.native_runtime import serve_bootstrap
             return serve_bootstrap()

@@ -20,9 +20,14 @@ class ManagedBrowser:
         if not self.executable:raise BrowserUnavailable("no supported Chromium executable")
         from playwright.sync_api import sync_playwright
         self.runtime=sync_playwright().start(); self.browser=self.runtime.chromium.launch(headless=self.headless,executable_path=self.executable)
-    def create(self):
+    def create(self,context_options=None,configure_context=None):
         if self.browser is None:self.start()
-        ident=f"browser_{uuid.uuid4().hex[:20]}"; context=self.browser.new_context(accept_downloads=True); session=BrowserSession(ident,context)
+        ident=f"browser_{uuid.uuid4().hex[:20]}"; context=self.browser.new_context(**(context_options or {"accept_downloads":True}))
+        try:
+            if configure_context:configure_context(context)
+        except Exception:
+            context.close();raise
+        session=BrowserSession(ident,context)
         context.on("page",lambda page:self._attach(session,page)); context.on("dialog",lambda dialog:self._dialog(session,dialog)); page=context.new_page(); self._attach(session,page); self.sessions[ident]=session; return ident
     def _attach(self,session,page):
         if any(existing is page for existing in session.pages.values()):return
@@ -84,5 +89,5 @@ class ManagedBrowser:
         return invalidated
     def shutdown(self):
         for ident in list(self.sessions):self.close(ident)
-        if self.browser:self.browser.close()
-        if self.runtime:self.runtime.stop()
+        if self.browser:self.browser.close();self.browser=None
+        if self.runtime:self.runtime.stop();self.runtime=None

@@ -1420,7 +1420,7 @@ impl LocalAgentControl {
 
     async fn resume_single_agent_from_rollout(
         &self,
-        config: Config,
+        mut config: Config,
         thread_id: ThreadId,
         session_source: SessionSource,
     ) -> CodexResult<(ThreadId, MultiAgentVersion)> {
@@ -1438,6 +1438,8 @@ impl LocalAgentControl {
             .map(AgentPath::try_from)
             .transpose()
             .map_err(|err| CodexErr::InvalidRequest(format!("invalid stored agent path: {err}")))?;
+        let isolated = crate::agent::worktree::restore(&mut config, &stored_thread.cwd)
+            .map_err(CodexErr::InvalidRequest)?;
         let resumed_agent_nickname = stored_thread.agent_nickname.clone();
         let resumed_agent_role = stored_thread.agent_role.clone();
         let history = load_agent_model_context(&state, thread_id, stored_thread.history_mode)
@@ -1483,9 +1485,19 @@ impl LocalAgentControl {
             other => (other, AgentMetadata::default()),
         };
         let notification_source = session_source.clone();
-        let inherited_environments = self
+        let mut inherited_environments = self
             .inherited_environments_for_source(&state, Some(&session_source))
             .await;
+        if isolated {
+            inherited_environments = Some(
+                inherited_environments
+                    .ok_or_else(|| {
+                        CodexErr::InvalidRequest("Worker owner environment is unavailable".into())
+                    })?
+                    .for_isolated_worker(&config)
+                    .map_err(CodexErr::InvalidRequest)?,
+            );
+        }
         let inherited_exec_policy = self
             .inherited_exec_policy_for_source(&state, Some(&session_source), &config)
             .await;

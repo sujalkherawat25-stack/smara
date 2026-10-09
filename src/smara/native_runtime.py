@@ -41,7 +41,7 @@ def native_binary(explicit: str | None = None) -> Path:
     raise RuntimeError("Smara's copied native runtime has not been built. Run scripts/build-smara-native.ps1; no legacy or installed-Codex fallback is used.")
 
 
-def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, tools_enabled: bool = False) -> tuple[list[str], dict[str, str]]:
+def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, tools_enabled: bool = False, workers_enabled: bool = False, browser_origins: list[str] | None = None) -> tuple[list[str], dict[str, str]]:
     if not workspace.is_dir():
         raise ValueError("Workspace must be an existing directory")
     home.mkdir(parents=True, exist_ok=True)
@@ -64,6 +64,11 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         # background catalog clones and inherited app/plugin authorization.
         "features.plugins": False,
         "features.apps": False,
+        # Even disabled MCP entries are transport-validated by the native core.
+        # Keep a valid, inert local transport; never inherit an ambient enable.
+        "mcp_servers.smara_browser.enabled": False,
+        "mcp_servers.smara_browser.command": sys.executable,
+        "mcp_servers.smara_browser.args": (["--native-browser"] if getattr(sys, "frozen", False) else ["-m", "smara.native_browser"]),
     }
     if os.name == "nt":
         settings["windows.sandbox"] = "unelevated"
@@ -82,10 +87,36 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
             "mcp_servers.smara_readers.startup_timeout_sec": 30,
             "mcp_servers.smara_readers.tool_timeout_sec": 45,
         })
+    if browser_origins:
+        from .native_browser import configured_origins, TOOLS as browser_tools
+        configured_origins(browser_origins)
+        browser_args = (["--native-browser"] if getattr(sys, "frozen", False) else ["-m", "smara.native_browser"])
+        browser_args += ["--workspace", str(workspace.resolve())]
+        for value in browser_origins:
+            browser_args += ["--origin", value]
+        settings.update({
+            "mcp_servers.smara_browser.enabled": True,
+            "mcp_servers.smara_browser.command": sys.executable,
+            "mcp_servers.smara_browser.args": browser_args,
+            "mcp_servers.smara_browser.env.PYTHONIOENCODING": "utf-8",
+            "mcp_servers.smara_browser.env.PYTHONUTF8": "1",
+            "mcp_servers.smara_browser.required": True,
+            "mcp_servers.smara_browser.startup_timeout_sec": 30,
+            "mcp_servers.smara_browser.tool_timeout_sec": 45,
+            "mcp_servers.smara_browser.default_tools_approval_mode": "prompt",
+        })
+        for entry in browser_tools:
+            settings[f'mcp_servers.smara_browser.tools.{entry["name"]}.approval_mode'] = "prompt"
     argv = [part for key, value in settings.items() for part in ("-c", key + "=" + json.dumps(value))]
     environment = dict(os.environ)
     environment["CODEX_HOME"] = str(home.resolve())
     environment["SMARA_NATIVE_WIRE_TOKEN"] = adapter.token
+    # Never inherit an ambient opt-in from an unrelated runtime/test process.
+    environment.pop("SMARA_NATIVE_WORKTREE_WORKERS", None)
+    if workers_enabled:
+        environment["SMARA_NATIVE_WORKTREE_WORKERS"] = "1"
+        # Isolated coding spawn/restore currently uses the maintained V1 path.
+        argv += ["-c", "features.multi_agent_v2=false"]
     # Never give the executor the configured provider key. The model transport
     # holds it in memory and rejects unauthenticated loopback requests.
     model_secrets = {"SMARA_LLM_API_KEY", "SARVAM_API_KEY", "OPENAI_API_KEY", "SMARA_LLM_PROFILES",
@@ -116,11 +147,14 @@ def print_smara_help() -> None:
     print("\nSmara integration commands (execution remains owned by the native engine):")
     print("  smara source-status                Show offline source/binary provenance")
     print("  smara --smara-tools [native args]   Opt in to public research/local-memory MCP readers")
+    print("  smara --smara-workers [native args] Enable parent-directed isolated coding checkouts")
+    print("  smara --smara-browser-origin URL   Opt in to an exact public DOM-browser origin (repeatable)")
     print("  smara schedule --help              Manage paused-by-default, bounded read-only jobs")
     print("  smara tools-serve --workspace DIR  Serve read-only MCP primitives on stdio")
     print("  smara legacy [args]                Explicit old-engine access (not in portable CLI)")
     print("\nThis fork uses its own source-built binary, not an installed Codex. Integration")
-    print("readers do not provide interactive browser/computer actions or company-write automation.")
+    print("readers do not provide browser actions. DOM browser actions need explicit origin opt-in")
+    print("and native confirmation; personal browser, host computer and company-write automation remain unavailable.")
 
 
 def configure_protocol_stdio(input_stream, output_stream) -> None:
@@ -146,7 +180,7 @@ def serve_bootstrap(input_stream=None, output_stream=None) -> int:
     endpoint = ChatEndpoint(config["base_url"], config["model"], config.get("api_key", ""), config.get("auth_header", "authorization"), config.get("context_window"))
     home = Path(config["home"]) if config.get("home") else runtime_home()
     with ResponsesAdapter(endpoint) as adapter:
-        options, environment = launch_options(adapter, home=home, workspace=workspace, tools_enabled=config.get("tools_enabled") is True)
+        options, environment = launch_options(adapter, home=home, workspace=workspace, tools_enabled=config.get("tools_enabled") is True, workers_enabled=config.get("workers_enabled") is True, browser_origins=config.get("browser_origins"))
         process = subprocess.Popen([str(binary), *options, "app-server", "--listen", "stdio://"],
             cwd=workspace, env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1,
@@ -205,9 +239,23 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "tools-serve":
         from .native_tools import main as tools_main
         return tools_main(args[1:])
+    if args and args[0] == "browser-serve":
+        from .native_browser import main as browser_main
+        return browser_main(args[1:])
+    browser_origins = []
+    while "--smara-browser-origin" in args:
+        position = args.index("--smara-browser-origin")
+        if position + 1 >= len(args):
+            print("--smara-browser-origin requires one public origin URL", file=sys.stderr)
+            return 1
+        browser_origins.append(args[position + 1])
+        del args[position:position + 2]
     tools_enabled = "--smara-tools" in args
     if tools_enabled:
         args.remove("--smara-tools")
+    workers_enabled = "--smara-workers" in args
+    if workers_enabled:
+        args.remove("--smara-workers")
     if args and args[0] == "legacy":
         if getattr(sys, "frozen", False):
             print("The native portable CLI does not bundle the legacy engine. Use smara-legacy from the Python package for migration tools.", file=sys.stderr)
@@ -240,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
         profile = active_profile(profiles, active_id)
         endpoint = ChatEndpoint(profile["base_url"], profile["model"], resolve_profile_key(profile, credentials), profile.get("auth_header", "authorization"), profile.get("context_window"))
         with ResponsesAdapter(endpoint) as adapter:
-            options, environment = launch_options(adapter, home=runtime_home(), workspace=Path.cwd(), tools_enabled=tools_enabled)
+            options, environment = launch_options(adapter, home=runtime_home(), workspace=Path.cwd(), tools_enabled=tools_enabled, workers_enabled=workers_enabled, browser_origins=browser_origins)
             # The adapter belongs to this invocation. A detached shared daemon
             # must not retain its now-dead URL/token after the CLI exits.
             return subprocess.call([str(binary), *options, "--no-daemon", *args], env=environment)

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import packageInfo from "../package.json";
 
 export type RpcMessage = { id?: number | string; method?: string; params?: Record<string, unknown>; result?: unknown; error?: { message: string } };
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
@@ -15,7 +16,7 @@ export class NativeRpc {
   private exited = false;
   constructor(private onMessage: (message: RpcMessage) => void) {}
 
-  async connect(workspace: string, profileId: string, toolsEnabled = false) {
+  async connect(workspace: string, profileId: string, toolsEnabled = false, workersEnabled = false, browserOrigins: string[] = []) {
     if (this.generation) throw new Error("Native runtime is already connected");
     this.exited = false;
     // A bootstrap failure can arrive before native_start's response. Preserve
@@ -27,10 +28,10 @@ export class NativeRpc {
       this.receive(event.payload.message);
     });
     try {
-      const start = await invoke<{ generation: string }>("native_start", { workspace, profileId, toolsEnabled });
+      const start = await invoke<{ generation: string }>("native_start", { workspace, profileId, toolsEnabled, workersEnabled, browserOrigins });
       this.generation = start.generation;
       for (const event of early) if (event.generation === this.generation) this.receive(event.message);
-      await this.request("initialize", { clientInfo: { name: "smara_desktop", title: "Smara Desktop", version: "0.1.8" }, capabilities: null });
+      await this.request("initialize", { clientInfo: { name: "smara_desktop", title: "Smara Desktop", version: packageInfo.version }, capabilities: null });
       await this.notify("initialized");
     } catch (error) {
       // Only stop a process this client actually owns; a failed start must

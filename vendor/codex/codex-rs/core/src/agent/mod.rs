@@ -6,6 +6,7 @@ mod registry;
 pub(crate) mod role;
 pub(crate) mod status;
 pub(crate) mod types;
+pub(crate) mod worktree;
 
 pub(crate) use codex_protocol::protocol::AgentStatus;
 pub(crate) use control::LocalAgentControl;

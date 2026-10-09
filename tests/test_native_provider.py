@@ -180,6 +180,44 @@ def test_reader_launch_is_opt_in_and_has_valid_toml_overrides(tmp_path):
         adapter.client.close()
 
 
+def test_isolated_workers_require_explicit_launch_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMARA_NATIVE_WORKTREE_WORKERS", "1")
+    adapter = ResponsesAdapter(ChatEndpoint("http://127.0.0.1", "synthetic", ""))
+    try:
+        off, environment = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path)
+        assert "SMARA_NATIVE_WORKTREE_WORKERS" not in environment
+        assert 'features.multi_agent_v2=false' not in off
+        on, environment = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path, workers_enabled=True)
+        assert environment["SMARA_NATIVE_WORKTREE_WORKERS"] == "1"
+        assert 'features.multi_agent_v2=false' in on
+        assert 'approval_policy="on-request"' in on
+        assert 'sandbox_mode="workspace-write"' in on
+    finally:
+        adapter.server.server_close()
+        adapter.client.close()
+
+
+def test_native_browser_is_opt_in_and_each_tool_requires_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr("smara.native_browser._is_public_http_url", lambda url: url == "https://fixture.example")
+    adapter = ResponsesAdapter(ChatEndpoint("http://127.0.0.1", "synthetic", ""))
+    try:
+        off, _ = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path)
+        assert "mcp_servers.smara_browser.enabled=false" in off
+        # enabled=false alone creates an invalid transport and breaks every
+        # ordinary native launch, even without any browser request.
+        import sys
+        assert "mcp_servers.smara_browser.command=" + json.dumps(sys.executable) in off
+        assert 'mcp_servers.smara_browser.args=["-m", "smara.native_browser"]' in off
+        on, _ = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path, browser_origins=["https://fixture.example"])
+        assert "mcp_servers.smara_browser.enabled=true" in on
+        for name in ("browser_open", "browser_observe", "browser_act", "browser_text_page", "browser_close"):
+            assert f'mcp_servers.smara_browser.tools.{name}.approval_mode="prompt"' in on
+        with pytest.raises(ValueError):
+            launch_options(adapter, home=tmp_path / "home", workspace=tmp_path, browser_origins=["http://private/"])
+    finally:
+        adapter.server.server_close(); adapter.client.close()
+
+
 @pytest.mark.parametrize("profiles, selected", [([], "missing"), ([{"id": "other"}], "missing"), ([{"id": "same"}, {"id": "same"}], "same")])
 def test_native_model_selection_never_silently_substitutes(profiles, selected):
     with pytest.raises(RuntimeError, match="not silently substitute"):

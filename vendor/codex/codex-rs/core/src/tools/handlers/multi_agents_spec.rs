@@ -423,6 +423,10 @@ fn spawn_agent_output_schema_v1() -> Value {
             "nickname": {
                 "type": ["string", "null"],
                 "description": "User-facing nickname for the spawned agent when available."
+            },
+            "worktree": {
+                "type": "string",
+                "description": "Isolated worker checkout when explicitly requested; patches remain here for review."
             }
         },
         "required": ["agent_id", "nickname"],
@@ -617,6 +621,8 @@ fn spawn_agent_common_properties_v1(agent_type_description: &str) -> BTreeMap<St
             )),
         ),
         ("items".to_string(), create_collab_input_items_schema()),
+        ("worktree".to_string(), JsonSchema::boolean(Some(
+            "Opt-in isolated coding checkout from committed HEAD. Requires Smara isolated-worker opt-in, a workspace-write repository root, and fork_context=false. No untracked files copied or automatic merges. Returned worktree is the worker's only writable project.".to_string()))),
         (
             "agent_type".to_string(),
             JsonSchema::string(Some(format!(

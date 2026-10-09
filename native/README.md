@@ -50,7 +50,8 @@ Hosted tools that a Chat endpoint cannot support are rejected explicitly. Native
 hosted web-search is disabled for this adapter. The opt-in `smara_readers` MCP
 server provides public search/fetch/paginated source text, the actual clock, and
 workspace-local memory reads. It is not the old research planner. Interactive
-browser/computer tools and Syntarus are not yet migrated. Saved legacy research
+DOM browsing now has a source-only opt-in adapter; screenshot computer tools
+and Syntarus are not yet migrated. Saved legacy research
 schedules are not automatically executed by the candidate.
 
 The development entry points may be registered in the repository virtualenv
@@ -68,6 +69,8 @@ use the selected model, native workspace sandbox and approval requests.
 
 ```powershell
 smara --smara-tools exec "Read the current clock, find public sources, and cite fetched evidence."
+smara --smara-workers exec "Delegate isolated coding work from committed HEAD; return changes for review, never merge."
+smara --smara-browser-origin https://example.org exec "Inspect this approved public site; ask permission for every browser call."
 smara schedule --help
 smara schedule list
 ```
@@ -76,6 +79,29 @@ Public readers send search queries to the configured search service and fetch
 public pages without personal cookies. Memory reads only `.smara/native-memory.md`
 inside the selected workspace; it does not scan private files or contact Syntarus.
 Readers are off unless selected in Desktop or enabled with `--smara-tools`.
+
+Isolated coding workers are separately off by default. With `--smara-workers`,
+the native parent can request `spawn_agent(worktree=true)` in a repository root
+under workspace-write permissions. Each worker starts from committed HEAD with
+fresh history and a detached checkout under `.smara/worker-worktrees`. Its write
+permissions are intersected with the parent's and confined to that checkout;
+network access is disabled. Worktree creation/registered cold restore are native,
+not a Python scheduler. Changes are retained for review, with no automatic merge
+or destructive cleanup. V1 local workers only; remote/V2 worktree support is not
+claimed. Worktrees may contain private committed files: normal model-provider
+privacy and approval requirements still apply.
+
+The DOM browser accepts up to eight explicitly configured public HTTP(S) origins
+via repeated `--smara-browser-origin` flags or the Desktop origin field before
+connecting. Its fresh owned browser has no personal cookies, password/file-input
+actions, downloads, arbitrary locators or model-supplied JavaScript. Each tool
+call requires native confirmation; accepting one action is not a persistent grant.
+Observation-bound references and paginated page text avoid stale actions and
+silent text clipping. This is DOM text, not screenshot vision; origin guards are
+not an OS/network sandbox or a complete DNS-rebinding defense. A supported local
+Chromium/Edge/Chrome executable is required; it is not downloaded automatically.
+These new integration paths have debug-runtime acceptance, not an installed or
+release-package gate. See `NEXT_GATES_2026-10-09.md` for this follow-up.
 
 Native schedules require explicit workspace, profile, prompt file and request
 ceiling. `schedule add` creates a **paused** read-only job; `enable` activates it,

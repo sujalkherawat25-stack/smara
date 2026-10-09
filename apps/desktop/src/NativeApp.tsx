@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import LegacyApp from "./App";
 import { desktop } from "./api";
 import { NativeRpc, RpcOutcomeUnknown, type RpcMessage } from "./nativeRpc";
-import { activeTurn, answerKey, approvalResponse, displayItem, mergeItem, resumeStatus, routeMessage, supportsApproval, threadLabel, type NativeTurn, type ViewItem } from "./nativeView";
+import { activeTurn, answerKey, approvalResponse, displayItem, mergeItem, mergeWorkers, resumeStatus, routeMessage, supportsApproval, threadLabel, type NativeTurn, type ViewItem, type WorkerView } from "./nativeView";
 import type { LocalModelProfile } from "./types";
 import packageInfo from "../package.json";
 import "./native.css";
@@ -28,6 +28,9 @@ export default function NativeApp() {
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [toolsEnabled, setToolsEnabled] = useState(false);
+  const [workersEnabled, setWorkersEnabled] = useState(false);
+  const [workers, setWorkers] = useState<WorkerView[]>([]);
+  const [browserOrigins, setBrowserOrigins] = useState("");
   const [draft, setDraft] = useState("");
   const [items, setItems] = useState<Item[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
@@ -76,6 +79,7 @@ export default function NativeApp() {
     } else if (message.method === "item/started" || message.method === "item/completed") {
       const item = params.item as Record<string, unknown> | undefined;
       if (!item) return;
+      setWorkers(current => mergeWorkers(current, item));
       setItems(current => mergeItem(current, displayItem(item), false, message.method === "item/started"));
     } else if (message.method === "turn/started") {
       const turn = params.turn as { id: string };
@@ -128,10 +132,10 @@ export default function NativeApp() {
       await clientRef.current?.stop();
       threadRef.current = ""; setThreadId(""); setTurnId("");
       activeTurnRef.current = ""; busyRef.current = false;
-      setItems([]); setApprovals([]); setAnswers({}); setUncertain(false); setBusy(false);
+      setItems([]); setWorkers([]); setApprovals([]); setAnswers({}); setUncertain(false); setBusy(false);
       client = new NativeRpc(receive);
       clientRef.current = client;
-      await client.connect(workspace, profile, toolsEnabled);
+      await client.connect(workspace, profile, toolsEnabled, workersEnabled, browserOrigins.split(/\s+/).filter(Boolean));
       setConnected(true); setStatus("Ready — workspace sandbox, approval on request");
       const list = await client.request<{ data: Thread[] }>("thread/list", { limit: 50, cwd: workspace });
       setThreads(list.data);
@@ -152,6 +156,7 @@ export default function NativeApp() {
       if (client !== clientRef.current || client.generation !== generation || lifecycleRef.current) return;
       threadRef.current = id; setThreadId(id); setItems([]);
       setItems((response.thread.turns ?? []).flatMap(turn => turn.items.map(displayItem)));
+      setWorkers((response.thread.turns ?? []).flatMap(turn => turn.items).reduce(mergeWorkers, [] as WorkerView[]));
       previousTurn.current = response.thread.turns.at(-1)?.id ?? "";
       const active = activeTurn(response.thread.turns ?? []);
       activeTurnRef.current = active?.id ?? ""; busyRef.current = !!active;
@@ -195,9 +200,23 @@ export default function NativeApp() {
       }
       accepted(); previousTurn.current = latest?.id ?? previousTurn.current;
       setItems(turns.flatMap(turn => turn.items.map(displayItem)));
+      setWorkers(turns.flatMap(turn => turn.items).reduce(mergeWorkers, [] as WorkerView[]));
       setBusy(!!current); setTurnId(current?.id ?? "");
       busyRef.current = !!current; activeTurnRef.current = current?.id ?? "";
       setStatus(current ? "Working — native status confirmed" : latest?.status ?? "Ready");
+    } catch (reason) { setError(String(reason)); }
+  };
+  const inspectWorker = async (id: string) => {
+    const client = clientRef.current;
+    if (!client || !connected || lifecycleRef.current) return;
+    const generation = client.generation;
+    const parent = threadRef.current;
+    try {
+      // Read only: never resume/relocate a worker into the parent's workspace.
+      const result = await client.request<{ thread: { cwd: string; turns: NativeTurn[] } }>("thread/read", { threadId: id, includeTurns: true });
+      if (client !== clientRef.current || client.generation !== generation || parent !== threadRef.current) return;
+      const latest = result.thread.turns.at(-1);
+      setWorkers(current => current.map(worker => worker.id === id ? { ...worker, cwd: result.thread.cwd, status: latest?.status ?? "no turn recorded" } : worker));
     } catch (reason) { setError(String(reason)); }
   };
   const decide = async (approval: Approval, allow: boolean) => {
@@ -233,7 +252,7 @@ export default function NativeApp() {
     finally {
       setConnected(false); setBusy(false); setUncertain(false);
       busyRef.current = false; activeTurnRef.current = "";
-      setApprovals([]); setAnswers({}); setTurnId(""); setThreadId(""); threadRef.current = ""; setItems([]);
+      setApprovals([]); setAnswers({}); setTurnId(""); setThreadId(""); threadRef.current = ""; setItems([]); setWorkers([]);
       lifecycleRef.current = false; setConnecting(false);
     }
   };
@@ -242,7 +261,7 @@ export default function NativeApp() {
   return <div className="native-app">
     <header><strong>🟢 Smara v{packageInfo.version}</strong><span>Source-native runtime · migration candidate</span><button disabled={connecting} onClick={() => { void disconnect().then(stopped => { if (stopped) setLegacy(true); }); }}>Settings & legacy tools</button></header>
     <div className="native-layout"><aside>
-      <button disabled={busy || connecting || loadingThread} onClick={() => { setThreadId(""); threadRef.current = ""; setItems([]); setError(""); }}>＋ New conversation</button>
+      <button disabled={busy || connecting || loadingThread} onClick={() => { setThreadId(""); threadRef.current = ""; setItems([]); setWorkers([]); setError(""); }}>＋ New conversation</button>
       <h3>Native conversations</h3>
       {threads.map(thread => <button className={thread.id === threadId ? "selected" : ""} key={thread.id} title={thread.name || thread.preview || "New conversation"} disabled={busy || connecting || loadingThread || !connected} onClick={() => void selectThread(thread.id)}>{threadLabel(thread)}</button>)}
       <p>Existing Python conversations remain untouched in the legacy view. They are not native sessions.</p>
@@ -254,9 +273,12 @@ export default function NativeApp() {
       {built === false && <div className="native-warning">The full source has been imported, but the native executable is not built/bundled. Run scripts/build-smara-native.ps1. No silent fallback to the previous engine.</div>}
       {error && <div role="alert" className="native-error">{error}</div>}
       <label className="native-tools-choice"><input type="checkbox" checked={toolsEnabled} disabled={connected || connecting} onChange={event => setToolsEnabled(event.target.checked)} /> Research & local-memory readers · searches send queries to your search provider; no personal-browser or computer actions</label>
+      <label className="native-tools-choice"><input type="checkbox" checked={workersEnabled} disabled={connected || connecting} onChange={event => setWorkersEnabled(event.target.checked)} /> Isolated coding workers · committed HEAD only; changes stay in separate checkouts for review, never auto-merged</label>
+      <label className="native-tools-choice">Optional DOM browser origins <input aria-label="Approved public browser origins" placeholder="https://example.com — leave empty to disable" disabled={connected || connecting} value={browserOrigins} onChange={event => setBrowserOrigins(event.target.value)} /> Fresh browser only; every action asks permission. No login, uploads, personal cookies or host desktop.</label>
       {uncertain && <div className="native-warning"><button onClick={() => void checkStatus()}>Check native turn status</button> Send stays locked until acceptance is known. Disconnect is available.</div>}
       <div className="native-transcript" aria-live="polite">
-        {!items.length && <div className="native-empty"><h1>One runtime. Your workspace.</h1><p>Choose a folder and model, connect, then ask Smara to inspect, code or run tests.</p><p>Public research and workspace-memory readers are opt-in. Interactive browser/computer use and remote memory are not yet native. Native tools and approvals use the imported harness source.</p></div>}
+        {!!workers.length && <section className="native-workers"><strong>Native workers · changes are not auto-merged</strong>{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
+        {!items.length && <div className="native-empty"><h1>One runtime. Your workspace.</h1><p>Choose a folder and model, connect, then ask Smara to inspect, code or run tests.</p><p>Research, local-memory readers, isolated workers and public DOM browsing are opt-in. Screenshot computer use, personal-browser sessions and remote memory are not enabled. Native tools and approvals use the imported harness source.</p></div>}
         {items.map(item => <article key={item.id} className={`native-item ${item.kind}`}><small>{item.kind} {item.status && `· ${item.status}`}</small><pre>{item.text}</pre></article>)}
         {approvals.map(approval => <section className="native-approval" key={approval.id}>
           {approval.params.threadId !== undefined && approval.params.threadId !== threadId && <p>Worker / other native conversation: {String(approval.params.threadId)}. This request is not auto-approved.</p>}

@@ -403,7 +403,7 @@ fn resolve_git_path(checkout: &Path, argument: &str) -> Result<PathBuf> {
         .with_context(|| format!("cannot resolve Git path {}", path.display()))
 }
 
-fn repository_root(cwd: &Path) -> Result<PathBuf> {
+pub fn repository_root(cwd: &Path) -> Result<PathBuf> {
     let path = git_path(cwd, ["rev-parse", "--show-toplevel"])?;
     dunce::canonicalize(&path)
         .with_context(|| format!("cannot resolve repository root {}", path.display()))

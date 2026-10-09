@@ -1057,6 +1057,35 @@ pub struct TurnEnvironmentSnapshot {
 }
 
 impl TurnEnvironmentSnapshot {
+    /// Rebind an explicitly isolated local child while preserving the executor,
+    /// shell, approval and network policy. Remote/multi-environment selection is
+    /// not implicitly relocated to this host.
+    pub(crate) fn for_isolated_worker(
+        &self,
+        config: &crate::config::Config,
+    ) -> Result<Self, String> {
+        let mut environment = self
+            .single_local_environment()
+            .ok_or_else(|| "Isolated workers require one ready local environment".to_string())?
+            .clone();
+        let cwd = PathUri::from_abs_path(&config.cwd);
+        environment.selection.cwd = cwd.clone();
+        environment.selection.workspace_roots = vec![cwd.clone()];
+        let mut settings = environment.config().clone();
+        settings.workspace_roots = vec![cwd];
+        settings.permission_profile = crate::config::PermissionProfileSnapshot::legacy(
+            config.permissions.effective_permission_profile(),
+        );
+        settings.selected_capability_roots.clear();
+        environment.selection.config = EnvironmentConfigState::Ready(settings);
+        environment.config_origin = EnvironmentConfigOrigin::Owner;
+        // Parent-selected plugin/credential roots do not become worker roots.
+        environment.selection.selected_capability_roots =
+            EnvironmentCapabilityRoots::for_environment(&environment.selection.environment_id, &[]);
+        Ok(Self {
+            environments: vec![TurnEnvironmentState::Ready(environment)],
+        })
+    }
     /// Keeps the original root order for child threads and saved history.
     pub(crate) fn selected_capability_roots(&self) -> Vec<SelectedCapabilityRoot> {
         EnvironmentCapabilityRoots::collect(self.environments.iter().map(|environment| {

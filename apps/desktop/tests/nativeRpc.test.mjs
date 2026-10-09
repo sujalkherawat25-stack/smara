@@ -25,10 +25,10 @@ function fixture({ earlyExit = false, startError = false, timeout = false, stopE
   };
   const module = { exports: {} };
   const source = readFileSync(new URL("../src/nativeRpc.ts", import.meta.url), "utf8");
-  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
   vm.runInNewContext(code, {
     module, exports: module.exports, setTimeout: (callback, ms) => setTimeout(callback, timeout ? 5 : ms), clearTimeout,
-    require: name => name.endsWith("/core") ? { invoke } : { listen: async (_name, callback) => {
+    require: name => name.endsWith("package.json") ? { version: "fixture-version" } : name.endsWith("/core") ? { invoke } : { listen: async (_name, callback) => {
       listener = callback; return () => { unlistened = true; };
     } },
   });
@@ -40,6 +40,7 @@ test("native initialization and approval responses stay in the native protocol",
   const f = fixture();
   await f.client.connect("synthetic-workspace", "synthetic-model");
   assert.equal(f.sent.find(item => item.args?.message?.method === "initialize").args.message.params.clientInfo.name, "smara_desktop");
+  assert.equal(f.sent.find(item => item.args?.message?.method === "initialize").args.message.params.clientInfo.version, "fixture-version");
   f.emit({ id: "permission", method: "item/commandExecution/requestApproval", params: { command: "synthetic" } });
   await f.client.respond("permission", { decision: "decline" });
   assert.equal(f.sent.at(-1).args.message.id, "permission");
@@ -61,6 +62,17 @@ test("stale generation cannot settle a new native request", async () => {
   await f.client.stop();
 });
 
+test("isolated-worker opt-in is explicit and does not enable it by default", async () => {
+  const off = fixture();
+  await off.client.connect("workspace", "model");
+  assert.equal(off.sent.find(item => item.command === "native_start").args.workersEnabled, false);
+  await off.client.stop();
+  const on = fixture();
+  await on.client.connect("workspace", "model", false, true);
+  assert.equal(on.sent.find(item => item.command === "native_start").args.workersEnabled, true);
+  await on.client.stop();
+});
+
 test("runtime exit rejects pending work without manufacturing completion", async () => {
   const f = fixture();
   await f.client.connect("workspace", "model");
@@ -69,6 +81,17 @@ test("runtime exit rejects pending work without manufacturing completion", async
   await assert.rejects(pending, /runtime exited/);
   await assert.rejects(f.client.request("turn/start"), /reconnect/);
   await f.client.stop();
+});
+
+test("browser origins are empty by default and forwarded only when supplied", async () => {
+  const off = fixture();
+  await off.client.connect("workspace", "model");
+  assert.equal(off.sent.find(item => item.command === "native_start").args.browserOrigins.length, 0);
+  await off.client.stop();
+  const on = fixture();
+  await on.client.connect("workspace", "model", false, false, ["https://example.com"]);
+  assert.equal(on.sent.find(item => item.command === "native_start").args.browserOrigins[0], "https://example.com");
+  await on.client.stop();
 });
 
 test("bootstrap exit before native_start acknowledgment is not lost", async () => {

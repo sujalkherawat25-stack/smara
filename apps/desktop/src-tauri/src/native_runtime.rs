@@ -36,7 +36,7 @@ pub fn native_status() -> Value {
 }
 
 #[tauri::command]
-pub fn native_start(app: AppHandle, workspace: String, profile_id: String, tools_enabled: Option<bool>) -> Result<Value, String> {
+pub fn native_start(app: AppHandle, workspace: String, profile_id: String, tools_enabled: Option<bool>, workers_enabled: Option<bool>, browser_origins: Option<Vec<String>>) -> Result<Value, String> {
     let mut lock = session().lock().map_err(|_| "Native session lock failed")?;
     if let Some(running) = lock.as_mut() {
         if running.process.try_wait().map_err(|_| "Cannot inspect native process")?.is_none() {
@@ -63,7 +63,7 @@ pub fn native_start(app: AppHandle, workspace: String, profile_id: String, tools
     let config = json!({"binary": native_binary, "workspace": root,
         "home": super::app_data_dir().join("native-runtime"), "model": profile.model,
         "base_url": profile.base_url, "api_key": secret, "auth_header": profile.auth_header,
-        "tools_enabled": tools_enabled.unwrap_or(false)});
+        "tools_enabled": tools_enabled.unwrap_or(false), "workers_enabled": workers_enabled.unwrap_or(false), "browser_origins": browser_origins.unwrap_or_default()});
     if writeln!(input, "{config}").and_then(|_| input.flush()).is_err() {
         let _ = process.kill(); let _ = process.wait();
         return Err("Cannot configure native transport".into());

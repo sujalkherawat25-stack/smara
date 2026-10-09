@@ -9,8 +9,8 @@ from smara.native_runtime import launch_options, native_binary
 
 
 class NativeSession:
-    def __init__(self, adapter, workspace, home, tools_enabled=False, timeout=120, request_handler=None):
-        options, env = launch_options(adapter, home=home, workspace=workspace, tools_enabled=tools_enabled)
+    def __init__(self, adapter, workspace, home, tools_enabled=False, timeout=120, request_handler=None, workers_enabled=False, browser_origins=None):
+        options, env = launch_options(adapter, home=home, workspace=workspace, tools_enabled=tools_enabled, workers_enabled=workers_enabled, browser_origins=browser_origins)
         self.process = subprocess.Popen([str(native_binary()), *options, "app-server", "--listen", "stdio://"],
             cwd=workspace, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)

@@ -8,8 +8,16 @@ const code = ts.transpileModule(readFileSync(new URL("../src/nativeView.ts", imp
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 vm.runInNewContext(code, { module, exports: module.exports });
-const { displayItem, mergeItem, approvalResponse, activeTurn, routeMessage, answerKey, threadLabel, resumeStatus, supportsApproval } = module.exports;
+const { displayItem, mergeItem, mergeWorkers, approvalResponse, activeTurn, routeMessage, answerKey, threadLabel, resumeStatus, supportsApproval } = module.exports;
 const plain = value => JSON.parse(JSON.stringify(value));
+
+test("worker cards use native worker state, not completion of the spawn tool", () => {
+  const item = { type: "collabAgentToolCall", status: "completed", receiverThreadIds: ["a", "b"], agentsStates: { a: { status: "running" } } };
+  const workers = mergeWorkers([], item);
+  assert.deepEqual(plain(workers), [{ id: "a", status: "running" }, { id: "b", status: "status unknown" }]);
+  assert.equal(mergeWorkers(workers, { type: "agentMessage", text: "b completed" }), workers);
+  assert.deepEqual(plain(mergeWorkers([{ id: "a", status: "running", cwd: "synthetic" }], { ...item, receiverThreadIds: ["a"], agentsStates: { a: { status: "failed" } } })), [{ id: "a", status: "failed", cwd: "synthetic" }]);
+});
 
 test("resumed user messages render text, not protocol JSON", () => {
   assert.equal(displayItem({ id: "u", type: "userMessage", content: [{ type: "text", text: "hello" }, { type: "image" }] }).text, "hello\n[image]");
