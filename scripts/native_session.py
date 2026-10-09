@@ -9,7 +9,7 @@ from smara.native_runtime import launch_options, native_binary
 
 
 class NativeSession:
-    def __init__(self, adapter, workspace, home, tools_enabled=False, timeout=120, request_handler=None, workers_enabled=False, browser_origins=None):
+    def __init__(self, adapter, workspace, home, tools_enabled=False, timeout=120, request_handler=None, workers_enabled=False, browser_origins=None, abort_event=None):
         options, env = launch_options(adapter, home=home, workspace=workspace, tools_enabled=tools_enabled, workers_enabled=workers_enabled, browser_origins=browser_origins)
         self.process = subprocess.Popen([str(native_binary()), *options, "app-server", "--listen", "stdio://"],
             cwd=workspace, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -18,6 +18,7 @@ class NativeSession:
         self.events = []
         self.next_id = 0
         self.timeout = timeout
+        self.abort_event = abort_event
         # Acceptance-only, explicitly scoped fixture decisions. Normal probes
         # still deny every permission; production Desktop requires the user.
         self.request_handler = request_handler
@@ -38,7 +39,19 @@ class NativeSession:
         self.process.stdin.flush()
 
     def next(self, timeout=None):
-        message = self.messages.get(timeout=self.timeout if timeout is None else max(.01, timeout))
+        deadline = time.monotonic() + (self.timeout if timeout is None else max(.01, timeout))
+        while True:
+            if self.abort_event is not None and self.abort_event.is_set():
+                raise RuntimeError("Acceptance stopped at its shared budget boundary")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise queue.Empty
+            try:
+                message = self.messages.get(timeout=min(remaining, .25) if self.abort_event is not None else remaining)
+                break
+            except queue.Empty:
+                if self.abort_event is None:
+                    raise
         if message.get("transport_exited"):
             raise RuntimeError("Native transport exited")
         self.events.append(message)

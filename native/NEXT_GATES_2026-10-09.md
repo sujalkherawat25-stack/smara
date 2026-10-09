@@ -1,5 +1,11 @@
 # Native workers, DOM browser and secret audit — 2026-10-09
 
+Follow-up evidence: [real workers, visual and frozen-browser gates](LIVE_QUALITY_GATES_2026-10-09.md).
+Installed/source Send–Stop–reconnect–resume, real isolated workers with cold
+recovery and the bounded real-model public DOM browser check now pass.
+Human Deny and optimized installation remain gated. Historical results below
+describe the earlier source batch; the linked follow-up records the newer gates.
+
 ## State of this follow-up
 
 The source now adds parent-directed isolated V1 coding workers, a native-approved
