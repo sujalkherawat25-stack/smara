@@ -17,33 +17,43 @@ class SearchError(RuntimeError):
     """Only constant, credential-free diagnostic messages may cross MCP."""
 
 
-def search_configuration():
+def search_configuration(*, allow_environment: bool = True):
     saved = read_object(state_path().parent / "native-settings.json")
-    selected = str(os.getenv("SMARA_SEARCH_PROVIDER") or saved.get("search_provider") or "").lower()
+    selected = str(saved.get("search_provider") or (os.getenv("SMARA_SEARCH_PROVIDER") if allow_environment else "") or "").lower()
+
+    def credential_for(alias):
+        # The locally protected value is canonical for Desktop/agent sessions.
+        # Environment values remain available to an explicitly launched reader,
+        # but cannot shadow a key saved in Smara Settings.
+        value = resolve_credential(alias, allow_environment=False)
+        if value or not allow_environment:
+            return value
+        return resolve_credential(alias) or os.getenv("SMARA_SEARCH_API_KEY", "")
+
     if selected:
         if selected not in PROVIDERS:
-            raise SearchError("Unsupported search provider. Select Tavily, Exa, Serper or Brave in Settings → Tools.")
-        key = os.getenv("SMARA_SEARCH_API_KEY") or resolve_credential(PROVIDERS[selected][1])
+            raise SearchError("Unsupported search provider. Select Tavily, Exa, Serper or Brave in Settings → Integrations.")
+        key = credential_for(PROVIDERS[selected][1])
     else:
         selected, key = next(((name, key) for name, (_, alias) in PROVIDERS.items()
-                              if (key := resolve_credential(alias))), ("tavily", ""))
+                              if (key := credential_for(alias))), ("tavily", ""))
     endpoint, alias = PROVIDERS[selected]
-    custom = os.getenv("SMARA_SEARCH_URL")
+    custom = os.getenv("SMARA_SEARCH_URL") if allow_environment else None
     if custom and custom.rstrip("/") != endpoint.rstrip("/"):
         raise SearchError("Search endpoint does not match the selected provider. Remove SMARA_SEARCH_URL; provider keys are never sent to another host.")
     return selected, endpoint, alias, key
 
 
-def search_status():
+def search_status(*, protected_only: bool = False):
     """Local credential readability, not a claim of network/provider health."""
     try:
-        provider, endpoint, alias, key = search_configuration()
+        provider, endpoint, alias, key = search_configuration(allow_environment=not protected_only)
         return {"provider": provider, "endpoint": endpoint, "credential_alias": alias,
                 "configured": bool(key), "network_tested": False,
-                "detail": "Credential readable; not network tested" if key else "Save a search API key in Settings → Tools"}
+                "detail": "Credential readable; live authentication not tested" if key else "Save a search API key in Settings → Integrations → Web search"}
     except (SearchError, RuntimeError):
         return {"provider": "", "configured": False, "network_tested": False,
-                "detail": "Search configuration needs attention in Settings → Tools; check provider, endpoint and credential vault"}
+                "detail": "Search configuration needs attention in Settings → Integrations → Web search; check provider and protected key"}
 
 
 async def web_search(query: str, count: int = 5, client=None):
@@ -53,7 +63,7 @@ async def web_search(query: str, count: int = 5, client=None):
         raise SearchError("Search result count must be 1..8.")
     provider, endpoint, _, key = search_configuration()
     if not key:
-        raise SearchError("The selected search provider has no readable API key. Save its key in Settings → Tools, then reconnect. No fallback provider was used.")
+        raise SearchError("No readable key for the selected search provider. Add or replace it in Smara Settings → Integrations → Web search; never paste API keys into chat. No fallback provider was used.")
     owns = client is None
     client = client or httpx.AsyncClient(timeout=20, follow_redirects=False, trust_env=False)
     try:
@@ -68,7 +78,7 @@ async def web_search(query: str, count: int = 5, client=None):
             response = await client.post(endpoint, json={"query": query, "numResults": count, "type": "auto",
                 "contents": {"highlights": {"maxCharacters": 1200}}}, headers={"x-api-key": key})
         if response.status_code in (401, 403):
-            raise SearchError("Search provider rejected authentication/access. Check its API key and plan in Settings → Tools.")
+            raise SearchError(f"{provider.title()} rejected authentication/access for the saved API key (HTTP {response.status_code}). Replace/check it in Smara Settings → Integrations → Web search; never paste API keys into chat.")
         if response.status_code in (402, 429, 432, 433):
             raise SearchError("Search provider quota/rate limit reached. Check its plan or try later; no automatic retries or provider substitutions.")
         if response.is_redirect:
@@ -100,7 +110,7 @@ async def web_search(query: str, count: int = 5, client=None):
     except httpx.TimeoutException:
         raise SearchError("Search provider timed out. Try a shorter query or try later; no result was fabricated.") from None
     except httpx.HTTPError:
-        raise SearchError("Search provider is unreachable or returned an HTTP error. Check connectivity and Settings → Tools.") from None
+        raise SearchError("Search provider is unreachable or returned an HTTP error. Check connectivity and Settings → Integrations.") from None
     except (ValueError, TypeError, AttributeError):
         raise SearchError("Search provider returned an invalid response; no results were invented.") from None
     finally:

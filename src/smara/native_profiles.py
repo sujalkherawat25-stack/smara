@@ -58,10 +58,10 @@ def unprotect(value: str) -> str:
         ctypes.windll.kernel32.LocalFree(clear.pbData)
 
 
-def resolve_credential(name: str, credentials: dict | None = None) -> str:
+def resolve_credential(name: str, credentials: dict | None = None, *, allow_environment: bool = True) -> str:
     if not re.fullmatch(r"[A-Za-z0-9_]{1,128}", name):
         return ""
-    if os.getenv(name):
+    if allow_environment and os.getenv(name):
         return os.environ[name]
     if credentials is None:
         path = Path(os.getenv("SMARA_DESKTOP_CREDENTIALS", str(state_path().parent / "credentials.json")))

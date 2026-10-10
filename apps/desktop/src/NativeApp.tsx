@@ -14,6 +14,12 @@ type Approval = { id: number | string; method: string; params: Record<string, un
 type Question = { id: string; question: string; isSecret?: boolean; options?: { label: string; description: string }[] | null };
 type Thread = { id: string; name?: string | null; preview?: string };
 
+const NATIVE_DEVELOPER_INSTRUCTIONS = [
+  "You are Smara. Be honest about tool outcomes. Do not claim tests passed without evidence. Ask before external writes, payments, publishing, or messaging people.",
+  "For latest, current, today, news, or other time-sensitive questions, use current_time and web_search when those tools are available, then read relevant public source pages before answering. Do not pretend to have searched.",
+  "Smara's web_search is built in; a separate Tavily MCP server is not required. Never inspect shell variables, credential files, or environment settings to find or reveal API keys, and never claim a key is missing based on shell probes. Never ask the user to paste a key into chat. If web_search is unavailable, direct them to Settings → Integrations → Web search. If the provider rejects the saved key, say so and direct them to replace it there.",
+].join(" ");
+
 export default function NativeApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -203,7 +209,7 @@ export default function NativeApp() {
     try {
       let id = threadRef.current;
       if (!id) {
-        const result = await clientRef.current!.request<{ thread: Thread }>("thread/start", { cwd: workspace, approvalPolicy: "on-request", sandbox: "workspace-write", developerInstructions: "You are Smara. Be honest about tool outcomes. Do not claim tests passed without evidence. Ask before external writes, payments, publishing, or messaging people." });
+        const result = await clientRef.current!.request<{ thread: Thread }>("thread/start", { cwd: workspace, approvalPolicy: "on-request", sandbox: "workspace-write", developerInstructions: NATIVE_DEVELOPER_INSTRUCTIONS });
         id = result.thread.id; threadRef.current = id; setThreadId(id);
         setThreads(current => [result.thread, ...current]);
       }

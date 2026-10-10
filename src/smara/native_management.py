@@ -47,7 +47,7 @@ def preferences():
         raise ValueError("Native project settings are invalid; restore your settings backup")
     _, selected, _ = load_profiles()
     return {"projects": projects, "workspace": saved.get("workspace") or (projects[0]["workspace"] if projects else ""),
-            "active_model": selected, "search_provider": saved.get("search_provider") or search_status().get("provider") or "tavily"}
+            "active_model": selected, "search_provider": saved.get("search_provider") or search_status(protected_only=True).get("provider") or "tavily"}
 
 
 @contextlib.contextmanager
@@ -95,7 +95,7 @@ def put_credential(name, secret, provider):
 def bootstrap():
     profiles, _, _ = load_profiles()
     profiles = [{k: v for k, v in profile.items() if k in PROFILE_FIELDS} for profile in profiles]
-    return {"preferences": preferences(), "profiles": profiles, "credentials": credential_summaries(), "search": search_status()}
+    return {"preferences": preferences(), "profiles": profiles, "credentials": credential_summaries(), "search": search_status(protected_only=True)}
 
 
 def manage(request):
@@ -137,7 +137,14 @@ def manage(request):
                 raise ValueError("Select Tavily, Exa, Serper or Brave")
             saved["search_provider"] = provider
         elif operation == "save_credential":
-            put_credential(request.get("name"), request.get("secret"), request.get("provider") or "custom")
+            provider = str(request.get("provider") or "custom").lower()
+            name = str(request.get("name") or "")
+            if provider in PROVIDERS and name.upper() != PROVIDERS[provider][1]:
+                raise ValueError("Search key alias does not match the selected provider")
+            vault_before = read_object(vault_path())
+            put_credential(name, request.get("secret"), provider)
+            if provider in PROVIDERS:
+                saved["search_provider"] = provider
         elif operation == "delete_credential":
             name = str(request.get("name") or "")
             records = read_object(vault_path())
@@ -183,7 +190,7 @@ def manage(request):
             saved["model_profiles"] = [{k: v for k, v in p.items() if k in PROFILE_FIELDS} for p in profiles if p.get("id") != identity] + [clean]
         else:
             raise ValueError("Unsupported native management operation; legacy execution is unavailable")
-        if operation not in {"save_credential", "delete_credential"}:
+        if operation != "delete_credential":
             try:
                 write_object(settings_path(), saved)
             except OSError:

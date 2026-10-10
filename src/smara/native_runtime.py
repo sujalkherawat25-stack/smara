@@ -10,6 +10,7 @@ import json
 from importlib.resources import files
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import threading
@@ -41,12 +42,27 @@ def native_binary(explicit: str | None = None) -> Path:
     raise RuntimeError("Smara's copied native runtime has not been built. Run scripts/build-smara-native.ps1; no legacy or installed-Codex fallback is used.")
 
 
-def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, tools_enabled: bool = False, workers_enabled: bool = False, browser_origins: list[str] | None = None) -> tuple[list[str], dict[str, str]]:
+def _search_credential_available() -> bool:
+    """Read protected search-key readiness only; never probe the network."""
+    try:
+        from .native_search import search_status
+        return bool(search_status(protected_only=True).get("configured"))
+    except Exception:
+        return False
+
+
+def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, tools_enabled: bool = False, search_enabled: bool = False, workers_enabled: bool = False, browser_origins: list[str] | None = None) -> tuple[list[str], dict[str, str]]:
     if not workspace.is_dir():
         raise ValueError("Workspace must be an existing directory")
     home.mkdir(parents=True, exist_ok=True)
     tool_args = (["--native-tools"] if getattr(sys, "frozen", False) else ["-m", "smara.native_tools"])
     tool_args += ["--workspace", str(workspace.resolve())]
+    # A saved search credential is an explicit provider opt-in. Make public
+    # research available without silently exposing local memory.
+    search_only = search_enabled and not tools_enabled
+    reader_args = list(tool_args)
+    if search_only:
+        reader_args.append("--public-search-only")
     settings = {
         "model_provider": "smara_chat_adapter",
         "model": adapter.endpoint.model,
@@ -70,7 +86,7 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         # Keep a valid, inert local transport; never inherit an ambient enable.
         "mcp_servers.smara_readers.enabled": False,
         "mcp_servers.smara_readers.command": sys.executable,
-        "mcp_servers.smara_readers.args": tool_args,
+        "mcp_servers.smara_readers.args": reader_args,
         "mcp_servers.smara_browser.enabled": False,
         "mcp_servers.smara_browser.command": sys.executable,
         "mcp_servers.smara_browser.args": (["--native-browser"] if getattr(sys, "frozen", False) else ["-m", "smara.native_browser"]),
@@ -80,7 +96,7 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
     if adapter.endpoint.effective_context_window:
         settings["model_context_window"] = adapter.endpoint.effective_context_window
         settings["model_auto_compact_token_limit"] = int(adapter.endpoint.effective_context_window * .8)
-    if tools_enabled:
+    if tools_enabled or search_only:
         settings.update({
             "mcp_servers.smara_readers.enabled": True,
             "mcp_servers.smara_readers.env.PYTHONIOENCODING": "utf-8",
@@ -120,7 +136,6 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
     argv = [part for key, value in settings.items() for part in ("-c", key + "=" + json.dumps(value, ensure_ascii=False))]
     environment = dict(os.environ)
     environment["CODEX_HOME"] = str(home.resolve())
-    environment["SMARA_NATIVE_WIRE_TOKEN"] = adapter.token
     # Never inherit an ambient opt-in from an unrelated runtime/test process.
     environment.pop("SMARA_NATIVE_WORKTREE_WORKERS", None)
     if workers_enabled:
@@ -129,12 +144,13 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         argv += ["-c", "features.multi_agent_v2=false"]
     # Never give the executor the configured provider key. The model transport
     # holds it in memory and rejects unauthenticated loopback requests.
-    model_secrets = {"SMARA_LLM_API_KEY", "SARVAM_API_KEY", "OPENAI_API_KEY", "SMARA_LLM_PROFILES",
-        "GROK_API_KEY", "XAI_API_KEY", "OPENROUTER_API_KEY", "OLLAMA_API_KEY", "ANTHROPIC_API_KEY",
-        "GEMINI_API_KEY", "GOOGLE_API_KEY", "MISTRAL_API_KEY"}
+    secret_environment_name = re.compile(r"(?:API[_-]?KEY|ACCESS[_-]?KEY|(?:^|[_-])TOKEN(?:$|[_-])|SECRET|PASSWORD|CREDENTIAL)", re.IGNORECASE)
     for key in list(environment):
-        if key in model_secrets or key.startswith("SMARA_MODEL_"):
+        if key in {"SMARA_SEARCH_PROVIDER", "SMARA_SEARCH_URL"} or secret_environment_name.search(key):
             environment.pop(key)
+    # This fresh per-invocation token is required only by the local adapter;
+    # restore it after the generic secret scrub removes ambient token values.
+    environment["SMARA_NATIVE_WIRE_TOKEN"] = adapter.token
     return argv, environment
 
 
@@ -189,8 +205,9 @@ def serve_bootstrap(input_stream=None, output_stream=None) -> int:
     workspace = Path(config["workspace"]).resolve()
     endpoint = ChatEndpoint(config["base_url"], config["model"], config.get("api_key", ""), config.get("auth_header", "authorization"), config.get("context_window"))
     home = Path(config["home"]) if config.get("home") else runtime_home()
+    search_enabled = config.get("tools_enabled") is not True and _search_credential_available()
     with ResponsesAdapter(endpoint) as adapter:
-        options, environment = launch_options(adapter, home=home, workspace=workspace, tools_enabled=config.get("tools_enabled") is True, workers_enabled=config.get("workers_enabled") is True, browser_origins=config.get("browser_origins"))
+        options, environment = launch_options(adapter, home=home, workspace=workspace, tools_enabled=config.get("tools_enabled") is True, search_enabled=search_enabled, workers_enabled=config.get("workers_enabled") is True, browser_origins=config.get("browser_origins"))
         process = subprocess.Popen([str(binary), *options, "app-server", "--listen", "stdio://"],
             cwd=workspace, env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1,
@@ -300,7 +317,9 @@ def main(argv: list[str] | None = None) -> int:
         profile = active_profile(profiles, active_id)
         endpoint = ChatEndpoint(profile["base_url"], profile["model"], resolve_profile_key(profile, credentials), profile.get("auth_header", "authorization"), profile.get("context_window"))
         with ResponsesAdapter(endpoint) as adapter:
-            options, environment = launch_options(adapter, home=runtime_home(), workspace=Path.cwd(), tools_enabled=tools_enabled, workers_enabled=workers_enabled, browser_origins=browser_origins)
+            options, environment = launch_options(adapter, home=runtime_home(), workspace=Path.cwd(), tools_enabled=tools_enabled,
+                search_enabled=not tools_enabled and _search_credential_available(), workers_enabled=workers_enabled,
+                browser_origins=browser_origins)
             # The adapter belongs to this invocation. A detached shared daemon
             # must not retain its now-dead URL/token after the CLI exits.
             return subprocess.call([str(binary), *options, "--no-daemon", *args], env=environment)

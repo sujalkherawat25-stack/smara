@@ -127,3 +127,36 @@ def test_key_rotation_uses_new_alias_and_does_not_copy_legacy_plaintext_fields(s
     assert updated["credential_name"] == "LEGACY_KEY"
     assert native_profiles.resolve_profile_key(updated, json.loads(vault.read_text())) == "synthetic-new"
     assert "synthetic-do-not-copy" not in management.settings_path().read_text()
+
+
+def test_saving_search_key_selects_provider_and_keeps_secret_out_of_settings(setup):
+    root, _, vault = setup
+    result = management.manage({"operation": "save_credential", "name": "TAVILY_API_KEY",
+        "provider": "tavily", "secret": "synthetic-tavily-secret"})
+    assert result["preferences"]["search_provider"] == "tavily"
+    assert result["search"]["configured"] is True
+    assert "synthetic-tavily-secret" not in management.settings_path().read_text()
+    assert "synthetic-tavily-secret" not in json.dumps(result)
+    assert json.loads(vault.read_text())["TAVILY_API_KEY"]["provider"] == "tavily"
+
+
+def test_search_key_alias_must_match_provider_before_vault_write(setup):
+    _, _, vault = setup
+    with pytest.raises(ValueError, match="does not match"):
+        management.manage({"operation": "save_credential", "name": "EXA_API_KEY",
+            "provider": "tavily", "secret": "synthetic-secret"})
+    assert not vault.exists()
+
+
+def test_search_provider_metadata_failure_rolls_back_new_key(setup, monkeypatch):
+    _, _, vault = setup
+    original_write = management.write_object
+    def fail_settings(path, value):
+        if path == management.settings_path():
+            raise OSError("synthetic metadata failure")
+        original_write(path, value)
+    monkeypatch.setattr(management, "write_object", fail_settings)
+    with pytest.raises(OSError, match="metadata failure"):
+        management.manage({"operation": "save_credential", "name": "TAVILY_API_KEY",
+            "provider": "tavily", "secret": "synthetic-secret"})
+    assert not vault.exists() or json.loads(vault.read_text()) == {}

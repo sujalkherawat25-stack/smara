@@ -18,6 +18,24 @@ def test_clock_and_empty_memory_are_local_nonmutating(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_public_search_only_excludes_local_memory_and_other_readers(tmp_path):
+    tools = NativeTools(tmp_path, public_search_only=True)
+    exposed = {spec["name"] for spec in tools.tool_specs}
+    assert exposed == {"current_time", "web_search", "fetch_url", "source_page"}
+    with pytest.raises(ValueError, match="Unknown tool"):
+        call(tools, "memory_read")
+
+    requests = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+    ]
+    output = io.StringIO()
+    serve(tmp_path, io.StringIO("\n".join(json.dumps(item) for item in requests) + "\n"), output,
+          public_search_only=True)
+    listed = json.loads(output.getvalue().splitlines()[1])["result"]["tools"]
+    assert {spec["name"] for spec in listed} == exposed
+
+
 def test_memory_pagination_has_no_silent_loss(tmp_path):
     directory = tmp_path / ".smara"
     directory.mkdir()

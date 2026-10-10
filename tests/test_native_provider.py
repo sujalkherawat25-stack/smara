@@ -137,6 +137,9 @@ def test_credentials_not_in_native_command_or_environment(tmp_path, monkeypatch)
     monkeypatch.setenv("SARVAM_API_KEY", "private-provider-key")
     monkeypatch.setenv("SMARA_MODEL_SARVAM_GLM_API_KEY", "private-provider-key")
     monkeypatch.setenv("XAI_API_KEY", "other-provider-key")
+    monkeypatch.setenv("TAVILY_API_KEY", "private-search-key")
+    monkeypatch.setenv("GITHUB_TOKEN", "private-github-token")
+    monkeypatch.setenv("SMARA_SEARCH_PROVIDER", "tavily")
     monkeypatch.setenv("CODEX_HOME", "unrelated-codex-home")
     adapter = ResponsesAdapter(ChatEndpoint("https://example.com/v2", "test", "private-provider-key"))
     try:
@@ -145,6 +148,9 @@ def test_credentials_not_in_native_command_or_environment(tmp_path, monkeypatch)
         assert "SARVAM_API_KEY" not in env
         assert "SMARA_MODEL_SARVAM_GLM_API_KEY" not in env
         assert "XAI_API_KEY" not in env
+        assert "TAVILY_API_KEY" not in env and "GITHUB_TOKEN" not in env
+        assert "SMARA_SEARCH_PROVIDER" not in env
+        assert env["SMARA_NATIVE_WIRE_TOKEN"] == adapter.token
         assert env["CODEX_HOME"] == str((tmp_path / "smara-home").resolve())
         assert 'approval_policy="on-request"' in argv
         assert 'sandbox_mode="workspace-write"' in argv
@@ -199,6 +205,83 @@ def test_reader_launch_is_opt_in_and_has_valid_toml_overrides(tmp_path, monkeypa
     finally:
         adapter.server.server_close()
         adapter.client.close()
+
+
+def test_saved_search_key_exposes_public_search_without_project_memory(tmp_path):
+    import sys
+    import tomllib
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    home = tmp_path / "home"
+    adapter = ResponsesAdapter(ChatEndpoint("http://127.0.0.1", "custom", ""))
+    try:
+        options, _ = launch_options(adapter, home=home, workspace=workspace, search_enabled=True)
+        reader = tomllib.loads("\n".join(options[1::2]))["mcp_servers"]["smara_readers"]
+        expected = (["--native-tools"] if getattr(sys, "frozen", False) else ["-m", "smara.native_tools"])
+        expected += ["--workspace", str(workspace.resolve()), "--public-search-only"]
+        assert reader["enabled"] is True
+        assert reader["args"] == expected
+    finally:
+        adapter.server.server_close()
+        adapter.client.close()
+
+
+def test_search_reader_gets_vault_path_but_never_inherits_provider_secret(tmp_path, monkeypatch):
+    import tomllib
+
+    state = tmp_path / "desktop.json"
+    vault = tmp_path / "credentials.json"
+    monkeypatch.setenv("SMARA_DESKTOP_STATE", str(state))
+    monkeypatch.setenv("SMARA_DESKTOP_CREDENTIALS", str(vault))
+    monkeypatch.setenv("TAVILY_API_KEY", "synthetic-private-search-key")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    adapter = ResponsesAdapter(ChatEndpoint("http://127.0.0.1", "custom", ""))
+    try:
+        options, environment = launch_options(adapter, home=tmp_path / "home", workspace=workspace, search_enabled=True)
+        config = tomllib.loads("\n".join(options[1::2]))
+        reader_env = config["mcp_servers"]["smara_readers"]["env"]
+        assert reader_env["SMARA_DESKTOP_STATE"] == str(state.resolve())
+        assert reader_env["SMARA_DESKTOP_CREDENTIALS"] == str(vault.resolve())
+        assert "TAVILY_API_KEY" not in environment
+        assert "synthetic-private-search-key" not in json.dumps(options) + json.dumps(environment)
+    finally:
+        adapter.server.server_close()
+        adapter.client.close()
+
+
+def test_search_credential_readiness_is_local_and_fail_safe(monkeypatch):
+    from smara.native_runtime import _search_credential_available
+
+    monkeypatch.setattr("smara.native_search.search_status", lambda **kwargs: {"configured": True, "network_tested": False})
+    assert _search_credential_available() is True
+    monkeypatch.setattr("smara.native_search.search_status", lambda **kwargs: {"configured": False})
+    assert _search_credential_available() is False
+    monkeypatch.setattr("smara.native_search.search_status", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("synthetic")))
+    assert _search_credential_available() is False
+
+
+def test_cli_enables_saved_search_readers_without_enabling_memory(tmp_path, monkeypatch):
+    import smara.native_runtime as runtime
+
+    captured = {}
+    class Adapter:
+        def __init__(self, endpoint): pass
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+
+    monkeypatch.setattr(runtime, "native_binary", lambda: tmp_path / "smara-native.exe")
+    monkeypatch.setattr(runtime, "runtime_home", lambda: tmp_path / "home")
+    monkeypatch.setattr(runtime, "_search_credential_available", lambda: True)
+    monkeypatch.setattr(runtime, "ResponsesAdapter", Adapter)
+    monkeypatch.setattr("smara.native_profiles.load_profiles", lambda: ([{"id": "synthetic", "base_url": "http://127.0.0.1", "model": "synthetic"}], "synthetic", {}))
+    monkeypatch.setattr("smara.native_profiles.resolve_profile_key", lambda *_args: "")
+    monkeypatch.setattr(runtime, "launch_options", lambda _adapter, **kwargs: (captured.update(kwargs) or [], {}))
+    monkeypatch.setattr(runtime.subprocess, "call", lambda *_args, **_kwargs: 0)
+    assert runtime.main([]) == 0
+    assert captured["search_enabled"] is True
+    assert captured["tools_enabled"] is False
 
 
 def test_isolated_workers_require_explicit_launch_opt_in(tmp_path, monkeypatch):
