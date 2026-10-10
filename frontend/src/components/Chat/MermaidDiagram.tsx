@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Download, Expand, Minimize2, Minus, MoreHorizontal, Plus, RotateCcw } from "lucide-react";
 import type { MessageDiagram } from "@/types/memory";
 import { prepareMermaidSource } from "@/lib/mermaidSource";
+import { sanitizeMermaidSvg } from "@/lib/sanitizeMermaidSvg";
 
 let mermaidReady: Promise<typeof import("mermaid")["default"]> | null = null;
 
@@ -87,7 +88,8 @@ export default function MermaidDiagram({
         if (!rendered || /Syntax error in text|mermaid version/i.test(rendered)) {
           throw new Error("Mermaid returned an error graphic instead of a diagram.");
         }
-        if (!cancelled) setSvg(rendered);
+        const safeSvg = sanitizeMermaidSvg(rendered);
+        if (!cancelled) setSvg(safeSvg);
       })
       .catch((e) => {
         if (!cancelled) setError(e?.message || "Diagram failed to render.");

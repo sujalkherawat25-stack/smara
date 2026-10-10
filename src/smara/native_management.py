@@ -9,8 +9,9 @@ from pathlib import Path
 import re
 import sys
 from urllib.parse import urlsplit
-from .native_profiles import load_profiles, protect, read_object, resolve_credential, state_path, write_object
-from .native_search import PROVIDERS, search_status
+from .native_profiles import load_profiles, protect, read_object, resolve_credential, resolve_profile_key, state_path, write_object
+from .native_provider import ChatEndpoint, probe_endpoint
+from .native_search import PROVIDERS, SearchError, probe_search, search_status
 
 PROFILE_FIELDS = {"id", "label", "model", "provider", "base_url", "auth_header", "credential_name", "updated_at", "context_window"}
 
@@ -98,10 +99,46 @@ def bootstrap():
     return {"preferences": preferences(), "profiles": profiles, "credentials": credential_summaries(), "search": search_status(protected_only=True)}
 
 
+def _test_model(request):
+    identity = str(request.get("id") or "")
+    if not re.fullmatch(r"[a-z0-9_-]{1,48}", identity):
+        raise ValueError("Choose a configured model to test")
+    with management_lock():
+        profiles, _, credentials = load_profiles()
+        profile = next((item for item in profiles if item.get("id") == identity), None)
+        if profile is None:
+            raise ValueError("Choose a configured model to test")
+        key = resolve_profile_key(profile, credentials, allow_environment=False)
+        endpoint = ChatEndpoint(
+            str(profile.get("base_url") or ""), str(profile.get("model") or ""), key,
+            str(profile.get("auth_header") or "authorization"), profile.get("context_window"),
+        )
+    return {"kind": "model", **probe_endpoint(endpoint)}
+
+
+def _test_search():
+    readiness = search_status(protected_only=True)
+    if not readiness.get("configured"):
+        raise ValueError("No readable search key is saved. Add one in Settings → Integrations → Web search.")
+    query = "Smara web search connectivity test"
+    try:
+        result = probe_search(query, count=1)
+    except SearchError as exc:
+        raise ValueError(str(exc)) from None
+    return {"kind": "search", "ok": True, "provider": result["provider"], "query": query,
+            "result_count": result["result_count"]}
+
+
 def manage(request):
     if not isinstance(request, dict) or not isinstance(request.get("operation"), str):
         raise ValueError("Invalid native management request")
     operation = request["operation"]
+    # Explicit provider probes are read-only and are invoked only by Settings
+    # after the user accepts the one-request/cost notice. Never run at startup.
+    if operation == "test_model":
+        return _test_model(request)
+    if operation == "test_search":
+        return _test_search()
     with management_lock():
         if operation == "bootstrap":
             return bootstrap()

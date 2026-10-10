@@ -3156,6 +3156,11 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--connector-revoke", help="disconnect one local connector and remove its local credential")
     parser.add_argument("--log", type=Path, default=default_log_path(), help="rotating desktop log path")
     args = parser.parse_args(argv)
+    if args.python_bridge and os.environ.get("SMARA_UNSAFE_ALLOW_DYNAMIC_PYTHON") != "1":
+        raise SystemExit(
+            "The legacy Python bridge is disabled because it executes arbitrary code. "
+            "Only trusted compatibility builds may set SMARA_UNSAFE_ALLOW_DYNAMIC_PYTHON=1."
+        )
     if args.session_protocol:
         from smara.session_protocol import SessionProtocol
         request = json.load(sys.stdin)

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "smara"
-version = "0.1.9"
+version = "0.1.10"
 description = "Smara independent agent control plane"
 requires-python = ">=3.11"
 dependencies = [
@@ -42,6 +42,16 @@ smara-migrate = "smara.migrations:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/smara"]
+exclude = [
+  "src/smara/agent_tools.py",
+  "src/smara/autonomous_agent.py",
+  "src/smara/cli.py",
+  "src/smara/desktop_executor.py",
+  "src/smara/local_agent_runtime.py",
+  "src/smara/self_healing.py",
+  "src/smara/swarm.py",
+  "src/smara/tool_synthesis.py",
+]
 
 [tool.hatch.build.targets.wheel.force-include]
 "native/UPSTREAM.json" = "smara/native_assets/UPSTREAM.json"

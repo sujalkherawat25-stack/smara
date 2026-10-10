@@ -12,7 +12,8 @@ try {
         '--hidden-import','smara.native_tools','--hidden-import','smara.native_profiles','--hidden-import','smara.native_management','--hidden-import','smara.native_schedule','--hidden-import','smara.native_browser','--collect-all','playwright')
     foreach ($smaraCliExcluded in @('pandas','pyarrow','datasets','pytest','tkinter','_tkinter',
         'numpy','psycopg','psycopg_pool','smara.store',
-        'smara.cli','smara.desktop_executor','smara.local_agent_runtime','smara.self_healing','smara.swarm')) {
+        'smara.agent_tools','smara.autonomous_agent','smara.cli','smara.desktop_executor',
+        'smara.local_agent_runtime','smara.self_healing','smara.swarm','smara.tool_synthesis')) {
         $smaraCliArgs += @('--exclude-module', $smaraCliExcluded)
     }
     $smaraCliArgs += 'scripts\native_cli_entry.py'

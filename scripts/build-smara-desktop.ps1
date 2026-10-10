@@ -41,11 +41,14 @@ try {
         'psycopg'
         'psycopg_pool'
         'smara.store'
+        'smara.agent_tools'
+        'smara.autonomous_agent'
         'smara.cli'
         'smara.desktop_executor'
         'smara.local_agent_runtime'
         'smara.self_healing'
         'smara.swarm'
+        'smara.tool_synthesis'
     )
     $pyInstallerArgs = @(
         '-m', 'PyInstaller'

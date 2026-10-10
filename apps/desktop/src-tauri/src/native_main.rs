@@ -76,7 +76,7 @@ fn management(request: Value) -> Result<Value, String> {
 }
 #[tauri::command]
 async fn native_manage(request: Value) -> Result<Value, String> {
-    if !matches!(request.get("operation").and_then(Value::as_str), Some("bootstrap" | "add_project" | "select_project" | "select_model" | "select_search" | "save_credential" | "delete_credential" | "save_model")) {
+    if !matches!(request.get("operation").and_then(Value::as_str), Some("bootstrap" | "add_project" | "select_project" | "select_model" | "select_search" | "save_credential" | "delete_credential" | "save_model" | "test_model" | "test_search")) {
         return Err("Unsupported UI settings operation; secret reads and legacy execution are unavailable".into());
     }
     tauri::async_runtime::spawn_blocking(move || {

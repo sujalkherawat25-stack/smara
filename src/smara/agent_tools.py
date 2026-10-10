@@ -13,8 +13,10 @@ Provides real, production-ready tool implementations for autonomous problem solv
 from __future__ import annotations
 
 import json
+import ast
 import logging
 import math
+import operator
 import os
 import re
 import shutil
@@ -862,19 +864,76 @@ def youtube_ingest(
 
 
 def calculate(expression: str) -> str:
-    """Safely evaluate mathematical expressions."""
-    allowed = {
-        "abs": abs, "round": round, "min": min, "max": max,
-        "sqrt": math.sqrt, "sin": math.sin, "cos": math.cos,
-        "tan": math.tan, "log": math.log, "log10": math.log10,
-        "pi": math.pi, "e": math.e, "pow": pow
-    }
+    """Evaluate bounded arithmetic without invoking Python's evaluator."""
     cleaned = expression.replace("^", "**").replace("×", "*").replace("÷", "/")
-    if not re.match(r"^[0-9\.\s\+\-\*/\(\)\,\_a-zA-Z]+$", cleaned):
-        return "Error: Invalid characters in expression."
     try:
-        res = eval(cleaned, {"__builtins__": {}}, allowed)
-        return str(res)
+        if len(cleaned) > 500:
+            raise ValueError("Expression is too long.")
+        tree = ast.parse(cleaned, mode="eval")
+        if sum(1 for _ in ast.walk(tree)) > 100:
+            raise ValueError("Expression is too complex.")
+
+        binary = {
+            ast.Add: operator.add, ast.Sub: operator.sub,
+            ast.Mult: operator.mul, ast.Div: operator.truediv,
+            ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod,
+            ast.Pow: operator.pow,
+        }
+        unary = {ast.UAdd: operator.pos, ast.USub: operator.neg}
+        constants = {"pi": math.pi, "e": math.e, "tau": math.tau}
+        functions = {
+            "abs": abs, "sqrt": math.sqrt, "sin": math.sin,
+            "cos": math.cos, "tan": math.tan, "log": math.log,
+            "log10": math.log10, "min": min, "max": max,
+        }
+
+        def bounded(value: Any) -> int | float:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError("Only numeric arithmetic is allowed.")
+            if not math.isfinite(float(value)) or abs(float(value)) > 1_000_000_000_000:
+                raise ValueError("Calculator values must be finite and bounded.")
+            return value
+
+        def visit(node: ast.AST) -> int | float:
+            if isinstance(node, ast.Constant):
+                return bounded(node.value)
+            if isinstance(node, ast.Name) and node.id.lower() in constants:
+                return constants[node.id.lower()]
+            if isinstance(node, ast.UnaryOp) and type(node.op) in unary:
+                return bounded(unary[type(node.op)](visit(node.operand)))
+            if isinstance(node, ast.BinOp) and type(node.op) in binary:
+                left, right = visit(node.left), visit(node.right)
+                if isinstance(node.op, ast.Pow) and abs(float(right)) > 12:
+                    raise ValueError("Calculator exponent is too large.")
+                return bounded(binary[type(node.op)](left, right))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                name = node.func.id.lower()
+                if name == "round":
+                    if len(node.args) not in (1, 2) or node.keywords:
+                        raise ValueError("round() accepts one value and an optional precision.")
+                    values = [visit(arg) for arg in node.args]
+                    if len(values) == 2 and (not isinstance(values[1], int) or abs(values[1]) > 12):
+                        raise ValueError("round() precision must be between -12 and 12.")
+                    return bounded(round(*values))
+                if name == "pow":
+                    if len(node.args) != 2 or node.keywords:
+                        raise ValueError("pow() accepts exactly two values.")
+                    left, right = (visit(arg) for arg in node.args)
+                    if abs(float(right)) > 12:
+                        raise ValueError("Calculator exponent is too large.")
+                    return bounded(pow(left, right))
+                function = functions.get(name)
+                if function is None or node.keywords:
+                    raise ValueError("Only supported math functions are allowed.")
+                values = [visit(arg) for arg in node.args]
+                if name in {"min", "max"} and not 1 <= len(values) <= 32:
+                    raise ValueError(f"{name}() needs between 1 and 32 values.")
+                if name not in {"min", "max"} and len(values) != 1:
+                    raise ValueError(f"{name}() accepts exactly one value.")
+                return bounded(function(*values))
+            raise ValueError("Only numeric arithmetic is allowed.")
+
+        return str(visit(tree.body))
     except Exception as e:
         return f"Math Error: {e}"
 

@@ -68,6 +68,55 @@ class ChatEndpoint:
         return {self.auth_header: ("Bearer " + self.api_key) if self.auth_header.lower() == "authorization" else self.api_key}
 
 
+def probe_endpoint(endpoint: ChatEndpoint, *, client: httpx.Client | None = None) -> dict[str, Any]:
+    """Send one fixed, one-token request to verify a configured model endpoint.
+
+    This is called only from the explicit Settings test action. Prompts, provider
+    response bodies and credentials are never returned in diagnostics.
+    """
+    if not endpoint.api_key:
+        raise ValueError("No readable key is saved for this model. Update it in Settings → Models.")
+    owns_client = client is None
+    client = client or httpx.Client(timeout=httpx.Timeout(20, connect=8), follow_redirects=False, trust_env=False)
+    started = time.monotonic()
+    try:
+        response = client.post(
+            endpoint.url,
+            headers=endpoint.headers(),
+            json={
+                "model": endpoint.model,
+                "messages": [{"role": "user", "content": "Reply with OK."}],
+                "max_tokens": 1,
+                "stream": False,
+            },
+        )
+        if response.status_code in (401, 403):
+            raise ValueError("The model provider rejected the saved credential. Replace it in Settings → Models.")
+        if response.status_code in (402, 429):
+            raise ValueError("The model provider reported a quota or rate limit. Check its plan or retry later.")
+        if response.status_code != 200:
+            raise ValueError(f"The model endpoint returned HTTP {response.status_code}; check its URL and model ID.")
+        try:
+            payload = response.json()
+        except (ValueError, TypeError):
+            raise ValueError("The model endpoint returned invalid JSON, not a compatible chat response.") from None
+        choices = payload.get("choices") if isinstance(payload, dict) else None
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            raise ValueError("The model endpoint responded, but not with a compatible chat-completion result.")
+        return {
+            "ok": True,
+            "model": endpoint.model,
+            "elapsed_ms": max(0, round((time.monotonic() - started) * 1000)),
+        }
+    except httpx.TimeoutException:
+        raise ValueError("The model endpoint timed out. Check the URL and network, then retry.") from None
+    except httpx.HTTPError:
+        raise ValueError("The model endpoint is unreachable. Check the URL and network, then retry.") from None
+    finally:
+        if owns_client:
+            client.close()
+
+
 def _alias(namespace: str | None, name: str) -> str:
     raw = f"{namespace}__{name}" if namespace else name
     if len(raw) <= 64 and all(char.isascii() and (char.isalnum() or char in "_-") for char in raw):

@@ -7,8 +7,14 @@ export type NativeSetup = {
   credentials: LocalCredentialSummary[];
   search: { provider: string; configured: boolean; network_tested: boolean; detail: string; credential_alias?: string; endpoint?: string };
 };
+export type NativeProbe = {
+  kind: "model" | "search"; ok: boolean; model?: string; elapsed_ms?: number;
+  provider?: string; query?: string; result_count?: number;
+};
 export const nativeSettings = (operation = "bootstrap", values: Record<string, unknown> = {}) =>
   invoke<NativeSetup>("native_manage", { request: { operation, ...values } });
+export const nativeProbe = (operation: "test_model" | "test_search", values: Record<string, unknown> = {}) =>
+  invoke<NativeProbe>("native_manage", { request: { operation, ...values } });
 export function sameWorkspace(a: string, b: string): boolean {
   const normalize = (path: string) => {
     const value = path.replace(/^\\\\\?\\/, "").replace(/\\/g, "/").replace(/\/+$/, "");

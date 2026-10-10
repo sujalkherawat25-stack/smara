@@ -114,7 +114,7 @@ def protect(value: str) -> str:
         ctypes.windll.kernel32.LocalFree(encrypted.pbData)
 
 
-def resolve_profile_key(profile: dict, credentials: dict) -> str:
+def resolve_profile_key(profile: dict, credentials: dict, *, allow_environment: bool = True) -> str:
     identity = str(profile.get("id", ""))
     provider = str(profile.get("provider", "")).lower()
     aliases = [profile.get("credential_name"), f"SMARA_MODEL_{identity.upper()}_API_KEY", f"model_api_key_{identity}",
@@ -125,7 +125,7 @@ def resolve_profile_key(profile: dict, credentials: dict) -> str:
         aliases += ["GROK_API_KEY", "XAI_API_KEY"]
     for alias in aliases:
         if isinstance(alias, str):
-            value = resolve_credential(alias, credentials)
+            value = resolve_credential(alias, credentials, allow_environment=allow_environment)
             if value:
                 return value
     return "ollama-local" if identity == "ollama" else ""

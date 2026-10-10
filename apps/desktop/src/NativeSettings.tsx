@@ -1,17 +1,17 @@
 import { useState } from "react";
-import { nativeSettings, type NativeSetup } from "./nativeApi";
+import { nativeProbe, nativeSettings, type NativeSetup } from "./nativeApi";
 import type { LocalModelProfile } from "./types";
 
 const aliases: Record<string, string> = { tavily: "TAVILY_API_KEY", exa: "EXA_API_KEY", serper: "SERPER_API_KEY", brave: "BRAVE_SEARCH_API_KEY" };
 const emptyModel = { id: "", label: "", provider: "", base_url: "", model: "", api_key: "", auth_header: "authorization" };
 type SettingsProps = {
-  setup: NativeSetup; locked: boolean; version: string;
+  setup: NativeSetup; locked: boolean; version: string; runtimeBuilt: boolean;
   onUpdate: (value: NativeSetup) => void; onClose: () => void;
   onPendingChange: (pending: boolean) => void;
   toolsEnabled: boolean; workersEnabled: boolean; browserOrigins: string;
   onToolsChange: (enabled: boolean) => void; onWorkersChange: (enabled: boolean) => void; onOriginsChange: (origins: string) => void;
 };
-export default function NativeSettings({ setup, locked, onUpdate, onClose, onPendingChange, version, toolsEnabled, workersEnabled, browserOrigins, onToolsChange, onWorkersChange, onOriginsChange }: SettingsProps) {
+export default function NativeSettings({ setup, locked, onUpdate, onClose, onPendingChange, version, runtimeBuilt, toolsEnabled, workersEnabled, browserOrigins, onToolsChange, onWorkersChange, onOriginsChange }: SettingsProps) {
   const [tab, setTab] = useState("models");
   const [model, setModel] = useState(emptyModel);
   const [provider, setProvider] = useState(setup.preferences.search_provider);
@@ -19,7 +19,9 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [probePending, setProbePending] = useState("");
   const disabled = locked || pending;
+  const activeModel = setup.profiles.find(profile => profile.id === setup.preferences.active_model);
   const save = async (operation: string, args: Record<string, unknown>) => {
     if (pending || (locked && operation !== "bootstrap")) return;
     onPendingChange(true); setPending(true); setError(""); setNotice("");
@@ -28,9 +30,24 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
     finally { onPendingChange(false); setPending(false); setSecret(""); setModel(current => ({ ...current, api_key: "" })); }
   };
   const edit = (profile: LocalModelProfile) => { setModel({ ...emptyModel, ...profile, api_key: "" }); setNotice(""); };
+  const runProbe = async (operation: "test_model" | "test_search") => {
+    if (disabled || probePending) return;
+    const explanation = operation === "test_model"
+      ? "Smara will send one fixed ‘Reply with OK’ request with a one-token output limit to your selected model. It will not send chat history or project files. Your provider may charge for the request. Continue?"
+      : "Smara will send the fixed query ‘Smara web search connectivity test’ to the selected search provider, requesting at most one result. Your provider may charge for the request. Continue?";
+    if (!window.confirm(explanation)) return;
+    setPending(true); setProbePending(operation); onPendingChange(true); setError(""); setNotice("");
+    try {
+      const result = await nativeProbe(operation, operation === "test_model" ? { id: activeModel?.id } : {});
+      setNotice(operation === "test_model"
+        ? `Model responded: ${result.model} · ${result.elapsed_ms} ms.`
+        : `Search responded: ${result.provider} · ${result.result_count} result(s) for the fixed test query.`);
+    } catch (reason) { setError(String(reason)); }
+    finally { onPendingChange(false); setPending(false); setProbePending(""); }
+  };
   return <section className="native-settings">
     <div className="settings-heading"><div><h1>Settings</h1><p>Your models and connected services.</p></div><button disabled={pending} onClick={onClose}>← Back to chat</button></div>
-    <nav className="settings-tabs" aria-label="Settings sections">{["models", "tools"].map(value => <button key={value} className={tab === value ? "selected" : ""} onClick={() => { setTab(value); setSecret(""); setModel(current => ({ ...current, api_key: "" })); }}>{value === "models" ? "Models" : "Integrations"}</button>)}</nav>
+    <nav className="settings-tabs" aria-label="Settings sections">{["models", "tools", "help"].map(value => <button key={value} className={tab === value ? "selected" : ""} onClick={() => { setTab(value); setSecret(""); setModel(current => ({ ...current, api_key: "" })); }}>{value === "models" ? "Models" : value === "tools" ? "Integrations" : "Help & setup"}</button>)}</nav>
     {locked && <p className="native-warning">Finishing session setup. Settings will be available shortly.</p>}
     {error && <p role="alert" className="native-error">{error.replaceAll("Settings → Tools", "Settings → Integrations")}</p>}{notice && <p role="status" className="settings-notice">{notice}</p>}
     {tab === "models" && <div className="settings-grid"><section className="settings-card"><h2>Configured models</h2><p>These endpoints are used as selected. Smara never silently replaces your model.</p>
@@ -60,6 +77,27 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
       <h3>Saved credential aliases</h3>{setup.credentials.length ? setup.credentials.map(c => <div className="credential-row" key={c.name}><div><code>{c.name}</code><small>{c.provider} · protected on this computer</small></div><button disabled={disabled} onClick={() => { if (window.confirm(`Remove ${c.name}? Tools/models using it will stop working until you save a replacement.`)) void save("delete_credential", { name: c.name }); }}>Remove</button></div>) : <p>No keys saved.</p>}
       <button disabled={pending} onClick={() => void save("bootstrap", {})}>Refresh readiness</button>
     </section></div></>}
+    {tab === "help" && <div className="settings-grid help-grid">
+      <section className="settings-card"><h2>Get started</h2>
+        <ol><li>Add a chat-compatible model in <strong>Models</strong>, then select it in the chat composer.</li>
+          <li>For current web research, choose a provider and save its key under <strong>Integrations → Web search</strong>.</li>
+          <li>Choose a trusted project folder from the sidebar. Avoid granting access to folders you do not trust.</li></ol>
+        <p>Smara {version} · Native runtime: <strong>{runtimeBuilt ? "available" : "not built"}</strong></p>
+      </section>
+      <section className="settings-card"><h2>Readiness and troubleshooting</h2>
+        <p><strong>Models:</strong> {setup.profiles.length ? `${setup.profiles.length} profile(s) saved${activeModel ? ` · selected: ${activeModel.label}` : " · choose one in the chat composer"}` : "No model configured — add one in Models."}</p>
+        <p><strong>Web search:</strong> {setup.search.configured ? `${setup.search.provider} key is readable locally.` : "No readable search key — save or replace it in Integrations."}</p>
+        <p>Saved-key checks are local only. These tests are manual, send fixed minimal requests, and may incur provider charges; no chat history or project files are included.</p>
+        <div className="settings-actions"><button disabled={disabled || !!probePending || !activeModel} onClick={() => void runProbe("test_model")}>{probePending === "test_model" ? "Testing model…" : "Test selected model"}</button><button disabled={disabled || !!probePending || !setup.search.configured} onClick={() => void runProbe("test_search")}>{probePending === "test_search" ? "Testing search…" : "Test web search"}</button></div>
+        {!runtimeBuilt && <p role="alert">The native runtime is missing. Use a matching Desktop installer or rebuild the native runtime before starting a chat.</p>}
+      </section>
+      <section className="settings-card"><h2>Access and privacy</h2>
+        <ul><li>Chat requests and context you provide go to your selected model provider. Project code or text Smara reads for a task may also be sent to that model.</li>
+          <li>Search queries go to the selected search provider; fetched public-page text may go to your model for analysis.</li>
+          <li>Project memory is optional. Local execution stays within the selected project sandbox; actions that need more authority require approval.</li>
+          <li>Browser work is limited to the configured public-site allowlist and does not use your personal browser profile. Full desktop/computer control and unattended company operations are not enabled in this build.</li></ul>
+      </section>
+    </div>}
     <small className="settings-version">Smara {version} · Keys protected on this computer</small>
   </section>;
 }

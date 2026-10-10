@@ -118,6 +118,69 @@ async def web_search(query: str, count: int = 5, client=None):
             await client.aclose()
 
 
+def probe_search(query: str, *, count: int = 1, client: httpx.Client | None = None):
+    """Perform one bounded synchronous readiness query for the Settings UI.
+
+    This avoids starting an asyncio runtime inside the short-lived native
+    settings companion. It uses only Smara's protected provider selection/key.
+    """
+    if not isinstance(query, str) or not query.strip() or len(query) > 500 or len(query.split()) > 75:
+        raise SearchError("Search query must be nonempty, at most 500 characters and 75 words.")
+    if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 8:
+        raise SearchError("Search result count must be 1..8.")
+    provider, endpoint, _, key = search_configuration(allow_environment=False)
+    if not key:
+        raise SearchError("No readable key for the selected search provider. Add or replace it in Smara Settings → Integrations → Web search; never paste API keys into chat.")
+    owns = client is None
+    client = client or httpx.Client(timeout=20, follow_redirects=False, trust_env=False)
+    try:
+        if provider == "brave":
+            response = client.get(endpoint, params={"q": query, "count": count}, headers={"X-Subscription-Token": key})
+        elif provider == "serper":
+            response = client.post(endpoint, json={"q": query, "num": count}, headers={"X-API-KEY": key})
+        elif provider == "tavily":
+            response = client.post(endpoint, json={"query": query, "max_results": count, "search_depth": "basic",
+                "include_answer": False, "include_raw_content": False}, headers={"Authorization": f"Bearer {key}"})
+        else:
+            response = client.post(endpoint, json={"query": query, "numResults": count, "type": "auto",
+                "contents": {"highlights": {"maxCharacters": 1200}}}, headers={"x-api-key": key})
+        if response.status_code in (401, 403):
+            raise SearchError(f"{provider.title()} rejected authentication/access for the saved API key (HTTP {response.status_code}). Replace/check it in Settings → Integrations → Web search; never paste API keys into chat.")
+        if response.status_code in (402, 429, 432, 433):
+            raise SearchError("Search provider quota/rate limit reached. Check its plan or try later; no automatic retries or provider substitutions.")
+        if response.is_redirect:
+            raise SearchError("Search provider returned a redirect; credentials were not forwarded. Check provider configuration.")
+        response.raise_for_status()
+        if len(response.content) > 1_000_000:
+            raise SearchError("Search response exceeded the retrieval safety limit.")
+        payload = response.json()
+        entries = payload.get("organic") if provider == "serper" else (payload.get("web") or {}).get("results") if provider == "brave" else payload.get("results")
+        if not isinstance(entries, list):
+            raise SearchError("Search provider returned an unexpected response format; no results were invented.")
+        valid = 0
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("link") if provider == "serper" else item.get("url") or "")
+            parsed = urlsplit(url)
+            if parsed.scheme in {"http", "https"} and parsed.hostname and not parsed.username and not parsed.password:
+                valid += 1
+                if valid >= count:
+                    break
+        return {"provider": provider, "result_count": valid}
+    except SearchError:
+        raise
+    except httpx.TimeoutException:
+        raise SearchError("Search provider timed out. Try later; no result was fabricated.") from None
+    except httpx.HTTPError:
+        raise SearchError("Search provider is unreachable or returned an HTTP error. Check connectivity and Settings → Integrations.") from None
+    except (ValueError, TypeError, AttributeError):
+        raise SearchError("Search provider returned an invalid response; no results were invented.") from None
+    finally:
+        if owns:
+            client.close()
+
+
 async def academic_search(query: str, client=None):
     if not isinstance(query, str) or not query.strip() or len(query) > 500:
         raise SearchError("Academic search needs a nonempty query up to 500 characters.")

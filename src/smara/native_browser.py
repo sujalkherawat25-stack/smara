@@ -172,7 +172,7 @@ def serve(workspace, origins, reader=None, writer=None):
                     raise ValueError("Invalid JSON-RPC")
                 if method == "initialize":
                     initialized = True
-                    result = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "smara-browser", "version": "0.1.9"}}
+                    result = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "smara-browser", "version": "0.1.10"}}
                 elif method == "ping":
                     result = {}
                 elif not initialized:

@@ -123,6 +123,15 @@ test("the primary UI has no technical badge, tool dropdown or capabilities tab",
   assert.match(settings, /action approvals remain required/);
 });
 
+test("setup help documents scope and gates provider checks behind confirmation", () => {
+  const settings = readFileSync(new URL("../src/NativeSettings.tsx", import.meta.url), "utf8");
+  assert.match(settings, /Help & setup/);
+  assert.match(settings, /window\.confirm\(explanation\)/);
+  assert.match(settings, /nativeProbe\(operation/);
+  assert.match(settings, /fixed minimal requests/);
+  assert.match(settings, /Full desktop\/computer control and unattended company operations are not enabled/);
+});
+
 test("settings pause the idle runtime and restore the same chat without replay", async () => {
   const f = fixture(); await f.flush();
   await f.button("Saved chat").props.onClick(); await f.flush();

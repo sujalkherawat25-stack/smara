@@ -1,8 +1,8 @@
-"""Dynamic Tool Synthesis Engine for Smara.
+"""Legacy dynamic Python tools, disabled unless explicitly opted into.
 
-Allows the agent to write, verify, smoke-test, register, and execute custom
-Python tools on the fly, creating a self-expanding tool library that persists
-across sessions.
+AST inspection is not a Python sandbox. Enabling this compatibility feature
+allows generated Python to run with the current user's process permissions.
+Prefer the native runtime's declared tools and approval-aware execution.
 """
 from __future__ import annotations
 
@@ -18,6 +18,17 @@ from typing import Any, Callable, Optional
 class DynamicToolError(Exception):
     """Raised when dynamic tool synthesis or execution fails."""
     pass
+
+
+UNSAFE_EXECUTION_ENV = "SMARA_UNSAFE_ALLOW_DYNAMIC_PYTHON"
+
+
+def _require_unsafe_execution() -> None:
+    if os.environ.get(UNSAFE_EXECUTION_ENV) != "1":
+        raise DynamicToolError(
+            "Dynamic Python execution is disabled. It is not sandboxed; set "
+            f"{UNSAFE_EXECUTION_ENV}=1 only for trusted legacy tools."
+        )
 
 
 class DynamicToolSynthesizer:
@@ -77,7 +88,12 @@ class DynamicToolSynthesizer:
         return True, "AST analysis passed cleanly."
 
     def smoke_test(self, code: str, sample_payload: dict[str, Any]) -> tuple[bool, Any, str]:
-        """Execute the code in an isolated module namespace with sample payload."""
+        """Run legacy tool code only after explicit unsafe compatibility opt-in."""
+        if os.environ.get(UNSAFE_EXECUTION_ENV) != "1":
+            return False, None, (
+                "Dynamic Python execution is disabled because it is not sandboxed. "
+                f"Set {UNSAFE_EXECUTION_ENV}=1 only for trusted legacy tools."
+            )
         temp_module_name = "_smara_temp_smoke_tool"
         module = importlib.util.module_from_spec(
             importlib.util.spec_from_loader(temp_module_name, loader=None)
@@ -109,6 +125,7 @@ class DynamicToolSynthesizer:
         sample_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Validate, smoke-test, and register a new custom dynamic tool."""
+        _require_unsafe_execution()
         clean_name = name.strip().lower().replace("-", "_")
         if not clean_name.isidentifier():
             raise DynamicToolError(f"Tool name '{name}' is not a valid Python identifier.")
@@ -161,6 +178,15 @@ class DynamicToolSynthesizer:
 
     def execute_dynamic_tool(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Execute an active registered dynamic tool by name with the given payload."""
+        try:
+            _require_unsafe_execution()
+        except DynamicToolError as exc:
+            return {
+                "action": "dynamic_tool_exec",
+                "tool": name.strip().lower().replace("-", "_"),
+                "status": "failed",
+                "error": str(exc),
+            }
         clean_name = name.strip().lower().replace("-", "_")
         meta = self.get_tool_metadata(clean_name)
         if not meta:
