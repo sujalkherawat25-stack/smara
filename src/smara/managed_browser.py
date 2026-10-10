@@ -14,8 +14,23 @@ class ManagedBrowser:
         self.root=Path(artifact_root); self.root.mkdir(parents=True,exist_ok=True); self.executable=executable_path or self._find(); self.headless=headless; self.runtime=None; self.browser=None; self.sessions={}
     @staticmethod
     def _find():
-        candidates=[shutil.which("chrome"),shutil.which("msedge"),r"C:\Program Files\Google\Chrome\Application\chrome.exe",r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"]
-        return next((str(p) for p in candidates if p and Path(p).is_file()),None)
+        candidates=[shutil.which("chrome"),shutil.which("chromium"),shutil.which("chromium-browser"),shutil.which("google-chrome"),shutil.which("msedge"),r"C:\Program Files\Google\Chrome\Application\chrome.exe",r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"]
+        installed=next((str(p) for p in candidates if p and Path(p).is_file()),None)
+        if installed:
+            return installed
+        # Playwright-managed Chromium is the supported headless fallback on
+        # clean runners and machines without a system Chrome/Edge install.
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as runtime:
+                bundled=runtime.chromium.executable_path
+                if bundled and Path(bundled).is_file():
+                    return str(Path(bundled))
+        except Exception:
+            # Discovery is optional: leave the existing BrowserUnavailable
+            # error path in control when Playwright or its browser is absent.
+            return None
+        return None
     def start(self):
         if not self.executable:raise BrowserUnavailable("no supported Chromium executable")
         from playwright.sync_api import sync_playwright

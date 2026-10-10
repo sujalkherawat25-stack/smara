@@ -187,6 +187,15 @@ def build_workspace_docker_argv(
     if (root / "src").is_dir():
         safe_env.setdefault("PYTHONPATH", "/workspace/src")
 
+    # Match the non-root owner of the mounted workspace on POSIX hosts. A
+    # fixed UID works on many developer machines, but can make legitimate
+    # workspace writes fail on hosts (including CI) whose UID differs.
+    container_user = "1000:1000"
+    if os.name != "nt":
+        owner = root.stat()
+        if owner.st_uid > 0:
+            container_user = f"{owner.st_uid}:{owner.st_gid}"
+
     command = [
         docker, "run", "--rm", "--init", "--pull=never", "--name", name,
         "--label", "com.smara.workspace-sandbox=true",
@@ -196,7 +205,7 @@ def build_workspace_docker_argv(
         "--cpus", str(limits.cpus),
         "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777",
         "--mount", f"type=bind,source={source},target=/workspace" + (",readonly" if read_only_workspace else ""),
-        "--workdir", container_workdir, "--user", "1000:1000",
+        "--workdir", container_workdir, "--user", container_user,
     ]
     if interactive:
         command.append("--interactive")

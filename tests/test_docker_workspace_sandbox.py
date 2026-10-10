@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 from pathlib import Path
@@ -35,6 +36,27 @@ def test_container_plan_has_workspace_only_mount_and_no_network(tmp_path: Path):
     assert mounts == [f"type=bind,source={str(workspace.resolve()).replace(chr(92), '/')},target=/workspace"]
     assert all("/var/run/docker.sock" not in item for item in command)
     assert "--memory" in command and "--cpus" in command and "--pids-limit" in command
+    owner = workspace.stat()
+    expected_user = f"{owner.st_uid}:{owner.st_gid}" if os.name != "nt" and owner.st_uid > 0 else "1000:1000"
+    assert command[command.index("--user") + 1] == expected_user
+
+
+def test_sandbox_uses_non_root_workspace_owner_without_docker(tmp_path: Path, monkeypatch):
+    import smara.sandbox as sandbox
+
+    monkeypatch.setattr(sandbox, "_docker_executable", lambda: "docker")
+    monkeypatch.setattr(sandbox, "docker_engine_status", lambda: {"engine_available": True, "linux_containers": True})
+    monkeypatch.setattr(
+        sandbox.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="sha256:" + "a" * 64, stderr=""),
+    )
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    command = sandbox.build_workspace_docker_argv(["sh", "-lc", "true"], workspace, image="test:local")
+    owner = workspace.stat()
+    expected_user = f"{owner.st_uid}:{owner.st_gid}" if os.name != "nt" and owner.st_uid > 0 else "1000:1000"
+    assert command[command.index("--user") + 1] == expected_user
 
 
 def test_container_environment_drops_credentials_and_host_path(tmp_path: Path):
