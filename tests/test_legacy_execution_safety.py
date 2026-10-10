@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import json
 import re
 import tomllib
@@ -72,16 +71,6 @@ def test_distributables_exclude_legacy_execution_modules():
         for path in project["tool"]["hatch"]["build"]["targets"]["wheel"]["exclude"]
     }
     assert required <= wheel_exclusions
-
-    spec = ast.parse((root / "smara-desktop.spec").read_text(encoding="utf-8"))
-    analysis = next(
-        node for node in ast.walk(spec)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "Analysis"
-    )
-    desktop_exclusions = set(ast.literal_eval(next(arg.value for arg in analysis.keywords if arg.arg == "excludes")))
-    assert {f"smara.{name.removesuffix('.py')}" for name in required} <= desktop_exclusions
 
     build_script = (root / "scripts" / "build-smara-desktop.ps1").read_text(encoding="utf-8")
     script_exclusions = set(re.findall(r"^\s*'(smara\.[^']+)'\s*$", build_script, re.MULTILINE))

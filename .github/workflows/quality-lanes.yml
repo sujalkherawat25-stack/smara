@@ -43,6 +43,12 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -e ".[test,browser]"
+      - name: Install browser and isolated execution dependencies
+        run: |
+          python -m playwright install --with-deps chromium
+          docker pull alpine:3.20
+          docker pull python:3.12-slim
+          python -c "from pathlib import Path; from smara.sandbox_image import build_coding_image; print(build_coding_image(Path.cwd()))"
       - name: Browser controls, worker isolation and Docker sandbox contracts
         run: >-
           python -m pytest -q
