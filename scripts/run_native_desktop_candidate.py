@@ -141,6 +141,10 @@ def main():
         selected = "native_protocol_fixture"
         profiles = [{"id": selected, "label": "OFFLINE clock Deny fixture — not AI" if args.offline_clock_deny else "OFFLINE stream fixture — not AI", "provider": "openai", "model": "synthetic-protocol",
             "base_url": f"http://127.0.0.1:{server.server_port}/v1", "auth_header": "authorization", "credential_name": "SMARA_OFFLINE_TEST_CREDENTIAL", "updated_at": "2026-10-09T00:00:00+05:30"}]
+        if args.offline_stream:
+            # UI-only model switching stays on the same owned loopback server.
+            # No user's profiles or keys are read, copied or contacted.
+            profiles.append({**profiles[0], "id": "native_protocol_alternate", "label": "OFFLINE alternate fixture — not AI", "model": "synthetic-protocol-alternate"})
         if args.offline_clock_deny:
             # Fixture-only: ASK for the clock. This does not enable readers or
             # approve a call. The human must enable readers and click Deny.
