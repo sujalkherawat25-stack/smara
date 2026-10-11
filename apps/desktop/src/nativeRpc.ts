@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import packageInfo from "../package.json";
 
 export type RpcMessage = { id?: number | string; method?: string; params?: Record<string, unknown>; result?: unknown; error?: { message: string } };
-type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
+type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer?: ReturnType<typeof setTimeout> };
 
 export class RpcOutcomeUnknown extends Error {}
 
@@ -50,7 +50,7 @@ export class NativeRpc {
       const call = this.pending.get(message.id);
       if (!call) return;
       this.pending.delete(message.id);
-      clearTimeout(call.timer);
+      if (call.timer) clearTimeout(call.timer);
       if (message.error) call.reject(new Error(message.error.message));
       else call.resolve(message.result);
     } else {
@@ -62,13 +62,13 @@ export class NativeRpc {
     }
   }
 
-  request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  request<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs: number | null = 60000): Promise<T> {
     const id = ++this.nextId;
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = timeoutMs === null ? undefined : setTimeout(() => {
         this.pending.delete(id);
         reject(new RpcOutcomeUnknown(`Native request timed out: ${method}. Its outcome is unknown; do not automatically repeat it.`));
-      }, 60000);
+      }, timeoutMs);
       this.pending.set(id, { resolve: value => resolve(value as T), reject, timer });
       void this.send({ id, method, params }).catch(error => {
         clearTimeout(timer); this.pending.delete(id); reject(new RpcOutcomeUnknown(String(error)));
@@ -84,7 +84,7 @@ export class NativeRpc {
     return invoke<void>("native_send", { generation: this.generation, message });
   }
   private rejectPending(reason: string) {
-    for (const call of this.pending.values()) { clearTimeout(call.timer); call.reject(new Error(reason)); }
+    for (const call of this.pending.values()) { if (call.timer) clearTimeout(call.timer); call.reject(new Error(reason)); }
     this.pending.clear();
   }
   async stop() {

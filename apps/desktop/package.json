@@ -1,13 +1,13 @@
 {
   "name": "@smara/desktop",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "dev": "vite --port 1420 --configLoader runner",
-    "build": "tsc && vite build --configLoader runner",
-    "preview": "vite preview --port 1420 --configLoader runner",
+    "dev": "vite --port 1420",
+    "build": "tsc && vite build --configLoader bundle",
+    "preview": "vite preview --port 1420",
     "tauri": "tauri"
   },
   "dependencies": {

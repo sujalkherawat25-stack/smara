@@ -6,7 +6,7 @@ import vm from "node:vm";
 import ts from "typescript";
 
 function fixture({ locked = false, confirmed = true } = {}) {
-  const slots = [], effects = [], calls = [], busy = [];
+  const slots = [], effects = [], calls = [], busy = [], previews = [];
   let cursor = 0, dirty = true, tree;
   const hooks = {
     useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = initial; return [slots[i], value => { slots[i] = typeof value === "function" ? value(slots[i]) : value; dirty = true; }]; },
@@ -26,8 +26,8 @@ function fixture({ locked = false, confirmed = true } = {}) {
   const nodes = () => { const found = []; const visit = n => { if (Array.isArray(n)) n.forEach(visit); else if (n && typeof n === "object") { found.push(n); visit(n.props?.children); } }; visit(tree); return found; };
   const text = n => Array.isArray(n) ? n.map(text).join("") : n && typeof n === "object" ? text(n.props.children) : String(n ?? "");
   const button = label => { const n = nodes().find(n => n.type === "button" && text(n) === label); assert.ok(n, label); return n; };
-  const flush = async () => { for (let i = 0; i < 20; i++) { if (dirty) { dirty = false; cursor = 0; tree = module.exports.default({ workspace: "C:/fixture", threadId: "chat", locked, revision: 0, notice: "", onBusyChange: v => busy.push(v), onClose() {} }); while (effects.length) effects.shift()(); } await Promise.resolve(); } assert.equal(dirty, false); };
-  return { calls, busy, button, flush, nodes, parts: module.exports.diffParts };
+  const flush = async () => { for (let i = 0; i < 20; i++) { if (dirty) { dirty = false; cursor = 0; tree = module.exports.default({ workspace: "C:/fixture", threadId: "chat", locked, revision: 0, notice: "", onBusyChange: v => busy.push(v), onPreviewFile: path => previews.push(path), onClose() {} }); while (effects.length) effects.shift()(); } await Promise.resolve(); } assert.equal(dirty, false); };
+  return { calls, busy, previews, button, flush, nodes, parts: module.exports.diffParts };
 }
 
 test("review writes require confirmation and respect native activity lock", async () => {
@@ -53,6 +53,13 @@ test("branch comparisons expose no stage, revert or undo controls", async () => 
   f.button("example.py+1 −1").props.onClick(); await f.flush();
   assert.equal(f.nodes().some(n => n.type === "button" && /^(Stage|Revert|Undo|Unstage) (all|file|hunk)/.test(String(n.props.children))), false);
   assert.equal(f.calls.at(-1).operation, "file");
+});
+
+test("selected project files can be previewed without invoking a write action", async () => {
+  const f = fixture(); await f.flush(); f.button("example.py+1 −1").props.onClick(); await f.flush();
+  f.button("Preview file").props.onClick();
+  assert.deepEqual(f.previews, ["example.py"]);
+  assert.equal(f.calls.some(call => call.operation === "apply"), false);
 });
 
 test("diff splitting preserves hunk text and no-newline markers", () => {

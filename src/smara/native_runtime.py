@@ -107,6 +107,11 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
     }
     if os.name == "nt":
         settings["windows.sandbox"] = "unelevated"
+        # Prefer the source runtime's MXC backend on supported Windows hosts;
+        # it preserves the workspace sandbox while allowing ConPTY streaming.
+        # The restricted-token backend remains the safe availability fallback
+        # for non-streaming work; there is never an unsandboxed retry.
+        settings["features.prefer_mxc"] = True
     if adapter.endpoint.effective_context_window:
         settings["model_context_window"] = adapter.endpoint.effective_context_window
         settings["model_auto_compact_token_limit"] = int(adapter.endpoint.effective_context_window * .8)

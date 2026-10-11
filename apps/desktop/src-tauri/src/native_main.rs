@@ -1,9 +1,11 @@
 //! Native-only Desktop shell. The Rust harness owns all agent/tool execution.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use serde::Deserialize;
+use base64::Engine as _;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::fs;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 mod native_runtime;
 use native_runtime::{native_send, native_start, native_status, native_stop};
@@ -97,11 +99,15 @@ async fn native_review(request: Value) -> Result<Value, String> {
         if read_only { action() } else { native_runtime::with_review_idle(action) }
     }).await.map_err(|_| "Git review worker failed".to_owned())?
 }
-struct Connection { allowed_roots: Vec<String> }
+struct Connection { allowed_roots: Vec<String>, active_workspace: String }
 fn current_connection() -> Result<Connection, String> {
     let value = management(json!({"operation":"bootstrap"}))?;
-    Ok(Connection { allowed_roots: value["preferences"]["projects"].as_array().ok_or("Projects are invalid")?
-        .iter().filter_map(|p| p["workspace"].as_str().map(str::to_owned)).collect() })
+    let preferences = value.get("preferences").ok_or("Project settings are unavailable")?;
+    Ok(Connection {
+        allowed_roots: preferences["projects"].as_array().ok_or("Projects are invalid")?
+            .iter().filter_map(|p| p["workspace"].as_str().map(str::to_owned)).collect(),
+        active_workspace: preferences["workspace"].as_str().ok_or("Choose a project first")?.to_owned(),
+    })
 }
 fn selected_workspace_dir(workspace: &str, roots: &[String]) -> Result<Option<PathBuf>, String> {
     let path = PathBuf::from(workspace);
@@ -111,6 +117,121 @@ fn selected_workspace_dir(workspace: &str, roots: &[String]) -> Result<Option<Pa
         return Err("Add this exact folder as a project first; another project's access does not apply".into());
     }
     Ok(Some(canonical))
+}
+
+const MAX_INLINE_TEXT_PREVIEW_BYTES: u64 = 1_000_000;
+const MAX_INLINE_BINARY_PREVIEW_BYTES: u64 = 8 * 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize)]
+struct NativeFilePreview {
+    file_name: String,
+    relative_path: String,
+    size_bytes: u64,
+    extension: String,
+    kind: String,
+    content: Option<String>,
+    data_url: Option<String>,
+    note: Option<String>,
+    can_open_externally: bool,
+}
+
+fn can_open_workspace_file_externally(extension: &str) -> bool {
+    matches!(extension,
+        "txt" | "md" | "markdown" | "pdf" | "png" | "jpg" | "jpeg" | "gif" | "webp"
+        | "docx" | "xlsx" | "pptx" | "odt" | "ods" | "odp"
+    )
+}
+
+fn active_preview_workspace(workspace: &str) -> Result<PathBuf, String> {
+    let connection = current_connection()?;
+    let active = selected_workspace_dir(&connection.active_workspace, &connection.allowed_roots)?
+        .ok_or_else(|| "Choose a project before previewing files.".to_owned())?;
+    let requested = selected_workspace_dir(workspace, &connection.allowed_roots)?
+        .ok_or_else(|| "Choose a project before previewing files.".to_owned())?;
+    if active != requested { return Err("Preview is limited to the currently selected project.".to_owned()); }
+    Ok(active)
+}
+
+fn canonical_workspace_file(root: &Path, requested: &str) -> Result<(PathBuf, PathBuf), String> {
+    if requested.trim().is_empty() { return Err("Choose a file to preview.".to_owned()); }
+    let root = fs::canonicalize(root).map_err(|_| "The selected project folder is unavailable.".to_owned())?;
+    let input = PathBuf::from(requested);
+    let candidate = if input.is_absolute() { input } else { root.join(input) };
+    let path = fs::canonicalize(candidate).map_err(|_| "The file is missing or inaccessible.".to_owned())?;
+    if !path.starts_with(&root) { return Err("Preview is limited to files inside the selected project.".to_owned()); }
+    if !fs::metadata(&path).map_err(|_| "The file is missing or inaccessible.".to_owned())?.is_file() {
+        return Err("Only regular files can be previewed.".to_owned());
+    }
+    Ok((root, path))
+}
+
+fn read_preview_bytes(path: &Path, limit: u64) -> Result<Option<Vec<u8>>, String> {
+    let mut bytes = Vec::new();
+    fs::File::open(path).map_err(|_| "The file could not be read.".to_owned())?
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "The file could not be read.".to_owned())?;
+    if bytes.len() as u64 > limit { Ok(None) } else { Ok(Some(bytes)) }
+}
+
+fn workspace_file_preview(root: &Path, requested: &str) -> Result<NativeFilePreview, String> {
+    let (root, path) = canonical_workspace_file(root, requested)?;
+    let size_bytes = fs::metadata(&path).map_err(|_| "The file is missing or inaccessible.".to_owned())?.len();
+    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    let can_open_externally = can_open_workspace_file_externally(&extension);
+    let file_name = path.file_name().and_then(|value| value.to_str()).unwrap_or("File").to_owned();
+    let relative_path = path.strip_prefix(&root).map_err(|_| "Preview is limited to files inside the selected project.".to_owned())?
+        .to_string_lossy().replace('\\', "/");
+    let text_extensions = ["txt", "md", "markdown", "csv", "tsv", "json", "jsonl", "yaml", "yml", "toml", "xml", "html", "htm", "css", "js", "jsx", "ts", "tsx", "mjs", "cjs", "py", "rs", "go", "java", "c", "h", "cpp", "hpp", "sh", "bash", "ps1", "bat", "sql", "log", "ini"];
+    if text_extensions.contains(&extension.as_str()) {
+        if size_bytes > MAX_INLINE_TEXT_PREVIEW_BYTES {
+            return Ok(NativeFilePreview { file_name, relative_path, size_bytes, extension, kind: "too_large".to_owned(), content: None, data_url: None, note: Some("Text previews are limited to 1 MB.".to_owned()), can_open_externally });
+        }
+        let Some(bytes) = read_preview_bytes(&path, MAX_INLINE_TEXT_PREVIEW_BYTES)? else {
+            return Ok(NativeFilePreview { file_name, relative_path, size_bytes, extension, kind: "too_large".to_owned(), content: None, data_url: None, note: Some("Text previews are limited to 1 MB.".to_owned()), can_open_externally });
+        };
+        return match String::from_utf8(bytes) {
+            Ok(content) => Ok(NativeFilePreview { file_name, relative_path, size_bytes, extension, kind: "text".to_owned(), content: Some(content), data_url: None, note: None, can_open_externally }),
+            Err(_) => Ok(NativeFilePreview { file_name, relative_path, size_bytes, extension, kind: "unsupported".to_owned(), content: None, data_url: None, note: Some("This file is not UTF-8 text and cannot be shown inline.".to_owned()), can_open_externally }),
+        };
+    }
+    let (kind, mime) = match extension.as_str() {
+        "pdf" => ("pdf", "application/pdf"),
+        "png" => ("image", "image/png"),
+        "jpg" | "jpeg" => ("image", "image/jpeg"),
+        "gif" => ("image", "image/gif"),
+        "webp" => ("image", "image/webp"),
+        _ => return Ok(NativeFilePreview { file_name, relative_path, size_bytes, extension, kind: "unsupported".to_owned(), content: None, data_url: None, note: Some(if can_open_externally { "This format can be opened with its default viewer." } else { "This file type is not opened externally for safety." }.to_owned()), can_open_externally }),
+    };
+    if size_bytes > MAX_INLINE_BINARY_PREVIEW_BYTES {
+        return Ok(NativeFilePreview { file_name, relative_path, size_bytes, extension, kind: "too_large".to_owned(), content: None, data_url: None, note: Some("PDF and image previews are limited to 8 MB.".to_owned()), can_open_externally });
+    }
+    let Some(bytes) = read_preview_bytes(&path, MAX_INLINE_BINARY_PREVIEW_BYTES)? else {
+        return Ok(NativeFilePreview { file_name, relative_path, size_bytes, extension, kind: "too_large".to_owned(), content: None, data_url: None, note: Some("PDF and image previews are limited to 8 MB.".to_owned()), can_open_externally });
+    };
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(NativeFilePreview { file_name, relative_path, size_bytes, extension, kind: kind.to_owned(), content: None, data_url: Some(format!("data:{mime};base64,{encoded}")), note: None, can_open_externally })
+}
+
+#[tauri::command]
+async fn native_preview_file(workspace: String, path: String) -> Result<NativeFilePreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = active_preview_workspace(&workspace)?;
+        workspace_file_preview(&root, &path)
+    }).await.map_err(|_| "File preview worker failed".to_owned())?
+}
+
+#[tauri::command]
+async fn native_open_workspace_file(workspace: String, path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = active_preview_workspace(&workspace)?;
+        let (_, resolved) = canonical_workspace_file(&root, &path)?;
+        let extension = resolved.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+        if !can_open_workspace_file_externally(&extension) {
+            return Err("This file type is not opened externally for safety.".to_owned());
+        }
+        open::that_detached(&resolved).map_err(|_| "Could not open the file in its default app.".to_owned())
+    }).await.map_err(|_| "File opener worker failed".to_owned())?
 }
 #[derive(Deserialize)]
 struct LocalModelProfile { id: String, model: String, base_url: String, credential_name: String, auth_header: String, context_window: Option<u64> }
@@ -134,9 +255,80 @@ fn native_open_url(url: String) -> Result<(), String> {
 }
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url])
+        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file])
         .build(tauri::generate_context!()).expect("Could not build Smara Desktop")
         .run(|_, event| {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) { let _ = native_runtime::stop_current(); }
         });
+}
+
+#[cfg(test)]
+mod artifact_preview_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempWorkspace(PathBuf);
+
+    impl TempWorkspace {
+        fn new() -> Self {
+            let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+            let base = std::env::temp_dir().join(format!("smara-preview-{}-{nonce}", std::process::id()));
+            fs::create_dir_all(base.join("project")).unwrap();
+            Self(base)
+        }
+
+        fn root(&self) -> PathBuf { self.0.join("project") }
+    }
+
+    impl Drop for TempWorkspace {
+        fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+    }
+
+    #[test]
+    fn previews_utf8_text_and_reports_project_relative_path() {
+        let temp = TempWorkspace::new();
+        fs::create_dir_all(temp.root().join("reports")).unwrap();
+        fs::write(temp.root().join("reports/summary.md"), "Verified summary").unwrap();
+
+        let preview = workspace_file_preview(&temp.root(), "reports/summary.md").unwrap();
+
+        assert_eq!(preview.kind, "text");
+        assert_eq!(preview.relative_path, "reports/summary.md");
+        assert_eq!(preview.content.as_deref(), Some("Verified summary"));
+        assert!(preview.data_url.is_none());
+    }
+
+    #[test]
+    fn refuses_paths_outside_the_selected_project() {
+        let temp = TempWorkspace::new();
+        fs::write(temp.0.join("outside.txt"), "private").unwrap();
+
+        assert!(workspace_file_preview(&temp.root(), "../outside.txt").is_err());
+        assert!(workspace_file_preview(&temp.root(), temp.0.join("outside.txt").to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn enforces_preview_size_caps_and_encodes_supported_images() {
+        let temp = TempWorkspace::new();
+        fs::write(temp.root().join("large.txt"), vec![b'x'; MAX_INLINE_TEXT_PREVIEW_BYTES as usize + 1]).unwrap();
+        fs::write(temp.root().join("pixel.png"), [137, 80, 78, 71]).unwrap();
+
+        let large = workspace_file_preview(&temp.root(), "large.txt").unwrap();
+        assert_eq!(large.kind, "too_large");
+        assert!(large.content.is_none());
+
+        let image = workspace_file_preview(&temp.root(), "pixel.png").unwrap();
+        assert_eq!(image.kind, "image");
+        assert_eq!(image.data_url.as_deref(), Some("data:image/png;base64,iVBORw=="));
+        assert!(image.can_open_externally);
+    }
+
+    #[test]
+    fn external_open_is_allowlisted_and_never_launches_scripts_or_binaries() {
+        assert!(can_open_workspace_file_externally("pdf"));
+        assert!(can_open_workspace_file_externally("docx"));
+        for extension in ["exe", "com", "bat", "cmd", "ps1", "vbs", "js", "html", "svg", "msi", "lnk"] {
+            assert!(!can_open_workspace_file_externally(extension), "unexpected external open for {extension}");
+        }
+    }
 }

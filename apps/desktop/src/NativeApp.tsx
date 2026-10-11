@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import NativeSettings from "./NativeSettings";
 import NativeMarkdown from "./NativeMarkdown";
+import NativeFilePreview from "./NativeFilePreview";
+import NativeTerminal from "./NativeTerminal";
 import NativeChanges, { reviewRequest } from "./NativeChanges";
 import NativeCommand from "./NativeCommand";
 import { nativeSettings, sameWorkspace, type NativeSetup } from "./nativeApi";
 import { NativeRpc, RpcOutcomeUnknown, type RpcMessage } from "./nativeRpc";
+import { appendTerminalOutput, decodeTerminalOutput, encodeTerminalInput, terminalExecParams, type TerminalSession } from "./terminalProtocol";
 import { activeTurn, answerKey, approvalResponse, displayItem, mergeItem, mergeWorkers, resumeStatus, routeMessage, supportsApproval, threadLabel, type NativeTurn, type ViewItem, type WorkerView } from "./nativeView";
 import type { LocalModelProfile } from "./types";
 import packageInfo from "../package.json";
@@ -15,6 +18,14 @@ type Item = ViewItem;
 type Approval = { id: number | string; method: string; params: Record<string, unknown> };
 type Question = { id: string; question: string; isSecret?: boolean; options?: { label: string; description: string }[] | null };
 type Thread = { id: string; name?: string | null; preview?: string };
+
+function terminalError(reason: unknown): string {
+  const message = String(reason);
+  if (message.toLowerCase().includes("streaming command/exec is not supported with windows sandbox")) {
+    return "This Windows runtime cannot stream a shell in its selected sandbox. No shell was started and Smara will not fall back to an unsandboxed process. Check MXC sandbox availability, then reconnect and retry.";
+  }
+  return message;
+}
 
 const NATIVE_DEVELOPER_INSTRUCTIONS = [
   "You are Smara. Be honest about tool outcomes. Do not claim tests passed without evidence. Ask before external writes, payments, publishing, or messaging people.",
@@ -36,6 +47,7 @@ export default function NativeApp() {
   const [connecting, setConnecting] = useState(false);
   const [loadingThread, setLoadingThread] = useState(false);
   const [built, setBuilt] = useState<boolean | null>(null);
+  const [terminalPlatformSupported, setTerminalPlatformSupported] = useState(false);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -54,12 +66,16 @@ export default function NativeApp() {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("Preparing project…");
   const [panel, setPanel] = useState<"changes" | "terminal" | null>(null);
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
+  const [terminalSession, setTerminalSession] = useState<TerminalSession | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewRevision, setReviewRevision] = useState(0);
   const [reviewNotice, setReviewNotice] = useState("");
   const [turnDiff, setTurnDiff] = useState("");
   const threadRef = useRef("");
   const clientRef = useRef<NativeRpc | null>(null);
+  const terminalIdRef = useRef("");
+  const terminalDecoderRef = useRef<TextDecoder | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const submitted = useRef("");
   const projectDrafts = useRef<Record<string, string>>({});
@@ -100,6 +116,17 @@ export default function NativeApp() {
 
   const receive = (message: RpcMessage) => {
     const params = message.params ?? {};
+    if (message.method === "command/exec/outputDelta") {
+      const processId = String(params.processId ?? "");
+      if (!processId || processId !== terminalIdRef.current) return;
+      try {
+        const delta = decodeTerminalOutput(String(params.deltaBase64 ?? ""), terminalDecoderRef.current ?? new TextDecoder());
+        setTerminalSession(current => current?.id === processId ? appendTerminalOutput(current, delta, params.capReached === true) : current);
+      } catch {
+        setTerminalSession(current => current?.id === processId ? { ...current, error: "Terminal output could not be decoded." } : current);
+      }
+      return;
+    }
     const route = routeMessage(message, threadRef.current);
     if (route === "resolved") {
       setApprovals(current => current.filter(item => item.id !== params.requestId));
@@ -144,15 +171,17 @@ export default function NativeApp() {
     } else if (message.method === "smara/runtimeStopped") {
       activeTurnRef.current = ""; busyRef.current = false;
       setConnected(false); setBusy(false); setUncertain(false); setApprovals([]); setStatus("Runtime stopped; unfinished work is not reported as complete");
+      setTerminalSession(current => current && ["starting", "running", "stopping"].includes(current.status) ? { ...current, status: "stopped", error: "The native runtime disconnected; its shell was stopped too." } : current);
     }
   };
 
   useEffect(() => {
     let disposed = false;
-    void Promise.all([nativeSettings(), invoke<{ built: boolean }>("native_status")])
+    void Promise.all([nativeSettings(), invoke<{ built: boolean; windowsTerminalBuild?: boolean }>("native_status")])
       .then(([initial, native]) => {
         if (disposed) return;
         setSetup(initial); setWorkspace(initial.preferences.workspace); setProfiles(initial.profiles); setBuilt(native.built);
+        setTerminalPlatformSupported(native.windowsTerminalBuild === true);
         const selected = initial.preferences.active_model;
         const configured = initial.profiles.some(model => model.id === selected);
         setProfile(configured ? selected : "");
@@ -200,6 +229,60 @@ export default function NativeApp() {
     }
     finally { lifecycleRef.current = false; setConnecting(false); }
   };
+  const startTerminal = async () => {
+    if (!terminalPlatformSupported) return;
+    const client = clientRef.current;
+    if (!connected || !client?.generation || (terminalSession && ["starting", "running", "stopping"].includes(terminalSession.status))) return;
+    const processId = `smara-terminal-${crypto.randomUUID()}`;
+    terminalIdRef.current = processId;
+    terminalDecoderRef.current = new TextDecoder();
+    setTerminalSession({ id: processId, status: "starting", output: "", truncated: false });
+    try {
+      const readiness = await client.request<{ status?: string }>("windowsSandbox/readiness", {});
+      if (client !== clientRef.current || client.generation === "") throw new Error("The native runtime disconnected before the shell could start.");
+      if (readiness.status !== "ready") throw new Error(`Windows sandbox is ${readiness.status ?? "unavailable"}. Configure the native Windows sandbox before starting an interactive shell.`);
+      const running = client.request<{ exitCode?: number }>("command/exec", terminalExecParams(workspace, processId), null);
+      setTerminalSession(current => current?.id === processId ? { ...current, status: "running" } : current);
+      void running.then(result => {
+        const tail = terminalDecoderRef.current ? decodeTerminalOutput("", terminalDecoderRef.current, false) : "";
+        terminalDecoderRef.current = null;
+        setTerminalSession(current => current?.id === processId
+          ? { ...appendTerminalOutput(current, tail), status: "exited", exitCode: result.exitCode ?? 0 }
+          : current);
+      }).catch(reason => {
+        terminalDecoderRef.current = null;
+        setTerminalSession(current => current?.id === processId
+          ? { ...current, status: client.generation ? "failed" : "stopped", error: terminalError(reason) }
+          : current);
+      });
+    } catch (reason) {
+      terminalDecoderRef.current = null;
+      setTerminalSession(current => current?.id === processId ? { ...current, status: "failed", error: terminalError(reason) } : current);
+    }
+  };
+  const writeTerminal = async (value: string) => {
+    const client = clientRef.current;
+    const processId = terminalIdRef.current;
+    if (!client || !processId || !terminalSession || terminalSession.status !== "running") return;
+    try { await client.request("command/exec/write", { processId, deltaBase64: encodeTerminalInput(value) }); }
+    catch (reason) { setTerminalSession(current => current?.id === processId ? { ...current, error: String(reason) } : current); }
+  };
+  const interruptTerminal = () => { void writeTerminal("\u0003"); };
+  const stopTerminal = async () => {
+    const client = clientRef.current;
+    const processId = terminalIdRef.current;
+    if (!client || !processId || terminalSession?.status !== "running") return;
+    setTerminalSession(current => current?.id === processId ? { ...current, status: "stopping" } : current);
+    try { await client.request("command/exec/terminate", { processId }); }
+    catch (reason) { setTerminalSession(current => current?.id === processId ? { ...current, status: "failed", error: String(reason) } : current); }
+  };
+  const resizeTerminal = (cols: number, rows: number) => {
+    const client = clientRef.current;
+    const processId = terminalIdRef.current;
+    if (!client || !processId || terminalSession?.status !== "running") return;
+    void client.request("command/exec/resize", { processId, size: { cols, rows } }).catch(() => {});
+  };
+  const terminalActive = !!terminalSession && ["starting", "running", "stopping"].includes(terminalSession.status);
   const loadThread = async (client: NativeRpc, id: string) => {
     const generation = client.generation;
     loadingThreadRef.current = true; setLoadingThread(true); setError(""); setStatus("Loading saved conversation…");
@@ -342,7 +425,7 @@ export default function NativeApp() {
   };
   const newConversation = () => {
     if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || settingsPendingRef.current || reviewBusyRef.current || approvals.length) return;
-    setThreadId(""); threadRef.current = ""; restoreThreadRef.current = ""; setItems([]); setWorkers([]); setError(""); setSettingsOpen(false); setTurnDiff(""); setReviewNotice(""); setReviewRevision(value => value + 1);
+    setThreadId(""); threadRef.current = ""; restoreThreadRef.current = ""; setItems([]); setWorkers([]); setError(""); setSettingsOpen(false); setTurnDiff(""); setReviewNotice(""); setPreviewPath(null); setReviewRevision(value => value + 1);
   };
   const switchProject = async (path: string, add = false) => {
     if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || settingsPendingRef.current || reviewBusyRef.current || approvals.length || workers.some(worker => ["running", "pendingInit", "inProgress"].includes(worker.status))) return;
@@ -355,7 +438,7 @@ export default function NativeApp() {
       restoreThreadRef.current = ""; threadRef.current = ""; setThreadId("");
       setToolsEnabled(false); setWorkersEnabled(false); setBrowserOrigins(""); setDraft(projectDrafts.current[next.preferences.workspace] ?? "");
       setAddingProject(false); setProjectPath(""); setProjectName(""); setSettingsOpen(false);
-      setPanel(null); setTurnDiff(""); setReviewNotice("");
+      setPanel(null); setTurnDiff(""); setReviewNotice(""); setPreviewPath(null);
       setStatus("Project selected");
     } catch (reason) { setError(String(reason)); }
     finally { lifecycleRef.current = false; setConnecting(false); }
@@ -422,7 +505,7 @@ export default function NativeApp() {
       {!threads.length && <p>{connecting ? "Loading chats…" : "Your chats appear here."}</p>}{nextCursor && <button disabled={navigationLocked || loadingMore || !connected} onClick={() => void loadOlder()}>{loadingMore ? "Loading…" : "Show more"}</button>}</div>
       <div className="sidebar-bottom"><button disabled={navigationLocked} className={settingsOpen ? "selected" : ""} onClick={() => void toggleSettings()}>⚙ Settings</button></div>
     </aside><main>
-      <header className="native-topbar"><span className="project-icon" aria-hidden="true">▱</span><strong title={workspace}>{settingsOpen ? "Settings" : project?.label || "Choose a project"}</strong>{!settingsOpen && threadId && <span className="header-chat-title">{threadLabel(threads.find(thread => thread.id === threadId) ?? { id: threadId })}</span>}{!settingsOpen && <div className="workspace-actions"><button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? " •" : ""}</button><button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Agent terminal</button></div>}</header>
+      <header className="native-topbar"><span className="project-icon" aria-hidden="true">▱</span><strong title={workspace}>{settingsOpen ? "Settings" : project?.label || "Choose a project"}</strong>{!settingsOpen && threadId && <span className="header-chat-title">{threadLabel(threads.find(thread => thread.id === threadId) ?? { id: threadId })}</span>}{!settingsOpen && <div className="workspace-actions"><button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? " •" : ""}</button><button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Terminal{terminalActive ? " •" : ""}</button></div>}</header>
       {built === false && <div className="native-warning">Native runtime is missing. Build scripts/build-smara-native.ps1; no old-engine fallback is used.</div>}
       {error && <div role="alert" className="native-error">{error}{!settingsOpen && (!busy || uncertain) && <button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Retry setup</button>}<button aria-label="Dismiss error" onClick={() => setError("")}>×</button></div>}
       {settingsOpen && setup ? <NativeSettings setup={setup} locked={connected || connecting} onUpdate={updateSetup} onClose={() => { if (!settingsPendingRef.current) setSettingsOpen(false); }} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : <>
@@ -432,7 +515,7 @@ export default function NativeApp() {
       <div className="native-transcript" aria-live="polite">
         {!!workers.length && <section className="native-workers"><strong>Native workers · changes are not auto-merged</strong>{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
         {!items.length && <div className="native-empty"><h1>What can I help you with?</h1><p>Research, build, and get work done.</p><div className="starter-cards">{[{ title: "Understand this project", text: "Inspect this project and explain its architecture, entry points and how to run its tests. Do not change files." }, { title: "Find & fix a bug", text: "Inspect this project for a reproducible bug. Show evidence, make a minimal fix, and run the relevant tests." }, { title: "Research a topic", text: "Research a topic using public sources. Read the actual clock for time-sensitive questions, verify claims against fetched pages and cite them. Ask me for the topic first." }].map(card => <button key={card.title} title={card.text} onClick={() => setDraft(card.text)}>{card.title}<span>↗</span></button>)}</div>{!profile && <small className="empty-hint">Add your model in Settings to get started.</small>}</div>}
-        {items.map(item => <article key={item.id} className={`native-item ${item.kind}`}><div className="item-heading"><small>{item.kind === "assistant" ? "Smara" : item.kind === "user" ? "You" : item.kind} {item.status && `· ${item.status}`}</small><button className="text-button" onClick={() => void navigator.clipboard.writeText(item.text).catch(() => setError("Clipboard is unavailable"))}>Copy</button></div>{item.kind === "assistant" ? <NativeMarkdown text={item.text} /> : item.kind === "user" ? <pre>{item.text}</pre> : item.kind === "commandExecution" ? <NativeCommand item={item} /> : <details open={item.status === "inProgress" || item.status === "failed"}><summary>Tool details · {item.text.length.toLocaleString()} characters</summary><pre>{item.text}</pre></details>}</article>)}
+        {items.map(item => <article key={item.id} className={`native-item ${item.kind}`}><div className="item-heading"><small>{item.kind === "assistant" ? "Smara" : item.kind === "user" ? "You" : item.kind} {item.status && `· ${item.status}`}</small><button className="text-button" onClick={() => void navigator.clipboard.writeText(item.text).catch(() => setError("Clipboard is unavailable"))}>Copy</button></div>{item.kind === "assistant" ? <NativeMarkdown text={item.text} onPreviewFile={setPreviewPath} /> : item.kind === "user" ? <pre>{item.text}</pre> : item.kind === "commandExecution" ? <NativeCommand item={item} /> : <details open={item.status === "inProgress" || item.status === "failed"}><summary>Tool details · {item.text.length.toLocaleString()} characters</summary><pre>{item.text}</pre></details>}</article>)}
         {approvals.map(approval => <section className="native-approval" key={approval.id}>
           {approval.params.threadId !== undefined && approval.params.threadId !== threadId && <p>Worker / other native conversation: {String(approval.params.threadId)}. This request is not auto-approved.</p>}
           {approval.method === "item/tool/requestUserInput" ? <>
@@ -451,10 +534,11 @@ export default function NativeApp() {
       </div>
       <footer><form className="native-composer" onSubmit={event => { event.preventDefault(); void send(); }}><textarea aria-label="Message Smara" rows={2} placeholder="Ask Smara anything…" value={draft} onChange={event => { setDraft(event.target.value); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 260)}px`; }} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} /><div className="composer-toolbar"><small>{connecting ? "Preparing project…" : ""}</small><div className="composer-actions"><select aria-label="Model" title="Choose a model" value={profile} disabled={navigationLocked} onChange={event => void selectModel(event.target.value)}><option value="" disabled>Choose model</option>{profiles.map(model => <option value={model.id} key={model.id}>{model.label}</option>)}</select><button className={busy ? "stop-button" : "primary"} aria-label={busy ? "Stop response" : "Send message"} title={busy ? "Stop response" : "Send message"} type={busy ? "button" : "submit"} disabled={reviewBusy || connecting || loadingThread || (busy ? !turnId : !profile || built !== true || !draft.trim() || approvals.length > 0)} onClick={busy ? () => void stopTurn() : undefined}>{busy ? "■" : "↑"}</button></div></div></form><div className="composer-status"><small role="status">{reviewBusy ? "Saving local review…" : busy || uncertain || loadingThread || (status !== "Ready" && status !== "completed") ? status : ""}</small><small>Shift+Enter for a new line</small></div></footer>
       </div>
-      {panel === "changes" && <NativeChanges key={workspace + threadId} workspace={workspace} threadId={threadId} locked={navigationLocked} revision={reviewRevision} notice={reviewNotice} onBusyChange={reviewPending} onClose={() => setPanel(null)} />}
-      {panel === "terminal" && <section className="agent-terminal-panel" aria-label="Agent terminal"><div className="panel-heading"><strong>Agent terminal</strong><button aria-label="Close terminal" onClick={() => setPanel(null)}>×</button></div><p className="review-note">Live output from this chat’s native commands. Send a message to request a command; its normal permissions still apply. This is not a separate interactive shell.</p><div className="terminal-commands">{items.filter(item => item.kind === "commandExecution").map(item => <NativeCommand item={item} expanded key={item.id} />)}{!items.some(item => item.kind === "commandExecution") && <p>No commands recorded in this chat yet.</p>}</div></section>}
+      {panel === "changes" && <NativeChanges key={workspace + threadId} workspace={workspace} threadId={threadId} locked={navigationLocked || terminalActive} revision={reviewRevision} notice={reviewNotice} onBusyChange={reviewPending} onPreviewFile={setPreviewPath} onClose={() => setPanel(null)} />}
+      {panel === "terminal" && <NativeTerminal workspace={workspace} connected={connected} session={terminalSession} interactiveSupported={terminalPlatformSupported} onConnect={() => { void connect(); }} onStart={() => startTerminal()} onInput={value => { void writeTerminal(value); }} onInterrupt={interruptTerminal} onStop={() => { void stopTerminal(); }} onResize={resizeTerminal} onClear={() => setTerminalSession(current => current ? { ...current, output: "", truncated: false } : current)} onClose={() => setPanel(null)} />}
       </div>
       </>}
     </main></div>
+    {previewPath && <NativeFilePreview workspace={workspace} path={previewPath} onClose={() => setPreviewPath(null)} />}
   </div>;
 }

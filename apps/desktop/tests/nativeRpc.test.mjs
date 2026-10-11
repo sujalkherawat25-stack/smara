@@ -116,6 +116,17 @@ test("timeout is an unknown outcome and never resends the action", async () => {
   await f.client.stop();
 });
 
+test("long-running interactive RPCs stay pending without weakening default timeouts", async () => {
+  const f = fixture({ timeout: true });
+  await f.client.connect("workspace", "model");
+  const pending = f.client.request("command/exec", { processId: "terminal-1" }, null);
+  const request = f.sent.at(-1).args.message;
+  await new Promise(resolve => setTimeout(resolve, 15));
+  f.emit({ id: request.id, result: { exitCode: 0 } });
+  assert.deepEqual(await pending, { exitCode: 0 });
+  await f.client.stop();
+});
+
 test("failed shutdown retains its generation for safe cleanup retry", async () => {
   const f = fixture({ stopError: true });
   await f.client.connect("workspace", "model");

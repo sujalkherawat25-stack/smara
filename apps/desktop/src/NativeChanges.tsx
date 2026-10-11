@@ -14,9 +14,9 @@ export function diffParts(patch: string): { header: string; hunks: string[] } {
   return { header: lines.slice(0, starts[0] ?? lines.length).join(""), hunks: starts.map((start, index) => lines.slice(start, starts[index + 1] ?? lines.length).join("")) };
 }
 
-export default function NativeChanges({ workspace, threadId, locked, revision, notice, onBusyChange, onClose }: {
+export default function NativeChanges({ workspace, threadId, locked, revision, notice, onBusyChange, onPreviewFile, onClose }: {
   workspace: string; threadId: string; locked: boolean; revision: number; notice: string;
-  onBusyChange: (busy: boolean) => void; onClose: () => void;
+  onBusyChange: (busy: boolean) => void; onPreviewFile: (path: string) => void; onClose: () => void;
 }) {
   const [view, setView] = useState("unstaged");
   const [base, setBase] = useState("");
@@ -91,7 +91,7 @@ export default function NativeChanges({ workspace, threadId, locked, revision, n
     {error && <p role="alert" className="review-error">{error}</p>}{message && <p role="status" className="review-note">{message}</p>}
     {review?.notes.map(note => <p className="review-note" key={note}>{note}</p>)}
     <div className="review-body"><div className="changed-files">{review?.files.map(value => <button key={value.path} className={file?.path === value.path ? "selected" : ""} disabled={applying} onClick={() => void select(value.path)}><span>{value.path}</span><small className="diff-count"><span>+{value.added}</span> −{value.removed}</small></button>)}{review && !review.files.length && <p>No reviewable changes.</p>}</div>
-      <div className="file-diff">{loading && <p role="status">Loading changes…</p>}{file ? <><div className="file-actions"><strong>{file.path}</strong>{view !== "branch" && <button disabled={disabled} onClick={() => void apply(primary, file.path)}>{label[primary]} file</button>}{view === "unstaged" && <button disabled={disabled} onClick={() => void apply("revert", file.path)}>Revert file</button>}</div>
+      <div className="file-diff">{loading && <p role="status">Loading changes…</p>}{file ? <><div className="file-actions"><strong>{file.path}</strong><button disabled={loading || applying} onClick={() => onPreviewFile(file.path)}>Preview file</button>{view !== "branch" && <button disabled={disabled} onClick={() => void apply(primary, file.path)}>{label[primary]} file</button>}{view === "unstaged" && <button disabled={disabled} onClick={() => void apply("revert", file.path)}>Revert file</button>}</div>
         <pre className="diff-header">{parts.header}</pre>{parts.hunks.map((hunk, index) => <section className="diff-hunk" key={index}><div className="hunk-actions"><small>Hunk {index + 1}</small>{view !== "branch" && <button disabled={disabled || fileOnly} title={fileOnly ? "New/deleted files and mode changes need a whole-file action" : undefined} onClick={() => void apply(primary, file.path, index)}>{label[primary]} hunk</button>}{view === "unstaged" && <button disabled={disabled || fileOnly} onClick={() => void apply("revert", file.path, index)}>Revert hunk</button>}</div><pre>{hunk.split("\n").map((line, i) => <span key={i} className={line.startsWith("+") ? "diff-add" : line.startsWith("-") ? "diff-remove" : line.startsWith("@@") ? "diff-position" : ""}>{line || " "}</span>)}</pre></section>)}
       </> : !loading && !!review?.files.length && <p>Select a file to review its diff.</p>}</div></div>
   </section>;

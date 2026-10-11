@@ -1,4 +1,4 @@
-"""Bounded, offline prerequisite for a future interactive Desktop terminal.
+"""Bounded, offline acceptance for the sandboxed interactive Desktop terminal.
 
 Exercises the copied command/exec implementation, never unsandboxed
 process/spawn. Only synthetic scratch paths and an inert loopback model URL
@@ -12,6 +12,8 @@ import json
 import os
 from pathlib import Path
 import queue
+import re
+import socket
 import subprocess
 import sys
 import threading
@@ -44,17 +46,33 @@ def main() -> int:
     replies, output, caps = {}, {}, set()
     next_id = 0
     stderr_lines = []
+    transport_errors = []
 
     def read():
         try:
             for line in child.stdout:
-                messages.put(json.loads(line))
+                try:
+                    messages.put(json.loads(line))
+                except json.JSONDecodeError as exc:
+                    transport_errors.append(f"invalid JSON on native transport (line {exc.lineno}, column {exc.colno})")
+                    return
+        except Exception as exc:
+            transport_errors.append(type(exc).__name__)
         finally:
             messages.put({"transport_exited": True})
 
     def drain():
-        for _line in child.stderr:
-            stderr_lines.append(1)  # Count only; no raw diagnostics in the report.
+        secret_values = [value for key, value in environment.items()
+                         if re.search(r"(?:API[_-]?KEY|ACCESS[_-]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)", key, re.I)
+                         and value]
+        for line in child.stderr:
+            safe = line.rstrip()
+            for secret in secret_values:
+                safe = safe.replace(secret, "<redacted>")
+            safe = re.sub(r"(?i)(api[_-]?key|token|secret|password)(\s*[=:]\s*)[^\s,;]+", r"\1\2<redacted>", safe)
+            if safe:
+                stderr_lines.append(safe[:500])
+                del stderr_lines[:-20]
 
     threading.Thread(target=read, daemon=True).start()
     threading.Thread(target=drain, daemon=True).start()
@@ -71,7 +89,9 @@ def main() -> int:
 
     def observe(message):
         if message.get("transport_exited"):
-            raise RuntimeError("Native transport exited before terminal check finished")
+            code = child.poll()
+            reader_error = transport_errors[-1] if transport_errors else "none"
+            raise RuntimeError(f"Native transport exited before terminal check finished (exit={code}, reader={reader_error})")
         if message.get("method") == "command/exec/outputDelta":
             params = message["params"]
             output.setdefault(params["processId"], bytearray()).extend(base64.b64decode(params["deltaBase64"], validate=True))
@@ -103,8 +123,14 @@ def main() -> int:
         return message["result"]
 
     def command(code, **extra):
-        return start("command/exec", {"command": [sys.executable, "-X", "utf8", "-u", "-c", code],
-                     "cwd": str(workspace), "permissionProfile": ":workspace", "timeoutMs": 15000, **extra})
+        policy = extra.pop("sandboxPolicy", None)
+        params = {"command": [sys.executable, "-X", "utf8", "-u", "-c", code],
+                  "cwd": str(workspace), "timeoutMs": 15000, **extra}
+        if policy is None:
+            params["permissionProfile"] = ":workspace"
+        else:
+            params["sandboxPolicy"] = policy
+        return start("command/exec", params)
 
     checks = []
     try:
@@ -125,8 +151,21 @@ def main() -> int:
         assert not outside_file.exists() and "OUTSIDE_BLOCKED" in boundary["stdout"], "Outside synthetic workspace write was allowed"
         checks.extend(["workspace_write", "outside_workspace_write_blocked"])
 
+        terminal_policy = {"type": "workspaceWrite", "writableRoots": [str(workspace)], "networkAccess": False}
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(1)
+            port = listener.getsockname()[1]
+            code = ("import socket\n"
+                    f"try:\n socket.create_connection(('127.0.0.1', {port}), timeout=1).close()\n"
+                    " print('NETWORK_ALLOWED')\n"
+                    "except OSError:\n print('NETWORK_BLOCKED')\n")
+            network = result(command(code, sandboxPolicy=terminal_policy))
+            assert network["exitCode"] == 0 and "NETWORK_BLOCKED" in network["stdout"], "Terminal sandbox allowed a loopback network connection"
+        checks.append("network_disabled_loopback")
+
         identifier = command("import sys; print('READY',flush=True); print('ECHO:'+sys.stdin.readline().strip(),flush=True)",
-                             processId="input-check", tty=True, size={"rows": 24, "cols": 80})
+                             processId="input-check", tty=True, size={"rows": 24, "cols": 80}, sandboxPolicy=terminal_policy)
         wait(lambda: b"READY" in output.get("input-check", b"") or identifier in replies)
         if identifier in replies:
             result(identifier)
@@ -139,7 +178,8 @@ def main() -> int:
         assert "input-check" not in caps, "PTY output was unexpectedly capped"
         checks.extend(["pty_streaming", "pty_unicode_stdin", "pty_resize"])
 
-        identifier = command("import time; print('RUNNING',flush=True); time.sleep(14)", processId="stop-check", tty=True)
+        identifier = command("import time; print('RUNNING',flush=True); time.sleep(14)", processId="stop-check", tty=True,
+                             sandboxPolicy=terminal_policy)
         wait(lambda: b"RUNNING" in output.get("stop-check", b"") or identifier in replies)
         if identifier in replies:
             result(identifier)
@@ -150,7 +190,7 @@ def main() -> int:
         send({"method": "smara/shutdown"})
         assert child.wait(timeout=45) == 0, "Native transport shutdown failed"
         report = {"status": "passed", "checks": checks, "fixture": str(fixture), "paid_inference": False,
-                  "gui_terminal_implemented": False, "network_or_path_escape_certification": False}
+                  "desktop_gui_exercised": False, "network_or_path_escape_certification": False}
         (fixture / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(report))
         return 0
@@ -158,7 +198,8 @@ def main() -> int:
         detail = str(exc)
         report = {"status": "blocked" if "streaming command/exec is not supported with windows sandbox" in detail else "failed",
                   "checks_passed_before_stop": checks, "error": detail, "fixture": str(fixture), "paid_inference": False,
-                  "gui_terminal_implemented": False, "network_or_path_escape_certification": False}
+                  "sanitized_stderr_tail": stderr_lines[-20:],
+                  "desktop_gui_exercised": False, "network_or_path_escape_certification": False}
         (fixture / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(report))
         return 1  # A refused/unsupported interactive terminal is never a pass.

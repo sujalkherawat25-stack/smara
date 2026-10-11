@@ -94,7 +94,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
       <section className="settings-card"><h2>Review changes and commands</h2>
         <p>Open <strong>Changes</strong> above the chat to inspect file or hunk diffs. Stage and unstage affect the Git index; Revert changes working files. Use a project folder that is the Git repository root.</p>
         <p><strong>Last turn → Undo</strong> reverses supported file changes from the last captured run, not chat history. Pre-existing and non-conflicting later edits are kept. Revert and Undo keep a local recovery copy; refresh if files changed after review.</p>
-        <p><strong>Agent terminal</strong> shows native command output and exit codes. It is a transcript, not an interactive shell. Ask for commands in chat; permissions still apply. Git writes wait until Smara and its workers are idle.</p>
+        <p><strong>Terminal</strong> opens a user-operated PowerShell session through the native app server. It starts only when the Windows sandbox reports ready, can write only to the selected project, has network access disabled, and is stopped when the runtime disconnects. Git review writes stay locked while the shell is running.</p>
       </section>
       <section className="settings-card"><h2>Access and privacy</h2>
         <ul><li>Chat requests and context you provide go to your selected model provider. Project code or text Smara reads for a task may also be sent to that model.</li>

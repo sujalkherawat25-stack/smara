@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 
-function fixture({ startupFailure = false, unknownTurn = false } = {}) {
+function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = true, terminalPlatformSupported = true } = {}) {
   const slots = [], calls = [], effects = [];
   let cursor = 0, dirty = true, tree, failResume = false, currentRpc;
   const setup = {
@@ -32,7 +32,7 @@ function fixture({ startupFailure = false, unknownTurn = false } = {}) {
     const module = { exports: {} };
     const source = readFileSync(new URL(path, import.meta.url), "utf8");
     const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-    vm.runInNewContext(code, { module, exports: module.exports, require, window: { addEventListener() {}, removeEventListener() {} }, navigator: { clipboard: { writeText: async () => {} } } });
+    vm.runInNewContext(code, { module, exports: module.exports, require, crypto: { randomUUID: () => "fixture-terminal-id" }, TextEncoder, TextDecoder, Uint8Array, btoa, atob, window: { addEventListener() {}, removeEventListener() {} }, navigator: { clipboard: { writeText: async () => {} } } });
     return module.exports;
   };
   class RpcOutcomeUnknown extends Error {}
@@ -51,6 +51,8 @@ function fixture({ startupFailure = false, unknownTurn = false } = {}) {
       if (method === "thread/list") return { data: [{ id: "saved", preview: "Saved chat" }] };
       if (method === "thread/read" || method === "thread/resume") return { thread };
       if (method === "thread/start") return { thread: { id: "new" } };
+      if (method === "windowsSandbox/readiness") return { status: sandboxReady ? "ready" : "notConfigured" };
+      if (method === "command/exec") return new Promise(() => {});
       if (method === "turn/start") {
         if (unknownTurn) throw new RpcOutcomeUnknown("Synthetic unknown outcome");
         this.receive({ method: "turn/started", params: { threadId: params.threadId, turn: { id: "running" } } });
@@ -67,20 +69,25 @@ function fixture({ startupFailure = false, unknownTurn = false } = {}) {
     },
   };
   const view = evaluate("../src/nativeView.ts", () => assert.fail("View must have no side-effect imports"));
+  const terminalProtocol = evaluate("../src/terminalProtocol.ts", () => assert.fail("Terminal protocol must have no side-effect imports"));
   function Settings() {}
   function Changes() {}
+  function Terminal() {}
   function Command() {}
   const App = evaluate("../src/NativeApp.tsx", name => {
     if (name === "react") return hooks;
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
-    if (name === "@tauri-apps/api/core") return { invoke: async () => ({ built: true }) };
+    if (name === "@tauri-apps/api/core") return { invoke: async () => ({ built: true, windowsTerminalBuild: terminalPlatformSupported }) };
     if (name.endsWith("NativeSettings")) return { default: Settings, __esModule: true };
     if (name.endsWith("NativeMarkdown")) return { default: () => null, __esModule: true };
+    if (name.endsWith("NativeFilePreview")) return { default: () => null, __esModule: true };
+    if (name.endsWith("NativeTerminal")) return { default: Terminal, __esModule: true };
     if (name.endsWith("NativeChanges")) return { default: Changes, __esModule: true, reviewRequest: async (workspace, operation, values) => { calls.push({ method: `review/${operation}`, workspace, values }); return operation === "capture" ? { snapshot: "synthetic-local-snapshot", excluded: 0 } : {}; } };
     if (name.endsWith("NativeCommand")) return { default: Command, __esModule: true };
     if (name.endsWith("nativeApi")) return api;
     if (name.endsWith("nativeRpc")) return { NativeRpc, RpcOutcomeUnknown };
     if (name.endsWith("nativeView")) return view;
+    if (name.endsWith("terminalProtocol")) return terminalProtocol;
     if (name.endsWith("package.json")) return { version: "fixture" };
     if (name.endsWith(".css")) return {};
     assert.fail(`Unexpected import ${name}`);
@@ -103,7 +110,7 @@ function fixture({ startupFailure = false, unknownTurn = false } = {}) {
     nodes().find(node => node.type === "textarea").props.onChange({ target: { value: message, style: {}, scrollHeight: 100 } });
     await flush();
   };
-  return { calls, flush, button, nodes, enter, emit: message => currentRpc.receive(message), changes: () => nodes().find(node => node.type === Changes)?.props, failResume: () => { failResume = true; }, settings: () => nodes().find(node => node.type === Settings).props, model: () => nodes().find(node => node.type === "select" && node.props["aria-label"] === "Model") };
+  return { calls, flush, button, nodes, enter, emit: message => currentRpc.receive(message), terminal: () => nodes().find(node => node.type === Terminal)?.props, changes: () => nodes().find(node => node.type === Changes)?.props, failResume: () => { failResume = true; }, settings: () => nodes().find(node => node.type === Settings).props, model: () => nodes().find(node => node.type === "select" && node.props["aria-label"] === "Model") };
 }
 
 test("turn snapshots are local, captured before acceptance and sealed after completion", async () => {
@@ -245,4 +252,24 @@ test("failed history restoration cannot silently send a reply into a new chat", 
   f.failResume(); f.settings().onClose(); await f.flush(); await f.enter("Reply to saved history");
   f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} }); await f.flush();
   assert.equal(f.calls.some(call => call.method === "thread/start" || call.method === "turn/start"), false);
+});
+
+test("interactive terminal starts only on supported Windows builds and uses only the native sandbox", async () => {
+  const f = fixture({ terminalPlatformSupported: true }); await f.flush();
+  f.button("Terminal").props.onClick(); await f.flush();
+  await f.terminal().onStart(); await f.flush();
+  assert.equal(f.terminal().interactiveSupported, true);
+  assert.equal(f.calls.some(call => call.method === "windowsSandbox/readiness"), true);
+  const command = f.calls.find(call => call.method === "command/exec");
+  assert.ok(command);
+  assert.equal(command.params.tty, true);
+  assert.equal(command.params.sandboxPolicy.networkAccess, false);
+  assert.equal(command.params.sandboxPolicy.writableRoots.length, 1);
+  const unsupported = fixture({ terminalPlatformSupported: false }); await unsupported.flush();
+  unsupported.button("Terminal").props.onClick(); await unsupported.flush();
+  await unsupported.terminal().onStart(); await unsupported.flush();
+  assert.equal(unsupported.terminal().interactiveSupported, false);
+  assert.equal(unsupported.calls.some(call => call.method === "command/exec"), false);
+  const terminal = readFileSync(new URL("../src/NativeTerminal.tsx", import.meta.url), "utf8");
+  assert.match(terminal, /Smara will never start an unsandboxed shell/);
 });

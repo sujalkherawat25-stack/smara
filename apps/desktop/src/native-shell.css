@@ -170,3 +170,37 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .project-form small { font-size: 10px; }
 @media (max-width: 1060px) { .native-layout aside { width: 220px; } .native-topbar { padding: 12px 20px; } .native-settings { padding: 22px; } .settings-grid { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .native-layout aside { width: 170px; padding: 16px 8px; } .native-brand { padding-bottom: 16px; } .native-topbar { padding: 10px 16px; } .header-chat-title { display: none; } .native-transcript { padding: 16px; } .native-layout footer { padding: 10px 12px; } .native-empty { margin-top: 35px; } .composer-actions { gap: 6px; } .native-app .composer-actions select { max-width: 160px; } .composer-toolbar > small, .composer-status > small:last-child { display: none; } .form-pair { grid-template-columns: 1fr; } }
+.native-inline-file { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; vertical-align: baseline; }
+.native-inline-file code { overflow-wrap: anywhere; }
+.native-app button.native-inline-preview { padding: 2px 7px; border-radius: 999px; color: #b8d6ff; font-size: 11px; line-height: 1.4; }
+.native-preview-backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 4vh 4vw; background: rgb(0 0 0 / 72%); }
+.native-preview-dialog { width: min(1120px, 92vw); height: min(850px, 92vh); display: flex; flex-direction: column; overflow: hidden; border: 1px solid #46536a; border-radius: 14px; background: #141820; box-shadow: 0 24px 90px rgb(0 0 0 / 55%); }
+.native-preview-header { flex: 0 0 auto; display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 12px 16px; border-bottom: 1px solid #303846; }
+.native-preview-header > div:first-child { min-width: 0; display: flex; flex-direction: column; }
+.native-preview-header strong, .native-preview-header small { overflow-wrap: anywhere; }
+.native-preview-header small { color: #a5b2c5; font-size: 12px; }
+.native-preview-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.native-preview-actions button { padding: 6px 10px; }
+.native-preview-text { flex: 1; min-height: 0; overflow: auto; margin: 0 !important; padding: 18px 20px !important; color: #e2e8f0; font: 13px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace !important; white-space: pre !important; }
+.native-preview-image-wrap { flex: 1; min-height: 0; display: grid; place-items: center; overflow: auto; padding: 18px; }
+.native-preview-image-wrap img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.native-preview-pdf { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
+.native-preview-message { margin: auto; padding: 24px; color: #b8c5d8; text-align: center; }
+@media (max-width: 700px) { .native-preview-backdrop { padding: 2vh 2vw; } .native-preview-dialog { width: 96vw; height: 96vh; } .native-preview-header { align-items: flex-start; } .native-preview-actions { flex-direction: column; } }
+.interactive-terminal { overflow: hidden; gap: 8px; }
+.interactive-terminal .panel-heading > div { display: flex; flex-direction: column; min-width: 0; }
+.interactive-terminal .panel-heading small { color: #93a3b6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 36vw; }
+.terminal-sandbox-note { margin: 0; color: #9bb9a7; font-size: 11px; line-height: 1.5; }
+.terminal-unavailable { margin: auto; max-width: 540px; padding: 24px; color: #c4cbd5; line-height: 1.6; text-align: center; }
+.terminal-unavailable strong { color: #f2c778; }
+.terminal-unavailable p { margin: 10px 0 0; font-size: 12px; }
+.terminal-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.terminal-toolbar button { padding: 5px 9px; font-size: 11px; }
+.terminal-toolbar > small { margin-left: auto; color: #aeb9c5; font-size: 11px; }
+.native-app .terminal-toolbar .terminal-stop { border-color: #7d4844; color: #ffc8bf; }
+.terminal-error { margin: 0; padding: 8px; border-radius: 7px; color: #ffb9af; background: #321f20; font-size: 11px; overflow-wrap: anywhere; }
+.terminal-empty { margin: 12px 2px; color: #aeb9c5; font-size: 12px; line-height: 1.6; }
+.interactive-terminal-output { flex: 1; min-height: 180px; overflow: auto; margin: 0 !important; padding: 10px !important; border: 1px solid #30383a; border-radius: 8px; background: #101414; color: #d6e2dc; font: 12px/1.55 Consolas, ui-monospace, monospace !important; white-space: pre-wrap !important; overflow-wrap: anywhere; }
+.interactive-terminal-input { display: flex; align-items: end; gap: 8px; flex: 0 0 auto; }
+.native-app .interactive-terminal-input textarea { resize: vertical; min-height: 42px; max-height: 150px; flex: 1; width: 0; padding: 8px; border: 1px solid #394443; border-radius: 8px; background: #151b1a; font: 12px/1.5 Consolas, ui-monospace, monospace; }
+.interactive-terminal-input button { flex-shrink: 0; }

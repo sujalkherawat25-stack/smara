@@ -20,6 +20,10 @@ struct ReviewActivity {
     turns: HashMap<String, String>,
     workers: HashSet<String>,
     completed: HashSet<String>,
+    readiness_requests: HashSet<String>,
+    terminal_processes: HashSet<String>,
+    terminal_exec_requests: HashMap<String, String>,
+    windows_sandbox_ready: bool,
     unknown: bool,
 }
 
@@ -39,14 +43,36 @@ impl ReviewActivity {
         }
     }
     fn request(&mut self, message: &Value) {
-        if matches!(message["method"].as_str(), Some("turn/start" | "thread/resume")) {
-            if let Some(id) = message.get("id") { self.pending.insert(id.to_string()); }
-            else { self.unknown = true; }
+        if let Some(id) = message.get("id") {
+            let request_id = id.to_string();
+            match message["method"].as_str() {
+                Some("turn/start" | "thread/resume") => { self.pending.insert(request_id); }
+                Some("windowsSandbox/readiness") => { self.readiness_requests.insert(request_id); }
+                Some("command/exec") => {
+                    self.pending.insert(request_id.clone());
+                    if let Some(process_id) = message["params"]["processId"].as_str() {
+                        self.terminal_processes.insert(process_id.to_owned());
+                        self.terminal_exec_requests.insert(request_id, process_id.to_owned());
+                    } else { self.unknown = true; }
+                }
+                _ => {}
+            }
+        } else if matches!(message["method"].as_str(), Some("turn/start" | "thread/resume" | "windowsSandbox/readiness" | "command/exec")) {
+            self.unknown = true;
         }
     }
     fn notification(&mut self, message: &Value) {
         if message.get("method").is_none() {
-            if let Some(id) = message.get("id") { self.pending.remove(&id.to_string()); }
+            if let Some(id) = message.get("id") {
+                let request_id = id.to_string();
+                self.pending.remove(&request_id);
+                if self.readiness_requests.remove(&request_id) {
+                    self.windows_sandbox_ready = message["result"]["status"] == "ready";
+                }
+                if let Some(process_id) = self.terminal_exec_requests.remove(&request_id) {
+                    self.terminal_processes.remove(&process_id);
+                }
+            }
             // Resuming an in-progress session must not enable Git writes.
             if let Some(turns) = message["result"]["thread"]["turns"].as_array() {
                 for turn in turns {
@@ -84,6 +110,79 @@ impl ReviewActivity {
     fn idle(&self) -> bool { !self.unknown && self.pending.is_empty() && self.turns.is_empty() && self.workers.is_empty() }
 }
 
+fn valid_terminal_process_id(value: &str) -> bool {
+    value.starts_with("smara-terminal-") && value.len() <= 128
+        && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+}
+
+fn path_is_exact_root(value: &Value, root: &std::path::Path) -> bool {
+    value.as_str().is_some_and(|value| {
+        let path = std::path::PathBuf::from(value);
+        path.is_absolute() && std::fs::canonicalize(path).is_ok_and(|path| path == root)
+    })
+}
+
+// Streaming is dispatched only on Windows builds. Smara's launcher prefers
+// MXC there; if the host cannot use it, the native runtime rejects the request
+// and this layer never retries through an unsandboxed process.
+const WINDOWS_SANDBOX_STREAMING_SUPPORTED: bool = cfg!(target_os = "windows");
+
+fn validate_terminal_message(message: &Value, activity: &ReviewActivity, project_root: Option<&std::path::Path>) -> Result<(), String> {
+    let params = &message["params"];
+    match message["method"].as_str().unwrap_or_default() {
+        "command/exec" => {
+            if !WINDOWS_SANDBOX_STREAMING_SUPPORTED {
+                return Err("Interactive terminal is unavailable: this Windows runtime does not support sandboxed streaming commands.".into());
+            }
+            if !activity.windows_sandbox_ready { return Err("Windows sandbox readiness has not been confirmed for this runtime.".into()); }
+            let root = project_root.ok_or("The selected project is unavailable for the terminal sandbox.")?;
+            if !valid_terminal_process_id(params["processId"].as_str().unwrap_or_default())
+                || activity.terminal_processes.contains(params["processId"].as_str().unwrap_or_default())
+                || params["command"] != serde_json::json!(["powershell.exe", "-NoLogo", "-NoProfile", "-NoExit"])
+                || params["tty"] != true || params["streamStdin"] != true || params["streamStdoutStderr"] != true
+                || params["disableTimeout"] != true || params["outputBytesCap"] != 8 * 1024 * 1024
+                || !params["env"].is_null() || !params["permissionProfile"].is_null()
+                || params["sandboxPolicy"]["type"] != "workspaceWrite"
+                || params["sandboxPolicy"]["networkAccess"] != false
+                || !path_is_exact_root(&params["cwd"], root)
+            { return Err("Terminal request does not match Smara's restricted interactive-shell policy.".into()); }
+            let roots = params["sandboxPolicy"]["writableRoots"].as_array().ok_or("Terminal writable roots are invalid.")?;
+            if roots.len() != 1 || !path_is_exact_root(&roots[0], root) {
+                return Err("The terminal can write only to the currently selected project.".into());
+            }
+            let cols = params["size"]["cols"].as_u64().unwrap_or_default();
+            let rows = params["size"]["rows"].as_u64().unwrap_or_default();
+            if !(40..=180).contains(&cols) || !(10..=60).contains(&rows) {
+                return Err("Terminal dimensions are outside the allowed range.".into());
+            }
+            Ok(())
+        }
+        "command/exec/write" => {
+            let id = params["processId"].as_str().unwrap_or_default();
+            if !valid_terminal_process_id(id) || !activity.terminal_processes.contains(id)
+                || params["closeStdin"] == true
+                || params["deltaBase64"].as_str().is_none_or(|value| value.is_empty() || value.len() > 131_072)
+            { return Err("Terminal input is invalid or the shell is no longer active.".into()); }
+            Ok(())
+        }
+        "command/exec/resize" | "command/exec/terminate" => {
+            let id = params["processId"].as_str().unwrap_or_default();
+            if !valid_terminal_process_id(id) || !activity.terminal_processes.contains(id) {
+                return Err("Terminal process is not owned by this Smara session.".into());
+            }
+            if message["method"] == "command/exec/resize" {
+                let cols = params["size"]["cols"].as_u64().unwrap_or_default();
+                let rows = params["size"]["rows"].as_u64().unwrap_or_default();
+                if !(40..=180).contains(&cols) || !(10..=60).contains(&rows) {
+                    return Err("Terminal dimensions are outside the allowed range.".into());
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 fn session() -> &'static Mutex<Option<NativeSession>> {
     static SESSION: OnceLock<Mutex<Option<NativeSession>>> = OnceLock::new();
     SESSION.get_or_init(|| Mutex::new(None))
@@ -102,8 +201,8 @@ fn binary() -> Result<PathBuf, String> {
 #[tauri::command]
 pub fn native_status() -> Value {
     match binary() {
-        Ok(path) => json!({"built": true, "binary": path, "sourceOwned": true}),
-        Err(error) => json!({"built": false, "error": error, "sourceOwned": true}),
+        Ok(path) => json!({"built": true, "binary": path, "sourceOwned": true, "windowsTerminalBuild": cfg!(target_os = "windows")}),
+        Err(error) => json!({"built": false, "error": error, "sourceOwned": true, "windowsTerminalBuild": cfg!(target_os = "windows")}),
     }
 }
 
@@ -186,8 +285,15 @@ pub fn native_send(generation: String, message: Value) -> Result<(), String> {
     if running.process.try_wait().map_err(|_| "Cannot inspect native process")?.is_some() {
         return Err("Native process exited; reconnect before sending work".into());
     }
+    let mut activity = running.activity.lock().map_err(|_| "Native activity lock failed")?;
+    let project_root = if message["method"] == "command/exec" {
+        let connection = super::current_connection()?;
+        Some(super::selected_workspace_dir(&connection.active_workspace, &connection.allowed_roots)?
+            .ok_or("Choose a project before starting a terminal")?)
+    } else { None };
+    validate_terminal_message(&message, &activity, project_root.as_deref())?;
     let input = running.input.as_mut().ok_or("Native runtime is stopping")?;
-    running.activity.lock().map_err(|_| "Native activity lock failed")?.request(&message);
+    activity.request(&message);
     writeln!(input, "{message}").and_then(|_| input.flush()).map_err(|_| "Cannot send native RPC message".into())
 }
 
@@ -308,5 +414,57 @@ mod review_tests {
             "type":"collabAgentToolCall","receiverThreadIds":["w"],"agentsStates":{"w":{"status":"completed"}}
         }}}));
         assert!(active.idle());
+    }
+    #[test]
+    fn interactive_terminal_keeps_git_writes_locked_until_its_process_exits() {
+        let mut active = ReviewActivity::default();
+        active.request(&json!({"id": 9, "method": "command/exec", "params": {"processId": "terminal-1"}}));
+        assert!(!active.idle());
+        active.notification(&json!({"id": 9, "result": {"exitCode": 0, "stdout": "", "stderr": ""}}));
+        assert!(active.idle());
+    }
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn non_windows_streaming_shell_is_rejected_before_runtime_dispatch() {
+        let active = ReviewActivity::default();
+        let result = validate_terminal_message(
+            &json!({"id": 10, "method": "command/exec", "params": {"processId": "smara-terminal-test"}}),
+            &active,
+            None,
+        );
+        assert!(result.unwrap_err().contains("does not support sandboxed streaming"));
+        assert!(active.terminal_processes.is_empty());
+        assert!(active.pending.is_empty());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_terminal_accepts_only_project_scoped_no_network_pty() {
+        let root = std::fs::canonicalize(std::env::current_dir().unwrap()).unwrap();
+        let root = root.to_str().unwrap();
+        let mut active = ReviewActivity::default();
+        active.windows_sandbox_ready = true;
+        let message = json!({
+            "id": 10,
+            "method": "command/exec",
+            "params": {
+                "processId": "smara-terminal-test",
+                "command": ["powershell.exe", "-NoLogo", "-NoProfile", "-NoExit"],
+                "cwd": root,
+                "tty": true,
+                "streamStdin": true,
+                "streamStdoutStderr": true,
+                "disableTimeout": true,
+                "outputBytesCap": 8388608,
+                "size": {"rows": 24, "cols": 80},
+                "sandboxPolicy": {
+                    "type": "workspaceWrite",
+                    "writableRoots": [root],
+                    "networkAccess": false
+                }
+            }
+        });
+        assert!(validate_terminal_message(&message, &active, Some(std::path::Path::new(root))).is_ok());
+        assert!(active.terminal_processes.is_empty());
     }
 }
