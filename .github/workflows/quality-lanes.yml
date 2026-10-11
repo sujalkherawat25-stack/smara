@@ -20,6 +20,7 @@ jobs:
           tests/test_native_profiles.py tests/test_native_management.py
           tests/test_native_provider.py tests/test_native_search.py
           tests/test_native_tools.py tests/test_native_schedule.py
+          tests/test_native_documents.py tests/test_native_limits.py
           tests/test_own_harness_routing.py
 
   legacy-compatibility:

@@ -29,6 +29,7 @@ dist/
 release/keys/*.private
 artifacts/
 .pytest_tmp*/
+/.pytest_*/
 pytest-tmp/
 .pytest-*/
 scratch/

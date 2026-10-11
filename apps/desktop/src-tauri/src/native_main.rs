@@ -78,7 +78,7 @@ fn management(request: Value) -> Result<Value, String> {
 }
 #[tauri::command]
 async fn native_manage(request: Value) -> Result<Value, String> {
-    if !matches!(request.get("operation").and_then(Value::as_str), Some("bootstrap" | "add_project" | "select_project" | "select_model" | "select_search" | "save_credential" | "delete_credential" | "save_model" | "test_model" | "test_search")) {
+    if !matches!(request.get("operation").and_then(Value::as_str), Some("bootstrap" | "add_project" | "select_project" | "save_project_options" | "select_model" | "select_search" | "save_credential" | "delete_credential" | "save_model" | "test_model" | "test_search")) {
         return Err("Unsupported UI settings operation; secret reads and legacy execution are unavailable".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
@@ -221,6 +221,15 @@ async fn native_preview_file(workspace: String, path: String) -> Result<NativeFi
     }).await.map_err(|_| "File preview worker failed".to_owned())?
 }
 
+mod native_context;
+
+#[tauri::command]
+async fn native_project_files(workspace: String, path: String) -> Result<native_context::Listing, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        native_context::list(&active_preview_workspace(&workspace)?, &path)
+    }).await.map_err(|_| "Project file listing failed".to_owned())?
+}
+
 #[tauri::command]
 async fn native_open_workspace_file(workspace: String, path: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -255,7 +264,7 @@ fn native_open_url(url: String) -> Result<(), String> {
 }
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file])
+        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file, native_project_files])
         .build(tauri::generate_context!()).expect("Could not build Smara Desktop")
         .run(|_, event| {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) { let _ = native_runtime::stop_current(); }

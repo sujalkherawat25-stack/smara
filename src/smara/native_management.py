@@ -31,6 +31,24 @@ def folder(value):
     return str(path.resolve(strict=True))
 
 
+def project_options(value):
+    if not isinstance(value, dict) or set(value) - {"tools_enabled", "workers_enabled", "browser_origins"}:
+        raise ValueError("Invalid project options")
+    result = {}
+    for field in ("tools_enabled", "workers_enabled"):
+        if type(value.get(field, False)) is not bool:
+            raise ValueError("Project tool choices must be true or false")
+        result[field] = value.get(field, False)
+    origins = value.get("browser_origins", [])
+    if not isinstance(origins, list):
+        raise ValueError("Browser sites must be a list of public origins")
+    if origins:
+        from .native_browser import configured_origins
+        configured_origins(origins)
+    result["browser_origins"] = list(dict.fromkeys(origins))
+    return result
+
+
 def preferences():
     saved = read_object(settings_path())
     legacy = read_object(state_path().parent / "desktop-ui.json")
@@ -46,6 +64,8 @@ def preferences():
                     projects.append({"workspace": canonical, "label": Path(canonical).name or canonical})
     if not isinstance(projects, list) or any(not isinstance(p, dict) or not isinstance(p.get("workspace"), str) or not isinstance(p.get("label"), str) for p in projects):
         raise ValueError("Native project settings are invalid; restore your settings backup")
+    projects = [{"workspace": p["workspace"], "label": p["label"],
+                 **({"options": project_options(p["options"])} if "options" in p else {})} for p in projects]
     _, selected, _ = load_profiles()
     return {"projects": projects, "workspace": saved.get("workspace") or (projects[0]["workspace"] if projects else ""),
             "active_model": selected, "search_provider": saved.get("search_provider") or search_status(protected_only=True).get("provider") or "tavily"}
@@ -165,6 +185,15 @@ def manage(request):
             if not any(os.path.normcase(p["workspace"]) == os.path.normcase(workspace) for p in prefs["projects"]):
                 raise ValueError("Add this folder as a project before using it")
             saved.update({"projects": prefs["projects"], "workspace": workspace})
+        elif operation == "save_project_options":
+            workspace = folder(request.get("workspace") or "")
+            if os.path.normcase(workspace) != os.path.normcase(prefs["workspace"]):
+                raise ValueError("Select this project before changing its options")
+            project = next((p for p in prefs["projects"] if os.path.normcase(p["workspace"]) == os.path.normcase(workspace)), None)
+            if project is None:
+                raise ValueError("Add this folder as a project before using it")
+            project["options"] = project_options(request.get("options"))
+            saved["projects"] = prefs["projects"]
         elif operation == "select_model":
             profiles, _, _ = load_profiles()
             identity = str(request.get("id") or "")

@@ -70,8 +70,8 @@ def main():
             saved_config = home / "config.toml"
             saved_config.write_text('[mcp_servers.smara_readers]\nenabled = true\ncommand = "unused-saved-reader-transport"\ndefault_tools_approval_mode = "prompt"\n', encoding="utf-8")
             original_config = saved_config.read_bytes()
-            # The real native configuration loader must honor the current
-            # opt-out, not an enabled entry retained from an earlier launch.
+            # Current opt-out restricts tools to clock/explicit document work;
+            # it must not expose saved project-memory/research choices.
             with ResponsesAdapter(ChatEndpoint(f"http://127.0.0.1:{provider.server_port}/v1", "offline-mcp-protocol", "")) as adapter:
                 session = NativeSession(adapter, workspace, home, tools_enabled=False, timeout=60)
                 try:
@@ -79,10 +79,11 @@ def main():
                     effective = session.rpc("config/read", {"includeLayers": False})["config"]["mcp_servers"]["smara_readers"]
                     thread = session.rpc("thread/start", {"cwd": str(workspace), "approvalPolicy": "on-request", "sandbox": "workspace-write"})["thread"]["id"]
                     inventory = session.rpc("mcpServerStatus/list", {"threadId": thread})["data"]
-                    readers_disabled = effective["enabled"] is False and not any(server["name"] == "smara_readers" and server.get("tools") for server in inventory)
+                    names = {spec["name"].rsplit("__", 1)[-1] for server in inventory if server["name"] == "smara_readers" for spec in server.get("tools", {}).values()}
+                    memory_disabled = effective["enabled"] is True and names == {"current_time", "document_ocr", "image_analyze", "source_page"}
                     saved_readers_unchanged = tomllib.loads(saved_config.read_text(encoding="utf-8"))["mcp_servers"]["smara_readers"] == tomllib.loads(original_config.decode("utf-8"))["mcp_servers"]["smara_readers"]
                     report["reader_opt_out_observation"] = {"config_read_enabled": effective["enabled"], "inventory": [{"name": server["name"], "tool_count": len(server.get("tools", {}))} for server in inventory], "saved_config_bytes_unchanged": saved_config.read_bytes() == original_config, "saved_reader_settings_unchanged": saved_readers_unchanged}
-                    assert readers_disabled and saved_readers_unchanged and not requests, "Saved readers opt-in leaked into an opted-out launch"
+                    assert memory_disabled and saved_readers_unchanged and not requests, "Saved memory/research opt-in leaked into a context-only launch"
                 finally:
                     session.close()
                     session = None
@@ -129,7 +130,7 @@ def main():
                     local = datetime.fromisoformat(clock["local"])
                     replay = json.loads(results[1])
                     replayed_clock = any(part.get("text") == json.dumps(clock, ensure_ascii=False) for part in replay)
-                    checks = {"saved_reader_opt_in_did_not_override_current_opt_out": readers_disabled,
+                    checks = {"saved_memory_opt_in_did_not_override_context_only_scope": memory_disabled,
                               "explicit_reader_opt_in_overrode_saved_disabled_entry": len(items) == 3,
                               "three_native_confirmations": len(approvals) == 3,
                               "denial_did_not_execute_clock": len(items) == 3 and all(items[index].get("status") == "failed" and not items[index].get("result") for index in (0, 2)),

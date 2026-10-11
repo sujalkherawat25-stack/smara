@@ -115,6 +115,19 @@ def test_mcp_stdio_and_error_are_not_success(tmp_path):
     assert results[2]["result"]["isError"] is True
 
 
+@pytest.mark.parametrize("mode,expected", [
+    ({"context_only": True}, {"current_time", "document_ocr", "image_analyze", "source_page"}),
+    ({"standard_tools": True}, {"current_time", "document_ocr", "image_analyze", "source_page", "web_search", "fetch_url"}),
+])
+def test_standard_tool_scopes_never_expose_project_memory(tmp_path, mode, expected):
+    output = io.StringIO()
+    serve(tmp_path, io.StringIO('{"jsonrpc":"2.0","id":0,"method":"initialize"}\n{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n'), output, **mode)
+    specs = json.loads(output.getvalue().splitlines()[-1])["result"]["tools"]
+    assert {tool["name"] for tool in specs} == expected
+    with pytest.raises(ValueError):
+        call(NativeTools(tmp_path, **mode), "memory_read")
+
+
 def test_mcp_frames_preserve_unicode_on_windows_codepages(tmp_path):
     directory = tmp_path / ".smara"
     directory.mkdir()

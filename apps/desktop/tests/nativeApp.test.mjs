@@ -5,13 +5,14 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 
-function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = true, terminalPlatformSupported = true } = {}) {
+function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = true, terminalPlatformSupported = true, projectOptions } = {}) {
   const slots = [], calls = [], effects = [], timers = new Set();
   let cursor = 0, dirty = true, tree, failResume = false, currentRpc;
   const setup = {
     preferences: { workspace: "C:/first", active_model: "one", projects: [{ workspace: "C:/first", label: "First" }, { workspace: "C:/second", label: "Second" }], search_provider: "tavily" },
     profiles: [{ id: "one", label: "Offline one", model: "offline-one" }, { id: "two", label: "Offline two", model: "offline-two" }], credentials: [], search: { configured: false },
   };
+  if (projectOptions) setup.preferences.projects[0].options = projectOptions;
   const hooks = {
     useState(initial) {
       const index = cursor++;
@@ -69,11 +70,13 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     },
   };
   const view = evaluate("../src/nativeView.ts", () => assert.fail("View must have no side-effect imports"));
+  const context = evaluate("../src/nativeContext.ts", () => assert.fail("Context formatting must have no side-effect imports"));
   const terminalProtocol = evaluate("../src/terminalProtocol.ts", () => assert.fail("Terminal protocol must have no side-effect imports"));
   function Settings() {}
   function Changes() {}
   function Terminal() {}
   function Command() {}
+  function ContextPicker() {}
   const App = evaluate("../src/NativeApp.tsx", name => {
     if (name === "react") return hooks;
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
@@ -81,6 +84,8 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     if (name.endsWith("NativeSettings")) return { default: Settings, __esModule: true };
     if (name.endsWith("NativeMarkdown")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeFilePreview")) return { default: () => null, __esModule: true };
+    if (name.endsWith("NativeContextPicker")) return { default: ContextPicker, __esModule: true };
+    if (name.endsWith("nativeContext")) return context;
     if (name.endsWith("NativeTerminal")) return { default: Terminal, __esModule: true };
     if (name.endsWith("NativeChanges")) return { default: Changes, __esModule: true, reviewRequest: async (workspace, operation, values) => { calls.push({ method: `review/${operation}`, workspace, values }); return operation === "capture" ? { snapshot: "synthetic-local-snapshot", excluded: 0 } : {}; } };
     if (name.endsWith("NativeCommand")) return { default: Command, __esModule: true };
@@ -110,7 +115,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     nodes().find(node => node.type === "textarea").props.onChange({ target: { value: message, style: {}, scrollHeight: 100 } });
     await flush();
   };
-  return { calls, flush, button, nodes, enter, emit: message => currentRpc.receive(message), terminal: () => nodes().find(node => node.type === Terminal)?.props, changes: () => nodes().find(node => node.type === Changes)?.props, failResume: () => { failResume = true; }, settings: () => nodes().find(node => node.type === Settings).props, model: () => nodes().find(node => node.type === "select" && node.props["aria-label"] === "Model") };
+  return { calls, flush, button, nodes, enter, contextPicker: () => nodes().find(node => node.type === ContextPicker)?.props, emit: message => currentRpc.receive(message), terminal: () => nodes().find(node => node.type === Terminal)?.props, changes: () => nodes().find(node => node.type === Changes)?.props, failResume: () => { failResume = true; }, settings: () => nodes().find(node => node.type === Settings).props, model: () => nodes().find(node => node.type === "select" && node.props["aria-label"] === "Model") };
 }
 
 test("turn snapshots are local, captured before acceptance and sealed after completion", async () => {
@@ -158,8 +163,52 @@ test("startup prepares a project without sending a turn or enabling optional too
   assert.equal(f.calls.some(call => call.method === "turn/start"), false);
   assert.equal(f.nodes().some(node => node.type === "button" && ["Connect", "Disconnect", "Manage settings"].includes(node.props.children)), false);
   assert.ok(f.model());
-  const composer = f.nodes().find(node => node.type === "form" && node.props.className === "native-composer");
-  assert.equal(composer.props.children[1].props.children[1].props.children[0], f.model());
+  assert.ok(f.button("Add project files"));
+});
+
+test("saved project choices are restored without leaking to another project", async () => {
+  const f = fixture({ projectOptions: { tools_enabled: true, workers_enabled: true, browser_origins: ["https://docs.python.org"] } });
+  await f.flush();
+  const first = f.calls.find(call => call.method === "connect");
+  assert.equal(first.readers, true); assert.equal(first.workers, true);
+  assert.deepEqual(first.origins, ["https://docs.python.org"]);
+  await f.nodes().find(node => node.type === "button" && node.props.title === "C:/second").props.onClick(); await f.flush();
+  assert.equal(f.calls.filter(call => call.method === "connect").at(-1).workers, false);
+  await f.nodes().find(node => node.type === "button" && node.props.title === "C:/first").props.onClick(); await f.flush();
+  assert.equal(f.calls.filter(call => call.method === "connect").at(-1).workers, true);
+});
+
+test("project files send references, not eager file contents, and clear only after acceptance", async () => {
+  const f = fixture(); await f.flush();
+  f.button("Add project files").props.onClick(); await f.flush();
+  f.contextPicker().onAttach([{ name: "report.pdf", path: "reports/report.pdf", directory: false, size: 42 }]);
+  f.contextPicker().onClose(); await f.flush();
+  await f.enter("Summarize this file");
+  f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} });
+  await f.flush();
+  const input = f.calls.find(call => call.method === "turn/start").params.input;
+  assert.equal(input.length, 1); assert.equal(input[0].type, "text");
+  assert.match(input[0].text, /Summarize this file/);
+  assert.match(input[0].text, /"reports\/report.pdf"/);
+  assert.match(input[0].text, /ask before uploading/);
+  assert.equal(f.nodes().some(node => node.props?.["aria-label"] === "Remove report.pdf"), false);
+});
+
+test("uncertain send preserves file context and project switches preserve separate drafts", async () => {
+  const f = fixture({ unknownTurn: true }); await f.flush();
+  f.button("Add project files").props.onClick(); await f.flush();
+  f.contextPicker().onAttach([{ name: "notes.txt", path: "notes.txt", directory: false, size: 4 }]);
+  f.contextPicker().onClose(); await f.flush();
+  await f.nodes().find(node => node.type === "button" && node.props.title === "C:/second").props.onClick(); await f.flush();
+  assert.equal(f.nodes().some(node => node.props?.["aria-label"] === "Remove notes.txt"), false);
+  await f.nodes().find(node => node.type === "button" && node.props.title === "C:/first").props.onClick(); await f.flush();
+  assert.ok(f.button("Remove notes.txt"));
+  await f.enter("Read notes");
+  f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} });
+  await f.flush();
+  assert.ok(f.button("Remove notes.txt"));
+  assert.equal(f.button("Remove notes.txt").props.disabled, true);
+  assert.equal(f.calls.filter(call => call.method === "turn/start").length, 1);
 });
 
 test("the primary UI has no technical badge, tool dropdown or capabilities tab", () => {

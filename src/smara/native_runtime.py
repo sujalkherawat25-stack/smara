@@ -75,8 +75,8 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
     # research available without silently exposing local memory.
     search_only = search_enabled and not tools_enabled
     reader_args = list(tool_args)
-    if search_only:
-        reader_args.append("--public-search-only")
+    if not tools_enabled:
+        reader_args.append("--standard-tools" if search_only else "--context-only")
     settings = {
         "model_provider": "smara_chat_adapter",
         "model": adapter.endpoint.model,
@@ -96,9 +96,9 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         # background catalog clones and inherited app/plugin authorization.
         "features.plugins": False,
         "features.apps": False,
-        # Even disabled MCP entries are transport-validated by the native core.
-        # Keep a valid, inert local transport; never inherit an ambient enable.
-        "mcp_servers.smara_readers.enabled": False,
+        # Standard context tools are always available; additional research and
+        # memory capabilities are selected by the explicit scope argument.
+        "mcp_servers.smara_readers.enabled": True,
         "mcp_servers.smara_readers.command": sys.executable,
         "mcp_servers.smara_readers.args": reader_args,
         "mcp_servers.smara_browser.enabled": False,
@@ -115,25 +115,25 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
     if adapter.endpoint.effective_context_window:
         settings["model_context_window"] = adapter.endpoint.effective_context_window
         settings["model_auto_compact_token_limit"] = int(adapter.endpoint.effective_context_window * .8)
-    if tools_enabled or search_only:
-        settings.update({
-            "mcp_servers.smara_readers.enabled": True,
-            "mcp_servers.smara_readers.env.PYTHONIOENCODING": "utf-8",
-            "mcp_servers.smara_readers.env.PYTHONUTF8": "1",
-            "mcp_servers.smara_readers.required": True,
-            "mcp_servers.smara_readers.startup_timeout_sec": 30,
-            "mcp_servers.smara_readers.tool_timeout_sec": 45,
-            # Uploads are external actions, never treated as ordinary read-only
-            # research merely because their result is text.
-            "mcp_servers.smara_readers.tools.document_ocr.approval_mode": "prompt",
-            "mcp_servers.smara_readers.tools.image_analyze.approval_mode": "prompt",
-        })
-        # MCP children do not inherit arbitrary environment variables. Pass
-        # vault/settings *paths*, never secret values in native -c arguments.
-        from .native_profiles import state_path
-        settings["mcp_servers.smara_readers.env.SMARA_DESKTOP_STATE"] = str(state_path().resolve())
-        if os.getenv("SMARA_DESKTOP_CREDENTIALS"):
-            settings["mcp_servers.smara_readers.env.SMARA_DESKTOP_CREDENTIALS"] = str(Path(os.environ["SMARA_DESKTOP_CREDENTIALS"]).resolve())
+    # The clock and explicit document/image analysis are standard tools.
+    # Local memory/academic readers still require project opt-in; document
+    # uploads remain separately approval-gated by the native core.
+    settings.update({
+        "mcp_servers.smara_readers.env.PYTHONIOENCODING": "utf-8",
+        "mcp_servers.smara_readers.env.PYTHONUTF8": "1",
+        "mcp_servers.smara_readers.required": True,
+        "mcp_servers.smara_readers.startup_timeout_sec": 30,
+        # A bounded OCR job includes submission, polling and result retrieval;
+        # its transport must outlast those bounded phases to preserve its ID.
+        "mcp_servers.smara_readers.tool_timeout_sec": 90,
+        "mcp_servers.smara_readers.tools.document_ocr.approval_mode": "prompt",
+        "mcp_servers.smara_readers.tools.image_analyze.approval_mode": "prompt",
+    })
+    # MCP children inherit vault/settings paths, never secret values.
+    from .native_profiles import state_path
+    settings["mcp_servers.smara_readers.env.SMARA_DESKTOP_STATE"] = str(state_path().resolve())
+    if os.getenv("SMARA_DESKTOP_CREDENTIALS"):
+        settings["mcp_servers.smara_readers.env.SMARA_DESKTOP_CREDENTIALS"] = str(Path(os.environ["SMARA_DESKTOP_CREDENTIALS"]).resolve())
     if browser_origins:
         from .native_browser import configured_origins, TOOLS as browser_tools
         configured_origins(browser_origins)
@@ -195,14 +195,16 @@ def active_profile(profiles: list[dict[str, Any]], active_id: str) -> dict[str, 
 def print_smara_help() -> None:
     print("\nSmara integration commands (execution remains owned by the native engine):")
     print("  smara source-status                Show offline source/binary provenance")
-    print("  smara --smara-tools [native args]   Opt in to public research/local-memory MCP readers")
+    print("  smara --smara-tools [native args]   Add academic search and local project-memory readers")
     print("  smara --smara-workers [native args] Enable parent-directed isolated coding checkouts")
     print("  smara --smara-browser-origin URL   Opt in to an exact public DOM-browser origin (repeatable)")
     print("  smara schedule --help              Manage paused-by-default, bounded read-only jobs")
     print("  smara changes --help               Review Git changes and explicitly stage/revert/undo")
-    print("  smara tools-serve --workspace DIR  Serve read-only MCP primitives on stdio")
+    print("  smara tools-serve --workspace DIR  Serve Smara MCP tools on stdio")
     print("  smara settings                    Show native project/model/search setup (no secret values)")
     print("\nThis fork uses its own source-built binary, not an installed Codex. Integration")
+    print("tools include the local clock and selected-file image/OCR analysis (uploads require approval).")
+    print("Public web search is available when a protected search key is saved.")
     print("readers do not provide browser actions. DOM browser actions need explicit origin opt-in")
     print("and native confirmation; personal browser, host computer and company-write automation remain unavailable.")
 

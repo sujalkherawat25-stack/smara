@@ -44,6 +44,51 @@ def test_project_registration_canonical_dedup_and_no_cross_project_access(setup)
     assert json.loads(state.read_text())["history"] == "preserve"
 
 
+def test_project_options_survive_switch_and_bootstrap_without_cross_project_inheritance(setup):
+    root, state, _ = setup
+    other = root / "second"
+    other.mkdir()
+    management.manage({"operation": "add_project", "workspace": str(other)})
+    options = {"tools_enabled": True, "workers_enabled": True,
+               "browser_origins": ["https://docs.python.org", "https://docs.python.org"]}
+    management.manage({"operation": "save_project_options", "workspace": str(other), "options": options})
+    management.manage({"operation": "select_project", "workspace": str(root)})
+    projects = management.manage({"operation": "bootstrap"})["preferences"]["projects"]
+    assert "options" not in next(p for p in projects if p["workspace"] == str(root))
+    assert next(p for p in projects if p["workspace"] == str(other))["options"] == {
+        **options, "browser_origins": ["https://docs.python.org"]}
+    management.manage({"operation": "select_project", "workspace": str(other)})
+    assert management.bootstrap()["preferences"]["projects"] == projects
+    assert json.loads(state.read_text())["history"] == "preserve"
+
+
+@pytest.mark.parametrize("options", [
+    {"tools_enabled": "true"}, {"workers_enabled": 1}, {"sandbox": "none"},
+    {"browser_origins": ["http://127.0.0.1"]},
+    {"browser_origins": ["https://user:secret@example.com"]},
+    {"browser_origins": ["https://example.com/private"]},
+    {"browser_origins": "https://example.com"},
+])
+def test_invalid_project_options_do_not_mutate_saved_settings(setup, options):
+    root, _, _ = setup
+    before = management.settings_path().read_bytes() if management.settings_path().exists() else None
+    with pytest.raises(ValueError):
+        management.manage({"operation": "save_project_options", "workspace": str(root), "options": options})
+    after = management.settings_path().read_bytes() if management.settings_path().exists() else None
+    assert after == before
+
+
+def test_cannot_change_options_for_an_inactive_project(setup):
+    root, _, _ = setup
+    other = root / "other"
+    other.mkdir()
+    management.manage({"operation": "add_project", "workspace": str(other)})
+    before = management.settings_path().read_bytes()
+    with pytest.raises(ValueError):
+        management.manage({"operation": "save_project_options", "workspace": str(root), "options": {"workers_enabled": True}})
+    assert management.settings_path().read_bytes() == before
+
+
 def test_model_and_credential_are_saved_separately_blank_key_edit_reuses_vault(setup):
     root, _, vault = setup
     profile = {"id": "test", "label": "Synthetic", "provider": "local", "model": "synthetic", "base_url": "http://127.0.0.1:9999/v1", "api_key": "synthetic-sensitive"}

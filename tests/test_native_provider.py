@@ -177,7 +177,7 @@ def test_provider_context_metadata_is_explicit_not_gpt_fallback():
 
 @pytest.mark.parametrize("frozen", [False, True])
 @pytest.mark.parametrize("saved_enabled", [False, True])
-def test_reader_launch_is_opt_in_and_has_valid_toml_overrides(tmp_path, monkeypatch, frozen, saved_enabled):
+def test_standard_tools_launch_without_opt_in_but_memory_remains_opt_in(tmp_path, monkeypatch, frozen, saved_enabled):
     import sys
     import tomllib
 
@@ -194,12 +194,13 @@ def test_reader_launch_is_opt_in_and_has_valid_toml_overrides(tmp_path, monkeypa
         off, _ = launch_options(adapter, home=home, workspace=workspace)
         on, _ = launch_options(adapter, home=home, workspace=workspace, tools_enabled=True)
         expected_args = (["--native-tools"] if frozen else ["-m", "smara.native_tools"]) + ["--workspace", str(workspace.resolve())]
-        for options, enabled in ((off, False), (on, True)):
+        for options, extra in ((off, ["--context-only"]), (on, [])):
             overrides = tomllib.loads("\n".join(options[1::2]))["mcp_servers"]["smara_readers"]
-            assert overrides["enabled"] is enabled
+            assert overrides["enabled"] is True
             assert overrides["command"] == sys.executable
-            assert overrides["args"] == expected_args
-        assert 'mcp_servers.smara_readers.enabled=false' in off
+            assert overrides["args"] == expected_args + extra
+            assert overrides["tools"]["document_ocr"]["approval_mode"] == "prompt"
+            assert overrides["tools"]["image_analyze"]["approval_mode"] == "prompt"
         assert 'mcp_servers.smara_readers.enabled=true' in on
         assert 'mcp_servers.smara_readers.env.PYTHONIOENCODING="utf-8"' in on
         assert "features.plugins=false" in on
@@ -221,7 +222,7 @@ def test_saved_search_key_exposes_public_search_without_project_memory(tmp_path)
         options, _ = launch_options(adapter, home=home, workspace=workspace, search_enabled=True)
         reader = tomllib.loads("\n".join(options[1::2]))["mcp_servers"]["smara_readers"]
         expected = (["--native-tools"] if getattr(sys, "frozen", False) else ["-m", "smara.native_tools"])
-        expected += ["--workspace", str(workspace.resolve()), "--public-search-only"]
+        expected += ["--workspace", str(workspace.resolve()), "--standard-tools"]
         assert reader["enabled"] is True
         assert reader["args"] == expected
     finally:

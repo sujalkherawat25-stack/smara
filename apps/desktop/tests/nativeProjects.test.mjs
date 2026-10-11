@@ -18,5 +18,8 @@ test("shipping UI imports no legacy app or broad tool bridge", () => {
   const app = readFileSync(new URL("../src/NativeApp.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(app, /LegacyApp|from "\.\/App"|from "\.\/api"/);
   assert.match(app, /sameWorkspace\(saved\.thread\.cwd, workspace\)/);
-  assert.match(app, /setToolsEnabled\(false\); setWorkersEnabled\(false\); setBrowserOrigins\(""\)/);
+  // Behavioral project tests cover saved opt-ins and non-inheritance. Keep this
+  // contract focused on refusing the retired transport, not JSX implementation.
+  const picker = readFileSync(new URL("../src/NativeContextPicker.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(picker, /from "\.\/api"|run_terminal_command|read_file/);
 });

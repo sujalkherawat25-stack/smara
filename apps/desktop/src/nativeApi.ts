@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { LocalModelProfile, LocalCredentialSummary } from "./types";
-export type Project = { workspace: string; label: string };
+export type ProjectOptions = { tools_enabled: boolean; workers_enabled: boolean; browser_origins: string[] };
+export type Project = { workspace: string; label: string; options?: ProjectOptions };
 export type NativeSetup = {
   preferences: { projects: Project[]; workspace: string; active_model: string; search_provider: string };
   profiles: LocalModelProfile[];

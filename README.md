@@ -259,10 +259,12 @@ smara-desktop --local-run
 An interrupted `running` task becomes `review_required`; it is never replayed
 until the owner explicitly retries it from Desktop Activity.
 
-After pairing is verified, `scripts/install-smara-desktop.ps1` registers the
-executor for the current Windows user at sign-in with limited privileges and
-duplicate-instance prevention. `scripts/uninstall-smara-desktop.ps1` removes
-auto-start; revoke the executor separately to invalidate its server token.
+The pairing/executor workflow above is legacy compatibility, not the current
+Desktop runtime. `scripts/install-smara-desktop.ps1 -InstallerPath PATH` now
+delegates to the verified native Desktop/CLI installer and does **not** register
+a Python executor or sign-in task. `scripts/uninstall-smara-desktop.ps1` only
+removes a previously registered legacy auto-start task; use Windows installed
+apps to uninstall the native Desktop.
 
 The executor claims a three-minute desktop step lease by default and calls
 `POST /v1/executors/steps/{step_id}/heartbeat` immediately before completion.

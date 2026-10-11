@@ -64,6 +64,7 @@ for spec in TOOLS:
     if spec["name"] in {"document_ocr", "image_analyze"}:
         spec["annotations"].update(readOnlyHint=False, idempotentHint=False, openWorldHint=True)
 PUBLIC_SEARCH_TOOLS = frozenset({"current_time", "web_search", "fetch_url", "source_page"})
+CONTEXT_TOOLS = frozenset({"current_time", "document_ocr", "image_analyze", "source_page"})
 
 
 def page(text, offset=0):
@@ -75,14 +76,18 @@ def page(text, offset=0):
 
 
 class NativeTools:
-    def __init__(self, workspace: Path, client=None, *, public_search_only: bool = False):
+    def __init__(self, workspace: Path, client=None, *, public_search_only: bool = False, context_only: bool = False, standard_tools: bool = False):
         self.workspace = workspace.resolve(strict=True)
         if not self.workspace.is_dir():
             raise ValueError("workspace must be an existing directory")
         self.client = client
         self.sources = OrderedDict()
         self.retrieval_cache = OrderedDict()
-        self.tool_specs = [spec for spec in TOOLS if not public_search_only or spec["name"] in PUBLIC_SEARCH_TOOLS]
+        if sum((public_search_only, context_only, standard_tools)) > 1:
+            raise ValueError("Choose one reader scope")
+        allowed = (PUBLIC_SEARCH_TOOLS if public_search_only else CONTEXT_TOOLS if context_only
+                   else PUBLIC_SEARCH_TOOLS | CONTEXT_TOOLS if standard_tools else None)
+        self.tool_specs = [spec for spec in TOOLS if allowed is None or spec["name"] in allowed]
 
     async def fetch(self, url):
         from .research import _is_public_http_url, _TextExtractor, restricted_content_reason
@@ -238,9 +243,9 @@ class NativeTools:
         return {"exists": True, **page(raw.decode("utf-8"), arguments.get("offset", 0))}
 
 
-def serve(workspace, input_stream=None, output_stream=None, *, public_search_only: bool = False):
+def serve(workspace, input_stream=None, output_stream=None, *, public_search_only: bool = False, context_only: bool = False, standard_tools: bool = False):
     reader, writer = input_stream or sys.stdin, output_stream or sys.stdout
-    tools = NativeTools(Path(workspace), public_search_only=public_search_only)
+    tools = NativeTools(Path(workspace), public_search_only=public_search_only, context_only=context_only, standard_tools=standard_tools)
     initialized = False
     while True:
         line = reader.readline(MAX_BYTES + 1)
@@ -261,7 +266,8 @@ def serve(workspace, input_stream=None, output_stream=None, *, public_search_onl
                 continue
             if method == "initialize":
                 initialized = True
-                result = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "smara-readers", "version": "0.1.11"}}
+                from .native_runtime import product_version
+                result = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "smara-readers", "version": product_version()}}
             elif method == "ping":
                 result = {}
             elif not initialized:
@@ -294,10 +300,13 @@ def main(argv=None):
             stream.reconfigure(encoding="utf-8", errors="strict")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", required=True)
-    parser.add_argument("--public-search-only", action="store_true",
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument("--public-search-only", action="store_true",
                         help="Expose clock and public search/page readers, but not project memory")
+    scope.add_argument("--context-only", action="store_true", help="Expose clock and approval-gated document/image tools")
+    scope.add_argument("--standard-tools", action="store_true", help="Expose context tools and configured public search without project memory")
     args = parser.parse_args(argv)
-    return serve(args.workspace, public_search_only=args.public_search_only)
+    return serve(args.workspace, public_search_only=args.public_search_only, context_only=args.context_only, standard_tools=args.standard_tools)
 
 
 if __name__ == "__main__":

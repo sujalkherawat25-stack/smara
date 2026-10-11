@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import NativeSettings from "./NativeSettings";
 import NativeMarkdown from "./NativeMarkdown";
 import NativeFilePreview from "./NativeFilePreview";
+import NativeContextPicker from "./NativeContextPicker";
+import { contextMessage, type ContextFile } from "./nativeContext";
 import NativeTerminal from "./NativeTerminal";
 import NativeChanges, { reviewRequest } from "./NativeChanges";
 import NativeCommand from "./NativeCommand";
@@ -62,6 +64,8 @@ export default function NativeApp() {
   const [workers, setWorkers] = useState<WorkerView[]>([]);
   const [browserOrigins, setBrowserOrigins] = useState("");
   const [draft, setDraft] = useState("");
+  const [contextOpen, setContextOpen] = useState(false);
+  const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -80,7 +84,9 @@ export default function NativeApp() {
   const terminalDecoderRef = useRef<TextDecoder | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const submitted = useRef("");
+  const submittedFiles = useRef<ContextFile[]>([]);
   const projectDrafts = useRef<Record<string, string>>({});
+  const projectContexts = useRef<Record<string, ContextFile[]>>({});
   const previousTurn = useRef("");
   const activeTurnRef = useRef("");
   const busyRef = useRef(false);
@@ -111,9 +117,11 @@ export default function NativeApp() {
     const text = submitted.current;
     if (text) {
       setDraft(current => current === text ? "" : current);
+      const sentPaths = new Set(submittedFiles.current.map(file => file.path));
+      setContextFiles(current => current.filter(file => !sentPaths.has(file.path)));
       setThreads(current => current.map(thread => thread.id === threadRef.current && !thread.preview ? { ...thread, preview: text } : thread));
     }
-    submitted.current = ""; setUncertain(false);
+    submitted.current = ""; submittedFiles.current = []; setUncertain(false);
   };
 
   const receive = (message: RpcMessage) => {
@@ -223,6 +231,8 @@ export default function NativeApp() {
       .then(([initial, native]) => {
         if (disposed) return;
         setSetup(initial); setWorkspace(initial.preferences.workspace); setProfiles(initial.profiles); setBuilt(native.built);
+        const options = initial.preferences.projects.find(project => sameWorkspace(project.workspace, initial.preferences.workspace))?.options;
+        setToolsEnabled(options?.tools_enabled ?? false); setWorkersEnabled(options?.workers_enabled ?? false); setBrowserOrigins(options?.browser_origins.join(" ") ?? "");
         setTerminalPlatformSupported(native.windowsTerminalBuild === true);
         const selected = initial.preferences.active_model;
         const configured = initial.profiles.some(model => model.id === selected);
@@ -355,11 +365,12 @@ export default function NativeApp() {
   const send = async () => {
     if (!draft.trim() || busyRef.current || lifecycleRef.current || loadingThreadRef.current || reviewBusyRef.current || approvals.length || !profile || built !== true) return;
     const textToSend = draft;
+    const filesToSend = [...contextFiles];
     if (!connected && !await connect()) return;
     // A failed history restoration must never turn a reply into a new chat.
     if (restoreThreadRef.current || busyRef.current) return;
     busyRef.current = true;
-    setError(""); setBusy(true); submitted.current = textToSend;
+    setError(""); setBusy(true); submitted.current = textToSend; submittedFiles.current = filesToSend;
     try {
       let id = threadRef.current;
       if (!id) {
@@ -367,7 +378,7 @@ export default function NativeApp() {
         id = result.thread.id; threadRef.current = id; setThreadId(id);
         setThreads(current => [result.thread, ...current]);
       }
-      const text = submitted.current;
+      const text = contextMessage(textToSend, filesToSend);
       setTurnDiff(""); setReviewNotice("");
       // Capture before acceptance, locally only. A non-Git workspace or an
       // unavailable snapshot must not prevent ordinary conversation.
@@ -386,7 +397,7 @@ export default function NativeApp() {
       setError(String(reason));
       if (reason instanceof RpcOutcomeUnknown) {
         if (submitted.current) { setUncertain(true); setStatus("Acceptance unknown — check status or recover chat before retrying. No automatic resend."); }
-      } else { busyRef.current = false; setBusy(false); submitted.current = ""; turnSnapshot.current = null; }
+      } else { busyRef.current = false; setBusy(false); submitted.current = ""; submittedFiles.current = []; turnSnapshot.current = null; }
     }
   };
   const checkStatus = async () => {
@@ -475,10 +486,13 @@ export default function NativeApp() {
     lifecycleRef.current = true; setConnecting(true); setError("");
     try {
       projectDrafts.current[workspace] = draft;
+      projectContexts.current[workspace] = contextFiles;
       const next = await nativeSettings(add ? "add_project" : "select_project", { workspace: path, label: projectName });
       updateSetup(next); setWorkspace(next.preferences.workspace); setThreads([]); setNextCursor(null); setItems([]); setWorkers([]);
       restoreThreadRef.current = ""; threadRef.current = ""; setThreadId("");
-      setToolsEnabled(false); setWorkersEnabled(false); setBrowserOrigins(""); setDraft(projectDrafts.current[next.preferences.workspace] ?? "");
+      const options = next.preferences.projects.find(project => sameWorkspace(project.workspace, next.preferences.workspace))?.options;
+      setToolsEnabled(options?.tools_enabled ?? false); setWorkersEnabled(options?.workers_enabled ?? false); setBrowserOrigins(options?.browser_origins.join(" ") ?? ""); setDraft(projectDrafts.current[next.preferences.workspace] ?? "");
+      setContextFiles(projectContexts.current[next.preferences.workspace] ?? []); setContextOpen(false);
       setAddingProject(false); setProjectPath(""); setProjectName(""); setSettingsOpen(false);
       setPanel(null); setTurnDiff(""); setReviewNotice(""); setPreviewPath(null);
       setStatus("Project selected");
@@ -575,7 +589,14 @@ export default function NativeApp() {
         </section>)}
         <div ref={bottom} />
       </div>
-      <footer><form className="native-composer" onSubmit={event => { event.preventDefault(); void send(); }}><textarea aria-label="Message Smara" rows={2} placeholder="Ask Smara anything…" value={draft} onChange={event => { setDraft(event.target.value); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 260)}px`; }} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} /><div className="composer-toolbar"><small>{connecting ? "Preparing project…" : ""}</small><div className="composer-actions"><select aria-label="Model" title="Choose a model" value={profile} disabled={navigationLocked} onChange={event => void selectModel(event.target.value)}><option value="" disabled>Choose model</option>{profiles.map(model => <option value={model.id} key={model.id}>{model.label}</option>)}</select><button className={busy ? "stop-button" : "primary"} aria-label={busy ? "Stop response" : "Send message"} title={busy ? "Stop response" : "Send message"} type={busy ? "button" : "submit"} disabled={reviewBusy || connecting || loadingThread || (busy ? !turnId : !profile || built !== true || !draft.trim() || approvals.length > 0)} onClick={busy ? () => void stopTurn() : undefined}>{busy ? "■" : "↑"}</button></div></div></form><div className="composer-status"><small role="status">{reviewBusy ? "Saving local review…" : busy || uncertain || loadingThread || (status !== "Ready" && status !== "completed") ? status : ""}</small><small>Shift+Enter for a new line</small></div></footer>
+      <footer><form className="native-composer" onSubmit={event => { event.preventDefault(); void send(); }}>
+        {!!contextFiles.length && <div className="composer-files">{contextFiles.map(file => <span key={file.path}><button type="button" title={file.path} onClick={() => setPreviewPath(file.path)}>{file.name}</button><button type="button" aria-label={`Remove ${file.name}`} disabled={navigationLocked} onClick={() => setContextFiles(current => current.filter(item => item.path !== file.path))}>×</button></span>)}</div>}
+        <textarea aria-label="Message Smara" rows={2} placeholder="Ask Smara anything…" value={draft} onChange={event => { setDraft(event.target.value); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 260)}px`; }} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
+        <div className="composer-toolbar"><div className="composer-context"><button type="button" aria-label="Add project files" title="Add project files" disabled={navigationLocked || !workspace} onClick={() => setContextOpen(true)}>＋</button><small>{connecting ? "Preparing project…" : ""}</small></div><div className="composer-actions">
+          <select aria-label="Model" title="Choose a model" value={profile} disabled={navigationLocked} onChange={event => void selectModel(event.target.value)}><option value="" disabled>Choose model</option>{profiles.map(model => <option value={model.id} key={model.id}>{model.label}</option>)}</select>
+          <button className={busy ? "stop-button" : "primary"} aria-label={busy ? "Stop response" : "Send message"} title={busy ? "Stop response" : "Send message"} type={busy ? "button" : "submit"} disabled={reviewBusy || connecting || loadingThread || (busy ? !turnId : !profile || built !== true || !draft.trim() || approvals.length > 0)} onClick={busy ? () => void stopTurn() : undefined}>{busy ? "■" : "↑"}</button>
+        </div></div>
+      </form><div className="composer-status"><small role="status">{reviewBusy ? "Saving local review…" : busy || uncertain || loadingThread || (status !== "Ready" && status !== "completed") ? status : ""}</small><small>Shift+Enter for a new line</small></div></footer>
       </div>
       {panel === "changes" && <NativeChanges key={workspace + threadId} workspace={workspace} threadId={threadId} locked={navigationLocked || terminalActive} revision={reviewRevision} notice={reviewNotice} onBusyChange={reviewPending} onPreviewFile={setPreviewPath} onClose={() => setPanel(null)} />}
       {panel === "terminal" && <NativeTerminal workspace={workspace} connected={connected} session={terminalSession} interactiveSupported={terminalPlatformSupported} onConnect={() => { void connect(); }} onStart={() => startTerminal()} onInput={value => { void writeTerminal(value); }} onInterrupt={interruptTerminal} onStop={() => { void stopTerminal(); }} onResize={resizeTerminal} onClear={() => setTerminalSession(current => current ? { ...current, output: "", truncated: false } : current)} onClose={() => setPanel(null)} />}
@@ -583,5 +604,6 @@ export default function NativeApp() {
       </>}
     </main></div>
     {previewPath && <NativeFilePreview workspace={workspace} path={previewPath} onClose={() => setPreviewPath(null)} />}
+    {contextOpen && <NativeContextPicker workspace={workspace} files={contextFiles} onAttach={setContextFiles} onClose={() => setContextOpen(false)} />}
   </div>;
 }

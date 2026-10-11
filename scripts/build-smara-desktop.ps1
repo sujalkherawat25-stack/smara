@@ -11,6 +11,10 @@ function Assert-NativeSuccess([string]$step) {
 
 $appRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\apps\desktop')).Path
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$smaraCandidateExe = Join-Path $appRoot 'src-tauri\target\release\smara-desktop.exe'
+if (Get-Process -Name 'smara-desktop' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $smaraCandidateExe }) {
+    throw 'Close the locally built release candidate before rebuilding or packaging it.'
+}
 $version = (Get-Content -LiteralPath (Join-Path $repoRoot 'release\VERSION') -Raw).Trim()
 # A Desktop build may never silently ship the old engine as its native core.
 & (Join-Path $PSScriptRoot 'build-smara-native.ps1')

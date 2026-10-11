@@ -203,4 +203,24 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .interactive-terminal-output { flex: 1; min-height: 180px; overflow: auto; margin: 0 !important; padding: 10px !important; border: 1px solid #30383a; border-radius: 8px; background: #101414; color: #d6e2dc; font: 12px/1.55 Consolas, ui-monospace, monospace !important; white-space: pre-wrap !important; overflow-wrap: anywhere; }
 .interactive-terminal-input { display: flex; align-items: end; gap: 8px; flex: 0 0 auto; }
 .native-app .interactive-terminal-input textarea { resize: vertical; min-height: 42px; max-height: 150px; flex: 1; width: 0; padding: 8px; border: 1px solid #394443; border-radius: 8px; background: #151b1a; font: 12px/1.5 Consolas, ui-monospace, monospace; }
+.composer-context { display: flex; align-items: center; gap: 10px; }
+.native-app .composer-context > button { border: 0; background: transparent; font-size: 22px; padding: 3px 8px; }
+.composer-files { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 8px; }
+.composer-files > span { display: flex; max-width: 100%; border: 1px solid #43534d; border-radius: 9px; overflow: hidden; }
+.native-app .composer-files button { border: 0; border-radius: 0; padding: 5px 8px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.native-context-dialog { width: min(700px, 94vw); max-height: 85vh; display: flex; flex-direction: column; border: 1px solid #43534d; border-radius: 14px; background: #171d1b; box-shadow: 0 24px 80px #0008; }
+.native-context-dialog > header { display: flex; justify-content: space-between; gap: 12px; padding: 18px; }
+.native-context-dialog header div { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.native-context-dialog small { color: #a6b4ac; font-size: 12px; overflow-wrap: anywhere; }
+.native-context-dialog > form { display: flex; gap: 8px; align-items: end; padding: 0 18px 14px; }
+.native-context-dialog label { flex: 1; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.native-context-dialog input { width: 100%; }
+.native-context-dialog > p { padding: 0 18px; color: #efb9a7; }
+.native-context-files { overflow: auto; min-height: 140px; max-height: 50vh; padding: 8px 18px; border-block: 1px solid #39453f; }
+.native-context-files > button { display: flex; width: 100%; gap: 12px; align-items: center; text-align: left; border: 0; background: transparent; padding: 10px; }
+.native-context-files button[aria-pressed="true"] { background: #293d33; }
+.native-context-files button > span:nth-child(2) { flex: 1; overflow-wrap: anywhere; }
+.native-context-files button small { white-space: nowrap; }
+.native-context-dialog > footer { display: flex; align-items: center; gap: 18px; padding: 18px; }
+.native-context-dialog footer button { flex-shrink: 0; }
 .interactive-terminal-input button { flex-shrink: 0; }

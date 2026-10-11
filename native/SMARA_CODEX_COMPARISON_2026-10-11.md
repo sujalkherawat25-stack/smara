@@ -39,6 +39,13 @@ References: [Agents API architecture](https://developers.openai.com/api/docs/gui
   caching, so replacing a file at the same path does not return stale results.
 - Worker status rendering now prevents an old polling snapshot from overwriting
   a newer terminal event such as `completed` or `failed`.
+- Project settings now retain explicit memory/worker/browser-site choices per
+  project. A different project does not inherit those choices.
+- The composer supports selected project files and local previews. File paths
+  are sent as references, not eager content uploads. Clock/image/OCR tools are
+  available without enabling project memory; uploads retain native approval.
+- The old Desktop installer entry point delegates to the native installer;
+  it no longer registers the retired Python executor.
 
 ## Verified in this candidate
 
@@ -46,10 +53,10 @@ References: [Agents API architecture](https://developers.openai.com/api/docs/gui
   not start because the CI-declared images were absent. After preparing the
   same images as CI, the complete Docker lane (worker and sandbox tests) passed
   21/21. The entire Python suite was not rerun after image preparation.
-- Focused native provider/tools/search/document/limits tests: 88 passed, 1
-  skipped.
-- Desktop frontend: 58 tests passed; Vite production build passed.
-- Rust `cargo check --locked`: passed.
+- Current focused native provider/tools/search/document/limits/management/
+  profile/auth/setup/CLI tests: 139 passed, 1 skipped (Windows symlink creation).
+- Desktop frontend: 61 tests passed; Vite production build passed.
+- Rust `cargo test --locked`: 11 passed, including project-file confinement.
 - Offline native protocol acceptance: passed handshake, thread/turn streaming,
   real patch, approval denial, denied-command non-execution, resume/list, and
   shutdown checks; four scripted provider requests, no paid inference.
@@ -58,6 +65,19 @@ References: [Agents API architecture](https://developers.openai.com/api/docs/gui
   and terminate checks. This runner did not exercise the Desktop GUI and is not
   a certification of every Windows OS-sandbox escape case.
 - No live Sarvam/model request was made during this audit/build.
+- Frozen Desktop protocol acceptance passed on the updated package. Frozen
+  Desktop/CLI configuration and real DPAPI acceptance passed all eight checks
+  with isolated synthetic state, without changing personal settings.
+- Native MCP confirmation acceptance passed Deny/Allow/Deny, actual clock
+  output, no persistent grant, and context-only memory exclusion. Scripted local
+  provider only; no GUI security buttons were operated.
+- The Windows unelevated scratch probe allowed the selected workspace write
+  and blocked the outside write. It is not broad escape certification.
+- The clean candidate GUI was visually checked using isolated synthetic data:
+  composer/sidebar, metadata file selection, attachment chip and actual file
+  preview. There were no model requests in this GUI fixture.
+- Old untracked reports/output files were moved to ignored, hash-verified
+  recovery storage (59 files, 2,769,943 bytes), not permanently deleted.
 
 ## Important differences and remaining work
 
@@ -84,8 +104,7 @@ References: [Agents API architecture](https://developers.openai.com/api/docs/gui
 
 ## Recommended next gate
 
-Run the exact packaged v0.1.14 candidate through manual Desktop GUI checks for
-connect, tool approval/deny, stop, disconnect/reconnect, worker completion,
-large output, and terminal output. Then run the Windows sandbox escape suite on
-the supported Windows/Docker configuration. Only after those pass should this
-candidate be installed or published as a release.
+For public release, retain separate outcome-level gates for real-model coding/
+research quality, GUI approval/recovery and worker/terminal workflows, and broad
+Windows/Docker escape cases. The approved local candidate update is not a claim
+that these broader production/parity gates have passed.

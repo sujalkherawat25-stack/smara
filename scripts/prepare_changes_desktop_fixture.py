@@ -14,10 +14,12 @@ import tempfile
 def main():
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--installed", action="store_true", help="Test the installed binary with isolated synthetic state")
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument("--installed", action="store_true", help="Test the installed binary with isolated synthetic state")
+    target.add_argument("--candidate", action="store_true", help="Test the clean release candidate with isolated synthetic state")
     options = parser.parse_args()
     executable = (Path(os.environ["LOCALAPPDATA"]) / "Smara Desktop/smara-desktop.exe" if options.installed
-                  else root / "apps/desktop/src-tauri/target/debug/smara-desktop.exe")
+                  else root / f"apps/desktop/src-tauri/target/{'release' if options.candidate else 'debug'}/smara-desktop.exe")
     if not executable.is_file():
         parser.error("The requested Desktop binary is not available")
     fixture = Path(tempfile.mkdtemp(prefix="changes-desktop-", dir=root / "build"))
@@ -36,7 +38,9 @@ def main():
     state = fixture / "desktop.json"
     state.write_text(json.dumps({"workspace": str(project), "local_model_profiles": []}), encoding="utf-8")
     (fixture / "native-settings.json").write_text(json.dumps({"projects": [{"workspace": str(project), "label": "OFFLINE Git review fixture"}], "workspace": str(project)}), encoding="utf-8")
-    companion = executable.parent / "resources/smara-desktop.exe" if options.installed else fixture / "no-packaged-helper.exe"
+    companion = (executable.parent / "resources/smara-desktop.exe" if options.installed
+                 else root / "apps/desktop/src-tauri/resources/smara-desktop.exe" if options.candidate
+                 else fixture / "no-packaged-helper.exe")
     environment = dict(os.environ, SMARA_DESKTOP_STATE=str(state), SMARA_DESKTOP_CREDENTIALS=str(fixture / "empty-credentials.json"),
                        SMARA_DESKTOP_EXECUTABLE=str(companion), SMARA_DESKTOP_DATA_DIR=str(fixture))
     process = subprocess.Popen([str(executable)], env=environment)
