@@ -61,6 +61,12 @@ remains a separate next UI step; it is not included in v0.1.12.
 
 ## Installer integrity
 
+The release-tag quality lanes passed. Adding the Git-review suite to CI then
+exposed a Linux fixture race: same-size source edits within one timestamp second
+could reuse Python bytecode. The follow-up disables bytecode writes in that
+fresh synthetic subprocess fixture; fail → pass → Undo → fail assertions remain
+unchanged. This test-only correction does not change the installer or release tag.
+
 Installer: `Smara Desktop_0.1.12_x64-setup.exe` — 144,397,076 bytes.
 
 GitHub normalizes the downloadable asset name to

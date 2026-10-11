@@ -16,7 +16,7 @@
 
 Tests cover real temporary Git repositories, real pytest coding outcomes,
 synthetic protocol/component events and isolated Windows visual checks.
-See [the workflow guide and verification limits](../native/CHANGES.md).
+See [the workflow guide and verification limits](https://github.com/sujalkherawat25-stack/smara/blob/v0.1.12/native/CHANGES.md).
 This release is not a claim of full Codex GUI parity or a new live-model evaluation.
 
 Installation preserves preferences, protected keys and history. Binary/large,

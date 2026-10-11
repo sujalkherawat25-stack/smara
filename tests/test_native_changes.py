@@ -301,7 +301,14 @@ def test_coding_outcome_fix_test_review_and_undo_with_manual_edit(repo):
     git(repo, "add", ".gitignore", "maths.py", "test_maths.py")
     git(repo, "commit", "-m", "Coding outcome fixture")
     def verify():
-        return subprocess.run([sys.executable, "-m", "pytest", "-q", "test_maths.py"], cwd=repo, capture_output=True, timeout=30)
+        # Same-length edits can share an integer mtime. Do not write bytecode in
+        # this fresh fixture, so each real pytest run imports the current source.
+        result = subprocess.run(
+            [sys.executable, "-B", "-m", "pytest", "-q", "test_maths.py"],
+            cwd=repo, capture_output=True, timeout=30,
+        )
+        assert not list((repo / "__pycache__").glob("maths.*.pyc"))
+        return result
     assert verify().returncode == 1
     baseline = request(repo, "capture", thread_id="coding")
     source.write_bytes(source.read_bytes().replace(b"return a + b", b"return a * b"))
