@@ -133,6 +133,9 @@ def manage(request):
     if not isinstance(request, dict) or not isinstance(request.get("operation"), str):
         raise ValueError("Invalid native management request")
     operation = request["operation"]
+    if operation == "review":
+        from .native_changes import operate
+        return operate(request.get("review") or {})
     # Explicit provider probes are read-only and are invoked only by Settings
     # after the user accepts the one-request/cost notice. Never run at startup.
     if operation == "test_model":

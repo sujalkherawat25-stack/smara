@@ -56,7 +56,9 @@ try {
         '--clean'
         '--onefile'
         '--paths', 'src'
+        '--add-data', ((Join-Path $repoRoot 'release\VERSION') + ';release')
         '--hidden-import', 'smara.native_management'
+        '--hidden-import', 'smara.native_changes'
         '--hidden-import', 'smara.native_runtime'
         '--hidden-import', 'smara.native_provider'
         '--hidden-import', 'smara.native_tools'

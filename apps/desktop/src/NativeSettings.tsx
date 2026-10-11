@@ -91,6 +91,11 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
         <div className="settings-actions"><button disabled={disabled || !!probePending || !activeModel} onClick={() => void runProbe("test_model")}>{probePending === "test_model" ? "Testing model…" : "Test selected model"}</button><button disabled={disabled || !!probePending || !setup.search.configured} onClick={() => void runProbe("test_search")}>{probePending === "test_search" ? "Testing search…" : "Test web search"}</button></div>
         {!runtimeBuilt && <p role="alert">The native runtime is missing. Use a matching Desktop installer or rebuild the native runtime before starting a chat.</p>}
       </section>
+      <section className="settings-card"><h2>Review changes and commands</h2>
+        <p>Open <strong>Changes</strong> above the chat to inspect file or hunk diffs. Stage and unstage affect the Git index; Revert changes working files. Use a project folder that is the Git repository root.</p>
+        <p><strong>Last turn → Undo</strong> reverses supported file changes from the last captured run, not chat history. Pre-existing and non-conflicting later edits are kept. Revert and Undo keep a local recovery copy; refresh if files changed after review.</p>
+        <p><strong>Agent terminal</strong> shows native command output and exit codes. It is a transcript, not an interactive shell. Ask for commands in chat; permissions still apply. Git writes wait until Smara and its workers are idle.</p>
+      </section>
       <section className="settings-card"><h2>Access and privacy</h2>
         <ul><li>Chat requests and context you provide go to your selected model provider. Project code or text Smara reads for a task may also be sent to that model.</li>
           <li>Search queries go to the selected search provider; fetched public-page text may go to your model for analysis.</li>

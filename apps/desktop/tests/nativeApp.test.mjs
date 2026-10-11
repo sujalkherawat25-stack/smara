@@ -7,7 +7,7 @@ import ts from "typescript";
 
 function fixture({ startupFailure = false, unknownTurn = false } = {}) {
   const slots = [], calls = [], effects = [];
-  let cursor = 0, dirty = true, tree, failResume = false;
+  let cursor = 0, dirty = true, tree, failResume = false, currentRpc;
   const setup = {
     preferences: { workspace: "C:/first", active_model: "one", projects: [{ workspace: "C:/first", label: "First" }, { workspace: "C:/second", label: "Second" }], search_provider: "tavily" },
     profiles: [{ id: "one", label: "Offline one", model: "offline-one" }, { id: "two", label: "Offline two", model: "offline-two" }], credentials: [], search: { configured: false },
@@ -38,7 +38,7 @@ function fixture({ startupFailure = false, unknownTurn = false } = {}) {
   class RpcOutcomeUnknown extends Error {}
   class NativeRpc {
     generation = "";
-    constructor(receive) { this.receive = receive; }
+    constructor(receive) { this.receive = receive; currentRpc = this; }
     async connect(workspace, profile, readers, workers, origins) {
       calls.push({ method: "connect", workspace, profile, readers, workers, origins: [...origins] });
       if (startupFailure) { startupFailure = false; throw new Error("Synthetic startup failure"); }
@@ -68,12 +68,16 @@ function fixture({ startupFailure = false, unknownTurn = false } = {}) {
   };
   const view = evaluate("../src/nativeView.ts", () => assert.fail("View must have no side-effect imports"));
   function Settings() {}
+  function Changes() {}
+  function Command() {}
   const App = evaluate("../src/NativeApp.tsx", name => {
     if (name === "react") return hooks;
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
     if (name === "@tauri-apps/api/core") return { invoke: async () => ({ built: true }) };
     if (name.endsWith("NativeSettings")) return { default: Settings, __esModule: true };
     if (name.endsWith("NativeMarkdown")) return { default: () => null, __esModule: true };
+    if (name.endsWith("NativeChanges")) return { default: Changes, __esModule: true, reviewRequest: async (workspace, operation, values) => { calls.push({ method: `review/${operation}`, workspace, values }); return operation === "capture" ? { snapshot: "synthetic-local-snapshot", excluded: 0 } : {}; } };
+    if (name.endsWith("NativeCommand")) return { default: Command, __esModule: true };
     if (name.endsWith("nativeApi")) return api;
     if (name.endsWith("nativeRpc")) return { NativeRpc, RpcOutcomeUnknown };
     if (name.endsWith("nativeView")) return view;
@@ -99,8 +103,44 @@ function fixture({ startupFailure = false, unknownTurn = false } = {}) {
     nodes().find(node => node.type === "textarea").props.onChange({ target: { value: message, style: {}, scrollHeight: 100 } });
     await flush();
   };
-  return { calls, flush, button, nodes, enter, failResume: () => { failResume = true; }, settings: () => nodes().find(node => node.type === Settings).props, model: () => nodes().find(node => node.type === "select" && node.props["aria-label"] === "Model") };
+  return { calls, flush, button, nodes, enter, emit: message => currentRpc.receive(message), changes: () => nodes().find(node => node.type === Changes)?.props, failResume: () => { failResume = true; }, settings: () => nodes().find(node => node.type === Settings).props, model: () => nodes().find(node => node.type === "select" && node.props["aria-label"] === "Model") };
 }
+
+test("turn snapshots are local, captured before acceptance and sealed after completion", async () => {
+  const f = fixture(); await f.flush(); await f.enter("Synthetic coding task");
+  f.button("Send message").props.onClick?.();
+  f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} });
+  await f.flush();
+  assert.ok(f.calls.findIndex(call => call.method === "review/capture") < f.calls.findIndex(call => call.method === "turn/start"));
+  f.emit({ method: "turn/completed", params: { threadId: "new", turn: { id: "running", status: "completed" } } });
+  await f.flush();
+  assert.equal(f.calls.filter(call => call.method === "review/seal").length, 1);
+  assert.deepEqual(f.calls.find(call => call.method === "turn/start").params.input, [{ type: "text", text: "Synthetic coding task", text_elements: [] }]);
+});
+
+test("Changes is readable during work but writes and navigation remain locked", async () => {
+  const f = fixture(); await f.flush(); await f.enter("Synthetic task");
+  f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} });
+  await f.flush(); f.button("Changes").props.onClick(); await f.flush();
+  assert.equal(f.changes().locked, true);
+  assert.equal(f.button("＋ New chat").props.disabled, true);
+  f.emit({ method: "turn/diff/updated", params: { threadId: "new", diff: "synthetic diff" } });
+  await f.flush(); assert.ok(f.button("Changes •"));
+});
+
+test("a user Git action synchronously blocks sending or changing project", async () => {
+  const f = fixture(); await f.flush(); f.button("Changes").props.onClick(); await f.flush();
+  f.changes().onBusyChange(true);
+  await f.enter("Keep this draft");
+  f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} });
+  await f.flush();
+  assert.equal(f.calls.some(call => call.method === "turn/start"), false);
+  assert.equal(f.button("＋ New chat").props.disabled, true);
+  assert.equal(f.model().props.disabled, true);
+  assert.equal(f.nodes().find(node => node.type === "textarea").props.value, "Keep this draft");
+  f.changes().onBusyChange(false); await f.flush();
+  assert.equal(f.button("Send message").props.disabled, false);
+});
 
 test("startup prepares a project without sending a turn or enabling optional tools", async () => {
   const f = fixture(); await f.flush();

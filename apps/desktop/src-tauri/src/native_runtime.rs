@@ -3,13 +3,85 @@ use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::collections::{HashMap, HashSet};
 use tauri::{AppHandle, Emitter};
 
 struct NativeSession {
     process: Child,
     input: Option<ChildStdin>,
     generation: String,
+    activity: Arc<Mutex<ReviewActivity>>,
+}
+
+#[derive(Default)]
+struct ReviewActivity {
+    pending: HashSet<String>,
+    turns: HashMap<String, String>,
+    workers: HashSet<String>,
+    completed: HashSet<String>,
+    unknown: bool,
+}
+
+impl ReviewActivity {
+    fn collaboration(&mut self, item: &Value) {
+        if item["type"] != "collabAgentToolCall" { return; }
+        if let Some(receivers) = item["receiverThreadIds"].as_array() {
+            for receiver in receivers {
+                if let Some(thread) = receiver.as_str() {
+                    match item["agentsStates"][thread]["status"].as_str() {
+                        Some("completed" | "failed" | "shutdown" | "notFound") => { self.workers.remove(thread); }
+                        // Tool completion alone does not mean worker completion.
+                        _ => { self.workers.insert(thread.into()); }
+                    }
+                } else { self.unknown = true; }
+            }
+        }
+    }
+    fn request(&mut self, message: &Value) {
+        if matches!(message["method"].as_str(), Some("turn/start" | "thread/resume")) {
+            if let Some(id) = message.get("id") { self.pending.insert(id.to_string()); }
+            else { self.unknown = true; }
+        }
+    }
+    fn notification(&mut self, message: &Value) {
+        if message.get("method").is_none() {
+            if let Some(id) = message.get("id") { self.pending.remove(&id.to_string()); }
+            // Resuming an in-progress session must not enable Git writes.
+            if let Some(turns) = message["result"]["thread"]["turns"].as_array() {
+                for turn in turns {
+                    if let Some(items) = turn["items"].as_array() {
+                        for item in items { self.collaboration(item); }
+                    }
+                    if turn["status"] == "inProgress" {
+                        if let (Some(thread), Some(id)) = (message["result"]["thread"]["id"].as_str(), turn["id"].as_str()) {
+                            self.turns.insert(thread.into(), id.into());
+                        } else { self.unknown = true; }
+                    }
+                }
+            }
+            // A turn/start response can precede turn/started.
+            if message["result"]["turn"]["status"] == "inProgress" {
+                let id = message["result"]["turn"]["id"].as_str().unwrap_or("unknown");
+                if !self.completed.contains(id) { self.turns.entry(format!("pending-turn-{id}")).or_insert(id.into()); }
+            }
+        }
+        if message["method"] == "item/started" || message["method"] == "item/completed" {
+            self.collaboration(&message["params"]["item"]);
+        }
+        if message["method"] == "turn/started" || message["method"] == "turn/completed" {
+            if let (Some(thread), Some(id)) = (message["params"]["threadId"].as_str(), message["params"]["turn"]["id"].as_str()) {
+                self.turns.remove(&format!("pending-turn-{id}"));
+                if message["method"] == "turn/started" { self.turns.insert(thread.into(), id.into()); }
+                else {
+                    self.completed.insert(id.into());
+                    self.workers.remove(thread);
+                    if self.turns.get(thread).is_some_and(|active| active == id) { self.turns.remove(thread); }
+                }
+            } else { self.unknown = true; }
+        }
+    }
+    fn idle(&self) -> bool { !self.unknown && self.pending.is_empty() && self.turns.is_empty() && self.workers.is_empty() }
 }
 
 fn session() -> &'static Mutex<Option<NativeSession>> {
@@ -75,18 +147,26 @@ fn start_session(app: AppHandle, workspace: String, profile_id: String, tools_en
         return Err("Cannot configure native transport".into());
     }
     let event_generation = generation.clone();
+    let activity = Arc::new(Mutex::new(ReviewActivity::default()));
+    let event_activity = Arc::clone(&activity);
     std::thread::spawn(move || {
         for line in BufReader::new(output).lines() {
             let Ok(line) = line else { break; };
             match serde_json::from_str::<Value>(&line) {
-                Ok(message) => { let _ = app.emit("native-runtime-event", json!({"generation": event_generation, "message": message})); }
-                Err(_) => { let _ = app.emit("native-runtime-event", json!({"generation": event_generation, "message": {"method": "smara/runtimeError", "params": {"message": "Native runtime returned invalid protocol data"}}})); }
+                Ok(message) => {
+                    if let Ok(mut active) = event_activity.lock() { active.notification(&message); }
+                    let _ = app.emit("native-runtime-event", json!({"generation": event_generation, "message": message}));
+                }
+                Err(_) => {
+                    if let Ok(mut active) = event_activity.lock() { active.unknown = true; }
+                    let _ = app.emit("native-runtime-event", json!({"generation": event_generation, "message": {"method": "smara/runtimeError", "params": {"message": "Native runtime returned invalid protocol data"}}}));
+                }
             }
         }
         let _ = app.emit("native-runtime-event", json!({"generation": event_generation, "message": {"method": "smara/runtimeStopped"}}));
     });
     std::thread::spawn(move || { for _line in BufReader::new(errors).lines() {} });
-    *lock = Some(NativeSession { process, input: Some(input), generation: generation.clone() });
+    *lock = Some(NativeSession { process, input: Some(input), generation: generation.clone(), activity });
     Ok(json!({"generation": generation, "sourceOwned": true}))
 }
 
@@ -107,6 +187,7 @@ pub fn native_send(generation: String, message: Value) -> Result<(), String> {
         return Err("Native process exited; reconnect before sending work".into());
     }
     let input = running.input.as_mut().ok_or("Native runtime is stopping")?;
+    running.activity.lock().map_err(|_| "Native activity lock failed")?.request(&message);
     writeln!(input, "{message}").and_then(|_| input.flush()).map_err(|_| "Cannot send native RPC message".into())
 }
 
@@ -162,4 +243,70 @@ pub fn with_disconnected<T>(operation: impl FnOnce() -> Result<T, String>) -> Re
         }
     }
     operation()
+}
+
+pub fn with_review_idle<T>(operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    // Serialize with native_start/native_send so a turn cannot race a Git write.
+    let mut lock = session().lock().map_err(|_| "Native session lock failed")?;
+    if let Some(running) = lock.as_mut() {
+        if running.process.try_wait().map_err(|_| "Cannot inspect native process")?.is_none() {
+            let active = running.activity.lock().map_err(|_| "Native activity lock failed")?;
+            if !active.idle() { return Err("Finish or stop all native turns and workers before changing Git files".into()); }
+            return operation();
+        }
+    }
+    operation()
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+    #[test]
+    fn pending_start_and_workers_block_review_writes() {
+        let mut active = ReviewActivity::default();
+        active.request(&json!({"id":1,"method":"turn/start"}));
+        assert!(!active.idle());
+        active.notification(&json!({"id":1,"result":{"turn":{"id":"parent","status":"inProgress"}}}));
+        assert!(!active.idle());
+        for (thread, id) in [("p", "parent"), ("w", "worker")] {
+            active.notification(&json!({"method":"turn/started","params":{"threadId":thread,"turn":{"id":id}}}));
+        }
+        active.notification(&json!({"method":"turn/completed","params":{"threadId":"p","turn":{"id":"parent"}}}));
+        assert!(!active.idle());
+        active.notification(&json!({"method":"turn/completed","params":{"threadId":"w","turn":{"id":"worker"}}}));
+        assert!(active.idle());
+    }
+    #[test]
+    fn resumed_active_and_unknown_work_cannot_enable_writes() {
+        let mut active = ReviewActivity::default();
+        active.notification(&json!({"id":3,"result":{"thread":{"id":"p","turns":[{"id":"t","status":"inProgress"}]}}}));
+        assert!(!active.idle());
+        active.notification(&json!({"method":"turn/completed","params":{"threadId":"p","turn":{"id":"t"}}}));
+        assert!(active.idle());
+        active.request(&json!({"method":"turn/start"}));
+        assert!(!active.idle());
+    }
+    #[test]
+    fn delayed_start_ack_cannot_relock_a_completed_turn() {
+        let mut active = ReviewActivity::default();
+        active.request(&json!({"id":1,"method":"turn/start"}));
+        active.notification(&json!({"method":"turn/started","params":{"threadId":"p","turn":{"id":"t"}}}));
+        active.notification(&json!({"method":"turn/completed","params":{"threadId":"p","turn":{"id":"t"}}}));
+        active.notification(&json!({"id":1,"result":{"turn":{"id":"t","status":"inProgress"}}}));
+        assert!(active.idle());
+    }
+    #[test]
+    fn collaboration_pending_worker_blocks_after_parent_finishes() {
+        let mut active = ReviewActivity::default();
+        active.notification(&json!({"method":"item/completed","params":{"item":{
+            "type":"collabAgentToolCall","status":"completed","receiverThreadIds":["w"],
+            "agentsStates":{"w":{"status":"pendingInit"}}
+        }}}));
+        active.notification(&json!({"method":"turn/completed","params":{"threadId":"p","turn":{"id":"parent"}}}));
+        assert!(!active.idle());
+        active.notification(&json!({"method":"item/completed","params":{"item":{
+            "type":"collabAgentToolCall","receiverThreadIds":["w"],"agentsStates":{"w":{"status":"completed"}}
+        }}}));
+        assert!(active.idle());
+    }
 }

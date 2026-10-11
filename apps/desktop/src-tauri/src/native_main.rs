@@ -84,6 +84,19 @@ async fn native_manage(request: Value) -> Result<Value, String> {
         else { native_runtime::with_disconnected(|| management(request)) }
     }).await.map_err(|_| "Settings worker failed".to_owned())?
 }
+/// Local, user-directed Git operations, not a model tool or shell escape.
+#[tauri::command]
+async fn native_review(request: Value) -> Result<Value, String> {
+    let operation = request.get("operation").and_then(Value::as_str).unwrap_or_default();
+    if !matches!(operation, "status" | "file" | "capture" | "seal" | "apply" | "recover") {
+        return Err("Unsupported Git review operation".into());
+    }
+    let read_only = matches!(operation, "status" | "file");
+    tauri::async_runtime::spawn_blocking(move || {
+        let action = || management(json!({"operation": "review", "review": request}));
+        if read_only { action() } else { native_runtime::with_review_idle(action) }
+    }).await.map_err(|_| "Git review worker failed".to_owned())?
+}
 struct Connection { allowed_roots: Vec<String> }
 fn current_connection() -> Result<Connection, String> {
     let value = management(json!({"operation":"bootstrap"}))?;
@@ -121,7 +134,7 @@ fn native_open_url(url: String) -> Result<(), String> {
 }
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_open_url])
+        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url])
         .build(tauri::generate_context!()).expect("Could not build Smara Desktop")
         .run(|_, event| {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) { let _ = native_runtime::stop_current(); }

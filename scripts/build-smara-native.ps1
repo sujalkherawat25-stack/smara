@@ -31,7 +31,14 @@ try {
         foreach ($binary in @('smara-native.exe', 'codex-windows-sandbox-setup.exe', 'codex-command-runner.exe')) {
             $built = Join-Path $sourceRoot "target\$profileDirectory\$binary"
             if (-not (Test-Path -LiteralPath $built -PathType Leaf)) { throw "Required native binary missing: $binary" }
-            Copy-Item -LiteralPath $built -Destination (Join-Path $destination $binary) -Force
+            $smaraBinaryTarget = Join-Path $destination $binary
+            # Antivirus or a running acceptance helper can briefly hold a read
+            # handle. Identical payloads need no overwrite; changed payloads
+            # still fail rather than silently keeping a stale build.
+            if (-not (Test-Path -LiteralPath $smaraBinaryTarget -PathType Leaf) -or
+                (Get-FileHash -LiteralPath $built).Hash -ne (Get-FileHash -LiteralPath $smaraBinaryTarget).Hash) {
+                Copy-Item -LiteralPath $built -Destination $smaraBinaryTarget -Force
+            }
         }
         Copy-Item -LiteralPath (Join-Path $smaraRoot 'vendor\codex\LICENSE') -Destination $destination -Force
         Copy-Item -LiteralPath (Join-Path $smaraRoot 'vendor\codex\NOTICE') -Destination $destination -Force

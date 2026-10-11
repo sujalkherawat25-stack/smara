@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import json
 from importlib.resources import files
+from importlib.metadata import version as distribution_version
 import os
 from pathlib import Path
 import re
@@ -21,6 +22,19 @@ from .native_provider import ChatEndpoint, ResponsesAdapter
 
 def source_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def product_version() -> str:
+    """Report the product release separately from the imported core's version."""
+    root = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else source_root()
+    release = root / "release/VERSION"
+    # Wheels carry the product version in their distribution metadata; frozen
+    # builds must use their embedded file, never the developer's installed wheel.
+    value = (release.read_text(encoding="utf-8").strip() if getattr(sys, "frozen", False) or release.is_file()
+             else distribution_version("smara"))
+    if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", value):
+        raise RuntimeError("Smara release version is invalid")
+    return value
 
 
 def source_manifest() -> dict:
@@ -176,6 +190,7 @@ def print_smara_help() -> None:
     print("  smara --smara-workers [native args] Enable parent-directed isolated coding checkouts")
     print("  smara --smara-browser-origin URL   Opt in to an exact public DOM-browser origin (repeatable)")
     print("  smara schedule --help              Manage paused-by-default, bounded read-only jobs")
+    print("  smara changes --help               Review Git changes and explicitly stage/revert/undo")
     print("  smara tools-serve --workspace DIR  Serve read-only MCP primitives on stdio")
     print("  smara settings                    Show native project/model/search setup (no secret values)")
     print("\nThis fork uses its own source-built binary, not an installed Codex. Integration")
@@ -256,6 +271,10 @@ def serve_bootstrap(input_stream=None, output_stream=None) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    if args[:1] == ["changes"]:
+        from .native_changes import main as changes_main
+        configure_protocol_stdio(sys.stdin, sys.stdout)
+        return changes_main(args[1:])
     if args == ["settings"]:
         from .native_management import bootstrap
         configure_protocol_stdio(sys.stdin, sys.stdout)
@@ -311,6 +330,8 @@ def main(argv: list[str] | None = None) -> int:
             result = subprocess.call([str(binary), *args], env=environment)
             if result == 0 and args in (["--help"], ["-h"]):
                 print_smara_help()
+            if result == 0 and args in (["--version"], ["-V"]):
+                print(f"Smara CLI {product_version()} (product release)")
             return result
         from .native_profiles import load_profiles, resolve_profile_key
         profiles, active_id, credentials = load_profiles()

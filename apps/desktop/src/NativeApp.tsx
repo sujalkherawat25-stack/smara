@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import NativeSettings from "./NativeSettings";
 import NativeMarkdown from "./NativeMarkdown";
+import NativeChanges, { reviewRequest } from "./NativeChanges";
+import NativeCommand from "./NativeCommand";
 import { nativeSettings, sameWorkspace, type NativeSetup } from "./nativeApi";
 import { NativeRpc, RpcOutcomeUnknown, type RpcMessage } from "./nativeRpc";
 import { activeTurn, answerKey, approvalResponse, displayItem, mergeItem, mergeWorkers, resumeStatus, routeMessage, supportsApproval, threadLabel, type NativeTurn, type ViewItem, type WorkerView } from "./nativeView";
@@ -51,6 +53,11 @@ export default function NativeApp() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [status, setStatus] = useState("Preparing project…");
+  const [panel, setPanel] = useState<"changes" | "terminal" | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewRevision, setReviewRevision] = useState(0);
+  const [reviewNotice, setReviewNotice] = useState("");
+  const [turnDiff, setTurnDiff] = useState("");
   const threadRef = useRef("");
   const clientRef = useRef<NativeRpc | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -63,6 +70,21 @@ export default function NativeApp() {
   const loadingThreadRef = useRef(false);
   const restoreThreadRef = useRef("");
   const settingsPendingRef = useRef(false);
+  const reviewBusyRef = useRef(false);
+  const turnSnapshot = useRef<{ id: string; workspace: string; thread: string } | null>(null);
+
+  const reviewPending = (pending: boolean) => { reviewBusyRef.current = pending; setReviewBusy(pending); };
+  const sealTurn = async () => {
+    const snapshot = turnSnapshot.current;
+    if (!snapshot) { setReviewRevision(value => value + 1); return; }
+    turnSnapshot.current = null;
+    reviewPending(true);
+    try {
+      await reviewRequest(snapshot.workspace, "seal", { snapshot: snapshot.id });
+      setReviewNotice("");
+    } catch (reason) { setReviewNotice(`Last-turn Undo is unavailable for this run: ${String(reason)}. Current Git changes remain reviewable.`); }
+    finally { reviewPending(false); setReviewRevision(value => value + 1); }
+  };
 
   const updateItem = (id: string, kind: string, text: string, append = false, itemStatus?: string) => {
     setItems(current => mergeItem(current, { id, kind, text, status: itemStatus }, append));
@@ -90,7 +112,9 @@ export default function NativeApp() {
       return;
     }
     if (route === "ignore") return;
-    if (message.method === "item/agentMessage/delta") {
+    if (message.method === "turn/diff/updated") {
+      setTurnDiff(String(params.diff ?? ""));
+    } else if (message.method === "item/agentMessage/delta") {
       updateItem(String(params.itemId), "assistant", String(params.delta ?? ""), true);
     } else if (message.method === "item/commandExecution/outputDelta") {
       updateItem(String(params.itemId), "commandExecution", String(params.delta ?? ""), true);
@@ -114,6 +138,7 @@ export default function NativeApp() {
       setApprovals(current => current.filter(item => !(item.params.threadId === params.threadId && item.params.turnId === turn.id)));
       setStatus(turn.status);
       if (turn.status !== "completed" && turn.error?.message) setError(turn.error.message);
+      void sealTurn();
     } else if (message.method === "error" || message.method === "smara/runtimeError") {
       setError(String(params.message ?? (params.error as { message?: string })?.message ?? "Native runtime error"));
     } else if (message.method === "smara/runtimeStopped") {
@@ -129,7 +154,9 @@ export default function NativeApp() {
         if (disposed) return;
         setSetup(initial); setWorkspace(initial.preferences.workspace); setProfiles(initial.profiles); setBuilt(native.built);
         const selected = initial.preferences.active_model;
-        setProfile(initial.profiles.some(model => model.id === selected) ? selected : "");
+        const configured = initial.profiles.some(model => model.id === selected);
+        setProfile(configured ? selected : "");
+        setStatus(configured ? "Ready" : "Choose a model in Settings to get started");
       }).catch(reason => { if (!disposed) setError(String(reason)); });
     return () => { disposed = true; void clientRef.current?.stop().catch(() => { /* App exit also owns native cleanup. */ }); };
   }, []);
@@ -139,7 +166,7 @@ export default function NativeApp() {
   }, [items, busy, approvals.length]);
 
   const connect = async () => {
-    if (lifecycleRef.current || busyRef.current || loadingThreadRef.current) return null;
+    if (lifecycleRef.current || busyRef.current || loadingThreadRef.current || reviewBusyRef.current) return null;
     if (!workspace || !profile || built !== true) return null;
     const restoreId = restoreThreadRef.current || threadRef.current;
     lifecycleRef.current = true;
@@ -182,6 +209,7 @@ export default function NativeApp() {
       const response = await client.request<{ thread: { id: string; turns: NativeTurn[] } }>("thread/resume", { threadId: id, model: profiles.find(model => model.id === profile)?.model, modelProvider: "smara_chat_adapter", approvalPolicy: "on-request", sandbox: "workspace-write" });
       if (client !== clientRef.current || client.generation !== generation) return false;
       threadRef.current = id; setThreadId(id); setItems([]);
+      setTurnDiff(""); setReviewNotice("");
       restoreThreadRef.current = "";
       setItems((response.thread.turns ?? []).flatMap(turn => turn.items.map(displayItem)));
       setWorkers((response.thread.turns ?? []).flatMap(turn => turn.items).reduce(mergeWorkers, [] as WorkerView[]));
@@ -190,16 +218,17 @@ export default function NativeApp() {
       activeTurnRef.current = active?.id ?? ""; busyRef.current = !!active;
       setBusy(!!active); setTurnId(active?.id ?? "");
       setStatus(resumeStatus(response.thread.turns ?? []));
+      if (!active && turnSnapshot.current?.thread === id) void sealTurn();
       return true;
     } catch (reason) { if (client === clientRef.current && client.generation === generation) setError(String(reason)); return false; }
     finally { loadingThreadRef.current = false; setLoadingThread(false); }
   };
   const selectThread = async (id: string) => {
-    if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || !connected) return;
+    if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || reviewBusyRef.current || !connected) return;
     await loadThread(clientRef.current!, id);
   };
   const send = async () => {
-    if (!draft.trim() || busyRef.current || lifecycleRef.current || loadingThreadRef.current || approvals.length || !profile || built !== true) return;
+    if (!draft.trim() || busyRef.current || lifecycleRef.current || loadingThreadRef.current || reviewBusyRef.current || approvals.length || !profile || built !== true) return;
     const textToSend = draft;
     if (!connected && !await connect()) return;
     // A failed history restoration must never turn a reply into a new chat.
@@ -214,6 +243,16 @@ export default function NativeApp() {
         setThreads(current => [result.thread, ...current]);
       }
       const text = submitted.current;
+      setTurnDiff(""); setReviewNotice("");
+      // Capture before acceptance, locally only. A non-Git workspace or an
+      // unavailable snapshot must not prevent ordinary conversation.
+      try {
+        const baseline = await reviewRequest<{ snapshot: string; excluded: number }>(workspace, "capture", { thread_id: id });
+        if (typeof baseline.snapshot === "string") {
+          turnSnapshot.current = { id: baseline.snapshot, workspace, thread: id };
+          if (baseline.excluded) setReviewNotice(`${baseline.excluded} unsupported files are excluded from turn Undo.`);
+        }
+      } catch (reason) { turnSnapshot.current = null; setReviewNotice(`Turn Undo unavailable: ${String(reason)}`); }
       // Keep the draft until native confirms acceptance. A timeout is not
       // permission to repeat a potentially accepted turn automatically.
       await clientRef.current!.request("turn/start", { threadId: id, input: [{ type: "text", text, text_elements: [] }] });
@@ -222,7 +261,7 @@ export default function NativeApp() {
       setError(String(reason));
       if (reason instanceof RpcOutcomeUnknown) {
         if (submitted.current) { setUncertain(true); setStatus("Acceptance unknown — check status or recover chat before retrying. No automatic resend."); }
-      } else { busyRef.current = false; setBusy(false); submitted.current = ""; }
+      } else { busyRef.current = false; setBusy(false); submitted.current = ""; turnSnapshot.current = null; }
     }
   };
   const checkStatus = async () => {
@@ -241,6 +280,7 @@ export default function NativeApp() {
       setBusy(!!current); setTurnId(current?.id ?? "");
       busyRef.current = !!current; activeTurnRef.current = current?.id ?? "";
       setStatus(current ? "Working — native status confirmed" : latest?.status ?? "Ready");
+      if (!current) void sealTurn();
     } catch (reason) { setError(String(reason)); }
   };
   const inspectWorker = async (id: string) => {
@@ -301,11 +341,11 @@ export default function NativeApp() {
     if (!value.profiles.some(model => model.id === profile)) setProfile("");
   };
   const newConversation = () => {
-    if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || settingsPendingRef.current || approvals.length) return;
-    setThreadId(""); threadRef.current = ""; restoreThreadRef.current = ""; setItems([]); setWorkers([]); setError(""); setSettingsOpen(false);
+    if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || settingsPendingRef.current || reviewBusyRef.current || approvals.length) return;
+    setThreadId(""); threadRef.current = ""; restoreThreadRef.current = ""; setItems([]); setWorkers([]); setError(""); setSettingsOpen(false); setTurnDiff(""); setReviewNotice(""); setReviewRevision(value => value + 1);
   };
   const switchProject = async (path: string, add = false) => {
-    if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || settingsPendingRef.current || approvals.length || workers.some(worker => ["running", "pendingInit", "inProgress"].includes(worker.status))) return;
+    if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || settingsPendingRef.current || reviewBusyRef.current || approvals.length || workers.some(worker => ["running", "pendingInit", "inProgress"].includes(worker.status))) return;
     if (connected && !await disconnect()) return;
     lifecycleRef.current = true; setConnecting(true); setError("");
     try {
@@ -315,12 +355,13 @@ export default function NativeApp() {
       restoreThreadRef.current = ""; threadRef.current = ""; setThreadId("");
       setToolsEnabled(false); setWorkersEnabled(false); setBrowserOrigins(""); setDraft(projectDrafts.current[next.preferences.workspace] ?? "");
       setAddingProject(false); setProjectPath(""); setProjectName(""); setSettingsOpen(false);
+      setPanel(null); setTurnDiff(""); setReviewNotice("");
       setStatus("Project selected");
     } catch (reason) { setError(String(reason)); }
     finally { lifecycleRef.current = false; setConnecting(false); }
   };
   const selectModel = async (id: string) => {
-    if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || settingsPendingRef.current || approvals.length) return;
+    if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || settingsPendingRef.current || reviewBusyRef.current || approvals.length) return;
     if (id === profile) return;
     if (connected && !await disconnect(true)) return;
     lifecycleRef.current = true; setConnecting(true); setError("");
@@ -329,7 +370,7 @@ export default function NativeApp() {
     finally { lifecycleRef.current = false; setConnecting(false); }
   };
   const project = setup?.preferences.projects.find(p => sameWorkspace(p.workspace, workspace));
-  const navigationLocked = busy || connecting || loadingThread || settingsSaving || approvals.length > 0 || workers.some(worker => ["running", "pendingInit", "inProgress"].includes(worker.status));
+  const navigationLocked = busy || connecting || loadingThread || settingsSaving || reviewBusy || approvals.length > 0 || workers.some(worker => ["running", "pendingInit", "inProgress"].includes(worker.status));
   const toggleSettings = async () => {
     if (navigationLocked || lifecycleRef.current || settingsPendingRef.current) return;
     if (settingsOpen) { setSettingsOpen(false); return; }
@@ -381,15 +422,17 @@ export default function NativeApp() {
       {!threads.length && <p>{connecting ? "Loading chats…" : "Your chats appear here."}</p>}{nextCursor && <button disabled={navigationLocked || loadingMore || !connected} onClick={() => void loadOlder()}>{loadingMore ? "Loading…" : "Show more"}</button>}</div>
       <div className="sidebar-bottom"><button disabled={navigationLocked} className={settingsOpen ? "selected" : ""} onClick={() => void toggleSettings()}>⚙ Settings</button></div>
     </aside><main>
-      <header className="native-topbar"><span className="project-icon" aria-hidden="true">▱</span><strong title={workspace}>{settingsOpen ? "Settings" : project?.label || "Choose a project"}</strong>{!settingsOpen && threadId && <span className="header-chat-title">{threadLabel(threads.find(thread => thread.id === threadId) ?? { id: threadId })}</span>}</header>
+      <header className="native-topbar"><span className="project-icon" aria-hidden="true">▱</span><strong title={workspace}>{settingsOpen ? "Settings" : project?.label || "Choose a project"}</strong>{!settingsOpen && threadId && <span className="header-chat-title">{threadLabel(threads.find(thread => thread.id === threadId) ?? { id: threadId })}</span>}{!settingsOpen && <div className="workspace-actions"><button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? " •" : ""}</button><button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Agent terminal</button></div>}</header>
       {built === false && <div className="native-warning">Native runtime is missing. Build scripts/build-smara-native.ps1; no old-engine fallback is used.</div>}
       {error && <div role="alert" className="native-error">{error}{!settingsOpen && (!busy || uncertain) && <button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Retry setup</button>}<button aria-label="Dismiss error" onClick={() => setError("")}>×</button></div>}
       {settingsOpen && setup ? <NativeSettings setup={setup} locked={connected || connecting} onUpdate={updateSetup} onClose={() => { if (!settingsPendingRef.current) setSettingsOpen(false); }} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : <>
+      <div className={`native-work-area ${panel ? "with-panel" : ""}`}>
+      <div className="native-chat-area">
       {uncertain && <div className="native-warning"><button onClick={() => void checkStatus()}>Check response status</button><button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Recover chat</button> The request may have been accepted. Your message will not be resent automatically.</div>}
       <div className="native-transcript" aria-live="polite">
         {!!workers.length && <section className="native-workers"><strong>Native workers · changes are not auto-merged</strong>{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
         {!items.length && <div className="native-empty"><h1>What can I help you with?</h1><p>Research, build, and get work done.</p><div className="starter-cards">{[{ title: "Understand this project", text: "Inspect this project and explain its architecture, entry points and how to run its tests. Do not change files." }, { title: "Find & fix a bug", text: "Inspect this project for a reproducible bug. Show evidence, make a minimal fix, and run the relevant tests." }, { title: "Research a topic", text: "Research a topic using public sources. Read the actual clock for time-sensitive questions, verify claims against fetched pages and cite them. Ask me for the topic first." }].map(card => <button key={card.title} title={card.text} onClick={() => setDraft(card.text)}>{card.title}<span>↗</span></button>)}</div>{!profile && <small className="empty-hint">Add your model in Settings to get started.</small>}</div>}
-        {items.map(item => <article key={item.id} className={`native-item ${item.kind}`}><div className="item-heading"><small>{item.kind === "assistant" ? "Smara" : item.kind === "user" ? "You" : item.kind} {item.status && `· ${item.status}`}</small><button className="text-button" onClick={() => void navigator.clipboard.writeText(item.text).catch(() => setError("Clipboard is unavailable"))}>Copy</button></div>{item.kind === "assistant" ? <NativeMarkdown text={item.text} /> : item.kind === "user" ? <pre>{item.text}</pre> : <details open={item.status === "inProgress" || item.status === "failed"}><summary>Tool details · {item.text.length.toLocaleString()} characters</summary><pre>{item.text}</pre></details>}</article>)}
+        {items.map(item => <article key={item.id} className={`native-item ${item.kind}`}><div className="item-heading"><small>{item.kind === "assistant" ? "Smara" : item.kind === "user" ? "You" : item.kind} {item.status && `· ${item.status}`}</small><button className="text-button" onClick={() => void navigator.clipboard.writeText(item.text).catch(() => setError("Clipboard is unavailable"))}>Copy</button></div>{item.kind === "assistant" ? <NativeMarkdown text={item.text} /> : item.kind === "user" ? <pre>{item.text}</pre> : item.kind === "commandExecution" ? <NativeCommand item={item} /> : <details open={item.status === "inProgress" || item.status === "failed"}><summary>Tool details · {item.text.length.toLocaleString()} characters</summary><pre>{item.text}</pre></details>}</article>)}
         {approvals.map(approval => <section className="native-approval" key={approval.id}>
           {approval.params.threadId !== undefined && approval.params.threadId !== threadId && <p>Worker / other native conversation: {String(approval.params.threadId)}. This request is not auto-approved.</p>}
           {approval.method === "item/tool/requestUserInput" ? <>
@@ -406,7 +449,11 @@ export default function NativeApp() {
         </section>)}
         <div ref={bottom} />
       </div>
-      <footer><form className="native-composer" onSubmit={event => { event.preventDefault(); void send(); }}><textarea aria-label="Message Smara" rows={2} placeholder="Ask Smara anything…" value={draft} onChange={event => { setDraft(event.target.value); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 260)}px`; }} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} /><div className="composer-toolbar"><small>{connecting ? "Preparing project…" : ""}</small><div className="composer-actions"><select aria-label="Model" title="Choose a model" value={profile} disabled={navigationLocked} onChange={event => void selectModel(event.target.value)}><option value="" disabled>Choose model</option>{profiles.map(model => <option value={model.id} key={model.id}>{model.label}</option>)}</select><button className={busy ? "stop-button" : "primary"} aria-label={busy ? "Stop response" : "Send message"} title={busy ? "Stop response" : "Send message"} type={busy ? "button" : "submit"} disabled={connecting || loadingThread || (busy ? !turnId : !profile || built !== true || !draft.trim() || approvals.length > 0)} onClick={busy ? () => void stopTurn() : undefined}>{busy ? "■" : "↑"}</button></div></div></form><div className="composer-status"><small role="status">{busy || uncertain || loadingThread || (status !== "Ready" && status !== "completed") ? status : ""}</small><small>Shift+Enter for a new line</small></div></footer>
+      <footer><form className="native-composer" onSubmit={event => { event.preventDefault(); void send(); }}><textarea aria-label="Message Smara" rows={2} placeholder="Ask Smara anything…" value={draft} onChange={event => { setDraft(event.target.value); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 260)}px`; }} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} /><div className="composer-toolbar"><small>{connecting ? "Preparing project…" : ""}</small><div className="composer-actions"><select aria-label="Model" title="Choose a model" value={profile} disabled={navigationLocked} onChange={event => void selectModel(event.target.value)}><option value="" disabled>Choose model</option>{profiles.map(model => <option value={model.id} key={model.id}>{model.label}</option>)}</select><button className={busy ? "stop-button" : "primary"} aria-label={busy ? "Stop response" : "Send message"} title={busy ? "Stop response" : "Send message"} type={busy ? "button" : "submit"} disabled={reviewBusy || connecting || loadingThread || (busy ? !turnId : !profile || built !== true || !draft.trim() || approvals.length > 0)} onClick={busy ? () => void stopTurn() : undefined}>{busy ? "■" : "↑"}</button></div></div></form><div className="composer-status"><small role="status">{reviewBusy ? "Saving local review…" : busy || uncertain || loadingThread || (status !== "Ready" && status !== "completed") ? status : ""}</small><small>Shift+Enter for a new line</small></div></footer>
+      </div>
+      {panel === "changes" && <NativeChanges key={workspace + threadId} workspace={workspace} threadId={threadId} locked={navigationLocked} revision={reviewRevision} notice={reviewNotice} onBusyChange={reviewPending} onClose={() => setPanel(null)} />}
+      {panel === "terminal" && <section className="agent-terminal-panel" aria-label="Agent terminal"><div className="panel-heading"><strong>Agent terminal</strong><button aria-label="Close terminal" onClick={() => setPanel(null)}>×</button></div><p className="review-note">Live output from this chat’s native commands. Send a message to request a command; its normal permissions still apply. This is not a separate interactive shell.</p><div className="terminal-commands">{items.filter(item => item.kind === "commandExecution").map(item => <NativeCommand item={item} expanded key={item.id} />)}{!items.some(item => item.kind === "commandExecution") && <p>No commands recorded in this chat yet.</p>}</div></section>}
+      </div>
       </>}
     </main></div>
   </div>;

@@ -11,6 +11,16 @@ vm.runInNewContext(code, { module, exports: module.exports });
 const { displayItem, mergeItem, mergeWorkers, approvalResponse, activeTurn, routeMessage, answerKey, threadLabel, resumeStatus, supportsApproval } = module.exports;
 const plain = value => JSON.parse(JSON.stringify(value));
 
+test("native command metadata stays separate from streamed output and keeps nonzero exit codes", () => {
+  const start = displayItem({ id: "cmd", type: "commandExecution", command: "pytest", cwd: "C:/fixture", status: "inProgress", aggregatedOutput: "" });
+  let items = mergeItem([], start);
+  items = mergeItem(items, { id: "cmd", kind: "commandExecution", text: "actual failing test output" }, true);
+  items = mergeItem(items, displayItem({ id: "cmd", type: "commandExecution", command: "pytest", cwd: "C:/fixture", status: "completed", exitCode: 1, durationMs: 1400, aggregatedOutput: "" }));
+  assert.equal(items[0].text, "actual failing test output");
+  assert.equal(items[0].command, "pytest"); assert.equal(items[0].cwd, "C:/fixture");
+  assert.equal(items[0].exitCode, 1); assert.equal(items[0].durationMs, 1400);
+});
+
 test("worker cards use native worker state, not completion of the spawn tool", () => {
   const item = { type: "collabAgentToolCall", status: "completed", receiverThreadIds: ["a", "b"], agentsStates: { a: { status: "running" } } };
   const workers = mergeWorkers([], item);

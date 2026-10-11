@@ -75,6 +75,9 @@ to your own build. Never point it at an unrelated installed Codex.
 
 ## Use the candidate
 
+See [Changes review and command output](CHANGES.md) for file/hunk staging,
+safe turn Undo, local recovery receipts and the Agent terminal transcript.
+
 `smara --help` shows the upstream native commands plus Smara's integrations.
 `smara source-status` works without a configured model. Ordinary coding commands
 use the selected model, native workspace sandbox and approval requests.

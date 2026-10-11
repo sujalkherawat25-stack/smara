@@ -37,6 +37,48 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .native-layout main { min-width: 0; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .native-topbar { min-height: 58px; padding: 12px 30px; display: flex; align-items: center; gap: 12px; }
 .native-topbar strong { font-size: 14px; font-weight: 600; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.workspace-actions { display: flex; gap: 8px; margin-left: auto; flex-shrink: 0; }
+.native-app .workspace-actions button { font-size: 12px; padding: 6px 10px; background: transparent; }
+.native-work-area { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.native-chat-area { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1; }
+.changes-panel, .agent-terminal-panel { width: clamp(360px, 43%, 760px); border-left: 1px solid #363636; display: flex; flex-direction: column; min-height: 0; background: #1c1c1c; padding: 16px; overflow-y: auto; }
+.panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.native-app .panel-heading button { padding: 0 8px; border: none; background: transparent; font-size: 20px; }
+.review-tabs, .review-toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.native-app .review-tabs button, .native-app .review-toolbar button, .native-app .file-actions button, .native-app .hunk-actions button { font-size: 11px; padding: 5px 8px; }
+.review-note, .review-error { font-size: 12px; margin: 6px 0 12px; overflow-wrap: anywhere; }
+.review-error { color: #f0a8a0 !important; }
+.review-body { min-height: 0; }
+.changed-files { max-height: 180px; overflow-y: auto; margin-bottom: 16px; border-bottom: 1px solid #343434; }
+.native-app .changed-files button { display: flex; justify-content: space-between; align-items: center; width: 100%; text-align: left; gap: 8px; font-size: 12px; border: none; background: transparent; padding: 6px 8px; }
+.native-app .changed-files button.selected { background: #2c3336; color: #e9f0ed; }
+.changed-files button > span { overflow-wrap: anywhere; }
+.changed-files .diff-count { white-space: nowrap; color: #de9a98; }
+.diff-count > span { color: #97d8ac; }
+.file-actions, .hunk-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.file-actions strong { width: 100%; font-size: 12px; overflow-wrap: anywhere; }
+.diff-header, .diff-hunk pre { margin: 0; font: 11px/1.7 Consolas, ui-monospace, monospace; white-space: pre; overflow-x: auto; }
+.diff-header { color: #98a5aa; padding: 8px; }
+.diff-hunk { border: 1px solid #333c3c; border-radius: 6px; margin: 12px 0; overflow: hidden; }
+.hunk-actions { padding: 5px 8px; background: #24282a; margin: 0; }
+.hunk-actions small { margin-right: auto; }
+.diff-hunk pre { padding: 8px; background: #151819; }
+.diff-hunk pre span { display: block; min-width: max-content; }
+.diff-add { color: #b3e4bf; background: #1d3426; }
+.diff-remove { color: #f0b5af; background: #3b2424; }
+.diff-position { color: #97cbdc; }
+.command-card { border: 1px solid #374042; border-radius: 8px; background: #1a1f20; overflow: hidden; }
+.command-card summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 12px; cursor: pointer; }
+.command-card summary code { font: 12px/1.6 Consolas, ui-monospace, monospace; overflow-wrap: anywhere; flex: 1; min-width: 0; }
+.command-card summary small { color: #9ca6ad; font-size: 10px; }
+.command-state { font-size: 10px; border-radius: 4px; background: #293c33; color: #aadabe; padding: 2px 6px; }
+.command-card.failed .command-state, .command-card.denied .command-state { background: #482b28; color: #ecb2a5; }
+.command-card.running .command-state { background: #293c4b; color: #afd4eb; }
+.command-card .command-cwd { padding: 0 12px; font-size: 10px; color: #a1b1ad; overflow-wrap: anywhere; }
+.command-card pre { padding: 12px; margin: 0; font: 11px/1.7 Consolas, ui-monospace, monospace !important; max-height: 440px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.terminal-commands { overflow-y: auto; min-height: 0; }
+.terminal-commands .command-card { margin-bottom: 14px; }
+@media (max-width: 1150px) { .native-work-area.with-panel { position: relative; } .changes-panel, .agent-terminal-panel { position: absolute; inset: 0 0 0 auto; width: min(620px, 95%); z-index: 2; box-shadow: -12px 0 35px #0006; } }
 .project-icon { color: #bbb; font-size: 19px; }
 .header-chat-title { min-width: 0; max-width: 60%; border-left: 1px solid #404040; padding-left: 14px; color: #aaa; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; font-size: 12px; }
 .eyebrow { display: block; color: #86989a; font-size: 10px; letter-spacing: 1.5px; margin-bottom: 3px; }

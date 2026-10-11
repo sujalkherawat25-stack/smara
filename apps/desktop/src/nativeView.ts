@@ -1,5 +1,5 @@
 /** Presentation only; native Rust owns execution and permissions. */
-export type ViewItem = { id: string; kind: string; text: string; status?: string };
+export type ViewItem = { id: string; kind: string; text: string; status?: string; command?: string; cwd?: string; exitCode?: number; durationMs?: number };
 export type NativeTurn = { id: string; status: string; items: Record<string, unknown>[] };
 export type WorkerView = { id: string; status: string; cwd?: string };
 /** Only workers named by the selected parent's native collaboration items. */
@@ -34,6 +34,14 @@ export function routeMessage(message: { id?: number | string; method?: string; p
 export function displayItem(item: Record<string, unknown>): ViewItem {
   const kind = String(item.type ?? "tool");
   const content = item.content;
+  if (kind === "commandExecution") return {
+    id: String(item.id), kind, text: typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : "",
+    command: typeof item.command === "string" ? item.command : undefined,
+    cwd: typeof item.cwd === "string" ? item.cwd : undefined,
+    status: typeof item.status === "string" ? item.status : undefined,
+    exitCode: typeof item.exitCode === "number" ? item.exitCode : undefined,
+    durationMs: typeof item.durationMs === "number" ? item.durationMs : undefined,
+  };
   const value = kind === "userMessage" && Array.isArray(content)
     ? content.map(part => part.type === "text" ? part.text ?? "" : `[${part.type ?? "attachment"}]`).join("\n")
     : item.text ?? item.aggregatedOutput ?? item.command ?? content ?? item;
@@ -44,6 +52,8 @@ export function mergeItem(items: ViewItem[], next: ViewItem, append = false, sta
   const index = items.findIndex(item => item.id === next.id);
   if (index < 0) return [...items, next];
   return items.map((item, position) => position !== index ? item : { ...item, ...next, status: next.status ?? item.status,
+    command: next.command ?? item.command, cwd: next.cwd ?? item.cwd,
+    exitCode: next.exitCode ?? item.exitCode, durationMs: next.durationMs ?? item.durationMs,
     text: append ? item.text + next.text : started || !next.text ? item.text : next.text });
 }
 export function approvalResponse(method: string, params: Record<string, unknown>, allow: boolean): Record<string, unknown> {
