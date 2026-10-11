@@ -20,6 +20,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from .native_limits import ResearchGuard, ResearchLimitError
+from .native_limits import research_tool
 
 
 class UnsupportedWireFeature(ValueError):
@@ -175,6 +177,13 @@ def translate_request(request: dict[str, Any], model: str) -> tuple[dict[str, An
     messages = []
     if request.get("instructions"):
         messages.append({"role": "system", "content": request["instructions"]})
+    if any(research_tool(name) for name in mapping):
+        messages.append({"role": "system", "content":
+            "Research efficiently: use focused queries, reuse fetched source IDs and their next_offset for pagination, "
+            "and never repeat a failed/unsupported URL without a changed retrieval method. Fetch_url reads text pages, not PDFs/images. "
+            "For documents use document_ocr, and for image understanding use image_analyze, only if available and after native upload approval. "
+            "Do not substitute a shell upload to evade approval. Finish when evidence is sufficient; report gaps rather than endlessly collecting. "
+            "Research workers should return their evidence and limitations promptly so the parent can synthesize partial results."})
     inputs = request.get("input", [])
     if isinstance(inputs, str):
         inputs = [{"type": "message", "role": "user", "content": inputs}]
@@ -243,6 +252,7 @@ def response_tool(call: dict, mapping: dict[str, dict]) -> dict:
 class ResponsesAdapter:
     def __init__(self, endpoint: ChatEndpoint):
         self.endpoint = endpoint
+        self.research_guard = ResearchGuard()
         self.token = secrets.token_urlsafe(32)
         self.client = httpx.Client(timeout=httpx.Timeout(300, connect=15), follow_redirects=False, trust_env=False)
         owner = self
@@ -269,6 +279,10 @@ class ResponsesAdapter:
                     if not isinstance(request, dict) or request.get("stream") is not True:
                         raise ValueError("This adapter requires streamed Responses requests")
                     payload, mapping = translate_request(request, owner.endpoint.model)
+                    owner.research_guard.admit(request, payload, mapping, self.headers)
+                except ResearchLimitError as exc:
+                    self._json_error(400, str(exc))
+                    return
                 except (ValueError, KeyError, TypeError) as exc:
                     self._json_error(400, str(exc))
                     return

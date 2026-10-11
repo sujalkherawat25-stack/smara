@@ -8,8 +8,33 @@ const code = ts.transpileModule(readFileSync(new URL("../src/nativeView.ts", imp
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 vm.runInNewContext(code, { module, exports: module.exports });
-const { displayItem, mergeItem, mergeWorkers, approvalResponse, activeTurn, routeMessage, answerKey, threadLabel, resumeStatus, supportsApproval } = module.exports;
+const { displayItem, mergeItem, mergeWorkers, workerActivity, workerSnapshot, approvalResponse, activeTurn, routeMessage, answerKey, threadLabel, resumeStatus, supportsApproval } = module.exports;
 const plain = value => JSON.parse(JSON.stringify(value));
+
+test("known child progress is visible without changing parent completion or showing its text", () => {
+  const workers = [{ id: "child", status: "running" }];
+  const message = { method: "item/agentMessage/delta", params: { threadId: "child", delta: "private child transcript" } };
+  const updated = workerActivity(workers, message, 42);
+  assert.equal(updated[0].activity, "Writing response");
+  assert.equal(updated[0].status, "running");
+  assert.equal(updated[0].lastActivityAt, 42);
+  assert.ok(!JSON.stringify(updated).includes("private child"));
+  assert.equal(workerActivity(workers, { ...message, params: { threadId: "unrelated" } }, 42), workers);
+  assert.equal(workerActivity(workers, { method: "turn/completed", params: { threadId: "child", turn: { status: "failed" } } }, 43)[0].status, "failed");
+});
+
+test("summary polling does not manufacture activity for unchanged workers", () => {
+  const turn = { id: "turn", status: "inProgress", items: [{ id: "first" }] };
+  let workers = workerSnapshot([{ id: "child", status: "running" }], "child", turn, 10);
+  workers = workerSnapshot(workers, "child", turn, 20);
+  assert.equal(workers[0].lastActivityAt, 10);
+  workers = workerSnapshot(workers, "child", { ...turn, status: "completed" }, 30);
+  assert.equal(workers[0].status, "completed");
+  assert.equal(workers[0].lastActivityAt, 30);
+  const latePoll = workerSnapshot(workers, "child", turn, 40);
+  assert.equal(latePoll[0].status, "completed");
+  assert.equal(latePoll[0].lastActivityAt, 30);
+});
 
 test("native command metadata stays separate from streamed output and keeps nonzero exit codes", () => {
   const start = displayItem({ id: "cmd", type: "commandExecution", command: "pytest", cwd: "C:/fixture", status: "inProgress", aggregatedOutput: "" });

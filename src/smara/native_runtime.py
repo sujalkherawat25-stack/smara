@@ -123,6 +123,10 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
             "mcp_servers.smara_readers.required": True,
             "mcp_servers.smara_readers.startup_timeout_sec": 30,
             "mcp_servers.smara_readers.tool_timeout_sec": 45,
+            # Uploads are external actions, never treated as ordinary read-only
+            # research merely because their result is text.
+            "mcp_servers.smara_readers.tools.document_ocr.approval_mode": "prompt",
+            "mcp_servers.smara_readers.tools.image_analyze.approval_mode": "prompt",
         })
         # MCP children do not inherit arbitrary environment variables. Pass
         # vault/settings *paths*, never secret values in native -c arguments.

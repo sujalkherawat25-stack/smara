@@ -6,7 +6,7 @@ import vm from "node:vm";
 import ts from "typescript";
 
 function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = true, terminalPlatformSupported = true } = {}) {
-  const slots = [], calls = [], effects = [];
+  const slots = [], calls = [], effects = [], timers = new Set();
   let cursor = 0, dirty = true, tree, failResume = false, currentRpc;
   const setup = {
     preferences: { workspace: "C:/first", active_model: "one", projects: [{ workspace: "C:/first", label: "First" }, { workspace: "C:/second", label: "Second" }], search_provider: "tavily" },
@@ -32,7 +32,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     const module = { exports: {} };
     const source = readFileSync(new URL(path, import.meta.url), "utf8");
     const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-    vm.runInNewContext(code, { module, exports: module.exports, require, crypto: { randomUUID: () => "fixture-terminal-id" }, TextEncoder, TextDecoder, Uint8Array, btoa, atob, window: { addEventListener() {}, removeEventListener() {} }, navigator: { clipboard: { writeText: async () => {} } } });
+    vm.runInNewContext(code, { module, exports: module.exports, require, setInterval: callback => { timers.add(callback); return callback; }, clearInterval: timer => timers.delete(timer), crypto: { randomUUID: () => "fixture-terminal-id" }, TextEncoder, TextDecoder, Uint8Array, btoa, atob, window: { addEventListener() {}, removeEventListener() {} }, navigator: { clipboard: { writeText: async () => {} } } });
     return module.exports;
   };
   class RpcOutcomeUnknown extends Error {}

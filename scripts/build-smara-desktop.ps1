@@ -62,6 +62,8 @@ try {
         '--hidden-import', 'smara.native_runtime'
         '--hidden-import', 'smara.native_provider'
         '--hidden-import', 'smara.native_tools'
+        '--hidden-import', 'smara.native_limits'
+        '--hidden-import', 'smara.native_documents'
         '--hidden-import', 'smara.native_browser'
         '--collect-all', 'playwright'
     )

@@ -1,7 +1,37 @@
 /** Presentation only; native Rust owns execution and permissions. */
 export type ViewItem = { id: string; kind: string; text: string; status?: string; command?: string; cwd?: string; exitCode?: number; durationMs?: number };
 export type NativeTurn = { id: string; status: string; items: Record<string, unknown>[] };
-export type WorkerView = { id: string; status: string; cwd?: string };
+export type WorkerView = { id: string; status: string; cwd?: string; activity?: string; lastActivityAt?: number; observedItems?: number };
+export function workerSnapshot(workers: WorkerView[], id: string, turn: NativeTurn, now: number): WorkerView[] {
+  return workers.map(worker => {
+    if (worker.id !== id) return worker;
+    // A summary request can race a newer turn/completed notification. Never
+    // let that older in-progress snapshot resurrect a terminal worker state.
+    if (["completed", "failed", "shutdown", "notFound", "interrupted"].includes(worker.status) && turn.status === "inProgress") return worker;
+    const count = turn.items.length;
+    const changed = worker.status !== turn.status || worker.observedItems !== count;
+    return { ...worker, status: turn.status, observedItems: count,
+      activity: `${count} recorded items`, lastActivityAt: changed ? now : worker.lastActivityAt };
+  });
+}
+/** Show known child activity without leaking its transcript into the parent. */
+export function workerActivity(workers: WorkerView[], message: { method?: string; params?: Record<string, unknown> }, now: number): WorkerView[] {
+  const params = message.params ?? {};
+  const id = params.threadId;
+  if (!workers.some(worker => worker.id === id)) return workers;
+  const item = params.item as Record<string, unknown> | undefined;
+  const turn = params.turn as { status?: string } | undefined;
+  let status: string | undefined;
+  let activity: string | undefined;
+  if (message.method === "turn/started") { status = "inProgress"; activity = "Working"; }
+  else if (message.method === "turn/completed") { status = turn?.status; activity = "Turn finished"; }
+  else if (message.method === "item/started" || message.method === "item/completed") {
+    activity = `${String(item?.type ?? "Tool")} · ${message.method === "item/started" ? "running" : "finished"}`;
+  } else if (message.method === "item/agentMessage/delta") activity = "Writing response";
+  else if (message.method === "item/commandExecution/outputDelta") activity = "Command output received";
+  else return workers;
+  return workers.map(worker => worker.id === id ? { ...worker, status: status ?? worker.status, activity, lastActivityAt: now } : worker);
+}
 /** Only workers named by the selected parent's native collaboration items. */
 export function mergeWorkers(workers: WorkerView[], item: Record<string, unknown>): WorkerView[] {
   if (item.type !== "collabAgentToolCall" || !Array.isArray(item.receiverThreadIds)) return workers;

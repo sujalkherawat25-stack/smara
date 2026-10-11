@@ -9,7 +9,7 @@ import NativeCommand from "./NativeCommand";
 import { nativeSettings, sameWorkspace, type NativeSetup } from "./nativeApi";
 import { NativeRpc, RpcOutcomeUnknown, type RpcMessage } from "./nativeRpc";
 import { appendTerminalOutput, decodeTerminalOutput, encodeTerminalInput, terminalExecParams, type TerminalSession } from "./terminalProtocol";
-import { activeTurn, answerKey, approvalResponse, displayItem, mergeItem, mergeWorkers, resumeStatus, routeMessage, supportsApproval, threadLabel, type NativeTurn, type ViewItem, type WorkerView } from "./nativeView";
+import { activeTurn, answerKey, approvalResponse, displayItem, mergeItem, mergeWorkers, workerActivity, workerSnapshot, resumeStatus, routeMessage, supportsApproval, threadLabel, type NativeTurn, type ViewItem, type WorkerView } from "./nativeView";
 import type { LocalModelProfile } from "./types";
 import packageInfo from "../package.json";
 import "./native-shell.css";
@@ -54,6 +54,8 @@ export default function NativeApp() {
   const [threadId, setThreadId] = useState("");
   const [turnId, setTurnId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [activityClock, setActivityClock] = useState(Date.now());
+  const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const [toolsEnabled, setToolsEnabled] = useState(false);
   const [workersEnabled, setWorkersEnabled] = useState(false);
@@ -138,7 +140,10 @@ export default function NativeApp() {
       setStatus("Waiting for your response");
       return;
     }
-    if (route === "ignore") return;
+    if (route === "ignore") {
+      setWorkers(current => workerActivity(current, message, Date.now()));
+      return;
+    }
     if (message.method === "turn/diff/updated") {
       setTurnDiff(String(params.diff ?? ""));
     } else if (message.method === "item/agentMessage/delta") {
@@ -153,7 +158,7 @@ export default function NativeApp() {
     } else if (message.method === "turn/started") {
       const turn = params.turn as { id: string };
       accepted(); activeTurnRef.current = turn.id; busyRef.current = true;
-      setTurnId(turn.id); setBusy(true); setStatus("Working");
+      setTurnId(turn.id); setBusy(true); setTurnStartedAt(Date.now()); setStatus("Working");
     } else if (message.method === "turn/completed") {
       const turn = params.turn as { id: string; status: string; error?: { message?: string } };
       if (activeTurnRef.current && turn.id !== activeTurnRef.current) return;
@@ -174,6 +179,43 @@ export default function NativeApp() {
       setTerminalSession(current => current && ["starting", "running", "stopping"].includes(current.status) ? { ...current, status: "stopped", error: "The native runtime disconnected; its shell was stopped too." } : current);
     }
   };
+
+  useEffect(() => {
+    if (!busy) return;
+    const timer = setInterval(() => setActivityClock(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [busy]);
+
+  // Some app-server clients are not subscribed to child transcript events.
+  // Read only the latest turn summary, not all historical tool outputs. Never
+  // resume a child, resend work, or overlap polling rounds.
+  const workerIds = workers.map(worker => worker.id).join(",");
+  useEffect(() => {
+    const client = clientRef.current;
+    if (!connected || !busy || !client || !workerIds) return;
+    const generation = client.generation, parent = threadRef.current;
+    let disposed = false, pending = false;
+    const poll = async () => {
+      if (disposed || pending || !client.generation) return;
+      pending = true;
+      try {
+        for (const id of workerIds.split(",")) {
+          if (disposed) break;
+          try {
+            const result = await client.request<{ data: NativeTurn[] }>("thread/turns/list", { threadId: id, limit: 1, sortDirection: "desc", itemsView: "summary" }, 10000);
+            if (disposed || client !== clientRef.current || client.generation !== generation || parent !== threadRef.current) return;
+            const turn = result.data?.[0];
+            if (turn) setWorkers(current => workerSnapshot(current, id, turn, Date.now()));
+          } catch {
+            if (!disposed) setWorkers(current => current.map(worker => worker.id === id ? { ...worker, activity: "Status unavailable — use Check status" } : worker));
+          }
+        }
+      } finally { pending = false; }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 15000);
+    return () => { disposed = true; clearInterval(timer); };
+  }, [connected, busy, threadId, workerIds]);
 
   useEffect(() => {
     let disposed = false;
@@ -513,7 +555,8 @@ export default function NativeApp() {
       <div className="native-chat-area">
       {uncertain && <div className="native-warning"><button onClick={() => void checkStatus()}>Check response status</button><button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Recover chat</button> The request may have been accepted. Your message will not be resent automatically.</div>}
       <div className="native-transcript" aria-live="polite">
-        {!!workers.length && <section className="native-workers"><strong>Native workers · changes are not auto-merged</strong>{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
+        {busy && turnStartedAt && <p role="status">Working for {Math.max(0, Math.floor((activityClock - turnStartedAt) / 60000))}m {Math.max(0, Math.floor((activityClock - turnStartedAt) / 1000) % 60)}s · Stop is available below.</p>}
+        {!!workers.length && <section className="native-workers"><strong>Workers · {workers.filter(worker => worker.status === "completed").length}/{workers.length} complete · changes are not auto-merged</strong>{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status}{worker.activity && <span> · {worker.activity}{worker.lastActivityAt && ` · ${Math.max(0, Math.floor((activityClock - worker.lastActivityAt) / 1000))}s ago`}</span>} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
         {!items.length && <div className="native-empty"><h1>What can I help you with?</h1><p>Research, build, and get work done.</p><div className="starter-cards">{[{ title: "Understand this project", text: "Inspect this project and explain its architecture, entry points and how to run its tests. Do not change files." }, { title: "Find & fix a bug", text: "Inspect this project for a reproducible bug. Show evidence, make a minimal fix, and run the relevant tests." }, { title: "Research a topic", text: "Research a topic using public sources. Read the actual clock for time-sensitive questions, verify claims against fetched pages and cite them. Ask me for the topic first." }].map(card => <button key={card.title} title={card.text} onClick={() => setDraft(card.text)}>{card.title}<span>↗</span></button>)}</div>{!profile && <small className="empty-hint">Add your model in Settings to get started.</small>}</div>}
         {items.map(item => <article key={item.id} className={`native-item ${item.kind}`}><div className="item-heading"><small>{item.kind === "assistant" ? "Smara" : item.kind === "user" ? "You" : item.kind} {item.status && `· ${item.status}`}</small><button className="text-button" onClick={() => void navigator.clipboard.writeText(item.text).catch(() => setError("Clipboard is unavailable"))}>Copy</button></div>{item.kind === "assistant" ? <NativeMarkdown text={item.text} onPreviewFile={setPreviewPath} /> : item.kind === "user" ? <pre>{item.text}</pre> : item.kind === "commandExecution" ? <NativeCommand item={item} /> : <details open={item.status === "inProgress" || item.status === "failed"}><summary>Tool details · {item.text.length.toLocaleString()} characters</summary><pre>{item.text}</pre></details>}</article>)}
         {approvals.map(approval => <section className="native-approval" key={approval.id}>
