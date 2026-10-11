@@ -16,6 +16,7 @@ jobs:
         run: >-
           python -m pytest -q
           tests/test_native_cli.py tests/test_native_auth.py
+          tests/test_native_changes.py
           tests/test_native_profiles.py tests/test_native_management.py
           tests/test_native_provider.py tests/test_native_search.py
           tests/test_native_tools.py tests/test_native_schedule.py

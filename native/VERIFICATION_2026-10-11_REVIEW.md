@@ -63,4 +63,8 @@ remains a separate next UI step; it is not included in v0.1.12.
 
 Installer: `Smara Desktop_0.1.12_x64-setup.exe` — 144,397,076 bytes.
 
+GitHub normalizes the downloadable asset name to
+`Smara.Desktop_0.1.12_x64-setup.exe`. The public checksum manifest uses that
+download name; the installer bytes and SHA-256 are unchanged.
+
 SHA-256: `87a5e15e94cc873837d63906a81486f2743094be4c2f16d04cdacbc6608eb2d1`
