@@ -252,6 +252,9 @@ def manage(request):
             context_window = profile.get("context_window", (previous or {}).get("context_window"))
             if context_window is not None and (type(context_window) is not int or not 4096 <= context_window <= 10_000_000):
                 raise ValueError("Model context window must be an integer from 4096 to 10000000 tokens")
+            # Catch known Sarvam API/model-version mismatches before saving a
+            # profile or replacing its protected key.
+            ChatEndpoint(base, profile["model"].strip(), "", header, context_window)
             secret = profile.get("api_key") or ""
             if secret:
                 alias = alias.strip().upper()  # put_credential stores this exact alias.

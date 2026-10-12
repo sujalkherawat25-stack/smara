@@ -10,7 +10,7 @@ from smara import native_search
 from smara.native_provider import ChatEndpoint, probe_endpoint
 
 
-def test_model_probe_sends_one_fixed_tiny_request_and_redacts_provider_errors():
+def test_model_probe_sends_one_fixed_bounded_request_and_redacts_provider_errors():
     requests = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -26,16 +26,40 @@ def test_model_probe_sends_one_fixed_tiny_request_and_redacts_provider_errors():
     assert len(requests) == 1
     assert requests[0].headers["authorization"] == "Bearer synthetic-secret"
     payload = json.loads(requests[0].content)
-    assert payload["messages"] == [{"role": "user", "content": "Reply with OK."}]
-    assert payload["max_tokens"] == 1 and payload["stream"] is False
+    assert payload["messages"] == [{"role": "user", "content": "Reply exactly OK. Do not explain."}]
+    assert payload["max_tokens"] == 256 and payload["stream"] is False
 
     def unauthorized(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, text="synthetic-secret rejected")
 
     with httpx.Client(transport=httpx.MockTransport(unauthorized), trust_env=False) as client:
-        with pytest.raises(ValueError, match="rejected the saved credential") as error:
+        with pytest.raises(ValueError, match="rejected the saved API key") as error:
             probe_endpoint(endpoint, client=client)
     assert "synthetic-secret" not in str(error.value)
+
+
+def test_sarvam_model_probe_uses_low_reasoning_and_requires_visible_output():
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "OK"}}]})
+
+    endpoint = ChatEndpoint("https://api.sarvam.ai/v2", "glm5.3", "synthetic-sarvam-key", "api-subscription-key")
+    with httpx.Client(transport=httpx.MockTransport(handler), trust_env=False) as client:
+        result = probe_endpoint(endpoint, client=client)
+    payload = json.loads(requests[0].content)
+    assert result["ok"] is True
+    assert payload["reasoning_effort"] == "low"
+    assert payload["max_tokens"] == 256
+    assert requests[0].headers["api-subscription-key"] == "synthetic-sarvam-key"
+
+    def empty(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"content": None}}]})
+
+    with httpx.Client(transport=httpx.MockTransport(empty), trust_env=False) as client:
+        with pytest.raises(ValueError, match="returned no visible text"):
+            probe_endpoint(endpoint, client=client)
 
 
 @pytest.fixture
@@ -66,6 +90,18 @@ def test_settings_model_probe_uses_only_saved_credential(native_settings, monkey
     assert observed["endpoint"].api_key == "synthetic-saved-key"
     assert result["ok"] is True
     assert "synthetic-saved-key" not in json.dumps(result)
+
+
+def test_settings_rejects_known_sarvam_model_route_mismatch_before_saving_key(native_settings):
+    with pytest.raises(ValueError, match="requires the /v2 Chat Completions API"):
+        native_management.manage({"operation": "save_model", "profile": {
+            "id": "sarvam_glm", "label": "Sarvam GLM", "provider": "sarvam",
+            "model": "glm5.3", "base_url": "https://api.sarvam.ai/v1",
+            "auth_header": "api-subscription-key", "api_key": "synthetic-route-key",
+        }})
+    setup = native_management.bootstrap()
+    assert not any(profile["id"] == "sarvam_glm" for profile in setup["profiles"])
+    assert "SMARA_MODEL_SARVAM_GLM_API_KEY" not in {item["name"] for item in setup["credentials"]}
 
 
 def test_search_probe_sends_only_a_fixed_single_result_query(native_settings, monkeypatch):

@@ -87,6 +87,29 @@ def test_cli_default_profiles_include_sarvam_glm_v2(tmp_path, monkeypatch):
     assert glm["auth_header"] == "api-subscription-key"
 
 
+def test_cli_migrates_deepseek_alias_but_preserves_v1_conversations_route(tmp_path, monkeypatch):
+    import json
+    from smara.cli import _load_local_profiles
+
+    state = tmp_path / "desktop.json"
+    state.write_text(json.dumps({
+        "model_profiles": [
+            {"id": "sarvam_deepseek", "provider": "sarvam", "label": "DeepSeek", "base_url": "https://api.sarvam.ai/v1", "model": "deepseekv4-flash", "auth_header": "api-subscription-key"},
+            {"id": "sarvam_conversations", "provider": "sarvam", "label": "Sarvam Conversations", "base_url": "https://api.sarvam.ai/v1", "model": "sarvam-105b-conversations", "auth_header": "api-subscription-key"},
+        ],
+        "active_model": "sarvam_deepseek",
+    }), encoding="utf-8")
+    monkeypatch.setenv("SMARA_DESKTOP_STATE", str(state))
+
+    profiles, active, _ = _load_local_profiles()
+
+    assert active == "sarvam_deepseek"
+    assert profiles[0]["model"] == "deepseekv4.1-flash"
+    assert profiles[0]["base_url"] == "https://api.sarvam.ai/v2"
+    assert profiles[1]["model"] == "sarvam-105b-conversations"
+    assert profiles[1]["base_url"] == "https://api.sarvam.ai/v1"
+
+
 def test_application_adapter_persists_canonical_live_web_profile(tmp_path, monkeypatch):
     import smara.app_adapter as adapter
 

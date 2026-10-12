@@ -192,9 +192,33 @@ class GoalStore:
     def get(self, identity):
         with self.connect() as db:
             goal = self.decode(db.execute("SELECT * FROM goals WHERE id=?", (identity,)).fetchone())
-            goal["events"] = [{"seq": row["seq"], "kind": row["kind"], "created": row["created"],
-                "body": {"summary": str(json.loads(row["body"]).get("summary", ""))[:2000]}} for row in db.execute(
-                "SELECT * FROM (SELECT * FROM goal_events WHERE goal_id=? ORDER BY seq DESC LIMIT 100) ORDER BY seq", (identity,))]
+            goal["events"] = []
+            for row in db.execute(
+                "SELECT * FROM (SELECT * FROM goal_events WHERE goal_id=? ORDER BY seq DESC LIMIT 100) ORDER BY seq", (identity,)
+            ):
+                body = json.loads(row["body"])
+                failure = body.get("failure")
+                safe_failure = None
+                if isinstance(failure, dict):
+                    stage, error_type, context = failure.get("stage"), failure.get("error_type"), failure.get("context")
+                    known_stages = {
+                        "load_provider_profile", "start_native_session", "initialize_native_protocol",
+                        "resume_saved_session", "start_saved_session", "start_model_turn",
+                        "wait_for_model_turn", "read_session_transcript", "validate_checkpoint",
+                        "verify_outcome", "close_native_session", "save_checkpoint",
+                    }
+                    known_contexts = {
+                        "workspace_missing", "native_runtime_missing", "runtime_dependency_missing",
+                        "required_file_unavailable",
+                    }
+                    safe_type = (isinstance(error_type, str) and error_type.replace("_", "").isalnum())
+                    if (isinstance(stage, str) and stage in known_stages and safe_type
+                            and (context is None or (isinstance(context, str) and context in known_contexts))):
+                        safe_failure = {"stage": stage, "error_type": error_type[:80], "context": context}
+                safe_body = {"summary": str(body.get("summary", ""))[:2000]}
+                if safe_failure:
+                    safe_body["failure"] = safe_failure
+                goal["events"].append({"seq": row["seq"], "kind": row["kind"], "created": row["created"], "body": safe_body})
             goal["approvals"] = [{**dict(row), "params": json.loads(row["params"])} for row in db.execute(
                 "SELECT id,method,params,state FROM goal_requests WHERE goal_id=? AND state='pending'", (identity,))]
             return goal
@@ -398,7 +422,7 @@ class GoalStore:
                 db.execute("UPDATE goals SET state='running',detail='' WHERE id=? AND lease=? AND state='awaiting_approval'", (goal["id"], goal["lease"]))
             return {"id": json.loads(row["native_id"]), "result": json.loads(row["response"])}
 
-    def finish(self, goal, checkpoint, state, detail, feedback_ids=()):
+    def finish(self, goal, checkpoint, state, detail, feedback_ids=(), failure=None):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = self.decode(db.execute("SELECT * FROM goals WHERE id=?", (goal["id"],)).fetchone())
@@ -422,7 +446,10 @@ class GoalStore:
             db.execute("UPDATE goals SET lease=NULL,turn_id=NULL,state=?,checkpoint=?,stalled=?,detail=?,due=?,updated=? WHERE id=?",
                 (state, json.dumps(checkpoint), stalled, detail, time.time() + row["spec"]["interval_seconds"], time.time(), goal["id"]))
             db.execute("UPDATE goal_requests SET state='expired' WHERE lease=? AND state IN ('pending','answered')", (goal["lease"],))
-            self.event(db, goal["id"], state, {"summary": detail, "checkpoint": checkpoint})
+            body = {"summary": detail, "checkpoint": checkpoint}
+            if failure:
+                body["failure"] = failure
+            self.event(db, goal["id"], state, body)
 
     def interactive(self, workspace, owner, busy):
         key = "interactive:" + workspace_key(workspace)

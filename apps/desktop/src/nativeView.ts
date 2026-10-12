@@ -2,6 +2,13 @@
 export type ViewItem = { id: string; kind: string; text: string; status?: string; command?: string; cwd?: string; exitCode?: number; durationMs?: number };
 export type NativeTurn = { id: string; status: string; items: Record<string, unknown>[] };
 export type WorkerView = { id: string; status: string; cwd?: string; activity?: string; lastActivityAt?: number; observedItems?: number };
+export function displayRuntimeError(value: unknown): string {
+  const message = String(value ?? "Native runtime error");
+  if (/incomplete response returned,\s*reason:\s*max_output_tokens/i.test(message)) {
+    return "The model reached its response-token limit before finishing this step. Incomplete tool calls were not executed. Use Continue to inspect completed work and resume; Smara will not replay the original actions.";
+  }
+  return message;
+}
 export function workerSnapshot(workers: WorkerView[], id: string, turn: NativeTurn, now: number): WorkerView[] {
   return workers.map(worker => {
     if (worker.id !== id) return worker;

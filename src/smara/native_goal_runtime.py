@@ -18,6 +18,57 @@ from .native_goals import ACTIVE, GoalStore
 
 MAX_CONCURRENT_GOALS = 2
 
+_FAILURE_STAGE_LABELS = {
+    "load_provider_profile": "loading the model profile",
+    "start_native_session": "starting the native session",
+    "initialize_native_protocol": "initializing the native session",
+    "resume_saved_session": "resuming the saved session",
+    "start_saved_session": "creating the native session",
+    "start_model_turn": "starting the model turn",
+    "wait_for_model_turn": "waiting for the model turn",
+    "read_session_transcript": "reading the completed session",
+    "validate_checkpoint": "validating the progress checkpoint",
+    "verify_outcome": "checking outcome evidence",
+    "close_native_session": "closing the native session",
+    "save_checkpoint": "saving progress",
+}
+_FAILURE_CONTEXT_LABELS = {
+    "workspace_missing": "The selected project folder is unavailable.",
+    "native_runtime_missing": "The bundled Smara native executable is unavailable.",
+    "runtime_dependency_missing": "Windows could not start a required native runtime file.",
+    "required_file_unavailable": "A file required during this phase was unavailable.",
+}
+
+
+def _tag_file_failure(error, context):
+    """Attach only a fixed, non-sensitive diagnostic code to a file error."""
+    if context in _FAILURE_CONTEXT_LABELS:
+        error.smara_failure_context = context
+    return error
+
+
+def _failure_record(error, stage):
+    error_type = type(error).__name__
+    if not error_type.replace("_", "").isalnum():
+        error_type = "Exception"
+    context = getattr(error, "smara_failure_context", None)
+    if context not in _FAILURE_CONTEXT_LABELS:
+        context = "required_file_unavailable" if isinstance(error, FileNotFoundError) else None
+    return {
+        "stage": stage if stage in _FAILURE_STAGE_LABELS else "start_native_session",
+        "error_type": error_type[:80],
+        "context": context,
+    }
+
+
+def _failure_detail(failure):
+    stage = _FAILURE_STAGE_LABELS[failure["stage"]]
+    detail = f"Cycle interrupted while {stage} ({failure['error_type']})."
+    context = _FAILURE_CONTEXT_LABELS.get(failure.get("context"))
+    if context:
+        detail += " " + context
+    return detail + " The saved session was retained; inspect this failure before resuming."
+
 
 def approval_response(method, params, allow):
     if method in {"item/commandExecution/requestApproval", "item/fileChange/requestApproval"}:
@@ -87,13 +138,31 @@ class NativeGoalSession:
         from .native_runtime import launch_options, native_binary, runtime_home
         self.goal, self.store = goal, store
         spec = goal["spec"]
-        options, env = launch_options(adapter, home=runtime_home(), workspace=Path(spec["workspace"]),
+        try:
+            executable = Path(binary) if binary is not None else native_binary()
+        except RuntimeError as exc:
+            raise _tag_file_failure(exc, "native_runtime_missing") from None
+        workspace = Path(spec["workspace"])
+        if not workspace.is_dir():
+            raise _tag_file_failure(FileNotFoundError("Project workspace is unavailable"), "workspace_missing")
+        if not executable.is_file():
+            raise _tag_file_failure(FileNotFoundError("Native executable is unavailable"), "native_runtime_missing")
+        options, env = launch_options(adapter, home=runtime_home(), workspace=workspace,
             tools_enabled=spec["tools_enabled"], search_enabled=not spec["tools_enabled"],
             workers_enabled=spec["workers_enabled"], browser_origins=spec["browser_origins"])
-        self.process = subprocess.Popen([str(binary or native_binary()), *options, "app-server", "--listen", "stdio://"],
-            cwd=spec["workspace"], env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", bufsize=1,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        try:
+            self.process = subprocess.Popen([str(executable), *options, "app-server", "--listen", "stdio://"],
+                cwd=workspace, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8", bufsize=1,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        except FileNotFoundError as exc:
+            if not workspace.is_dir():
+                context = "workspace_missing"
+            elif not executable.is_file():
+                context = "native_runtime_missing"
+            else:
+                context = "runtime_dependency_missing"
+            raise _tag_file_failure(exc, context) from None
         self.messages = queue.Queue()
         self.counter = 0
         self.events = []
@@ -281,6 +350,7 @@ def execute_cycle(store, goal, *, endpoint=None, session_factory=NativeGoalSessi
     feedback = store.feedback(goal["id"])
     session = None
     started = time.monotonic()
+    phase = "load_provider_profile"
     try:
         if endpoint is None:
             profiles, _, credentials = load_profiles()
@@ -288,17 +358,21 @@ def execute_cycle(store, goal, *, endpoint=None, session_factory=NativeGoalSessi
             endpoint = ChatEndpoint(profile["base_url"], profile["model"], resolve_profile_key(profile, credentials, allow_environment=False), profile.get("auth_header", "authorization"), profile.get("context_window"))
         with ResponsesAdapter(endpoint) as adapter:
             adapter.client = GoalBudget(provider_guard(adapter.client) if provider_guard else adapter.client, store, goal)
+            phase = "start_native_session"
             session = session_factory(adapter, goal, store)
             try:
+                phase = "initialize_native_protocol"
                 session.rpc("initialize", {"clientInfo": {"name": "smara_goal_supervisor", "version": "1"}, "capabilities": None})
                 session.send({"method": "initialized"})
                 params = {"cwd": goal["spec"]["workspace"], "approvalPolicy": "on-request", "sandbox": goal["spec"]["sandbox"], "developerInstructions": CHECKPOINT_INSTRUCTIONS}
                 if goal.get("session_id"):
+                    phase = "resume_saved_session"
                     params["threadId"] = goal["session_id"]
                     thread = session.rpc("thread/resume", params)["thread"]
                     if any(turn.get("status") == "inProgress" for turn in thread.get("turns", [])):
                         raise RuntimeError("Saved session is still active; inspect it in Desktop")
                 else:
+                    phase = "start_saved_session"
                     thread = session.rpc("thread/start", params)["thread"]
                 store.attach(goal, thread["id"])
                 prompt = json.dumps({"objective": goal["spec"]["objective"], "success_criteria": goal["spec"]["success_criteria"],
@@ -308,16 +382,21 @@ def execute_cycle(store, goal, *, endpoint=None, session_factory=NativeGoalSessi
                     "token_estimate_remaining": goal["spec"]["max_token_estimate"] - goal["token_estimate"],
                     "cycle_seconds": goal["spec"]["cycle_seconds"]}, ensure_ascii=False)
                 prompt = json.dumps({"task": json.loads(prompt), "outcome_requirements": {k: goal["spec"].get(k) for k in ("task_kind", "min_sources", "time_sensitive")}}, ensure_ascii=False)
+                phase = "start_model_turn"
                 turn = session.rpc("turn/start", {"threadId": thread["id"], "input": [{"type": "text", "text": prompt, "text_elements": []}]})["turn"]
                 store.attach(goal, thread["id"], turn["id"])
                 session.deadline = time.monotonic() + goal["spec"]["cycle_seconds"]
+                phase = "wait_for_model_turn"
                 completed = session.wait_turn(turn["id"])
                 if completed.get("status") != "completed":
                     raise RuntimeError("Native goal turn did not complete")
+                phase = "read_session_transcript"
                 transcript = session.rpc("thread/read", {"threadId": thread["id"], "includeTurns": True})["thread"]
                 last = next(t for t in transcript["turns"] if t["id"] == turn["id"])
                 messages = [item.get("text", "") for item in last.get("items", []) if item.get("type") == "agentMessage"]
+                phase = "validate_checkpoint"
                 checkpoint = checkpoint_from(messages[-1] if messages else "", goal["spec"]["workspace"], goal["spec"].get("task_kind", "general"))
+                phase = "verify_outcome"
                 from .native_outcomes import review
                 checkpoint["outcome"] = review(goal["spec"], checkpoint, transcript, elapsed_seconds=time.monotonic() - started)
                 if checkpoint["decision"] == "ready_for_review" and not checkpoint["outcome"]["passed"]:
@@ -325,14 +404,18 @@ def execute_cycle(store, goal, *, endpoint=None, session_factory=NativeGoalSessi
                     checkpoint["next_step"] = "Resolve outcome evidence gaps: " + "; ".join(c["name"] for c in checkpoint["outcome"]["checks"] if not c["passed"])
                 state = {"continue": "queued", "blocked": "blocked", "ready_for_review": "ready_for_review"}[checkpoint["decision"]]
             finally:
+                if sys.exc_info()[0] is None:
+                    phase = "close_native_session"
                 session.close()
         # Keep project ownership until native child/tool cleanup has finished.
+        phase = "save_checkpoint"
         store.finish(goal, checkpoint, state, checkpoint["summary"], [item["id"] for item in feedback])
     except InterruptedError:
         store.finish(goal, None, "paused", "Supervisor stopped; resume explicitly")
     except Exception as exc:
         # Never expose a provider body or a prompt through raw exception text.
-        store.finish(goal, None, "blocked", f"Cycle interrupted ({type(exc).__name__}); inspect its saved session and add feedback before resuming")
+        failure = _failure_record(exc, phase)
+        store.finish(goal, None, "blocked", _failure_detail(failure), failure=failure)
     return store.get(goal["id"])
 
 

@@ -195,13 +195,19 @@ def _load_local_profiles() -> tuple[list[dict[str, Any]], str, dict[str, str]]:
         model = str(profile.get("model") or "").lower().replace("-", "").replace(".", "")
         # Sarvam's current /v2 model ID is `glm5.3`; normalize profiles saved
         # by older builds that used the now-rejected `glm5.3-flash` alias.
-        canonical_model = {"glm52": "glm5.2", "glm53": "glm5.3", "glm53flash": "glm5.3"}.get(model)
+        canonical_model = {
+            "glm52": "glm5.2", "glm53": "glm5.3", "glm53flash": "glm5.3",
+            "deepseekv4flash": "deepseekv4.1-flash", "deepseekv41flash": "deepseekv4.1-flash",
+        }.get(model)
         if canonical_model:
             profile["model"] = canonical_model
             if str(profile.get("label", "")).lower() == "sarvam 105b" or "glm" in str(profile.get("label", "")).lower():
                 profile["label"] = f"Sarvam {canonical_model.replace('glm', 'GLM ')}"
         base_url = str(profile.get("base_url") or "")
-        if "api.sarvam.ai" in base_url and "/v1" in base_url and "/v2" not in base_url:
+        # Conversations is a V1-only model; do not migrate it onto V2, where
+        # Sarvam returns a model/route error. Open-weight models use V2.
+        if ("api.sarvam.ai" in base_url and "/v1" in base_url and "/v2" not in base_url
+                and profile.get("model") != "sarvam-105b-conversations"):
             profile["base_url"] = "https://api.sarvam.ai/v2"
 
     return profiles, active_id, credentials

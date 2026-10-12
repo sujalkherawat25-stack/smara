@@ -34,7 +34,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
   const runProbe = async (operation: "test_model" | "test_search") => {
     if (disabled || probePending) return;
     const explanation = operation === "test_model"
-      ? "Smara will send one fixed ‘Reply with OK’ request with a one-token output limit to your selected model. It will not send chat history or project files. Your provider may charge for the request. Continue?"
+      ? "Smara will send one fixed ‘Reply exactly OK’ request with a 256-token maximum (low reasoning for Sarvam reasoning models). It will not send chat history or project files. Your provider may charge for the request. Continue?"
       : "Smara will send the fixed query ‘Smara web search connectivity test’ to the selected search provider, requesting at most one result. Your provider may charge for the request. Continue?";
     if (!window.confirm(explanation)) return;
     setPending(true); setProbePending(operation); onPendingChange(true); setError(""); setNotice("");

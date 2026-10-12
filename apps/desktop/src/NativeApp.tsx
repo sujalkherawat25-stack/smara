@@ -13,7 +13,7 @@ import NativeCommand from "./NativeCommand";
 import { nativeSettings, sameWorkspace, type NativeSetup } from "./nativeApi";
 import { NativeRpc, RpcOutcomeUnknown, type RpcMessage } from "./nativeRpc";
 import { appendTerminalOutput, decodeTerminalOutput, encodeTerminalInput, terminalExecParams, type TerminalSession } from "./terminalProtocol";
-import { activeTurn, answerKey, approvalResponse, displayItem, mergeItem, mergeWorkers, workerActivity, workerSnapshot, resumeStatus, routeMessage, supportsApproval, threadLabel, type NativeTurn, type ViewItem, type WorkerView } from "./nativeView";
+import { activeTurn, answerKey, approvalResponse, displayItem, displayRuntimeError, mergeItem, mergeWorkers, workerActivity, workerSnapshot, resumeStatus, routeMessage, supportsApproval, threadLabel, type NativeTurn, type ViewItem, type WorkerView } from "./nativeView";
 import type { LocalModelProfile } from "./types";
 import packageInfo from "../package.json";
 import "./native-shell.css";
@@ -53,6 +53,7 @@ function terminalError(reason: unknown): string {
 
 const NATIVE_DEVELOPER_INSTRUCTIONS = [
   "You are Smara. Be honest about tool outcomes. Do not claim tests passed without evidence. Ask before external writes, payments, publishing, or messaging people.",
+  "Work output-first: use tools to create requested files instead of repeatedly narrating future actions. Give brief progress only when blocked, waiting, or needing approval. Never claim an artifact exists until you have created and verified it.",
   "For latest, current, today, news, or other time-sensitive questions, use current_time and web_search when those tools are available, then read relevant public source pages before answering. Do not pretend to have searched.",
   "Smara's web_search is built in; a separate Tavily MCP server is not required. Never inspect shell variables, credential files, or environment settings to find or reveal API keys, and never claim a key is missing based on shell probes. Never ask the user to paste a key into chat. If web_search is unavailable, direct them to Settings → Integrations → Web search. If the provider rejects the saved key, say so and direct them to replace it there.",
 ].join(" ");
@@ -499,10 +500,10 @@ export default function NativeApp() {
       // Native serverRequest/resolved is the authority for request lifetime.
       setApprovals(current => current.filter(item => !(item.params.threadId === params.threadId && item.params.turnId === turn.id)));
       setStatus(turn.status);
-      if (turn.status !== "completed" && turn.error?.message) setError(turn.error.message);
+      if (turn.status !== "completed" && turn.error?.message) setError(displayRuntimeError(turn.error.message));
       void sealTurn();
     } else if (message.method === "error" || message.method === "smara/runtimeError") {
-      setError(String(params.message ?? (params.error as { message?: string })?.message ?? "Native runtime error"));
+      setError(displayRuntimeError(params.message ?? (params.error as { message?: string })?.message ?? "Native runtime error"));
     } else if (message.method === "smara/runtimeStopped") {
       activeTurnRef.current = ""; busyRef.current = false;
       setConnected(false); setBusy(false); setUncertain(false); setApprovals([]); setStatus("Runtime stopped; unfinished work is not reported as complete");
@@ -998,7 +999,7 @@ export default function NativeApp() {
     </aside><main>
       <header className="native-topbar"><span className="project-icon" aria-hidden="true">▱</span><strong title={workspace}>{settingsOpen ? "Settings" : project?.label || "Choose a project"}</strong>{!settingsOpen && threadId && <span className="header-chat-title">{threadLabel(threads.find(thread => thread.id === threadId) ?? { id: threadId })}</span>}{!settingsOpen && <div className="workspace-actions"><button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? " •" : ""}</button><button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy || goalWorking} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Terminal{terminalActive ? " •" : ""}</button></div>}</header>
       {built === false && <div className="native-warning">Native runtime is missing. Build scripts/build-smara-native.ps1; no old-engine fallback is used.</div>}
-      {error && <div role="alert" className="native-error">{error}{!settingsOpen && (!busy || uncertain) && <button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Retry setup</button>}<button aria-label="Dismiss error" onClick={() => setError("")}>×</button></div>}
+      {error && <div role="alert" className="native-error">{error}{!settingsOpen && !connected && (!busy || uncertain) && <button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Retry setup</button>}<button aria-label="Dismiss error" onClick={() => setError("")}>×</button></div>}
       {settingsOpen && setup ? <NativeSettings setup={setup} locked={connected || connecting} onUpdate={updateSetup} onClose={() => { if (!settingsPendingRef.current) setSettingsOpen(false); }} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : <>
       <div className={`native-work-area ${panel ? "with-panel" : ""}`}>
       <div className="native-chat-area">

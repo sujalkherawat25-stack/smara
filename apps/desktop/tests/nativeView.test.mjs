@@ -8,8 +8,16 @@ const code = ts.transpileModule(readFileSync(new URL("../src/nativeView.ts", imp
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 vm.runInNewContext(code, { module, exports: module.exports });
-const { displayItem, mergeItem, mergeWorkers, workerActivity, workerSnapshot, approvalResponse, activeTurn, routeMessage, answerKey, threadLabel, resumeStatus, supportsApproval } = module.exports;
+const { displayItem, displayRuntimeError, mergeItem, mergeWorkers, workerActivity, workerSnapshot, approvalResponse, activeTurn, routeMessage, answerKey, threadLabel, resumeStatus, supportsApproval } = module.exports;
 const plain = value => JSON.parse(JSON.stringify(value));
+
+test("output-token exhaustion is reported as an incomplete model step, not a setup failure", () => {
+  const message = displayRuntimeError("stream disconnected before completion: Incomplete response returned, reason: max_output_tokens");
+  assert.match(message, /response-token limit/);
+  assert.match(message, /Incomplete tool calls were not executed/);
+  assert.match(message, /Continue to inspect completed work/);
+  assert.equal(displayRuntimeError("provider unavailable"), "provider unavailable");
+});
 
 test("known child progress is visible without changing parent completion or showing its text", () => {
   const workers = [{ id: "child", status: "running" }];

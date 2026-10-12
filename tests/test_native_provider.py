@@ -26,6 +26,122 @@ def test_preserves_long_input_and_tool_history():
     assert item["namespace"] == "functions" and item["name"] == "exec_command"
 
 
+def test_sarvam_glm_gets_bounded_long_output_budget_instead_of_chat_default():
+    endpoint = ChatEndpoint("https://api.sarvam.ai/v2", "glm5.3", "synthetic-key")
+    payload, _ = translate_request(
+        {"input": "Create and verify a requested artifact", "reasoning": {"effort": "high"}},
+        endpoint.model,
+        default_max_output_tokens=endpoint.default_max_output_tokens,
+        sarvam=True,
+    )
+    assert endpoint.default_max_output_tokens == 16_384
+    assert payload["max_tokens"] == 16_384
+    assert payload["reasoning_effort"] == "high"
+
+
+def test_explicit_output_budget_wins_and_other_providers_keep_their_defaults():
+    endpoint = ChatEndpoint("https://api.sarvam.ai/v2", "glm5.3", "synthetic-key")
+    payload, _ = translate_request(
+        {"input": "synthetic", "max_output_tokens": 9000}, endpoint.model,
+        default_max_output_tokens=endpoint.default_max_output_tokens,
+        sarvam=True,
+    )
+    assert payload["max_tokens"] == 9000
+    other, _ = translate_request({"input": "synthetic"}, "other-model")
+    assert "max_tokens" not in other
+
+
+@pytest.mark.parametrize(("codex_effort", "sarvam_effort"), [
+    ("minimal", "low"), ("low", "low"), ("medium", "high"),
+    ("high", "high"), ("xhigh", "max"), ("ultra", "max"), ("max", "max"),
+])
+def test_codex_reasoning_effort_maps_to_sarvam_supported_values(codex_effort, sarvam_effort):
+    payload, _ = translate_request(
+        {"input": "synthetic", "reasoning": {"effort": codex_effort}},
+        "deepseekv4.1-flash", sarvam=True,
+    )
+    assert payload["reasoning_effort"] == sarvam_effort
+
+
+def test_reasoning_none_disables_deepseek_thinking_but_uses_glm_lowest_effort():
+    deepseek, _ = translate_request(
+        {"input": "synthetic", "reasoning": {"effort": "none"}},
+        "deepseekv4.1-flash", sarvam=True,
+    )
+    glm, _ = translate_request(
+        {"input": "synthetic", "reasoning": {"effort": "none"}},
+        "glm5.3", sarvam=True,
+    )
+    assert deepseek["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert glm["reasoning_effort"] == "low"
+    assert "extra_body" not in glm
+
+
+def test_codex_output_schema_is_translated_to_sarvam_structured_output():
+    schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}
+    payload, _ = translate_request({"input": "synthetic", "text": {"format": {
+        "type": "json_schema", "name": "codex_output_schema", "strict": True, "schema": schema,
+    }}}, "glm5.3", sarvam=True)
+    assert payload["response_format"] == {"type": "json_schema", "json_schema": {
+        "name": "codex_output_schema", "strict": True, "schema": schema,
+    }}
+
+
+def test_sarvam_image_inputs_are_restricted_to_gemma_inline_data_urls():
+    image = {"type": "input_image", "image_url": "data:image/png;base64,c3ludGhldGlj"}
+    payload, _ = translate_request({"input": [{"type": "message", "role": "user", "content": [image]}]}, "gemma4", sarvam=True)
+    assert payload["messages"][0]["content"][0]["image_url"]["url"] == image["image_url"]
+    with pytest.raises(UnsupportedWireFeature, match="requires Gemma 4"):
+        translate_request({"input": [{"type": "message", "role": "user", "content": [image]}]}, "glm5.3", sarvam=True)
+    remote = {"type": "input_image", "image_url": "https://example.test/image.png"}
+    with pytest.raises(UnsupportedWireFeature, match="inline base64"):
+        translate_request({"input": [{"type": "message", "role": "user", "content": [remote]}]}, "gemma4", sarvam=True)
+
+
+@pytest.mark.parametrize(("model", "context"), [
+    ("glm5.3", 1_048_576), ("deepseekv4.1-flash", 1_048_576),
+    ("gemma4", 131_072), ("sarvam-105b", 131_072),
+    ("sarvam-105b-conversations", 32_768),
+])
+def test_sarvam_context_metadata_matches_current_model_ids(model, context):
+    endpoint = ChatEndpoint("https://api.sarvam.ai/v2", model, "") if model != "sarvam-105b-conversations" else ChatEndpoint("https://api.sarvam.ai/v1", model, "")
+    assert endpoint.effective_context_window == context
+
+
+def test_sarvam_context_override_cannot_exceed_published_model_limit():
+    endpoint = ChatEndpoint("https://api.sarvam.ai/v2", "sarvam-105b", "", context_window=500_000)
+    assert endpoint.effective_context_window == 131_072
+    assert ChatEndpoint("https://api.sarvam.ai/v2", "deepseekv4-flash", "").model == "deepseekv4.1-flash"
+    assert ChatEndpoint("https://api.sarvam.ai/v2", "deepseekv4-flash", "").effective_context_window == 1_048_576
+
+
+def test_sarvam_routes_and_models_are_exact_and_conversation_v1_is_preserved():
+    endpoint = ChatEndpoint("https://api.sarvam.ai/v1/chat/completions", "sarvam-105b-conversations", "")
+    assert endpoint.url == "https://api.sarvam.ai/v1/chat/completions"
+    with pytest.raises(ValueError, match="available on /v1 only"):
+        ChatEndpoint("https://api.sarvam.ai/v2", "sarvam-105b-conversations", "")
+    with pytest.raises(ValueError, match="exact Sarvam Chat Completions base URL"):
+        ChatEndpoint("https://api.sarvam.ai/v2/proxy", "deepseekv4.1-flash", "")
+    with pytest.raises(ValueError, match="not available on /v2"):
+        ChatEndpoint("https://api.sarvam.ai/v2", "glm5.2", "")
+
+
+@pytest.mark.parametrize(("base_url", "model", "message"), [
+    ("https://api.sarvam.ai/v2/responses", "glm5.3", "translates through Chat Completions"),
+    ("https://api.sarvam.ai/v1", "glm5.3", "requires the /v2"),
+    ("https://api.sarvam.ai/v2", "sarvam-105b-conversations", "available on /v1 only"),
+])
+def test_sarvam_route_model_mismatch_fails_with_repair_guidance(base_url, model, message):
+    with pytest.raises(ValueError, match=message):
+        ChatEndpoint(base_url, model, "")
+
+
+@pytest.mark.parametrize("invalid", [0, -1, True, "16384"])
+def test_invalid_output_budget_fails_closed(invalid):
+    with pytest.raises(UnsupportedWireFeature, match="positive integer"):
+        translate_request({"input": "synthetic", "max_output_tokens": invalid}, "test-model")
+
+
 def test_freeform_patch_is_exact_and_not_executed_by_adapter():
     patch = "*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch"
     payload, mapping = translate_request({"input": "patch", "tools": [{"type": "custom", "name": "apply_patch", "format": {"type": "grammar", "definition": "start: PATCH"}}]}, "test")
@@ -68,6 +184,26 @@ def test_stream_reports_actual_deltas_and_usage():
         assert "".join(event["delta"] for event in events if event["type"] == "response.output_text.delta") == "hello world"
         assert events[-1]["response"]["usage"]["total_tokens"] == 12
         assert events[-1]["response"]["output"][0]["content"][0]["text"] == "hello world"
+
+
+def test_stream_does_not_leak_sarvam_reasoning_trace_to_user_text():
+    with ResponsesAdapter(ChatEndpoint("http://127.0.0.1", "test", "")) as adapter:
+        events = []
+        adapter._stream(stream_chunks(
+            {"choices": [{"delta": {"reasoning_content": "private synthetic reasoning"}}]},
+            {"choices": [{"delta": {"content": "Visible answer"}, "finish_reason": "stop"}]},
+        ), SimpleNamespace(_event=events.append), {})
+        visible = "".join(event.get("delta", "") for event in events if event["type"] == "response.output_text.delta")
+        assert visible == "Visible answer"
+        assert "private synthetic reasoning" not in json.dumps(events)
+
+
+def test_content_filter_is_reported_as_a_provider_filter_not_transport_failure():
+    with ResponsesAdapter(ChatEndpoint("http://127.0.0.1", "test", "")) as adapter:
+        events = []
+        adapter._stream(stream_chunks({"choices": [{"delta": {}, "finish_reason": "content_filter"}]}), SimpleNamespace(_event=events.append), {})
+        assert events[-1]["type"] == "response.incomplete"
+        assert events[-1]["response"]["incomplete_details"]["reason"] == "content_filter"
 
 
 def test_cut_off_stream_is_not_success():

@@ -350,6 +350,32 @@ def test_missing_provider_blocks_only_its_goal_and_releases_the_lease(tmp_path, 
     assert store.claim()["id"] == following != identity
 
 
+def test_cycle_failure_records_safe_stage_without_persisting_missing_path(tmp_path):
+    from smara.native_goal_runtime import execute_cycle
+    from smara.native_provider import ChatEndpoint
+    store = GoalStore(tmp_path / "goals.sqlite")
+    identity = create(store, tmp_path)
+
+    class MissingSessionFile:
+        def __init__(self, *_args):
+            error = FileNotFoundError(2, "missing", r"C:\Users\private\secrets\provider-key.json")
+            error.smara_failure_context = "required_file_unavailable"
+            raise error
+
+    result = execute_cycle(store, store.claim(), endpoint=ChatEndpoint("http://127.0.0.1:9/v1", "synthetic", ""),
+        session_factory=MissingSessionFile)
+    event = result["events"][-1]
+    assert result["id"] == identity and result["state"] == "blocked" and result["lease"] is None
+    assert "starting the native session" in result["detail"]
+    assert "provider-key.json" not in json.dumps(event)
+    assert event["body"]["failure"] == {
+        "stage": "start_native_session", "error_type": "FileNotFoundError", "context": "required_file_unavailable"
+    }
+    with store.connect() as db:
+        stored = db.execute("SELECT body FROM goal_events WHERE goal_id=? ORDER BY seq DESC LIMIT 1", (identity,)).fetchone()[0]
+    assert "provider-key.json" not in stored and "C:\\Users\\private" not in stored
+
+
 def test_rejected_token_reservation_requires_an_explicit_budget_increase(tmp_path):
     store = GoalStore(tmp_path / "goals.sqlite")
     identity = create(store, tmp_path, max_token_estimate=4096)

@@ -28,6 +28,23 @@ class UnsupportedWireFeature(ValueError):
     pass
 
 
+SARVAM_CONTEXT_WINDOWS = {
+    "glm5.3": 1_048_576,
+    "deepseekv4.1-flash": 1_048_576,
+    "gemma4": 131_072,
+    "sarvam-105b": 131_072,
+    "sarvam-105b-conversations": 32_768,
+}
+SARVAM_V2_MODELS = frozenset({"glm5.3", "deepseekv4.1-flash", "gemma4", "sarvam-105b"})
+SARVAM_V1_MODELS = frozenset({"sarvam-105b", "sarvam-105b-conversations"})
+SARVAM_REASONING_MODELS = frozenset({"glm5.3", "deepseekv4.1-flash"})
+SARVAM_MODEL_ALIASES = {
+    "glm5.3-flash": "glm5.3",
+    "deepseekv4-flash": "deepseekv4.1-flash",
+    "deepseek-v4-flash": "deepseekv4.1-flash",
+}
+
+
 @dataclass(frozen=True)
 class ChatEndpoint:
     base_url: str
@@ -38,12 +55,34 @@ class ChatEndpoint:
 
     def __post_init__(self) -> None:
         parsed = urlparse(self.base_url)
+        if parsed.hostname == "api.sarvam.ai":
+            # Migrate IDs used by earlier Smara builds to Sarvam's current
+            # exact IDs before calculating limits or sending the request.
+            canonical = SARVAM_MODEL_ALIASES.get(self.model.strip().lower())
+            if canonical:
+                object.__setattr__(self, "model", canonical)
         if parsed.scheme not in {"https", "http"} or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("Invalid configured model endpoint")
         if parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
             raise ValueError("Remote model endpoints must use HTTPS")
         if parsed.query or parsed.fragment or not self.model.strip():
             raise ValueError("Invalid model endpoint or name")
+        path = parsed.path.rstrip("/") or "/"
+        if parsed.hostname == "api.sarvam.ai":
+            if path.endswith("/responses"):
+                raise ValueError("Smara's Codex-compatible adapter translates through Chat Completions. Set the base URL to https://api.sarvam.ai/v2, not /responses.")
+            if path not in {"/v1", "/v1/chat/completions", "/v2", "/v2/chat/completions"}:
+                raise ValueError("Use the exact Sarvam Chat Completions base URL: https://api.sarvam.ai/v1 or /v2.")
+            route_version = "v1" if path.startswith("/v1") else "v2"
+            if route_version == "v1" and self.model in SARVAM_V2_MODELS - {"sarvam-105b"}:
+                raise ValueError("This Sarvam open-weight model requires the /v2 Chat Completions API. Set the base URL to https://api.sarvam.ai/v2.")
+            if route_version == "v2" and self.model == "sarvam-105b-conversations":
+                raise ValueError("Sarvam 105B Conversations is available on /v1 only. Set the base URL to https://api.sarvam.ai/v1.")
+            allowed_models = SARVAM_V1_MODELS if route_version == "v1" else SARVAM_V2_MODELS
+            if self.model not in allowed_models:
+                route = "https://api.sarvam.ai/v1" if route_version == "v1" else "https://api.sarvam.ai/v2"
+                accepted = ", ".join(sorted(allowed_models))
+                raise ValueError(f"Sarvam model '{self.model}' is not available on /{route_version}. Use {route} with one of: {accepted}.")
         if self.auth_header.lower() not in {"authorization", "api-subscription-key"}:
             raise ValueError("Unsupported credential header")
         if self.context_window is not None and (isinstance(self.context_window, bool) or not isinstance(self.context_window, int) or self.context_window < 4096):
@@ -51,13 +90,34 @@ class ChatEndpoint:
 
     @property
     def effective_context_window(self) -> int | None:
+        provider_window = None
+        if urlparse(self.base_url).hostname == "api.sarvam.ai":
+            provider_window = SARVAM_CONTEXT_WINDOWS.get(self.model)
         if self.context_window is not None:
-            return self.context_window
+            return min(self.context_window, provider_window) if provider_window else self.context_window
         # Published provider capability metadata, not task/prompt routing.
-        # https://docs.sarvam.ai/api/getting-started/models/openweight/glm-5-3
-        if urlparse(self.base_url).hostname == "api.sarvam.ai" and self.model in {"glm5.3", "deepseekv4-flash"}:
-            return 1_048_576
-        return None  # Unknown is not a fabricated provider limit.
+        # https://docs.sarvam.ai/api/getting-started/models/openweight
+        return provider_window  # Unknown is not a fabricated provider limit.
+
+    @property
+    def default_max_output_tokens(self) -> int | None:
+        # Sarvam's /v2/chat/completions defaults max_tokens to 2,048. GLM-5.3
+        # bills reasoning against that same small cap, while its Responses
+        # endpoint has no default. Give this adapter a bounded, useful budget
+        # instead of silently inheriting the chat endpoint's short default.
+        parsed = urlparse(self.base_url)
+        if parsed.hostname == "api.sarvam.ai" and parsed.path.startswith("/v2") and self.model in SARVAM_V2_MODELS:
+            # Sarvam-105B has a documented Starter plan ceiling of 4,096;
+            # use that safe floor even on its V2 route. The open-weight V2
+            # model pages document larger token windows and support long turns.
+            return 4_096 if self.model == "sarvam-105b" else 16_384
+        if parsed.hostname == "api.sarvam.ai" and parsed.path.startswith("/v1") and self.model in SARVAM_V1_MODELS:
+            return 4_096
+        return None
+
+    @property
+    def is_sarvam(self) -> bool:
+        return urlparse(self.base_url).hostname == "api.sarvam.ai"
 
     @property
     def url(self) -> str:
@@ -71,7 +131,7 @@ class ChatEndpoint:
 
 
 def probe_endpoint(endpoint: ChatEndpoint, *, client: httpx.Client | None = None) -> dict[str, Any]:
-    """Send one fixed, one-token request to verify a configured model endpoint.
+    """Send one fixed, bounded request to verify a configured model endpoint.
 
     This is called only from the explicit Settings test action. Prompts, provider
     response bodies and credentials are never returned in diagnostics.
@@ -87,17 +147,14 @@ def probe_endpoint(endpoint: ChatEndpoint, *, client: httpx.Client | None = None
             headers=endpoint.headers(),
             json={
                 "model": endpoint.model,
-                "messages": [{"role": "user", "content": "Reply with OK."}],
-                "max_tokens": 1,
+                "messages": [{"role": "user", "content": "Reply exactly OK. Do not explain."}],
+                "max_tokens": 256,
+                **({"reasoning_effort": "low"} if endpoint.is_sarvam and endpoint.model in SARVAM_REASONING_MODELS else {}),
                 "stream": False,
             },
         )
-        if response.status_code in (401, 403):
-            raise ValueError("The model provider rejected the saved credential. Replace it in Settings → Models.")
-        if response.status_code in (402, 429):
-            raise ValueError("The model provider reported a quota or rate limit. Check its plan or retry later.")
         if response.status_code != 200:
-            raise ValueError(f"The model endpoint returned HTTP {response.status_code}; check its URL and model ID.")
+            raise ValueError(provider_status_message(response.status_code, endpoint))
         try:
             payload = response.json()
         except (ValueError, TypeError):
@@ -105,6 +162,9 @@ def probe_endpoint(endpoint: ChatEndpoint, *, client: httpx.Client | None = None
         choices = payload.get("choices") if isinstance(payload, dict) else None
         if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
             raise ValueError("The model endpoint responded, but not with a compatible chat-completion result.")
+        message = choices[0].get("message")
+        if not isinstance(message, dict) or not isinstance(message.get("content"), str) or not message["content"].strip():
+            raise ValueError("The endpoint is reachable, but the model returned no visible text within the small test budget. Check its reasoning and output-token limits.")
         return {
             "ok": True,
             "model": endpoint.model,
@@ -117,6 +177,27 @@ def probe_endpoint(endpoint: ChatEndpoint, *, client: httpx.Client | None = None
     finally:
         if owns_client:
             client.close()
+
+
+def provider_status_message(status: int, endpoint: ChatEndpoint) -> str:
+    """Translate provider HTTP status into safe, actionable setup guidance."""
+    if status in (401, 403):
+        return "The model provider rejected the saved API key or this key lacks access to the selected model. Check Settings → Models and the provider's model access."
+    if status == 402:
+        return "The model provider reports that its credit or quota is exhausted. Check the provider account."
+    if status == 404:
+        return "The provider endpoint or exact model ID was not found. Check the configured API version and model ID."
+    if status == 413:
+        return "The request is larger than the provider accepts. Reduce the attached files or message size and retry."
+    if status in (400, 422):
+        if endpoint.is_sarvam:
+            return "Sarvam rejected this request. Check the exact model ID, beta access for this API key, input/context size, and account token limits. Private provider details are withheld."
+        return "The provider rejected this request. Check the model ID, input size, and model token/parameter limits. Private provider details are withheld."
+    if status == 429:
+        return "The model provider rate limit was reached. Wait briefly and retry."
+    if status in (502, 503, 504):
+        return "The model provider is temporarily unavailable or overloaded. Wait briefly and retry."
+    return f"The model provider returned HTTP {status}. Check the endpoint and provider status; private response details are withheld."
 
 
 def _alias(namespace: str | None, name: str) -> str:
@@ -143,9 +224,71 @@ def _content(value: Any) -> Any:
     return result
 
 
-def translate_request(request: dict[str, Any], model: str) -> tuple[dict[str, Any], dict[str, dict]]:
+def _reasoning_effort(request: dict[str, Any], model: str) -> tuple[str | None, bool]:
+    """Map Codex effort settings to Sarvam's smaller documented set.
+
+    The boolean requests DeepSeek's documented no-thinking mode. GLM-5.3 has
+    no documented off switch on chat, so `none` maps to its lowest effort.
+    """
+    reasoning = request.get("reasoning")
+    effort = reasoning.get("effort") if isinstance(reasoning, dict) else None
+    if effort is None or model not in SARVAM_REASONING_MODELS:
+        return None, False
+    if not isinstance(effort, str):
+        raise UnsupportedWireFeature("Sarvam reasoning effort must be a supported text value")
+    value = effort.lower()
+    if value in {"none", "minimal", "low"}:
+        return "low", value == "none" and model == "deepseekv4.1-flash"
+    if value in {"medium", "high"}:
+        return "high", False
+    if value in {"xhigh", "ultra", "persistent", "max"}:
+        return "max", False
+    raise UnsupportedWireFeature("This Sarvam model accepts low, medium, high, or max reasoning effort")
+
+
+def _image_urls(request: dict[str, Any]):
+    inputs = request.get("input", [])
+    if isinstance(inputs, str):
+        return []
+    found = []
+    for item in inputs:
+        if not isinstance(item, dict) or item.get("type", "message") != "message":
+            continue
+        content = item.get("content", [])
+        if isinstance(content, list):
+            found.extend(part.get("image_url") for part in content if isinstance(part, dict) and part.get("type") == "input_image")
+    return found
+
+
+def _response_format(request: dict[str, Any]) -> dict[str, Any] | None:
+    text = request.get("text")
+    if not isinstance(text, dict):
+        return None
+    format_spec = text.get("format")
+    if format_spec is None:
+        return None
+    if not isinstance(format_spec, dict) or format_spec.get("type") != "json_schema":
+        raise UnsupportedWireFeature("Unsupported Responses text format")
+    schema = format_spec.get("schema")
+    name = format_spec.get("name", "codex_output_schema")
+    strict = format_spec.get("strict", False)
+    if not isinstance(schema, dict) or not isinstance(name, str) or not isinstance(strict, bool):
+        raise UnsupportedWireFeature("Invalid Responses JSON schema format")
+    return {"type": "json_schema", "json_schema": {"name": name, "strict": strict, "schema": schema}}
+
+
+def translate_request(
+    request: dict[str, Any], model: str, *, default_max_output_tokens: int | None = None,
+    sarvam: bool = False,
+) -> tuple[dict[str, Any], dict[str, dict]]:
     if request.get("previous_response_id"):
         raise UnsupportedWireFeature("This adapter requires full input history, not previous_response_id")
+    image_urls = _image_urls(request)
+    if sarvam and image_urls:
+        if model != "gemma4":
+            raise UnsupportedWireFeature("Sarvam image input requires Gemma 4; the selected Sarvam model accepts text only")
+        if any(not isinstance(url, str) or not url.startswith("data:image/") or ";base64," not in url for url in image_urls):
+            raise UnsupportedWireFeature("Sarvam accepts inline base64 images only; remote image URLs are not supported")
     mapping: dict[str, dict] = {}
     functions = []
 
@@ -170,7 +313,10 @@ def translate_request(request: dict[str, Any], model: str) -> tuple[dict[str, An
             grammar = spec.get("format", {}).get("definition")
             if grammar:
                 description += "\nTool input grammar:\n" + grammar
-        functions.append({"type": "function", "function": {"name": alias, "description": description, "parameters": parameters}})
+        function = {"name": alias, "description": description, "parameters": parameters}
+        if kind == "function" and isinstance(spec.get("strict"), bool):
+            function["strict"] = spec["strict"]
+        functions.append({"type": "function", "function": function})
 
     for spec in request.get("tools", []):
         tool(spec)
@@ -223,8 +369,26 @@ def translate_request(request: dict[str, Any], model: str) -> tuple[dict[str, An
     for key in ("temperature", "parallel_tool_calls"):
         if key in request:
             payload[key] = request[key]
-    if request.get("max_output_tokens"):
-        payload["max_tokens"] = request["max_output_tokens"]
+    response_format = _response_format(request)
+    if response_format:
+        payload["response_format"] = response_format
+    if sarvam and model in SARVAM_REASONING_MODELS:
+        effort, disable_thinking = _reasoning_effort(request, model)
+        if effort:
+            payload["reasoning_effort"] = effort
+        if disable_thinking:
+            payload["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+        elif response_format and model == "deepseekv4.1-flash":
+            # Sarvam documents that structured output with DeepSeek reasoning
+            # enabled may return content=null. Disable only for this request.
+            payload["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+    max_output_tokens = request.get("max_output_tokens")
+    if max_output_tokens is None:
+        max_output_tokens = default_max_output_tokens
+    if max_output_tokens is not None:
+        if isinstance(max_output_tokens, bool) or not isinstance(max_output_tokens, int) or max_output_tokens < 1:
+            raise UnsupportedWireFeature("max_output_tokens must be a positive integer")
+        payload["max_tokens"] = max_output_tokens
     return payload, mapping
 
 
@@ -278,7 +442,12 @@ class ResponsesAdapter:
                     request = json.loads(self.rfile.read(length))
                     if not isinstance(request, dict) or request.get("stream") is not True:
                         raise ValueError("This adapter requires streamed Responses requests")
-                    payload, mapping = translate_request(request, owner.endpoint.model)
+                    payload, mapping = translate_request(
+                        request,
+                        owner.endpoint.model,
+                        default_max_output_tokens=owner.endpoint.default_max_output_tokens,
+                        sarvam=owner.endpoint.is_sarvam,
+                    )
                     owner.research_guard.admit(request, payload, mapping, self.headers)
                 except ResearchLimitError as exc:
                     self._json_error(400, str(exc))
@@ -289,7 +458,7 @@ class ResponsesAdapter:
                 try:
                     with owner.client.stream("POST", owner.endpoint.url, headers=owner.endpoint.headers(), json=payload) as upstream:
                         if upstream.status_code != 200:
-                            self._json_error(upstream.status_code, "Configured provider rejected inference; its response body is withheld to protect secrets")
+                            self._json_error(upstream.status_code, provider_status_message(upstream.status_code, owner.endpoint))
                             return
                         self.send_response(200)
                         self.send_header("Content-Type", "text/event-stream")
@@ -397,8 +566,13 @@ class ResponsesAdapter:
                     for key in ("name", "arguments"):
                         current["function"][key] += call.get("function", {}).get(key, "") or ""
                 finish = choice.get("finish_reason") or finish
-        if not saw_done or finish not in {"stop", "tool_calls", "length"}:
+        if not saw_done or finish not in {"stop", "tool_calls", "length", "content_filter"}:
             raise UnsupportedWireFeature("Provider stream ended without a valid terminal event")
+        if finish == "content_filter":
+            response["status"] = "incomplete"
+            response["incomplete_details"] = {"reason": "content_filter"}
+            handler._event({"type": "response.incomplete", "response": response})
+            return
         if finish == "length":
             # Incomplete tool arguments must never reach the executor.
             response["status"] = "incomplete"
