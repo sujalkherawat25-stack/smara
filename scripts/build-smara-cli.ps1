@@ -10,13 +10,14 @@ try {
     $smaraCliArgs = @('-m','PyInstaller','--noconfirm','--clean','--onefile','--name','smara','--paths','src',
         '--distpath',$smaraCliDist,'--workpath','build\pyinstaller-native-cli','--specpath','build',
         '--add-data',((Join-Path $smaraCliRoot 'release\VERSION') + ';release'),
-        '--hidden-import','smara.native_tools','--hidden-import','smara.native_limits','--hidden-import','smara.native_documents','--hidden-import','smara.native_profiles','--hidden-import','smara.native_management','--hidden-import','smara.native_changes','--hidden-import','smara.native_schedule','--hidden-import','smara.native_browser','--collect-all','playwright')
+        '--hidden-import','smara.native_tools','--hidden-import','smara.native_limits','--hidden-import','smara.native_documents','--hidden-import','smara.native_profiles','--hidden-import','smara.native_management','--hidden-import','smara.native_changes','--hidden-import','smara.native_schedule','--hidden-import','smara.native_goals','--hidden-import','smara.native_goal_runtime','--hidden-import','smara.native_telegram','--hidden-import','smara.native_browser','--collect-all','playwright')
     foreach ($smaraCliExcluded in @('pandas','pyarrow','datasets','pytest','tkinter','_tkinter',
         'numpy','psycopg','psycopg_pool','smara.store',
         'smara.agent_tools','smara.autonomous_agent','smara.cli','smara.desktop_executor',
         'smara.local_agent_runtime','smara.self_healing','smara.swarm','smara.tool_synthesis')) {
         $smaraCliArgs += @('--exclude-module', $smaraCliExcluded)
     }
+    $smaraCliArgs += @('--hidden-import','smara.native_outcomes','--hidden-import','smara.native_voice')
     $smaraCliArgs += 'scripts\native_cli_entry.py'
     & $smaraCliPython @smaraCliArgs
     if ($LASTEXITCODE -ne 0) { throw 'Native CLI freezing failed' }

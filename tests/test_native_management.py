@@ -29,6 +29,29 @@ def test_bootstrap_preserves_original_state_and_hides_unknown_model_fields(setup
     assert value["preferences"]["projects"] == [{"workspace": str(root), "label": root.name}]
 
 
+def test_goal_management_uses_registered_project_model_and_shared_ledger(setup):
+    root, _, _ = setup
+    management.manage({"operation": "save_model", "profile": {"id": "goal-fixture", "label": "Synthetic goal model", "provider": "local", "model": "synthetic", "base_url": "http://127.0.0.1:9999/v1", "api_key": "local-fixture"}})
+    management.manage({"operation": "save_project_options", "workspace": str(root), "options": {"tools_enabled": True}})
+    request = {"action": "create", "workspace": str(root), "profile_id": "goal-fixture", "objective": "Inspect the fixture", "success_criteria": "Show evidence"}
+    goal = management.manage({"operation": "goals", "goal": request})
+    assert goal["state"] == "queued" and goal["spec"]["sandbox"] == "read-only"
+    assert goal["spec"]["tools_enabled"] is True
+    from smara.native_goals import GoalStore
+    shared = GoalStore()
+    assert shared.get(goal["id"])["spec"]["success_criteria"] == "Show evidence"
+    with pytest.raises(ValueError, match="configured model"):
+        management.manage({"operation": "goals", "goal": {**request, "profile_id": "unknown"}})
+
+
+def test_invalid_telegram_token_does_not_write_the_vault(setup):
+    _, _, vault = setup
+    before = vault.read_bytes() if vault.exists() else None
+    with pytest.raises(ValueError, match="BotFather"):
+        management.manage({"operation": "save_credential", "name": "SMARA_TELEGRAM_BOT_TOKEN", "provider": "telegram", "secret": "synthetic-invalid-token"})
+    assert (vault.read_bytes() if vault.exists() else None) == before
+
+
 def test_project_registration_canonical_dedup_and_no_cross_project_access(setup):
     root, state, _ = setup
     second = root / "project स्मारा 😀"

@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import NativeSettings from "./NativeSettings";
+import NativeGoals from "./NativeGoals";
+import NativeVoice, { ReadAloud } from "./NativeVoice";
+import { goalRequest, type GoalList } from "./goalApi";
 import NativeMarkdown from "./NativeMarkdown";
 import NativeFilePreview from "./NativeFilePreview";
 import NativeContextPicker from "./NativeContextPicker";
@@ -37,6 +40,8 @@ const NATIVE_DEVELOPER_INSTRUCTIONS = [
 
 export default function NativeApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [goalsOpen, setGoalsOpen] = useState(false);
+  const [goalWorking, setGoalWorking] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [setup, setSetup] = useState<NativeSetup | null>(null);
   const [addingProject, setAddingProject] = useState(false);
@@ -96,6 +101,21 @@ export default function NativeApp() {
   const settingsPendingRef = useRef(false);
   const reviewBusyRef = useRef(false);
   const turnSnapshot = useRef<{ id: string; workspace: string; thread: string } | null>(null);
+
+  useEffect(() => {
+    let disposed = false, pending = false;
+    const poll = async () => {
+      if (pending || !workspace) return;
+      pending = true;
+      try {
+        const value = await goalRequest<GoalList>("list", { workspace });
+        if (!disposed) setGoalWorking(value.goals.some(goal => !!goal.lease));
+      } catch { if (!disposed) setGoalWorking(false); }
+      finally { pending = false; }
+    };
+    void poll(); const timer = setInterval(() => void poll(), 2500);
+    return () => { disposed = true; clearInterval(timer); };
+  }, [workspace]);
 
   const reviewPending = (pending: boolean) => { reviewBusyRef.current = pending; setReviewBusy(pending); };
   const sealTurn = async () => {
@@ -363,7 +383,7 @@ export default function NativeApp() {
     await loadThread(clientRef.current!, id);
   };
   const send = async () => {
-    if (!draft.trim() || busyRef.current || lifecycleRef.current || loadingThreadRef.current || reviewBusyRef.current || approvals.length || !profile || built !== true) return;
+    if (!draft.trim() || goalWorking || busyRef.current || lifecycleRef.current || loadingThreadRef.current || reviewBusyRef.current || approvals.length || !profile || built !== true) return;
     const textToSend = draft;
     const filesToSend = [...contextFiles];
     if (!connected && !await connect()) return;
@@ -561,18 +581,19 @@ export default function NativeApp() {
       {!threads.length && <p>{connecting ? "Loading chats…" : "Your chats appear here."}</p>}{nextCursor && <button disabled={navigationLocked || loadingMore || !connected} onClick={() => void loadOlder()}>{loadingMore ? "Loading…" : "Show more"}</button>}</div>
       <div className="sidebar-bottom"><button disabled={navigationLocked} className={settingsOpen ? "selected" : ""} onClick={() => void toggleSettings()}>⚙ Settings</button></div>
     </aside><main>
-      <header className="native-topbar"><span className="project-icon" aria-hidden="true">▱</span><strong title={workspace}>{settingsOpen ? "Settings" : project?.label || "Choose a project"}</strong>{!settingsOpen && threadId && <span className="header-chat-title">{threadLabel(threads.find(thread => thread.id === threadId) ?? { id: threadId })}</span>}{!settingsOpen && <div className="workspace-actions"><button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? " •" : ""}</button><button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Terminal{terminalActive ? " •" : ""}</button></div>}</header>
+      <header className="native-topbar"><span className="project-icon" aria-hidden="true">▱</span><strong title={workspace}>{settingsOpen ? "Settings" : goalsOpen ? "Goals" : project?.label || "Choose a project"}</strong>{!settingsOpen && !goalsOpen && threadId && <span className="header-chat-title">{threadLabel(threads.find(thread => thread.id === threadId) ?? { id: threadId })}</span>}{!settingsOpen && <div className="workspace-actions"><button aria-pressed={goalsOpen} className={goalsOpen ? "selected" : ""} disabled={!workspace} onClick={() => setGoalsOpen(!goalsOpen)}>Goals{goalWorking ? " •" : ""}</button><button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => { setGoalsOpen(false); setPanel(panel === "changes" ? null : "changes"); }}>Changes{turnDiff ? " •" : ""}</button><button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy || goalWorking} onClick={() => { setGoalsOpen(false); setPanel(panel === "terminal" ? null : "terminal"); }}>Terminal{terminalActive ? " •" : ""}</button></div>}</header>
       {built === false && <div className="native-warning">Native runtime is missing. Build scripts/build-smara-native.ps1; no old-engine fallback is used.</div>}
       {error && <div role="alert" className="native-error">{error}{!settingsOpen && (!busy || uncertain) && <button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Retry setup</button>}<button aria-label="Dismiss error" onClick={() => setError("")}>×</button></div>}
-      {settingsOpen && setup ? <NativeSettings setup={setup} locked={connected || connecting} onUpdate={updateSetup} onClose={() => { if (!settingsPendingRef.current) setSettingsOpen(false); }} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : <>
+      {settingsOpen && setup ? <NativeSettings setup={setup} locked={connected || connecting} onUpdate={updateSetup} onClose={() => { if (!settingsPendingRef.current) setSettingsOpen(false); }} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : goalsOpen ? <NativeGoals key={workspace} workspace={workspace} profile={profile} locked={navigationLocked || terminalActive} onClose={() => setGoalsOpen(false)} onPreview={setPreviewPath} /> : <>
       <div className={`native-work-area ${panel ? "with-panel" : ""}`}>
       <div className="native-chat-area">
+      {goalWorking && <div className="native-warning">A goal is working in this project. <button onClick={() => setGoalsOpen(true)}>View progress or pause</button></div>}
       {uncertain && <div className="native-warning"><button onClick={() => void checkStatus()}>Check response status</button><button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Recover chat</button> The request may have been accepted. Your message will not be resent automatically.</div>}
       <div className="native-transcript" aria-live="polite">
         {busy && turnStartedAt && <p role="status">Working for {Math.max(0, Math.floor((activityClock - turnStartedAt) / 60000))}m {Math.max(0, Math.floor((activityClock - turnStartedAt) / 1000) % 60)}s · Stop is available below.</p>}
         {!!workers.length && <section className="native-workers"><strong>Workers · {workers.filter(worker => worker.status === "completed").length}/{workers.length} complete · changes are not auto-merged</strong>{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status}{worker.activity && <span> · {worker.activity}{worker.lastActivityAt && ` · ${Math.max(0, Math.floor((activityClock - worker.lastActivityAt) / 1000))}s ago`}</span>} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
         {!items.length && <div className="native-empty"><h1>What can I help you with?</h1><p>Research, build, and get work done.</p><div className="starter-cards">{[{ title: "Understand this project", text: "Inspect this project and explain its architecture, entry points and how to run its tests. Do not change files." }, { title: "Find & fix a bug", text: "Inspect this project for a reproducible bug. Show evidence, make a minimal fix, and run the relevant tests." }, { title: "Research a topic", text: "Research a topic using public sources. Read the actual clock for time-sensitive questions, verify claims against fetched pages and cite them. Ask me for the topic first." }].map(card => <button key={card.title} title={card.text} onClick={() => setDraft(card.text)}>{card.title}<span>↗</span></button>)}</div>{!profile && <small className="empty-hint">Add your model in Settings to get started.</small>}</div>}
-        {items.map(item => <article key={item.id} className={`native-item ${item.kind}`}><div className="item-heading"><small>{item.kind === "assistant" ? "Smara" : item.kind === "user" ? "You" : item.kind} {item.status && `· ${item.status}`}</small><button className="text-button" onClick={() => void navigator.clipboard.writeText(item.text).catch(() => setError("Clipboard is unavailable"))}>Copy</button></div>{item.kind === "assistant" ? <NativeMarkdown text={item.text} onPreviewFile={setPreviewPath} /> : item.kind === "user" ? <pre>{item.text}</pre> : item.kind === "commandExecution" ? <NativeCommand item={item} /> : <details open={item.status === "inProgress" || item.status === "failed"}><summary>Tool details · {item.text.length.toLocaleString()} characters</summary><pre>{item.text}</pre></details>}</article>)}
+        {items.map(item => <article key={item.id} className={`native-item ${item.kind}`}><div className="item-heading"><small>{item.kind === "assistant" ? "Smara" : item.kind === "user" ? "You" : item.kind} {item.status && `· ${item.status}`}</small><div>{item.kind === "assistant" && <ReadAloud text={item.text} disabled={busy} />}<button className="text-button" onClick={() => void navigator.clipboard.writeText(item.text).catch(() => setError("Clipboard is unavailable"))}>Copy</button></div></div>{item.kind === "assistant" ? <NativeMarkdown text={item.text} onPreviewFile={setPreviewPath} /> : item.kind === "user" ? <pre>{item.text}</pre> : item.kind === "commandExecution" ? <NativeCommand item={item} /> : <details open={item.status === "inProgress" || item.status === "failed"}><summary>Tool details · {item.text.length.toLocaleString()} characters</summary><pre>{item.text}</pre></details>}</article>)}
         {approvals.map(approval => <section className="native-approval" key={approval.id}>
           {approval.params.threadId !== undefined && approval.params.threadId !== threadId && <p>Worker / other native conversation: {String(approval.params.threadId)}. This request is not auto-approved.</p>}
           {approval.method === "item/tool/requestUserInput" ? <>
@@ -592,13 +613,13 @@ export default function NativeApp() {
       <footer><form className="native-composer" onSubmit={event => { event.preventDefault(); void send(); }}>
         {!!contextFiles.length && <div className="composer-files">{contextFiles.map(file => <span key={file.path}><button type="button" title={file.path} onClick={() => setPreviewPath(file.path)}>{file.name}</button><button type="button" aria-label={`Remove ${file.name}`} disabled={navigationLocked} onClick={() => setContextFiles(current => current.filter(item => item.path !== file.path))}>×</button></span>)}</div>}
         <textarea aria-label="Message Smara" rows={2} placeholder="Ask Smara anything…" value={draft} onChange={event => { setDraft(event.target.value); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 260)}px`; }} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
-        <div className="composer-toolbar"><div className="composer-context"><button type="button" aria-label="Add project files" title="Add project files" disabled={navigationLocked || !workspace} onClick={() => setContextOpen(true)}>＋</button><small>{connecting ? "Preparing project…" : ""}</small></div><div className="composer-actions">
+        <div className="composer-toolbar"><div className="composer-context"><button type="button" aria-label="Add project files" title="Add project files" disabled={navigationLocked || !workspace} onClick={() => setContextOpen(true)}>＋</button><NativeVoice key={workspace + threadId} disabled={navigationLocked} onTranscript={text => setDraft(current => current ? current + "\n" + text : text)} /><small>{connecting ? "Preparing project…" : ""}</small></div><div className="composer-actions">
           <select aria-label="Model" title="Choose a model" value={profile} disabled={navigationLocked} onChange={event => void selectModel(event.target.value)}><option value="" disabled>Choose model</option>{profiles.map(model => <option value={model.id} key={model.id}>{model.label}</option>)}</select>
-          <button className={busy ? "stop-button" : "primary"} aria-label={busy ? "Stop response" : "Send message"} title={busy ? "Stop response" : "Send message"} type={busy ? "button" : "submit"} disabled={reviewBusy || connecting || loadingThread || (busy ? !turnId : !profile || built !== true || !draft.trim() || approvals.length > 0)} onClick={busy ? () => void stopTurn() : undefined}>{busy ? "■" : "↑"}</button>
+          <button className={busy ? "stop-button" : "primary"} aria-label={busy ? "Stop response" : "Send message"} title={busy ? "Stop response" : "Send message"} type={busy ? "button" : "submit"} disabled={reviewBusy || connecting || loadingThread || (busy ? !turnId : goalWorking || !profile || built !== true || !draft.trim() || approvals.length > 0)} onClick={busy ? () => void stopTurn() : undefined}>{busy ? "■" : "↑"}</button>
         </div></div>
       </form><div className="composer-status"><small role="status">{reviewBusy ? "Saving local review…" : busy || uncertain || loadingThread || (status !== "Ready" && status !== "completed") ? status : ""}</small><small>Shift+Enter for a new line</small></div></footer>
       </div>
-      {panel === "changes" && <NativeChanges key={workspace + threadId} workspace={workspace} threadId={threadId} locked={navigationLocked || terminalActive} revision={reviewRevision} notice={reviewNotice} onBusyChange={reviewPending} onPreviewFile={setPreviewPath} onClose={() => setPanel(null)} />}
+      {panel === "changes" && <NativeChanges key={workspace + threadId} workspace={workspace} threadId={threadId} locked={navigationLocked || terminalActive || goalWorking} revision={reviewRevision} notice={reviewNotice} onBusyChange={reviewPending} onPreviewFile={setPreviewPath} onClose={() => setPanel(null)} />}
       {panel === "terminal" && <NativeTerminal workspace={workspace} connected={connected} session={terminalSession} interactiveSupported={terminalPlatformSupported} onConnect={() => { void connect(); }} onStart={() => startTerminal()} onInput={value => { void writeTerminal(value); }} onInterrupt={interruptTerminal} onStop={() => { void stopTerminal(); }} onResize={resizeTerminal} onClear={() => setTerminalSession(current => current ? { ...current, output: "", truncated: false } : current)} onClose={() => setPanel(null)} />}
       </div>
       </>}

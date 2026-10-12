@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 
-function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = true, terminalPlatformSupported = true, projectOptions } = {}) {
+function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = true, terminalPlatformSupported = true, projectOptions, backgroundGoal = false } = {}) {
   const slots = [], calls = [], effects = [], timers = new Set();
   let cursor = 0, dirty = true, tree, failResume = false, currentRpc;
   const setup = {
@@ -82,6 +82,9 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
     if (name === "@tauri-apps/api/core") return { invoke: async () => ({ built: true, windowsTerminalBuild: terminalPlatformSupported }) };
     if (name.endsWith("NativeSettings")) return { default: Settings, __esModule: true };
+    if (name.endsWith("NativeGoals")) return { default: () => null, __esModule: true };
+    if (name.endsWith("NativeVoice")) return { default: () => null, ReadAloud: () => null, __esModule: true };
+    if (name.endsWith("goalApi")) return { goalRequest: async () => ({ goals: backgroundGoal ? [{ lease: "synthetic-active-goal" }] : [], service: {} }) };
     if (name.endsWith("NativeMarkdown")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeFilePreview")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeContextPicker")) return { default: ContextPicker, __esModule: true };
@@ -128,6 +131,14 @@ test("turn snapshots are local, captured before acceptance and sealed after comp
   await f.flush();
   assert.equal(f.calls.filter(call => call.method === "review/seal").length, 1);
   assert.deepEqual(f.calls.find(call => call.method === "turn/start").params.input, [{ type: "text", text: "Synthetic coding task", text_elements: [] }]);
+});
+
+test("an active background goal blocks a new foreground turn", async () => {
+  const f = fixture({ backgroundGoal: true }); await f.flush(); await f.enter("Another task in the same project");
+  assert.equal(f.button("Send message").props.disabled, true);
+  f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} });
+  await f.flush();
+  assert.equal(f.calls.some(call => call.method === "turn/start"), false);
 });
 
 test("Changes is readable during work but writes and navigation remain locked", async () => {

@@ -68,6 +68,11 @@ try {
         '--hidden-import', 'smara.native_tools'
         '--hidden-import', 'smara.native_limits'
         '--hidden-import', 'smara.native_documents'
+        '--hidden-import', 'smara.native_goals'
+        '--hidden-import', 'smara.native_goal_runtime'
+        '--hidden-import', 'smara.native_telegram'
+        '--hidden-import', 'smara.native_outcomes'
+        '--hidden-import', 'smara.native_voice'
         '--hidden-import', 'smara.native_browser'
         '--collect-all', 'playwright'
     )

@@ -153,6 +153,12 @@ def manage(request):
     if not isinstance(request, dict) or not isinstance(request.get("operation"), str):
         raise ValueError("Invalid native management request")
     operation = request["operation"]
+    if operation == "voice":
+        from .native_voice import operate
+        return operate(request.get("voice") or {})
+    if operation == "goals":
+        from .native_goals import operate
+        return operate(request.get("goal") or {})
     if operation == "review":
         from .native_changes import operate
         return operate(request.get("review") or {})
@@ -210,6 +216,8 @@ def manage(request):
             name = str(request.get("name") or "")
             if provider in PROVIDERS and name.upper() != PROVIDERS[provider][1]:
                 raise ValueError("Search key alias does not match the selected provider")
+            if provider == "telegram" and (name.upper() != "SMARA_TELEGRAM_BOT_TOKEN" or not re.fullmatch(r"\d+:[A-Za-z0-9_-]{20,}", str(request.get("secret") or "").strip())):
+                raise ValueError("Enter the bot token issued by Telegram's BotFather")
             vault_before = read_object(vault_path())
             put_credential(name, request.get("secret"), provider)
             if provider in PROVIDERS:
@@ -273,6 +281,12 @@ def manage(request):
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
+    if args[:1] == ["--native-goals"]:
+        from .native_goal_runtime import run
+        from .native_goals import GoalStore
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--store", type=Path)
+        return run(GoalStore(parser.parse_args(args[1:]).store))
     if args == ["--native-app-server"]:
         from .native_runtime import serve_bootstrap
         return serve_bootstrap()
@@ -291,7 +305,10 @@ def main(argv=None):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="strict")
     try:
-        request = json.loads(sys.stdin.read(131073))
+        raw = sys.stdin.read(4_194_305)
+        if len(raw) > 4_194_304:
+            raise ValueError("Native management request exceeds 4 MB; use a shorter goal or project file references")
+        request = json.loads(raw)
         result = manage(request)
         print(json.dumps({"result": result}, ensure_ascii=True))
         return 0

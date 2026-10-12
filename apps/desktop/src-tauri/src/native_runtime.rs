@@ -238,7 +238,7 @@ fn start_session(app: AppHandle, workspace: String, profile_id: String, tools_en
         return Err("Native transport stdio pipes are missing".into());
     };
     let config = json!({"binary": native_binary, "workspace": root,
-        "home": super::app_data_dir().join("native-runtime"), "model": profile.model,
+        "home": super::state_path().parent().unwrap_or(std::path::Path::new(".")).join("native-runtime"), "model": profile.model,
         "base_url": profile.base_url, "api_key": secret, "auth_header": profile.auth_header, "context_window": profile.context_window,
         "tools_enabled": tools_enabled.unwrap_or(false), "workers_enabled": workers_enabled.unwrap_or(false), "browser_origins": browser_origins.unwrap_or_default()});
     if writeln!(input, "{config}").and_then(|_| input.flush()).is_err() {

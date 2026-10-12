@@ -168,13 +168,16 @@ impl FileSystemSandboxRunner {
                 "filesystem sandbox cannot be enforced on this executor".to_string(),
             ));
         }
-        // Requests use absolute paths; the helper can start at the filesystem root even if
-        // the policy cwd was removed. Keep its drive or share for Windows `:root` rules.
-        let helper_cwd = cwd
-            .native
-            .ancestors()
-            .last()
-            .ok_or_else(|| invalid_request("filesystem sandbox cwd has no root".to_string()))?;
+        // Windows direct-spawn enforcement reevaluates workspace rules at the
+        // process cwd. Keep an existing policy cwd instead of rebasing its
+        // workspace grants to the drive root. Absolute requests still allow
+        // the root fallback when the original directory has disappeared.
+        let helper_cwd = if cfg!(windows) && cwd.native.is_dir() {
+            cwd.native.clone()
+        } else {
+            cwd.native.ancestors().last()
+                .ok_or_else(|| invalid_request("filesystem sandbox cwd has no root".to_string()))?
+        };
         let command = SandboxCommand {
             program: helper.as_path().as_os_str().to_owned(),
             args: vec![CODEX_FS_HELPER_ARG1.to_string()],

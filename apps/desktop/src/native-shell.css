@@ -224,3 +224,23 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .native-context-dialog > footer { display: flex; align-items: center; gap: 18px; padding: 18px; }
 .native-context-dialog footer button { flex-shrink: 0; }
 .interactive-terminal-input button { flex-shrink: 0; }
+.native-goals { flex: 1; min-height: 0; overflow: auto; padding: 24px 32px; }
+.goals-heading, .goals-service, .goal-state { display: flex; align-items: center; gap: 16px; justify-content: space-between; }
+.goals-heading h2 { margin: 0; }.goals-heading p, .goals-service small { color: #a6b4ac; }
+.goals-service { flex-wrap: wrap; margin: 16px 0; padding: 14px; border: 1px solid #39453f; border-radius: 10px; }
+.goals-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; }
+.goals-list { display: flex; flex-direction: column; gap: 8px; }
+.native-app .goals-list button { text-align: left; display: flex; flex-direction: column; gap: 8px; }
+.goals-list strong { overflow-wrap: anywhere; font-weight: 500; }.goals-list small { color: #a6b4ac; }
+.goal-detail { min-width: 0; }.goal-detail textarea { min-height: 90px; width: 100%; resize: vertical; padding: 10px; border-radius: 8px; background: #202624; color: inherit; }
+.goal-detail dd { margin: 6px 0 20px; white-space: pre-wrap; }.goal-detail dt { color: #a6b4ac; }
+.goal-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; }
+.goal-detail > details { margin-top: 24px; }.goal-state span { flex-shrink: 0; color: #97ceb3; }
+@media (max-width: 850px) { .native-goals { padding: 18px; }.goals-layout { grid-template-columns: 1fr; }.goals-list { max-height: 220px; overflow: auto; } }
+.voice-input { position: relative; display: flex; align-items: center; gap: 8px; }
+.voice-input > small, .voice-read > small { max-width: 320px; color: #f2b7aa; }
+.voice-review { position: absolute; bottom: 40px; left: 0; width: min(380px, 70vw); padding: 16px; background: #202326; border: 1px solid #454b51; border-radius: 12px; display: flex; flex-wrap: wrap; gap: 10px; z-index: 4; box-shadow: 0 8px 32px #0006; }
+.voice-review small { flex-basis: 100%; line-height: 1.5; }
+.voice-read { display: inline-flex; gap: 8px; align-items: center; }
+.goal-outcome { border: 1px solid #454b51; border-radius: 12px; padding: 16px; margin: 16px 0; }
+.goal-outcome blockquote { margin: 12px 0; padding-left: 16px; border-left: 3px solid #54756b; overflow-wrap: anywhere; }

@@ -1,0 +1,17 @@
+import { invoke } from "@tauri-apps/api/core";
+
+export type GoalState = "queued" | "running" | "awaiting_approval" | "paused" | "blocked" | "ready_for_review" | "completed" | "stopped";
+export type Goal = {
+  id: string; state: GoalState; session_id: string | null; lease: string | null;
+  cycles: number; requests: number; token_estimate: number; detail: string;
+  spec: { objective: string; success_criteria: string; workspace: string; profile_id: string; sandbox: string; task_kind?: string; max_cycles: number; max_requests: number; max_token_estimate: number };
+  checkpoint: { summary?: string; next_step?: string; plan?: string[]; completed_steps?: string[]; evidence?: string[]; outputs?: string[]; outcome?: { passed: boolean; elapsed_seconds: number; checks: { name: string; passed: boolean; detail: string }[]; sources: { url: string }[]; failed_pages: string[]; claims: { claim: string; url: string; quote: string; quote_found: boolean }[] } };
+  events?: { seq: number; kind: string; body: { summary?: string } }[];
+  approvals?: { id: string; method: string; params: Record<string, unknown> }[];
+};
+export type GoalList = { goals: Goal[]; service: { running?: boolean; heartbeat?: number; pid?: number } };
+export type TelegramStatus = { configured: boolean; paired: boolean; health?: { status?: string; detail?: string; last_poll?: number }; service?: { running?: boolean }; options?: { workspace?: string; profile_id?: string; sandbox?: string } };
+export const goalRequest = <T,>(action: string, values: Record<string, unknown> = {}) =>
+  invoke<T>("native_manage", { request: { operation: "goals", goal: { action, ...values } } });
+export const goalLabel = (state: GoalState) => ({ queued: "Queued", running: "Working", awaiting_approval: "Needs your response", paused: "Paused", blocked: "Needs attention", ready_for_review: "Ready for review", completed: "Completed", stopped: "Stopped" })[state];
+export const goalActive = (goal: Goal) => !!goal.lease;

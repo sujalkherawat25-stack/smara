@@ -341,6 +341,14 @@ def preview(repo, view, thread, base=None):
 
 def operate(request):
     """Allowlisted UI/CLI operations. Snapshots never enter Git commits or prompts."""
+    if request.get("operation") in {"apply", "recover"}:
+        from .native_goals import project_activity
+        with project_activity(request.get("workspace")):
+            return _operate(request)
+    return _operate(request)
+
+
+def _operate(request):
     with review_lock():
         repo = Repository(request.get("workspace"))
         operation = request.get("operation")

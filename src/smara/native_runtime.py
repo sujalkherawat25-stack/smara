@@ -15,9 +15,56 @@ import re
 import subprocess
 import sys
 import threading
+import uuid
 from typing import Any
 
 from .native_provider import ChatEndpoint, ResponsesAdapter
+
+
+class NativeProjectActivity:
+    """Conservative ownership projection; native events remain authoritative."""
+    def __init__(self):
+        self.pending, self.turns, self.completed, self.workers = set(), set(), set(), set()
+
+    @property
+    def busy(self):
+        return bool(self.pending or self.turns or self.workers)
+
+    def request(self, message):
+        self.pending.add(json.dumps(message["id"]))
+
+    def collaboration(self, item):
+        if item.get("type") != "collabAgentToolCall":
+            return
+        for thread in item.get("receiverThreadIds") or []:
+            status = (item.get("agentsStates") or {}).get(thread, {}).get("status")
+            if status in {"completed", "failed", "shutdown", "notFound"}:
+                self.workers.discard(thread)
+            else:
+                self.workers.add(thread)
+
+    def observe(self, message):
+        if "id" in message and not message.get("method"):
+            self.pending.discard(json.dumps(message["id"]))
+            result = message.get("result") or {}
+            turn = result.get("turn") or {}
+            if turn.get("status") == "inProgress" and turn.get("id") not in self.completed:
+                self.turns.add(turn["id"])
+            for resumed in (result.get("thread") or {}).get("turns", []):
+                if resumed.get("status") == "inProgress" and resumed.get("id") not in self.completed:
+                    self.turns.add(resumed["id"])
+                for item in resumed.get("items") or []:
+                    self.collaboration(item)
+        params = message.get("params") or {}
+        if message.get("method") in {"item/started", "item/completed"}:
+            self.collaboration(params.get("item") or {})
+        turn = params.get("turn") or {}
+        if message.get("method") == "turn/started" and turn.get("id") not in self.completed:
+            self.turns.add(turn["id"])
+        if message.get("method") == "turn/completed":
+            self.completed.add(turn["id"])
+            self.turns.discard(turn["id"])
+            self.workers.discard(params.get("threadId"))
 
 
 def source_root() -> Path:
@@ -107,11 +154,11 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
     }
     if os.name == "nt":
         settings["windows.sandbox"] = "unelevated"
-        # Prefer the source runtime's MXC backend on supported Windows hosts;
-        # it preserves the workspace sandbox while allowing ConPTY streaming.
-        # The restricted-token backend remains the safe availability fallback
-        # for non-streaming work; there is never an unsandboxed retry.
-        settings["features.prefer_mxc"] = True
+        # MXC remains available in the imported runtime, but this host's
+        # end-to-end probe showed workspace writes failing there. Use the
+        # verified restricted-token sandbox until MXC passes the same gate.
+        # Both modes remain sandboxed; no unsandboxed retry is permitted.
+        settings["features.prefer_mxc"] = False
     if adapter.endpoint.effective_context_window:
         settings["model_context_window"] = adapter.endpoint.effective_context_window
         settings["model_auto_compact_token_limit"] = int(adapter.endpoint.effective_context_window * .8)
@@ -181,6 +228,8 @@ def runtime_home() -> Path:
     explicit = os.getenv("SMARA_NATIVE_HOME")
     if explicit:
         return Path(explicit).expanduser().resolve()
+    if os.getenv("SMARA_DESKTOP_STATE"):
+        return Path(os.environ["SMARA_DESKTOP_STATE"]).resolve().parent / "native-runtime"
     app_data = Path(os.getenv("APPDATA", str(Path.home() / ".config")))
     return app_data / "Smara" / "native-runtime"
 
@@ -199,6 +248,8 @@ def print_smara_help() -> None:
     print("  smara --smara-workers [native args] Enable parent-directed isolated coding checkouts")
     print("  smara --smara-browser-origin URL   Opt in to an exact public DOM-browser origin (repeatable)")
     print("  smara schedule --help              Manage paused-by-default, bounded read-only jobs")
+    print("  smara goals --help                 Persistent goals, continuation and Telegram controls")
+    print("  smara voice --help                 Explicit Sarvam transcription and read-aloud audio")
     print("  smara changes --help               Review Git changes and explicitly stage/revert/undo")
     print("  smara tools-serve --workspace DIR  Serve Smara MCP tools on stdio")
     print("  smara settings                    Show native project/model/search setup (no secret values)")
@@ -238,14 +289,46 @@ def serve_bootstrap(input_stream=None, output_stream=None) -> int:
             cwd=workspace, env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        from .native_goals import GoalStore
+        goals = GoalStore(home / "native-goals.sqlite")
+        owner = uuid.uuid4().hex
+        activity_lock, output_lock = threading.Lock(), threading.Lock()
+        project_activity = NativeProjectActivity()
+        ended = threading.Event()
+
+        def write_output(line):
+            with output_lock:
+                output_stream.write(line)
+                output_stream.flush()
+
+        def activity():
+            while not ended.wait(2):
+                with activity_lock:
+                    if project_activity.busy:
+                        try:
+                            goals.interactive(workspace, owner, True)
+                        except (ValueError, OSError):
+                            # The existing lease remains conservative until EOF.
+                            pass
+
+        threading.Thread(target=activity, daemon=True).start()
         def forward_input():
             try:
                 for line in input_stream:
-                    if json.loads(line).get("method") == "smara/shutdown":
+                    message = json.loads(line)
+                    if message.get("method") == "smara/shutdown":
                         # EOF enters the copied app-server's connection cleanup:
                         # it cancels threads and closes managed tool processes.
                         # TerminateProcess skips that cleanup on Windows.
                         return
+                    if message.get("method") in {"turn/start", "thread/resume", "command/exec"} and "id" in message:
+                        with activity_lock:
+                            try:
+                                goals.interactive(workspace, owner, True)
+                            except ValueError as exc:
+                                write_output(json.dumps({"id": message["id"], "error": {"code": -32000, "message": str(exc)}}) + "\n")
+                                continue
+                            project_activity.request(message)
                     process.stdin.write(line)
                     process.stdin.flush()
             except (BrokenPipeError, OSError, ValueError):
@@ -266,8 +349,12 @@ def serve_bootstrap(input_stream=None, output_stream=None) -> int:
         threading.Thread(target=drain_errors, daemon=True).start()
         try:
             for line in process.stdout:
-                output_stream.write(line)
-                output_stream.flush()
+                message = json.loads(line)
+                with activity_lock:
+                    project_activity.observe(message)
+                    if not project_activity.busy:
+                        goals.interactive(workspace, owner, False)
+                write_output(line)
             return process.wait()
         finally:
             if process.poll() is None:
@@ -278,10 +365,22 @@ def serve_bootstrap(input_stream=None, output_stream=None) -> int:
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
+            ended.set()
+            goals.interactive(workspace, owner, False)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    if args[:1] == ["voice"]:
+        from .native_voice import main as voice_main
+        return voice_main(args[1:])
+    if args[:1] == ["goals"]:
+        from .native_goals import main as goals_main
+        try:
+            return goals_main(args[1:])
+        except (RuntimeError, ValueError, OSError) as exc:
+            print(str(exc) if isinstance(exc, ValueError) else "Goal service is unavailable; check local settings and the saved session", file=sys.stderr)
+            return 1
     if args[:1] == ["changes"]:
         from .native_changes import main as changes_main
         configure_protocol_stdio(sys.stdin, sys.stdout)
@@ -354,7 +453,9 @@ def main(argv: list[str] | None = None) -> int:
                 browser_origins=browser_origins)
             # The adapter belongs to this invocation. A detached shared daemon
             # must not retain its now-dead URL/token after the CLI exits.
-            return subprocess.call([str(binary), *options, "--no-daemon", *args], env=environment)
+            from .native_goals import project_activity
+            with project_activity(Path.cwd()):
+                return subprocess.call([str(binary), *options, "--no-daemon", *args], env=environment)
     except (RuntimeError, ValueError, KeyError, IndexError, OSError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

@@ -27,12 +27,12 @@ class DocumentError(ValueError):
     """Secret-free diagnostic; raw provider responses are never exposed."""
 
 
-def sarvam_key():
+def sarvam_key(credential_name="SMARA_OCR_API_KEY"):
     from .native_profiles import load_profiles, resolve_credential, resolve_profile_key
     profiles, active, credentials = load_profiles()
     # A dedicated OCR credential is intentional. Otherwise prefer the active
     # Sarvam profile, not an old shared alias left behind by prior engines.
-    key = resolve_credential("SMARA_OCR_API_KEY", credentials, allow_environment=False)
+    key = resolve_credential(credential_name, credentials, allow_environment=False)
     if not key:
         ordered = sorted(profiles, key=lambda profile: profile.get("id") != active)
         for profile in ordered:

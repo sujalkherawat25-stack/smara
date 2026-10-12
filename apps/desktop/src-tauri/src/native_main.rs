@@ -59,7 +59,7 @@ fn management(request: Value) -> Result<Value, String> {
     let output = process.stdout.take().ok_or("Settings output unavailable")?;
     let reader = std::thread::spawn(move || {
         let mut bytes = Vec::new();
-        output.take(2_000_001).read_to_end(&mut bytes).map(|_| bytes)
+        output.take(8_000_001).read_to_end(&mut bytes).map(|_| bytes)
     });
     let mut finished = false;
     for _ in 0..300 {
@@ -71,18 +71,18 @@ fn management(request: Value) -> Result<Value, String> {
         return Err("Settings request timed out; check saved state before retrying".into());
     }
     let bytes = reader.join().map_err(|_| "Cannot read settings response")?.map_err(|_| "Cannot read settings response")?;
-    if bytes.len() > 2_000_000 { return Err("Settings response exceeds safety limit".into()); }
+    if bytes.len() > 8_000_000 { return Err("Settings response exceeds safety limit".into()); }
     let reply: Value = serde_json::from_slice(&bytes).map_err(|_| "Invalid settings response")?;
     if let Some(error) = reply.get("error").and_then(Value::as_str) { return Err(error.to_owned()); }
     reply.get("result").cloned().ok_or("Missing settings response".into())
 }
 #[tauri::command]
 async fn native_manage(request: Value) -> Result<Value, String> {
-    if !matches!(request.get("operation").and_then(Value::as_str), Some("bootstrap" | "add_project" | "select_project" | "save_project_options" | "select_model" | "select_search" | "save_credential" | "delete_credential" | "save_model" | "test_model" | "test_search")) {
+    if !matches!(request.get("operation").and_then(Value::as_str), Some("bootstrap" | "goals" | "voice" | "add_project" | "select_project" | "save_project_options" | "select_model" | "select_search" | "save_credential" | "delete_credential" | "save_model" | "test_model" | "test_search")) {
         return Err("Unsupported UI settings operation; secret reads and legacy execution are unavailable".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        if request["operation"] == "bootstrap" { management(request) }
+        if request["operation"] == "bootstrap" || request["operation"] == "goals" || request["operation"] == "voice" { management(request) }
         else { native_runtime::with_disconnected(|| management(request)) }
     }).await.map_err(|_| "Settings worker failed".to_owned())?
 }
