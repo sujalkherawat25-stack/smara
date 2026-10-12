@@ -1,6 +1,6 @@
 [package]
 name = "smara-desktop"
-version = "0.1.15"
+version = "0.1.19"
 description = "Smara's lightweight local executor companion"
 authors = ["Syntarus"]
 edition = "2021"

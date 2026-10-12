@@ -29,6 +29,32 @@ def default_path():
     return runtime_home() / "native-goals.sqlite"
 
 
+def strip_windows_verbatim_prefix(value):
+    """Convert Windows extended paths to ordinary drive/UNC spelling."""
+    text = os.fspath(value)
+    unc_prefix = "\\\\?\\UNC\\"
+    if text[:len(unc_prefix)].casefold() == unc_prefix.casefold():
+        return "\\\\" + text[len(unc_prefix):]
+    drive_prefix = "\\\\?\\"
+    if text.startswith(drive_prefix):
+        return text[len(drive_prefix):]
+    return text
+
+
+def workspace_path(workspace):
+    """Resolve a project and remove Rust's Windows-only verbatim prefix."""
+    value = os.fspath(workspace)
+    if os.name == "nt":
+        value = strip_windows_verbatim_prefix(value)
+    text = str(Path(value).resolve())
+    return strip_windows_verbatim_prefix(text) if os.name == "nt" else text
+
+
+def workspace_key(workspace):
+    """Return one indexed identity for Python and Rust canonical paths."""
+    return os.path.normcase(workspace_path(workspace))
+
+
 def goal_spec(value):
     requested = Path(str(value.get("workspace", "")))
     if not requested.is_absolute():
@@ -36,7 +62,7 @@ def goal_spec(value):
     root = requested.resolve(strict=True)
     if not root.is_dir():
         raise ValueError("Choose an existing project folder")
-    result = {"workspace": str(root)}
+    result = {"workspace": strip_windows_verbatim_prefix(root) if os.name == "nt" else str(root)}
     for field, limit in (("objective", 100_000), ("success_criteria", 30_000), ("profile_id", 48)):
         text = value.get(field)
         if not isinstance(text, str) or not text.strip() or len(text) > limit:
@@ -45,6 +71,10 @@ def goal_spec(value):
     if value.get("sandbox", "read-only") not in {"read-only", "workspace-write"}:
         raise ValueError("Choose read-only or project editing access")
     result["sandbox"] = value.get("sandbox", "read-only")
+    origin_thread_id = value.get("origin_thread_id", "")
+    if not isinstance(origin_thread_id, str) or len(origin_thread_id) > 128 or any(ord(char) < 32 for char in origin_thread_id):
+        raise ValueError("Invalid conversation association")
+    result["origin_thread_id"] = origin_thread_id
     from .native_outcomes import KINDS
     kind = value.get("task_kind", "general")
     if kind not in KINDS:
@@ -59,7 +89,7 @@ def goal_spec(value):
         raise ValueError("Time-sensitive must be true or false")
     result["time_sensitive"] = sensitive
     for field, default, lower, upper in (("max_cycles", 8, 1, 100), ("max_requests", 30, 1, 500),
-            ("max_token_estimate", 500_000, 4096, 20_000_000), ("cycle_seconds", 300, 10, 3600),
+            ("max_token_estimate", 500_000, 4096, 20_000_000), ("cycle_seconds", 900, 10, 3600),
             ("interval_seconds", 30, 0, 86400)):
         number = value.get(field, default)
         if type(number) is not int or not lower <= number <= upper:
@@ -78,6 +108,7 @@ class GoalStore:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS goals (
                     id TEXT PRIMARY KEY, spec TEXT NOT NULL, state TEXT NOT NULL,
+                    workspace_key TEXT NOT NULL DEFAULT '',
                     session_id TEXT, turn_id TEXT, lease TEXT, due REAL NOT NULL,
                     created REAL NOT NULL, updated REAL NOT NULL,
                     cycles INTEGER NOT NULL DEFAULT 0, requests INTEGER NOT NULL DEFAULT 0,
@@ -102,6 +133,17 @@ class GoalStore:
                     chat_id INTEGER NOT NULL, text TEXT NOT NULL, artifact TEXT,
                     state TEXT NOT NULL DEFAULT 'pending');
             """)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(goals)")}
+            if "workspace_key" not in columns:
+                db.execute("ALTER TABLE goals ADD COLUMN workspace_key TEXT NOT NULL DEFAULT ''")
+            for row in db.execute("SELECT id,spec FROM goals WHERE workspace_key='' ").fetchall():
+                try:
+                    project = json.loads(row["spec"])["workspace"]
+                    canonical = workspace_key(project)
+                except (KeyError, TypeError, ValueError, OSError):
+                    continue
+                db.execute("UPDATE goals SET workspace_key=? WHERE id=?", (canonical, row["id"]))
+            db.execute("CREATE INDEX IF NOT EXISTS goals_workspace_key_idx ON goals(workspace_key,lease,state)")
             db.execute("PRAGMA journal_mode=WAL")
 
     @contextmanager
@@ -143,9 +185,8 @@ class GoalStore:
             with self.connect() as connection:
                 return self.list(workspace, connection)
         if workspace:
-            canonical = os.path.normcase(str(Path(workspace).resolve()))
-            field = "LOWER(json_extract(spec,'$.workspace'))" if os.name == "nt" else "json_extract(spec,'$.workspace')"
-            return [self.decode(row) for row in db.execute(f"SELECT * FROM goals WHERE {field}=? ORDER BY created DESC LIMIT 200", (canonical,))]
+            canonical = workspace_key(workspace)
+            return [self.decode(row) for row in db.execute("SELECT * FROM goals WHERE workspace_key=? ORDER BY created DESC LIMIT 200", (canonical,))]
         return [self.decode(row) for row in db.execute("SELECT * FROM goals ORDER BY created DESC LIMIT 200")]
 
     def get(self, identity):
@@ -157,6 +198,19 @@ class GoalStore:
             goal["approvals"] = [{**dict(row), "params": json.loads(row["params"])} for row in db.execute(
                 "SELECT id,method,params,state FROM goal_requests WHERE goal_id=? AND state='pending'", (identity,))]
             return goal
+
+    def progress(self, goal, summary):
+        """Persist a short, user-safe activity update for the Desktop timeline."""
+        summary = str(summary).strip()[:240]
+        if not summary:
+            return
+        with self.connect() as db:
+            changed = db.execute(
+                "UPDATE goals SET detail=?,updated=? WHERE id=? AND lease=? AND state IN ('running','awaiting_approval')",
+                (summary, time.time(), goal["id"], goal["lease"]),
+            )
+            if changed.rowcount:
+                self.event(db, goal["id"], "activity", {"summary": summary})
 
     def control(self, identity):
         with self.connect() as db:
@@ -180,8 +234,8 @@ class GoalStore:
             previous = db.execute("SELECT spec FROM goals WHERE id=?", (identity,)).fetchone()
             if previous and json.loads(previous[0]) != spec:
                 raise ValueError("This creation receipt belongs to a different goal")
-            inserted = db.execute("INSERT OR IGNORE INTO goals(id,spec,state,due,created,updated) VALUES(?,?,'queued',?,?,?)",
-                (identity, json.dumps(spec), now, now, now))
+            inserted = db.execute("INSERT OR IGNORE INTO goals(id,spec,workspace_key,state,due,created,updated) VALUES(?,?,?,'queued',?,?,?)",
+                (identity, json.dumps(spec), workspace_key(spec["workspace"]), now, now, now))
             if inserted.rowcount:
                 self.event(db, identity, "created", {"summary": "Goal queued", "access": spec["sandbox"]})
             return identity
@@ -240,6 +294,14 @@ class GoalStore:
             validate_acceptance(row)
             db.execute("UPDATE goals SET state='completed',updated=?,detail='Accepted by user' WHERE id=?", (now, identity))
             self.event(db, identity, "completed", {"summary": "Result accepted by user"})
+        elif action in {"delete", "dismiss", "clear"}:
+            if row["lease"] or state in ACTIVE:
+                raise ValueError("This goal still owns a worker lease. Pause or stop it and wait for cleanup before dismissing it.")
+            db.execute("DELETE FROM goal_requests WHERE goal_id=?", (identity,))
+            db.execute("DELETE FROM goal_feedback WHERE goal_id=?", (identity,))
+            db.execute("DELETE FROM goal_events WHERE goal_id=?", (identity,))
+            db.execute("DELETE FROM goals WHERE id=?", (identity,))
+            return identity
         else:
             raise ValueError("Unsupported goal action")
         return identity
@@ -249,7 +311,10 @@ class GoalStore:
             db.execute("BEGIN IMMEDIATE")
             for row in db.execute("SELECT * FROM goals WHERE state='queued' AND lease IS NULL AND due<=? ORDER BY due", (time.time(),)).fetchall():
                 goal = self.decode(row)
-                interactive = self.meta(db, "interactive:" + os.path.normcase(goal["spec"]["workspace"]), {})
+                key = workspace_key(goal["spec"]["workspace"])
+                if db.execute("SELECT 1 FROM goals WHERE workspace_key=? AND lease IS NOT NULL LIMIT 1", (key,)).fetchone():
+                    continue
+                interactive = self.meta(db, "interactive:" + key, {})
                 if interactive.get("heartbeat", 0) > time.time() - 10 and interactive.get("busy"):
                     continue
                 if goal["cycles"] >= goal["spec"]["max_cycles"] or goal["requests"] >= goal["spec"]["max_requests"] or goal["token_estimate"] >= goal["spec"]["max_token_estimate"]:
@@ -257,8 +322,9 @@ class GoalStore:
                     self.event(db, goal["id"], "paused", {"summary": "Cumulative goal budget reached"})
                     continue
                 lease = uuid.uuid4().hex
-                db.execute("UPDATE goals SET state='running',lease=?,cycles=cycles+1,updated=? WHERE id=?", (lease, time.time(), goal["id"]))
-                self.event(db, goal["id"], "cycle_started", {"summary": f"Starting cycle {goal['cycles'] + 1}"})
+                summary = f"Starting cycle {goal['cycles'] + 1} of {goal['spec']['max_cycles']}"
+                db.execute("UPDATE goals SET state='running',lease=?,cycles=cycles+1,detail=?,updated=? WHERE id=?", (lease, summary, time.time(), goal["id"]))
+                self.event(db, goal["id"], "cycle_started", {"summary": summary})
                 return {**goal, "lease": lease, "cycles": goal["cycles"] + 1, "state": "running"}
         return None
 
@@ -294,20 +360,29 @@ class GoalStore:
         with self.connect() as db:
             db.execute("INSERT INTO goal_requests(id,goal_id,lease,native_id,method,params,created) VALUES(?,?,?,?,?,?,?)",
                 (identity, goal["id"], goal["lease"], json.dumps(message["id"]), message["method"], json.dumps(message.get("params") or {}), time.time()))
-            db.execute("UPDATE goals SET state='awaiting_approval',detail='Waiting for a response in Desktop',updated=? WHERE id=? AND lease=? AND state='running'", (time.time(), goal["id"], goal["lease"]))
-            self.event(db, goal["id"], "awaiting_approval", {"summary": "Open Goals in Desktop to respond", "request_id": identity})
+            db.execute("UPDATE goals SET state='awaiting_approval',detail='Waiting for your approval in the chat',updated=? WHERE id=? AND lease=? AND state='running'", (time.time(), goal["id"], goal["lease"]))
+            self.event(db, goal["id"], "awaiting_approval", {"summary": "Respond to the approval in Smara Desktop", "request_id": identity})
         return identity
 
-    def respond(self, identity, request_id, allow):
-        from .native_goal_runtime import approval_response
+    def respond(self, identity, request_id, allow=None, answers=None):
+        from .native_goal_runtime import approval_response, user_input_response
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT r.* FROM goal_requests r JOIN goals g ON g.id=r.goal_id WHERE r.id=? AND r.goal_id=? AND r.lease=g.lease AND r.state='pending' AND g.state='awaiting_approval'", (request_id, identity)).fetchone()
             if not row:
                 raise ValueError("This approval has expired or was already answered")
-            response = approval_response(row["method"], json.loads(row["params"]), allow)
+            params = json.loads(row["params"])
+            if row["method"] == "item/tool/requestUserInput":
+                if answers is None:
+                    raise ValueError("Answer every requested question before continuing")
+                response = user_input_response(params, answers)
+            else:
+                if type(allow) is not bool:
+                    raise ValueError("Choose Allow or Deny for this request")
+                response = approval_response(row["method"], params, allow)
             db.execute("UPDATE goal_requests SET response=?,state='answered' WHERE id=?", (json.dumps(response), request_id))
-            self.event(db, identity, "approval_answered", {"summary": "Allowed" if allow else "Denied", "request_id": request_id})
+            summary = "Answered" if answers is not None else "Allowed" if allow else "Denied"
+            self.event(db, identity, "approval_answered", {"summary": summary, "request_id": request_id})
 
     def consume_response(self, goal, request_id):
         with self.connect() as db:
@@ -315,7 +390,9 @@ class GoalStore:
             row = db.execute("SELECT r.response,r.native_id FROM goal_requests r JOIN goals g ON g.id=r.goal_id WHERE r.id=? AND r.lease=? AND r.lease=g.lease AND r.state='answered' AND g.state IN ('running','awaiting_approval')", (request_id, goal["lease"])).fetchone()
             if not row:
                 return None
-            db.execute("UPDATE goal_requests SET state='delivered' WHERE id=?", (request_id,))
+            # User answers can contain sensitive values. Keep them only until
+            # they are handed to the native request, not in the durable ledger.
+            db.execute("UPDATE goal_requests SET state='delivered',response=NULL WHERE id=?", (request_id,))
             remaining = db.execute("SELECT 1 FROM goal_requests WHERE lease=? AND state IN ('pending','answered') LIMIT 1", (goal["lease"],)).fetchone()
             if not remaining:
                 db.execute("UPDATE goals SET state='running',detail='' WHERE id=? AND lease=? AND state='awaiting_approval'", (goal["id"], goal["lease"]))
@@ -348,14 +425,13 @@ class GoalStore:
             self.event(db, goal["id"], state, {"summary": detail, "checkpoint": checkpoint})
 
     def interactive(self, workspace, owner, busy):
-        key = "interactive:" + os.path.normcase(str(Path(workspace).resolve()))
+        key = "interactive:" + workspace_key(workspace)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             previous = self.meta(db, key, {})
             if busy:
-                canonical = os.path.normcase(str(Path(workspace).resolve()))
-                field = "LOWER(json_extract(spec,'$.workspace'))" if os.name == "nt" else "json_extract(spec,'$.workspace')"
-                if db.execute(f"SELECT 1 FROM goals WHERE lease IS NOT NULL AND {field}=? LIMIT 1", (canonical,)).fetchone():
+                canonical = workspace_key(workspace)
+                if db.execute("SELECT 1 FROM goals WHERE lease IS NOT NULL AND workspace_key=? LIMIT 1", (canonical,)).fetchone():
                     raise ValueError("A goal is working in this project; pause it before starting another turn or shell")
                 if previous.get("owner") != owner and previous.get("busy") and previous.get("heartbeat", 0) > time.time() - 10:
                     raise ValueError("Another Smara session is working in this project")
@@ -411,11 +487,24 @@ def operate(request, *, store=None):
     store = store or GoalStore()
     action = request.get("action", "list")
     if action == "list":
+        raw_goals = store.list(request.get("workspace"))
         goals = [{**g, "spec": {**g["spec"], "objective": g["spec"]["objective"][:500], "success_criteria": g["spec"]["success_criteria"][:500]},
-            "checkpoint": {k: str(g["checkpoint"].get(k, ""))[:2000] for k in ("summary", "next_step")}} for g in store.list(request.get("workspace"))]
-        return {"goals": goals, "service": store.service()}
+            "checkpoint": {k: str(g["checkpoint"].get(k, ""))[:2000] for k in ("summary", "next_step")}} for g in raw_goals]
+        selected = next((goal for goal in raw_goals if goal["lease"]),
+            next((goal for goal in raw_goals if goal["state"] not in TERMINAL), None))
+        current = store.get(selected["id"]) if selected else None
+        if current:
+            current["spec"] = {**current["spec"],
+                "objective": current["spec"]["objective"][:1200],
+                "success_criteria": current["spec"]["success_criteria"][:2000]}
+            current["checkpoint"] = {k: str(current["checkpoint"].get(k, ""))[:5000 if k == "summary" else 1200]
+                for k in ("summary", "next_step")}
+        return {"goals": goals, "current_goal": current, "service": store.service()}
     if action == "get":
         return store.get(request.get("id"))
+    if action in {"delete", "dismiss", "clear"}:
+        store.action(request)
+        return {"ok": True, "id": request.get("id")}
     if action in {"start_service", "stop_service", "telegram_status", "pair", "unlink"}:
         from .native_goal_runtime import service_control
         return service_control(store, request)
@@ -432,9 +521,7 @@ def operate(request, *, store=None):
         from .native_goal_runtime import service_control
         return service_control(store, {"action": "telegram_status"})
     if action == "respond":
-        if type(request.get("allow")) is not bool:
-            raise ValueError("Choose Allow or Deny")
-        store.respond(request.get("id"), request.get("request_id"), request["allow"])
+        store.respond(request.get("id"), request.get("request_id"), request.get("allow"), request.get("answers"))
         return store.get(request.get("id"))
     if action == "create":
         from .native_management import preferences

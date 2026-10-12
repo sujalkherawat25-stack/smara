@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -13,6 +14,9 @@ import threading
 import time
 
 from .native_goals import ACTIVE, GoalStore
+
+
+MAX_CONCURRENT_GOALS = 2
 
 
 def approval_response(method, params, allow):
@@ -32,6 +36,32 @@ def approval_response(method, params, allow):
             raise ValueError("This specialized request needs its native client")
         return {"action": "accept" if allow else "decline", "content": {} if allow else None, "_meta": None}
     raise ValueError("This request needs user input; pause and provide goal feedback")
+
+
+def user_input_response(params, answers):
+    """Validate and shape a native user-input response without guessing."""
+    questions = params.get("questions")
+    if not isinstance(questions, list) or not 1 <= len(questions) <= 100:
+        raise ValueError("The native request did not contain valid questions")
+    if not isinstance(answers, dict):
+        raise ValueError("Provide an answer for every question")
+    expected = []
+    for question in questions:
+        identity = question.get("id") if isinstance(question, dict) else None
+        if not isinstance(identity, str) or not identity or len(identity) > 128 or identity in expected:
+            raise ValueError("The native request contains an invalid question identifier")
+        expected.append(identity)
+    if set(answers) != set(expected):
+        raise ValueError("Answer every requested question and no others")
+    result = {}
+    for identity in expected:
+        entry = answers[identity]
+        values = entry.get("answers") if isinstance(entry, dict) else None
+        if (not isinstance(values, list) or len(values) != 1 or not isinstance(values[0], str)
+                or not values[0].strip() or len(values[0]) > 10_000):
+            raise ValueError("Each answer must be non-empty and at most 10000 characters")
+        result[identity] = {"answers": [values[0]]}
+    return {"answers": result}
 
 
 class GoalBudget:
@@ -68,6 +98,7 @@ class NativeGoalSession:
         self.counter = 0
         self.events = []
         self.pending_requests = []
+        self.last_progress_write = 0.0
         self.deadline = time.monotonic() + spec["cycle_seconds"]
         self.last_poll = time.monotonic()
 
@@ -117,19 +148,38 @@ class NativeGoalSession:
                 continue
             if message.get("transport_exited"):
                 raise RuntimeError("Native goal transport exited")
-            if message.get("method") == "turn/completed":
+            method = message.get("method")
+            if method == "turn/completed":
                 self.events.append(message)
                 self.events = self.events[-10:]
             if message.get("id") is not None and message.get("method"):
                 # Human decisions are returned verbatim to this native request.
                 # Their IDs/lease cannot survive a disconnected generation.
                 self.pending_requests.append(self.store.pending(self.goal, message))
-            elif message.get("method") in {"item/started", "item/completed"}:
+            elif method == "turn/started":
+                self.store.progress(self.goal, "Model is working on this cycle")
+            elif method == "turn/completed":
+                self.store.progress(self.goal, "Cycle response received; checking evidence and outcome")
+            elif method in {"item/started", "item/completed"}:
                 item = message.get("params", {}).get("item", {})
-                summary = f"{item.get('type', 'Tool')} · {'running' if message['method'] == 'item/started' else item.get('status', 'finished')}"
-                with self.store.connect() as db:
-                    self.store.event(db, self.goal["id"], "activity", {"summary": summary})
-                    db.execute("UPDATE goals SET detail=?,updated=? WHERE id=? AND lease=? AND state='running'", (summary, time.time(), self.goal["id"], self.goal["lease"]))
+                kind = item.get("type")
+                verb = "Started" if method == "item/started" else "Finished"
+                labels = {
+                    "commandExecution": "project command",
+                    "fileChange": "project file update",
+                    "mcpToolCall": "connected tool action",
+                    "webSearch": "web search",
+                    "webFetch": "source page read",
+                    "browser": "browser action",
+                    "collabAgentToolCall": "parallel worker coordination",
+                }
+                summary = f"{verb} {labels.get(kind, 'agent step')}"
+                self.store.progress(self.goal, summary)
+            elif method == "item/agentMessage/delta":
+                now = time.monotonic()
+                if now - self.last_progress_write >= 8:
+                    self.last_progress_write = now
+                    self.store.progress(self.goal, "Smara is preparing a progress update")
             return message
 
     def rpc(self, method, params=None):
@@ -289,14 +339,29 @@ def execute_cycle(store, goal, *, endpoint=None, session_factory=NativeGoalSessi
 def service_control(store, request):
     action = request["action"]
     if action == "start_service":
-        if store.service().get("running"):
-            return store.service()
+        current = store.service()
+        if current.get("running"):
+            return current
         args = ([sys.executable, "--native-goals"] if getattr(sys, "frozen", False)
                 else [sys.executable, "-m", "smara.native_goal_runtime"])
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        subprocess.Popen([*args, "--store", str(store.path)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, creationflags=flags, start_new_session=os.name != "nt")
-        return {"starting": True}
+        try:
+            process = subprocess.Popen([*args, "--store", str(store.path)], stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags,
+                start_new_session=os.name != "nt")
+        except OSError:
+            raise ValueError("The background worker could not be launched. Restart Smara and try again.") from None
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            current = store.service()
+            if current.get("running"):
+                return current
+            exit_code = process.poll()
+            if exit_code is not None:
+                raise ValueError(f"The background worker exited before becoming ready (exit code {exit_code}). Restart Smara and retry.")
+            time.sleep(.2)
+        current = store.service()
+        return {**current, "starting": not current.get("running"), "pid": process.pid}
     if action == "stop_service":
         with store.connect() as db:
             store.set_meta(db, "service_stop", True)
@@ -340,22 +405,32 @@ def run(store):
         from .native_telegram import run_connector
         telegram = threading.Thread(target=run_connector, args=(store, stop), daemon=True)
         telegram.start()
-        try:
-            while not stop.is_set():
-                goal = store.claim()
-                if goal:
-                    execute_cycle(store, goal)
-                else:
-                    stop.wait(.5)
-        except KeyboardInterrupt:
-            with store.connect() as db:
-                store.set_meta(db, "service_stop", True)
-        finally:
-            stop.set()
-            pulse.join(timeout=3)
-            telegram.join(timeout=3)
-            with store.connect() as db:
-                store.set_meta(db, "service", {"pid": os.getpid(), "heartbeat": 0})
+        with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_GOALS, thread_name_prefix="smara-goal") as workers:
+            futures = set()
+            try:
+                while not stop.is_set():
+                    for future in tuple(futures):
+                        if future.done():
+                            futures.remove(future)
+                            future.result()  # Surface unexpected supervisor faults; do not orphan leases.
+                    while len(futures) < MAX_CONCURRENT_GOALS and not stop.is_set():
+                        goal = store.claim()
+                        if goal is None:
+                            break
+                        futures.add(workers.submit(execute_cycle, store, goal))
+                    stop.wait(.25)
+            except KeyboardInterrupt:
+                with store.connect() as db:
+                    store.set_meta(db, "service_stop", True)
+            finally:
+                stop.set()
+                with store.connect() as db:
+                    store.set_meta(db, "service_stop", True)
+                workers.shutdown(wait=True, cancel_futures=False)
+                pulse.join(timeout=3)
+                telegram.join(timeout=3)
+                with store.connect() as db:
+                    store.set_meta(db, "service", {"pid": os.getpid(), "heartbeat": 0})
     return 0
 
 

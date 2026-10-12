@@ -16,6 +16,7 @@ vm.runInNewContext(code, {
   module,
   exports: module.exports,
   require(name) {
+    if (name === "react") return { memo: fn => fn };
     if (name === "react/jsx-runtime") return elements;
     if (name === "@tauri-apps/api/core") return { invoke: async () => {} };
     if (name === "./nativeArtifacts") return helperModule.exports;

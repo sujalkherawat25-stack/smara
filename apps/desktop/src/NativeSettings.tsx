@@ -48,7 +48,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
   };
   return <section className="native-settings">
     <div className="settings-heading"><div><h1>Settings</h1><p>Your models and connected services.</p></div><button disabled={pending} onClick={onClose}>← Back to chat</button></div>
-    <nav className="settings-tabs" aria-label="Settings sections">{["models", "tools", "help"].map(value => <button key={value} className={tab === value ? "selected" : ""} onClick={() => { setTab(value); setSecret(""); setModel(current => ({ ...current, api_key: "" })); }}>{value === "models" ? "Models" : value === "tools" ? "Integrations" : "Help & setup"}</button>)}</nav>
+    <nav className="settings-tabs" aria-label="Settings sections">{["models", "tools", "telegram", "help"].map(value => <button key={value} className={tab === value ? "selected" : ""} onClick={() => { setTab(value); setSecret(""); setModel(current => ({ ...current, api_key: "" })); }}>{value === "models" ? "Models" : value === "tools" ? "Integrations" : value === "telegram" ? "Telegram" : "Help & setup"}</button>)}</nav>
     {locked && <p className="native-warning">Finishing session setup. Settings will be available shortly.</p>}
     {error && <p role="alert" className="native-error">{error.replaceAll("Settings → Tools", "Settings → Integrations")}</p>}{notice && <p role="status" className="settings-notice">{notice}</p>}
     {tab === "models" && <div className="settings-grid"><section className="settings-card"><h2>Configured models</h2><p>These endpoints are used as selected. Smara never silently replaces your model.</p>
@@ -78,7 +78,8 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
     </form><section className="settings-card"><h2>Search readiness</h2><p className={`readiness ${setup.search.configured ? "ready" : "attention"}`}>{setup.search.configured ? "● Credential readable" : "○ Needs configuration"}</p><p>{setup.search.provider || "Not selected"} · {setup.search.detail.replaceAll("Settings → Tools", "Settings → Integrations")}</p><small>Local configuration check only—not a live search test.</small>
       <h3>Saved credential aliases</h3>{setup.credentials.length ? setup.credentials.map(c => <div className="credential-row" key={c.name}><div><code>{c.name}</code><small>{c.provider} · protected on this computer</small></div><button disabled={disabled} onClick={() => { if (window.confirm(`Remove ${c.name}? Tools/models using it will stop working until you save a replacement.`)) void save("delete_credential", { name: c.name }); }}>Remove</button></div>) : <p>No keys saved.</p>}
       <button disabled={pending} onClick={() => void save("bootstrap", {})}>Refresh readiness</button>
-    </section></div><NativeTelegramSettings workspace={setup.preferences.workspace} profile={setup.preferences.active_model} locked={disabled} onSaved={() => { void nativeSettings().then(onUpdate); }} /></>}
+    </section></div></>}
+    {tab === "telegram" && <NativeTelegramSettings workspace={setup.preferences.workspace} profile={setup.preferences.active_model} locked={disabled} onSaved={() => { void nativeSettings().then(onUpdate); }} />}
     {tab === "help" && <div className="settings-grid help-grid">
       <section className="settings-card"><h2>Get started</h2>
         <ol><li>Add a chat-compatible model in <strong>Models</strong>, then select it in the chat composer.</li>
@@ -100,7 +101,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
         <p><strong>Terminal</strong> opens a user-operated PowerShell session through the native app server. It starts only when the Windows sandbox reports ready, can write only to the selected project, has network access disabled, and is stopped when the runtime disconnects. Git review writes stay locked while the shell is running.</p>
       </section>
       <section className="settings-card"><h2>Access and privacy</h2>
-        <p><strong>Goals:</strong> use Goals above chat to choose an outcome, criteria and coding/research/mixed evidence checks. Start background work explicitly; it pauses for approvals and cumulative limits. Only your acceptance completes the goal. Telegram setup lives under Integrations and controls the same ledger.</p>
+        <p><strong>Autonomous work:</strong> type <code>/goal</code> followed by the outcome in chat. Smara saves the prompt, starts background work, and shows progress and approvals in the conversation. Goals pause at cumulative limits and require your acceptance before completion. Telegram controls the same goal ledger.</p>
         <p><strong>Voice:</strong> Voice records locally for up to 25 seconds. Transcribe uploads that clip to Sarvam and inserts an editable draft; it never sends a chat automatically. Read aloud asks before uploading response text and can be stopped. Stable Saaras v3/Bulbul v3 use your protected Sarvam model key; speech has separate provider charges.</p>
         <ul><li>Chat requests and context you provide go to your selected model provider. Project code or text Smara reads for a task may also be sent to that model.</li>
           <li>Search queries go to the selected search provider; fetched public-page text may go to your model for analysis.</li>

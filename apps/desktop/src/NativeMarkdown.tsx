@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { previewableLocalPath } from "./nativeArtifacts";
 /** Small safe presentation parser: React escapes all text; no HTML injection. */
@@ -15,7 +15,7 @@ function inline(text: string, onPreviewFile?: (path: string) => void): ReactNode
     return part;
   });
 }
-export default function NativeMarkdown({ text, onPreviewFile }: { text: string; onPreviewFile?: (path: string) => void }) {
+const NativeMarkdown = memo(function NativeMarkdown({ text, onPreviewFile }: { text: string; onPreviewFile?: (path: string) => void }) {
   const blocks: ReactNode[] = [];
   const lines = text.split("\n");
   let code: string[] | null = null;
@@ -39,4 +39,6 @@ export default function NativeMarkdown({ text, onPreviewFile }: { text: string; 
   }
   flush(); if (code !== null) blocks.push(<pre className="code-block" key={blocks.length}><code>{code.join("\n")}</code></pre>);
   return <div className="native-markdown">{blocks}</div>;
-}
+});
+
+export default NativeMarkdown;

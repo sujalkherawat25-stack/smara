@@ -6,13 +6,18 @@ import vm from "node:vm";
 import ts from "typescript";
 
 function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = true, terminalPlatformSupported = true, projectOptions, backgroundGoal = false } = {}) {
-  const slots = [], calls = [], effects = [], timers = new Set();
+  const slots = [], calls = [], goalCalls = [], effects = [], timers = new Set();
   let cursor = 0, dirty = true, tree, failResume = false, currentRpc;
   const setup = {
     preferences: { workspace: "C:/first", active_model: "one", projects: [{ workspace: "C:/first", label: "First" }, { workspace: "C:/second", label: "Second" }], search_provider: "tavily" },
     profiles: [{ id: "one", label: "Offline one", model: "offline-one" }, { id: "two", label: "Offline two", model: "offline-two" }], credentials: [], search: { configured: false },
   };
   if (projectOptions) setup.preferences.projects[0].options = projectOptions;
+  const goalRecord = backgroundGoal && typeof backgroundGoal === "object" ? backgroundGoal : backgroundGoal ? {
+    id: "fixturegoal", state: "running", lease: "synthetic-active-goal", updated: Date.now() / 1000, cycles: 1, requests: 1, token_estimate: 100,
+    detail: "Synthetic task is working", session_id: "synthetic-goal-session", spec: { objective: "Synthetic goal", success_criteria: "Evidence", workspace: "C:/first", profile_id: "one", sandbox: "read-only", max_cycles: 8, max_requests: 30, max_token_estimate: 500000 },
+    checkpoint: {}, events: [], approvals: [],
+  } : null;
   const hooks = {
     useState(initial) {
       const index = cursor++;
@@ -33,7 +38,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     const module = { exports: {} };
     const source = readFileSync(new URL(path, import.meta.url), "utf8");
     const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-    vm.runInNewContext(code, { module, exports: module.exports, require, setInterval: callback => { timers.add(callback); return callback; }, clearInterval: timer => timers.delete(timer), crypto: { randomUUID: () => "fixture-terminal-id" }, TextEncoder, TextDecoder, Uint8Array, btoa, atob, window: { addEventListener() {}, removeEventListener() {} }, navigator: { clipboard: { writeText: async () => {} } } });
+    vm.runInNewContext(code, { module, exports: module.exports, require, setTimeout: callback => { timers.add(callback); return callback; }, clearTimeout: timer => timers.delete(timer), setInterval: callback => { timers.add(callback); return callback; }, clearInterval: timer => timers.delete(timer), crypto: { randomUUID: () => "fixture-terminal-id" }, TextEncoder, TextDecoder, Uint8Array, btoa, atob, window: { addEventListener() {}, removeEventListener() {} }, navigator: { clipboard: { writeText: async () => {} } } });
     return module.exports;
   };
   class RpcOutcomeUnknown extends Error {}
@@ -72,6 +77,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
   const view = evaluate("../src/nativeView.ts", () => assert.fail("View must have no side-effect imports"));
   const context = evaluate("../src/nativeContext.ts", () => assert.fail("Context formatting must have no side-effect imports"));
   const terminalProtocol = evaluate("../src/terminalProtocol.ts", () => assert.fail("Terminal protocol must have no side-effect imports"));
+  const goal = evaluate("../src/goalApi.ts", n => n === "@tauri-apps/api/core" ? { invoke: async () => ({}) } : assert.fail(n));
   function Settings() {}
   function Changes() {}
   function Terminal() {}
@@ -84,7 +90,11 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     if (name.endsWith("NativeSettings")) return { default: Settings, __esModule: true };
     if (name.endsWith("NativeGoals")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeVoice")) return { default: () => null, ReadAloud: () => null, __esModule: true };
-    if (name.endsWith("goalApi")) return { goalRequest: async () => ({ goals: backgroundGoal ? [{ lease: "synthetic-active-goal" }] : [], service: {} }) };
+    if (name.endsWith("goalApi")) return { ...goal, goalRequest: async (action, values = {}) => {
+      goalCalls.push({ action, values: JSON.parse(JSON.stringify(values)) });
+      if (action === "list") return { goals: goalRecord ? [goalRecord] : [], current_goal: goalRecord, service: { running: !!goalRecord } };
+      return { id: values.id ?? goalRecord?.id };
+    } };
     if (name.endsWith("NativeMarkdown")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeFilePreview")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeContextPicker")) return { default: ContextPicker, __esModule: true };
@@ -118,7 +128,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     nodes().find(node => node.type === "textarea").props.onChange({ target: { value: message, style: {}, scrollHeight: 100 } });
     await flush();
   };
-  return { calls, flush, button, nodes, enter, contextPicker: () => nodes().find(node => node.type === ContextPicker)?.props, emit: message => currentRpc.receive(message), terminal: () => nodes().find(node => node.type === Terminal)?.props, changes: () => nodes().find(node => node.type === Changes)?.props, failResume: () => { failResume = true; }, settings: () => nodes().find(node => node.type === Settings).props, model: () => nodes().find(node => node.type === "select" && node.props["aria-label"] === "Model") };
+  return { calls, goalCalls, flush, button, nodes, enter, contextPicker: () => nodes().find(node => node.type === ContextPicker)?.props, emit: message => currentRpc.receive(message), terminal: () => nodes().find(node => node.type === Terminal)?.props, changes: () => nodes().find(node => node.type === Changes)?.props, failResume: () => { failResume = true; }, settings: () => nodes().find(node => node.type === Settings).props, model: () => nodes().find(node => node.type === "select" && node.props["aria-label"] === "Model") };
 }
 
 test("turn snapshots are local, captured before acceptance and sealed after completion", async () => {
@@ -139,6 +149,37 @@ test("an active background goal blocks a new foreground turn", async () => {
   f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} });
   await f.flush();
   assert.equal(f.calls.some(call => call.method === "turn/start"), false);
+});
+
+test("an active goal cannot be dismissed from chat while it owns its worker lease", async () => {
+  const f = fixture({ backgroundGoal: true }); await f.flush();
+  assert.equal(f.nodes().some(node => node.props?.["aria-label"] === "Dismiss goal"), false);
+  assert.equal(f.button("Send message").props.disabled, true);
+  assert.equal(f.goalCalls.some(call => call.action === "delete"), false);
+});
+
+test("autonomous goals can answer native user-input requests in the same chat", async () => {
+  const f = fixture({ backgroundGoal: {
+    id: "fixturegoal", state: "awaiting_approval", lease: "synthetic-active-goal", updated: Date.now() / 1000, cycles: 1, requests: 1, token_estimate: 100,
+    detail: "Waiting for your response", session_id: "synthetic-goal-session", spec: { objective: "Synthetic goal", success_criteria: "Evidence", workspace: "C:/first", profile_id: "one", sandbox: "read-only", max_cycles: 8, max_requests: 30, max_token_estimate: 500000 },
+    checkpoint: {}, events: [], approvals: [{ id: "question-receipt", method: "item/tool/requestUserInput", params: { questions: [{ id: "choice", question: "Choose the synthetic mode", options: [{ label: "safe", description: "Use safe mode" }] }] } }],
+  } });
+  await f.flush();
+  const input = f.nodes().find(node => node.type === "input" && node.props.type === "text");
+  assert.ok(input);
+  input.props.onChange({ target: { value: "safe" } }); await f.flush();
+  f.button("Continue").props.onClick(); await f.flush();
+  const response = f.goalCalls.find(call => call.action === "respond");
+  assert.deepEqual(response.values, { id: "fixturegoal", request_id: "question-receipt", answers: { choice: { answers: ["safe"] } } });
+});
+
+test("coding goals get workspace-scoped write access while research goals stay read-only", async () => {
+  for (const [prompt, expectedSandbox] of [["/goal fix the bug in this repository", "workspace-write"], ["/goal research the latest market size", "read-only"]]) {
+    const f = fixture(); await f.flush(); await f.enter(prompt);
+    f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} });
+    await f.flush();
+    assert.equal(f.goalCalls.find(call => call.action === "create")?.values.sandbox, expectedSandbox);
+  }
 });
 
 test("Changes is readable during work but writes and navigation remain locked", async () => {

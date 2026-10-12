@@ -1,10 +1,11 @@
 """Ledger invariants; these are not real-model outcome evaluations."""
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 from pathlib import Path
 import pytest
 
-from smara.native_goals import GoalStore
+from smara.native_goals import GoalStore, strip_windows_verbatim_prefix
 from smara.native_goal_runtime import checkpoint_from
 
 
@@ -31,6 +32,48 @@ def test_claim_is_atomic_and_checkpoint_resumes_same_session(tmp_path):
     assert following["session_id"] == "native-session-1"
     assert following["checkpoint"]["completed_steps"] == ["Inspect"]
     assert following["cycles"] == 2
+    assert following["spec"]["cycle_seconds"] == 900
+
+
+def test_supervisor_runs_two_independent_projects_concurrently_and_stops_cleanly(tmp_path, monkeypatch):
+    from contextlib import nullcontext
+    import threading
+    from smara import native_goal_runtime, native_schedule, native_telegram
+
+    store = GoalStore(tmp_path / "goals.sqlite")
+    create(store, tmp_path, objective="First independent task")
+    other = tmp_path / "other-project"
+    other.mkdir()
+    create(store, other, objective="Second independent task")
+    both_started = threading.Event()
+    release = threading.Event()
+    state_lock = threading.Lock()
+    started = []
+
+    monkeypatch.setattr(native_schedule, "supervisor_lock", lambda _path: nullcontext())
+    monkeypatch.setattr(native_telegram, "run_connector", lambda _store, stop: stop.wait())
+
+    def cycle(_store, goal):
+        with state_lock:
+            started.append(goal["id"])
+            if len(started) == 2:
+                both_started.set()
+        release.wait(5)
+        _store.finish(goal, None, "paused", "Synthetic supervisor shutdown")
+
+    monkeypatch.setattr(native_goal_runtime, "execute_cycle", cycle)
+    worker = threading.Thread(target=native_goal_runtime.run, args=(store,))
+    worker.start()
+    try:
+        assert both_started.wait(5), "independent project cycles did not overlap"
+    finally:
+        with store.connect() as db:
+            store.set_meta(db, "service_stop", True)
+        release.set()
+        worker.join(10)
+    assert not worker.is_alive(), "supervisor did not stop and release its workers"
+    assert len(started) == 2
+    assert all(store.get(identity)["lease"] is None for identity in started)
 
 
 @pytest.mark.parametrize("action,state", [("pause", "paused"), ("stop", "stopped")])
@@ -177,6 +220,86 @@ def test_interactive_project_work_and_goals_do_not_overlap(tmp_path):
     assert store.claim()
     with pytest.raises(ValueError, match="A goal"):
         store.interactive(tmp_path, "foreground-owner", True)
+
+
+def test_windows_verbatim_project_path_shares_one_interactive_key(tmp_path):
+    if os.name != "nt":
+        pytest.skip("Windows canonical path spelling is required")
+    verbatim = Path("\\\\?\\" + str(tmp_path.resolve()))
+    store = GoalStore(tmp_path / "goals.sqlite")
+    identity = create(store, verbatim)
+    assert len(store.list(tmp_path)) == 1
+    assert len(store.list(verbatim)) == 1
+    store.interactive(verbatim, "rust-desktop", True)
+    assert store.claim() is None
+    with pytest.raises(ValueError, match="Another"):
+        store.interactive(tmp_path, "python-desktop", True)
+    store.interactive(verbatim, "rust-desktop", False)
+    assert store.claim()
+
+
+def test_windows_verbatim_path_conversion_preserves_unc_roots():
+    assert strip_windows_verbatim_prefix("\\\\?\\C:\\repo") == "C:\\repo"
+    assert strip_windows_verbatim_prefix("\\\\?\\UNC\\server\\share\\repo") == "\\\\server\\share\\repo"
+
+
+def test_workspace_key_is_backfilled_when_opening_an_existing_goal_ledger(tmp_path):
+    import sqlite3
+    database = tmp_path / "legacy.sqlite"
+    spec = {"workspace": str(tmp_path), "objective": "Legacy task", "success_criteria": "Evidence"}
+    with sqlite3.connect(database) as db:
+        db.execute("""CREATE TABLE goals (
+            id TEXT PRIMARY KEY, spec TEXT NOT NULL, state TEXT NOT NULL,
+            session_id TEXT, turn_id TEXT, lease TEXT, due REAL NOT NULL,
+            created REAL NOT NULL, updated REAL NOT NULL, cycles INTEGER NOT NULL DEFAULT 0,
+            requests INTEGER NOT NULL DEFAULT 0, token_estimate INTEGER NOT NULL DEFAULT 0,
+            stalled INTEGER NOT NULL DEFAULT 0, checkpoint TEXT NOT NULL DEFAULT '{}', detail TEXT NOT NULL DEFAULT '')""")
+        db.execute("INSERT INTO goals(id,spec,state,due,created,updated) VALUES(?,?,'paused',0,0,0)",
+            ("legacygoal", json.dumps(spec)))
+    store = GoalStore(database)
+    assert [goal["id"] for goal in store.list(tmp_path)] == ["legacygoal"]
+
+
+def test_live_goal_cannot_be_deleted_under_its_worker(tmp_path):
+    store = GoalStore(tmp_path / "goals.sqlite")
+    identity = create(store, tmp_path)
+    claimed = store.claim()
+    with pytest.raises(ValueError, match="owns a worker lease"):
+        store.action({"action": "delete", "id": identity})
+    assert store.get(identity)["lease"] == claimed["lease"]
+
+
+def test_goal_claims_run_in_parallel_only_for_distinct_projects(tmp_path):
+    store = GoalStore(tmp_path / "goals.sqlite")
+    first = create(store, tmp_path, objective="First project task")
+    second = create(store, tmp_path, objective="Second task in same project")
+    other_workspace = tmp_path / "other-project"
+    other_workspace.mkdir()
+    other = create(store, other_workspace, objective="Independent project task")
+    claimed_first = store.claim()
+    claimed_other = store.claim()
+    assert claimed_first["id"] == first
+    assert claimed_other["id"] == other
+    assert store.claim() is None
+    store.finish(claimed_first, checkpoint(), "queued", "Continue")
+    assert store.claim()["id"] == second
+
+
+def test_goal_user_input_is_validated_delivered_once_and_scrubbed(tmp_path):
+    store = GoalStore(tmp_path / "goals.sqlite")
+    identity = create(store, tmp_path)
+    goal = store.claim()
+    request = store.pending(goal, {"id": "native-question", "method": "item/tool/requestUserInput",
+        "params": {"questions": [{"id": "api-key", "question": "Synthetic secret"}]}})
+    with pytest.raises(ValueError, match="Answer every requested question"):
+        store.respond(identity, request, answers={})
+    store.respond(identity, request, answers={"api-key": {"answers": ["synthetic-private-value"]}})
+    delivered = store.consume_response(goal, request)
+    assert delivered == {"id": "native-question", "result": {"answers": {"api-key": {"answers": ["synthetic-private-value"]}}}}
+    assert store.consume_response(goal, request) is None
+    with store.connect() as db:
+        saved = db.execute("SELECT response,state FROM goal_requests WHERE id=?", (request,)).fetchone()
+    assert saved["response"] is None and saved["state"] == "delivered"
 
 
 def test_feedback_arriving_during_cycle_prevents_premature_review(tmp_path):

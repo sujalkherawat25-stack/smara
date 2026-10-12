@@ -179,6 +179,8 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
     # MCP children inherit vault/settings paths, never secret values.
     from .native_profiles import state_path
     settings["mcp_servers.smara_readers.env.SMARA_DESKTOP_STATE"] = str(state_path().resolve())
+    if not getattr(sys, "frozen", False):
+        settings["mcp_servers.smara_readers.env.PYTHONPATH"] = str((source_root() / "src").resolve())
     if os.getenv("SMARA_DESKTOP_CREDENTIALS"):
         settings["mcp_servers.smara_readers.env.SMARA_DESKTOP_CREDENTIALS"] = str(Path(os.environ["SMARA_DESKTOP_CREDENTIALS"]).resolve())
     if browser_origins:
@@ -199,6 +201,8 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
             "mcp_servers.smara_browser.tool_timeout_sec": 45,
             "mcp_servers.smara_browser.default_tools_approval_mode": "prompt",
         })
+        if not getattr(sys, "frozen", False):
+            settings["mcp_servers.smara_browser.env.PYTHONPATH"] = str((source_root() / "src").resolve())
         for entry in browser_tools:
             settings[f'mcp_servers.smara_browser.tools.{entry["name"]}.approval_mode'] = "prompt"
     # TOML rejects JSON's surrogate-pair escapes for non-BMP characters. Keep

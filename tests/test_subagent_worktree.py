@@ -1,7 +1,7 @@
 """Tests for Smara Subagent Git Worktree Isolation."""
 import subprocess
 import os
-import tempfile
+import uuid
 from pathlib import Path
 import pytest
 from smara.subagent_worktree import (
@@ -18,13 +18,20 @@ def test_resolve_git_root():
     assert Path(root).exists()
 
 
-def test_worktree_lifecycle():
-    # Use real workspace repo for a fast isolated test
-    root = resolve_git_root(Path.cwd())
-    if not root:
-        pytest.skip("Not in a git repository")
+def test_worktree_lifecycle(tmp_path):
+    # A tiny real Git repository exercises clone/inspect/cleanup without
+    # cloning the multi-gigabyte application and vendored runtime per test.
+    root = tmp_path / "fixture-repo"
+    root.mkdir()
+    environment = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+    subprocess.run(["git", "init", "--quiet"], cwd=root, env=environment, check=True)
+    (root / "README.md").write_text("isolated snapshot fixture\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=root, env=environment, check=True)
+    subprocess.run(["git", "-c", "user.name=Smara Tests", "-c", "user.email=tests@example.invalid",
+                    "-c", f"core.hooksPath={os.devnull}", "commit", "--quiet", "-m", "fixture"],
+                   cwd=root, env=environment, check=True)
 
-    wt_info = create_subagent_worktree(root, subagent_id="test_unit_99")
+    wt_info = create_subagent_worktree(root, subagent_id=f"test_unit_{uuid.uuid4().hex}")
     assert wt_info, "Isolated snapshot creation failed for the current Git repository"
 
     wt_path = Path(wt_info["path"])
