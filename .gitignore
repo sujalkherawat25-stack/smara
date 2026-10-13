@@ -28,6 +28,8 @@ reports/osworld_readiness.json
 dist/
 release/keys/*.private
 artifacts/
+/tmp/pdfs/
+/output/pdf/
 .pytest_tmp*/
 /.pytest_*/
 pytest-tmp/

@@ -62,7 +62,8 @@ fn management(request: Value) -> Result<Value, String> {
         output.take(8_000_001).read_to_end(&mut bytes).map(|_| bytes)
     });
     let mut finished = false;
-    for _ in 0..300 {
+    let polls = if request["operation"] == "outreach" { 900 } else { 300 };
+    for _ in 0..polls {
         if process.try_wait().map_err(|_| "Cannot inspect settings companion")?.is_some() { finished = true; break; }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
@@ -78,11 +79,11 @@ fn management(request: Value) -> Result<Value, String> {
 }
 #[tauri::command]
 async fn native_manage(request: Value) -> Result<Value, String> {
-    if !matches!(request.get("operation").and_then(Value::as_str), Some("bootstrap" | "goals" | "voice" | "add_project" | "select_project" | "save_project_options" | "select_model" | "select_search" | "save_credential" | "delete_credential" | "save_model" | "test_model" | "test_search")) {
+    if !matches!(request.get("operation").and_then(Value::as_str), Some("bootstrap" | "runtime_health" | "goals" | "background" | "browser_control" | "computer_control" | "voice" | "outreach" | "save_outreach" | "add_project" | "select_project" | "save_project_options" | "select_model" | "select_search" | "save_credential" | "delete_credential" | "save_model" | "save_memory" | "test_memory" | "test_model" | "test_search")) {
         return Err("Unsupported UI settings operation; secret reads and legacy execution are unavailable".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        if request["operation"] == "bootstrap" || request["operation"] == "goals" || request["operation"] == "voice" { management(request) }
+        if request["operation"] == "bootstrap" || request["operation"] == "runtime_health" || request["operation"] == "goals" || request["operation"] == "background" || request["operation"] == "browser_control" || request["operation"] == "computer_control" || request["operation"] == "voice" { management(request) }
         else { native_runtime::with_disconnected(|| management(request)) }
     }).await.map_err(|_| "Settings worker failed".to_owned())?
 }
@@ -263,6 +264,19 @@ fn native_open_url(url: String) -> Result<(), String> {
     open::that_detached(parsed.as_str()).map_err(|_| "Cannot open link".into())
 }
 fn main() {
+    if std::env::args().any(|argument| argument == "--background-worker") {
+        // The GUI-subsystem executable is the login launcher. Its frozen
+        // JSON-RPC companion retains console stdio but is launched hidden.
+        // Never render a chat window, grant permissions, or enable a schedule.
+        let companion = std::env::current_exe().ok().and_then(|path| path.parent().map(|root| root.join("resources/smara-desktop.exe")));
+        if let Some(path) = companion.filter(|path| path.is_file()) {
+            let mut command = Command::new(path);
+            command.arg("--native-goals").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+            command_hidden(&mut command);
+            let _ = command.spawn(); // The worker's ledger reports startup/health.
+        }
+        return;
+    }
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file, native_project_files])
         .build(tauri::generate_context!()).expect("Could not build Smara Desktop")

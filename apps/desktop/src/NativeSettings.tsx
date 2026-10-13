@@ -2,26 +2,32 @@ import { useState } from "react";
 import { nativeProbe, nativeSettings, type NativeSetup } from "./nativeApi";
 import type { LocalModelProfile } from "./types";
 import NativeTelegramSettings from "./NativeTelegramSettings";
+import NativeMemorySettings from "./NativeMemorySettings";
+import NativeEmail from "./NativeEmail";
+import NativeBackground from "./NativeBackground";
+import NativeAutomation from "./NativeAutomation";
 
 const aliases: Record<string, string> = { tavily: "TAVILY_API_KEY", exa: "EXA_API_KEY", serper: "SERPER_API_KEY", brave: "BRAVE_SEARCH_API_KEY" };
 const emptyModel = { id: "", label: "", provider: "", base_url: "", model: "", api_key: "", auth_header: "authorization" };
 type SettingsProps = {
+  initialTab?: "models" | "memory" | "tools";
   setup: NativeSetup; locked: boolean; version: string; runtimeBuilt: boolean;
   onUpdate: (value: NativeSetup) => void; onClose: () => void;
   onPendingChange: (pending: boolean) => void;
   toolsEnabled: boolean; workersEnabled: boolean; browserOrigins: string;
   onToolsChange: (enabled: boolean) => void; onWorkersChange: (enabled: boolean) => void; onOriginsChange: (origins: string) => void;
 };
-export default function NativeSettings({ setup, locked, onUpdate, onClose, onPendingChange, version, runtimeBuilt, toolsEnabled, workersEnabled, browserOrigins, onToolsChange, onWorkersChange, onOriginsChange }: SettingsProps) {
-  const [tab, setTab] = useState("models");
+export default function NativeSettings({ setup, locked, onUpdate, onClose, onPendingChange, version, runtimeBuilt, toolsEnabled, workersEnabled, browserOrigins, onToolsChange, onWorkersChange, onOriginsChange, initialTab = "models" }: SettingsProps) {
+  const [tab, setTab] = useState(initialTab as string);
   const [model, setModel] = useState(emptyModel);
   const [provider, setProvider] = useState(setup.preferences.search_provider);
   const [secret, setSecret] = useState("");
   const [pending, setPending] = useState(false);
+  const [integrationPending, setIntegrationPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [probePending, setProbePending] = useState("");
-  const disabled = locked || pending;
+  const disabled = locked || pending || integrationPending;
   const activeModel = setup.profiles.find(profile => profile.id === setup.preferences.active_model);
   const save = async (operation: string, args: Record<string, unknown>) => {
     if (pending || (locked && operation !== "bootstrap")) return;
@@ -47,8 +53,8 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
     finally { onPendingChange(false); setPending(false); setProbePending(""); }
   };
   return <section className="native-settings">
-    <div className="settings-heading"><div><h1>Settings</h1><p>Your models and connected services.</p></div><button disabled={pending} onClick={onClose}>← Back to chat</button></div>
-    <nav className="settings-tabs" aria-label="Settings sections">{["models", "tools", "telegram", "help"].map(value => <button key={value} className={tab === value ? "selected" : ""} onClick={() => { setTab(value); setSecret(""); setModel(current => ({ ...current, api_key: "" })); }}>{value === "models" ? "Models" : value === "tools" ? "Integrations" : value === "telegram" ? "Telegram" : "Help & setup"}</button>)}</nav>
+    <div className="settings-heading"><div><h1>Settings</h1><p>Your models and connected services.</p></div><button disabled={pending || integrationPending} onClick={onClose}>← Back to chat</button></div>
+    <nav className="settings-tabs" aria-label="Settings sections">{["models", "memory", "tools", "email", "background", "telegram", "help"].map(value => <button disabled={pending || integrationPending} key={value} className={tab === value ? "selected" : ""} onClick={() => { setTab(value); setSecret(""); setModel(current => ({ ...current, api_key: "" })); }}>{value === "models" ? "Models" : value === "memory" ? "Memory" : value === "tools" ? "Integrations" : value === "email" ? "Email" : value === "background" ? "Background" : value === "telegram" ? "Telegram" : "Help & setup"}</button>)}</nav>
     {locked && <p className="native-warning">Finishing session setup. Settings will be available shortly.</p>}
     {error && <p role="alert" className="native-error">{error.replaceAll("Settings → Tools", "Settings → Integrations")}</p>}{notice && <p role="status" className="settings-notice">{notice}</p>}
     {tab === "models" && <div className="settings-grid"><section className="settings-card"><h2>Configured models</h2><p>These endpoints are used as selected. Smara never silently replaces your model.</p>
@@ -64,13 +70,16 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
       <label>API key<input type="password" autoComplete="off" disabled={disabled} value={model.api_key} placeholder="Leave blank when editing to keep the saved key" onChange={e => setModel({ ...model, api_key: e.target.value })} /></label>
       <small>Encrypted with Windows DPAPI. Key values are never returned to this screen. Only chat-compatible APIs are supported by this adapter.</small><button className="primary" disabled={disabled}>Save model</button>
     </form></div>}
+    {tab === "memory" && <NativeMemorySettings setup={setup} locked={disabled} onUpdate={onUpdate} onPendingChange={value => { setIntegrationPending(value); onPendingChange(value); }} />}
+    {tab === "email" && <NativeEmail workspace={setup.preferences.workspace} locked={disabled} onUpdate={onUpdate} onPendingChange={value => { setIntegrationPending(value); onPendingChange(value); }} />}
+    {tab === "background" && <NativeBackground workspace={setup.preferences.workspace} profile={setup.preferences.active_model} locked={disabled} onPendingChange={value => { setIntegrationPending(value); onPendingChange(value); }} />}
     {tab === "tools" && <><section className="settings-card project-options"><h2>For this project</h2>
-      <label className="native-tools-choice"><input type="checkbox" checked={toolsEnabled} disabled={disabled} onChange={event => onToolsChange(event.target.checked)} /> Academic search & project memory</label><small>Web search is available when a provider key is saved. The clock and Sarvam image/OCR tools are available in chat; document uploads ask for approval. This option also allows reading local project memory and academic search results.</small>
+      <label className="native-tools-choice"><input type="checkbox" checked={toolsEnabled} disabled={disabled} onChange={event => onToolsChange(event.target.checked)} /> Academic search & local project notes</label><small>Web search is available when a provider key is saved. The clock and Sarvam image/OCR tools are available in chat; document uploads ask for approval. This option reads local project notes and academic search results. Conversation recall is configured separately in Memory.</small>
       <details><summary>Advanced options</summary><label className="native-tools-choice"><input type="checkbox" checked={workersEnabled} disabled={disabled} onChange={event => onWorkersChange(event.target.checked)} /> Parallel coding assistants</label><small>Work in isolated copies of committed code. Changes stay separate for your review.</small>
-      <label className="native-tools-choice">Allowed public browser sites<input aria-label="Approved public browser origins" placeholder="https://example.com" disabled={disabled} value={browserOrigins} onChange={event => onOriginsChange(event.target.value)} /></label><small>A fresh browser asks before every action. No personal cookies, login, uploads or desktop control. Leave empty to disable.</small></details>
+      <label className="native-tools-choice">Allowed public browser sites<input aria-label="Approved public browser origins" placeholder="https://example.com" disabled={disabled} value={browserOrigins} onChange={event => onOriginsChange(event.target.value)} /></label><small>A fresh browser asks before every action. Human-only login and reviewed transfers are configured below; no personal cookies. Leave empty to disable.</small></details>
       <button disabled={disabled} onClick={() => void save("save_project_options", { workspace: setup.preferences.workspace, options: { tools_enabled: toolsEnabled, workers_enabled: workersEnabled, browser_origins: browserOrigins.split(/\s+/).filter(Boolean) } })}>Save project options</button>
       <small className="project-options-note">Saved choices are restored when you return to this project; action approvals remain required.</small>
-    </section><div className="settings-grid"><form className="settings-card settings-form" onSubmit={event => { event.preventDefault(); void save("save_credential", { name: aliases[provider], provider, secret }); }}><h2>Web search</h2><p>Choose a provider and save its key. Smara can read public pages to verify search results.</p>
+    </section><NativeAutomation workspace={setup.preferences.workspace} locked={disabled} onPendingChange={value => { setIntegrationPending(value); onPendingChange(value); }} onSelectionChange={async () => onUpdate(await nativeSettings())} /><div className="settings-grid"><form className="settings-card settings-form" onSubmit={event => { event.preventDefault(); void save("save_credential", { name: aliases[provider], provider, secret }); }}><h2>Web search</h2><p>Choose a provider and save its key. Smara can read public pages to verify search results.</p>
       <label>Search provider<select value={provider} disabled={disabled} onChange={e => { setProvider(e.target.value); setSecret(""); }}>{Object.keys(aliases).map(p => <option key={p} value={p}>{p[0].toUpperCase() + p.slice(1)}</option>)}</select></label>
       <button type="button" disabled={disabled} onClick={() => void save("select_search", { provider })}>Use this provider</button>
       <label>{aliases[provider]}<input type="password" autoComplete="off" disabled={disabled} value={secret} onChange={e => setSecret(e.target.value)} placeholder="Paste your search provider API key" /></label><button className="primary" disabled={disabled || !secret.trim()}>Save search key</button>
@@ -98,15 +107,16 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
       <section className="settings-card"><h2>Review changes and commands</h2>
         <p>Open <strong>Changes</strong> above the chat to inspect file or hunk diffs. Stage and unstage affect the Git index; Revert changes working files. Use a project folder that is the Git repository root.</p>
         <p><strong>Last turn → Undo</strong> reverses supported file changes from the last captured run, not chat history. Pre-existing and non-conflicting later edits are kept. Revert and Undo keep a local recovery copy; refresh if files changed after review.</p>
-        <p><strong>Terminal</strong> opens a user-operated PowerShell session through the native app server. It starts only when the Windows sandbox reports ready, can write only to the selected project, has network access disabled, and is stopped when the runtime disconnects. Git review writes stay locked while the shell is running.</p>
+        <p><strong>Terminal</strong> is disabled pending verification of its no-network boundary. No interactive shell starts on this candidate. Agent commands and their results still appear in chat; this does not certify Windows command network isolation.</p>
       </section>
       <section className="settings-card"><h2>Access and privacy</h2>
         <p><strong>Autonomous work:</strong> type <code>/goal</code> followed by the outcome in chat. Smara saves the prompt, starts background work, and shows progress and approvals in the conversation. Goals pause at cumulative limits and require your acceptance before completion. Telegram controls the same goal ledger.</p>
         <p><strong>Voice:</strong> Voice records locally for up to 25 seconds. Transcribe uploads that clip to Sarvam and inserts an editable draft; it never sends a chat automatically. Read aloud asks before uploading response text and can be stopped. Stable Saaras v3/Bulbul v3 use your protected Sarvam model key; speech has separate provider charges.</p>
+        <p><strong>Conversation memory:</strong> Settings → Memory configures Continuum by Syntarus. Enabling sends future user messages and completed answers to Syntarus; recalled context is sent to your selected model. Existing local history is not bulk-uploaded. Local SKILL.md files retain procedural knowledge. Disabling memory does not delete hosted data.</p>
         <ul><li>Chat requests and context you provide go to your selected model provider. Project code or text Smara reads for a task may also be sent to that model.</li>
           <li>Search queries go to the selected search provider; fetched public-page text may go to your model for analysis.</li>
           <li>Project memory is optional. Local execution stays within the selected project sandbox; actions that need more authority require approval.</li>
-          <li>Browser work is limited to the configured public-site allowlist and does not use your personal browser profile. Full desktop/computer control and unattended company operations are not enabled in this build.</li></ul>
+          <li>Browser work uses the public-site allowlist and an owned session, with human login handoff and opt-in reviewed transfers. Experimental Windows tools target selected foreground Notepad/Paint/Calculator windows only; general desktop control is not certified. Full desktop/computer control and unattended company operations are not enabled in this build.</li></ul>
       </section>
     </div>}
     <small className="settings-version">Smara {version} · Keys protected on this computer</small>

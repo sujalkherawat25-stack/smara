@@ -9,6 +9,37 @@ from smara.native_goals import GoalStore, strip_windows_verbatim_prefix
 from smara.native_goal_runtime import checkpoint_from
 
 
+def test_final_budget_request_only_serializes_owning_goal_thread(tmp_path):
+    from smara.native_goal_runtime import checkpoint_needed
+    store = GoalStore(tmp_path / "goals.sqlite")
+    identity = create(store, tmp_path, max_requests=3)
+    goal = store.claim()
+    store.reserve(goal, 10)
+    assert not checkpoint_needed(store, identity, "root", "root")
+    store.reserve(goal, 10)
+    assert not checkpoint_needed(store, identity, "root", "worker")
+    assert not checkpoint_needed(store, identity, "root", None)
+    assert checkpoint_needed(store, identity, "root", "root")
+    assert store.get(identity)["requests"] == 2
+
+
+def test_rate_limit_reason_is_typed_and_does_not_leak_native_error_text():
+    from smara.native_goal_runtime import turn_failure, _failure_detail, _failure_record
+    error = turn_failure({"error": {"message": "synthetic-private-diagnostic", "codexErrorInfo": {"responseTooManyFailedAttempts": {"httpStatusCode": 429}}}})
+    detail = _failure_detail(_failure_record(error, "wait_for_model_turn"))
+    assert "HTTP 429" in detail and "synthetic-private" not in detail
+
+
+def test_checkpoint_ignores_bounded_coverage_label_but_still_rejects_invalid_links(tmp_path):
+    value = checkpoint(claims=[], coverage=[{"requirement_id": "tests", "description": "Synthetic label", "claim_indexes": [], "outputs": [], "test_commands": ["python -m pytest"]}])
+    parsed = checkpoint_from(json.dumps(value), tmp_path, "coding")
+    assert "description" not in parsed["coverage"][0]
+    value["coverage"][0]["claim_indexes"] = [999]
+    with pytest.raises(ValueError, match="coverage links"): checkpoint_from(json.dumps(value), tmp_path, "coding")
+    value["coverage"][0].update(claim_indexes=[], allow=True)
+    with pytest.raises(ValueError, match="coverage links"): checkpoint_from(json.dumps(value), tmp_path, "coding")
+
+
 def create(store, root, **kwargs):
     return store.action({"action": "create", "objective": "Inspect the synthetic project", "success_criteria": "Return evidence",
         "workspace": str(root), "profile_id": "synthetic", "interval_seconds": 0, **kwargs})
@@ -193,8 +224,9 @@ def test_checkpoint_requires_real_workspace_outputs_and_evidence(tmp_path):
 def test_coding_checkpoint_claims_do_not_require_a_research_url(tmp_path):
     coding = checkpoint(claims=[{"claim": "The function now adds values", "url": "", "quote": "return a + b"}])
     assert checkpoint_from(json.dumps(coding), tmp_path, "coding")["claims"][0]["url"] == ""
+    assert checkpoint_from(json.dumps(coding), tmp_path, "mixed")["claims"][0]["url"] == ""
     with pytest.raises(ValueError, match="citation claims"):
-        checkpoint_from(json.dumps(coding), tmp_path, "mixed")
+        checkpoint_from(json.dumps(coding), tmp_path, "research")
 
 
 def test_stale_cycle_cannot_override_new_lease(tmp_path):
@@ -458,3 +490,28 @@ def test_model_cannot_bypass_missing_native_test_evidence(tmp_path):
     assert result["state"] == "queued"
     assert not result["checkpoint"]["outcome"]["passed"]
     assert "Tests" in result["checkpoint"]["next_step"]
+
+
+def test_interrupted_resume_retains_prior_test_evidence_without_certifying_completion(tmp_path):
+    from types import SimpleNamespace
+    from smara.native_goal_runtime import partial_checkpoint
+    old_test = {"id": "test", "type": "commandExecution", "command": "python -m pytest",
+                "status": "completed", "exitCode": 0}
+    old_edit = {"id": "edit", "type": "fileChange", "status": "completed", "changes": []}
+    session = SimpleNamespace(observed_prior_transcript={"turns": [{"id": "old", "items": [old_edit, old_test]}]},
+        observed_items={"duplicate": old_edit, "new": {"id": "new", "type": "agentMessage", "text": "Still working"}})
+    goal = {"spec": {"workspace": str(tmp_path), "task_kind": "coding"}, "checkpoint": {}}
+    result = partial_checkpoint(session, goal, 1)
+    assert result["partial"] and result["decision"] == "continue"
+    assert result["outcome"]["tests"][0]["passed"]
+    assert not result["outcome"]["passed"]
+
+
+def test_new_edit_invalidates_prior_tests_in_partial_resume(tmp_path):
+    from types import SimpleNamespace
+    from smara.native_goal_runtime import partial_checkpoint
+    session = SimpleNamespace(observed_prior_transcript={"turns": [{"id": "old", "items": [
+        {"id": "test", "type": "commandExecution", "command": "python -m pytest", "status": "completed", "exitCode": 0}]}]},
+        observed_items={"new": {"id": "new-edit", "type": "fileChange", "status": "completed", "changes": []}})
+    result = partial_checkpoint(session, {"spec": {"workspace": str(tmp_path), "task_kind": "coding"}, "checkpoint": {}}, 1)
+    assert not result["outcome"]["tests"] and not result["outcome"]["passed"]

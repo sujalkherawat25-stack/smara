@@ -114,6 +114,34 @@ $smaraOtherPathEntries = @($smaraUserPath -split ';' | Where-Object {
 # A pre-existing entry can sit behind an older CLI. Put this tested candidate
 # first without removing unrelated entries or old recoverable installations.
 [Environment]::SetEnvironmentVariable('Path', (@($smaraCliTarget) + $smaraOtherPathEntries) -join ';', 'User')
+# NSIS writes the redirected Desktop shortcut, but an older source launcher
+# may remain on the unredirected Desktop. Preserve and migrate only an existing
+# Smara shortcut known to point at this app or its old cmd launcher.
+$smaraShortcutPaths = @(
+    (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Smara Desktop.lnk'),
+    (Join-Path $env:USERPROFILE 'Desktop\Smara Desktop.lnk')
+) | Select-Object -Unique
+$smaraShortcutShell = New-Object -ComObject WScript.Shell
+foreach ($smaraShortcutPath in $smaraShortcutPaths) {
+    if (-not (Test-Path -LiteralPath $smaraShortcutPath -PathType Leaf)) { continue }
+    $smaraShortcut = $smaraShortcutShell.CreateShortcut($smaraShortcutPath)
+    $smaraInstalledExe = Join-Path $smaraDesktopTarget 'smara-desktop.exe'
+    $smaraOldCmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
+    if ($smaraShortcut.TargetPath -eq $smaraInstalledExe -and -not $smaraShortcut.Arguments) { continue }
+    if ($smaraShortcut.TargetPath -ne $smaraInstalledExe -and
+        -not ($smaraShortcut.TargetPath -eq $smaraOldCmd -and $smaraShortcut.Arguments -match '(?i)smara')) {
+        Write-Warning 'A customized Smara shortcut was left unchanged; review it separately.'
+        continue
+    }
+    New-Item -ItemType Directory -Path $smaraBackup -Force | Out-Null
+    Copy-Item -LiteralPath $smaraShortcutPath -Destination (Join-Path $smaraBackup ('shortcut-' + [Guid]::NewGuid().ToString('N') + '.lnk'))
+    $smaraShortcut.TargetPath = $smaraInstalledExe
+    $smaraShortcut.Arguments = ''
+    $smaraShortcut.WorkingDirectory = $smaraDesktopTarget
+    $smaraShortcut.IconLocation = $smaraInstalledExe + ',0'
+    $smaraShortcut.Save()
+    Write-Host 'Migrated an existing Smara Desktop shortcut to the verified installed app.'
+}
 Write-Host "Installed Desktop $smaraVersion at $smaraDesktopTarget"
 Write-Host "Installed CLI at $smaraCliTarget. Open a new terminal for its updated PATH."
 Write-Host "Previous Desktop, including its install-directory skills, is preserved at $smaraBackup"

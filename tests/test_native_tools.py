@@ -116,8 +116,8 @@ def test_mcp_stdio_and_error_are_not_success(tmp_path):
 
 
 @pytest.mark.parametrize("mode,expected", [
-    ({"context_only": True}, {"current_time", "document_ocr", "image_analyze", "source_page"}),
-    ({"standard_tools": True}, {"current_time", "document_ocr", "image_analyze", "source_page", "web_search", "fetch_url"}),
+    ({"context_only": True}, {"current_time", "document_ocr", "image_analyze", "source_page", "pdf_inspect"}),
+    ({"standard_tools": True}, {"current_time", "document_ocr", "image_analyze", "source_page", "pdf_inspect", "web_search", "fetch_url"}),
 ])
 def test_standard_tool_scopes_never_expose_project_memory(tmp_path, mode, expected):
     output = io.StringIO()

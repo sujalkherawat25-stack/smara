@@ -51,6 +51,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
       this.generation = String(calls.length);
     }
     async stop() { calls.push({ method: "stop" }); this.generation = ""; }
+    async respond(id, result) { calls.push({ method: "respond", id, result }); }
     async request(method, params) {
       calls.push({ method, params: JSON.parse(JSON.stringify(params)) });
       const thread = { id: "saved", cwd: failResume ? "C:/wrong-project" : setup.preferences.workspace, turns: [{ id: "turn", status: "interrupted", items: [{ id: "user", type: "userMessage", content: [{ type: "text", text: "Synthetic saved question" }] }] }] };
@@ -77,6 +78,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
   const view = evaluate("../src/nativeView.ts", () => assert.fail("View must have no side-effect imports"));
   const context = evaluate("../src/nativeContext.ts", () => assert.fail("Context formatting must have no side-effect imports"));
   const terminalProtocol = evaluate("../src/terminalProtocol.ts", () => assert.fail("Terminal protocol must have no side-effect imports"));
+  const chatStatus = evaluate("../src/chatStatus.ts", () => assert.fail("Status formatting must have no side-effect imports"));
   const goal = evaluate("../src/goalApi.ts", n => n === "@tauri-apps/api/core" ? { invoke: async () => ({}) } : assert.fail(n));
   function Settings() {}
   function Changes() {}
@@ -102,6 +104,9 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     if (name.endsWith("NativeTerminal")) return { default: Terminal, __esModule: true };
     if (name.endsWith("NativeChanges")) return { default: Changes, __esModule: true, reviewRequest: async (workspace, operation, values) => { calls.push({ method: `review/${operation}`, workspace, values }); return operation === "capture" ? { snapshot: "synthetic-local-snapshot", excluded: 0 } : {}; } };
     if (name.endsWith("NativeCommand")) return { default: Command, __esModule: true };
+    if (name.endsWith("NativeOutcome")) return { default: () => null, __esModule: true };
+    if (name.endsWith("NativeHealth")) return { default: () => null, __esModule: true };
+    if (name.endsWith("chatStatus")) return chatStatus;
     if (name.endsWith("nativeApi")) return api;
     if (name.endsWith("nativeRpc")) return { NativeRpc, RpcOutcomeUnknown };
     if (name.endsWith("nativeView")) return view;
@@ -128,8 +133,42 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     nodes().find(node => node.type === "textarea").props.onChange({ target: { value: message, style: {}, scrollHeight: 100 } });
     await flush();
   };
-  return { calls, goalCalls, flush, button, nodes, enter, contextPicker: () => nodes().find(node => node.type === ContextPicker)?.props, emit: message => currentRpc.receive(message), terminal: () => nodes().find(node => node.type === Terminal)?.props, changes: () => nodes().find(node => node.type === Changes)?.props, failResume: () => { failResume = true; }, settings: () => nodes().find(node => node.type === Settings).props, model: () => nodes().find(node => node.type === "select" && node.props["aria-label"] === "Model") };
+  return { calls, goalCalls, flush, button, nodes, enter, tick: async () => { for (const callback of [...timers]) callback(); await flush(); }, contextPicker: () => nodes().find(node => node.type === ContextPicker)?.props, emit: message => currentRpc.receive(message), terminal: () => nodes().find(node => node.type === Terminal)?.props, changes: () => nodes().find(node => node.type === Changes)?.props, failResume: () => { failResume = true; }, settings: () => nodes().find(node => node.type === Settings).props, model: () => nodes().find(node => node.type === "select" && node.props["aria-label"] === "Model") };
 }
+
+test("workers continue status polling after parent completion and have an explicit owning-runtime Stop", async () => {
+  const f = fixture(); await f.flush(); await f.enter("Synthetic parallel task");
+  f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} }); await f.flush();
+  f.emit({ method: "item/started", params: { threadId: "new", item: { id: "spawn", type: "collabAgentToolCall", receiverThreadIds: ["worker"], agentsStates: {}, status: "inProgress" } } }); await f.flush();
+  f.emit({ method: "turn/completed", params: { threadId: "new", turn: { id: "running", status: "completed" } } }); await f.flush();
+  const before = f.calls.filter(call => call.method === "thread/turns/list").length;
+  await f.tick();
+  assert.ok(f.calls.filter(call => call.method === "thread/turns/list").length > before);
+  assert.equal(f.button("＋ New chat").props.disabled, true);
+  f.button("Stop workers").props.onClick(); await f.flush();
+  assert.ok(f.calls.some(call => call.method === "stop"));
+  assert.equal(f.button("＋ New chat").props.disabled, false);
+  assert.equal(f.nodes().some(node => node.type === "button" && node.props.children === "Stop workers"), false);
+});
+
+test("foreign requests cannot grant authority in the selected conversation", async () => {
+  const f = fixture(); await f.flush(); await f.enter("Synthetic task");
+  f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} }); await f.flush();
+  f.emit({ id: 8, method: "item/commandExecution/requestApproval", params: { threadId: "foreign", turnId: "other", command: "synthetic" } }); await f.flush();
+  assert.equal(f.nodes().some(node => node.type === "button" && node.props.children === "Allow this action"), false);
+  assert.equal(f.calls.some(call => call.method === "respond"), false);
+});
+
+test("malformed and duplicate-ID questions cannot crash chat or submit an answer", async () => {
+  for (const questions of [null, {}, [{ id: "x", question: "one" }, { id: "x", question: "two" }]]) {
+    const f = fixture(); await f.flush(); await f.enter("Synthetic task");
+    f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} }); await f.flush();
+    f.emit({ id: 9, method: "item/tool/requestUserInput", params: { threadId: "new", questions } }); await f.flush();
+    assert.equal(f.nodes().some(node => node.type === "input"), false);
+    assert.equal(f.calls.some(call => call.method === "respond"), false);
+    assert.equal(f.button("Stop response").props.disabled, false);
+  }
+});
 
 test("turn snapshots are local, captured before acceptance and sealed after completion", async () => {
   const f = fixture(); await f.flush(); await f.enter("Synthetic coding task");
@@ -372,5 +411,8 @@ test("interactive terminal starts only on supported Windows builds and uses only
   assert.equal(unsupported.terminal().interactiveSupported, false);
   assert.equal(unsupported.calls.some(call => call.method === "command/exec"), false);
   const terminal = readFileSync(new URL("../src/NativeTerminal.tsx", import.meta.url), "utf8");
-  assert.match(terminal, /Smara will never start an unsandboxed shell/);
+  assert.match(terminal, /no-network boundary failed testing/);
+  assert.match(terminal, /No interactive shell will start/);
+  const backend = readFileSync(new URL("../src-tauri/src/native_runtime.rs", import.meta.url), "utf8");
+  assert.match(backend, /const WINDOWS_SANDBOX_STREAMING_SUPPORTED: bool = false/);
 });

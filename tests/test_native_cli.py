@@ -19,6 +19,16 @@ def test_protocol_stdio_preserves_utf8_despite_windows_codepages():
     assert raw.getvalue().decode("utf-8") == expected + "\n"
 
 
+def test_primary_cli_reconfigures_windows_stdio_before_help(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(native_runtime, "configure_protocol_stdio", lambda *streams: calls.append(streams))
+    monkeypatch.setattr(native_runtime, "native_binary", lambda: Path("owned-native.exe"))
+    monkeypatch.setattr(native_runtime, "runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(native_runtime.subprocess, "call", lambda *_args, **_kwargs: 0)
+    assert native_runtime.main(["--help"]) == 0
+    assert len(calls) == 2
+
+
 def test_protocol_stdio_leaves_explicit_text_streams_usable():
     source, destination = io.StringIO("synthetic\n"), io.StringIO()
     native_runtime.configure_protocol_stdio(source, destination)
@@ -51,7 +61,7 @@ def test_help_documents_smara_integrations_without_profile_or_inference(tmp_path
     assert native_runtime.main([option]) == 0
     assert calls[0][0] == ["owned-native.exe", option]
     output = capsys.readouterr().out
-    for command in ("source-status", "--smara-tools", "schedule --help", "tools-serve", "settings"):
+    for command in ("source-status", "--smara-tools", "background --help", "tools-serve", "settings"):
         assert command in output
     assert "smara legacy" not in output
     assert "not an installed Codex" in output

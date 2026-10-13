@@ -6,6 +6,7 @@ from pathlib import Path
 import json
 import re
 import shlex
+from urllib.parse import urldefrag
 
 KINDS = {"general", "coding", "research", "mixed"}
 
@@ -25,15 +26,38 @@ def output_record(workspace, name):
     return {"path": path.relative_to(root).as_posix(), "sha256": digest.hexdigest(), "bytes": path.stat().st_size}
 
 
+def command_body(command):
+    """Unwrap only one recognized native shell invocation, not arbitrary scripts."""
+    if not isinstance(command, str): return None
+    command = command.strip()
+    try:
+        words = shlex.split(command, posix=True)
+    except ValueError:
+        return None
+    if words:
+        executable = words[0].replace("\\", "/").rsplit("/", 1)[-1].lower().removesuffix(".exe")
+        if executable in {"powershell", "pwsh"}:
+            flags = [word.lower() for word in words[1:-2]]
+            if (len(words) < 3 or words[-2].lower() != "-command"
+                    or any(flag not in {"-noprofile", "-noninteractive", "-nologo"} for flag in flags)):
+                return None
+            command = words[-1].strip()
+        elif executable in {"bash", "sh"}:
+            if len(words) != 3 or words[1] not in {"-c", "-lc"}: return None
+            command = words[-1].strip()
+    if command.startswith("& "):
+        command = command[2:].lstrip()
+    return command
+
+
 def test_command(command):
     # Compound commands can mask an earlier failure. Do not count them.
     if not isinstance(command, str):
         return False
     # PowerShell needs its call operator for a quoted absolute executable.
     # Permit that single leading operator, never chaining or background work.
-    command = command.strip()
-    if command.startswith("& "):
-        command = command[2:].lstrip()
+    command = command_body(command)
+    if not command: return False
     if re.search(r"[;&|`\n\r<>]", command):
         return False
     try:
@@ -73,19 +97,21 @@ def normalized(text):
     return " ".join(text.split())
 
 
-def review(spec, checkpoint, transcript, *, elapsed_seconds=0):
+def review(spec, checkpoint, transcript, *, elapsed_seconds=0, cycle_turn_ids=None):
     kind = spec.get("task_kind", "general")
     turns = transcript.get("turns", [])
     items = [item for turn in turns for item in turn.get("items", [])]
-    current_items = turns[-1].get("items", []) if turns else []
+    current_items = ([item for turn in turns if turn.get("id") in cycle_turn_ids for item in turn.get("items", [])]
+                     if cycle_turn_ids is not None else turns[-1].get("items", []) if turns else [])
     last_edit = max((i for i, item in enumerate(items) if item.get("type") == "fileChange" and item.get("status") == "completed"), default=-1)
     tests, sources, failed_pages, clock = {}, {}, [], False
     for index, item in enumerate(items):
         if item.get("type") == "commandExecution" and test_command(item.get("command")) and index > last_edit:
             # Baseline runs before the last edit are not current evidence.
             # Keep the latest post-edit outcome for each exact command.
-            tests[item["command"]] = {"command": item["command"][:1000], "exit_code": item.get("exitCode"),
-                "passed": item.get("status") == "completed" and type(item.get("exitCode")) is int and item["exitCode"] == 0}
+            tests[command_body(item["command"])] = {"command": command_body(item["command"])[:1000], "native_command": item["command"][:2000], "exit_code": item.get("exitCode"),
+                "passed": item.get("status") == "completed" and type(item.get("exitCode")) is int and item["exitCode"] == 0,
+                "failure_excerpt": str(item.get("aggregatedOutput") or "")[-4000:] if item.get("exitCode") != 0 else ""}
         if item.get("type") != "mcpToolCall" or item.get("server") != "smara_readers":
             continue
         values = payloads(item)
@@ -105,7 +131,7 @@ def review(spec, checkpoint, transcript, *, elapsed_seconds=0):
                     source["alias"] = value["url"]
     claims = []
     for claim in checkpoint.get("claims", []):
-        source = next((s for s in sources.values() if claim["url"] in {s["url"], s.get("alias")}), None)
+        source = next((s for s in sources.values() if urldefrag(claim["url"])[0] in {urldefrag(s["url"])[0], urldefrag(s.get("alias") or "")[0]}), None)
         quote = normalized(claim["quote"])
         found = bool(source and len(quote) >= 20 and any(quote in text for text in source["texts"]))
         claims.append({**claim, "quote_found": found})
@@ -116,13 +142,63 @@ def review(spec, checkpoint, transcript, *, elapsed_seconds=0):
         check("Tests", bool(tests) and all(t["passed"] for t in tests.values()), "At least one native test command must pass after the last recorded edit; failed or stale commands do not count.")
     if kind in {"research", "mixed"}:
         check("Source reads", len(sources) >= spec.get("min_sources", 2), f"Read {len(sources)} distinct pages; search snippets alone do not count.")
-        check("Citation excerpts", bool(claims) and all(c["quote_found"] for c in claims), "Every submitted claim needs an exact excerpt from a page actually read. This checks quotation provenance, not semantic correctness or full answer coverage.")
+        web_claims = [c for c in claims if c["url"]]
+        check("Citation excerpts", bool(web_claims) and all(c["quote_found"] for c in web_claims), "Every submitted research claim needs an exact excerpt from a page actually read. Local coding claims do not count. This checks quotation provenance, not semantic correctness or full answer coverage.")
         if spec.get("time_sensitive"):
             check("Current date", clock, "Time-sensitive work requires a native clock read in this cycle; an older session timestamp does not count.")
     outputs = [output_record(spec["workspace"], name) for name in checkpoint.get("outputs", [])]
+    coverage = []
+    links = {entry["requirement_id"]: entry for entry in checkpoint.get("coverage", [])}
+    for requirement in spec.get("requirements", []):
+        entry = links.get(requirement["id"], {})
+        evidence = []
+        for index in entry.get("claim_indexes", []):
+            if type(index) is int and 0 <= index < len(claims) and claims[index]["quote_found"]:
+                evidence.append({"kind": "citation", "reference": index})
+        for name in entry.get("outputs", []):
+            if any(output["path"] == name for output in outputs):
+                evidence.append({"kind": "output", "reference": name})
+        for cmd in entry.get("test_commands", []):
+            matched = next((value for key, value in tests.items() if key == command_body(cmd)), None)
+            if matched and matched["passed"]:
+                evidence.append({"kind": "test", "reference": matched["command"]})
+        coverage.append({**requirement, "evidence_present": bool(evidence), "evidence": evidence,
+                         "semantic_review_required": True})
+    if coverage:
+        check("Requirement evidence", all(c["evidence_present"] for c in coverage),
+              "Each explicit requirement needs observed citation, output or test evidence. Linkage does not prove that the evidence satisfies the requirement; review correctness.")
     if outputs:
         check("Output files", True, f"Hashed {len(outputs)} existing project files. Changed files will need another review.")
+    for output in outputs:
+        if not output["path"].lower().endswith(".pdf"):
+            continue
+        inspected, total, issues = set(), None, []
+        for item in items:
+            if item.get("type") != "mcpToolCall" or item.get("server") != "smara_readers" or item.get("tool") != "pdf_inspect":
+                continue
+            for value in payloads(item):
+                if value.get("content_sha256") != output["sha256"]:
+                    continue  # A prior revision is not current layout evidence.
+                page_count = value.get("total_pages")
+                if type(page_count) is not int or not 1 <= page_count <= 10000:
+                    continue
+                total = page_count
+                for page in value.get("pages", []):
+                    number = page.get("page")
+                    if type(number) is int and 1 <= number <= total and page.get("rendered") is True:
+                        inspected.add(number)
+                        issues.extend(page.get("issues") or [])
+        passed = total is not None and len(inspected) == total and not issues
+        check("PDF layout preflight", passed,
+              f"{output['path']}: rendered {len(inspected)}/{total or '?'} pages of the current PDF; {len(issues)} layout warnings. "
+              "Resolve warnings and inspect every page with pdf_inspect. This is heuristic preflight, not visual or semantic proof; human review is still required.")
     return {"kind": kind, "passed": all(c["passed"] for c in checks), "checks": checks,
+        "coverage": coverage,
+        "metrics": {"citation_support": sum(c["quote_found"] for c in claims if c["url"]) / sum(bool(c["url"]) for c in claims) if any(c["url"] for c in claims) else None,
+                    "evidence_coverage": sum(c["evidence_present"] for c in coverage) / len(coverage) if coverage else None,
+                    "source_reads": len(sources), "failed_pages": len(failed_pages),
+                    "failed_tests": sum(not t["passed"] for t in tests.values()), "latency_seconds": round(elapsed_seconds, 1),
+                    "semantic_correctness": "not_automatically_verified"},
         "tests": list(tests.values())[-50:], "sources": [{k: v for k, v in s.items() if k != "texts"} for s in sources.values()][:100],
         "claims": claims, "failed_pages": failed_pages[-20:], "outputs": outputs, "elapsed_seconds": round(elapsed_seconds, 1),
         "review_required": True}
@@ -130,7 +206,10 @@ def review(spec, checkpoint, transcript, *, elapsed_seconds=0):
 
 def validate_acceptance(goal):
     report = goal["checkpoint"].get("outcome")
-    if goal["spec"].get("task_kind", "general") != "general" and (not report or not report.get("passed")):
+    pdf_output = any(output["path"].lower().endswith(".pdf") for output in (report or {}).get("outputs", []))
+    if pdf_output and not any(c.get("name") == "PDF layout preflight" and c.get("passed") is True for c in (report or {}).get("checks", [])):
+        raise ValueError("PDF layout evidence is incomplete; continue for a fresh review")
+    if (goal["spec"].get("task_kind", "general") != "general" or pdf_output) and (not report or not report.get("passed")):
         raise ValueError("Outcome evidence checks are incomplete; add feedback and continue")
     for saved in (report or {}).get("outputs", []):
         try:

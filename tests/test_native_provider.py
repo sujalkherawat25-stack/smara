@@ -39,6 +39,18 @@ def test_sarvam_glm_gets_bounded_long_output_budget_instead_of_chat_default():
     assert payload["reasoning_effort"] == "high"
 
 
+def test_pdf_workflow_guidance_is_capability_scoped_and_preserves_user_request():
+    request = {"input": "Create a PDF", "tools": [{"type": "function", "name": "mcp__smara_readers__pdf_inspect", "parameters": {"type": "object"}}]}
+    payload, _ = translate_request(request, "glm5.3", sarvam=True)
+    assert payload["messages"][-1]["content"] == "Create a PDF"
+    guidance = payload["messages"][0]["content"]
+    assert "retain the editable generator" in guidance
+    assert "do not call view_image" in guidance
+    assert "do not prove readable layout" in guidance
+    without, _ = translate_request({"input": "Hello"}, "other-model")
+    assert without["messages"] == [{"role": "user", "content": "Hello"}]
+
+
 def test_explicit_output_budget_wins_and_other_providers_keep_their_defaults():
     endpoint = ChatEndpoint("https://api.sarvam.ai/v2", "glm5.3", "synthetic-key")
     payload, _ = translate_request(

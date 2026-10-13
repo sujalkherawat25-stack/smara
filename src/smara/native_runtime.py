@@ -112,9 +112,10 @@ def _search_credential_available() -> bool:
         return False
 
 
-def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, tools_enabled: bool = False, search_enabled: bool = False, workers_enabled: bool = False, browser_origins: list[str] | None = None) -> tuple[list[str], dict[str, str]]:
+def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, tools_enabled: bool = False, search_enabled: bool = False, workers_enabled: bool = False, browser_origins: list[str] | None = None, interactive: bool = False) -> tuple[list[str], dict[str, str]]:
     if not workspace.is_dir():
         raise ValueError("Workspace must be an existing directory")
+    adapter.configure_memory(workspace)
     home.mkdir(parents=True, exist_ok=True)
     tool_args = (["--native-tools"] if getattr(sys, "frozen", False) else ["-m", "smara.native_tools"])
     tool_args += ["--workspace", str(workspace.resolve())]
@@ -143,12 +144,18 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         # background catalog clones and inherited app/plugin authorization.
         "features.plugins": False,
         "features.apps": False,
+        "features.memories": False,
+        "features.external_agent_memory_import": False,
+        "skills.include_instructions": True,
         # Standard context tools are always available; additional research and
         # memory capabilities are selected by the explicit scope argument.
         "mcp_servers.smara_readers.enabled": True,
         "mcp_servers.smara_readers.command": sys.executable,
         "mcp_servers.smara_readers.args": reader_args,
         "mcp_servers.smara_browser.enabled": False,
+        "mcp_servers.smara_computer.enabled": False,
+        "mcp_servers.smara_computer.command": sys.executable,
+        "mcp_servers.smara_computer.args": (["--native-computer"] if getattr(sys, "frozen", False) else ["-m", "smara.native_computer"]),
         "mcp_servers.smara_browser.command": sys.executable,
         "mcp_servers.smara_browser.args": (["--native-browser"] if getattr(sys, "frozen", False) else ["-m", "smara.native_browser"]),
     }
@@ -175,10 +182,12 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         "mcp_servers.smara_readers.tool_timeout_sec": 90,
         "mcp_servers.smara_readers.tools.document_ocr.approval_mode": "prompt",
         "mcp_servers.smara_readers.tools.image_analyze.approval_mode": "prompt",
+        "mcp_servers.smara_readers.tools.outreach_draft.approval_mode": "prompt",
     })
     # MCP children inherit vault/settings paths, never secret values.
     from .native_profiles import state_path
     settings["mcp_servers.smara_readers.env.SMARA_DESKTOP_STATE"] = str(state_path().resolve())
+    settings["mcp_servers.smara_readers.env.SMARA_NATIVE_HOME"] = str(home.resolve())
     if not getattr(sys, "frozen", False):
         settings["mcp_servers.smara_readers.env.PYTHONPATH"] = str((source_root() / "src").resolve())
     if os.getenv("SMARA_DESKTOP_CREDENTIALS"):
@@ -191,6 +200,7 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         for value in browser_origins:
             browser_args += ["--origin", value]
         settings.update({
+            "mcp_servers.smara_browser.env.SMARA_DESKTOP_STATE": str(state_path().resolve()),
             "mcp_servers.smara_browser.enabled": True,
             "mcp_servers.smara_browser.command": sys.executable,
             "mcp_servers.smara_browser.args": browser_args,
@@ -205,6 +215,18 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
             settings["mcp_servers.smara_browser.env.PYTHONPATH"] = str((source_root() / "src").resolve())
         for entry in browser_tools:
             settings[f'mcp_servers.smara_browser.tools.{entry["name"]}.approval_mode'] = "prompt"
+    if interactive:
+        from .native_computer import selected, TOOLS as computer_tools
+        if selected(workspace):
+            settings.update({"mcp_servers.smara_computer.enabled": True,
+                "mcp_servers.smara_computer.command": sys.executable,
+                "mcp_servers.smara_computer.args": (["--native-computer"] if getattr(sys, "frozen", False) else ["-m", "smara.native_computer"]) + ["--workspace", str(workspace.resolve())],
+                "mcp_servers.smara_computer.env.SMARA_DESKTOP_STATE": str(state_path().resolve()),
+                "mcp_servers.smara_computer.env.PYTHONPATH": str((source_root() / "src").resolve()),
+                "mcp_servers.smara_computer.env.PYTHONIOENCODING": "utf-8", "mcp_servers.smara_computer.env.PYTHONUTF8": "1",
+                "mcp_servers.smara_computer.required": True, "mcp_servers.smara_computer.tool_timeout_sec": 30,
+                "mcp_servers.smara_computer.default_tools_approval_mode": "prompt"})
+            for entry in computer_tools: settings[f'mcp_servers.smara_computer.tools.{entry["name"]}.approval_mode'] = "prompt"
     # TOML rejects JSON's surrogate-pair escapes for non-BMP characters. Keep
     # Unicode literal so emoji/non-Latin workspace paths survive native parsing.
     argv = [part for key, value in settings.items() for part in ("-c", key + "=" + json.dumps(value, ensure_ascii=False))]
@@ -251,17 +273,22 @@ def print_smara_help() -> None:
     print("  smara --smara-tools [native args]   Add academic search and local project-memory readers")
     print("  smara --smara-workers [native args] Enable parent-directed isolated coding checkouts")
     print("  smara --smara-browser-origin URL   Opt in to an exact public DOM-browser origin (repeatable)")
-    print("  smara schedule --help              Manage paused-by-default, bounded read-only jobs")
+    print("  smara background --help            Shared goal worker and bounded recurring wakes")
     print("  smara goals --help                 Persistent goals, continuation and Telegram controls")
     print("  smara voice --help                 Explicit Sarvam transcription and read-aloud audio")
     print("  smara changes --help               Review Git changes and explicitly stage/revert/undo")
+    print("  smara pdf --help                   Local PDF preflight and explicit page PNG export (no model)")
+    print("  smara memory status                Show Continuum readiness and local skills paths (no secrets)")
+    print("  smara mail list                    Review local company-research drafts; send from Desktop Settings → Email")
     print("  smara tools-serve --workspace DIR  Serve Smara MCP tools on stdio")
     print("  smara settings                    Show native project/model/search setup (no secret values)")
     print("\nThis fork uses its own source-built binary, not an installed Codex. Integration")
     print("tools include the local clock and selected-file image/OCR analysis (uploads require approval).")
     print("Public web search is available when a protected search key is saved.")
     print("readers do not provide browser actions. DOM browser actions need explicit origin opt-in")
-    print("and native confirmation; personal browser, host computer and company-write automation remain unavailable.")
+    print("and native confirmation. Experimental foreground app tools need user selection in Settings;")
+    print("personal-browser profiles, unrestricted desktop control and unattended company writes remain unavailable.")
+    print("Desktop interactive terminal is disabled pending its network-isolation gate; agent command transcripts remain available.")
 
 
 def configure_protocol_stdio(input_stream, output_stream) -> None:
@@ -288,7 +315,7 @@ def serve_bootstrap(input_stream=None, output_stream=None) -> int:
     home = Path(config["home"]) if config.get("home") else runtime_home()
     search_enabled = config.get("tools_enabled") is not True and _search_credential_available()
     with ResponsesAdapter(endpoint) as adapter:
-        options, environment = launch_options(adapter, home=home, workspace=workspace, tools_enabled=config.get("tools_enabled") is True, search_enabled=search_enabled, workers_enabled=config.get("workers_enabled") is True, browser_origins=config.get("browser_origins"))
+        options, environment = launch_options(adapter, home=home, workspace=workspace, tools_enabled=config.get("tools_enabled") is True, search_enabled=search_enabled, workers_enabled=config.get("workers_enabled") is True, browser_origins=config.get("browser_origins"), interactive=True)
         process = subprocess.Popen([str(binary), *options, "app-server", "--listen", "stdio://"],
             cwd=workspace, env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1,
@@ -325,6 +352,9 @@ def serve_bootstrap(input_stream=None, output_stream=None) -> int:
                         # it cancels threads and closes managed tool processes.
                         # TerminateProcess skips that cleanup on Windows.
                         return
+                    if message.get("method") == "turn/interrupt" and adapter.memory is not None:
+                        params = message.get("params") or {}
+                        adapter.memory.cancel(params.get("threadId"), params.get("turnId"))
                     if message.get("method") in {"turn/start", "thread/resume", "command/exec"} and "id" in message:
                         with activity_lock:
                             try:
@@ -374,7 +404,36 @@ def serve_bootstrap(input_stream=None, output_stream=None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_protocol_stdio(sys.stdin, sys.stdout)
+    configure_protocol_stdio(sys.stdin, sys.stderr)
     args = list(sys.argv[1:] if argv is None else argv)
+    if args[:1] == ["mail"]:
+        import argparse
+        from .native_outreach import operate as outreach
+        parser = argparse.ArgumentParser(description="Local company-research drafts and reviewed email status. Send from Desktop Settings → Email.")
+        parser.add_argument("action", choices=["list", "connect", "reconcile"], default="list", nargs="?")
+        parser.add_argument("--workspace", default=str(Path.cwd()))
+        parser.add_argument("--id")
+        params = parser.parse_args(args[1:])
+        if params.action == "reconcile" and not params.id: parser.error("Reconcile requires --id")
+        try:
+            print(json.dumps(outreach({"action": params.action, "workspace": params.workspace, "id": params.id}), ensure_ascii=False, indent=2))
+            return 0
+        except (RuntimeError, ValueError, OSError) as exc:
+            print(str(exc) if isinstance(exc, ValueError) else "Email state unavailable; inspect Desktop Settings → Email", file=sys.stderr)
+            return 1
+    if args[:1] == ["memory"]:
+        if args[1:] not in ([], ["status"], ["--help"]):
+            print("Use smara memory status; configure the protected key in Desktop Settings → Memory", file=sys.stderr)
+            return 2
+        from .native_memory import skills_roots, status as memory_status
+        configure_protocol_stdio(sys.stdin, sys.stdout)
+        print(json.dumps({"memory": memory_status(Path.cwd()), "skills_roots": skills_roots(Path.cwd())}, ensure_ascii=False, indent=2))
+        return 0
+    if args[:1] == ["pdf"]:
+        from .native_pdf import main as pdf_main
+        configure_protocol_stdio(sys.stdin, sys.stdout)
+        return pdf_main(args[1:])
     if args[:1] == ["voice"]:
         from .native_voice import main as voice_main
         return voice_main(args[1:])
@@ -394,13 +453,12 @@ def main(argv: list[str] | None = None) -> int:
         configure_protocol_stdio(sys.stdin, sys.stdout)
         print(json.dumps(bootstrap(), ensure_ascii=False, indent=2))
         return 0
+    if args[:1] == ["background"]:
+        from .native_background import main as background_main
+        return background_main(args[1:])
     if args[:1] == ["schedule"]:
-        from .native_schedule import main as schedule_main
-        try:
-            return schedule_main(args[1:])
-        except (RuntimeError, ValueError, OSError) as exc:
-            print(str(exc), file=sys.stderr)
-            return 1
+        print("The separate scheduler is retired. Use smara background --help. Existing records remain untouched; do not restart the old worker.", file=sys.stderr)
+        return 2
     if args and args[0] == "tools-serve":
         from .native_tools import main as tools_main
         return tools_main(args[1:])
@@ -454,7 +512,7 @@ def main(argv: list[str] | None = None) -> int:
         with ResponsesAdapter(endpoint) as adapter:
             options, environment = launch_options(adapter, home=runtime_home(), workspace=Path.cwd(), tools_enabled=tools_enabled,
                 search_enabled=not tools_enabled and _search_credential_available(), workers_enabled=workers_enabled,
-                browser_origins=browser_origins)
+                browser_origins=browser_origins, interactive=True)
             # The adapter belongs to this invocation. A detached shared daemon
             # must not retain its now-dead URL/token after the CLI exits.
             from .native_goals import project_activity

@@ -46,6 +46,12 @@ def main():
     checks["encrypted_vault_not_plaintext"] = synthetic_key.encode() not in vault_before_edit
     # Internal resolver is not exposed to the renderer; test only our synthetic key.
     checks["real_dpapi_roundtrip"] = call("resolve_credential", name="SMARA_MODEL_FIXTURE_API_KEY")["secret"] == synthetic_key
+    memory_key = "sk_mem_synthetic-frozen-acceptance-123456789"
+    memory_setup = call("save_memory", secret=memory_key, memory={"enabled": False, "scope": "project", "user_id": "synthetic-frozen-user"})
+    checks["Continuum_SDK_bundled_and_key_readable"] = memory_setup["memory"]["sdk_available"] and memory_setup["memory"]["configured"]
+    checks["memory_is_disabled_without_upload_consent"] = memory_setup["memory"]["enabled"] is False
+    checks["memory_key_encrypted_and_hidden_from_UI"] = memory_key not in json.dumps(memory_setup) and memory_key.encode() not in (data / "credentials.json").read_bytes()
+    checks["memory_DPAPI_roundtrip"] = call("resolve_credential", name="SYNTARUS_API_KEY")["secret"] == memory_key
     cli = subprocess.run([str(args.cli.resolve()), "settings"], capture_output=True, text=True, encoding="utf-8", env=env, timeout=30)
     try:
         value = json.loads(cli.stdout) if cli.returncode == 0 else {}
@@ -53,6 +59,7 @@ def main():
         value = {}
     checks["CLI_and_Desktop_share_native_configuration"] = cli.returncode == 0 and value["preferences"]["active_model"] == "fixture" and len(value["preferences"]["projects"]) == 2
     checks["CLI_settings_do_not_return_secret"] = synthetic_key not in cli.stdout
+    checks["CLI_shares_conversation_memory_configuration"] = value.get("memory", {}).get("user_id") == "synthetic-frozen-user" and memory_key not in cli.stdout
     checks["original_history_and_preferences_untouched"] = (data / "desktop.json").read_bytes() == original
     report = {"status": "passed" if all(checks.values()) else "failed", "scope": "frozen synthetic metadata and DPAPI, not GUI grants or model quality",
               "fixture": str(fixture), "checks": checks, "model_or_provider_requests": 0, "personal_state_modified": False}

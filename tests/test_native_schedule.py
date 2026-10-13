@@ -71,7 +71,7 @@ def test_inference_budget_cannot_fabricate_or_repeat_a_response():
     sentinel = object()
     budget = RequestBudget(SimpleNamespace(stream=lambda *args, **kwargs: observed.append(kwargs) or sentinel), 1)
     assert budget.stream("POST", "synthetic", json={"messages": [], "max_tokens": 8192}) is sentinel
-    assert observed[0]["json"]["max_tokens"] == 2048
+    assert observed[0]["json"]["max_tokens"] == 8192
     with pytest.raises(RuntimeError, match="ceiling"):
         budget.stream("POST", "synthetic", json={"messages": []})
     assert len(observed) == 1

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import uuid
 from urllib.parse import urlsplit
 from .native_profiles import load_profiles, protect, read_object, resolve_credential, resolve_profile_key, state_path, write_object
 from .native_provider import ChatEndpoint, probe_endpoint
@@ -116,7 +117,13 @@ def put_credential(name, secret, provider):
 def bootstrap():
     profiles, _, _ = load_profiles()
     profiles = [{k: v for k, v in profile.items() if k in PROFILE_FIELDS} for profile in profiles]
-    return {"preferences": preferences(), "profiles": profiles, "credentials": credential_summaries(), "search": search_status(protected_only=True)}
+    from .native_memory import skills_roots, status as memory_status
+    from .native_computer import selected as computer_selected
+    prefs = preferences()
+    computer = computer_selected(prefs["workspace"]) if prefs["workspace"] else None
+    return {"preferences": prefs, "profiles": profiles, "credentials": credential_summaries(), "search": search_status(protected_only=True),
+            "memory": memory_status(prefs["workspace"]), "skills_roots": skills_roots(prefs["workspace"]),
+            "computer": {"enabled": bool(computer), "expires": computer.get("expires") if computer else None}}
 
 
 def _test_model(request):
@@ -153,6 +160,29 @@ def manage(request):
     if not isinstance(request, dict) or not isinstance(request.get("operation"), str):
         raise ValueError("Invalid native management request")
     operation = request["operation"]
+    if operation == "runtime_health":
+        if set(request) - {"operation", "workspace"}:
+            raise ValueError("Health inspection accepts only a project")
+        from .native_goals import workspace_key
+        workspace = request.get("workspace", "")
+        if not isinstance(workspace, str) or not workspace or not any(
+                workspace_key(project["workspace"]) == workspace_key(workspace) for project in preferences()["projects"]):
+            raise ValueError("Choose a registered project")
+        from .native_memory import status as memory_status
+        return {"search": search_status(protected_only=True), "memory": memory_status(workspace),
+                "network_probes": 0, "detail": "Local configuration and sync receipts only; not a live connectivity test"}
+    if operation == "background":
+        from .native_background import manage as background
+        return background(request)
+    if operation == "browser_control":
+        from .native_browser_control import manage as browser
+        return browser(request)
+    if operation == "computer_control":
+        from .native_computer import manage as computer
+        return computer(request)
+    if operation == "outreach":
+        from .native_outreach import operate
+        return operate(request.get("outreach") or {})
     if operation == "voice":
         from .native_voice import operate
         return operate(request.get("voice") or {})
@@ -168,6 +198,9 @@ def manage(request):
         return _test_model(request)
     if operation == "test_search":
         return _test_search()
+    if operation == "test_memory":
+        from .native_memory import probe
+        return probe()
     with management_lock():
         if operation == "bootstrap":
             return bootstrap()
@@ -177,7 +210,46 @@ def manage(request):
         saved = read_object(settings_path())
         prefs = preferences()
         vault_before = None
-        if operation == "add_project":
+        if operation == "save_memory":
+            from .native_memory import CREDENTIAL, options
+            config = options(request.get("memory"))
+            existing = options(saved.get("conversation_memory"))
+            config["user_id"] = config["user_id"] or existing["user_id"] or "smara-" + uuid.uuid4().hex
+            secret = request.get("secret", "")
+            if not isinstance(secret, str):
+                raise ValueError("Enter a Syntarus project key")
+            if secret.strip():
+                if not re.fullmatch(r"sk_mem_[A-Za-z0-9_-]{16,200}", secret.strip()):
+                    raise ValueError("Enter a Syntarus project key beginning sk_mem_")
+                vault_before = read_object(vault_path())
+                put_credential(CREDENTIAL, secret, "syntarus")
+            if config["enabled"] and not resolve_credential(CREDENTIAL, allow_environment=False):
+                raise ValueError("Save a readable Syntarus project key before enabling memory")
+            saved["conversation_memory"] = config
+        elif operation == "save_outreach":
+            from .native_outreach import address, CLIENT_ALIAS, TOKEN_ALIAS
+            config = request.get("outreach")
+            if not isinstance(config, dict) or set(config) != {"enabled", "client_id", "allowlist", "daily_limit"}:
+                raise ValueError("Invalid outreach settings")
+            if type(config["enabled"]) is not bool or type(config["daily_limit"]) is not int or not 1 <= config["daily_limit"] <= 20:
+                raise ValueError("Choose explicit draft opt-in and a daily cap from 1 to 20")
+            client_id = config["client_id"]
+            if not isinstance(client_id, str) or len(client_id) > 200 or (client_id and not re.fullmatch(r"[A-Za-z0-9_-]+\.apps\.googleusercontent\.com", client_id)):
+                raise ValueError("Use a Google Desktop OAuth client ID")
+            if not isinstance(config["allowlist"], list) or len(config["allowlist"]) > 100:
+                raise ValueError("Approve at most 100 exact recipient addresses")
+            clean = {**config, "allowlist": list(dict.fromkeys(address(a) for a in config["allowlist"]))}
+            secret = request.get("client_secret", "")
+            if not isinstance(secret, str) or len(secret) > 1000:
+                raise ValueError("Invalid Desktop OAuth client secret")
+            vault_before = read_object(vault_path())
+            previous = saved.get("outreach", {})
+            if previous.get("client_id") != client_id:
+                records = dict(vault_before); records.pop(TOKEN_ALIAS, None); records.pop(CLIENT_ALIAS, None)
+                write_object(vault_path(), records)
+            if secret: put_credential(CLIENT_ALIAS, secret, "gmail")
+            saved["outreach"] = clean
+        elif operation == "add_project":
             workspace = folder(request.get("workspace") or "")
             label = str(request.get("label") or Path(workspace).name or workspace).strip()
             if not label or len(label) > 100:
@@ -216,6 +288,8 @@ def manage(request):
             name = str(request.get("name") or "")
             if provider in PROVIDERS and name.upper() != PROVIDERS[provider][1]:
                 raise ValueError("Search key alias does not match the selected provider")
+            if provider == "syntarus" and name.upper() != "SYNTARUS_API_KEY":
+                raise ValueError("Use SYNTARUS_API_KEY for Syntarus conversation memory")
             if provider == "telegram" and (name.upper() != "SMARA_TELEGRAM_BOT_TOKEN" or not re.fullmatch(r"\d+:[A-Za-z0-9_-]{20,}", str(request.get("secret") or "").strip())):
                 raise ValueError("Enter the bot token issued by Telegram's BotFather")
             vault_before = read_object(vault_path())
@@ -225,8 +299,18 @@ def manage(request):
         elif operation == "delete_credential":
             name = str(request.get("name") or "")
             records = read_object(vault_path())
+            if name.upper() == "SYNTARUS_API_KEY":
+                from .native_memory import options
+                vault_before = dict(records)
+                for alias in list(records):
+                    if alias.upper() == "SYNTARUS_API_KEY":
+                        records.pop(alias)
+                saved["conversation_memory"] = {**options(saved.get("conversation_memory")), "enabled": False}
             records.pop(name, None)
             write_object(vault_path(), records)
+            if name == "SMARA_GMAIL_OAUTH":
+                from .native_mail_oauth import health_path
+                write_object(health_path(), {"state": "disconnected", "generation": uuid.uuid4().hex})
         elif operation == "save_model":
             profile = request.get("profile")
             if not isinstance(profile, dict):
@@ -270,7 +354,7 @@ def manage(request):
             saved["model_profiles"] = [{k: v for k, v in p.items() if k in PROFILE_FIELDS} for p in profiles if p.get("id") != identity] + [clean]
         else:
             raise ValueError("Unsupported native management operation; legacy execution is unavailable")
-        if operation != "delete_credential":
+        if operation != "delete_credential" or name.upper() == "SYNTARUS_API_KEY":
             try:
                 write_object(settings_path(), saved)
             except OSError:
@@ -284,6 +368,14 @@ def manage(request):
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
+    if args[:1] == ["--native-pdf"]:
+        from .native_pdf import main as pdf_main
+        return pdf_main(args[1:])
+    if args[:1] == ["--native-mail-connect"]:
+        from .native_mail_oauth import authorize
+        parser = argparse.ArgumentParser(); parser.add_argument("--generation")
+        try: authorize(generation=parser.parse_args(args[1:]).generation); return 0
+        except Exception: return 1
     if args[:1] == ["--native-goals"]:
         from .native_goal_runtime import run
         from .native_goals import GoalStore
@@ -299,6 +391,9 @@ def main(argv=None):
     if args[:1] == ["--native-browser"]:
         from .native_browser import main as serve
         return serve(args[1:])
+    if args[:1] == ["--native-computer"]:
+        from .native_computer import main as computer_main
+        return computer_main(args[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--native-manage", action="store_true")
     parsed = parser.parse_args(args)

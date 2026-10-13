@@ -14,7 +14,7 @@ def test_rejects_nonpublic_or_nonorigin_configuration(url):
 
 def test_action_tools_are_not_marked_readonly():
     for entry in TOOLS:
-        assert entry["annotations"]["readOnlyHint"] == (entry["name"] in {"browser_observe", "browser_text_page"})
+        assert entry["annotations"]["readOnlyHint"] == (entry["name"] in {"browser_observe", "browser_text_page", "browser_snapshot", "browser_tabs"})
 
 
 def test_real_dom_actions_pagination_stale_and_auth_denial(tmp_path, monkeypatch):

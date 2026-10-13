@@ -23,6 +23,13 @@ jobs:
           tests/test_native_goals.py tests/test_native_telegram.py
           tests/test_native_outcomes.py tests/test_native_voice.py
           tests/test_native_documents.py tests/test_native_limits.py
+          tests/test_native_budget.py tests/test_native_memory.py tests/test_native_pdf.py
+          tests/test_native_outcome_suite.py
+          tests/test_native_sources.py
+          tests/test_native_release_manifest.py
+          tests/test_native_outreach.py
+          tests/test_native_serialization.py
+          tests/test_native_background.py tests/test_native_computer.py
           tests/test_own_harness_routing.py
 
   legacy-compatibility:
@@ -57,6 +64,7 @@ jobs:
         run: >-
           python -m pytest -q
           tests/test_native_browser.py tests/test_h5_managed_browser.py
+          tests/test_native_browser_upgrade.py
           tests/test_worker_snapshot_review.py tests/test_h6_bounded_delegation.py
           tests/test_docker_workspace_sandbox.py
 
@@ -130,6 +138,6 @@ jobs:
           leaked = sorted(forbidden & names)
           assert not leaked, f"legacy execution modules leaked into wheel: {leaked}"
           assert "smara/native_runtime.py" in names, "native runtime missing from wheel"
-          for module in ("native_goals", "native_goal_runtime", "native_telegram", "native_outcomes", "native_voice"):
+          for module in ("native_goals", "native_goal_runtime", "native_telegram", "native_outcomes", "native_voice", "native_background", "native_browser_control", "native_browser_transfer", "native_computer", "native_windows"):
               assert f"smara/{module}.py" in names, f"goal module missing from wheel: {module}"
           PY

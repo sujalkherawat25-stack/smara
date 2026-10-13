@@ -10,10 +10,13 @@ import { contextMessage, type ContextFile } from "./nativeContext";
 import NativeTerminal from "./NativeTerminal";
 import NativeChanges, { reviewRequest } from "./NativeChanges";
 import NativeCommand from "./NativeCommand";
+import NativeOutcome from "./NativeOutcome";
+import NativeHealth from "./NativeHealth";
+import { requestQuestions, waitingReason } from "./chatStatus";
 import { nativeSettings, sameWorkspace, type NativeSetup } from "./nativeApi";
 import { NativeRpc, RpcOutcomeUnknown, type RpcMessage } from "./nativeRpc";
 import { appendTerminalOutput, decodeTerminalOutput, encodeTerminalInput, terminalExecParams, type TerminalSession } from "./terminalProtocol";
-import { activeTurn, answerKey, approvalResponse, displayItem, displayRuntimeError, mergeItem, mergeWorkers, workerActivity, workerSnapshot, resumeStatus, routeMessage, supportsApproval, threadLabel, type NativeTurn, type ViewItem, type WorkerView } from "./nativeView";
+import { activeTurn, answerKey, approvalResponse, displayItem, displayRuntimeError, mergeItem, mergeWorkers, workerActivity, workerOutstanding, workerSnapshot, resumeStatus, routeMessage, supportsApproval, threadLabel, type NativeTurn, type ViewItem, type WorkerView } from "./nativeView";
 import type { LocalModelProfile } from "./types";
 import packageInfo from "../package.json";
 import "./native-shell.css";
@@ -60,6 +63,7 @@ const NATIVE_DEVELOPER_INSTRUCTIONS = [
 
 export default function NativeApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"models" | "memory" | "tools">("models");
   const [goalWorking, setGoalWorking] = useState(false);
   const [currentGoal, setCurrentGoal] = useState<Goal | null>(null);
   const [goalServiceRunning, setGoalServiceRunning] = useState(false);
@@ -146,6 +150,10 @@ export default function NativeApp() {
   const streamDeltaTimerRef = useRef<number | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const turnSnapshot = useRef<{ id: string; workspace: string; thread: string } | null>(null);
+  const lastNativeEventRef = useRef(Date.now());
+  const liveWorkers = workers.some(workerOutstanding);
+  const approvalRelevant = (approval: Approval) => typeof approval.params.threadId === "string"
+    && (approval.params.threadId === threadRef.current || workers.some(worker => worker.id === approval.params.threadId));
 
   const applyGoalSnapshot = (value: GoalList) => {
     const allGoals = value.goals || [];
@@ -161,7 +169,7 @@ export default function NativeApp() {
     setGoalWorking(allGoals.some(goal => !!goal.lease) || !!value.current_goal?.lease);
     setGoalServiceRunning(!!value.service.running);
     if (value.service.running) {
-      setGoalServiceStarting(false); setGoalServiceError(""); setGoalPollError("");
+      setGoalServiceStarting(false); setGoalServiceError(value.service.online === false ? "Network offline · queued work waits; interrupted actions are not replayed." : ""); setGoalPollError("");
       goalServiceStartedAtRef.current = 0;
     } else if (goalServiceStartedAtRef.current && Date.now() - goalServiceStartedAtRef.current > 30_000) {
       setGoalServiceStarting(false);
@@ -464,6 +472,7 @@ export default function NativeApp() {
       return;
     }
     if (route === "request") {
+      lastNativeEventRef.current = Date.now();
       setSettingsOpen(false);
       setApprovals(current => [...current.filter(item => item.id !== message.id), { id: message.id!, method: message.method!, params }]);
       setStatus("Waiting for your response");
@@ -473,6 +482,7 @@ export default function NativeApp() {
       setWorkers(current => workerActivity(current, message, Date.now()));
       return;
     }
+    lastNativeEventRef.current = Date.now();
     if (message.method === "turn/diff/updated") {
       setTurnDiff(String(params.diff ?? ""));
     } else if (message.method === "item/agentMessage/delta") {
@@ -507,16 +517,17 @@ export default function NativeApp() {
     } else if (message.method === "smara/runtimeStopped") {
       activeTurnRef.current = ""; busyRef.current = false;
       setConnected(false); setBusy(false); setUncertain(false); setApprovals([]); setStatus("Runtime stopped; unfinished work is not reported as complete");
+      setWorkers(current => current.map(worker => workerOutstanding(worker) ? { ...worker, status: "shutdown", activity: "Owning runtime exited; not reported as completed" } : worker));
       setTerminalSession(current => current && ["starting", "running", "stopping"].includes(current.status) ? { ...current, status: "stopped", error: "The native runtime disconnected; its shell was stopped too." } : current);
     }
   };
 
   useEffect(() => {
     const trackGoal = !!currentGoal && !["completed", "stopped"].includes(currentGoal.state);
-    if (!busy && !goalWorking && !goalServiceStarting && !trackGoal) return;
+    if (!busy && !liveWorkers && !goalWorking && !goalServiceStarting && !trackGoal) return;
     const timer = setInterval(() => setActivityClock(Date.now()), busy ? 1000 : 15_000);
     return () => clearInterval(timer);
-  }, [busy, goalWorking, goalServiceStarting, currentGoal?.id, currentGoal?.state]);
+  }, [busy, liveWorkers, goalWorking, goalServiceStarting, currentGoal?.id, currentGoal?.state]);
 
   useEffect(() => () => {
     if (streamDeltaTimerRef.current !== null) clearTimeout(streamDeltaTimerRef.current);
@@ -526,10 +537,10 @@ export default function NativeApp() {
   // Some app-server clients are not subscribed to child transcript events.
   // Read only the latest turn summary, not all historical tool outputs. Never
   // resume a child, resend work, or overlap polling rounds.
-  const workerIds = workers.map(worker => worker.id).join(",");
+  const workerIds = workers.filter(workerOutstanding).map(worker => worker.id).join(",");
   useEffect(() => {
     const client = clientRef.current;
-    if (!connected || !busy || !client || !workerIds) return;
+    if (!connected || !client || !workerIds) return;
     const generation = client.generation, parent = threadRef.current;
     let disposed = false, pending = false;
     const poll = async () => {
@@ -552,7 +563,7 @@ export default function NativeApp() {
     void poll();
     const timer = setInterval(() => void poll(), 15000);
     return () => { disposed = true; clearInterval(timer); };
-  }, [connected, busy, threadId, workerIds]);
+  }, [connected, threadId, workerIds]);
 
   useEffect(() => {
     let disposed = false;
@@ -722,7 +733,7 @@ export default function NativeApp() {
       await startGoal(textToSend);
       return;
     }
-    if (!textToSend.trim() || goalWorking || busyRef.current || lifecycleRef.current || loadingThreadRef.current || reviewBusyRef.current || approvals.length || !profile || built !== true) return;
+    if (!textToSend.trim() || goalWorking || goalPending || workers.some(workerOutstanding) || busyRef.current || lifecycleRef.current || loadingThreadRef.current || reviewBusyRef.current || approvals.length || !profile || built !== true) return;
     const filesToSend = [...contextFiles];
     if (!connected && !await connect()) return;
     // A failed history restoration must never turn a reply into a new chat.
@@ -806,6 +817,7 @@ export default function NativeApp() {
   };
   const decide = async (approval: Approval, allow: boolean) => {
     try {
+      if (allow && !approvalRelevant(approval)) throw new Error("Open the requesting conversation before approving; this chat does not own the request.");
       await clientRef.current!.respond(approval.id, approvalResponse(approval.method, approval.params, allow));
       setApprovals(current => current.filter(item => item.id !== approval.id)); setStatus("Working");
     } catch (reason) { setError(String(reason)); }
@@ -816,7 +828,9 @@ export default function NativeApp() {
   };
   const answerQuestions = async (request: Approval) => {
     try {
-      const questions = request.params.questions as Question[];
+      if (!approvalRelevant(request)) throw new Error("Open the requesting conversation before answering.");
+      const questions = requestQuestions(request.params);
+      if (!questions) throw new Error("Invalid native question; stop the turn without answering.");
       if (questions.some(question => !answers[answerKey(request.id, question.id)]?.trim())) throw new Error("Answer each question before continuing");
       await clientRef.current!.respond(request.id, { answers: Object.fromEntries(questions.map(question => [question.id, { answers: [answers[answerKey(request.id, question.id)]] }])) });
       setApprovals(current => current.filter(item => item.id !== request.id));
@@ -844,16 +858,26 @@ export default function NativeApp() {
     }
   };
 
+  const stopWorkers = async () => {
+    // Explicitly stop this chat's owning native runtime, not merely the parent
+    // turn. An idle parent can still have live children awaiting results.
+    if (await disconnect(true)) {
+      setWorkers(current => current.map(worker => workerOutstanding(worker)
+        ? { ...worker, status: "shutdown", activity: "Owning runtime stopped; inspect partial work before continuing" } : worker));
+      setCanContinueTurn(true); setStatus("Workers stopped. Continue inspects saved work; no actions replayed.");
+    } else { setUncertain(true); setStatus("Worker shutdown is unconfirmed. Recover chat before starting more work."); }
+  };
+
   const updateSetup = (value: NativeSetup) => {
     setSetup(value); setProfiles(value.profiles);
     if (!value.profiles.some(model => model.id === profile)) setProfile("");
   };
   const newConversation = () => {
-    if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || settingsPendingRef.current || reviewBusyRef.current || approvals.length) return;
+    if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || settingsPendingRef.current || reviewBusyRef.current || approvals.length || goalPending || workers.some(workerOutstanding)) return;
     setThreadId(""); threadRef.current = ""; restoreThreadRef.current = ""; setItems([]); setWorkers([]); setCanContinueTurn(false); setEditingPrompt(false); setError(""); setSettingsOpen(false); setTurnDiff(""); setReviewNotice(""); setPreviewPath(null); setReviewRevision(value => value + 1);
   };
   const switchProject = async (path: string, add = false) => {
-    if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || settingsPendingRef.current || reviewBusyRef.current || approvals.length || workers.some(worker => ["running", "pendingInit", "inProgress"].includes(worker.status))) return;
+    if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || settingsPendingRef.current || reviewBusyRef.current || approvals.length || goalPending || workers.some(workerOutstanding)) return;
     if (connected && !await disconnect()) return;
     lifecycleRef.current = true; setConnecting(true); setError("");
     try {
@@ -861,6 +885,7 @@ export default function NativeApp() {
       projectContexts.current[workspace] = contextFiles;
       const next = await nativeSettings(add ? "add_project" : "select_project", { workspace: path, label: projectName });
       updateSetup(next); setWorkspace(next.preferences.workspace); setThreads([]); setNextCursor(null); setItems([]); setWorkers([]);
+      currentGoalRef.current = null; goalFingerprintRef.current = ""; setCurrentGoal(null); setGoalWorking(false); setAnswers({}); setGoalFeedback(""); setGoalPollError("");
       restoreThreadRef.current = ""; threadRef.current = ""; setThreadId("");
       const options = next.preferences.projects.find(project => sameWorkspace(project.workspace, next.preferences.workspace))?.options;
       setToolsEnabled(options?.tools_enabled ?? false); setWorkersEnabled(options?.workers_enabled ?? false); setBrowserOrigins(options?.browser_origins.join(" ") ?? ""); setDraft(projectDrafts.current[next.preferences.workspace] ?? "");
@@ -872,7 +897,7 @@ export default function NativeApp() {
     finally { lifecycleRef.current = false; setConnecting(false); }
   };
   const selectModel = async (id: string) => {
-    if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || settingsPendingRef.current || reviewBusyRef.current || approvals.length) return;
+    if (busyRef.current || lifecycleRef.current || loadingThreadRef.current || settingsPendingRef.current || reviewBusyRef.current || approvals.length || goalPending || workers.some(workerOutstanding)) return;
     if (id === profile) return;
     if (connected && !await disconnect(true)) return;
     lifecycleRef.current = true; setConnecting(true); setError("");
@@ -881,14 +906,14 @@ export default function NativeApp() {
     finally { lifecycleRef.current = false; setConnecting(false); }
   };
   const project = setup?.preferences.projects.find(p => sameWorkspace(p.workspace, workspace));
-  const navigationLocked = busy || connecting || loadingThread || settingsSaving || reviewBusy || approvals.length > 0 || workers.some(worker => ["running", "pendingInit", "inProgress"].includes(worker.status));
-  const toggleSettings = async () => {
+  const navigationLocked = busy || connecting || loadingThread || settingsSaving || reviewBusy || goalPending || approvals.length > 0 || workers.some(workerOutstanding);
+  const toggleSettings = async (section: "models" | "memory" | "tools" = "models") => {
     if (navigationLocked || lifecycleRef.current || settingsPendingRef.current) return;
     if (settingsOpen) { setSettingsOpen(false); return; }
     // Pause the idle transport internally so credentials can be edited safely.
     // The selected conversation is restored, never resent, on return to chat.
     if (connected && !await disconnect(true)) return;
-    setSettingsOpen(true);
+    setSettingsTab(section); setSettingsOpen(true);
   };
   const goalInThisConversation = !!currentGoal && (!currentGoal.spec?.origin_thread_id || currentGoal.spec?.origin_thread_id === threadId);
   const goalInAnotherConversation = !!currentGoal?.spec?.origin_thread_id
@@ -998,16 +1023,20 @@ export default function NativeApp() {
       <div className="sidebar-bottom"><button disabled={navigationLocked} className={settingsOpen ? "selected" : ""} onClick={() => void toggleSettings()}>⚙ Settings</button></div>
     </aside><main>
       <header className="native-topbar"><span className="project-icon" aria-hidden="true">▱</span><strong title={workspace}>{settingsOpen ? "Settings" : project?.label || "Choose a project"}</strong>{!settingsOpen && threadId && <span className="header-chat-title">{threadLabel(threads.find(thread => thread.id === threadId) ?? { id: threadId })}</span>}{!settingsOpen && <div className="workspace-actions"><button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? " •" : ""}</button><button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy || goalWorking} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Terminal{terminalActive ? " •" : ""}</button></div>}</header>
+      {setup?.computer?.enabled && <div className="native-warning" role="status">Experimental app control · after approval, bring the selected app forward within 10 seconds · 15-minute grant<button onClick={() => {
+        void invoke("native_manage", { request: { operation: "computer_control", action: "stop", workspace } }).then(() => setSetup(current => current ? { ...current, computer: { enabled: false, expires: null } } : current)).catch(reason => setError(String(reason)));
+      }}>Stop computer control</button></div>}
       {built === false && <div className="native-warning">Native runtime is missing. Build scripts/build-smara-native.ps1; no old-engine fallback is used.</div>}
       {error && <div role="alert" className="native-error">{error}{!settingsOpen && !connected && (!busy || uncertain) && <button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Retry setup</button>}<button aria-label="Dismiss error" onClick={() => setError("")}>×</button></div>}
-      {settingsOpen && setup ? <NativeSettings setup={setup} locked={connected || connecting} onUpdate={updateSetup} onClose={() => { if (!settingsPendingRef.current) setSettingsOpen(false); }} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : <>
+      {settingsOpen && setup ? <NativeSettings initialTab={settingsTab} setup={setup} locked={connected || connecting} onUpdate={updateSetup} onClose={() => { if (!settingsPendingRef.current) setSettingsOpen(false); }} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : <>
       <div className={`native-work-area ${panel ? "with-panel" : ""}`}>
       <div className="native-chat-area">
       {goalInAnotherConversation && <div className="goal-other-chat" role="status"><span><strong>Background goal {goalLabel(currentGoal!.state).toLowerCase()}</strong><small>Chat and project activity are paused while it works.</small></span><button disabled={connecting || loadingThread} onClick={() => void openGoalConversation()}>Open task chat</button></div>}
       {goalInThisConversation && currentGoal && <section className={`native-goal-status state-${currentGoal.state}`} aria-label="Autonomous goal progress">
-        <div className="native-goal-heading"><div><span className="goal-live-dot" /><strong>{currentGoal.spec?.origin_thread_id ? goalLabel(currentGoal.state) : `Project goal · ${goalLabel(currentGoal.state)}`}</strong><small>Cycle {currentGoal.cycles || 0}/{currentGoal.spec?.max_cycles ?? 0} · {currentGoal.requests || 0}/{currentGoal.spec?.max_requests ?? 0} requests{currentGoal.spec?.max_token_estimate ? ` · ${Math.round((currentGoal.token_estimate || 0) / 1000)}k/${Math.round((currentGoal.spec.max_token_estimate) / 1000)}k tokens` : ""}</small></div><div className="goal-heading-aside"><small>{currentGoal.updated ? `Updated ${Math.max(0, Math.floor((activityClock - currentGoal.updated * 1000) / 1000))}s ago` : "Saved"}</small>{!currentGoal.lease && <button className="goal-dismiss-btn" disabled={goalPending} title="Dismiss goal" aria-label="Dismiss goal" onClick={() => void dismissGoal(currentGoal.id)}>✕</button>}</div></div>
+        <div className="native-goal-heading"><div><span className="goal-live-dot" /><strong>{currentGoal.spec?.origin_thread_id ? goalLabel(currentGoal.state) : `Project goal · ${goalLabel(currentGoal.state)}`}</strong><small>Cycle {currentGoal.cycles || 0}/{currentGoal.spec?.max_cycles ?? 0} · {currentGoal.requests || 0}/{currentGoal.spec?.max_requests ?? 0} requests{currentGoal.spec?.max_token_estimate ? ` · ${Math.round((currentGoal.token_estimate || 0) / 1000)}k/${Math.round((currentGoal.spec.max_token_estimate) / 1000)}k safety estimate` : ""}</small></div><div className="goal-heading-aside"><small>{currentGoal.updated ? `Updated ${Math.max(0, Math.floor((activityClock - currentGoal.updated * 1000) / 1000))}s ago` : "Saved"}</small>{!currentGoal.lease && <button className="goal-dismiss-btn" disabled={goalPending} title="Dismiss goal" aria-label="Dismiss goal" onClick={() => void dismissGoal(currentGoal.id)}>✕</button>}</div></div>
         <p className="goal-objective" title={currentGoal.spec?.objective}>{currentGoal.spec?.objective}</p>
         <div className="goal-progress-line"><span role="status">{currentGoal.detail || (currentGoal.state === "queued" ? "Waiting for the background worker" : goalLabel(currentGoal.state))}</span>
+          {!!currentGoal.lease && ["paused", "stopped", "blocked"].includes(currentGoal.state) && <small>Finishing worker cleanup · Resume unlocks only after ownership is released.</small>}
           {goalServiceStarting && <small>Starting background worker…</small>}
           {!goalServiceRunning && !goalServiceStarting && !["completed", "stopped"].includes(currentGoal.state) && <small className="goal-service-offline">Background worker offline</small>}
           {goalServiceError && <small className="goal-service-offline">{goalServiceError}</small>}
@@ -1016,8 +1045,8 @@ export default function NativeApp() {
         {!!currentGoal.events?.length && <details className="goal-timeline"><summary>Activity · {currentGoal.events.length} updates</summary><ol>{currentGoal.events.slice(-5).reverse().map(event => <li key={event.seq}><span>{event.body.summary || event.kind}</span><time>{new Date(event.created * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></li>)}</ol></details>}
         {!!currentGoal.checkpoint?.summary && currentGoal.state === "ready_for_review" && <NativeMarkdown text={currentGoal.checkpoint.summary} onPreviewFile={setPreviewPath} />}
         {currentGoal.approvals?.map(request => {
-          const questions = request.params.questions as Question[] | undefined;
-          const isQuestion = request.method === "item/tool/requestUserInput" && Array.isArray(questions);
+          const questions = requestQuestions(request.params);
+          const isQuestion = request.method === "item/tool/requestUserInput" && !!questions;
           const canDeny = supportsApproval(request.method, request.params) || request.method === "mcpServer/elicitation/request";
           return <div className="native-goal-approval" key={request.id}>
             <strong>{isQuestion ? "Smara needs your input" : `Smara needs your approval · ${request.method}`}</strong>
@@ -1051,10 +1080,11 @@ export default function NativeApp() {
         </div>
         {!["completed", "stopped"].includes(currentGoal.state) && <details className="goal-guidance"><summary>Guide this task</summary><form onSubmit={event => { event.preventDefault(); void submitGoalFeedback(currentGoal.id); }}><textarea aria-label="Goal feedback" value={goalFeedback} onChange={event => setGoalFeedback(event.target.value)} placeholder="Correct the direction, answer a question, or add missing requirements…" /><button disabled={goalPending || !goalFeedback.trim()}>Send guidance</button></form></details>}
       </section>}
+      {goalInThisConversation && currentGoal && <NativeOutcome goal={currentGoal} onPreviewFile={setPreviewPath} />}
       {uncertain && <div className="native-warning"><button onClick={() => void checkStatus()}>Check response status</button><button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Recover chat</button> The request may have been accepted. Your message will not be resent automatically.</div>}
       <div className="native-transcript" aria-live="off">
-        {busy && turnStartedAt && <p role="status">Working for {Math.max(0, Math.floor((activityClock - turnStartedAt) / 60000))}m {Math.max(0, Math.floor((activityClock - turnStartedAt) / 1000) % 60)}s · Stop is available below.</p>}
-        {!!workers.length && <section className="native-workers"><strong>Workers · {workers.filter(worker => worker.status === "completed").length}/{workers.length} complete · changes are not auto-merged</strong>{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status}{worker.activity && <span> · {worker.activity}{worker.lastActivityAt && ` · ${Math.max(0, Math.floor((activityClock - worker.lastActivityAt) / 1000))}s ago`}</span>} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
+        {busy && turnStartedAt && <p role="status">{waitingReason(items, approvals.length, activityClock, lastNativeEventRef.current)} · {Math.max(0, Math.floor((activityClock - turnStartedAt) / 1000))}s elapsed</p>}
+        {!!workers.length && <section className="native-workers"><strong>Workers · {workers.filter(worker => worker.status === "completed").length}/{workers.length} complete · changes are not auto-merged</strong>{liveWorkers && <button disabled={connecting || loadingThread} title="Stops this chat's native runtime and all its workers; saved history is kept" onClick={() => void stopWorkers()}>Stop workers</button>}{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status}{worker.activity && <span> · {worker.activity}{worker.lastActivityAt && ` · ${Math.max(0, Math.floor((activityClock - worker.lastActivityAt) / 1000))}s ago`}</span>} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
         {!items.length && <div className="native-empty"><h1>What can I help you with?</h1><p>Research, build, and get work done.</p><div className="starter-cards">{[{ title: "Understand this project", text: "Inspect this project and explain its architecture, entry points and how to run its tests. Do not change files." }, { title: "Find & fix a bug", text: "Inspect this project for a reproducible bug. Show evidence, make a minimal fix, and run the relevant tests." }, { title: "Research a topic", text: "Research a topic using public sources. Read the actual clock for time-sensitive questions, verify claims against fetched pages and cite them. Ask me for the topic first." }].map(card => <button key={card.title} title={card.text} onClick={() => setDraft(card.text)}>{card.title}<span>↗</span></button>)}</div>{!profile && <small className="empty-hint">Add your model in Settings to get started.</small>}</div>}
         {items.map(item => <article key={item.id} className={`native-item ${item.kind}`}>
           <div className="item-heading"><small>{item.kind === "assistant" ? "Smara" : item.kind === "user" ? "You" : item.kind} {item.status && `· ${item.status}`}</small><div>
@@ -1066,14 +1096,15 @@ export default function NativeApp() {
         </article>)}
         {approvals.map(approval => <section className="native-approval" key={approval.id}>
           {approval.params.threadId !== undefined && approval.params.threadId !== threadId && <p>Worker / other native conversation: {String(approval.params.threadId)}. This request is not auto-approved.</p>}
-          {approval.method === "item/tool/requestUserInput" ? <>
+          {!approvalRelevant(approval) && <p>This request belongs to a different conversation. No permission can be granted from this chat.{typeof approval.params.threadId === "string" && threads.some(thread => thread.id === approval.params.threadId) && <button disabled={busy || connecting || loadingThread} onClick={() => void selectThread(String(approval.params.threadId))}>Open requesting conversation</button>}</p>}
+          {approval.method === "item/tool/requestUserInput" && approvalRelevant(approval) && requestQuestions(approval.params) ? <>
             <strong>Smara needs your input</strong>
-            {(approval.params.questions as Question[]).map(question => <label key={question.id} style={{ display: "block", marginTop: 12 }}>{question.question}
+            {requestQuestions(approval.params)!.map(question => <label key={question.id} style={{ display: "block", marginTop: 12 }}>{question.question}
               {question.options?.map(option => <button type="button" key={option.label} title={option.description} onClick={() => setAnswers(current => ({ ...current, [answerKey(approval.id, question.id)]: option.label }))}>{option.label}</button>)}
               <input type={question.isSecret ? "password" : "text"} value={answers[answerKey(approval.id, question.id)] ?? ""} onChange={event => setAnswers(current => ({ ...current, [answerKey(approval.id, question.id)]: event.target.value }))} />
             </label>)}<button onClick={() => void answerQuestions(approval)}>Continue</button>
           </> : <><strong>Permission required</strong><p>{approval.method}</p><pre>{JSON.stringify(approval.params, null, 2)}</pre>
-            {supportsApproval(approval.method, approval.params)
+            {supportsApproval(approval.method, approval.params) && approvalRelevant(approval)
               ? <><button onClick={() => void decide(approval, true)}>Allow this action</button><button onClick={() => void decide(approval, false)}>Deny</button></>
               : <><p>This specialized request cannot be approved here; no automatic grant.</p>{approval.method === "mcpServer/elicitation/request" && <button onClick={() => void decide(approval, false)}>Deny request</button>}</>}
           </>}
@@ -1096,9 +1127,10 @@ export default function NativeApp() {
         <div className="composer-toolbar"><div className="composer-context"><button type="button" aria-label="Add project files" title="Add project files" disabled={navigationLocked || !workspace} onClick={() => setContextOpen(true)}>＋</button><NativeVoice key={workspace + threadId} disabled={navigationLocked} onTranscript={text => setDraft(current => current ? current + "\n" + text : text)} /><small>{connecting ? "Preparing project…" : ""}</small></div><div className="composer-actions">
           {canContinueTurn && !busy && <button type="button" className="continue-button" disabled={goalWorking || connecting || loadingThread} title="Start a fresh turn in this conversation; previous tools will not replay" onClick={() => void send("Continue from where you left off. First inspect the current state and completed tool results so you do not repeat actions.")}>Continue</button>}
           <select aria-label="Model" title="Choose a model" value={profile} disabled={navigationLocked} onChange={event => void selectModel(event.target.value)}><option value="" disabled>Choose model</option>{profiles.map(model => <option value={model.id} key={model.id}>{model.label}</option>)}</select>
-          <button className={busy ? "stop-button" : "primary"} aria-label={busy ? "Stop response" : "Send message"} title={busy ? "Stop response" : "Send message"} type={busy ? "button" : "submit"} disabled={reviewBusy || connecting || loadingThread || goalPending || (busy ? !turnId : (goalWorking && !/^\/goal(?:\s|$)/i.test(draft.trim())) || !profile || built !== true || !draft.trim() || approvals.length > 0)} onClick={busy ? () => void stopTurn() : undefined}>{busy ? "■" : "↑"}</button>
+          <button className={busy ? "stop-button" : "primary"} aria-label={busy ? "Stop response" : "Send message"} title={busy ? "Stop response" : "Send message"} type={busy ? "button" : "submit"} disabled={reviewBusy || connecting || loadingThread || goalPending || (busy ? !turnId : workers.some(workerOutstanding) || (goalWorking && !/^\/goal(?:\s|$)/i.test(draft.trim())) || !profile || built !== true || !draft.trim() || approvals.length > 0)} onClick={busy ? () => void stopTurn() : undefined}>{busy ? "■" : "↑"}</button>
         </div></div>
       </form><div className="composer-status"><small role="status">{reviewBusy ? "Saving local review…" : busy || uncertain || loadingThread || (status !== "Ready" && status !== "completed") ? status : ""}</small><small>Shift+Enter for a new line</small></div></footer>
+      <NativeHealth key={workspace} workspace={workspace} locked={navigationLocked} onSettings={section => void toggleSettings(section)} />
       </div>
       {panel === "changes" && <NativeChanges key={workspace + threadId} workspace={workspace} threadId={threadId} locked={navigationLocked || terminalActive || goalWorking} revision={reviewRevision} notice={reviewNotice} onBusyChange={reviewPending} onPreviewFile={setPreviewPath} onClose={() => setPanel(null)} />}
       {panel === "terminal" && <NativeTerminal workspace={workspace} connected={connected} session={terminalSession} interactiveSupported={terminalPlatformSupported} onConnect={() => { void connect(); }} onStart={() => startTerminal()} onInput={value => { void writeTerminal(value); }} onInterrupt={interruptTerminal} onStop={() => { void stopTerminal(); }} onResize={resizeTerminal} onClear={() => setTerminalSession(current => current ? { ...current, output: "", truncated: false } : current)} onClose={() => setPanel(null)} />}

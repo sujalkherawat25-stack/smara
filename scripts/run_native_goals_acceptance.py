@@ -177,7 +177,7 @@ def main():
         report.update(status="failed", failure=type(exc).__name__, detail=str(exc))
     finally:
         server.shutdown(); server.server_close()
-    target = root / "build/native-goals-acceptance.json"
+    target = scratch / "native-goals-acceptance.json"
     target.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report), flush=True)
     return 0 if report["status"] == "passed" else 1

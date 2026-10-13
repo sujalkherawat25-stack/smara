@@ -80,6 +80,15 @@ def goal_spec(value):
     if kind not in KINDS:
         raise ValueError("Choose general, coding, research or mixed outcome checks")
     result["task_kind"] = kind
+    requirements = value.get("requirements", [])
+    if (not isinstance(requirements, list) or len(requirements) > 20
+            or any(not isinstance(r, dict) or set(r) != {"id", "description"}
+                   or not isinstance(r["id"], str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,48}", r["id"])
+                   or not isinstance(r["description"], str) or not r["description"].strip()
+                   or len(r["description"]) > 2000 for r in requirements)
+            or len({r["id"] for r in requirements}) != len(requirements)):
+        raise ValueError("Provide up to 20 distinct outcome requirements with id and description")
+    result["requirements"] = requirements
     count = value.get("min_sources", 2)
     if type(count) is not int or not 1 <= count <= 20:
         raise ValueError("Minimum sources must be 1..20")
@@ -88,6 +97,11 @@ def goal_spec(value):
     if type(sensitive) is not bool:
         raise ValueError("Time-sensitive must be true or false")
     result["time_sensitive"] = sensitive
+    allowance = value.get("max_output_tokens")
+    if allowance is not None and (type(allowance) is not int or not 256 <= allowance <= 131072):
+        raise ValueError("Explicit output token limit must be 256..131072, or omitted for the model default")
+    if allowance is not None:
+        result["max_output_tokens"] = allowance
     for field, default, lower, upper in (("max_cycles", 8, 1, 100), ("max_requests", 30, 1, 500),
             ("max_token_estimate", 500_000, 4096, 20_000_000), ("cycle_seconds", 900, 10, 3600),
             ("interval_seconds", 30, 0, 86400)):
@@ -209,7 +223,7 @@ class GoalStore:
                     }
                     known_contexts = {
                         "workspace_missing", "native_runtime_missing", "runtime_dependency_missing",
-                        "required_file_unavailable",
+                        "required_file_unavailable", "provider_rate_limited",
                     }
                     safe_type = (isinstance(error_type, str) and error_type.replace("_", "").isalnum())
                     if (isinstance(stage, str) and stage in known_stages and safe_type
@@ -330,10 +344,10 @@ class GoalStore:
             raise ValueError("Unsupported goal action")
         return identity
 
-    def claim(self):
+    def claim(self, identity=None):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            for row in db.execute("SELECT * FROM goals WHERE state='queued' AND lease IS NULL AND due<=? ORDER BY due", (time.time(),)).fetchall():
+            for row in db.execute("SELECT * FROM goals WHERE state='queued' AND lease IS NULL AND due<=? AND (? IS NULL OR id=?) ORDER BY due", (time.time(), identity, identity)).fetchall():
                 goal = self.decode(row)
                 key = workspace_key(goal["spec"]["workspace"])
                 if db.execute("SELECT 1 FROM goals WHERE workspace_key=? AND lease IS NOT NULL LIMIT 1", (key,)).fetchone():
@@ -481,7 +495,8 @@ class GoalStore:
     def service(self):
         with self.connect() as db:
             value = self.meta(db, "service", {})
-        return {**value, "running": bool(value.get("heartbeat", 0) > time.time() - 10)}
+            health = self.meta(db, "background_health", {})
+        return {**value, "running": bool(value.get("heartbeat", 0) > time.time() - 10), "online": health.get("online")}
 
     def pairing_code(self):
         code = secrets.token_urlsafe(18)

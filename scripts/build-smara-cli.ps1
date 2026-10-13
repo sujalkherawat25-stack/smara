@@ -1,10 +1,15 @@
 [CmdletBinding()]
-param([ValidateSet('dev', 'release')][string]$Profile = 'release', [switch]$SkipNativeBuild)
+param([ValidateSet('dev', 'release')][string]$Profile = 'release', [switch]$SkipNativeBuild, [string]$SourceManifest)
 $ErrorActionPreference = 'Stop'
 $smaraCliRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if (-not $SkipNativeBuild) { & (Join-Path $PSScriptRoot 'build-smara-native.ps1') -Profile $Profile }
 $smaraCliDist = Join-Path $smaraCliRoot 'build\native-cli-candidate'
 $smaraCliPython = Join-Path $smaraCliRoot '.venv\Scripts\python.exe'
+if ($SourceManifest) {
+    $SourceManifest = (Resolve-Path -LiteralPath $SourceManifest).Path
+    & $smaraCliPython (Join-Path $PSScriptRoot 'native_release_manifest.py') verify --manifest $SourceManifest
+    if ($LASTEXITCODE -ne 0) { throw 'CLI source provenance failed' }
+} else { Write-Warning 'Unsealed CLI candidate: pass -SourceManifest before publication.' }
 Push-Location $smaraCliRoot
 try {
     $smaraCliArgs = @('-m','PyInstaller','--noconfirm','--clean','--onefile','--name','smara','--paths','src',
@@ -18,6 +23,11 @@ try {
         $smaraCliArgs += @('--exclude-module', $smaraCliExcluded)
     }
     $smaraCliArgs += @('--hidden-import','smara.native_outcomes','--hidden-import','smara.native_voice')
+    $smaraCliArgs += @('--hidden-import','smara.native_sources')
+    $smaraCliArgs += @('--hidden-import','smara.native_memory','--collect-all','syntarus')
+    $smaraCliArgs += @('--hidden-import','smara.native_budget','--hidden-import','smara.native_admission','--hidden-import','smara.native_outreach','--hidden-import','smara.native_mail_oauth')
+    $smaraCliArgs += @('--hidden-import','smara.native_background','--hidden-import','smara.native_browser_control','--hidden-import','smara.native_browser_transfer','--hidden-import','smara.native_computer','--hidden-import','smara.native_windows','--collect-all','pywinauto','--collect-all','comtypes','--hidden-import','psutil')
+    $smaraCliArgs += @('--hidden-import','smara.native_pdf','--collect-all','pypdfium2','--collect-all','pypdfium2_raw')
     $smaraCliArgs += 'scripts\native_cli_entry.py'
     & $smaraCliPython @smaraCliArgs
     if ($LASTEXITCODE -ne 0) { throw 'Native CLI freezing failed' }
@@ -29,5 +39,9 @@ try {
     }
     & (Join-Path $smaraCliDist 'smara.exe') source-status
     if ($LASTEXITCODE -ne 0) { throw 'Packaged native source-status failed' }
+    if ($SourceManifest) {
+        & $smaraCliPython (Join-Path $PSScriptRoot 'native_release_manifest.py') verify --manifest $SourceManifest
+        if ($LASTEXITCODE -ne 0) { throw 'Post-build CLI source provenance failed' }
+    }
 } finally { Pop-Location }
 Write-Host "Native portable CLI candidate: $smaraCliDist. Install/release gates are separate."

@@ -57,7 +57,7 @@ export default function NativeTerminal({ workspace, connected, session, interact
 
   return <section className="agent-terminal-panel interactive-terminal" aria-label="Interactive terminal">
     <div className="panel-heading"><div><strong>PowerShell</strong><small title={workspace}>{workspace}</small></div><button aria-label="Close terminal panel" onClick={onClose}>×</button></div>
-    {!interactiveSupported ? <div className="terminal-unavailable" role="status"><strong>Interactive terminal isn’t available on this build</strong><p>The sandboxed terminal is available only in the Windows desktop build. Smara will never start an unsandboxed shell.</p></div> : <>
+    {!interactiveSupported ? <div className="terminal-unavailable" role="status"><strong>Interactive terminal is disabled pending sandbox verification</strong><p>The requested no-network boundary failed testing. No interactive shell will start. Agent command results remain available in the conversation.</p></div> : <>
     <p className="terminal-sandbox-note">Windows sandbox · this project only · network disabled · requires MXC support</p>
     <div className="terminal-toolbar">
       {!connected && <button onClick={onConnect}>Connect project</button>}

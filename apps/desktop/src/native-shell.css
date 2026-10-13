@@ -173,6 +173,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .settings-form { display: flex; flex-direction: column; gap: 14px; }
 .settings-form input, .settings-form select { background: #131718; border: 1px solid #36403d; border-radius: 7px; padding: 8px 10px; color: #e1e9e5; font-size: 13px; transition: border-color 0.15s ease; }
 .settings-form input:focus, .settings-form select:focus { border-color: #588a75; outline: none; }
+.settings-form label:has(> input[type="checkbox"]) { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; }
+.settings-form input[type="checkbox"] { flex: 0 0 auto; width: auto; margin: 0; padding: 0; accent-color: #9ed8c9; }
+.chat-health { margin: 0 28px 8px; font-size: 12px; color: #9aaba3; }
+.chat-health summary { cursor: pointer; padding: 5px 0; }
+.chat-health.has-warning summary { color: #f0c981; }
+.chat-health p { margin: 8px 0; }
+.chat-health small { display: block; line-height: 1.5; }
+.chat-health button { margin: 5px 8px 5px 0; }
 .form-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .settings-card small { display: block; line-height: 1.7; overflow-wrap: anywhere; color: #8e9e97; }
 .model-row, .credential-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 14px; border: 1px solid #2d3637; background: #15191b; border-radius: 8px; margin-bottom: 10px; transition: border-color 0.15s ease; }

@@ -29,6 +29,18 @@ def test_bootstrap_preserves_original_state_and_hides_unknown_model_fields(setup
     assert value["preferences"]["projects"] == [{"workspace": str(root), "label": root.name}]
 
 
+def test_runtime_health_is_local_project_bound_and_never_returns_credentials(setup, monkeypatch):
+    root, _, _ = setup
+    monkeypatch.setattr(management, "_test_search", lambda: pytest.fail("No network health probe"))
+    value = management.manage({"operation": "runtime_health", "workspace": str(root)})
+    assert value["network_probes"] == 0 and not value["memory"]["enabled"]
+    assert "credentials" not in value and "profiles" not in value
+    with pytest.raises(ValueError, match="registered"):
+        management.manage({"operation": "runtime_health", "workspace": str(root / "other")})
+    with pytest.raises(ValueError, match="only a project"):
+        management.manage({"operation": "runtime_health", "workspace": str(root), "probe": True})
+
+
 def test_goal_management_uses_registered_project_model_and_shared_ledger(setup):
     root, _, _ = setup
     management.manage({"operation": "save_model", "profile": {"id": "goal-fixture", "label": "Synthetic goal model", "provider": "local", "model": "synthetic", "base_url": "http://127.0.0.1:9999/v1", "api_key": "local-fixture"}})

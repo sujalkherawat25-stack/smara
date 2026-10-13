@@ -1,5 +1,10 @@
 # Smara source-runtime migration
 
+For current functionality and known blockers, read
+[the v0.1.23 candidate capability matrix](CAPABILITY_MATRIX.md). Older sections
+and dated gate reports below describe earlier checks, not current certification.
+The interactive terminal is currently disabled after a failed no-network probe.
+
 The full public OpenAI Codex source is owned by this checkout in `vendor/codex`,
 not downloaded at runtime and not delegated to an installed `codex` command.
 `UPSTREAM.json` records the exact imported revision and our modifications.
@@ -100,7 +105,8 @@ the native parent can request `spawn_agent(worktree=true)` in a repository root
 under workspace-write permissions. Each worker starts from committed HEAD with
 fresh history and a detached checkout under `.smara/worker-worktrees`. Its write
 permissions are intersected with the parent's and confined to that checkout;
-network access is disabled. Worktree creation/registered cold restore are native,
+their policy requests disabled network access, but the general Windows command
+network boundary is not certified. Worktree creation/registered cold restore are native,
 not a Python scheduler. Changes are retained for review, with no automatic merge
 or destructive cleanup. V1 local workers only; remote/V2 worktree support is not
 claimed. Worktrees may contain private committed files: normal model-provider

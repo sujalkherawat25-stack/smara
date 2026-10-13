@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 import httpx
 from .native_limits import ResearchGuard, ResearchLimitError
 from .native_limits import research_tool
+from .native_admission import AdmissionError, peer_context
 
 
 class UnsupportedWireFeature(ValueError):
@@ -323,6 +324,14 @@ def translate_request(
     messages = []
     if request.get("instructions"):
         messages.append({"role": "system", "content": request["instructions"]})
+    if any(name.endswith("pdf_inspect") for name in mapping):
+        messages.append({"role": "system", "content":
+            "For PDF deliverables: retain the editable generator, compile it before running, and write large documents in bounded sections. "
+            "With ReportLab, explicitly transition from cover to body PageTemplate; Paragraph textColor overrides TableStyle TEXTCOLOR. "
+            "Use pdf_inspect on every page range, repair warnings, and render page PNGs using its preview_command_argv via the native command sandbox. "
+            "Text extraction and file hashes do not prove readable layout. Do not claim visual verification when no image review succeeded. "
+            "For a text-only model, do not call view_image; image_analyze is a separate approval-gated upload, not an automatic fallback. "
+            "Read current version/revision from source instead of carrying stale values from conversation history."})
     if any(research_tool(name) for name in mapping):
         messages.append({"role": "system", "content":
             "Research efficiently: use focused queries, reuse fetched source IDs and their next_offset for pagination, "
@@ -418,7 +427,11 @@ class ResponsesAdapter:
         self.endpoint = endpoint
         self.research_guard = ResearchGuard()
         self.token = secrets.token_urlsafe(32)
-        self.client = httpx.Client(timeout=httpx.Timeout(300, connect=15), follow_redirects=False, trust_env=False)
+        from .native_admission import AdmissionClient, provider_admission
+        self.client = AdmissionClient(httpx.Client(timeout=httpx.Timeout(300, connect=15), follow_redirects=False, trust_env=False), provider_admission(endpoint))
+        self.memory = None
+        self.checkpoint_thread_id = None
+        self.checkpoint_required = None
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -448,6 +461,25 @@ class ResponsesAdapter:
                         default_max_output_tokens=owner.endpoint.default_max_output_tokens,
                         sarvam=owner.endpoint.is_sarvam,
                     )
+                    thread_id = (request.get("client_metadata") or {}).get("thread_id") or self.headers.get("thread-id")
+                    budget_checkpoint = owner.checkpoint_required is not None and owner.checkpoint_required(thread_id)
+                    if owner.checkpoint_thread_id is not None and not thread_id:
+                        raise UnsupportedWireFeature("Checkpoint serialization requires a native thread identity")
+                    is_checkpoint = budget_checkpoint or owner.checkpoint_thread_id is not None and thread_id == owner.checkpoint_thread_id
+                    if is_checkpoint:
+                        # A final serialization pass, not another work turn.
+                        # Clear the mapping too: even an unsolicited tool call
+                        # cannot reach the native executor.
+                        payload.pop("tools", None); payload.pop("tool_choice", None); mapping.clear()
+                        payload["messages"].append({"role": "system", "content": "This is the final allowed inference request for this bounded cycle. Return only the structured progress checkpoint specified by the goal instructions, including coverage links, from observed history. Tools are unavailable. Report missing work honestly; use continue or blocked rather than falsely declaring readiness. Do not invent completed actions or evidence."})
+                    memory_ticket = None
+                    if owner.memory is not None and not is_checkpoint:
+                        try:
+                            memory_ticket = owner.memory.augment(request, payload, self.headers, provider_secret=owner.endpoint.api_key)
+                        except Exception:
+                            # Memory cannot take down the native execution path.
+                            # SDK errors/prompt contents are never exposed here.
+                            pass
                     owner.research_guard.admit(request, payload, mapping, self.headers)
                 except ResearchLimitError as exc:
                     self._json_error(400, str(exc))
@@ -456,7 +488,7 @@ class ResponsesAdapter:
                     self._json_error(400, str(exc))
                     return
                 try:
-                    with owner.client.stream("POST", owner.endpoint.url, headers=owner.endpoint.headers(), json=payload) as upstream:
+                    with peer_context(self.connection), owner.client.stream("POST", owner.endpoint.url, headers=owner.endpoint.headers(), json=payload) as upstream:
                         if upstream.status_code != 200:
                             self._json_error(upstream.status_code, provider_status_message(upstream.status_code, owner.endpoint))
                             return
@@ -467,7 +499,16 @@ class ResponsesAdapter:
                         self.end_headers()
                         stream_started = True
                         self.close_connection = True
-                        owner._stream(upstream, self, mapping)
+                        response = owner._stream(upstream, self, mapping)
+                        if owner.memory is not None and not is_checkpoint:
+                            try:
+                                owner.memory.capture(memory_ticket, response, provider_secret=owner.endpoint.api_key)
+                            except Exception:
+                                # Preserve a completed answer if the local queue
+                                # is unavailable. Never emit a second completion.
+                                pass
+                except AdmissionError as exc:
+                    self._json_error(429, str(exc))
                 except (BrokenPipeError, ConnectionResetError):
                     return
                 except Exception:
@@ -519,7 +560,14 @@ class ResponsesAdapter:
         self.thread.start()
         return self
 
+    def configure_memory(self, workspace):
+        from .native_memory import ConversationMemory, settings
+        if self.memory is None and settings()["enabled"]:
+            self.memory = ConversationMemory(workspace)
+
     def __exit__(self, *_args):
+        if self.memory is not None:
+            self.memory.close()
         self.server.shutdown()
         # Stop in-flight provider streams before closing the HTTP server. A
         # disconnected native session must not hold the bootstrap open for the
@@ -572,13 +620,13 @@ class ResponsesAdapter:
             response["status"] = "incomplete"
             response["incomplete_details"] = {"reason": "content_filter"}
             handler._event({"type": "response.incomplete", "response": response})
-            return
+            return response
         if finish == "length":
             # Incomplete tool arguments must never reach the executor.
             response["status"] = "incomplete"
             response["incomplete_details"] = {"reason": "max_output_tokens"}
             handler._event({"type": "response.incomplete", "response": response})
-            return
+            return response
         items = []
         if text:
             items.append({"type": "message", "id": message_id, "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": text, "annotations": []}]})
@@ -603,3 +651,4 @@ class ResponsesAdapter:
             reported_usage = {"input_tokens": usage["prompt_tokens"], "output_tokens": usage["completion_tokens"], "total_tokens": usage["total_tokens"]}
         response.update(status="completed", output=items, usage=reported_usage)
         handler._event({"type": "response.completed", "response": response})
+        return response

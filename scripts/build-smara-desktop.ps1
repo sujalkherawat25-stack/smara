@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([string]$SourceManifest)
 
 $ErrorActionPreference = 'Stop'
 
@@ -16,6 +16,12 @@ if (Get-Process -Name 'smara-desktop' -ErrorAction SilentlyContinue | Where-Obje
     throw 'Close the locally built release candidate before rebuilding or packaging it.'
 }
 $version = (Get-Content -LiteralPath (Join-Path $repoRoot 'release\VERSION') -Raw).Trim()
+$python = Join-Path $repoRoot '.venv\Scripts\python.exe'
+if ($SourceManifest) {
+    $SourceManifest = (Resolve-Path -LiteralPath $SourceManifest).Path
+    & $python (Join-Path $PSScriptRoot 'native_release_manifest.py') verify --manifest $SourceManifest
+    Assert-NativeSuccess 'Pre-build source provenance'
+} else { Write-Warning 'Unsealed candidate build: capture and pass -SourceManifest before publication.' }
 # A Desktop build may never silently ship the old engine as its native core.
 & (Join-Path $PSScriptRoot 'build-smara-native.ps1')
 $python = Join-Path $repoRoot '.venv\Scripts\python.exe'
@@ -65,15 +71,33 @@ try {
         '--hidden-import', 'smara.native_changes'
         '--hidden-import', 'smara.native_runtime'
         '--hidden-import', 'smara.native_provider'
+        '--hidden-import', 'smara.native_memory'
+        '--collect-all', 'syntarus'
         '--hidden-import', 'smara.native_tools'
+        '--hidden-import', 'smara.native_sources'
         '--hidden-import', 'smara.native_limits'
         '--hidden-import', 'smara.native_documents'
+        '--hidden-import', 'smara.native_pdf'
+        '--collect-all', 'pypdfium2'
+        '--collect-all', 'pypdfium2_raw'
         '--hidden-import', 'smara.native_goals'
         '--hidden-import', 'smara.native_goal_runtime'
         '--hidden-import', 'smara.native_telegram'
         '--hidden-import', 'smara.native_outcomes'
         '--hidden-import', 'smara.native_voice'
         '--hidden-import', 'smara.native_browser'
+        '--hidden-import', 'smara.native_budget'
+        '--hidden-import', 'smara.native_admission'
+        '--hidden-import', 'smara.native_outreach'
+        '--hidden-import', 'smara.native_mail_oauth'
+        '--hidden-import', 'smara.native_background'
+        '--hidden-import', 'smara.native_browser_control'
+        '--hidden-import', 'smara.native_browser_transfer'
+        '--hidden-import', 'smara.native_computer'
+        '--hidden-import', 'smara.native_windows'
+        '--collect-all', 'pywinauto'
+        '--collect-all', 'comtypes'
+        '--hidden-import', 'psutil'
         '--collect-all', 'playwright'
     )
     foreach ($module in $pyInstallerExcludes) {
@@ -123,3 +147,7 @@ try {
 }
 
 Write-Host "Smara Desktop installers are under apps\desktop\src-tauri\target\release\bundle."
+if ($SourceManifest) {
+    & $python (Join-Path $PSScriptRoot 'native_release_manifest.py') verify --manifest $SourceManifest
+    Assert-NativeSuccess 'Post-build source provenance'
+}

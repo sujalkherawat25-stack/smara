@@ -1,11 +1,12 @@
 """Opt-in DOM browser tools for the native runtime, not an agent/planner.
 
 Uses fresh owned contexts, exact user-configured public origins, and native
-MCP action confirmations. No personal profile, login, upload, download, raw JS,
-arbitrary locator, or host-computer tool. Origin guards are not an OS sandbox.
+MCP action confirmations. Login is human-only. Transfers require separate opt-in
+and confirmation. No personal profile, raw JS or arbitrary locator. Not an OS sandbox.
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -28,8 +29,8 @@ def origin(url):
 
 
 def configured_origins(values):
-    if not isinstance(values, list) or not 1 <= len(values) <= 8:
-        raise ValueError("Configure 1..8 exact public browser origins")
+    if not isinstance(values, list) or not 1 <= len(values) <= 32:
+        raise ValueError("Configure 1..32 exact public browser origins")
     for value in values:
         if not isinstance(value, str) or len(value) > 1000:
             raise ValueError("Invalid browser origin")
@@ -45,24 +46,35 @@ TOOLS = [
     tool("browser_text_page", "Read remaining text from the current cached observation without silent clipping.", {"observation_id": {"type": "string"}, "offset": {"type": "integer", "minimum": 0}}, ["observation_id"]),
     tool("browser_act", "Act only on a freshly observed reference: click/fill/select/check. Requires native confirmation; no raw JS, uploads or authentication.", {"observation_id": {"type": "string"}, "ref": {"type": "string"}, "action": {"type": "string", "enum": ["click", "fill", "select", "check"]}, "value": {"type": "string"}}, ["observation_id", "ref", "action"]),
     tool("browser_close", "Close only this server's owned browser session."),
+    tool("browser_snapshot", "Return the fresh viewport screenshot as a LOCAL artifact path/hash. Use view_image only with a vision-capable model, or separately approved image_analyze. Never claim a visual review from DOM text."),
+    tool("browser_tabs", "List owned approved tabs; page content is untrusted."),
+    tool("browser_switch", "Switch to a listed owned tab and invalidate older observations.", {"tab_id": {"type": "string"}}, ["tab_id"]),
+    tool("browser_scroll", "Scroll the owned viewport and obtain fresh DOM references.", {"dy": {"type": "integer", "minimum": -3000, "maximum": 3000}}, ["dy"]),
+    tool("browser_handoff", "Pause ALL model browser actions for human login in the visible owned browser. Human resumes in Settings; the agent never types passwords or resumes itself."),
+    tool("browser_upload", "Upload ONE explicit non-secret project file to a fresh observed file input. Requires transfer opt-in and native approval; can transmit data immediately.", {"observation_id": {"type": "string"}, "ref": {"type": "string"}, "path": {"type": "string"}}, ["observation_id", "ref", "path"]),
+    tool("browser_download", "Download from one fresh observed reference, after transfer opt-in and approval. Retain a non-executable project artifact; never open/run it.", {"observation_id": {"type": "string"}, "ref": {"type": "string"}}, ["observation_id", "ref"]),
 ]
 for entry in TOOLS:
-    entry["annotations"].update(readOnlyHint=entry["name"] in {"browser_observe", "browser_text_page"}, idempotentHint=False, openWorldHint=True)
+    entry["annotations"].update(readOnlyHint=entry["name"] in {"browser_observe", "browser_text_page", "browser_snapshot", "browser_tabs"}, idempotentHint=False, openWorldHint=True)
 
 
 class NativeBrowser:
-    def __init__(self, workspace, origins):
+    def __init__(self, workspace, origins, options=None, control=None):
         self.origins = configured_origins(origins)
         self.workspace = Path(workspace).resolve(strict=True)
         directory = self.workspace / ".smara/native-browser"
         if not directory.resolve().is_relative_to(self.workspace):
             raise ValueError("Browser artifacts escape the workspace")
-        self.engine = ManagedBrowser(directory / uuid.uuid4().hex)
+        from .native_browser_control import DEFAULTS
+        self.options = {**DEFAULTS, **(options or {})}
+        self.control = control
+        self.engine = ManagedBrowser(directory / uuid.uuid4().hex, headless=not self.options["visible"])
         self.session = None
         self.latest = None
         self.allow_writes = False
         self.actions = 0
         self.deadline = None
+        self.download_allowed = False
 
     def allowed(self, url):
         try:
@@ -72,7 +84,8 @@ class NativeBrowser:
 
     def route(self, route):
         request = route.request
-        if self.allowed(request.url) and (request.method in {"GET", "HEAD"} or self.allow_writes):
+        human = bool(self.control and self.options["visible"] and self.control.state().get("paused"))
+        if self.allowed(request.url) and (request.method in {"GET", "HEAD"} or self.allow_writes or human):
             route.continue_()
         else:
             route.abort("blockedbyclient")
@@ -82,6 +95,7 @@ class NativeBrowser:
         context.set_default_navigation_timeout(15000)
         context.route("**/*", self.route)
         context.route_web_socket("**/*", lambda websocket: websocket.close())
+        context.on("page", lambda value: value.on("download", lambda download: None if self.download_allowed else download.cancel()))
 
     def observe(self):
         observed = self.engine.observe(self.session)
@@ -96,7 +110,8 @@ class NativeBrowser:
         # This DOM-only adapter works with text-only models. Screenshots stay
         # local; they are not dumped as base64 text or passed to GLM as images.
         result = {key: value for key, value in observed.items() if key not in {"body_text", "screenshot", "screenshot_sha256"}}
-        return {**result, **page(full_text), "element_limit": 200, "elements_may_be_incomplete": len(observed["elements"]) == 200, "modality": "DOM text; no vision"}
+        return {**result, **page(full_text), "element_limit": 200, "elements_may_be_incomplete": len(observed["elements"]) == 200, "modality": "DOM text; no vision",
+            "actions_used": self.actions, "action_limit": self.options["max_actions"], "seconds_limit": self.options["seconds"]}
 
     def call(self, name, arguments):
         entry = next((entry for entry in TOOLS if entry["name"] == name), None)
@@ -108,10 +123,20 @@ class NativeBrowser:
         for key, value in arguments.items():
             if schema["properties"][key]["type"] == "string" and (not isinstance(value, str) or len(value) > 8000):
                 raise ValueError("Invalid bounded string")
+            if schema["properties"][key]["type"] == "integer" and (type(value) is not int or not schema["properties"][key].get("minimum", 0) <= value <= schema["properties"][key].get("maximum", MAX_BYTES)):
+                raise ValueError("Invalid bounded integer")
         if name == "browser_close":
             self.engine.shutdown(); self.session = None; self.latest = None
+            if self.control: self.control.update(closed=True)
             return {"closed": True}
-        if self.actions >= 40 or (self.deadline is not None and time.monotonic() >= self.deadline):
+        if self.control:
+            state = self.control.state()
+            if state.get("stopped"):
+                self.engine.shutdown(); self.latest = None; self.session = None
+                self.control.update(closed=True)
+                raise ValueError("Browser stopped by user")
+            if state.get("paused"): raise ValueError("Browser handed off; only the human can resume it")
+        if self.actions >= self.options["max_actions"] or (self.deadline is not None and time.monotonic() >= self.deadline):
             raise ValueError("Browser session bound reached; reconnect explicitly")
         if name == "browser_open":
             if not self.allowed(arguments["url"]):
@@ -119,8 +144,8 @@ class NativeBrowser:
             if not self.session:
                 if self.deadline is not None:
                     raise ValueError("Browser was closed; reconnect explicitly")
-                self.deadline = time.monotonic() + 600
-                self.session = self.engine.create({"accept_downloads": False, "service_workers": "block", "permissions": []}, self.configure)
+                self.deadline = time.monotonic() + self.options["seconds"]
+                self.session = self.engine.create({"accept_downloads": self.options["transfers"], "service_workers": "block", "permissions": []}, self.configure)
             self.latest = None; self.actions += 1
             self.engine.navigate(self.session, arguments["url"])
             return self.observe()
@@ -128,6 +153,25 @@ class NativeBrowser:
             raise ValueError("Open an approved page first")
         if name == "browser_observe":
             return self.observe()
+        if name == "browser_handoff":
+            if not self.options["visible"] or not self.control: raise ValueError("Human handoff requires a visible user-controlled session")
+            self.latest = None; self.allow_writes = False
+            self.control.update(paused=True)
+            return {"paused": True, "session_id": self.control.id, "instruction": "Human completes login in the owned browser and resumes in Settings → Integrations. Do not poll or bypass this handoff."}
+        if name == "browser_tabs":
+            return {"tabs": [item for item in self.engine.tabs(self.session) if self.allowed(item["url"])]}
+        if name == "browser_switch":
+            tabs = self.engine.tabs(self.session)
+            if not any(item["tab_id"] == arguments["tab_id"] and self.allowed(item["url"]) for item in tabs): raise ValueError("Tab is outside approved origins")
+            self.actions += 1; self.latest = None
+            self.engine.switch(self.session, arguments["tab_id"]); return self.observe()
+        if name == "browser_scroll":
+            self.actions += 1; self.latest = None
+            self.engine.scroll(self.session, arguments["dy"]); return self.observe()
+        if name == "browser_snapshot":
+            observed = self.observe()
+            image = Path(self.latest["observation"]["screenshot"])
+            return {"path": str(image), "sha256": self.latest["observation"]["screenshot_sha256"], "observation_id": observed["observation_id"], "uploaded": False}
         if not self.latest or arguments["observation_id"] != self.latest["observation"]["observation_id"]:
             raise StaleObservation("Observation expired; observe again")
         if name == "browser_text_page":
@@ -136,9 +180,27 @@ class NativeBrowser:
         current = self.engine.page(self.engine.sessions[self.session])
         if current.url != observed["url"] or not self.allowed(current.url) or time.time() - observed["timestamp"] > 120:
             raise StaleObservation("Page changed or observation expired")
+        target = self.engine._ground(self.engine.sessions[self.session], observed, arguments["ref"])
+        if name in {"browser_upload", "browser_download"}:
+            if not self.options["transfers"]: raise ValueError("File transfers require user opt-in")
+            self.latest = None; self.actions += 1
+            if name == "browser_upload":
+                from .native_browser_transfer import upload_file
+                path = upload_file(self.workspace, arguments["path"])
+                if (target.get_attribute("type") or "").lower() != "file": raise ValueError("Choose an observed file input")
+                self.allow_writes = True
+                try: target.set_input_files(str(path))
+                finally: self.allow_writes = False
+                return self.observe()
+            from .native_browser_transfer import save_download
+            self.download_allowed = True; self.allow_writes = True
+            try:
+                with current.expect_download(timeout=15000) as pending: target.click()
+                artifact = save_download(self.workspace, pending.value)
+                return {**artifact, "observation": self.observe()}
+            finally: self.download_allowed = False; self.allow_writes = False
         if arguments["action"] not in {"click", "fill", "select", "check"}:
             raise ValueError("Unsupported browser action")
-        target = self.engine._ground(self.engine.sessions[self.session], observed, arguments["ref"])
         # HTML input types are case-insensitive even when get_attribute keeps
         # the site's original spelling.
         if (target.get_attribute("type") or "").lower() in {"file", "password"}:
@@ -153,9 +215,9 @@ class NativeBrowser:
             self.allow_writes = False
 
 
-def serve(workspace, origins, reader=None, writer=None):
+def serve(workspace, origins, reader=None, writer=None, options=None, control=None):
     reader, writer = reader or sys.stdin, writer or sys.stdout
-    browser = NativeBrowser(workspace, origins)
+    browser = NativeBrowser(workspace, origins, options, control)
     initialized = False
     try:
         while line := reader.readline(MAX_BYTES + 1):
@@ -194,6 +256,7 @@ def serve(workspace, origins, reader=None, writer=None):
         return 0
     finally:
         browser.engine.shutdown()
+        if control: control.update(closed=True)
 
 
 def main(argv=None):
@@ -201,7 +264,8 @@ def main(argv=None):
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--origin", action="append", required=True)
     args = parser.parse_args(argv)
-    return serve(args.workspace, args.origin)
+    from .native_browser_control import Control, options
+    return serve(args.workspace, args.origin, options=options(args.workspace), control=Control(args.workspace))
 
 
 if __name__ == "__main__":

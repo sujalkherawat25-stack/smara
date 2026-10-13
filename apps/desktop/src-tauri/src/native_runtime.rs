@@ -122,17 +122,17 @@ fn path_is_exact_root(value: &Value, root: &std::path::Path) -> bool {
     })
 }
 
-// Streaming is dispatched only on Windows builds. Smara's launcher prefers
-// MXC there; if the host cannot use it, the native runtime rejects the request
-// and this layer never retries through an unsandboxed process.
-const WINDOWS_SANDBOX_STREAMING_SUPPORTED: bool = cfg!(target_os = "windows");
+// Fail closed until the actual command/exec network boundary passes. The
+// 2026-10-13 acceptance allowed loopback despite networkAccess:false. OS or
+// MXC availability alone is not proof of the requested confinement.
+const WINDOWS_SANDBOX_STREAMING_SUPPORTED: bool = false;
 
 fn validate_terminal_message(message: &Value, activity: &ReviewActivity, project_root: Option<&std::path::Path>) -> Result<(), String> {
     let params = &message["params"];
     match message["method"].as_str().unwrap_or_default() {
         "command/exec" => {
             if !WINDOWS_SANDBOX_STREAMING_SUPPORTED {
-                return Err("Interactive terminal is unavailable: this Windows runtime does not support sandboxed streaming commands.".into());
+                return Err("Interactive terminal is disabled: the requested no-network sandbox has not passed verification. No shell was started.".into());
             }
             if !activity.windows_sandbox_ready { return Err("Windows sandbox readiness has not been confirmed for this runtime.".into()); }
             let root = project_root.ok_or("The selected project is unavailable for the terminal sandbox.")?;
@@ -201,8 +201,8 @@ fn binary() -> Result<PathBuf, String> {
 #[tauri::command]
 pub fn native_status() -> Value {
     match binary() {
-        Ok(path) => json!({"built": true, "binary": path, "sourceOwned": true, "windowsTerminalBuild": cfg!(target_os = "windows")}),
-        Err(error) => json!({"built": false, "error": error, "sourceOwned": true, "windowsTerminalBuild": cfg!(target_os = "windows")}),
+        Ok(path) => json!({"built": true, "binary": path, "sourceOwned": true, "windowsTerminalBuild": WINDOWS_SANDBOX_STREAMING_SUPPORTED}),
+        Err(error) => json!({"built": false, "error": error, "sourceOwned": true, "windowsTerminalBuild": WINDOWS_SANDBOX_STREAMING_SUPPORTED}),
     }
 }
 
@@ -423,23 +423,22 @@ mod review_tests {
         active.notification(&json!({"id": 9, "result": {"exitCode": 0, "stdout": "", "stderr": ""}}));
         assert!(active.idle());
     }
-    #[cfg(not(target_os = "windows"))]
     #[test]
-    fn non_windows_streaming_shell_is_rejected_before_runtime_dispatch() {
+    fn unverified_streaming_shell_is_rejected_before_runtime_dispatch() {
         let active = ReviewActivity::default();
         let result = validate_terminal_message(
             &json!({"id": 10, "method": "command/exec", "params": {"processId": "smara-terminal-test"}}),
             &active,
             None,
         );
-        assert!(result.unwrap_err().contains("does not support sandboxed streaming"));
+        assert!(result.unwrap_err().contains("no-network sandbox has not passed verification"));
         assert!(active.terminal_processes.is_empty());
         assert!(active.pending.is_empty());
     }
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn windows_terminal_accepts_only_project_scoped_no_network_pty() {
+    fn even_well_formed_windows_terminal_is_blocked_until_network_gate_passes() {
         let root = std::fs::canonicalize(std::env::current_dir().unwrap()).unwrap();
         let root = root.to_str().unwrap();
         let mut active = ReviewActivity::default();
@@ -464,7 +463,7 @@ mod review_tests {
                 }
             }
         });
-        assert!(validate_terminal_message(&message, &active, Some(std::path::Path::new(root))).is_ok());
+        assert!(validate_terminal_message(&message, &active, Some(std::path::Path::new(root))).unwrap_err().contains("No shell was started"));
         assert!(active.terminal_processes.is_empty());
     }
 }

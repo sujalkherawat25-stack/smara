@@ -49,6 +49,14 @@ class ScheduleStore:
             raise ValueError("Explicit workspace, prompt and profile are required")
         if not 60 <= spec["interval_seconds"] <= 31_536_000 or not 1 <= spec["max_requests"] <= 100:
             raise ValueError("Invalid interval/request budget")
+        for key, default, low, high in (("cycle_seconds", 900, 10, 3600), ("max_token_estimate", 500_000, 4096, 20_000_000)):
+            number = spec.get(key, default)
+            if type(number) is not int or not low <= number <= high:
+                raise ValueError("Invalid scheduled execution allowance")
+            spec = {**spec, key: number}
+        output = spec.get("max_output_tokens")
+        if output is not None and (type(output) is not int or not 256 <= output <= 131072):
+            raise ValueError("Invalid scheduled output allowance")
         spec = {**spec, "workspace": str(workspace)}
         identity = uuid.uuid4().hex
         with self.connect() as db:
@@ -126,29 +134,37 @@ def supervisor_lock(path: Path):
 
 
 class RequestBudget:
-    def __init__(self, client, ceiling):
+    def __init__(self, client, ceiling, *, token_ceiling=500_000, output_ceiling=None):
         self.client, self.ceiling, self.requests = client, ceiling, 0
+        self.token_ceiling, self.output_ceiling = token_ceiling, output_ceiling
         self.estimated_input_tokens_upper_bound = 0
         self.lock = threading.Lock()
 
     def stream(self, *args, **kwargs):
+        from .native_budget import output_payload, reservation_estimate
+        payload = output_payload(kwargs["json"], self.output_ceiling)
         with self.lock:
             if self.requests >= self.ceiling:
                 raise RuntimeError("Scheduled inference request ceiling reached")
             # Count UTF-8 bytes as a conservative bound, not actual billing.
-            estimate = len(json.dumps(kwargs["json"], ensure_ascii=False).encode("utf-8"))
-            if self.estimated_input_tokens_upper_bound + estimate > 200_000:
+            estimate = reservation_estimate(payload)
+            if self.estimated_input_tokens_upper_bound + estimate > self.token_ceiling:
                 raise RuntimeError("Scheduled cumulative input estimate ceiling reached")
             self.estimated_input_tokens_upper_bound += estimate
             self.requests += 1
-        kwargs["json"]["max_tokens"] = min(kwargs["json"].get("max_tokens", 2048), 2048)
-        return self.client.stream(*args, **kwargs)
+        return self.client.stream(*args, **{**kwargs, "json": payload})
 
     def close(self):
         self.client.close()
 
 
 def execute(job, runs_root):
+    from .native_goals import project_activity
+    with project_activity(Path(job["workspace"])):
+        return _execute(job, runs_root)
+
+
+def _execute(job, runs_root):
     from .native_provider import ChatEndpoint, ResponsesAdapter
     from .native_runtime import active_profile, launch_options, native_binary
     from .native_profiles import load_profiles, resolve_profile_key
@@ -158,13 +174,15 @@ def execute(job, runs_root):
     home.mkdir(parents=True)
     evidence = {"native_home": str(home), "sandbox": "read-only", "approval_policy": "never", "profile_id": job["profile_id"]}
     with ResponsesAdapter(ChatEndpoint(profile["base_url"], profile["model"], resolve_profile_key(profile, credentials), profile.get("auth_header", "authorization"), profile.get("context_window"))) as adapter:
-        budget = RequestBudget(adapter.client, job["max_requests"])
+        budget = RequestBudget(adapter.client, job["max_requests"], token_ceiling=job.get("max_token_estimate", 500_000), output_ceiling=job.get("max_output_tokens"))
         adapter.client = budget
+        cycle_seconds = job.get("cycle_seconds", 900)
+        adapter.research_guard.worker_seconds = adapter.research_guard.shared_seconds = cycle_seconds
         options, env = launch_options(adapter, home=home, workspace=Path(job["workspace"]), tools_enabled=job.get("public_readers") is True)
         try:
             result = subprocess.run([str(native_binary()), *options, "-c", 'sandbox_mode="read-only"', "-c", 'approval_policy="never"',
                 "-c", "agents.max_concurrent_threads_per_session=1", "--no-daemon", "exec", "--skip-git-repo-check", "--json", "-"],
-                input=job["prompt"], cwd=job["workspace"], env=env, text=True, encoding="utf-8", capture_output=True, timeout=180,
+                input=job["prompt"], cwd=job["workspace"], env=env, text=True, encoding="utf-8", capture_output=True, timeout=cycle_seconds,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
             trace = home / "schedule-events.jsonl"
             trace.write_text(result.stdout, encoding="utf-8")
@@ -177,7 +195,8 @@ def execute(job, runs_root):
         except subprocess.TimeoutExpired:
             status = "unknown"  # Do not retry a possibly accepted operation.
         evidence.update(provider_requests=budget.requests, request_ceiling=budget.ceiling,
-            estimated_input_tokens_upper_bound=budget.estimated_input_tokens_upper_bound, max_output_tokens_per_request=2048)
+            estimated_tokens_upper_bound=budget.estimated_input_tokens_upper_bound, max_token_estimate=budget.token_ceiling,
+            max_output_tokens_per_request=job.get("max_output_tokens") or adapter.endpoint.default_max_output_tokens or 4096, cycle_seconds=cycle_seconds)
     return status, evidence
 
 
@@ -194,6 +213,12 @@ def tick(store, runner=execute):
 
 
 def main(argv=None):
+    print("Separate schedule execution is retired. Use smara background; import-legacy explicitly copies paused configurations while preserving old run evidence.", file=sys.stderr)
+    return 2
+
+
+def compatibility_parser(argv=None):
+    """Historical parser retained for ledger compatibility, not dispatch."""
     from .native_runtime import runtime_home
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--store", type=Path, default=runtime_home() / "native-schedules.sqlite")
@@ -205,6 +230,9 @@ def main(argv=None):
     add.add_argument("--profile", required=True)
     add.add_argument("--interval-seconds", type=int, default=3600)
     add.add_argument("--max-requests", type=int, default=4)
+    add.add_argument("--cycle-seconds", type=int, default=900)
+    add.add_argument("--max-token-estimate", type=int, default=500_000)
+    add.add_argument("--max-output-tokens", type=int, default=None, help="Optional explicit limit; otherwise the model default")
     add.add_argument("--public-readers", action="store_true")
     commands.add_parser("list")
     for name in ("enable", "pause"):
@@ -216,7 +244,8 @@ def main(argv=None):
     store = ScheduleStore(args.store)
     if args.command == "add":
         identity = store.add(args.name, {"workspace": args.workspace, "prompt": args.prompt_file.read_text(encoding="utf-8"),
-            "profile_id": args.profile, "interval_seconds": args.interval_seconds, "max_requests": args.max_requests, "public_readers": args.public_readers})
+            "profile_id": args.profile, "interval_seconds": args.interval_seconds, "max_requests": args.max_requests, "public_readers": args.public_readers,
+            "cycle_seconds": args.cycle_seconds, "max_token_estimate": args.max_token_estimate, "max_output_tokens": args.max_output_tokens})
         print(json.dumps({"id": identity, "enabled": False, "scope": "read-only"}))
     elif args.command == "list":
         print(json.dumps(store.list()))
