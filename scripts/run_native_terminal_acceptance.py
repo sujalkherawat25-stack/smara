@@ -8,6 +8,8 @@ not live-model quality, network/path-escape certification or a GUI terminal.
 from __future__ import annotations
 
 import base64
+import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -23,10 +25,34 @@ import uuid
 from smara.native_runtime import native_binary
 
 
-def main() -> int:
+def bootstrap_program(backend):
+    if backend not in {"unelevated", "mxc"}:
+        raise ValueError("Choose an explicit native Windows sandbox backend")
+    # Select only the backend under test. Native execution, permissions,
+    # output and confinement checks stay real; no tool outcome is replaced.
+    return (
+        "import smara.native_runtime as runtime\n"
+        "original = runtime.launch_options\n"
+        "def configured(*args, **kwargs):\n"
+        " options, environment = original(*args, **kwargs)\n"
+        f" options += ['-c', 'windows.sandbox=\"{backend}\"', '-c', 'features.prefer_mxc=false']\n"
+        " return options, environment\n"
+        "runtime.launch_options = configured\n"
+        "raise SystemExit(runtime.serve_bootstrap())\n"
+    )
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--windows-backend", choices=["unelevated", "mxc"], default="mxc",
+                        help="Actual imported backend under test; never switches to unsandboxed execution")
+    args = parser.parse_args(argv)
     if os.name != "nt":
         raise SystemExit("This prerequisite tests the copied Windows sandbox")
     root = Path(__file__).resolve().parents[1]
+    binary = native_binary()
+    with binary.open("rb") as stream:
+        native_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
     fixture = root / "build" / ("native-terminal-" + uuid.uuid4().hex)
     # Ordinary inherited ACLs, unlike tempfile's private Windows DACL: the
     # sandbox must be able to reach the selected synthetic workspace.
@@ -38,7 +64,7 @@ def main() -> int:
     state.write_text('{"local_model_profiles": []}', encoding="utf-8")
     environment = dict(os.environ, PYTHONPATH=str(root / "src"), PYTHONIOENCODING="utf-8",
                        SMARA_DESKTOP_STATE=str(state), SMARA_DESKTOP_CREDENTIALS=str(fixture / "empty-credentials.json"))
-    child = subprocess.Popen([sys.executable, "-u", "-c", "from smara.native_runtime import serve_bootstrap; raise SystemExit(serve_bootstrap())"],
+    child = subprocess.Popen([sys.executable, "-u", "-c", bootstrap_program(args.windows_backend)],
                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              cwd=root, env=environment, text=True, encoding="utf-8",
                              creationflags=subprocess.CREATE_NO_WINDOW)
@@ -151,6 +177,17 @@ def main() -> int:
         assert not outside_file.exists() and "OUTSIDE_BLOCKED" in boundary["stdout"], "Outside synthetic workspace write was allowed"
         checks.extend(["workspace_write", "outside_workspace_write_blocked"])
 
+        helper_target = workspace / "fs-helper-write.txt"
+        helper_target.write_text("existing file\n", encoding="utf-8")
+        helper_request = {"operation": "fs/writeFile", "params": {"path": helper_target.as_uri(),
+                          "dataBase64": base64.b64encode(b"native helper write").decode(), "followSymlinks": True}}
+        code = ("import subprocess, sys\n"
+                f"result = subprocess.run([{str(native_binary())!r}, '--codex-run-as-fs-helper'], input={json.dumps(helper_request) + chr(10)!r}, capture_output=True, text=True, timeout=10)\n"
+                "print(result.stdout); print(result.stderr); sys.exit(result.returncode)\n")
+        helper_result = result(command(code))
+        assert helper_result["exitCode"] == 0 and helper_target.is_file() and helper_target.read_text() == "native helper write", "Native filesystem helper cannot write the selected project"
+        checks.append("native_fs_helper_workspace_write")
+
         terminal_policy = {"type": "workspaceWrite", "writableRoots": [str(workspace)], "networkAccess": False}
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
             listener.bind(("127.0.0.1", 0))
@@ -163,6 +200,76 @@ def main() -> int:
             network = result(command(code, sandboxPolicy=terminal_policy))
             assert network["exitCode"] == 0 and "NETWORK_BLOCKED" in network["stdout"], "Terminal sandbox allowed a loopback network connection"
         checks.append("network_disabled_loopback")
+
+        # Calibrate each owned listener outside the sandbox first. A dead
+        # listener or full calibration backlog must not masquerade as a deny.
+        for host, family, label, descendant in (
+            ("::1", socket.AF_INET6, "network_disabled_ipv6", False),
+            ("127.0.0.1", socket.AF_INET, "network_disabled_descendant_without_proxy_env", True),
+        ):
+            with socket.socket(family, socket.SOCK_STREAM) as listener:
+                listener.bind((host, 0))
+                listener.listen(2)
+                listener.settimeout(2)
+                port = listener.getsockname()[1]
+                socket.create_connection((host, port), timeout=1).close()
+                calibration, _ = listener.accept()
+                calibration.close()
+                code = ("import socket\n"
+                        f"try:\n socket.create_connection(({host!r}, {port}), timeout=1).close()\n"
+                        " print('NETWORK_ALLOWED')\n"
+                        "except OSError:\n print('NETWORK_BLOCKED')\n")
+                if descendant:
+                    code = ("import os, subprocess, sys\nos.environ.clear()\n"
+                            f"child = subprocess.run([sys.executable, '-c', {code!r}], capture_output=True, text=True, timeout=5)\n"
+                            "print(child.stdout)\nsys.exit(child.returncode)\n")
+                network = result(command(code, sandboxPolicy=terminal_policy))
+                assert network["exitCode"] == 0 and "NETWORK_BLOCKED" in network["stdout"], f"Sandbox failed {label}"
+            checks.append(label)
+
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.settimeout(.1)
+            port = listener.getsockname()[1]
+            stop_echo, delivered = threading.Event(), []
+            def echo():
+                while not stop_echo.is_set():
+                    try:
+                        payload, address = listener.recvfrom(100)
+                    except socket.timeout:
+                        continue
+                    delivered.append(payload)
+                    listener.sendto(payload, address)
+            echo_thread = threading.Thread(target=echo, daemon=True)
+            echo_thread.start()
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as calibration:
+                    calibration.settimeout(1)
+                    calibration.sendto(b"CALIBRATION", ("127.0.0.1", port))
+                    assert calibration.recvfrom(100)[0] == b"CALIBRATION"
+                code = ("import socket\ns = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\ns.settimeout(1)\n"
+                        f"try:\n s.sendto(b'SMARA_NATIVE_UDP', ('127.0.0.1', {port}))\n s.recvfrom(100)\n"
+                        " print('NETWORK_ALLOWED')\nexcept OSError:\n print('NETWORK_BLOCKED')\n")
+                network = result(command(code, sandboxPolicy=terminal_policy))
+                assert network["exitCode"] == 0 and "NETWORK_BLOCKED" in network["stdout"], "Sandbox allowed UDP echo"
+                assert b"SMARA_NATIVE_UDP" not in delivered, "Sandbox leaked an outbound UDP packet"
+            finally:
+                stop_echo.set()
+                echo_thread.join(timeout=1)
+        checks.append("network_disabled_udp_no_outbound_delivery")
+
+        junction = workspace / "outside-junction"
+        escaped = outside / "junction-escaped.txt"
+        quote = lambda path: "'" + str(path).replace("'", "''") + "'"
+        subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                        f"New-Item -ItemType Junction -Path {quote(junction)} -Target {quote(outside)} -ErrorAction Stop | Out-Null"],
+                       check=True, capture_output=True, timeout=15)
+        code = ("from pathlib import Path\n"
+                f"try:\n Path({str(junction / escaped.name)!r}).write_text('escape')\n print('ESCAPE_ALLOWED')\n"
+                "except OSError:\n print('ESCAPE_BLOCKED')\n")
+        boundary = result(command(code, sandboxPolicy=terminal_policy))
+        assert boundary["exitCode"] == 0 and "ESCAPE_BLOCKED" in boundary["stdout"] and not escaped.exists(), "Workspace junction escaped its write boundary"
+        checks.append("junction_write_escape_blocked")
 
         identifier = command("import sys; print('READY',flush=True); print('ECHO:'+sys.stdin.readline().strip(),flush=True)",
                              processId="input-check", tty=True, size={"rows": 24, "cols": 80}, sandboxPolicy=terminal_policy)
@@ -190,7 +297,8 @@ def main() -> int:
         send({"method": "smara/shutdown"})
         assert child.wait(timeout=45) == 0, "Native transport shutdown failed"
         report = {"status": "passed", "checks": checks, "fixture": str(fixture), "paid_inference": False,
-                  "desktop_gui_exercised": False, "network_or_path_escape_certification": False}
+                  "native_sha256": native_sha256,
+                  "windows_backend": args.windows_backend, "desktop_gui_exercised": False, "network_or_path_escape_certification": False}
         (fixture / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(report))
         return 0
@@ -198,7 +306,9 @@ def main() -> int:
         detail = str(exc)
         report = {"status": "blocked" if "streaming command/exec is not supported with windows sandbox" in detail else "failed",
                   "checks_passed_before_stop": checks, "error": detail, "fixture": str(fixture), "paid_inference": False,
+                  "native_sha256": native_sha256,
                   "sanitized_stderr_tail": stderr_lines[-20:],
+                  "windows_backend": args.windows_backend,
                   "desktop_gui_exercised": False, "network_or_path_escape_certification": False}
         (fixture / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(report))

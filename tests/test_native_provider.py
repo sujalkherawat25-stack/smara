@@ -304,6 +304,8 @@ def test_credentials_not_in_native_command_or_environment(tmp_path, monkeypatch)
         assert 'approval_policy="on-request"' in argv
         assert 'sandbox_mode="workspace-write"' in argv
         assert ('features.prefer_mxc=false' in argv) is (os.name == "nt")
+        assert ('windows.sandbox="mxc"' in argv) is (os.name == "nt")
+        assert 'windows.sandbox="unelevated"' not in argv
     finally:
         adapter.server.server_close()
         adapter.client.close()

@@ -411,8 +411,9 @@ test("interactive terminal starts only on supported Windows builds and uses only
   assert.equal(unsupported.terminal().interactiveSupported, false);
   assert.equal(unsupported.calls.some(call => call.method === "command/exec"), false);
   const terminal = readFileSync(new URL("../src/NativeTerminal.tsx", import.meta.url), "utf8");
-  assert.match(terminal, /no-network boundary failed testing/);
+  assert.match(terminal, /without the verified MXC backend/);
   assert.match(terminal, /No interactive shell will start/);
   const backend = readFileSync(new URL("../src-tauri/src/native_runtime.rs", import.meta.url), "utf8");
-  assert.match(backend, /const WINDOWS_SANDBOX_STREAMING_SUPPORTED: bool = false/);
+  assert.match(backend, /const WINDOWS_SANDBOX_STREAMING_SUPPORTED: bool = cfg!\(target_os = "windows"\)/);
+  assert.match(backend, /if !activity\.windows_sandbox_ready/);
 });

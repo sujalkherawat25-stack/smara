@@ -107,7 +107,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
       <section className="settings-card"><h2>Review changes and commands</h2>
         <p>Open <strong>Changes</strong> above the chat to inspect file or hunk diffs. Stage and unstage affect the Git index; Revert changes working files. Use a project folder that is the Git repository root.</p>
         <p><strong>Last turn → Undo</strong> reverses supported file changes from the last captured run, not chat history. Pre-existing and non-conflicting later edits are kept. Revert and Undo keep a local recovery copy; refresh if files changed after review.</p>
-        <p><strong>Terminal</strong> is disabled pending verification of its no-network boundary. No interactive shell starts on this candidate. Agent commands and their results still appear in chat; this does not certify Windows command network isolation.</p>
+        <p><strong>Terminal</strong> starts a PowerShell session with the Windows MXC sandbox: writes are limited to the selected project and network is disabled. Streaming, Unicode input, resize, Stop, TCP/UDP/IPv6 and junction-write checks passed. Hosts without MXC fail closed; there is no weaker fallback. These checks are not a universal escape certification.</p>
       </section>
       <section className="settings-card"><h2>Access and privacy</h2>
         <p><strong>Autonomous work:</strong> type <code>/goal</code> followed by the outcome in chat. Smara saves the prompt, starts background work, and shows progress and approvals in the conversation. Goals pause at cumulative limits and require your acceptance before completion. Telegram controls the same goal ledger.</p>

@@ -1,5 +1,8 @@
 # v0.1.23 source-freeze gate — not a public release
 
+Historical snapshot. See [the follow-up release gate](USABILITY_RELEASE_GATE_2026-10-14.md)
+for subsequent research, Windows sandbox and packaging verification.
+
 This batch includes the previously local v0.1.21/22 memory, outcome, outreach,
 browser and background-worker work, plus chat usability and recovery hardening.
 User-deleted reports and the manual architecture-PDF diagnostic remain outside

@@ -5,6 +5,7 @@ Native executes a real bounded PowerShell command. No tool result is mocked.
 Only owned processes and disposable synthetic workspaces are touched.
 """
 import argparse
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
@@ -12,6 +13,7 @@ import threading
 import time
 import uuid
 from smara.native_provider import ChatEndpoint, ResponsesAdapter
+from smara.native_runtime import native_binary
 from scripts.native_session import NativeSession
 from scripts.run_native_coding_acceptance import cleanup_scratch
 
@@ -49,7 +51,10 @@ def exercise(root, crash):
                 provider_errors.append(type(exc).__name__)
     provider = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
     threading.Thread(target=provider.serve_forever, daemon=True).start()
-    report = {"kind": "crash" if crash else "stop", "status": "failed", "synthetic_provider": True}
+    with native_binary().open("rb") as stream:
+        native_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+    report = {"kind": "crash" if crash else "stop", "status": "failed", "synthetic_provider": True,
+              "native_sha256": native_sha256}
     session = None
     try:
         with ResponsesAdapter(ChatEndpoint(f"http://127.0.0.1:{provider.server_port}", "synthetic-recovery", "")) as adapter:

@@ -72,7 +72,7 @@ def main():
     lock = threading.Lock()
     barrier = threading.Barrier(2)
     counts = {}
-    errors, child_paths, callbacks = [], {}, []
+    errors, child_paths, callbacks, approval_reasons = [], {}, [], []
     report = {"status": "failed", "paid_requests": 0, "private_code_sent": False,
               "scope": "offline scripted provider with actual native tools; not real-model quality", "retained_fixture": str(scratch),
               "native_sha256": hashlib.sha256(native_binary().read_bytes()).hexdigest()}
@@ -143,6 +143,7 @@ def main():
     threading.Thread(target=provider.serve_forever, daemon=True).start()
     def decide(message):
         callbacks.append(message["method"])
+        approval_reasons.append({"method": message["method"], "reason": str((message.get("params") or {}).get("reason") or "")[:1500]})
         # An in-checkout patch should need no widening. Any unexpected request
         # is denied, including one with a fixture-like model-controlled ID.
         if message["method"] in {"item/fileChange/requestApproval", "item/commandExecution/requestApproval"}:
@@ -196,7 +197,8 @@ def main():
         if session: session.close()
         provider.shutdown()
         provider.server_close()
-    report.update(elapsed_seconds=round(time.monotonic() - started, 2), provider_counts=counts, provider_errors=errors, native_approval_callbacks=callbacks)
+    report.update(elapsed_seconds=round(time.monotonic() - started, 2), provider_counts=counts, provider_errors=errors,
+                  native_approval_callbacks=callbacks, native_approval_reasons=approval_reasons)
     target.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report), flush=True)
     return 0 if report["status"] == "passed" else 1

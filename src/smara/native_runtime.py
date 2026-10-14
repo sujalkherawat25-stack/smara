@@ -160,11 +160,11 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         "mcp_servers.smara_browser.args": (["--native-browser"] if getattr(sys, "frozen", False) else ["-m", "smara.native_browser"]),
     }
     if os.name == "nt":
-        settings["windows.sandbox"] = "unelevated"
-        # MXC remains available in the imported runtime, but this host's
-        # end-to-end probe showed workspace writes failing there. Use the
-        # verified restricted-token sandbox until MXC passes the same gate.
-        # Both modes remain sandboxed; no unsandboxed retry is permitted.
+        # Explicit MXC selection fails if it is unavailable: never fall back
+        # to restricted tokens, whose proxy variables do not confine sockets.
+        # The actual command/exec gate verified writes, TCP/UDP/IPv6,
+        # descendants, junction escape and PTY lifecycle on this backend.
+        settings["windows.sandbox"] = "mxc"
         settings["features.prefer_mxc"] = False
     if adapter.endpoint.effective_context_window:
         settings["model_context_window"] = adapter.endpoint.effective_context_window
@@ -288,7 +288,7 @@ def print_smara_help() -> None:
     print("readers do not provide browser actions. DOM browser actions need explicit origin opt-in")
     print("and native confirmation. Experimental foreground app tools need user selection in Settings;")
     print("personal-browser profiles, unrestricted desktop control and unattended company writes remain unavailable.")
-    print("Desktop interactive terminal is disabled pending its network-isolation gate; agent command transcripts remain available.")
+    print("Desktop interactive terminal requires the MXC sandbox: project writes, no network, streaming and Stop. If MXC is unavailable, no shell starts; there is no weaker fallback.")
 
 
 def configure_protocol_stdio(input_stream, output_stream) -> None:
