@@ -13,7 +13,10 @@ export type TerminalSession = {
 /** Fixed shell plus an explicit, no-network workspace-write sandbox. */
 export function terminalExecParams(workspace: string, processId: string, cols = 100, rows = 28) {
   return {
-    command: ["powershell.exe", "-NoLogo", "-NoProfile", "-NoExit"],
+    // The GUI already edits complete input lines. PSReadLine would also edit
+    // them and attempt to read/write the user's personal history outside MXC.
+    command: ["powershell.exe", "-NoLogo", "-NoProfile", "-NoExit", "-Command",
+      "if (Get-Module PSReadLine) { Remove-Module PSReadLine -ErrorAction Stop }"],
     processId,
     tty: true,
     streamStdin: true,

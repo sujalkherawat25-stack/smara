@@ -137,7 +137,10 @@ def main(argv=None) -> int:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError("Bounded terminal prerequisite timed out")
-            observe(messages.get(timeout=remaining))
+            try:
+                observe(messages.get(timeout=remaining))
+            except queue.Empty as exc:
+                raise TimeoutError("Bounded terminal prerequisite timed out") from exc
 
     def result(identifier):
         wait(lambda: identifier in replies)
@@ -294,19 +297,55 @@ def main(argv=None) -> int:
         result(start("command/exec/terminate", {"processId": "stop-check"}))
         assert result(identifier)["exitCode"] != 0, "Terminated PTY was reported as success"
         checks.append("pty_terminate")
+
+        # Exercise the exact Desktop PowerShell argv, not just a Python PTY.
+        # Reading this public source contract avoids a test-only startup fix.
+        protocol = (root / "apps/desktop/src/terminalProtocol.ts").read_text(encoding="utf-8")
+        shell_argv = json.loads(re.search(r"command: (\[.*?\]),", protocol, re.S).group(1))
+        shell_id = "smara-terminal-powershell-check"
+        identifier = start("command/exec", {
+            "command": shell_argv, "cwd": str(workspace), "processId": shell_id,
+            "tty": True, "streamStdin": True, "streamStdoutStderr": True,
+            "disableTimeout": True, "outputBytesCap": 8 * 1024 * 1024,
+            "size": {"rows": 28, "cols": 100}, "sandboxPolicy": terminal_policy,
+        })
+        # ConPTY can express the space after '>' as a cursor-forward escape.
+        wait(lambda: b"workspace>" in output.get(shell_id, b"") or identifier in replies)
+        if identifier in replies:
+            result(identifier)
+            raise RuntimeError("Desktop PowerShell exited before its first prompt")
+        for code, expected in (
+            ("Write-Output ('SMARA_' + 'TERMINAL_OK'); Write-Output ('PSREADLINE_LOADED=' + [bool](Get-Module PSReadLine))", b"PSREADLINE_LOADED=False"),
+            ("Write-Output ('SECOND_' + 'COMMAND_OK')", b"SECOND_COMMAND_OK"),
+        ):
+            result(start("command/exec/write", {"processId": shell_id,
+                "deltaBase64": base64.b64encode((code + "\r").encode()).decode()}))
+            wait(lambda: expected in output.get(shell_id, b"") or identifier in replies)
+            assert expected in output.get(shell_id, b""), "Desktop PowerShell lost a submitted line"
+        shell_output = bytes(output[shell_id]).decode("utf-8")
+        assert "SMARA_TERMINAL_OK" in shell_output, "Desktop PowerShell did not execute the submitted command"
+        assert not any(error in shell_output for error in (
+            "ConsoleHost_history.txt", "Error reading or writing history file", "CommandNotFoundException",
+        )), "Desktop PowerShell attempted personal history access or corrupted command input"
+        checks.extend(["desktop_powershell_exact_startup", "desktop_powershell_no_personal_history", "desktop_powershell_multiple_input_lines"])
+        result(start("command/exec/terminate", {"processId": shell_id}))
+        assert result(identifier)["exitCode"] != 0, "Stopped PowerShell was reported as success"
+        checks.append("desktop_powershell_stop")
         send({"method": "smara/shutdown"})
         assert child.wait(timeout=45) == 0, "Native transport shutdown failed"
         report = {"status": "passed", "checks": checks, "fixture": str(fixture), "paid_inference": False,
                   "native_sha256": native_sha256,
+                  "desktop_shell_argv": shell_argv, "synthetic_powershell_output": shell_output,
                   "windows_backend": args.windows_backend, "desktop_gui_exercised": False, "network_or_path_escape_certification": False}
         (fixture / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(report))
         return 0
     except Exception as exc:
-        detail = str(exc)
+        detail = str(exc) or type(exc).__name__
         report = {"status": "blocked" if "streaming command/exec is not supported with windows sandbox" in detail else "failed",
                   "checks_passed_before_stop": checks, "error": detail, "fixture": str(fixture), "paid_inference": False,
                   "native_sha256": native_sha256,
+                  "synthetic_powershell_output": bytes(output.get("smara-terminal-powershell-check", b"")).decode("utf-8", errors="replace"),
                   "sanitized_stderr_tail": stderr_lines[-20:],
                   "windows_backend": args.windows_backend,
                   "desktop_gui_exercised": False, "network_or_path_escape_certification": False}

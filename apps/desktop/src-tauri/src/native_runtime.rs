@@ -138,7 +138,8 @@ fn validate_terminal_message(message: &Value, activity: &ReviewActivity, project
             let root = project_root.ok_or("The selected project is unavailable for the terminal sandbox.")?;
             if !valid_terminal_process_id(params["processId"].as_str().unwrap_or_default())
                 || activity.terminal_processes.contains(params["processId"].as_str().unwrap_or_default())
-                || params["command"] != serde_json::json!(["powershell.exe", "-NoLogo", "-NoProfile", "-NoExit"])
+                || params["command"] != serde_json::json!(["powershell.exe", "-NoLogo", "-NoProfile", "-NoExit", "-Command",
+                    "if (Get-Module PSReadLine) { Remove-Module PSReadLine -ErrorAction Stop }"])
                 || params["tty"] != true || params["streamStdin"] != true || params["streamStdoutStderr"] != true
                 || params["disableTimeout"] != true || params["outputBytesCap"] != 8 * 1024 * 1024
                 || !params["env"].is_null() || !params["permissionProfile"].is_null()
@@ -449,7 +450,8 @@ mod review_tests {
             "method": "command/exec",
             "params": {
                 "processId": "smara-terminal-test",
-                "command": ["powershell.exe", "-NoLogo", "-NoProfile", "-NoExit"],
+                "command": ["powershell.exe", "-NoLogo", "-NoProfile", "-NoExit", "-Command",
+                    "if (Get-Module PSReadLine) { Remove-Module PSReadLine -ErrorAction Stop }"],
                 "cwd": root,
                 "tty": true,
                 "streamStdin": true,
@@ -465,6 +467,9 @@ mod review_tests {
             }
         });
         assert!(validate_terminal_message(&message, &active, Some(std::path::Path::new(root))).is_ok());
+        let mut injected_startup = message.clone();
+        injected_startup["params"]["command"][5] = json!("Write-Output 'untrusted startup'");
+        assert!(validate_terminal_message(&injected_startup, &active, Some(std::path::Path::new(root))).is_err());
         let mut network_enabled = message.clone();
         network_enabled["params"]["sandboxPolicy"]["networkAccess"] = json!(true);
         assert!(validate_terminal_message(&network_enabled, &active, Some(std::path::Path::new(root))).is_err());

@@ -30,7 +30,7 @@ changes, network/path probes and cleanup were not substituted with mocks.
   Docker-dependent; the subsequent real Docker/workspace lane passed all 15
   checks with Docker 29.2.0. Two Windows symlink-privilege cases remain skipped.
   These counts overlap and must not be summed as unique tests.
-- Desktop: 104 frontend tests, TypeScript/Vite production build, 12 Rust tests.
+- Desktop: 105 frontend tests, TypeScript/Vite production build, 12 Rust tests.
 - Native Rust SystemRoot/secret-exclusion regression passed.
 - Read-only secret gate: 12,178 reachable blobs, 9,944 working-tree entries,
   153 reviewed public/synthetic matches, zero unclassified findings/skipped inputs.
@@ -58,6 +58,21 @@ matched cached page text. Quote presence/evidence linkage does not prove semanti
 correctness or a real business outcome. Earlier failed live reports are retained.
 
 ## Remaining release gates
+
+The installed terminal exposed a PowerShell-specific gap after the Python PTY
+gate: PSReadLine attempted personal-history access outside the workspace and
+duplicated line editing already handled by the GUI. The fixed, native-validated
+startup unloads PSReadLine before the first prompt, without adding environment
+overrides, personal write roots, network access or profile loading. The actual
+MXC gate now includes the exact Desktop PowerShell argv, two consecutive command
+lines, absence of personal-history errors and shell termination: all 17 checks
+pass. Earlier test-harness timeouts (ConPTY represents a prompt space with a
+cursor escape) are retained as failed reports, not silently reclassified.
+
+The previously installed package passed observed Send/Stop/reconnect without
+replayed inference and its protected-settings/CLI checks. The user-discovered
+PowerShell error prevents treating that installer as release-ready. Rebuild and
+repeat installed GUI terminal and human Deny verification on the fixed package.
 
 Final source commit/secret gate; exact-input manifest and sealed packages;
 installed GUI/CLI verification; CI and only then publication.

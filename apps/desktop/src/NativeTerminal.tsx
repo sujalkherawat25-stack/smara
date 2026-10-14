@@ -67,7 +67,7 @@ export default function NativeTerminal({ workspace, connected, session, interact
       {session && <small role="status">{session.status}{session.exitCode !== undefined ? ` · exit ${session.exitCode}` : ""}</small>}
     </div>
     {session?.error && <p className="terminal-error" role="alert">{session.error}</p>}
-    {!session && <p className="terminal-empty">Start a sandboxed shell in the selected project. It does not inherit a personal shell profile.</p>}
+    {!session && <p className="terminal-empty">Start a sandboxed shell in the selected project. Personal profiles and command-history persistence are disabled.</p>}
     <pre ref={outputRef} className="interactive-terminal-output" aria-label="Terminal output" aria-live="off">{session?.output || (session?.status === "starting" ? "Starting the sandboxed shell…" : "")}{session?.truncated && "\n[Earlier output omitted to keep the terminal responsive.]"}</pre>
     {session?.status === "running" && <form className="interactive-terminal-input" onSubmit={event => { event.preventDefault(); submit(); }}>
       <textarea ref={inputRef} aria-label="Terminal input" rows={2} value={input} placeholder="Type a command and press Enter" onChange={event => setInput(event.target.value)} onKeyDown={event => {

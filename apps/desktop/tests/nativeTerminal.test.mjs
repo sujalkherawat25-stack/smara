@@ -12,13 +12,22 @@ const { appendTerminalOutput, decodeTerminalOutput, encodeTerminalInput, termina
 
 test("terminal process is fixed to the selected workspace with network disabled", () => {
   const params = terminalExecParams("C:/project", "terminal-1");
-  assert.deepEqual(Array.from(params.command), ["powershell.exe", "-NoLogo", "-NoProfile", "-NoExit"]);
+  assert.deepEqual(Array.from(params.command), ["powershell.exe", "-NoLogo", "-NoProfile", "-NoExit", "-Command",
+    "if (Get-Module PSReadLine) { Remove-Module PSReadLine -ErrorAction Stop }"]);
   assert.equal(params.tty, true);
   assert.equal(params.disableTimeout, true);
   assert.deepEqual(Array.from(params.sandboxPolicy.writableRoots), ["C:/project"]);
   assert.equal(params.sandboxPolicy.type, "workspaceWrite");
   assert.equal(params.sandboxPolicy.networkAccess, false);
   assert.equal(params.cwd, "C:/project");
+});
+
+test("frontend shell startup agrees with the native fixed-command guard", () => {
+  const native = readFileSync(new URL("../src-tauri/src/native_runtime.rs", import.meta.url), "utf8");
+  const params = terminalExecParams("C:/project", "terminal-1");
+  assert.ok(native.includes(JSON.stringify(params.command[5])));
+  assert.ok(native.includes('params["command"] != serde_json::json!'));
+  assert.equal(params.env, undefined);
 });
 
 test("terminal input and streamed UTF-8 output preserve unicode and strip terminal controls", () => {

@@ -20,7 +20,7 @@ business outcome verification are different things.
 | Windows selected-app computer actions | Experimental, off unless explicitly selected | Human permissions/consent; not unrestricted desktop automation; broad live acceptance incomplete |
 | Gmail researched drafts/reviewed sending | Implemented and synthetic fault-tested | Real account OAuth and self-addressed send remain unverified; no automatic campaign sending |
 | Docker fixture isolation | Actual engine tests passed | Separate from native Windows sandbox; not a claim that every action runs in Docker |
-| Windows interactive terminal | MXC execution gate passed; revised installed-GUI check pending | 13 real probes, including PTY/Unicode/resize/Stop, TCP/UDP/IPv6, descendants and junction writes; no automatic weaker fallback |
+| Windows interactive terminal | MXC execution gate passed; PowerShell startup fixed; rebuilt installed-GUI check pending | 17 real probes, including exact Desktop shell argv, two submitted commands, personal-history disabled, PTY/Unicode/resize/Stop, TCP/UDP/IPv6, descendants and junction writes; no automatic weaker fallback |
 | Windows agent command network boundary | Bounded MXC probes passed; **not universal certification** | Earlier restricted-token loopback failure retained; unsupported MXC hosts fail closed |
 
 Both fresh public-documentation research cases reached ready-for-review within
