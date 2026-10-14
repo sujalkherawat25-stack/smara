@@ -268,6 +268,30 @@ def test_loopback_auth_and_route_are_required():
             assert "provider-secret" not in response.text
 
 
+def test_budget_refusal_is_fatal_not_a_retryable_gateway_error():
+    from contextlib import contextmanager
+    from smara.native_budget import BudgetLimitError
+    calls = []
+    @contextmanager
+    def refused(*args, **kwargs):
+        calls.append(True)
+        raise BudgetLimitError("synthetic-sensitive-value")
+        yield  # Keep the same streaming context-manager contract.
+    with ResponsesAdapter(ChatEndpoint("http://127.0.0.1:1", "test", "provider-secret")) as adapter:
+        original_client = adapter.client
+        adapter.client = SimpleNamespace(stream=refused, close=lambda: None)
+        try:
+            with httpx.Client(trust_env=False) as client:
+                response = client.post(adapter.base_url + "/responses", headers={"Authorization": "Bearer " + adapter.token},
+                                       json={"stream": True, "input": "synthetic budget fixture"})
+            assert response.status_code == 400
+            assert "Approved inference budget reached" in response.json()["error"]["message"]
+            assert "synthetic-sensitive-value" not in response.text and "provider-secret" not in response.text
+            assert calls == [True]
+        finally:
+            original_client.close()
+
+
 def test_rejected_posts_return_json_repeatedly_without_reset_or_inference():
     with ResponsesAdapter(ChatEndpoint("http://127.0.0.1:1", "test", "provider-secret")) as adapter:
         with httpx.Client(trust_env=False) as client:

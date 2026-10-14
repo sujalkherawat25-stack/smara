@@ -22,6 +22,7 @@ import uuid
 from smara.native_profiles import load_profiles, resolve_profile_key
 from smara.native_provider import ChatEndpoint, ResponsesAdapter
 from smara.native_runtime import active_profile, native_binary
+from smara.native_budget import BudgetLimitError
 from scripts.native_session import NativeSession
 
 PUBLIC_URL = "https://docs.python.org/3/library/heapq.html"
@@ -60,7 +61,7 @@ class BudgetClient:
             if self.requests >= self.ceiling or self.reserved_rupees + reserve > self.rupees:
                 self.blocked_requests += 1
                 self.exhausted.set()
-                raise RuntimeError("Live check budget ceiling reached before outbound request")
+                raise BudgetLimitError("Live check budget ceiling reached before outbound request")
             self.requests += 1
             self.reserved_rupees += reserve
         with self.client.stream(method, url, **kwargs) as response:
@@ -187,7 +188,7 @@ def browser_prompt():
     return (
         f"Use the owned DOM browser to read {PUBLIC_URL}. Explain in under 180 words the "
         "difference between heappushpop and heapreplace for a min-heap. For heap [5, 9, 12] "
-        "and item 3, state what each returns and whether 3 stays in the heap. Cite the actual "
+        "and item 3, state what each returns, whether 3 stays in the heap, and the heap length before and after each operation. Cite the actual "
         "documentation URL you retrieved. Inspect the relevant page text, paging if needed, "
         "rather than answering from memory. Use only browser navigation, observation, text "
         "paging and close. No shell/web-fetch substitute, browser actions, forms, logins, "
@@ -397,10 +398,14 @@ def main():
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ceiling-inr", type=float, default=300)
+    parser.add_argument("--browser-only", action="store_true", help="Fresh public DOM check; do not rerun previously verified workers")
+    parser.add_argument("--request-ceiling", type=int, default=26, choices=range(1, 33), help="Explicit total request ceiling for this run")
     parser.add_argument("--report", type=Path)
     parser.add_argument("--continue-report", type=Path, help="Cold-resume only this runner's original fixture; carry its entire budget forward")
     parser.add_argument("--extra-browser-requests", type=int, default=0, choices=range(7), help="Separately authorized extension, up to six calls; browser only after workers pass")
     args = parser.parse_args()
+    if args.browser_only and args.extra_browser_requests:
+        raise ValueError("Browser-only cannot bypass its explicit cumulative request ceiling")
     target = args.report.resolve() if args.report else root / "build" / ("native-live-workers-browser-" + uuid.uuid4().hex + ".json")
     if not target.is_relative_to((root / "build").resolve()) or target.exists():
         raise ValueError("Use a new report path under build; never overwrite evidence")
@@ -434,13 +439,16 @@ def main():
     if previous:
         report["continues_report"] = str(args.continue_report.resolve())
     with ResponsesAdapter(ChatEndpoint(profile["base_url"], profile["model"], key, profile.get("auth_header", "authorization"))) as adapter:
-        bounded = BudgetClient(adapter.client, rupees=args.ceiling_inr, ceiling=26 + args.extra_browser_requests)
+        bounded = BudgetClient(adapter.client, rupees=args.ceiling_inr, ceiling=args.request_ceiling + args.extra_browser_requests)
         if previous:
             ledger = complete_ledger_usage(scratch / "workers-home", previous["budget"]["requests"])
             bounded.carry_forward(previous["budget"], ledger)
             report["previous_usage_ledger_verified"] = ledger
         adapter.client = bounded
         tasks = [("workers", lambda: run_workers(adapter, root, scratch, bounded, previous)), ("browser", lambda: run_browser(adapter, scratch, bounded))]
+        if args.browser_only:
+            tasks = tasks[1:]
+            report["workers"] = {"status": "not_run", "reason": "Fresh browser-only scope; no worker inference sent"}
         if args.extra_browser_requests:
             report["workers"] = previous["workers"]
             report["workers_carried_from_verified_previous_run"] = True
@@ -455,7 +463,7 @@ def main():
             # Generated report only; save every failure before proceeding.
             target.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
             print(json.dumps({"finished": name, "status": result["status"], "budget": report["budget"]}), flush=True)
-    report.update(status="passed" if all(report[name]["status"] == "passed" for name in ("workers", "browser")) else "failed",
+    report.update(status="passed" if all(report[name]["status"] == "passed" for name in (("browser",) if args.browser_only else ("workers", "browser"))) else "failed",
                   elapsed_seconds=round(time.monotonic() - started, 2))
     target.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"status": report["status"], "report": str(target), "budget": report["budget"]}), flush=True)

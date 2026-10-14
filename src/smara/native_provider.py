@@ -23,6 +23,7 @@ import httpx
 from .native_limits import ResearchGuard, ResearchLimitError
 from .native_limits import research_tool
 from .native_admission import AdmissionError, peer_context
+from .native_budget import BudgetLimitError
 
 
 class UnsupportedWireFeature(ValueError):
@@ -507,6 +508,10 @@ class ResponsesAdapter:
                                 # Preserve a completed answer if the local queue
                                 # is unavailable. Never emit a second completion.
                                 pass
+                except BudgetLimitError:
+                    # A native 4xx ends this turn rather than retrying a 502.
+                    # Never expose a guard's exception text or private payload.
+                    self._json_error(400, "Approved inference budget reached; extend its limits before resuming")
                 except AdmissionError as exc:
                     self._json_error(429, str(exc))
                 except (BrokenPipeError, ConnectionResetError):

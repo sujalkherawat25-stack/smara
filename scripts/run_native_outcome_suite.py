@@ -1,7 +1,7 @@
 """Maintained native outcomes gate. Never sends email or hosted memory.
 
 Use --live only after explicit approval. Inputs are synthetic fixtures and public
-Python documentation. Existing reports are never overwritten. Failed/bounded
+documentation/company pages. Existing reports are never overwritten. Failed/bounded
 runs remain failed; no repeated run or approval is silently substituted.
 """
 import argparse
@@ -15,7 +15,7 @@ import threading
 import time
 from contextlib import contextmanager
 
-from smara.native_budget import output_payload, reservation_estimate
+from smara.native_budget import BudgetLimitError, output_payload, reservation_estimate
 from smara.native_goals import GoalStore
 from smara.native_goal_runtime import execute_cycle
 from smara.native_provider import ChatEndpoint
@@ -24,6 +24,15 @@ from smara.native_runtime import active_profile
 
 PUBLIC = "Read https://docs.python.org/3/library/json.html and https://docs.python.org/3/tutorial/inputoutput.html. Explain json.load versus json.loads using actual fetched source excerpts."
 CASES = {
+    "memory-opportunity": {
+        "kind": "research", "max_requests": 8, "time_sensitive": True,
+        "prompt": "Read the actual clock. Produce a 400-700 word discovery brief on whether conversational-AI software teams serving Indian businesses could benefit from a separate agent-memory layer. Read https://docs.langchain.com/oss/python/langgraph/add-memory and https://docs.mem0.ai/overview to compare existing alternatives, and https://www.haptik.ai/ and https://yellow.ai/ for public company evidence. Use at most these four pages; do not endlessly retry a failed page. Identify two plausible buyer segments, the observable workflow problem versus your hypothesis, two candidate companies with why they might or might not fit, and five neutral discovery-interview questions. Explicitly state that public marketing does not establish demand, willingness to pay, a customer's internal architecture, or actual buying intent. Cite actually retrieved URLs and exact supporting excerpts for material factual claims; clearly mark deductions and unknowns. No outreach, email, private files or hosted memory. Put the useful brief in your final checkpoint summary, not just a plan or a list of tools.",
+        "requirements": [
+            {"id": "alternatives", "description": "Compare observed memory alternatives with sourced factual claims and limitations"},
+            {"id": "segments", "description": "Two plausible segments and two candidate companies; inference distinguished from demonstrated demand"},
+            {"id": "discovery", "description": "Five neutral interview questions and explicit unresolved willingness-to-pay/internal-architecture unknowns"},
+        ],
+    },
     "coding": {"kind": "coding", "prompt": "Fix calculator.py without changing test_calculator.py. Run the tests and include calculator.py in outputs.", "requirements": [{"id": "tests", "description": "The unchanged synthetic addition tests pass"}]},
     "research": {"kind": "research", "prompt": PUBLIC, "requirements": [{"id": "json", "description": "Explain both JSON functions with supporting source excerpts"}]},
     "mixed": {"kind": "mixed", "prompt": "Fix calculator.py, do not change test_calculator.py, run its tests. " + PUBLIC, "requirements": [{"id": "tests", "description": "The unchanged synthetic tests pass"}, {"id": "json", "description": "Explain both JSON functions with observed source evidence"}]},
@@ -64,7 +73,7 @@ class LiveBudget:
                 with guard.lock:
                     if (guard.state["requests"] >= guard.state["request_ceiling"] or
                             guard.state["reserved_inr_estimate"] + cost > guard.state["ceiling_inr"]):
-                        raise RuntimeError("Approved live evaluation ceiling reached; no request sent")
+                        raise BudgetLimitError("Approved live evaluation ceiling reached; no request sent")
                     guard.state["requests"] += 1
                     guard.state["reserved_inr_estimate"] += cost
                     guard.save()
@@ -183,7 +192,7 @@ def main(argv=None):
                 objective=case["prompt"] + instruction + ' Perform the work with the native tools; do not merely describe a plan. Do not inspect credentials or other folders.',
                 success_criteria="Address every requested requirement with observed evidence; report failures honestly.",
                 task_kind=case["kind"], requirements=case.get("requirements", []), time_sensitive=case.get("time_sensitive", False),
-                sandbox="workspace-write" if original_tests else "read-only", max_requests=4, max_cycles=1,
+                sandbox="workspace-write" if original_tests else "read-only", max_requests=case.get("max_requests", 4), max_cycles=1,
                 max_output_tokens=8192, max_token_estimate=1_000_000, cycle_seconds=180, interval_seconds=0)
             if continuing:
                 matches = store.list(workspace)
@@ -195,7 +204,7 @@ def main(argv=None):
                            "max_token_estimate": max(matches[0]["spec"]["max_token_estimate"], matches[0]["token_estimate"] + int((guard.state["ceiling_inr"] - guard.state["reserved_inr_estimate"]) * 1_000_000 / 396))}
                           if args.resume_saved else {"max_cycles": 5 if args.finalize_mixed else 2, "max_requests": 15 if args.finalize_mixed else 9})
                 store.action({"action": "extend", "id": identity, **limits, **({"max_token_estimate": 2_000_000} if args.finalize_mixed else {})})
-                store.action({"action": "feedback", "id": identity, "text": "Inspect the saved tool results and current files before continuing. Retain all completed work. Finish missing work, then serialize the checkpoint; do not repeat completed tests or reads if their evidence is current."})
+                store.action({"action": "feedback", "id": identity, "text": "Inspect the saved tool results and current files before continuing. Retain all completed work. Finish missing work, then serialize the checkpoint; do not repeat completed tests or reads if their evidence is current. For an unmatched quotation, copy a contiguous excerpt verbatim from an observed successful source; do not combine headings or alter punctuation. Reuse existing verified excerpts where relevant. Do not retry an already failed URL. Read a fresh clock if the current cycle requires it."})
                 store.action({"action": "resume", "id": identity})
             else:
                 identity = store.action(spec)

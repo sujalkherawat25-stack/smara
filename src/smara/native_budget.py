@@ -6,6 +6,10 @@ DEFAULT_CYCLE_SECONDS = 900
 DEFAULT_TOKEN_ESTIMATE = 500_000
 
 
+class BudgetLimitError(RuntimeError):
+    """Preflight budget refusal, not a transient provider connection failure."""
+
+
 def output_payload(payload, ceiling=None):
     result = dict(payload)
     requested = result.get("max_tokens", DEFAULT_OUTPUT_TOKENS)

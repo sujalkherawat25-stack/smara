@@ -11,6 +11,10 @@ def test_catalog_preview_never_claims_real_evaluation_success(tmp_path):
     assert report["mode"] == "catalog_only" and not report["passed"]
     assert not report["cases"]
     assert {"latest", "historical", "failed-page"}.issubset(CASES)
+    brief = CASES["memory-opportunity"]
+    assert brief["kind"] == "research" and brief["max_requests"] == 8
+    assert "public marketing does not establish demand" in brief["prompt"]
+    assert len(brief["requirements"]) == 3
     with pytest.raises(FileExistsError): main(["--out", str(root)])
 
 

@@ -387,7 +387,8 @@ class GoalStore:
             else:
                 db.execute("UPDATE goals SET requests=requests+1,token_estimate=token_estimate+? WHERE id=?", (estimate, goal["id"]))
         if exhausted:
-            raise RuntimeError("Cumulative goal inference budget reached")
+            from .native_budget import BudgetLimitError
+            raise BudgetLimitError("Cumulative goal inference budget reached")
 
     def feedback(self, identity):
         with self.connect() as db:
