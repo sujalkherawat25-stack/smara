@@ -1,7 +1,8 @@
 # v0.1.23 follow-up release gate
 
-Status: **in progress; not permission to publish an unverified build**.
+Status: **completed; v0.1.23 published from the exact tested build**.
 The earlier source-freeze gate is historical, not the current release result.
+This post-release documentation update does not move the tag or rebuild the app.
 
 ## Fixed boundary
 
@@ -57,7 +58,7 @@ saved session; completed searches/reads were not replayed. Submitted excerpts
 matched cached page text. Quote presence/evidence linkage does not prove semantic
 correctness or a real business outcome. Earlier failed live reports are retained.
 
-## Remaining release gates
+## Final installed verification and publication
 
 The installed terminal exposed a PowerShell-specific gap after the Python PTY
 gate: PSReadLine attempted personal-history access outside the workspace and
@@ -71,11 +72,27 @@ cursor escape) are retained as failed reports, not silently reclassified.
 
 The previously installed package passed observed Send/Stop/reconnect without
 replayed inference and its protected-settings/CLI checks. The user-discovered
-PowerShell error prevents treating that installer as release-ready. Rebuild and
-repeat installed GUI terminal and human Deny verification on the fixed package.
+PowerShell error prevented releasing that installer. The fixed package was
+rebuilt, sealed and installed, with preferences and protected credentials
+unchanged and recoverable binary backups retained. Nine installed CLI checks
+and 13 synthetic installed settings checks passed.
 
-Final source commit/secret gate; exact-input manifest and sealed packages;
-installed GUI/CLI verification; CI and only then publication.
+The human reported the terminal marker appeared without a history error and
+the shell stopped. Its transcript was empty at subsequent inspection, so this
+is recorded as human confirmation, not automated GUI command verification.
+The final human Deny was separately observed in the installed GUI and the
+durable native report passed all five checks: clock tool failed with user
+rejection, null result, rejection delivered to the offline provider, no fixture
+errors and one completed native turn. No paid model was used for these GUI checks.
+
+Both branches' seven CI lanes and redacted secret-audit workflows passed for
+`4afbe276d031e7290cabf916e8a17b0edf14d848`. The installed GUI/resources matched
+the sealed payloads. GitHub's uploaded installer digest matched the tested local
+SHA-256: `5063d9bb3f4c7a9f7db289412be42c07e5484805cb5c63033c2723258cca5cad`.
+The remote `v0.1.23` tag points to that exact source commit; publication was
+confirmed, with checksum and final capability-matrix assets attached.
+
+[Published release](https://github.com/sujalkherawat25-stack/smara/releases/tag/v0.1.23).
 
 Gmail real-account OAuth/sending, broad Windows selected-app production
 certification and hosted-memory quality are not claimed by this release. No
