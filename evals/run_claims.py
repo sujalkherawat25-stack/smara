@@ -80,7 +80,7 @@ async def main() -> None:
     report("heuristic (no LLM)", await score(_Off(), a.show))
     if a.llm:
         env = os.environ
-        llm = LLM(env["LLM_BASE_URL"], env.get("LLM_API_KEY", ""), env.get("LLM_MODEL", "glm-5.3-flash"))
+        llm = LLM(env["LLM_BASE_URL"], env.get("LLM_API_KEY", ""), env.get("LLM_MODEL", "glm5.3-flash"))
         report(f"LLM {env.get('LLM_MODEL', 'glm-5.3-flash')}", await score(llm, a.show))
         await llm.aclose()
 

@@ -23,7 +23,7 @@ class Settings:
     # OpenAI-compatible chat endpoint; fast model by default, reasoning model on escalation
     llm_base_url: str = ""
     llm_api_key: str = ""
-    llm_model: str = "glm-5.3-flash"
+    llm_model: str = "glm5.3-flash"
     llm_reasoning_model: str = ""
     sarvam_api_key: str = ""
     tick_seconds: int = 60
@@ -45,7 +45,7 @@ def load_settings() -> Settings:
         public_base_url=env.get("PUBLIC_BASE_URL", ""),
         llm_base_url=env.get("LLM_BASE_URL", ""),
         llm_api_key=env.get("LLM_API_KEY", ""),
-        llm_model=env.get("LLM_MODEL", "glm-5.3-flash"),
+        llm_model=env.get("LLM_MODEL", "glm5.3-flash"),
         llm_reasoning_model=env.get("LLM_REASONING_MODEL", ""),
         sarvam_api_key=env.get("SARVAM_API_KEY", ""),
         tick_seconds=int(env.get("TICK_SECONDS", "60")),

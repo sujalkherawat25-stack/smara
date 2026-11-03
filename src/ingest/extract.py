@@ -18,8 +18,11 @@ _MONTHS = {m.lower(): i for i, m in enumerate(calendar.month_abbr) if m}
 SYSTEM = (
     "You read a debtor's WhatsApp reply (Hinglish/Hindi/English) about an unpaid invoice. "
     "Return JSON: type ('DISCOUNT_CLAIM'|'PROMISE_DATE_CHANGE'|'UTR_PROOF'|null), "
-    "new_amount_rupees (the total they say they owe after a discount, or null), "
-    "promise_date (YYYY-MM-DD they promise to pay by, or null). "
+    "new_amount_rupees (the new total they would pay after a discount, computed from the "
+    "outstanding amount of Rs {outstanding}; null if no discount), "
+    "promise_date (YYYY-MM-DD they promise to pay by; null if no specific day; "
+    "'today' and 'aaj' are not a date change). "
+    "Use type 'PROMISE_DATE_CHANGE' for any promise to pay later, even without a date. "
     "Today is {today}. Use null if the message makes no such claim."
 )
 
@@ -95,19 +98,45 @@ def _heuristic(text: str, outstanding: int, today: date) -> Claim | None:
 
 
 async def extract_claim(llm: LLM, text: str, *, outstanding_paise: int, today: date) -> Claim | None:
-    if llm.enabled:
-        try:
-            out = await llm.json(SYSTEM.format(today=today.isoformat()), text)
-            if out.get("type") not in TYPES:
-                return None
-            amt = out.get("new_amount_rupees")
-            amount = round(float(amt) * 100) if amt is not None else None
-            when = date.fromisoformat(out["promise_date"]) if out.get("promise_date") else None
-            return Claim(
-                out["type"],
-                amount if amount is not None and 0 < amount < outstanding_paise else None,
-                when if when and when >= today else None,
-            )
-        except Exception:
-            log.exception("llm extraction failed; using heuristics")
-    return _heuristic(text, outstanding_paise, today)
+    """The model reads intent; deterministic rules supply numbers and dates.
+
+    A wrong amount or date on an approval card is worse than a missing one, so
+    when the rules find a figure they win, and the model's figure is used only
+    if the rules found none (and it passes the same sanity checks).
+    """
+    rules = _heuristic(text, outstanding_paise, today)
+    if not llm.enabled:
+        return rules
+    try:
+        out = await llm.json(SYSTEM.format(today=today.isoformat(), outstanding=outstanding_paise // 100), text)
+    except Exception:
+        log.exception("llm extraction failed; using rules")
+        return rules
+    kind = out.get("type") if out.get("type") in TYPES else (rules.type if rules else None)
+    if kind is None:
+        return None
+    return Claim(kind, _pick_amount(kind, rules, out, outstanding_paise), _pick_date(kind, rules, out, today))
+
+
+def _pick_amount(kind: str, rules: Claim | None, out: dict, outstanding: int) -> int | None:
+    if kind != "DISCOUNT_CLAIM":
+        return None
+    if rules and rules.amount_paise:
+        return rules.amount_paise
+    try:
+        amount = round(float(out["new_amount_rupees"]) * 100)
+    except (KeyError, TypeError, ValueError):
+        return None
+    return amount if 0 < amount < outstanding else None
+
+
+def _pick_date(kind: str, rules: Claim | None, out: dict, today: date) -> date | None:
+    if kind == "UTR_PROOF":
+        return None
+    if rules and rules.date:
+        return rules.date
+    try:
+        when = date.fromisoformat(out["promise_date"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return when if when > today else None   # "today" is not a date change
