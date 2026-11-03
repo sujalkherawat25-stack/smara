@@ -288,3 +288,45 @@ async def test_cron_agent_drafts_reminder_and_approval_dispatches(env):
     st = await one(env.pool, "select state, attempt_count from obligations where id = %s", env.oid)
     assert st == {"state": "DISPATCHED", "attempt_count": 1}
     assert "Friday" in env.app.state.wa.to(DEBTOR)[0]["text"]["body"]
+
+
+# ---------------------------------------------------------------- sandbox: Tally XML -> rows -> verified import
+
+async def test_agent_converts_tally_xml_in_sandbox_and_verifies_import(env, monkeypatch, tmp_path):
+    from pathlib import Path
+    from src.box.sandbox import Sandbox
+    env.app.state.sandbox = Sandbox(str(tmp_path), "local")
+    xml = (Path(__file__).parent / "fixtures" / "tally_daybook.xml").read_bytes()
+    real_fetch = actions._fetch
+
+    async def fetch(app, ref):
+        return (xml, "text/xml", "daybook.xml") if ref.startswith("whatsapp:") else await real_fetch(app, ref)
+    monkeypatch.setattr(actions, "_fetch", fetch)
+    code = ("import munim_helpers as mh\nfrom datetime import timedelta\n"
+            "phones = {l['name']: l['mobile'] for l in mh.tally_ledgers('in/daybook.xml')}\n"
+            "sales = [v for v in mh.tally_vouchers('in/daybook.xml') if v['type'] == 'Sales']\n"
+            "rows = [dict(party=v['party'], phone=phones.get(v['party'], ''), invoice=v['number'],\n"
+            "             due_date=v['date'] + timedelta(days=v['credit_days'] or 30), amount=v['amount']) for v in sales]\n"
+            "mh.to_rows_csv(rows)\nRESULT = {'invoices': len(rows), 'total': sum(r['amount'] for r in rows)}")
+    ref = "whatsapp:MX:daybook.xml"
+    llm = env.app.state.llm = ScriptLLM(
+        call("run_python", code=code, file_refs=[ref]),
+        lambda m: call("inspect_and_import_file", file_ref=json.loads(m[-1]["content"])["output_file_refs"][0], mode="import"),
+        lambda m: say("Imported 2 Tally invoices, Rs 16,500.50, totals verified."))
+    await dispatch(env.app, InboundMessage(wamid="t1", sender=OWNER, kind="document", media_id="MX", filename="daybook.xml"))
+    ran = llm.last_tool_result(1)
+    assert ran["exit_code"] == 0 and ran["result"] == {"invoices": 2, "total": 16500.5}
+    imp = llm.last_tool_result(2)
+    assert imp["created"] == 2 and imp["totals_match"] is True and imp["ledger_total_rupees_for_these_invoices"] == 16500.5
+    due = await one(env.pool, "select due_date from obligations where invoice_ref = 'S-101'")
+    assert due["due_date"] == date(2026, 11, 4)                                 # date + 30 credit days
+
+
+def test_sandbox_policy():
+    debtor = SessionCtx("s", "t", "UNTRUSTED", party_id="p1", files=("whatsapp:a:x.csv",))
+    owner_ctx = SessionCtx("s", "t", "TRUSTED", files=("whatsapp:a:x.csv",))
+    v = lambda ctx, a: pre_tool_use(ctx, "run_python", a, TOOL_NAMES).verdict
+    assert v(debtor, {"code": "print(1)"}) == "deny"                            # no compute for counterparties
+    assert v(owner_ctx, {"code": "print(1)", "file_refs": ["whatsapp:a:x.csv"]}) == "allow"
+    assert v(owner_ctx, {"code": "print(1)", "file_refs": ["sandbox:deadbeef:other.csv"]}) == "deny"
+    assert v(owner_ctx, {"code": ""}) == "deny"

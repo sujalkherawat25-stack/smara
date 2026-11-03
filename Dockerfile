@@ -7,6 +7,7 @@ COPY pyproject.toml ./
 COPY src ./src
 COPY migrations ./migrations
 COPY scripts ./scripts
+COPY sandbox ./sandbox
 RUN pip install . && playwright install --with-deps chromium
 
 EXPOSE 8080

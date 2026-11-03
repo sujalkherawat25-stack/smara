@@ -22,6 +22,8 @@ WINDOW = timedelta(hours=24)
 
 async def _fetch(app, file_ref: str) -> tuple[bytes, str, str]:
     channel, media_id, filename = (file_ref.split(":", 2) + ["", ""])[:3]
+    if channel == "sandbox":
+        return app.state.sandbox.read_output(media_id, filename), "application/octet-stream", filename
     if channel == "telegram":
         return await app.state.tg.download(media_id), "application/octet-stream", filename
     data, mime = await download_media(app.state.settings.wa_access_token, media_id)
@@ -51,6 +53,18 @@ async def inspect_and_import_file(app, ctx: SessionCtx, args: dict) -> dict:
             "ledger_total_rupees_for_these_invoices": int(back["s"]) / 100, "totals_match": int(back["s"]) == total}
 
 
+async def run_python(app, ctx: SessionCtx, args: dict) -> dict:
+    inputs = {}
+    for ref in args.get("file_refs") or []:
+        data, _, filename = await _fetch(app, ref)
+        inputs[filename or "file"] = data
+    res = await app.state.sandbox.run(args["code"], inputs)
+    refs = [f"sandbox:{res['job_id']}:{n}" for n in res.get("outputs") or []] if res.get("job_id") else []
+    return {**{k: res.get(k) for k in ("exit_code", "timed_out", "seconds", "stdout", "stderr", "result", "error")
+               if res.get(k) not in (None, "")},
+            "output_file_refs": refs, "_new_files": refs}
+
+
 async def _obligation(pool, ctx: SessionCtx, oid) -> dict | None:
     async with pool.connection() as conn:
         cur = await conn.execute(
@@ -73,6 +87,10 @@ async def validate_gated(app, ctx: SessionCtx, name: str, args: dict) -> str | N
         o = await _obligation(pool, ctx, args.get("obligation_id"))
         if not o or o["state"] == "PAID":
             return "unknown or already paid obligation_id"
+        if args.get("kind") not in ("DISCOUNT_CLAIM", "PARTIAL_PAYMENT", "PROMISE_DATE_CHANGE", "UTR_PROOF"):
+            return "kind must be DISCOUNT_CLAIM, PARTIAL_PAYMENT, PROMISE_DATE_CHANGE or UTR_PROOF"
+        if args["kind"] in ("DISCOUNT_CLAIM", "PARTIAL_PAYMENT") and args.get("new_amount_rupees") is None:
+            return "new_amount_rupees (what is still owed afterwards) is required for this kind"
         if ctx.trust == "UNTRUSTED" and str(o["party_id"]) != ctx.party_id:
             return "a counterparty may only propose changes to its own invoices"
         amt = args.get("new_amount_rupees")

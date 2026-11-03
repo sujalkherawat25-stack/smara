@@ -127,7 +127,9 @@ async def test_digest_once_per_day_per_tenant_across_restarts(app):
 
 
 async def test_healthz_flags_dead_outbox(app):
+    from src.box.sandbox import Sandbox
     fastapi_app.state.pool = app.state.pool
+    fastapi_app.state.sandbox = Sandbox("data/test-sandbox", "local")
     r = Response()
     assert (await healthz(r))["ok"] is True and r.status_code == 200
     async with app.state.pool.connection() as c:

@@ -102,7 +102,7 @@ async def decide_adjustment(
 async def _apply(conn, adj: dict) -> str:
     """Mutate the obligation per adjustment type; returns the resulting state."""
     oid, kind = adj["obligation_id"], adj["adjustment_type"]
-    if kind == "DISCOUNT_CLAIM" and adj["proposed_amount_paise"] is not None:
+    if kind in ("DISCOUNT_CLAIM", "PARTIAL_PAYMENT") and adj["proposed_amount_paise"] is not None:
         await conn.execute(
             "UPDATE obligations SET amount_paise = %s WHERE id = %s",
             (adj["proposed_amount_paise"], oid))

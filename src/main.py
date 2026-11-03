@@ -11,6 +11,7 @@ from src.ingest.telegram import TelegramClient
 from src.ingest.telegram import router as telegram_router
 from src.ingest.webhook import router
 from src.box.browser_session import BrowserSessions
+from src.box.sandbox import Sandbox
 from src.loop.llm import LLM
 from src.loop.pay import router as pay_router
 from src.loop.scheduler import run_forever
@@ -25,9 +26,11 @@ async def lifespan(app: FastAPI):
     await migrate(app.state.pool)
     app.state.continuum = ContinuumClient(s.continuum_url, s.continuum_api_key)
     app.state.wa = WhatsAppClient(s.wa_phone_number_id, s.wa_access_token)
-    app.state.llm = LLM(s.llm_base_url, s.llm_api_key, s.llm_model, s.llm_reasoning_model)
+    app.state.llm = LLM(s.llm_base_url, s.llm_api_key, s.llm_model, s.llm_reasoning_model,
+                        agent_model=s.llm_agent_model)
     app.state.bg = set()
     app.state.browsers = BrowserSessions()
+    app.state.sandbox = Sandbox(s.sandbox_jobs_dir, s.sandbox_mode)
     app.state.tg = TelegramClient(s.telegram_bot_token) if s.telegram_bot_token else None
     ticker = asyncio.create_task(run_forever(app))
     yield
@@ -58,7 +61,28 @@ async def healthz(response: Response):
     except Exception:
         response.status_code = 503
         return {"ok": False, "db": False}
-    ok = ob["dead"] == 0 and ob["oldest_pending_s"] < STALE_OUTBOX_S
+    st = app.state
+    sandbox_ok = st.sandbox.healthy() if getattr(st, "sandbox", None) else False
+    ok = ob["dead"] == 0 and ob["oldest_pending_s"] < STALE_OUTBOX_S and sandbox_ok
     if not ok:
         response.status_code = 503
-    return {"ok": ok, "db": True, "outbox": ob}
+    return {"ok": ok, "db": True, "outbox": ob, "sandbox": sandbox_ok, "continuum": await _continuum_probe(),
+            "agent_model": st.llm.agent_model if getattr(st, "llm", None) and st.llm.enabled else None}
+
+
+_probe = {"at": 0.0, "ok": None, "ms": None}
+
+
+async def _continuum_probe() -> dict:
+    """Read-only search against a probe scope, at most once every 5 minutes."""
+    import time
+    if time.monotonic() - _probe["at"] > 300 and getattr(app.state, "continuum", None):
+        started = time.monotonic()
+        try:
+            r = await app.state.continuum._http.post("/memories/search",
+                                                     json={"user_id": "munim_health", "query": "ping", "top_k": 1})
+            _probe.update(ok=r.status_code == 200)
+        except Exception:
+            _probe.update(ok=False)
+        _probe.update(at=time.monotonic(), ms=round((time.monotonic() - started) * 1000))
+    return {"ok": _probe["ok"], "latency_ms": _probe["ms"]}

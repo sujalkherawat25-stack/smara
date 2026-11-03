@@ -24,7 +24,7 @@ MAX_STEPS = 12
 CONTINUE_WITHIN = timedelta(minutes=30)
 EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memory": tools.resolve_continuum_memory,
              "write_continuum_evidence": tools.write_continuum_evidence,
-             "inspect_and_import_file": actions.inspect_and_import_file}
+             "inspect_and_import_file": actions.inspect_and_import_file, "run_python": actions.run_python}
 BASE = ("You are Smara, the back-office agent of {shop}, an Indian small business. Today is {today}. "
         "Work step by step with tools. Never invent numbers: read them from the ledger. After any import or proposal, "
         "verify by reading the result back (totals, rows) before you answer; if a tool fails, fix the call and retry. "
@@ -74,7 +74,13 @@ async def start_session(app, *, tenant, trust: str, trigger: str, content: str, 
                 (json.dumps([user]), list(files), tenant.id, channel, CONTINUE_WITHIN))
             row = await cur.fetchone()
         if row is None:
-            system = {"role": "system", "content": BASE.format(shop=tenant.name, today=date.today()) + ROLE[trust]}
+            snap = await (await conn.execute(
+                """SELECT count(*) n, coalesce(sum(amount_paise), 0) s,
+                          count(*) FILTER (WHERE due_date < current_date) od FROM obligations
+                    WHERE tenant_id = %s AND state NOT IN ('PAID', 'DRAFT')""", (tenant.id,))).fetchone()
+            ledger = (f" Ledger right now: {snap['n']} open invoices ({snap['od']} overdue), "
+                      f"Rs {int(snap['s']) / 100:,.2f} outstanding.")
+            system = {"role": "system", "content": BASE.format(shop=tenant.name, today=date.today()) + ledger + " " + ROLE[trust]}
             cur = await conn.execute(
                 """INSERT INTO agent_sessions (tenant_id, trust, trigger, party_id, channel, files, messages)
                    VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
@@ -135,6 +141,10 @@ async def _process(app, row, messages: list, calls: list) -> bool:
             result = {"error": f"blocked by policy: {d.reason}"}
         elif d.verdict == "allow":
             result = await _execute(app, ctx, tenant, name, args)
+            if new := result.pop("_new_files", None):   # sandbox outputs become openable in this session
+                row["files"] = [*row["files"], *new]
+                async with app.state.pool.connection() as conn:
+                    await conn.execute("UPDATE agent_sessions SET files = files || %s WHERE id = %s", (new, ctx.id))
         else:
             err = await actions.validate_gated(app, ctx, name, args)
             if err is None:

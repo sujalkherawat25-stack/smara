@@ -32,6 +32,10 @@ services:
       # Continuum over the docker network, no public round trip
       CONTINUUM_URL: http://memoryos_backend:8000/v1
       PUBLIC_BASE_URL: https://ai.syntarus.com/munim
+      SANDBOX_MODE: container
+      SANDBOX_JOBS_DIR: /jobs
+    volumes:
+      - munim_jobs:/jobs
     ports:
       - "127.0.0.1:8090:8080"
     depends_on:
@@ -44,6 +48,29 @@ services:
       retries: 3
     networks: [munim, memoryos_default]
 
+  # Runs the agent's Python on uploaded files. No network at all, read-only root,
+  # tmpfs scratch, capped memory/CPU/pids; jobs run as `nobody` (see sandbox/runner.py).
+  munim_sandbox:
+    build:
+      context: ..
+      dockerfile: sandbox/Dockerfile
+    image: smara-munim-sandbox:${MUNIM_VERSION:-local}
+    container_name: munim_sandbox
+    restart: unless-stopped
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    volumes:
+      - munim_jobs:/jobs
+    mem_limit: 2g
+    cpus: 1.5
+    pids_limit: 256
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE]   # runner only; jobs run as nobody with no caps
+    security_opt:
+      - no-new-privileges:true
+
 networks:
   munim: {}
   memoryos_default:
@@ -51,3 +78,4 @@ networks:
 
 volumes:
   munim_pgdata:
+  munim_jobs:

@@ -3,7 +3,8 @@
 Every tool call the model makes passes through `pre_tool_use` before it runs.
 The model cannot reach a side effect any other way.
 
-  T0 read      query ledger (read-only role + RLS), resolve memory, inspect file, browser navigate/read
+  T0 read      query ledger (read-only role + RLS), resolve memory, inspect file, browser navigate/read,
+               run_python (isolated sandbox: no network, no ledger access, own files only)
   T1 internal  write evidence, import the owner's own file, message the owner
   T2 outward   message a counterparty, browser click/fill/press        -> owner approval
   T3 money     propose a ledger adjustment                              -> owner approval
@@ -38,7 +39,7 @@ class Decision:
 
 
 def tier_of(name: str, args: dict) -> str:
-    if name in ("query_ledger_sql", "resolve_continuum_memory"):
+    if name in ("query_ledger_sql", "resolve_continuum_memory", "run_python"):
         return "T0"
     if name == "inspect_and_import_file":
         return "T1" if args.get("mode") == "import" else "T0"
@@ -72,6 +73,12 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
             return Decision("deny", tier, "only files attached to this conversation can be opened")
         if tier == "T1" and ctx.trust != "TRUSTED":
             return Decision("deny", tier, "only the owner's own uploads can be imported")
+    if name == "run_python":
+        refs = args.get("file_refs") or []
+        if not isinstance(refs, list) or any(r not in ctx.files for r in refs):
+            return Decision("deny", tier, "only files attached to this conversation can be opened")
+        if not isinstance(args.get("code"), str) or not args["code"].strip() or len(args["code"]) > 20_000:
+            return Decision("deny", tier, "code must be a non-empty string under 20,000 characters")
     if tier in ("T0", "T1"):
         return Decision("allow", tier)
     return Decision("approve", tier, card=approval_text(name, args))

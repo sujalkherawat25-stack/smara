@@ -50,6 +50,25 @@ python -m evals.run_claims --show     # add --llm to score the model path
 
 DB tests are skipped when `TEST_DATABASE_URL` is unset and they drop the `public` schema, so use a scratch database (`createdb munim_test`), never your dev one.
 
+## Agent harness
+
+`evals/agent_harness.py` runs 15 end-to-end tasks through the real loop, policy and sandbox with a real model
+(Q&A, analysis, Excel and Tally XML imports, GST analysis, bank reconciliation, partial payment, debtor
+injection, UTR proof, chatter, gated reminder, mark-paid, cron with memory, tenant isolation). Tasks are
+scored from ledger state and outbound messages, never from the model's own claims.
+
+```bash
+python -m evals.agent_harness --db postgresql://munim:munim@localhost:5433/munim_eval --model glm5.3
+```
+
+## Python sandbox
+
+`run_python` executes the agent's code on attached files in the `munim_sandbox` container: no network,
+read-only root, tmpfs scratch, 2 GB / 1.5 CPU / 256 pids, each job as `nobody` with CPU, memory and file
+limits, and job directories private to root. `sandbox/munim_helpers.py` parses Tally XML, finds real header
+rows in Excel reports, and reads Indian amounts and dates. Output files become file refs the verifying
+importer can load. Set `SANDBOX_MODE=local` for development only (no isolation).
+
 ## Tenants and WhatsApp numbers
 
 Tenants live in Postgres. Give a tenant its own WhatsApp number (`--number-id`) and debtor messages are routed by the receiving number. On a shared number a debtor who owes several tenants is ambiguous, and the message is dropped rather than guessed.
@@ -58,7 +77,7 @@ Reminders to a debtor who has not written in the last 24 hours need a Meta-appro
 
 ## Known limits
 
-- Claim extraction by regex is a fallback; the LLM path is primary and not yet scored.
+- The regex claim extractor is only a fallback when no model is configured or the model fails.
 - The GST portal sits behind a captcha, so `gstin` validates format and checksum only.
 - The IndiaMART scraper is heuristic and unproven against the live site.
 - No Continuum dead-row alerting beyond `/healthz`; no off-site Postgres backup config here.

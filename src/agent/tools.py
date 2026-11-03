@@ -47,11 +47,22 @@ TOOLS = [
         "navigate/read run immediately; click/fill/press need the owner's approval.",
         {"action": {"type": "string", "enum": ["navigate", "read", "click", "fill", "press"]},
          "url": _S, "selector": _S, "value": _S}, ["action"]),
-    _fn("propose_ledger_adjustment", "Propose changing an invoice (discount, new due date, or paid with proof). "
-        "Nothing changes until the owner approves.",
-        {"obligation_id": _S, "kind": {"type": "string", "enum": ["DISCOUNT_CLAIM", "PROMISE_DATE_CHANGE", "UTR_PROOF"]},
+    _fn("propose_ledger_adjustment", "Propose changing an invoice: DISCOUNT_CLAIM or PARTIAL_PAYMENT (set "
+        "new_amount_rupees = what is still owed after it), PROMISE_DATE_CHANGE (new_due_date), or UTR_PROOF "
+        "(fully paid, with proof). Nothing changes until the owner approves.",
+        {"obligation_id": _S, "kind": {"type": "string",
+                                       "enum": ["DISCOUNT_CLAIM", "PARTIAL_PAYMENT", "PROMISE_DATE_CHANGE", "UTR_PROOF"]},
          "new_amount_rupees": {"type": "number"}, "new_due_date": {"type": "string", "description": "YYYY-MM-DD"},
          "evidence": _S}, ["obligation_id", "kind", "evidence"]),
+    _fn("run_python", "Run Python in an isolated sandbox (no network, 60 s) for Tally/Excel/CSV work. "
+        "Attached files are at ./in/<filename>; write output files to ./out/ (they come back as file_refs you "
+        "can pass to inspect_and_import_file); set RESULT = <json-able> for structured output. pandas, openpyxl "
+        "and `import munim_helpers as mh` are available: mh.read_table(path) finds the real header row; "
+        "mh.parse_amount('1,25,000.50 Dr'); mh.parse_date('05-10-2026'|'20261005'|excel serial); mh.phone(v); "
+        "mh.tally_vouchers(xml_path) / mh.tally_ledgers(xml_path) parse Tally Prime XML exports; "
+        "mh.to_rows_csv(records) writes out/rows.csv (records: party, phone, invoice, due_date, amount in rupees) "
+        "in the format the importer reads. Always print or RESULT the totals you computed so you can verify them.",
+        {"code": _S, "file_refs": {"type": "array", "items": _S}}, ["code"]),
     _fn("send_whatsapp_message", "Send a WhatsApp message. to='owner' messages the shop owner directly; "
         "to=<party_id> messages a customer and needs the owner's approval first.",
         {"to": _S, "text": _S, "obligation_id": _S}, ["to", "text"]),
