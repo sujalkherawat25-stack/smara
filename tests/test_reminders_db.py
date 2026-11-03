@@ -17,7 +17,7 @@ from src.loop.scheduler import tick
 
 URL = os.environ.get("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL not set")
-NOW = datetime(2026, 11, 3, 12, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc) + timedelta(minutes=1)  # DB defaults use the real clock
 
 
 class FakeWA:
@@ -103,3 +103,19 @@ async def test_digest_and_reimport_idempotent(app):
     assert again == {"created": 0, "updated": 1}
     text = await build_digest(app.state.pool, app.state.tenant, date(2026, 11, 3))
     assert "Overdue: 1 invoices, ₹900" in text and "Ravi" in text
+
+
+async def test_failed_owner_card_releases_obligation_for_retry(app):
+    oid = await seed(app)
+
+    async def boom(payload, **kw):
+        raise ConnectionError("whatsapp down")
+
+    app.state.wa.send = boom
+    assert await tick(app, NOW) == 0
+    st = await state(app, oid)
+    assert st["state"] == "ACTIVE"                       # not stuck in WAITING_OWNER_APPROVAL
+    assert await tick(app, NOW + timedelta(minutes=1)) == 0   # backing off for 10 minutes
+    app.state.wa = FakeWA()
+    assert await tick(app, NOW + timedelta(minutes=11)) == 1  # retried and delivered
+    assert (await state(app, oid))["state"] == "WAITING_OWNER_APPROVAL"

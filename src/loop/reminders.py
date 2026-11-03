@@ -73,6 +73,16 @@ async def state_card(continuum: ContinuumClient, o: dict) -> str:
         return ""
 
 
+async def release_claim(pool, o: dict, now: datetime) -> None:
+    """The owner could not be asked: put the obligation back and retry shortly,
+    instead of leaving it stuck in WAITING_OWNER_APPROVAL."""
+    async with pool.connection() as conn:
+        await conn.execute(
+            "UPDATE obligations SET state = %s, next_followup_at = %s WHERE id = %s AND state = 'WAITING_OWNER_APPROVAL'",
+            (o["prev"], now + timedelta(minutes=10), o["id"]))
+        await _event(conn, o["id"], "WAITING_OWNER_APPROVAL", o["prev"], "SYSTEM_CRON")
+
+
 def reminder_card(to: str, o: dict, draft: str, context: str) -> dict:
     body = f"Send this to {o['canonical_name']}?\n\n\"{draft}\""
     if context and "No relevant state" not in context:

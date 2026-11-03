@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from src import tenants
 from src.bridge.outbox import drain
 from src.loop.digest import build_digest
-from src.loop.reminders import claim_due, draft_reminder, reminder_card, state_card
+from src.loop.reminders import claim_due, draft_reminder, release_claim, reminder_card, state_card
 from src.loop.whatsapp import text_message
 
 log = logging.getLogger(__name__)
@@ -28,7 +28,12 @@ async def tick(app, now: datetime) -> int:
         if t is None:
             continue
         card = reminder_card(t.owner_phone, o, draft_reminder(o, t.upi), await state_card(app.state.continuum, o))
-        await app.state.wa.send(card, number_id=t.wa_phone_number_id)
+        try:
+            await app.state.wa.send(card, number_id=t.wa_phone_number_id)
+        except Exception:
+            log.exception("owner card send failed for obligation %s; will retry", o["id"])
+            await release_claim(pool, o, now)
+            continue
         sent += 1
     return sent
 

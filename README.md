@@ -44,11 +44,11 @@ Two-phone demo: `python scripts/seed_demo.py --owner <phone> --debtor <phone>`.
 ## Tests
 
 ```bash
-TEST_DATABASE_URL=postgresql://munim:munim@localhost:5433/munim python -m pytest
+TEST_DATABASE_URL=postgresql://munim:munim@localhost:5433/munim_test python -m pytest
 python -m evals.run_claims --show     # add --llm to score the model path
 ```
 
-DB tests are skipped when `TEST_DATABASE_URL` is unset and drop the `public` schema, so point them at a scratch database.
+DB tests are skipped when `TEST_DATABASE_URL` is unset and they drop the `public` schema, so use a scratch database (`createdb munim_test`), never your dev one.
 
 ## Tenants and WhatsApp numbers
 

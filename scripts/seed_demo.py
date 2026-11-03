@@ -45,17 +45,15 @@ async def main() -> None:
     owner, debtor = normalize_phone(args.owner), normalize_phone(args.debtor)
     if owner == debtor:
         sys.exit("owner and debtor must be different phones")
-    tenant = str(uuid.uuid5(NAMESPACE, owner))
+    tenant_id = str(uuid.uuid5(NAMESPACE, owner))
 
     pool = await open_pool(args.db)
     await migrate(pool)
-    result = await import_rows(pool, tenant, demo_rows(debtor, date.today()))
+    t = await tenants.create(pool, name="Demo Shop", owner_phone=owner, upi_vpa=args.vpa, tenant_id=tenant_id)
+    result = await import_rows(pool, t.id, demo_rows(debtor, date.today()))
     await pool.close()
 
-    print(f"Seeded: {result}")
-    print("\nAdd to .env:")
-    print(f"OWNER_TENANTS={json.dumps({owner: tenant})}")
-    print(f"TENANT_UPI={json.dumps({tenant: {'vpa': args.vpa, 'name': 'Demo Shop'}})}")
+    print(f"Seeded tenant {t.id}: {result}")
     print("\nDemo script:\n"
           "  1. Start the server; owner phone gets reminder cards for DEMO-101/102.\n"
           "  2. Tap Send on one -> debtor phone receives it with a UPI link.\n"
