@@ -1,5 +1,7 @@
 """Debtor-claim extraction: LLM when configured, regex heuristics otherwise.
 The result is only ever a *proposal*; nothing here touches obligations."""
+from __future__ import annotations
+
 import calendar
 import logging
 import re

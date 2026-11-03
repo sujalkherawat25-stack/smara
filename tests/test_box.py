@@ -85,7 +85,7 @@ class FakeWA:
     def __init__(self):
         self.sent = []
 
-    async def send(self, p):
+    async def send(self, p, **kw):
         self.sent.append(p)
 
 

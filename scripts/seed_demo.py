@@ -3,13 +3,12 @@
     python scripts/seed_demo.py --owner 919811100001 --debtor 919811100002 --vpa shop@upi
 
 Idempotent: the tenant id is derived from the owner phone, so rerunning updates
-the same rows. Prints the env lines the server needs. Run the server afterwards;
+the same rows. Registers the tenant in Postgres. Run the server afterwards;
 the scheduler picks up the overdue invoices within one tick and asks the owner
 to approve each reminder before anything reaches the debtor phone.
 """
 import argparse
 import asyncio
-import json
 import os
 import selectors
 import sys
@@ -19,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src import tenants  # noqa: E402
 from src.config import normalize_phone  # noqa: E402
 from src.db import migrate, open_pool  # noqa: E402
 from src.ingest.importer import import_rows  # noqa: E402

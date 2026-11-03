@@ -11,16 +11,17 @@ from src.ingest.sheet_mapper import SheetRow, map_sheet, parse_amount_paise, par
 from src.loop.digest import build_digest
 from src.loop.reminders import decide_reminder
 from src.loop.whatsapp import text_message
+from src.tenants import Tenant
 
 log = logging.getLogger(__name__)
 HELP = ("Commands: gstin <no>, quotes <product>, browse <task>. Send me your outstanding sheet (.xlsx/.csv), a photo of a bill with the customer's "
         "number as caption, or say 'digest'.")
 
 
-async def handle_owner(app, tenant_id: str, msg: InboundMessage) -> None:
-    reply = await _route(app, tenant_id, msg)
+async def handle_owner(app, tenant: Tenant, msg: InboundMessage) -> None:
+    reply = await _route(app, tenant.id, msg)
     if reply:
-        await app.state.wa.send(text_message(msg.sender, reply))
+        await app.state.wa.send(text_message(msg.sender, reply), number_id=msg.number_id or tenant.wa_phone_number_id)
 
 
 async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
@@ -36,13 +37,13 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
             return await decide_reminder(app, tenant_id, ref, action, datetime.now(timezone.utc)) \
                 or "That reminder was already handled."
         if action in ("bt_approve", "bt_reject"):
-            return await decide_browser_task(app, tenant_id, msg.sender, ref, action == "bt_approve")
+            return await decide_browser_task(app, tenant_id, msg.sender, ref, action == "bt_approve", number_id=msg.number_id)
         return None
     if msg.kind == "document":
         return await _sheet(app, tenant_id, msg)
     if msg.kind == "image":
         return await _bill(app, tenant_id, msg)
-    if msg.kind == "text" and (reply := await handle_text(app, tenant_id, msg.sender, msg.text)):
+    if msg.kind == "text" and (reply := await handle_text(app, tenant_id, msg.sender, msg.text, number_id=msg.number_id)):
         return reply
     if msg.kind == "text" and msg.text.lower().startswith("browse "):
         return None  # plan card already sent

@@ -1,9 +1,10 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 
 from src.bridge.continuum import ContinuumClient
+from src.bridge.outbox import stats as outbox_stats
 from src.config import load_settings
 from src.db import migrate, open_pool
 from src.ingest.webhook import router
@@ -35,6 +36,18 @@ app = FastAPI(title="Smara Munim", lifespan=lifespan)
 app.include_router(router)
 
 
+STALE_OUTBOX_S = 1800
+
+
 @app.get("/healthz")
-async def healthz():
-    return {"ok": True}
+async def healthz(response: Response):
+    """200 when Postgres answers and Continuum delivery is keeping up; else 503 (for an uptime monitor)."""
+    try:
+        ob = await outbox_stats(app.state.pool)
+    except Exception:
+        response.status_code = 503
+        return {"ok": False, "db": False}
+    ok = ob["dead"] == 0 and ob["oldest_pending_s"] < STALE_OUTBOX_S
+    if not ok:
+        response.status_code = 503
+    return {"ok": ok, "db": True, "outbox": ob}

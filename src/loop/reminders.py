@@ -4,9 +4,10 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from src.bridge.continuum import ContinuumClient, scope_user
+from src import tenants
 from src.bridge.outbox import enqueue_standalone
 from src.loop.upi import rupees, upi_link
-from src.loop.whatsapp import text_message
+from src.loop.whatsapp import template_message, text_message
 
 log = logging.getLogger(__name__)
 MAX_ATTEMPTS = 4
@@ -83,13 +84,25 @@ def reminder_card(to: str, o: dict, draft: str, context: str) -> dict:
         "action": {"buttons": [btn("send", "Send"), btn("snooze", "Snooze 3 days"), btn("paid", "Mark paid")]}}}
 
 
+WINDOW = timedelta(hours=24)
+
+
+def _debtor_payload(o: dict, tenant, settings, now: datetime) -> dict:
+    """Free text inside the 24h reply window, the approved template outside it."""
+    last = o.get("last_inbound_at")
+    if (last and now - last < WINDOW) or not settings.wa_reminder_template:
+        return text_message(o["whatsapp_phone"], draft_reminder(o, tenant.upi))
+    return template_message(o["whatsapp_phone"], settings.wa_reminder_template, settings.wa_reminder_lang,
+                            [o["canonical_name"], o["invoice_ref"], rupees(o["amount_paise"]), f"{o['due_date']:%d %b}"])
+
+
 async def decide_reminder(app, tenant_id: str, obligation_id: str, action: str, now: datetime) -> str | None:
     """Owner tap on a reminder card. Returns a reply for the owner, None if stale."""
     pool, s = app.state.pool, app.state.settings
     async with pool.connection() as conn:
         async with conn.transaction():
             cur = await conn.execute(
-                """SELECT o.*, p.canonical_name, p.whatsapp_phone FROM obligations o
+                """SELECT o.*, p.canonical_name, p.whatsapp_phone, p.last_inbound_at FROM obligations o
                      JOIN parties p ON p.id = o.party_id
                     WHERE o.id = %s AND o.tenant_id = %s AND o.state = 'WAITING_OWNER_APPROVAL'
                     FOR UPDATE OF o""", (obligation_id, tenant_id))
@@ -106,7 +119,8 @@ async def decide_reminder(app, tenant_id: str, obligation_id: str, action: str, 
     if action != "send":
         return f"Okay, {o['invoice_ref']} {'marked paid' if action == 'paid' else 'snoozed 3 days'}."
     try:
-        await app.state.wa.send(text_message(o["whatsapp_phone"], draft_reminder(o, s.tenant_upi.get(tenant_id))))
+        tenant = await tenants.by_id(pool, tenant_id)
+        await app.state.wa.send(_debtor_payload(o, tenant, s, now), number_id=tenant.wa_phone_number_id)
     except Exception:
         log.exception("debtor send failed for %s", obligation_id)
         async with pool.connection() as conn:

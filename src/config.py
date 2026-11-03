@@ -1,4 +1,3 @@
-import json
 import os
 from dataclasses import dataclass, field
 
@@ -16,10 +15,9 @@ class Settings:
     wa_app_secret: str = ""
     wa_access_token: str = ""
     wa_phone_number_id: str = ""
-    # owner WhatsApp phone (digits only) -> tenant_id
-    owner_tenants: dict[str, str] = field(default_factory=dict)
-    # tenant_id -> {"vpa": "shop@upi", "name": "Shop Name"}
-    tenant_upi: dict[str, dict] = field(default_factory=dict)
+    # Approved Meta template for reminders sent outside the 24h reply window ("" = text only)
+    wa_reminder_template: str = ""
+    wa_reminder_lang: str = "en"
     # OpenAI-compatible chat endpoint; fast model by default, reasoning model on escalation
     llm_base_url: str = ""
     llm_api_key: str = ""
@@ -32,7 +30,6 @@ class Settings:
 
 def load_settings() -> Settings:
     env = os.environ
-    owners = json.loads(env.get("OWNER_TENANTS", "{}"))
     return Settings(
         database_url=env.get("DATABASE_URL", ""),
         continuum_url=env.get("CONTINUUM_URL", "http://localhost:8000"),
@@ -41,8 +38,8 @@ def load_settings() -> Settings:
         wa_app_secret=env.get("WA_APP_SECRET", ""),
         wa_access_token=env.get("WA_ACCESS_TOKEN", ""),
         wa_phone_number_id=env.get("WA_PHONE_NUMBER_ID", ""),
-        owner_tenants={normalize_phone(k): v for k, v in owners.items()},
-        tenant_upi=json.loads(env.get("TENANT_UPI", "{}")),
+        wa_reminder_template=env.get("WA_REMINDER_TEMPLATE", ""),
+        wa_reminder_lang=env.get("WA_REMINDER_LANG", "en"),
         llm_base_url=env.get("LLM_BASE_URL", ""),
         llm_api_key=env.get("LLM_API_KEY", ""),
         llm_model=env.get("LLM_MODEL", "glm-5.3-flash"),

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src import tenants
 from src.config import Settings
 from src.db import migrate, open_pool
 from src.ingest.importer import import_rows
@@ -23,7 +24,7 @@ class FakeWA:
     def __init__(self):
         self.sent = []
 
-    async def send(self, payload):
+    async def send(self, payload, **kw):
         self.sent.append(payload)
 
 
@@ -42,7 +43,8 @@ async def app():
         await c.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
     await migrate(pool)
     tenant = str(uuid.uuid4())
-    s = Settings(owner_tenants={"919000000001": tenant})
+    await tenants.create(pool, name="Shop", owner_phone="919000000001", upi_vpa="shop@upi", tenant_id=tenant)
+    s = Settings()
     yield SimpleNamespace(state=SimpleNamespace(pool=pool, settings=s, wa=FakeWA(), continuum=FakeContinuum(),
                                                 tenant=tenant))
     await pool.close()

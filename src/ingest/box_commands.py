@@ -48,12 +48,12 @@ def format_task(res: dict) -> str:
     return "\n".join(out)
 
 
-async def _quotes(app, phone: str, product: str) -> None:
+async def _quotes(app, phone: str, product: str, number_id: str | None) -> None:
     res = await run_box("scrape_indiamart_quotes", {"product": product})
-    await app.state.wa.send(text_message(phone, format_quotes(res)))
+    await app.state.wa.send(text_message(phone, format_quotes(res)), number_id=number_id)
 
 
-async def handle_text(app, tenant_id: str, phone: str, text: str) -> str | None:
+async def handle_text(app, tenant_id: str, phone: str, text: str, number_id: str | None = None) -> str | None:
     cmd, _, arg = text.strip().partition(" ")
     cmd, arg = cmd.lower(), arg.strip()
     if cmd == "gstin" and arg:
@@ -63,14 +63,14 @@ async def handle_text(app, tenant_id: str, phone: str, text: str) -> str | None:
         return (f"GSTIN {r['gstin']} is well-formed (state {r['state_code']}, PAN {r['pan']}). "
                 f"Registration status needs the portal captcha: {r['portal_url']}")
     if cmd == "quotes" and arg:
-        spawn(app, _quotes(app, phone, arg))
+        spawn(app, _quotes(app, phone, arg, number_id))
         return f"Looking up '{arg}' on IndiaMART..."
     if cmd == "browse" and arg:
-        return await _propose(app, tenant_id, phone, arg)
+        return await _propose(app, tenant_id, phone, arg, number_id)
     return None
 
 
-async def _propose(app, tenant_id: str, phone: str, instruction: str) -> str | None:
+async def _propose(app, tenant_id: str, phone: str, instruction: str, number_id: str | None) -> str | None:
     if not app.state.llm.enabled:
         return "Browser tasks need the LLM configured to plan steps."
     try:
@@ -88,11 +88,12 @@ async def _propose(app, tenant_id: str, phone: str, instruction: str) -> str | N
         "messaging_product": "whatsapp", "to": phone, "type": "interactive", "interactive": {
             "type": "button",
             "body": {"text": f"Run this browser task?\n\"{instruction[:150]}\"\n\n{describe_plan(plan)}{note}"[:1024]},
-            "action": {"buttons": [btn("bt_approve", "Approve"), btn("bt_reject", "Reject")]}}})
+            "action": {"buttons": [btn("bt_approve", "Approve"), btn("bt_reject", "Reject")]}}}, number_id=number_id)
     return None
 
 
-async def decide_browser_task(app, tenant_id: str, phone: str, task_id: str, approve: bool) -> str:
+async def decide_browser_task(app, tenant_id: str, phone: str, task_id: str, approve: bool,
+                              number_id: str | None = None) -> str:
     async with app.state.pool.connection() as conn:
         cur = await conn.execute(
             """UPDATE browser_tasks SET status = %s, decided_at = now()
@@ -103,13 +104,13 @@ async def decide_browser_task(app, tenant_id: str, phone: str, task_id: str, app
         return "That task was already handled or no longer exists."
     if not approve:
         return "Okay, cancelled."
-    spawn(app, _execute(app, phone, task_id, row["plan"]))
+    spawn(app, _execute(app, phone, task_id, row["plan"], number_id))
     return "Running it now..."
 
 
-async def _execute(app, phone: str, task_id: str, plan: list) -> None:
+async def _execute(app, phone: str, task_id: str, plan: list, number_id: str | None) -> None:
     res = await run_box("run_personal_browser_task", {"plan": plan})
     async with app.state.pool.connection() as conn:
         await conn.execute("UPDATE browser_tasks SET status = %s, result = %s WHERE id = %s",
                            ("FAILED" if res.get("error") else "DONE", json.dumps(res), task_id))
-    await app.state.wa.send(text_message(phone, format_task(res)))
+    await app.state.wa.send(text_message(phone, format_task(res)), number_id=number_id)

@@ -39,14 +39,22 @@ class WhatsAppClient:
     sends must go through WAITING_OWNER_APPROVAL (Phase 2)."""
 
     def __init__(self, phone_number_id: str, access_token: str, client: httpx.AsyncClient | None = None):
-        self._url = f"{GRAPH}/{phone_number_id}/messages"
+        self._default_number = phone_number_id
         self._http = client or httpx.AsyncClient(
             headers={"Authorization": f"Bearer {access_token}"}, timeout=15
         )
 
-    async def send(self, payload: dict) -> None:
-        resp = await self._http.post(self._url, json=payload)
+    async def send(self, payload: dict, *, number_id: str | None = None) -> None:
+        """`number_id` picks the sending WhatsApp number (per-tenant); default otherwise."""
+        resp = await self._http.post(f"{GRAPH}/{number_id or self._default_number}/messages", json=payload)
         resp.raise_for_status()
 
     async def aclose(self) -> None:
         await self._http.aclose()
+
+
+def template_message(to: str, name: str, lang: str, params: list[str]) -> dict:
+    """Pre-approved template: the only way to open a conversation outside the 24h window."""
+    return {"messaging_product": "whatsapp", "to": to, "type": "template", "template": {
+        "name": name, "language": {"code": lang},
+        "components": [{"type": "body", "parameters": [{"type": "text", "text": p} for p in params]}]}}

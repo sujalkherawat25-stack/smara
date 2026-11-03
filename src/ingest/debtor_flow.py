@@ -9,8 +9,8 @@ from src.ingest.extract import extract_claim
 from src.ingest.media import download_media, ocr_to_evidence, read_image, transcribe
 from src.ingest.payload import InboundMessage
 from src.loop.upi import rupees
-from src.loop.scheduler import owner_phone
 from src.loop.whatsapp import owner_approval_card
+from src import tenants
 
 log = logging.getLogger(__name__)
 OPEN_STATES = ("ACTIVE", "WAITING_OWNER_APPROVAL", "DISPATCHED", "DISPUTED", "SNOOZED")
@@ -33,35 +33,59 @@ async def _evidence(app, msg: InboundMessage) -> str:
     return text
 
 
+async def _claim_notification(pool, adjustment_id: str) -> bool:
+    """True for exactly one caller per pending adjustment: whoever must send the owner card."""
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            """UPDATE proposed_adjustments SET owner_notified_at = now()
+                WHERE id = %s AND status = 'PENDING' AND owner_notified_at IS NULL RETURNING id""", (adjustment_id,))
+        return await cur.fetchone() is not None
+
+
 async def handle_debtor(app, msg: InboundMessage) -> None:
-    async with app.state.pool.connection() as conn:
+    pool = app.state.pool
+    receiving = await tenants.by_number_id(pool, msg.number_id) if msg.number_id else None
+    async with pool.connection() as conn:
         cur = await conn.execute(
             """SELECT p.id AS party_id, p.tenant_id, p.canonical_name, o.id AS obligation_id,
                       o.invoice_ref, o.amount_paise
                  FROM parties p JOIN obligations o ON o.party_id = p.id
                 WHERE p.whatsapp_phone = %s AND o.state = ANY(%s)
-                ORDER BY o.due_date LIMIT 1""", (msg.sender, list(OPEN_STATES)))
-        row = await cur.fetchone()
-    if row is None:
+                  AND (%s::uuid IS NULL OR p.tenant_id = %s::uuid)
+                ORDER BY o.due_date LIMIT 20""",
+            (msg.sender, list(OPEN_STATES), receiving and receiving.id, receiving and receiving.id))
+        rows = await cur.fetchall()
+    if not rows:
         log.info("message from unknown/no-open-obligation sender dropped: %s", msg.wamid)
         return
+    if len({r["tenant_id"] for r in rows}) > 1:  # same debtor owes several tenants, number gives no hint
+        log.warning("ambiguous tenant for sender on shared number, dropped: %s", msg.wamid)
+        return
+    row = rows[0]
     tenant_id, party_id = str(row["tenant_id"]), str(row["party_id"])
+    async with pool.connection() as conn:  # opens the 24h reply window
+        await conn.execute("UPDATE parties SET last_inbound_at = now() WHERE id = %s", (party_id,))
     text = await _evidence(app, msg)
     claim = await extract_claim(app.state.llm, text, outstanding_paise=row["amount_paise"], today=date.today())
     if claim is None:  # chatter is still evidence, just never a proposal
         await enqueue_standalone(
-            app.state.pool, user_id=scope_user(tenant_id, party_id),
+            pool, user_id=scope_user(tenant_id, party_id),
             source_id=make_source_id(tenant_id, msg.wamid, text),
             text=text, trusted=False, metadata={"party_id": party_id, "actor": "DEBTOR"})
         return
-    adj_id, created = await submit_debtor_claim(
-        app.state.pool, tenant_id=tenant_id, party_id=party_id,
+    adj_id, _ = await submit_debtor_claim(
+        pool, tenant_id=tenant_id, party_id=party_id,
         obligation_id=str(row["obligation_id"]), wamid=msg.wamid, adjustment_type=claim.type,
         evidence_text=text, proposed_amount_paise=claim.amount_paise, proposed_date=claim.date)
-    phone = owner_phone(app.state.settings, tenant_id)
-    if created and phone:
-        bits = ([f"new amount {rupees(claim.amount_paise)}"] if claim.amount_paise else []) + \
-               ([f"pay by {claim.date:%d %b}"] if claim.date else [])
-        await app.state.wa.send(owner_approval_card(
-            phone, adjustment_id=adj_id, party_name=row["canonical_name"], invoice_ref=row["invoice_ref"],
-            adjustment_type=claim.type, evidence=text, proposal=", ".join(bits)))
+    tenant = await tenants.by_id(pool, tenant_id)
+    if tenant and await _claim_notification(pool, adj_id):
+        bits = ([f"new amount {rupees(claim.amount_paise)}"] if claim.amount_paise else []) +                ([f"pay by {claim.date:%d %b}"] if claim.date else [])
+        try:
+            await app.state.wa.send(owner_approval_card(
+                tenant.owner_phone, adjustment_id=adj_id, party_name=row["canonical_name"],
+                invoice_ref=row["invoice_ref"], adjustment_type=claim.type, evidence=text,
+                proposal=", ".join(bits)), number_id=tenant.wa_phone_number_id)
+        except Exception:
+            async with pool.connection() as conn:  # release so a redelivery notifies the owner
+                await conn.execute("UPDATE proposed_adjustments SET owner_notified_at = NULL WHERE id = %s", (adj_id,))
+            raise

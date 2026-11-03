@@ -70,3 +70,15 @@ async def drain(pool: AsyncConnectionPool, continuum: ContinuumClient, now: date
                     await conn.execute("UPDATE obligations SET last_continuum_source_id = %s WHERE id = %s",
                                        (r["source_id"], r["stamp_obligation_id"]))
     return {"delivered": done, "failed": failed}
+
+
+async def stats(pool: AsyncConnectionPool) -> dict:
+    """Backlog numbers for /healthz and alerting."""
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            """SELECT count(*) FILTER (WHERE status = 'PENDING') AS pending,
+                      count(*) FILTER (WHERE status = 'DEAD') AS dead,
+                      coalesce(extract(epoch FROM now() - min(created_at) FILTER (WHERE status = 'PENDING')), 0)::int
+                        AS oldest_pending_s
+                 FROM continuum_outbox""")
+        return await cur.fetchone()

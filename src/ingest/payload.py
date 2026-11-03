@@ -15,6 +15,7 @@ class InboundMessage:
     button_id: str | None = None
     caption: str = ""
     filename: str = ""
+    number_id: str = ""   # our WhatsApp number that received it
 
     @property
     def evidence_text(self) -> str:
@@ -37,7 +38,9 @@ def parse_messages(payload: dict) -> list[InboundMessage]:
     out: list[InboundMessage] = []
     for entry in payload.get("entry", []):
         for change in entry.get("changes", []):
-            for m in change.get("value", {}).get("messages", []):
+            value = change.get("value", {})
+            number_id = (value.get("metadata") or {}).get("phone_number_id", "")
+            for m in value.get("messages", []):
                 kind = m.get("type", "unknown")
                 msg = InboundMessage(
                     wamid=m.get("id", ""),
@@ -47,6 +50,7 @@ def parse_messages(payload: dict) -> list[InboundMessage]:
                     media_id=(m.get(kind) or {}).get("id") if kind in ("audio", "image", "document") else None,
                     caption=(m.get(kind) or {}).get("caption", "") if kind in ("image", "document") else "",
                     filename=(m.get(kind) or {}).get("filename", "") if kind == "document" else "",
+                    number_id=number_id,
                     button_id=((m.get("interactive") or {}).get("button_reply") or {}).get("id"),
                 )
                 if msg.wamid and msg.sender:
