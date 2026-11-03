@@ -29,14 +29,22 @@ class Claim:
     date: date | None = None
 
 
+_WEEKDAYS = {n: i for i, n in enumerate(
+    ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"))}
+
+
 def parse_promise_date(text: str, today: date) -> date | None:
     t = text.lower()
-    if re.search(r"\bparso\b", t):
+    if re.search(r"\bparso\b|परसों", t):
         return today + timedelta(days=2)
-    if re.search(r"\b(kal|tomorrow)\b", t):
+    if re.search(r"\b(kal|tomorrow)\b|कल", t) and not re.search(r"\bkal (ka|ki|ke)\b", t):
         return today + timedelta(days=1)
-    if re.search(r"\b(next week|agle hafte|agla hafta)\b", t):
+    if re.search(r"\bnext week\b|\bagl[ea] (hafte|hafta)\b|अगले हफ्ते", t):
         return today + timedelta(days=7)
+    if re.search(r"\bend tak\b|month end|mahine ke end", t):
+        return today.replace(day=calendar.monthrange(today.year, today.month)[1])
+    if m := re.search(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", t):
+        return today + timedelta(days=(_WEEKDAYS[m.group(1)] - today.weekday()) % 7 or 7)
     if m := re.search(r"\b(\d{1,2})\s?(?:th|st|nd|rd)?\s?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*", t):
         for year in (today.year, today.year + 1):
             try:
@@ -45,7 +53,7 @@ def parse_promise_date(text: str, today: date) -> date | None:
                 return None
             if d >= today:
                 return d
-    if m := re.search(r"\b(\d{1,2})\s?(?:tarikh|tareekh)\b", t):
+    if m := re.search(r"(\d{1,2})\s?(?:tarikh|tareekh|तारीख|तारिख)", t):
         day = int(m.group(1))
         for offset in (0, 1):
             month = (today.month - 1 + offset) % 12 + 1
@@ -55,18 +63,33 @@ def parse_promise_date(text: str, today: date) -> date | None:
     return None
 
 
+_PCT = re.compile(r"(\d{1,2}(?:\.\d+)?)\s?(?:%|percent|pct)", re.I)
+_NUM = r"(\d[\d,]*)"
+_LESS = re.compile(_NUM + r"\s*(?:rupay|rupaye|rs)?\s*(?:kam|less|off|कम)", re.I)
+_THOUSANDS = re.compile(r"(\d{1,3})\s*(?:hazaar|hazar|हजार)\s*(?:kam|less|off|कम)", re.I)
+_NEW_TOTAL = re.compile(_NUM + r"\s*(?:mein final|me final|में फाइनल|de dunga|dunga|lelo|le lo|bhejta|bhejunga)", re.I)
+
+
+def _discount_total(text: str, outstanding: int) -> int | None:
+    """New total (paise) the debtor proposes to pay, or None if no number is stated."""
+    if (m := _PCT.search(text)) and 0 < float(m.group(1)) < 100:
+        return round(outstanding * (1 - float(m.group(1)) / 100))
+    if m := _THOUSANDS.search(text):
+        return outstanding - int(m.group(1)) * 1000 * 100
+    if m := _LESS.search(text):
+        return outstanding - int(m.group(1).replace(",", "")) * 100
+    if m := _NEW_TOTAL.search(text):
+        return int(m.group(1).replace(",", "")) * 100
+    return None
+
+
 def _heuristic(text: str, outstanding: int, today: date) -> Claim | None:
     kind = classify_claim(text)
     if kind is None:
         return None
-    amount = None
-    if kind == "DISCOUNT_CLAIM":
-        if m := re.search(r"(\d{1,2}(?:\.\d+)?)\s?%", text):
-            amount = round(outstanding * (1 - float(m.group(1)) / 100))
-        elif m := re.search(r"(?:₹|rs\.?)\s?(\d[\d,]*)\s*(?:kam|less|off|discount)", text, re.I):
-            amount = outstanding - int(m.group(1).replace(",", "")) * 100
+    amount = _discount_total(text, outstanding) if kind == "DISCOUNT_CLAIM" else None
     return Claim(kind, amount if amount and 0 < amount < outstanding else None,
-                 parse_promise_date(text, today) if kind == "PROMISE_DATE_CHANGE" else None)
+                 parse_promise_date(text, today) if kind != "UTR_PROOF" else None)
 
 
 async def extract_claim(llm: LLM, text: str, *, outstanding_paise: int, today: date) -> Claim | None:

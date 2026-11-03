@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
+from src.bridge.outbox import drain
 from src.loop.digest import build_digest
 from src.loop.reminders import claim_due, draft_reminder, reminder_card, state_card
 from src.loop.whatsapp import text_message
@@ -18,6 +19,10 @@ async def tick(app, now: datetime) -> int:
     """One scheduler pass: claim due obligations, ask the owner about each."""
     s = app.state.settings
     sent = 0
+    try:
+        await drain(app.state.pool, app.state.continuum, now)
+    except Exception:
+        log.exception("outbox drain failed")  # must never block reminders
     for o in await claim_due(app.state.pool, now):
         phone = owner_phone(s, str(o["tenant_id"]))
         if not phone:

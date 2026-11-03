@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from src.bridge.continuum import ContinuumClient, scope_user
+from src.bridge.outbox import enqueue_standalone
 from src.loop.upi import rupees, upi_link
 from src.loop.whatsapp import text_message
 
@@ -119,13 +120,12 @@ async def decide_reminder(app, tenant_id: str, obligation_id: str, action: str, 
 
 
 async def _record_sent(app, o: dict, tenant_id: str) -> None:
-    sid = f"reminder_{o['id']}_{o['attempt_count'] + 1}"
+    n = o["attempt_count"] + 1
     try:
-        await app.state.continuum.write_evidence(
-            user_id=scope_user(tenant_id, str(o["party_id"])), source_id=sid, trusted=True,
-            text=f"Owner-approved reminder #{o['attempt_count'] + 1} sent for invoice {o['invoice_ref']}",
+        await enqueue_standalone(
+            app.state.pool, user_id=scope_user(tenant_id, str(o["party_id"])),
+            source_id=f"reminder_{o['id']}_{n}", trusted=True, stamp_obligation_id=str(o["id"]),
+            text=f"Owner-approved reminder #{n} sent for invoice {o['invoice_ref']}",
             metadata={"actor": "OWNER", "obligation_id": str(o["id"])})
-        async with app.state.pool.connection() as conn:
-            await conn.execute("UPDATE obligations SET last_continuum_source_id = %s WHERE id = %s", (sid, o["id"]))
     except Exception:
-        log.exception("continuum write failed for %s", sid)
+        log.exception("could not queue reminder evidence for %s", o["id"])

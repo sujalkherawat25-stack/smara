@@ -27,7 +27,7 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
     if msg.button_id and ":" in msg.button_id:
         action, ref = msg.button_id.split(":", 1)
         if action in ("approve", "reject"):
-            r = await decide_adjustment(app.state.pool, app.state.continuum,
+            r = await decide_adjustment(app.state.pool,
                                         tenant_id=tenant_id, adjustment_id=ref, approve=action == "approve")
             if r is None:
                 return "That request was already handled or no longer exists."

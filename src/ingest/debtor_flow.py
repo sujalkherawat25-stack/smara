@@ -4,6 +4,7 @@ from datetime import date
 
 from src.bridge.continuum import make_source_id, scope_user
 from src.bridge.coordinator import submit_debtor_claim
+from src.bridge.outbox import enqueue_standalone
 from src.ingest.extract import extract_claim
 from src.ingest.media import download_media, ocr_to_evidence, read_image, transcribe
 from src.ingest.payload import InboundMessage
@@ -48,12 +49,13 @@ async def handle_debtor(app, msg: InboundMessage) -> None:
     text = await _evidence(app, msg)
     claim = await extract_claim(app.state.llm, text, outstanding_paise=row["amount_paise"], today=date.today())
     if claim is None:  # chatter is still evidence, just never a proposal
-        await app.state.continuum.write_evidence(
-            user_id=scope_user(tenant_id, party_id), source_id=make_source_id(tenant_id, msg.wamid, text),
+        await enqueue_standalone(
+            app.state.pool, user_id=scope_user(tenant_id, party_id),
+            source_id=make_source_id(tenant_id, msg.wamid, text),
             text=text, trusted=False, metadata={"party_id": party_id, "actor": "DEBTOR"})
         return
     adj_id, created = await submit_debtor_claim(
-        app.state.pool, app.state.continuum, tenant_id=tenant_id, party_id=party_id,
+        app.state.pool, tenant_id=tenant_id, party_id=party_id,
         obligation_id=str(row["obligation_id"]), wamid=msg.wamid, adjustment_type=claim.type,
         evidence_text=text, proposed_amount_paise=claim.amount_paise, proposed_date=claim.date)
     phone = owner_phone(app.state.settings, tenant_id)
