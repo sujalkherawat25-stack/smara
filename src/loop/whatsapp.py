@@ -44,10 +44,13 @@ class WhatsAppClient:
             headers={"Authorization": f"Bearer {access_token}"}, timeout=15
         )
 
-    async def send(self, payload: dict, *, number_id: str | None = None) -> None:
-        """`number_id` picks the sending WhatsApp number (per-tenant); default otherwise."""
+    async def send(self, payload: dict, *, number_id: str | None = None) -> str | None:
+        """`number_id` picks the sending WhatsApp number (per-tenant). Returns Meta's message id.
+
+        A 200 only means Meta accepted it; delivery failures arrive later as status receipts."""
         resp = await self._http.post(f"{GRAPH}/{number_id or self._default_number}/messages", json=payload)
         resp.raise_for_status()
+        return ((resp.json().get("messages") or [{}])[0]).get("id")
 
     async def aclose(self) -> None:
         await self._http.aclose()

@@ -7,21 +7,24 @@ from src.ingest.box_commands import decide_browser_task, handle_text
 from src.ingest.importer import import_rows
 from src.ingest.media import clean_phone_caption, download_media, read_image
 from src.ingest.payload import InboundMessage
+from src.ingest.telegram import link_message, unlink
 from src.ingest.sheet_mapper import SheetRow, map_sheet, parse_amount_paise, parse_date, parse_phone
 from src.loop.digest import build_digest
 from src.loop.reminders import decide_reminder
+from src.loop.owner_channel import send_to_owner
 from src.loop.whatsapp import text_message
 from src.tenants import Tenant
 
 log = logging.getLogger(__name__)
-HELP = ("Commands: gstin <no>, quotes <product>, browse <task>. Send me your outstanding sheet (.xlsx/.csv), a photo of a bill with the customer's "
+HELP = ("Commands: digest, telegram (link Telegram), gstin <no>, quotes <product>, browse <task>. Send me your outstanding sheet (.xlsx/.csv), a photo of a bill with the customer's "
         "number as caption, or say 'digest'.")
 
 
 async def handle_owner(app, tenant: Tenant, msg: InboundMessage) -> None:
     reply = await _route(app, tenant.id, msg)
     if reply:
-        await app.state.wa.send(text_message(msg.sender, reply), number_id=msg.number_id or tenant.wa_phone_number_id)
+        await send_to_owner(app, tenant, text_message(tenant.owner_phone, reply), kind="owner_text",
+                            reply_channel=msg.channel, number_id=msg.number_id or None)
 
 
 async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
@@ -37,25 +40,38 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
             return await decide_reminder(app, tenant_id, ref, action, datetime.now(timezone.utc)) \
                 or "That reminder was already handled."
         if action in ("bt_approve", "bt_reject"):
-            return await decide_browser_task(app, tenant_id, msg.sender, ref, action == "bt_approve", number_id=msg.number_id)
+            return await decide_browser_task(app, tenant_id, msg.sender, ref, action == "bt_approve", number_id=msg.number_id,
+                                             channel=msg.channel)
         return None
     if msg.kind == "document":
         return await _sheet(app, tenant_id, msg)
     if msg.kind == "image":
         return await _bill(app, tenant_id, msg)
-    if msg.kind == "text" and (reply := await handle_text(app, tenant_id, msg.sender, msg.text, number_id=msg.number_id)):
+    if msg.kind == "text" and (reply := await handle_text(app, tenant_id, msg.sender, msg.text, number_id=msg.number_id,
+                                                                    channel=msg.channel)):
         return reply
     if msg.kind == "text" and msg.text.lower().startswith("browse "):
         return None  # plan card already sent
+    if msg.text.strip().lower() == "telegram":
+        return await link_message(app, tenant_id)
+    if msg.text.strip().lower() == "telegram off":
+        return await unlink(app, tenant_id)
     if msg.text.strip().lower() in ("digest", "summary", "overdue", "status"):
         return await build_digest(app.state.pool, tenant_id, date.today())
     return HELP
 
 
+async def fetch_media(app, msg: InboundMessage) -> tuple[bytes, str]:
+    if msg.channel == "telegram":
+        mime = "image/jpeg" if msg.kind == "image" else "application/octet-stream"
+        return await app.state.tg.download(msg.media_id), mime
+    return await download_media(app.state.settings.wa_access_token, msg.media_id)
+
+
 async def _sheet(app, tenant_id: str, msg: InboundMessage) -> str:
     if not msg.filename.lower().endswith((".xlsx", ".xlsm", ".csv")):
         return "I can read .xlsx or .csv sheets. Please export your outstanding report in one of those."
-    data, _ = await download_media(app.state.settings.wa_access_token, msg.media_id)
+    data, _ = await fetch_media(app, msg)
     rows, skipped = map_sheet(msg.filename, data)
     result = await import_rows(app.state.pool, tenant_id, rows) if rows else {"created": 0, "updated": 0}
     out = f"Imported {result['created']} new, {result['updated']} updated invoices."
@@ -65,7 +81,7 @@ async def _sheet(app, tenant_id: str, msg: InboundMessage) -> str:
 
 
 async def _bill(app, tenant_id: str, msg: InboundMessage) -> str:
-    data, mime = await download_media(app.state.settings.wa_access_token, msg.media_id)
+    data, mime = await fetch_media(app, msg)
     ocr = await read_image(app.state.llm, data, mime)
     if not ocr:
         return "Bill reading is not configured yet. Please send the sheet instead."

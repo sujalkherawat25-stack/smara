@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from src.bridge.continuum import ContinuumClient, scope_user
 from src import tenants
 from src.bridge.outbox import enqueue_standalone
+from src.loop.outbound import record
 from src.loop.upi import pay_url, rupees, upi_text
 from src.loop.whatsapp import template_message, text_message
 
@@ -132,7 +133,10 @@ async def decide_reminder(app, tenant_id: str, obligation_id: str, action: str, 
         return f"Okay, {o['invoice_ref']} {'marked paid' if action == 'paid' else 'snoozed 3 days'}."
     try:
         tenant = await tenants.by_id(pool, tenant_id)
-        await app.state.wa.send(_debtor_payload(o, tenant, s, now), number_id=tenant.wa_phone_number_id)
+        msg_id = await app.state.wa.send(_debtor_payload(o, tenant, s, now), number_id=tenant.wa_phone_number_id)
+        if msg_id:
+            await record(pool, msg_id, tenant_id=tenant_id, kind="debtor_reminder",
+                         to_phone=o["whatsapp_phone"], obligation_id=o["id"])
     except Exception:
         log.exception("debtor send failed for %s", obligation_id)
         async with pool.connection() as conn:

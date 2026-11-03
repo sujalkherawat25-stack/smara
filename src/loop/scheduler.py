@@ -6,6 +6,7 @@ from src import tenants
 from src.bridge.outbox import drain
 from src.loop.digest import build_digest
 from src.loop.reminders import claim_due, draft_reminder, release_claim, reminder_card, state_card
+from src.loop.owner_channel import send_to_owner
 from src.loop.whatsapp import text_message
 
 log = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ async def tick(app, now: datetime) -> int:
             continue
         card = reminder_card(t.owner_phone, o, draft_reminder(o, t.upi, app.state.settings.public_base_url), await state_card(app.state.continuum, o))
         try:
-            await app.state.wa.send(card, number_id=t.wa_phone_number_id)
+            await send_to_owner(app, t, card, kind="owner_reminder_card", obligation_id=o["id"])
         except Exception:
             log.exception("owner card send failed for obligation %s; will retry", o["id"])
             await release_claim(pool, o, now)
@@ -51,7 +52,7 @@ async def send_digests(app, local: datetime) -> int:
             continue
         try:
             text = await build_digest(pool, t.id, local.date())
-            await app.state.wa.send(text_message(t.owner_phone, text), number_id=t.wa_phone_number_id)
+            await send_to_owner(app, t, text_message(t.owner_phone, text), kind="owner_digest")
             sent += 1
         except Exception:
             log.exception("digest failed for tenant %s", t.id)

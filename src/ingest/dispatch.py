@@ -3,6 +3,7 @@ from src import tenants
 from src.ingest.debtor_flow import handle_debtor
 from src.ingest.owner_flow import handle_owner
 from src.ingest.payload import InboundMessage
+from src.loop.owner_channel import resend_undelivered
 
 
 async def _claim(pool, wamid: str) -> bool:
@@ -20,7 +21,10 @@ async def dispatch(app, msg: InboundMessage) -> None:
     try:
         owner = await tenants.by_owner_phone(pool, msg.sender)
         if owner:
+            await tenants.touch_owner_inbound(pool, owner.id)   # opens the owner's 24h window
+            owner = await tenants.by_id(pool, owner.id)
             await handle_owner(app, owner, msg)
+            await resend_undelivered(app, owner, channel="whatsapp")
         else:
             await handle_debtor(app, msg)
     except Exception:

@@ -4,7 +4,8 @@ import logging
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from src.ingest.dispatch import dispatch
-from src.ingest.payload import parse_messages, verify_signature
+from src.ingest.payload import parse_messages, parse_statuses, verify_signature
+from src.loop.outbound import apply_status
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -30,9 +31,15 @@ async def receive(request: Request):
     if not verify_signature(secret, raw, request.headers.get("x-hub-signature-256")):
         raise HTTPException(status_code=401, detail="bad signature")
     try:
-        messages = parse_messages(json.loads(raw))
+        body = json.loads(raw)
+        messages, statuses = parse_messages(body), parse_statuses(body)
     except ValueError:
         raise HTTPException(status_code=400, detail="bad json")
+    for st in statuses:
+        try:
+            await apply_status(request.app, st)
+        except Exception:
+            log.exception("status handling failed for %s", st.msg_id)
     for msg in messages:
         try:
             await dispatch(request.app, msg)

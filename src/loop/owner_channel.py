@@ -1,0 +1,114 @@
+"""The one path for every owner-bound message.
+
+- Telegram if the owner linked it (free, no 24h window).
+- WhatsApp otherwise. Outside the owner's 24h window a free-form card would be
+  dropped by WhatsApp, so with WA_OWNER_TEMPLATE set we hold the card, send one
+  approved "N items waiting" template, and re-send held cards when the owner replies.
+Builders produce WhatsApp payloads; Telegram gets a translation of the same card.
+"""
+import logging
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
+from src.loop.outbound import record
+from src.loop.whatsapp import owner_approval_card, template_message
+
+log = logging.getLogger(__name__)
+WINDOW = timedelta(hours=24)
+CARD_KINDS = ("owner_reminder_card", "owner_claim_card")
+
+
+def window_open(tenant, now: datetime) -> bool:
+    last = tenant.owner_last_inbound_at
+    return bool(last) and now - last < WINDOW
+
+
+def wa_to_telegram(payload: dict, chat_id: int) -> dict:
+    if payload.get("type") == "interactive":
+        it = payload["interactive"]
+        rows = [[{"text": b["reply"]["title"], "callback_data": b["reply"]["id"]}] for b in it["action"]["buttons"]]
+        return {"chat_id": chat_id, "text": it["body"]["text"][:4096], "reply_markup": {"inline_keyboard": rows}}
+    return {"chat_id": chat_id, "text": (payload.get("text") or {}).get("body", "")[:4096]}
+
+
+async def send_to_owner(app, tenant, payload: dict, *, kind: str, obligation_id=None, adjustment_id=None,
+                        reply_channel: str | None = None, number_id: str | None = None) -> str:
+    """Returns the channel used: 'telegram', 'whatsapp' or 'held'."""
+    pool, s, now = app.state.pool, app.state.settings, datetime.now(timezone.utc)
+    tg = getattr(app.state, "tg", None)
+    if tg and tenant.telegram_chat_id and reply_channel in (None, "telegram"):
+        await tg.send(wa_to_telegram(payload, tenant.telegram_chat_id))
+        return "telegram"
+    if reply_channel is None and s.wa_owner_template and not window_open(tenant, now) \
+            and kind in (*CARD_KINDS, "owner_digest"):
+        if kind in CARD_KINDS:
+            await record(pool, f"held:{uuid4()}", tenant_id=tenant.id, kind=kind, to_phone=tenant.owner_phone,
+                         status="held", obligation_id=obligation_id, adjustment_id=adjustment_id)
+        await nudge(app, tenant)
+        return "held"
+    msg_id = await app.state.wa.send({**payload, "to": tenant.owner_phone},
+                                     number_id=number_id or tenant.wa_phone_number_id)
+    if msg_id:
+        await record(pool, msg_id, tenant_id=tenant.id, kind=kind, to_phone=tenant.owner_phone,
+                     obligation_id=obligation_id, adjustment_id=adjustment_id)
+    return "whatsapp"
+
+
+async def nudge(app, tenant) -> None:
+    """One approved template per closed window: 'You have N items waiting, reply to see them.'"""
+    if tenant.owner_nudged_at and (not tenant.owner_last_inbound_at or tenant.owner_nudged_at > tenant.owner_last_inbound_at):
+        return
+    async with app.state.pool.connection() as conn:
+        cur = await conn.execute(
+            """SELECT (SELECT count(*) FROM obligations WHERE tenant_id = %(t)s AND state = 'WAITING_OWNER_APPROVAL')
+                    + (SELECT count(*) FROM proposed_adjustments a JOIN obligations o ON o.id = a.obligation_id
+                        WHERE o.tenant_id = %(t)s AND a.status = 'PENDING') AS n""", {"t": tenant.id})
+        n = (await cur.fetchone())["n"]
+        await conn.execute("UPDATE tenants SET owner_nudged_at = now() WHERE id = %s", (tenant.id,))
+    s = app.state.settings
+    await app.state.wa.send(template_message(tenant.owner_phone, s.wa_owner_template, s.wa_reminder_lang, [str(max(n, 1))]),
+                            number_id=tenant.wa_phone_number_id)
+
+
+async def resend_undelivered(app, tenant, channel: str) -> int:
+    """Owner is reachable again: re-send held or failed cards that still need a decision."""
+    pool = app.state.pool
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            """UPDATE outbound_messages SET status = 'resent', updated_at = now()
+                WHERE tenant_id = %s AND status IN ('held', 'failed') AND kind = ANY(%s)
+            RETURNING kind, obligation_id, adjustment_id""", (tenant.id, list(CARD_KINDS)))
+        rows = await cur.fetchall()
+    sent = 0
+    for r in rows:
+        payload = await _rebuild(app, tenant, r)
+        if payload:
+            await send_to_owner(app, tenant, payload, kind=r["kind"], obligation_id=r["obligation_id"],
+                                adjustment_id=r["adjustment_id"], reply_channel=channel)
+            sent += 1
+    return sent
+
+
+async def _rebuild(app, tenant, r: dict) -> dict | None:
+    from src.loop.reminders import draft_reminder, reminder_card
+    from src.loop.upi import rupees
+
+    async with app.state.pool.connection() as conn:
+        if r["kind"] == "owner_reminder_card":
+            cur = await conn.execute(
+                """SELECT o.*, p.canonical_name FROM obligations o JOIN parties p ON p.id = o.party_id
+                    WHERE o.id = %s AND o.state = 'WAITING_OWNER_APPROVAL'""", (r["obligation_id"],))
+            o = await cur.fetchone()
+            return reminder_card(tenant.owner_phone, o, draft_reminder(o, tenant.upi, app.state.settings.public_base_url), "") if o else None
+        cur = await conn.execute(
+            """SELECT a.*, o.invoice_ref, p.canonical_name FROM proposed_adjustments a
+                 JOIN obligations o ON o.id = a.obligation_id JOIN parties p ON p.id = o.party_id
+                WHERE a.id = %s AND a.status = 'PENDING'""", (r["adjustment_id"],))
+        a = await cur.fetchone()
+    if not a:
+        return None
+    bits = ([f"new amount {rupees(a['proposed_amount_paise'])}"] if a["proposed_amount_paise"] else []) + \
+           ([f"pay by {a['proposed_date']:%d %b}"] if a["proposed_date"] else [])
+    return owner_approval_card(tenant.owner_phone, adjustment_id=str(a["id"]), party_name=a["canonical_name"],
+                               invoice_ref=a["invoice_ref"], adjustment_type=a["adjustment_type"],
+                               evidence=a["raw_evidence_text"], proposal=", ".join(bits))

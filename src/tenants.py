@@ -1,9 +1,11 @@
 """Tenant directory. Small tables, so each lookup is a direct query (no cache to go stale)."""
 from dataclasses import dataclass
+from datetime import datetime
 
 from psycopg_pool import AsyncConnectionPool
 
-_COLS = "id, name, owner_phone, upi_vpa, upi_name, wa_phone_number_id"
+_COLS = ("id, name, owner_phone, upi_vpa, upi_name, wa_phone_number_id, owner_last_inbound_at, "
+         "owner_nudged_at, telegram_chat_id")
 
 
 @dataclass(frozen=True)
@@ -14,6 +16,9 @@ class Tenant:
     upi_vpa: str | None = None
     upi_name: str | None = None
     wa_phone_number_id: str | None = None
+    owner_last_inbound_at: datetime | None = None
+    owner_nudged_at: datetime | None = None
+    telegram_chat_id: int | None = None
 
     @property
     def upi(self) -> dict | None:
@@ -61,3 +66,12 @@ async def create(pool, *, name: str, owner_phone: str, upi_vpa: str | None = Non
                 RETURNING {_COLS}""",
             (tenant_id, name, owner_phone, upi_vpa, upi_name, wa_phone_number_id))
         return _row(await cur.fetchone())
+
+
+async def by_telegram_chat(pool, chat_id: int) -> Tenant | None:
+    return await _one(pool, "telegram_chat_id", chat_id)
+
+
+async def touch_owner_inbound(pool, tenant_id: str) -> None:
+    async with pool.connection() as conn:
+        await conn.execute("UPDATE tenants SET owner_last_inbound_at = now() WHERE id = %s", (tenant_id,))

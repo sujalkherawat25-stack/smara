@@ -9,6 +9,7 @@ from src.ingest.extract import extract_claim
 from src.ingest.media import download_media, ocr_to_evidence, read_image, transcribe
 from src.ingest.payload import InboundMessage
 from src.loop.upi import rupees
+from src.loop.owner_channel import send_to_owner
 from src.loop.whatsapp import owner_approval_card
 from src import tenants
 
@@ -81,10 +82,10 @@ async def handle_debtor(app, msg: InboundMessage) -> None:
     if tenant and await _claim_notification(pool, adj_id):
         bits = ([f"new amount {rupees(claim.amount_paise)}"] if claim.amount_paise else []) +                ([f"pay by {claim.date:%d %b}"] if claim.date else [])
         try:
-            await app.state.wa.send(owner_approval_card(
+            await send_to_owner(app, tenant, owner_approval_card(
                 tenant.owner_phone, adjustment_id=adj_id, party_name=row["canonical_name"],
                 invoice_ref=row["invoice_ref"], adjustment_type=claim.type, evidence=text,
-                proposal=", ".join(bits)), number_id=tenant.wa_phone_number_id)
+                proposal=", ".join(bits)), kind="owner_claim_card", adjustment_id=adj_id)
         except Exception:
             async with pool.connection() as conn:  # release so a redelivery notifies the owner
                 await conn.execute("UPDATE proposed_adjustments SET owner_notified_at = NULL WHERE id = %s", (adj_id,))

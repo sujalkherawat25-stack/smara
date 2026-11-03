@@ -18,6 +18,10 @@ class Settings:
     # Approved Meta template for reminders sent outside the 24h reply window ("" = text only)
     wa_reminder_template: str = ""
     wa_reminder_lang: str = "en"
+    # Approved template that tells the owner "N items waiting" when their 24h window is closed
+    wa_owner_template: str = ""
+    telegram_bot_token: str = ""
+    telegram_webhook_secret: str = ""
     # Public https origin of this server; enables tappable pay links in reminders
     public_base_url: str = ""
     # OpenAI-compatible chat endpoint; fast model by default, reasoning model on escalation
@@ -42,6 +46,9 @@ def load_settings() -> Settings:
         wa_phone_number_id=env.get("WA_PHONE_NUMBER_ID", ""),
         wa_reminder_template=env.get("WA_REMINDER_TEMPLATE", ""),
         wa_reminder_lang=env.get("WA_REMINDER_LANG", "en"),
+        wa_owner_template=env.get("WA_OWNER_TEMPLATE", ""),
+        telegram_bot_token=env.get("TELEGRAM_BOT_TOKEN", ""),
+        telegram_webhook_secret=env.get("TELEGRAM_WEBHOOK_SECRET", ""),
         public_base_url=env.get("PUBLIC_BASE_URL", ""),
         llm_base_url=env.get("LLM_BASE_URL", ""),
         llm_api_key=env.get("LLM_API_KEY", ""),

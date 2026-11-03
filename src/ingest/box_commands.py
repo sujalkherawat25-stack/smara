@@ -24,6 +24,18 @@ PLAN_SYSTEM = (
 )
 
 
+async def _send(app, tenant_id: str, payload: dict, number_id, channel) -> None:
+    """Reply on the channel the owner used (Telegram or WhatsApp)."""
+    from src import tenants
+    from src.loop.owner_channel import send_to_owner
+
+    t = await tenants.by_id(app.state.pool, tenant_id)
+    if t:
+        await send_to_owner(app, t, payload, kind="owner_text", reply_channel=channel, number_id=number_id or None)
+    else:
+        await app.state.wa.send(payload, number_id=number_id)
+
+
 def spawn(app, coro) -> None:
     task = asyncio.create_task(coro)
     app.state.bg.add(task)
@@ -48,12 +60,13 @@ def format_task(res: dict) -> str:
     return "\n".join(out)
 
 
-async def _quotes(app, phone: str, product: str, number_id: str | None) -> None:
+async def _quotes(app, tenant_id: str, phone: str, product: str, number_id, channel) -> None:
     res = await run_box("scrape_indiamart_quotes", {"product": product})
-    await app.state.wa.send(text_message(phone, format_quotes(res)), number_id=number_id)
+    await _send(app, tenant_id, text_message(phone, format_quotes(res)), number_id, channel)
 
 
-async def handle_text(app, tenant_id: str, phone: str, text: str, number_id: str | None = None) -> str | None:
+async def handle_text(app, tenant_id: str, phone: str, text: str, number_id: str | None = None,
+                      channel: str = "whatsapp") -> str | None:
     cmd, _, arg = text.strip().partition(" ")
     cmd, arg = cmd.lower(), arg.strip()
     if cmd == "gstin" and arg:
@@ -63,14 +76,14 @@ async def handle_text(app, tenant_id: str, phone: str, text: str, number_id: str
         return (f"GSTIN {r['gstin']} is well-formed (state {r['state_code']}, PAN {r['pan']}). "
                 f"Registration status needs the portal captcha: {r['portal_url']}")
     if cmd == "quotes" and arg:
-        spawn(app, _quotes(app, phone, arg, number_id))
+        spawn(app, _quotes(app, tenant_id, phone, arg, number_id, channel))
         return f"Looking up '{arg}' on IndiaMART..."
     if cmd == "browse" and arg:
-        return await _propose(app, tenant_id, phone, arg, number_id)
+        return await _propose(app, tenant_id, phone, arg, number_id, channel)
     return None
 
 
-async def _propose(app, tenant_id: str, phone: str, instruction: str, number_id: str | None) -> str | None:
+async def _propose(app, tenant_id: str, phone: str, instruction: str, number_id, channel) -> str | None:
     if not app.state.llm.enabled:
         return "Browser tasks need the LLM configured to plan steps."
     try:
@@ -84,16 +97,16 @@ async def _propose(app, tenant_id: str, phone: str, instruction: str, number_id:
         tid = str((await cur.fetchone())["id"])
     note = "\nIncludes clicking/typing on the site." if is_mutating(plan) else ""
     btn = lambda k, t: {"type": "reply", "reply": {"id": f"{k}:{tid}", "title": t}}
-    await app.state.wa.send({
+    await _send(app, tenant_id, {
         "messaging_product": "whatsapp", "to": phone, "type": "interactive", "interactive": {
             "type": "button",
             "body": {"text": f"Run this browser task?\n\"{instruction[:150]}\"\n\n{describe_plan(plan)}{note}"[:1024]},
-            "action": {"buttons": [btn("bt_approve", "Approve"), btn("bt_reject", "Reject")]}}}, number_id=number_id)
+            "action": {"buttons": [btn("bt_approve", "Approve"), btn("bt_reject", "Reject")]}}}, number_id, channel)
     return None
 
 
 async def decide_browser_task(app, tenant_id: str, phone: str, task_id: str, approve: bool,
-                              number_id: str | None = None) -> str:
+                              number_id: str | None = None, channel: str = "whatsapp") -> str:
     async with app.state.pool.connection() as conn:
         cur = await conn.execute(
             """UPDATE browser_tasks SET status = %s, decided_at = now()
@@ -104,13 +117,13 @@ async def decide_browser_task(app, tenant_id: str, phone: str, task_id: str, app
         return "That task was already handled or no longer exists."
     if not approve:
         return "Okay, cancelled."
-    spawn(app, _execute(app, phone, task_id, row["plan"], number_id))
+    spawn(app, _execute(app, tenant_id, phone, task_id, row["plan"], number_id, channel))
     return "Running it now..."
 
 
-async def _execute(app, phone: str, task_id: str, plan: list, number_id: str | None) -> None:
+async def _execute(app, tenant_id: str, phone: str, task_id: str, plan: list, number_id, channel) -> None:
     res = await run_box("run_personal_browser_task", {"plan": plan})
     async with app.state.pool.connection() as conn:
         await conn.execute("UPDATE browser_tasks SET status = %s, result = %s WHERE id = %s",
                            ("FAILED" if res.get("error") else "DONE", json.dumps(res), task_id))
-    await app.state.wa.send(text_message(phone, format_task(res)), number_id=number_id)
+    await _send(app, tenant_id, text_message(phone, format_task(res)), number_id, channel)

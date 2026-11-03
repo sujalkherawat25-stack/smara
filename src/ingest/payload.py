@@ -16,6 +16,8 @@ class InboundMessage:
     caption: str = ""
     filename: str = ""
     number_id: str = ""   # our WhatsApp number that received it
+    channel: str = "whatsapp"   # whatsapp | telegram
+    chat_id: int | None = None  # telegram chat
 
     @property
     def evidence_text(self) -> str:
@@ -55,4 +57,25 @@ def parse_messages(payload: dict) -> list[InboundMessage]:
                 )
                 if msg.wamid and msg.sender:
                     out.append(msg)
+    return out
+
+
+@dataclass(frozen=True)
+class StatusUpdate:
+    msg_id: str
+    status: str            # sent | delivered | read | failed
+    recipient: str
+    error_code: int | None = None
+    error_title: str = ""
+
+
+def parse_statuses(payload: dict) -> list[StatusUpdate]:
+    out: list[StatusUpdate] = []
+    for entry in payload.get("entry", []):
+        for change in entry.get("changes", []):
+            for st in change.get("value", {}).get("statuses", []):
+                err = (st.get("errors") or [{}])[0]
+                if st.get("id") and st.get("status"):
+                    out.append(StatusUpdate(st["id"], st["status"], normalize_phone(st.get("recipient_id", "")),
+                                            err.get("code"), err.get("title") or err.get("message") or ""))
     return out
