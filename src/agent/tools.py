@@ -104,6 +104,7 @@ async def query_ledger_sql(app, ctx: SessionCtx, args: dict) -> dict:
                 await conn.execute("SET LOCAL ROLE munim_agent_ro")
                 await conn.execute("SELECT set_config('munim.tenant_id', %s, true)", (ctx.tenant_id,))
                 await conn.execute("SET LOCAL statement_timeout = '3000'")
+                await conn.execute("SET LOCAL TIME ZONE 'Asia/Kolkata'")   # current_date = the shop's today
                 cur = await conn.execute(sql)
                 rows = await cur.fetchmany(MAX_ROWS + 1)
     except psycopg.Error as e:

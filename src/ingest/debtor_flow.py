@@ -1,4 +1,5 @@
 """Thread B: debtor messages are UNTRUSTED. Evidence + PENDING proposal + owner card only."""
+from src import clock
 import logging
 from datetime import date
 
@@ -75,7 +76,7 @@ async def handle_debtor(app, msg: InboundMessage) -> None:
         text=text, trusted=False, metadata={"party_id": party_id, "actor": "DEBTOR"})
 
     async def rules() -> None:   # deterministic path: no LLM, or the agent failed before acting
-        claim = await extract_claim(app.state.llm, text, outstanding_paise=row["amount_paise"], today=date.today())
+        claim = await extract_claim(app.state.llm, text, outstanding_paise=row["amount_paise"], today=clock.today())
         if claim is None:  # chatter is still evidence, just never a proposal
             await enqueue_standalone(
                 pool, user_id=scope_user(tenant_id, party_id),

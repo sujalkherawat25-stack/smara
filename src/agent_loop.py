@@ -8,6 +8,7 @@ A gated call (T2/T3) freezes the session in Postgres with the exact call and
 any calls after it, shows the owner a card, and stops. The owner's tap is
 handled deterministically (never by the model) and resumes from that call.
 """
+from src import clock
 import asyncio
 import json
 import logging
@@ -76,11 +77,11 @@ async def start_session(app, *, tenant, trust: str, trigger: str, content: str, 
         if row is None:
             snap = await (await conn.execute(
                 """SELECT count(*) n, coalesce(sum(amount_paise), 0) s,
-                          count(*) FILTER (WHERE due_date < current_date) od FROM obligations
-                    WHERE tenant_id = %s AND state NOT IN ('PAID', 'DRAFT')""", (tenant.id,))).fetchone()
+                          count(*) FILTER (WHERE due_date < %s) od FROM obligations
+                    WHERE tenant_id = %s AND state NOT IN ('PAID', 'DRAFT')""", (clock.today(), tenant.id))).fetchone()
             ledger = (f" Ledger right now: {snap['n']} open invoices ({snap['od']} overdue), "
                       f"Rs {int(snap['s']) / 100:,.2f} outstanding.")
-            system = {"role": "system", "content": BASE.format(shop=tenant.name, today=date.today()) + ledger + " " + ROLE[trust]}
+            system = {"role": "system", "content": BASE.format(shop=tenant.name, today=clock.today()) + ledger + " " + ROLE[trust]}
             cur = await conn.execute(
                 """INSERT INTO agent_sessions (tenant_id, trust, trigger, party_id, channel, files, messages)
                    VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",

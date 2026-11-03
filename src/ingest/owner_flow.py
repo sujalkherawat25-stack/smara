@@ -1,4 +1,5 @@
 """Thread A: owner messages are trusted. Buttons, sheet/bill uploads, digest requests."""
+from src import clock
 import logging
 from datetime import date, datetime, timezone
 
@@ -68,7 +69,7 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
     if msg.kind == "text" and msg.text.lower().startswith("browse "):
         return None  # plan card already sent
     if msg.text.strip().lower() in ("digest", "summary", "overdue", "status"):
-        return await build_digest(app.state.pool, tenant_id, date.today())
+        return await build_digest(app.state.pool, tenant_id, clock.today())
     return HELP
 
 
@@ -115,7 +116,7 @@ async def _bill(app, tenant_id: str, msg: InboundMessage) -> str:
         return "Bill reading is not configured yet. Please send the sheet instead."
     phone = parse_phone(clean_phone_caption(msg.caption)) or parse_phone(ocr.get("phone"))
     amount = parse_amount_paise(ocr.get("amount_rupees"))
-    due = parse_date(ocr.get("due_date")) or date.today()
+    due = parse_date(ocr.get("due_date")) or clock.today()
     if ocr.get("kind") != "bill" or not (ocr.get("party") and amount and phone):
         return "I could not read a complete bill. Send it again with the customer's number as caption."
     ref = ocr.get("invoice_ref") or f"bill-{msg.wamid[-8:]}"

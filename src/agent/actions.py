@@ -7,6 +7,7 @@ arguments that were frozen in the session when the card was shown.
 """
 from datetime import date, datetime, timedelta, timezone
 
+from src import clock
 from src.agent.policy import SessionCtx
 from src.agent.tools import party_in_tenant
 from src.bridge.coordinator import submit_debtor_claim
@@ -98,7 +99,7 @@ async def validate_gated(app, ctx: SessionCtx, name: str, args: dict) -> str | N
             return "new_amount_rupees must be positive and below the amount owed"
         if args.get("new_due_date"):
             try:
-                if date.fromisoformat(args["new_due_date"]) < date.today():
+                if date.fromisoformat(args["new_due_date"]) < clock.today():
                     return "new_due_date is in the past"
             except ValueError:
                 return "new_due_date must be YYYY-MM-DD"

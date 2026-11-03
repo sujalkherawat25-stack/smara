@@ -358,3 +358,11 @@ async def test_rules_fallback_uses_the_invoice_the_debtor_names(env):
     await dispatch(env.app, InboundMessage(wamid="d9", sender=DEBTOR, kind="text", text="INV-2 ka payment kar diya, UTR 412345678901"))
     assert (await one(env.pool, """select o.invoice_ref from proposed_adjustments a
                                    join obligations o on o.id = a.obligation_id"""))["invoice_ref"] == "INV-2"
+
+
+async def test_business_dates_are_ist(env):
+    from datetime import timezone as tz
+    from src import clock
+    rows = (await query_ledger_sql(env.app, SessionCtx("s", env.t.id, "TRUSTED"), {"sql": "select current_date d"}))["rows"]
+    assert rows[0]["d"] == clock.today()                                   # SQL "today" is the shop's today
+    assert clock.today() == datetime.now(tz(timedelta(hours=5, minutes=30))).date()
