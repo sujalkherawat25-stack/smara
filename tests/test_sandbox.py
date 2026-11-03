@@ -30,6 +30,10 @@ def test_tally_xml_vouchers_and_ledgers():
                           "amount": 12500.0, "credit_days": 30}
     assert v["S-102"]["party"] == "Sharma & Sons" and v["S-102"]["amount"] == 4000.5
     assert v["R-7"]["type"] == "Receipt" and v["R-7"]["amount"] == 2500.0   # survives Tally's &#4; junk
+    rec = {r["invoice"]: r for r in mh.tally_receivables(FIXTURE)}
+    assert set(rec) == {"S-101", "S-102"}                                       # receipts excluded
+    assert rec["S-101"]["phone"] == "919876543210" and rec["S-101"]["due_date"] == date(2026, 11, 4)
+    assert rec["S-102"]["phone"] == "919811122233" and rec["S-102"]["due_date"] == date(2026, 10, 27)
     led = {x["name"]: x for x in mh.tally_ledgers(FIXTURE)}
     assert led["Ravi Kirana Store"]["mobile"] == "919876543210" and led["Sharma & Sons"]["closing_balance"] == -4000.5
 

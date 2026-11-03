@@ -59,7 +59,8 @@ TOOLS = [
         "can pass to inspect_and_import_file); set RESULT = <json-able> for structured output. pandas, openpyxl "
         "and `import munim_helpers as mh` are available: mh.read_table(path) finds the real header row; "
         "mh.parse_amount('1,25,000.50 Dr'); mh.parse_date('05-10-2026'|'20261005'|excel serial); mh.phone(v); "
-        "mh.tally_vouchers(xml_path) / mh.tally_ledgers(xml_path) parse Tally Prime XML exports; "
+        "Tally Prime XML: mh.tally_receivables(xml_path) gives sales invoices WITH phones (from ledger masters) "
+        "and due dates (credit period) ready for mh.to_rows_csv; mh.tally_vouchers / mh.tally_ledgers for the raw data; "
         "mh.to_rows_csv(records) writes out/rows.csv (records: party, phone, invoice, due_date, amount in rupees) "
         "in the format the importer reads. Always print or RESULT the totals you computed so you can verify them.",
         {"code": _S, "file_refs": {"type": "array", "items": _S}}, ["code"]),

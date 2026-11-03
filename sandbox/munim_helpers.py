@@ -128,3 +128,17 @@ def to_rows_csv(records: list[dict], path="out/rows.csv") -> str:
             due = due.strftime("%d/%m/%Y") if isinstance(due, (date, datetime)) else due
             w.writerow([r["party"], r.get("phone", ""), r["invoice"], due, f"{float(r['amount']):.2f}"])
     return path
+
+
+def tally_receivables(path, default_credit_days: int = 30) -> list[dict]:
+    """Sales invoices from a Tally XML export, ready for to_rows_csv: party, phone (from the
+    ledger master), invoice, due_date (voucher date + credit period), amount. Receipts are not
+    netted here; use tally_vouchers() for those."""
+    phones = {l["name"]: l["mobile"] for l in tally_ledgers(path)}
+    out = []
+    for v in tally_vouchers(path):
+        if v["type"].lower().startswith("sales") and v["amount"]:
+            days = v["credit_days"] if v["credit_days"] is not None else default_credit_days
+            out.append({"party": v["party"], "phone": phones.get(v["party"], ""), "invoice": v["number"],
+                        "due_date": v["date"] + timedelta(days=days) if v["date"] else None, "amount": v["amount"]})
+    return out
