@@ -63,7 +63,8 @@ async def handle_debtor(app, msg: InboundMessage) -> None:
     if len({r["tenant_id"] for r in rows}) > 1:  # same debtor owes several tenants, number gives no hint
         log.warning("ambiguous tenant for sender on shared number, dropped: %s", msg.wamid)
         return
-    row = rows[0]
+    named = [r for r in rows if r["invoice_ref"] and r["invoice_ref"].lower() in (msg.text or "").lower()]
+    row = named[0] if named else rows[0]       # the invoice the debtor names, else the oldest open one
     tenant_id, party_id = str(row["tenant_id"]), str(row["party_id"])
     async with pool.connection() as conn:  # opens the 24h reply window
         await conn.execute("UPDATE parties SET last_inbound_at = now() WHERE id = %s", (party_id,))

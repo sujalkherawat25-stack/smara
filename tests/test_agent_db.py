@@ -330,3 +330,31 @@ def test_sandbox_policy():
     assert v(owner_ctx, {"code": "print(1)", "file_refs": ["whatsapp:a:x.csv"]}) == "allow"
     assert v(owner_ctx, {"code": "print(1)", "file_refs": ["sandbox:deadbeef:other.csv"]}) == "deny"
     assert v(owner_ctx, {"code": ""}) == "deny"
+
+
+async def test_llm_retries_rate_limits_then_succeeds():
+    import httpx
+    from src.loop.llm import LLM
+    hits = {"n": 0}
+
+    def handler(request):
+        hits["n"] += 1
+        if hits["n"] < 3:
+            return httpx.Response(429, headers={"retry-after": "0"}, json={"error": "slow down"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}], "usage": {"total_tokens": 5}})
+    llm = LLM("https://llm.test", "k", "m", client=httpx.AsyncClient(base_url="https://llm.test",
+                                                                   transport=httpx.MockTransport(handler)))
+    assert (await llm.chat([], []))["content"] == "ok" and hits["n"] == 3 and llm.last_usage["total_tokens"] == 5
+    never = LLM("https://llm.test", "k", "m", max_retries=1, client=httpx.AsyncClient(
+        base_url="https://llm.test", transport=httpx.MockTransport(lambda r: httpx.Response(429, headers={"retry-after": "0"}))))
+    with pytest.raises(httpx.HTTPStatusError):
+        await never.chat([], [])
+
+
+async def test_rules_fallback_uses_the_invoice_the_debtor_names(env):
+    await import_rows(env.pool, env.t.id, [SheetRow("Ravi", DEBTOR, "INV-2", 400_000, date(2026, 11, 2))])
+    env.app.state.llm = ScriptLLM(RuntimeError("model down"))
+    env.app.state.llm.json = None
+    await dispatch(env.app, InboundMessage(wamid="d9", sender=DEBTOR, kind="text", text="INV-2 ka payment kar diya, UTR 412345678901"))
+    assert (await one(env.pool, """select o.invoice_ref from proposed_adjustments a
+                                   join obligations o on o.id = a.obligation_id"""))["invoice_ref"] == "INV-2"

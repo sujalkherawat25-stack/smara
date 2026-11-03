@@ -247,6 +247,8 @@ async def main() -> None:
     ap.add_argument("--model", required=True)
     ap.add_argument("--only", default="")
     ap.add_argument("--json", default="")
+    ap.add_argument("--sandbox", default="local", help="local, or container (use the live munim_sandbox via --jobs)")
+    ap.add_argument("--jobs", default="")
     a = ap.parse_args()
     pool = await open_pool(a.db)
     llm = LLM(os.environ["LLM_BASE_URL"], os.environ["LLM_API_KEY"], a.model)
@@ -258,7 +260,7 @@ async def main() -> None:
         tokens["t"] = tokens.get("t", 0) + int((llm.last_usage or {}).get("total_tokens") or 0)
         return m
     llm.chat = counted
-    sb = Sandbox(tempfile.mkdtemp(prefix="harness-"), "local")
+    sb = Sandbox(a.jobs or tempfile.mkdtemp(prefix="harness-"), a.sandbox)
     files = {k: v for k, v in FILES.items()}
 
     async def fetch(app, ref):
