@@ -10,6 +10,7 @@ from src.db import migrate, open_pool
 from src.ingest.telegram import TelegramClient
 from src.ingest.telegram import router as telegram_router
 from src.ingest.webhook import router
+from src.box.browser_session import BrowserSessions
 from src.loop.llm import LLM
 from src.loop.pay import router as pay_router
 from src.loop.scheduler import run_forever
@@ -26,10 +27,12 @@ async def lifespan(app: FastAPI):
     app.state.wa = WhatsAppClient(s.wa_phone_number_id, s.wa_access_token)
     app.state.llm = LLM(s.llm_base_url, s.llm_api_key, s.llm_model, s.llm_reasoning_model)
     app.state.bg = set()
+    app.state.browsers = BrowserSessions()
     app.state.tg = TelegramClient(s.telegram_bot_token) if s.telegram_bot_token else None
     ticker = asyncio.create_task(run_forever(app))
     yield
     ticker.cancel()
+    await app.state.browsers.close_all()
     if app.state.tg:
         await app.state.tg.aclose()
     await app.state.llm.aclose()

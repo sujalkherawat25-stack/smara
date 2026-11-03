@@ -129,3 +129,18 @@ async def test_browse_waits_for_approval(monkeypatch):
 
 
 import asyncio  # noqa: E402
+
+
+async def test_persistent_browser_worker_guards():
+    """Real Chromium in its own process: no act before navigate, and no SSRF to private hosts."""
+    from src.box.browser_session import BrowserSessions
+    b = BrowserSessions(step_timeout_s=60)
+    try:
+        assert "navigate first" in (await b.step("s1", {"action": "click", "selector": "#x"}))["error"]
+        out = await b.step("s1", {"action": "navigate", "url": "http://127.0.0.1:8080/healthz"})
+        assert "blocked url" in out["error"]
+        assert b.alive("s1")                                   # worker survives a refused step
+        assert "error" in await b.step("s1", {"action": "teleport"})
+    finally:
+        await b.close_all()
+    assert not b.alive("s1")

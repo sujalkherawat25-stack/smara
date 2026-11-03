@@ -15,7 +15,7 @@ from src.loop.whatsapp import owner_approval_card, template_message
 
 log = logging.getLogger(__name__)
 WINDOW = timedelta(hours=24)
-CARD_KINDS = ("owner_reminder_card", "owner_claim_card")
+CARD_KINDS = ("owner_reminder_card", "owner_claim_card", "owner_agent_card")
 
 
 def window_open(tenant, now: datetime) -> bool:
@@ -32,7 +32,8 @@ def wa_to_telegram(payload: dict, chat_id: int) -> dict:
 
 
 async def send_to_owner(app, tenant, payload: dict, *, kind: str, obligation_id=None, adjustment_id=None,
-                        reply_channel: str | None = None, number_id: str | None = None) -> str:
+                        reply_channel: str | None = None, number_id: str | None = None,
+                        agent_session_id=None) -> str:
     """Returns the channel used: 'telegram', 'whatsapp' or 'held'."""
     pool, s, now = app.state.pool, app.state.settings, datetime.now(timezone.utc)
     tg = getattr(app.state, "tg", None)
@@ -43,14 +44,15 @@ async def send_to_owner(app, tenant, payload: dict, *, kind: str, obligation_id=
             and kind in (*CARD_KINDS, "owner_digest"):
         if kind in CARD_KINDS:
             await record(pool, f"held:{uuid4()}", tenant_id=tenant.id, kind=kind, to_phone=tenant.owner_phone,
-                         status="held", obligation_id=obligation_id, adjustment_id=adjustment_id)
+                         status="held", obligation_id=obligation_id, adjustment_id=adjustment_id,
+                         agent_session_id=agent_session_id)
         await nudge(app, tenant)
         return "held"
     msg_id = await app.state.wa.send({**payload, "to": tenant.owner_phone},
                                      number_id=number_id or tenant.wa_phone_number_id)
     if msg_id:
         await record(pool, msg_id, tenant_id=tenant.id, kind=kind, to_phone=tenant.owner_phone,
-                     obligation_id=obligation_id, adjustment_id=adjustment_id)
+                     obligation_id=obligation_id, adjustment_id=adjustment_id, agent_session_id=agent_session_id)
     return "whatsapp"
 
 
@@ -77,14 +79,15 @@ async def resend_undelivered(app, tenant, channel: str) -> int:
         cur = await conn.execute(
             """UPDATE outbound_messages SET status = 'resent', updated_at = now()
                 WHERE tenant_id = %s AND status IN ('held', 'failed') AND kind = ANY(%s)
-            RETURNING kind, obligation_id, adjustment_id""", (tenant.id, list(CARD_KINDS)))
+            RETURNING kind, obligation_id, adjustment_id, agent_session_id""", (tenant.id, list(CARD_KINDS)))
         rows = await cur.fetchall()
     sent = 0
     for r in rows:
         payload = await _rebuild(app, tenant, r)
         if payload:
             await send_to_owner(app, tenant, payload, kind=r["kind"], obligation_id=r["obligation_id"],
-                                adjustment_id=r["adjustment_id"], reply_channel=channel)
+                                adjustment_id=r["adjustment_id"], reply_channel=channel,
+                                agent_session_id=r["agent_session_id"])
             sent += 1
     return sent
 
@@ -94,6 +97,16 @@ async def _rebuild(app, tenant, r: dict) -> dict | None:
     from src.loop.upi import rupees
 
     async with app.state.pool.connection() as conn:
+        if r["kind"] == "owner_agent_card":
+            cur = await conn.execute("SELECT id, pending FROM agent_sessions WHERE id = %s AND status = 'WAITING_APPROVAL'",
+                                     (r["agent_session_id"],))
+            sess = await cur.fetchone()
+            if not sess:
+                return None
+            btn = lambda k, t: {"type": "reply", "reply": {"id": f"{k}:{sess['id']}", "title": t}}
+            return {"messaging_product": "whatsapp", "to": tenant.owner_phone, "type": "interactive", "interactive": {
+                "type": "button", "body": {"text": sess["pending"]["card"][:1024]},
+                "action": {"buttons": [btn("ag_ok", "Approve"), btn("ag_no", "Reject")]}}}
         if r["kind"] == "owner_reminder_card":
             cur = await conn.execute(
                 """SELECT o.*, p.canonical_name FROM obligations o JOIN parties p ON p.id = o.party_id

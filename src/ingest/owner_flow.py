@@ -9,6 +9,7 @@ from src.ingest.media import clean_phone_caption, download_media, read_image
 from src.ingest.payload import InboundMessage
 from src.ingest.telegram import link_message, unlink
 from src.ingest.sheet_mapper import SheetRow, map_sheet, parse_amount_paise, parse_date, parse_phone
+from src.agent_loop import resume, start_session
 from src.loop.digest import build_digest
 from src.loop.reminders import decide_reminder
 from src.loop.owner_channel import send_to_owner
@@ -35,14 +36,28 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
                                         tenant_id=tenant_id, adjustment_id=ref, approve=action == "approve")
             if r is None:
                 return "That request was already handled or no longer exists."
+            await resume(app, tenant_id, adjustment_id=ref, approved=r["approved"],   # agent waiting on it, if any
+                         outcome={"owner_decision": "approved" if r["approved"] else "rejected",
+                                  "invoice_ref": r["invoice_ref"], "ledger_updated": r["approved"]},
+                         background=getattr(app.state, "agent_background", True))
             return f"{'Approved' if r['approved'] else 'Rejected'}: invoice {r['invoice_ref']}."
         if action in ("send", "snooze", "paid"):
             return await decide_reminder(app, tenant_id, ref, action, datetime.now(timezone.utc)) \
                 or "That reminder was already handled."
+        if action in ("ag_ok", "ag_no"):
+            ok = await resume(app, tenant_id, sid=ref, approved=action == "ag_ok",
+                              background=getattr(app.state, "agent_background", True))
+            return None if ok else "That was already handled."   # the resumed agent reports the outcome itself
         if action in ("bt_approve", "bt_reject"):
             return await decide_browser_task(app, tenant_id, msg.sender, ref, action == "bt_approve", number_id=msg.number_id,
                                              channel=msg.channel)
         return None
+    if msg.text.strip().lower() == "telegram":
+        return await link_message(app, tenant_id)
+    if msg.text.strip().lower() == "telegram off":
+        return await unlink(app, tenant_id)
+    if getattr(getattr(app.state, "llm", None), "enabled", False):
+        return await _agent(app, tenant_id, msg)
     if msg.kind == "document":
         return await _sheet(app, tenant_id, msg)
     if msg.kind == "image":
@@ -52,13 +67,26 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         return reply
     if msg.kind == "text" and msg.text.lower().startswith("browse "):
         return None  # plan card already sent
-    if msg.text.strip().lower() == "telegram":
-        return await link_message(app, tenant_id)
-    if msg.text.strip().lower() == "telegram off":
-        return await unlink(app, tenant_id)
     if msg.text.strip().lower() in ("digest", "summary", "overdue", "status"):
         return await build_digest(app.state.pool, tenant_id, date.today())
     return HELP
+
+
+async def _agent(app, tenant_id: str, msg: InboundMessage) -> None:
+    """Owner's free text or file starts (or continues) a trusted agent session; it replies itself."""
+    from src import tenants
+
+    files, content = (), msg.text or ""
+    if msg.media_id and msg.kind in ("document", "image"):
+        ref = f"{msg.channel}:{msg.media_id}:{msg.filename or ('photo.jpg' if msg.kind == 'image' else 'file')}"
+        files = (ref,)
+        content = f"{content}\n[The owner attached a file: file_ref={ref}; caption: {msg.caption or '-'}]".strip()
+    if not content:
+        return None
+    tenant = await tenants.by_id(app.state.pool, tenant_id)
+    await start_session(app, tenant=tenant, trust="TRUSTED", trigger="owner_message", content=content,
+                        files=files, channel=msg.channel, background=getattr(app.state, "agent_background", True))
+    return None
 
 
 async def fetch_media(app, msg: InboundMessage) -> tuple[bytes, str]:

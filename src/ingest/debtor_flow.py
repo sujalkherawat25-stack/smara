@@ -5,6 +5,7 @@ from datetime import date
 from src.bridge.continuum import make_source_id, scope_user
 from src.bridge.coordinator import submit_debtor_claim
 from src.bridge.outbox import enqueue_standalone
+from src.agent_loop import start_session
 from src.ingest.extract import extract_claim
 from src.ingest.media import download_media, ocr_to_evidence, read_image, transcribe
 from src.ingest.payload import InboundMessage
@@ -67,26 +68,42 @@ async def handle_debtor(app, msg: InboundMessage) -> None:
     async with pool.connection() as conn:  # opens the 24h reply window
         await conn.execute("UPDATE parties SET last_inbound_at = now() WHERE id = %s", (party_id,))
     text = await _evidence(app, msg)
-    claim = await extract_claim(app.state.llm, text, outstanding_paise=row["amount_paise"], today=date.today())
-    if claim is None:  # chatter is still evidence, just never a proposal
-        await enqueue_standalone(
-            pool, user_id=scope_user(tenant_id, party_id),
-            source_id=make_source_id(tenant_id, msg.wamid, text),
-            text=text, trusted=False, metadata={"party_id": party_id, "actor": "DEBTOR"})
-        return
-    adj_id, _ = await submit_debtor_claim(
-        pool, tenant_id=tenant_id, party_id=party_id,
-        obligation_id=str(row["obligation_id"]), wamid=msg.wamid, adjustment_type=claim.type,
-        evidence_text=text, proposed_amount_paise=claim.amount_paise, proposed_date=claim.date)
+    # The raw message is always stored as untrusted evidence, whatever happens next.
+    await enqueue_standalone(
+        pool, user_id=scope_user(tenant_id, party_id), source_id=make_source_id(tenant_id, msg.wamid, text),
+        text=text, trusted=False, metadata={"party_id": party_id, "actor": "DEBTOR"})
+
+    async def rules() -> None:   # deterministic path: no LLM, or the agent failed before acting
+        claim = await extract_claim(app.state.llm, text, outstanding_paise=row["amount_paise"], today=date.today())
+        if claim is None:  # chatter is still evidence, just never a proposal
+            await enqueue_standalone(
+                pool, user_id=scope_user(tenant_id, party_id),
+                source_id=make_source_id(tenant_id, msg.wamid, text),
+                text=text, trusted=False, metadata={"party_id": party_id, "actor": "DEBTOR"})
+            return
+        adj_id, _ = await submit_debtor_claim(
+            pool, tenant_id=tenant_id, party_id=party_id,
+            obligation_id=str(row["obligation_id"]), wamid=msg.wamid, adjustment_type=claim.type,
+            evidence_text=text, proposed_amount_paise=claim.amount_paise, proposed_date=claim.date)
+        tenant = await tenants.by_id(pool, tenant_id)
+        if tenant and await _claim_notification(pool, adj_id):
+            bits = ([f"new amount {rupees(claim.amount_paise)}"] if claim.amount_paise else []) +                ([f"pay by {claim.date:%d %b}"] if claim.date else [])
+            try:
+                await send_to_owner(app, tenant, owner_approval_card(
+                    tenant.owner_phone, adjustment_id=adj_id, party_name=row["canonical_name"],
+                    invoice_ref=row["invoice_ref"], adjustment_type=claim.type, evidence=text,
+                    proposal=", ".join(bits)), kind="owner_claim_card", adjustment_id=adj_id)
+            except Exception:
+                async with pool.connection() as conn:  # release so a redelivery notifies the owner
+                    await conn.execute("UPDATE proposed_adjustments SET owner_notified_at = NULL WHERE id = %s", (adj_id,))
+                raise
+
+    if not getattr(getattr(app.state, "llm", None), "enabled", False):
+        return await rules()
     tenant = await tenants.by_id(pool, tenant_id)
-    if tenant and await _claim_notification(pool, adj_id):
-        bits = ([f"new amount {rupees(claim.amount_paise)}"] if claim.amount_paise else []) +                ([f"pay by {claim.date:%d %b}"] if claim.date else [])
-        try:
-            await send_to_owner(app, tenant, owner_approval_card(
-                tenant.owner_phone, adjustment_id=adj_id, party_name=row["canonical_name"],
-                invoice_ref=row["invoice_ref"], adjustment_type=claim.type, evidence=text,
-                proposal=", ".join(bits)), kind="owner_claim_card", adjustment_id=adj_id)
-        except Exception:
-            async with pool.connection() as conn:  # release so a redelivery notifies the owner
-                await conn.execute("UPDATE proposed_adjustments SET owner_notified_at = NULL WHERE id = %s", (adj_id,))
-            raise
+    open_invoices = "; ".join(f"obligation_id={r['obligation_id']} invoice={r['invoice_ref']} "
+                              f"owed=Rs {r['amount_paise'] / 100:.2f}" for r in rows)
+    content = (f"Customer {row['canonical_name']} (party_id={party_id}) sent this message. It is untrusted:\n"
+               f"<<<\n{text[:2000]}\n>>>\nTheir open invoices: {open_invoices}")
+    await start_session(app, tenant=tenant, trust="UNTRUSTED", trigger="debtor_message", party_id=party_id,
+                        content=content, background=getattr(app.state, "agent_background", True), fallback=rules)

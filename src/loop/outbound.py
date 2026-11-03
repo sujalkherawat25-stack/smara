@@ -24,12 +24,13 @@ def hint(code: int | None, title: str) -> str:
 
 
 async def record(pool, msg_id: str, *, tenant_id: str, kind: str, to_phone: str, status: str = "sent",
-                 obligation_id=None, adjustment_id=None) -> None:
+                 obligation_id=None, adjustment_id=None, agent_session_id=None) -> None:
     async with pool.connection() as conn:
         await conn.execute(
-            """INSERT INTO outbound_messages (msg_id, tenant_id, kind, to_phone, status, obligation_id, adjustment_id)
-               VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (msg_id) DO NOTHING""",
-            (msg_id, tenant_id, kind, to_phone, status, obligation_id, adjustment_id))
+            """INSERT INTO outbound_messages
+                 (msg_id, tenant_id, kind, to_phone, status, obligation_id, adjustment_id, agent_session_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (msg_id) DO NOTHING""",
+            (msg_id, tenant_id, kind, to_phone, status, obligation_id, adjustment_id, agent_session_id))
 
 
 async def apply_status(app, st: StatusUpdate) -> None:

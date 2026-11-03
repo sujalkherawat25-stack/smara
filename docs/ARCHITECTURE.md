@@ -65,6 +65,23 @@
    approvals, audit       (outbox, ordered)      tokens encrypted (key ring)
 ```
 
+### The agent loop (`src/agent_loop.py`)
+
+Every event — owner message or file, counterparty reply, cron tick — starts or resumes an iterative tool loop, not a fixed pipeline:
+
+```
+event → session (messages in Postgres) → model → tool_calls → PreToolUse ─┬─ allow   → execute → result back to model
+                                                                          ├─ deny    → error back to model
+                                                                          └─ approve → freeze session + owner card ⏸
+owner taps Approve (deterministic code, never the model) → re-check policy → run the frozen call → resume loop
+```
+
+- **Tools:** `query_ledger_sql` (separate read-only Postgres role, row-level security pins it to the tenant, 3 s timeout), `resolve_continuum_memory`, `write_continuum_evidence`, `inspect_and_import_file` (returns sheet vs ledger totals so the agent verifies its import), `browser_step` (one persistent page per session: observe → act → observe), `propose_ledger_adjustment`, `send_whatsapp_message`.
+- **Self-verification:** tool results and errors go back to the model; the prompt requires reading back after any write, and the loop allows retries up to 12 steps.
+- **PreToolUse (`src/agent/policy.py`)** is the only path to a side effect. Counterparty-started sessions are `UNTRUSTED` and may only record evidence or propose an adjustment for their own party; everything else is refused there, whatever the model was told.
+- **Approvals are never model-driven:** the stored arguments the owner saw are the ones executed; a second tap finds nothing waiting.
+- **Fallbacks:** with no model configured, or if the model fails before acting, the deterministic rules path runs, so a claim or reminder is never lost.
+
 ### Layers
 
 - **Channel gateway** — WhatsApp Cloud API webhook (built), Telegram bot (next). Verifies signatures, drops replays, maps the sender to a tenant and labels them *owner* (trusted) or *counterparty* (untrusted).

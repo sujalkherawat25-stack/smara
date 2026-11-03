@@ -28,6 +28,9 @@ async def tick(app, now: datetime) -> int:
         t = known[tid]
         if t is None:
             continue
+        if getattr(getattr(app.state, "llm", None), "enabled", False) and await _agent_reminder(app, t, o):
+            sent += 1
+            continue
         card = reminder_card(t.owner_phone, o, draft_reminder(o, t.upi, app.state.settings.public_base_url), await state_card(app.state.continuum, o))
         try:
             await send_to_owner(app, t, card, kind="owner_reminder_card", obligation_id=o["id"])
@@ -37,6 +40,30 @@ async def tick(app, now: datetime) -> int:
             continue
         sent += 1
     return sent
+
+
+async def _agent_reminder(app, tenant, o: dict) -> bool:
+    """Let the agent read memory and draft the reminder; True if it is now waiting on the owner.
+
+    False means the deterministic card should go out instead, so a due invoice never sits unasked."""
+    from src.agent_loop import start_session
+    from src.loop.upi import rupees, upi_text
+
+    pay = upi_text(tenant.upi["vpa"], o["amount_paise"], o["invoice_ref"]) if tenant.upi else ""
+    content = (f"Invoice {o['invoice_ref']} of {o['canonical_name']} (party_id={o['party_id']}, obligation_id={o['id']}) "
+               f"for {rupees(o['amount_paise'])} was due {o['due_date']}; this is reminder #{o['attempt_count'] + 1}. "
+               f"Check resolve_continuum_memory for promises or disputes first. Then draft ONE short, polite reminder "
+               f"in Hinglish and call send_whatsapp_message with to=<party_id> and obligation_id. "
+               f"Include this payment line exactly: {pay or '(no UPI configured)'}")
+    try:
+        sid = await start_session(app, tenant=tenant, trust="SYSTEM", trigger="cron_reminder", content=content,
+                                  background=False)
+    except Exception:
+        log.exception("agent reminder failed for %s", o["id"])
+        return False
+    async with app.state.pool.connection() as conn:
+        row = await (await conn.execute("SELECT status FROM agent_sessions WHERE id = %s", (sid,))).fetchone()
+    return row["status"] == "WAITING_APPROVAL"
 
 
 async def send_digests(app, local: datetime) -> int:

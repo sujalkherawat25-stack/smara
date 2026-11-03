@@ -26,3 +26,12 @@ class LLM:
 
     async def aclose(self) -> None:
         await self._http.aclose()
+
+    async def chat(self, messages: list[dict], tools: list[dict]) -> dict:
+        """One agent step: returns the assistant message (content and/or tool_calls)."""
+        resp = await self._http.post("/chat/completions", json={
+            "model": self._model, "temperature": 0, "messages": messages,
+            "tools": tools, "tool_choice": "auto",
+        })
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]
