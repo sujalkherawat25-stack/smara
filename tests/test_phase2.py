@@ -57,7 +57,10 @@ def test_upi_and_reminder():
     assert rupees(150_050) == "₹1,500.50"
     o = {"canonical_name": "Ravi", "invoice_ref": "INV-1", "amount_paise": 100_000,
          "due_date": date(2026, 11, 1), "attempt_count": 0}
-    assert "upi://pay" in draft_reminder(o, {"vpa": "s@upi"}) and "upi://" not in draft_reminder(o, None)
+    text = draft_reminder(o, {"vpa": "s@upi"})
+    assert "Pay ₹1,000 to s@upi (UPI). Ref: INV-1" in text and "upi://" not in text   # plain, copyable
+    assert "https://x.test/pay?pa=s@upi" in draft_reminder(o, {"vpa": "s@upi"}, "https://x.test/")
+    assert "UPI" not in draft_reminder(o, None)
 
 
 def test_card_shows_proposal():

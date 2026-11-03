@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from src.bridge.continuum import ContinuumClient, scope_user
 from src import tenants
 from src.bridge.outbox import enqueue_standalone
-from src.loop.upi import rupees, upi_link
+from src.loop.upi import pay_url, rupees, upi_text
 from src.loop.whatsapp import template_message, text_message
 
 log = logging.getLogger(__name__)
@@ -22,12 +22,14 @@ _TONES = (
 )
 
 
-def draft_reminder(o: dict, upi: dict | None) -> str:
+def draft_reminder(o: dict, upi: dict | None, base_url: str = "") -> str:
     text = _TONES[min(o["attempt_count"], len(_TONES) - 1)].format(
         party=o["canonical_name"], ref=o["invoice_ref"], amt=rupees(o["amount_paise"]),
         due=o["due_date"].strftime("%d %b"))
     if upi:
-        text += "\nPay: " + upi_link(upi["vpa"], upi.get("name", ""), o["amount_paise"], o["invoice_ref"])
+        text += "\n" + upi_text(upi["vpa"], o["amount_paise"], o["invoice_ref"])
+        if base_url:
+            text += "\nTap to pay: " + pay_url(base_url, upi["vpa"], upi.get("name", ""), o["amount_paise"], o["invoice_ref"])
     return text
 
 
@@ -101,7 +103,7 @@ def _debtor_payload(o: dict, tenant, settings, now: datetime) -> dict:
     """Free text inside the 24h reply window, the approved template outside it."""
     last = o.get("last_inbound_at")
     if (last and now - last < WINDOW) or not settings.wa_reminder_template:
-        return text_message(o["whatsapp_phone"], draft_reminder(o, tenant.upi))
+        return text_message(o["whatsapp_phone"], draft_reminder(o, tenant.upi, settings.public_base_url))
     return template_message(o["whatsapp_phone"], settings.wa_reminder_template, settings.wa_reminder_lang,
                             [o["canonical_name"], o["invoice_ref"], rupees(o["amount_paise"]), f"{o['due_date']:%d %b}"])
 

@@ -27,7 +27,7 @@ async def tick(app, now: datetime) -> int:
         t = known[tid]
         if t is None:
             continue
-        card = reminder_card(t.owner_phone, o, draft_reminder(o, t.upi), await state_card(app.state.continuum, o))
+        card = reminder_card(t.owner_phone, o, draft_reminder(o, t.upi, app.state.settings.public_base_url), await state_card(app.state.continuum, o))
         try:
             await app.state.wa.send(card, number_id=t.wa_phone_number_id)
         except Exception:

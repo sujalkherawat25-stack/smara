@@ -9,6 +9,7 @@ from src.config import load_settings
 from src.db import migrate, open_pool
 from src.ingest.webhook import router
 from src.loop.llm import LLM
+from src.loop.pay import router as pay_router
 from src.loop.scheduler import run_forever
 from src.loop.whatsapp import WhatsAppClient
 
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Smara Munim", lifespan=lifespan)
 app.include_router(router)
+app.include_router(pay_router)
 
 
 STALE_OUTBOX_S = 1800
