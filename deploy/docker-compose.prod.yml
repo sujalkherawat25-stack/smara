@@ -1,0 +1,53 @@
+# Production stack on the Oracle host, next to MemoryOS.
+#   docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d --build
+# Caddy routes https://ai.syntarus.com/munim/* -> 127.0.0.1:8090 (prefix stripped).
+name: munim
+
+services:
+  munim_postgres:
+    image: postgres:16-alpine
+    container_name: munim_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: munim
+      POSTGRES_PASSWORD: ${MUNIM_DB_PASSWORD:?set MUNIM_DB_PASSWORD in .env}
+      POSTGRES_DB: munim
+    volumes:
+      - munim_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U munim"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [munim]
+
+  munim_app:
+    build: ..
+    image: smara-munim:${MUNIM_VERSION:-local}
+    container_name: munim_app
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql://munim:${MUNIM_DB_PASSWORD}@munim_postgres:5432/munim
+      # Continuum over the docker network, no public round trip
+      CONTINUUM_URL: http://memoryos_backend:8000/v1
+      PUBLIC_BASE_URL: https://ai.syntarus.com/munim
+    ports:
+      - "127.0.0.1:8090:8080"
+    depends_on:
+      munim_postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks: [munim, memoryos_default]
+
+networks:
+  munim: {}
+  memoryos_default:
+    external: true
+
+volumes:
+  munim_pgdata:
