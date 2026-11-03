@@ -1,0 +1,53 @@
+import json
+import os
+from dataclasses import dataclass, field
+
+
+def normalize_phone(raw: str) -> str:
+    return "".join(ch for ch in raw if ch.isdigit())
+
+
+@dataclass(frozen=True)
+class Settings:
+    database_url: str = ""
+    continuum_url: str = "http://localhost:8000"
+    continuum_api_key: str = ""
+    wa_verify_token: str = ""
+    wa_app_secret: str = ""
+    wa_access_token: str = ""
+    wa_phone_number_id: str = ""
+    # owner WhatsApp phone (digits only) -> tenant_id
+    owner_tenants: dict[str, str] = field(default_factory=dict)
+    # tenant_id -> {"vpa": "shop@upi", "name": "Shop Name"}
+    tenant_upi: dict[str, dict] = field(default_factory=dict)
+    # OpenAI-compatible chat endpoint; fast model by default, reasoning model on escalation
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model: str = "glm-5.3-flash"
+    llm_reasoning_model: str = ""
+    sarvam_api_key: str = ""
+    tick_seconds: int = 60
+    digest_hour_ist: int = 9
+
+
+def load_settings() -> Settings:
+    env = os.environ
+    owners = json.loads(env.get("OWNER_TENANTS", "{}"))
+    return Settings(
+        database_url=env.get("DATABASE_URL", ""),
+        continuum_url=env.get("CONTINUUM_URL", "http://localhost:8000"),
+        continuum_api_key=env.get("CONTINUUM_API_KEY", ""),
+        wa_verify_token=env.get("WA_VERIFY_TOKEN", ""),
+        wa_app_secret=env.get("WA_APP_SECRET", ""),
+        wa_access_token=env.get("WA_ACCESS_TOKEN", ""),
+        wa_phone_number_id=env.get("WA_PHONE_NUMBER_ID", ""),
+        owner_tenants={normalize_phone(k): v for k, v in owners.items()},
+        tenant_upi=json.loads(env.get("TENANT_UPI", "{}")),
+        llm_base_url=env.get("LLM_BASE_URL", ""),
+        llm_api_key=env.get("LLM_API_KEY", ""),
+        llm_model=env.get("LLM_MODEL", "glm-5.3-flash"),
+        llm_reasoning_model=env.get("LLM_REASONING_MODEL", ""),
+        sarvam_api_key=env.get("SARVAM_API_KEY", ""),
+        tick_seconds=int(env.get("TICK_SECONDS", "60")),
+        digest_hour_ist=int(env.get("DIGEST_HOUR_IST", "9")),
+    )

@@ -1,0 +1,52 @@
+"""WhatsApp Cloud API sender + Thread A (Owner) interactive card builders."""
+import httpx
+
+GRAPH = "https://graph.facebook.com/v20.0"
+
+
+def owner_approval_card(
+    to: str, *, adjustment_id: str, party_name: str, invoice_ref: str,
+    adjustment_type: str, evidence: str, proposal: str = "",
+) -> dict:
+    """Interactive [Approve]/[Reject] card. Button ids carry the adjustment id."""
+    body = (
+        f"{party_name} wrote about invoice {invoice_ref} ({adjustment_type}):\n"
+        f"\"{evidence[:300]}\"\n"
+        + (f"\nProposed: {proposal}\n" if proposal else "")
+        + "\nUnverified. Apply this?"
+    )
+    return {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": {"text": body[:1024]},
+            "action": {"buttons": [
+                {"type": "reply", "reply": {"id": f"approve:{adjustment_id}", "title": "Approve"}},
+                {"type": "reply", "reply": {"id": f"reject:{adjustment_id}", "title": "Reject"}},
+            ]},
+        },
+    }
+
+
+def text_message(to: str, text: str) -> dict:
+    return {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
+
+
+class WhatsAppClient:
+    """Sends payloads. Owner-bound messages only in Phase 1; debtor-bound
+    sends must go through WAITING_OWNER_APPROVAL (Phase 2)."""
+
+    def __init__(self, phone_number_id: str, access_token: str, client: httpx.AsyncClient | None = None):
+        self._url = f"{GRAPH}/{phone_number_id}/messages"
+        self._http = client or httpx.AsyncClient(
+            headers={"Authorization": f"Bearer {access_token}"}, timeout=15
+        )
+
+    async def send(self, payload: dict) -> None:
+        resp = await self._http.post(self._url, json=payload)
+        resp.raise_for_status()
+
+    async def aclose(self) -> None:
+        await self._http.aclose()
