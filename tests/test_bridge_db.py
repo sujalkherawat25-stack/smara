@@ -268,3 +268,24 @@ async def test_agent_searches_then_reads_a_result(env):
     await dispatch(env.app, owner("ws1", "best pizza shop in banswara?"))
     assert [s["url"] for s in br.steps if s["action"] == "navigate"][1] == "https://example.org/pizza"
     assert env.app.state.wa.sent[-1]["text"]["body"].startswith("Mario")
+
+
+async def test_search_api_is_used_on_the_server_and_falls_back_to_the_browser(env):
+    from src.agent.policy import SessionCtx
+    from src.agent import web
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(200, json={"web": {"results": [{"title": "Mario's", "url": "https://example.org/m", "description": "Rs 299"}]}})
+    real = web.api_search
+
+    async def fake(key, query, client=None):
+        return await real(key, query, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    web.api_search = fake
+    try:
+        env.app.state.settings = type("S", (), {"brave_search_api_key": "k"})()
+        out = await web.web_search(env.app, SessionCtx(id="s", tenant_id=env.t.id, trust="TRUSTED"), {"query": "pizza banswara"})
+    finally:
+        web.api_search = real
+    assert out["engine"] == "brave-api" and out["results"][0]["url"] == "https://example.org/m" and "q=pizza+banswara" in calls[0]

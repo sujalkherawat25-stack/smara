@@ -37,6 +37,7 @@ class Settings:
     llm_agent_model: str = ""
     llm_max_concurrency: int = 4
     llm_agent_rpm: float = 0
+    brave_search_api_key: str = ""
     llm_fallback_model: str = ""
     sarvam_api_key: str = ""
     tick_seconds: int = 60
@@ -72,6 +73,7 @@ def load_settings() -> Settings:
         llm_agent_model=env.get("LLM_AGENT_MODEL", ""),
         llm_max_concurrency=int(env.get("LLM_MAX_CONCURRENCY", "4")),
         llm_agent_rpm=float(env.get("LLM_AGENT_RPM", "0")),
+        brave_search_api_key=env.get("BRAVE_SEARCH_API_KEY", ""),
         llm_fallback_model=env.get("LLM_FALLBACK_MODEL", ""),
         sarvam_api_key=env.get("SARVAM_API_KEY", ""),
         tick_seconds=int(env.get("TICK_SECONDS", "60")),

@@ -8,6 +8,14 @@ from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
 from src.agent.policy import SessionCtx
 
+
+async def _device_online(app, ctx: SessionCtx):
+    from src.bridge.device import online_device
+    try:
+        return await online_device(app.state.pool, ctx.tenant_id)
+    except Exception:
+        return None
+
 ENGINES = (
     ("duckduckgo", "https://html.duckduckgo.com/html/?q={q}"),
     ("bing", "https://www.bing.com/search?q={q}"),
@@ -47,11 +55,36 @@ def parse_results(elements: list[dict]) -> list[dict]:
     return list(seen.values())[:MAX_RESULTS]
 
 
+async def api_search(key: str, query: str, client=None) -> list[dict]:
+    """Brave Search API: reliable from a server (no bot checks). Used first when BRAVE_SEARCH_API_KEY is set."""
+    import httpx
+    http = client or httpx.AsyncClient(timeout=15)
+    try:
+        r = await http.get("https://api.search.brave.com/res/v1/web/search", params={"q": query, "count": MAX_RESULTS, "country": "in"},
+                           headers={"X-Subscription-Token": key, "Accept": "application/json"})
+        r.raise_for_status()
+        rows = (r.json().get("web") or {}).get("results") or []
+    finally:
+        if client is None:
+            await http.aclose()
+    return [{"title": x.get("title", "")[:150], "url": x.get("url", ""), "snippet": (x.get("description") or "")[:300]}
+            for x in rows if x.get("url", "").startswith("http")][:MAX_RESULTS]
+
+
 async def web_search(app, ctx: SessionCtx, args: dict) -> dict:
     query = " ".join(str(args.get("query", "")).split())[:300]
     if len(query) < 2:
         return {"error": "query is too short"}
     browsers, sid, last_error = app.state.browsers, f"{ctx.id}:search", ""
+    on_device = bool(await _device_online(app, ctx))
+    key = getattr(app.state.settings, "brave_search_api_key", "")
+    if key and not on_device:        # a PC browser (real, headed, home IP) is the better searcher when it is connected
+        try:
+            if results := await api_search(key, query):
+                return {"query": query, "engine": "brave-api", "via": "api", "results": results,
+                        "next": "open a result with browser_step navigate, then read it"}
+        except Exception as e:
+            last_error = f"search api failed: {type(e).__name__}"
     try:
         for name, template in ENGINES:
             out = await browsers.step(sid, {"action": "navigate", "url": template.format(q=quote_plus(query))},
