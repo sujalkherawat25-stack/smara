@@ -1,4 +1,6 @@
 import os
+
+from src.clock import parse_quiet_hours
 from dataclasses import dataclass, field
 
 
@@ -36,6 +38,10 @@ class Settings:
     sarvam_api_key: str = ""
     tick_seconds: int = 60
     digest_hour_ist: int = 9
+    # Nothing proactive (cards, digests, reminders) goes out between these IST hours
+    # 0/0 = never quiet for a bare Settings(); production gets 21-8 from load_settings (QUIET_HOURS_IST)
+    quiet_start_hour: int = 0
+    quiet_end_hour: int = 0
 
 
 def load_settings() -> Settings:
@@ -64,4 +70,6 @@ def load_settings() -> Settings:
         sarvam_api_key=env.get("SARVAM_API_KEY", ""),
         tick_seconds=int(env.get("TICK_SECONDS", "60")),
         digest_hour_ist=int(env.get("DIGEST_HOUR_IST", "9")),
+        quiet_start_hour=parse_quiet_hours(env.get("QUIET_HOURS_IST", "21-8"))[0],
+        quiet_end_hour=parse_quiet_hours(env.get("QUIET_HOURS_IST", "21-8"))[1],
     )

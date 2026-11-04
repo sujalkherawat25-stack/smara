@@ -11,6 +11,7 @@ from decimal import Decimal
 import psycopg
 
 from src.agent.policy import SessionCtx
+from src.agent.prompt import forget_standing
 from src.bridge.continuum import scope_user
 from src.bridge.outbox import enqueue_standalone
 
@@ -36,10 +37,28 @@ def _fn(name: str, desc: str, props: dict, required: list[str]) -> dict:
 _S = {"type": "string"}
 TOOLS = [
     _fn("query_ledger_sql", "Run ONE read-only SELECT on the shop's ledger. " + LEDGER_SCHEMA, {"sql": _S}, ["sql"]),
-    _fn("resolve_continuum_memory", "Get the evidence-backed state card (promises, disputes, history) for a party.",
+    _fn("get_current_time", "The current date and time in India (IST), the weekday, and whether it is business hours. "
+        "Call this whenever the date or time matters; never guess it.", {}, []),
+    _fn("resolve_continuum_memory", "Get the evidence-backed state card (promises, disputes, history) for a party. "
+        "party_id='shop' reads the owner's shop-wide notes and standing instructions.",
         {"party_id": _S, "query": _S}, ["party_id", "query"]),
-    _fn("write_continuum_evidence", "Record a fact or message about a party as evidence in memory.",
+    _fn("write_continuum_evidence", "Record a fact, promise or instruction in memory about a party. party_id='shop' "
+        "stores shop-wide notes and standing instructions (e.g. 'never remind Sharma before Friday').",
         {"party_id": _S, "text": _S}, ["party_id", "text"]),
+    _fn("schedule_followup", "Wake yourself up later to do something (e.g. check if a customer paid, nudge the owner). "
+        "Give either at_ist ('YYYY-MM-DD HH:MM', Indian time) or in_minutes. Times in quiet hours (9 PM to 8 AM) move to "
+        "the next morning. When it fires you get the instruction and can use all tools; outward actions still need approval.",
+        {"instruction": _S, "at_ist": _S, "in_minutes": {"type": "integer"}}, ["instruction"]),
+    _fn("list_followups", "List your pending scheduled follow-ups.", {}, []),
+    _fn("cancel_followup", "Cancel a pending follow-up by task_id.", {"task_id": _S}, ["task_id"]),
+    _fn("check_gstin", "Validate a GSTIN's format and checksum (does not check live registration status).",
+        {"gstin": _S}, ["gstin"]),
+    _fn("build_payment_request", "Prepare the payment request text for an invoice: amount, the shop's UPI ID and a tap-to-pay "
+        "link. It only builds text; sending it to a customer is a separate send_whatsapp_message call.",
+        {"obligation_id": _S}, ["obligation_id"]),
+    _fn("send_file_to_owner", "Send the owner a file you created in the sandbox (PDF statement, Excel report, CSV). "
+        "file_ref must be one of the output_file_refs from run_python.",
+        {"file_ref": _S, "caption": _S}, ["file_ref"]),
     _fn("inspect_and_import_file", "Open a file attached to this conversation. mode=inspect previews the rows "
         "and totals; mode=import loads them into the ledger and reports sheet vs ledger totals to verify.",
         {"file_ref": _S, "mode": {"type": "string", "enum": ["inspect", "import"]}}, ["file_ref", "mode"]),
@@ -47,12 +66,15 @@ TOOLS = [
         "navigate/read run immediately; click/fill/press need the owner's approval.",
         {"action": {"type": "string", "enum": ["navigate", "read", "click", "fill", "press"]},
          "url": _S, "selector": _S, "value": _S}, ["action"]),
-    _fn("propose_ledger_adjustment", "Propose changing an invoice: DISCOUNT_CLAIM or PARTIAL_PAYMENT (set "
-        "new_amount_rupees = what is still owed after it), PROMISE_DATE_CHANGE (new_due_date), or UTR_PROOF "
-        "(fully paid, with proof). Nothing changes until the owner approves.",
+    _fn("propose_ledger_adjustment", "Propose changing an invoice: PARTIAL_PAYMENT (give paid_rupees), DISCOUNT_CLAIM "
+        "(give discount_percent, or new_amount_rupees if they state a new total), PROMISE_DATE_CHANGE (new_due_date), or "
+        "UTR_PROOF (fully paid, with proof). Do not do the arithmetic yourself. Nothing changes until the owner approves.",
         {"obligation_id": _S, "kind": {"type": "string",
                                        "enum": ["DISCOUNT_CLAIM", "PARTIAL_PAYMENT", "PROMISE_DATE_CHANGE", "UTR_PROOF"]},
-         "new_amount_rupees": {"type": "number"}, "new_due_date": {"type": "string", "description": "YYYY-MM-DD"},
+         "paid_rupees": {"type": "number", "description": "PARTIAL_PAYMENT: how much was paid; the system computes what remains"},
+         "discount_percent": {"type": "number", "description": "DISCOUNT_CLAIM by percentage; the system computes the new total"},
+         "new_amount_rupees": {"type": "number", "description": "only when the customer states the new total themselves"},
+         "new_due_date": {"type": "string", "description": "YYYY-MM-DD"},
          "evidence": _S}, ["obligation_id", "kind", "evidence"]),
     _fn("run_python", "Run Python in an isolated sandbox (no network, 60 s) for Tally/Excel/CSV work. "
         "Attached files are at ./in/<filename>; write output files to ./out/ (they come back as file_refs you "
@@ -112,11 +134,19 @@ async def query_ledger_sql(app, ctx: SessionCtx, args: dict) -> dict:
     return {"rows": rows[:MAX_ROWS], "row_count": min(len(rows), MAX_ROWS), "truncated": len(rows) > MAX_ROWS}
 
 
+async def _memory_scope(app, ctx: SessionCtx, party_id) -> str | None:
+    """Continuum scope for a party of this shop, or for the shop itself ('shop'). None if not allowed."""
+    if str(party_id) == "shop":
+        return scope_user(ctx.tenant_id, "shop")
+    return scope_user(ctx.tenant_id, str(party_id)) if await party_in_tenant(app.state.pool, ctx.tenant_id, party_id) else None
+
+
 async def resolve_continuum_memory(app, ctx: SessionCtx, args: dict) -> dict:
-    if not await party_in_tenant(app.state.pool, ctx.tenant_id, args.get("party_id")):
-        return {"error": "unknown party_id for this shop"}
+    scope = await _memory_scope(app, ctx, args.get("party_id"))
+    if scope is None:
+        return {"error": "unknown party_id for this shop (use 'shop' for shop-wide notes)"}
     try:
-        res = await app.state.continuum.resolve(user_id=scope_user(ctx.tenant_id, str(args["party_id"])),
+        res = await app.state.continuum.resolve(user_id=scope,
                                                 query=str(args.get("query", ""))[:500])
     except Exception as e:
         return {"error": f"memory unavailable: {type(e).__name__}"}
@@ -126,12 +156,15 @@ async def resolve_continuum_memory(app, ctx: SessionCtx, args: dict) -> dict:
 
 async def write_continuum_evidence(app, ctx: SessionCtx, args: dict) -> dict:
     party = str(args.get("party_id", ""))
-    if not await party_in_tenant(app.state.pool, ctx.tenant_id, party):
-        return {"error": "unknown party_id for this shop"}
+    scope = await _memory_scope(app, ctx, party)
+    if scope is None:
+        return {"error": "unknown party_id for this shop (use 'shop' for shop-wide notes)"}
     text = str(args.get("text", "")).strip()[:4000]
     if not text:
         return {"error": "text is empty"}
     sid = re.sub(r"[^A-Za-z0-9._:-]", "-", f"agent_{ctx.id}_{ctx.call_id}")[:200]
-    await enqueue_standalone(app.state.pool, user_id=scope_user(ctx.tenant_id, party), source_id=sid, text=text,
+    if party == "shop":
+        forget_standing(ctx.tenant_id)            # the next turn re-reads the updated instructions
+    await enqueue_standalone(app.state.pool, user_id=scope, source_id=sid, text=text,
                              trusted=ctx.trust != "UNTRUSTED", metadata={"actor": ctx.trust, "session": ctx.id})
     return {"queued": True, "trusted": ctx.trust != "UNTRUSTED", "source_id": sid}

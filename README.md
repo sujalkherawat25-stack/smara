@@ -50,9 +50,33 @@ python -m evals.run_claims --show     # add --llm to score the model path
 
 DB tests are skipped when `TEST_DATABASE_URL` is unset and they drop the `public` schema, so use a scratch database (`createdb munim_test`), never your dev one.
 
+## What the hosted agent can do
+
+| Tool | Tier | Purpose |
+| --- | --- | --- |
+| `query_ledger_sql` | read | Read-only SQL as a locked-down Postgres role, pinned to the shop by row-level security |
+| `get_current_time` | read | IST date, time, weekday, business hours (the prompt is also rebuilt fresh every run) |
+| `run_python` | read | Isolated sandbox for Excel/CSV/Tally XML/PDF work; helpers for Indian amounts, Tally, PDF statements, XLSX |
+| `inspect_and_import_file` | read / internal | Preview or import a sheet and compare sheet vs ledger totals |
+| `resolve_continuum_memory` / `write_continuum_evidence` | read / internal | Per-customer memory, and shop-wide notes and standing instructions (`party_id='shop'`) |
+| `schedule_followup` / `list_followups` / `cancel_followup` | internal | The agent plans its own future work (25 pending, 50 per day per shop) |
+| `send_file_to_owner` | internal | Sends a PDF/XLSX/CSV the sandbox produced to the owner (WhatsApp or Telegram) |
+| `check_gstin`, `build_payment_request` | read | GSTIN checksum, UPI payment text and tap-to-pay link |
+| `browser_step` | read / gated | One interactive page per session; navigate and read run, click/fill/press need approval |
+| `propose_ledger_adjustment` | gated | Discount, part-payment, new date, paid-with-proof; the server computes the arithmetic |
+| `send_whatsapp_message` | owner: internal, customer: gated | Customers are messaged only after the owner approves the exact text |
+
+Owner voice notes are transcribed (Sarvam) and handled like text. Long conversations are compacted
+(old tool output truncated, oldest turns dropped whole) so the context stays bounded.
+
+**Quiet hours** (`QUIET_HOURS_IST`, default 21-8): nothing proactive is sent. Reminders do not start,
+cards and agent notes wait and are released at opening (as one template nudge if the owner's WhatsApp window
+is closed), the digest only goes out 9:00-12:00, and a customer message the owner approved at night is
+sent automatically when the shop opens. Replies to something the owner just wrote are never delayed.
+
 ## Agent harness
 
-`evals/agent_harness.py` runs 15 end-to-end tasks through the real loop, policy and sandbox with a real model
+`evals/agent_harness.py` runs 22 end-to-end tasks through the real loop, policy and sandbox with a real model
 (Q&A, analysis, Excel and Tally XML imports, GST analysis, bank reconciliation, partial payment, debtor
 injection, UTR proof, chatter, gated reminder, mark-paid, cron with memory, tenant isolation). Tasks are
 scored from ledger state and outbound messages, never from the model's own claims.
@@ -68,6 +92,7 @@ read-only root, tmpfs scratch, 2 GB / 1.5 CPU / 256 pids, each job as `nobody` w
 limits, and job directories private to root. `sandbox/munim_helpers.py` parses Tally XML, finds real header
 rows in Excel reports, and reads Indian amounts and dates. Output files become file refs the verifying
 importer can load. Set `SANDBOX_MODE=local` for development only (no isolation).
+`scripts/continuum_check.py` does a live Continuum round trip (write, ingest, resolve, isolation, delete) on a throwaway scope.
 
 ## Tenants and WhatsApp numbers
 

@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from src.bridge.coordinator import decide_adjustment
 from src.ingest.box_commands import decide_browser_task, handle_text
 from src.ingest.importer import import_rows
-from src.ingest.media import clean_phone_caption, download_media, read_image
+from src.ingest.media import clean_phone_caption, download_media, read_image, transcribe
 from src.ingest.payload import InboundMessage
 from src.ingest.telegram import link_message, unlink
 from src.ingest.sheet_mapper import SheetRow, map_sheet, parse_amount_paise, parse_date, parse_phone
@@ -78,7 +78,17 @@ async def _agent(app, tenant_id: str, msg: InboundMessage) -> None:
     from src import tenants
 
     files, content = (), msg.text or ""
-    if msg.media_id and msg.kind in ("document", "image"):
+    if msg.kind == "audio" and msg.media_id:               # voice note: transcribe, then treat as text
+        spoken = ""
+        try:
+            data, mime = await fetch_media(app, msg)
+            spoken = await transcribe(app.state.settings.sarvam_api_key, data, mime)
+        except Exception:
+            log.exception("owner voice transcription failed")
+        if not spoken.strip():
+            return "Voice note samajh nahi aaya. Kripya type karke bhejiye ya dobara bolkar bhejiye."
+        content = f"[voice note, transcribed] {spoken.strip()}"
+    elif msg.media_id and msg.kind in ("document", "image"):
         ref = f"{msg.channel}:{msg.media_id}:{msg.filename or ('photo.jpg' if msg.kind == 'image' else 'file')}"
         files = (ref,)
         content = f"{content}\n[The owner attached a file: file_ref={ref}; caption: {msg.caption or '-'}]".strip()

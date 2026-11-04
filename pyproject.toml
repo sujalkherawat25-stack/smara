@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<9", "pytest-asyncio>=0.24,<1", "pandas>=2.2,<4"]
+test = ["pytest>=8,<9", "pytest-asyncio>=0.24,<1", "pandas>=2.2,<4", "reportlab>=4.2,<5"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

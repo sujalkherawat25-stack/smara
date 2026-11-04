@@ -54,11 +54,15 @@ class ScriptLLM:
 
 class FakeWA:
     def __init__(self):
-        self.sent = []
+        self.sent, self.uploads = [], []
 
     async def send(self, payload, **kw):
         self.sent.append(payload)
         return f"wamid.{next(_ids)}"
+
+    async def upload_media(self, data, mime, filename, **kw):
+        self.uploads.append((filename, mime, len(data)))
+        return f"media.{len(self.uploads)}"
 
     def to(self, phone):
         return [m for m in self.sent if m["to"] == phone]

@@ -52,6 +52,14 @@ class WhatsAppClient:
         resp.raise_for_status()
         return ((resp.json().get("messages") or [{}])[0]).get("id")
 
+    async def upload_media(self, data: bytes, mime: str, filename: str, *, number_id: str | None = None) -> str:
+        """Upload a file to WhatsApp and return its media id (used to send it as a document)."""
+        resp = await self._http.post(f"{GRAPH}/{number_id or self._default_number}/media",
+                                     data={"messaging_product": "whatsapp", "type": mime},
+                                     files={"file": (filename, data, mime)})
+        resp.raise_for_status()
+        return resp.json()["id"]
+
     async def aclose(self) -> None:
         await self._http.aclose()
 
@@ -61,3 +69,10 @@ def template_message(to: str, name: str, lang: str, params: list[str]) -> dict:
     return {"messaging_product": "whatsapp", "to": to, "type": "template", "template": {
         "name": name, "language": {"code": lang},
         "components": [{"type": "body", "parameters": [{"type": "text", "text": p} for p in params]}]}}
+
+
+def document_message(to: str, media_id: str, filename: str, caption: str = "") -> dict:
+    doc = {"id": media_id, "filename": filename}
+    if caption:
+        doc["caption"] = caption[:1000]
+    return {"messaging_product": "whatsapp", "to": to, "type": "document", "document": doc}

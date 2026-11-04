@@ -142,3 +142,48 @@ def tally_receivables(path, default_credit_days: int = 30) -> list[dict]:
             out.append({"party": v["party"], "phone": phones.get(v["party"], ""), "invoice": v["number"],
                         "due_date": v["date"] + timedelta(days=days) if v["date"] else None, "amount": v["amount"]})
     return out
+
+
+def statement_pdf(path, *, shop: str, party: str, rows: list[dict], as_of=None, note: str = "") -> str:
+    """Account statement PDF for one customer. rows: invoice, date, due_date, amount (rupees), paid (rupees, optional).
+    Writes `path` (use out/statement.pdf) and returns it. Totals are computed here, so print or RESULT them."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    styles = getSampleStyleSheet()
+    fmt = lambda n: f"Rs {n:,.2f}"
+    d = lambda v: v.strftime("%d %b %Y") if isinstance(v, (date, datetime)) else (str(v) if v else "")
+    table = [["Invoice", "Date", "Due", "Amount", "Paid", "Balance"]]
+    total = paid_total = 0.0
+    for r in rows:
+        amt, paid = float(r["amount"]), float(r.get("paid") or 0)
+        total, paid_total = total + amt, paid_total + paid
+        table.append([r["invoice"], d(r.get("date")), d(r.get("due_date")), fmt(amt), fmt(paid), fmt(amt - paid)])
+    table.append(["Total", "", "", fmt(total), fmt(paid_total), fmt(total - paid_total)])
+    t = Table(table, repeatRows=1, hAlign="LEFT")
+    t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f3a5f")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                           ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"), ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
+                           ("GRID", (0, 0), (-1, -1), 0.25, colors.grey), ("FONTSIZE", (0, 0), (-1, -1), 9)]))
+    story = [Paragraph(shop, styles["Title"]), Paragraph(f"Statement of account: {party}", styles["Heading2"]),
+             Paragraph(f"As of {d(as_of or date.today())}", styles["Normal"]), Spacer(1, 12), t]
+    if note:
+        story += [Spacer(1, 12), Paragraph(note, styles["Normal"])]
+    SimpleDocTemplate(str(path), pagesize=A4, title=f"Statement - {party}").build(story)
+    return str(path)
+
+
+def write_xlsx(sheets: dict, path="out/report.xlsx") -> str:
+    """Write {sheet_name: DataFrame} to an Excel file with a frozen header row and auto column widths."""
+    import pandas as pd
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with pd.ExcelWriter(path, engine="openpyxl") as xw:
+        for name, df in sheets.items():
+            df.to_excel(xw, sheet_name=str(name)[:31], index=False)
+            ws = xw.sheets[str(name)[:31]]
+            ws.freeze_panes = "A2"
+            for col in ws.columns:
+                ws.column_dimensions[col[0].column_letter].width = min(48, max(10, max(len(str(c.value or "")) for c in col) + 2))
+    return str(path)

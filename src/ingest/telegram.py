@@ -35,6 +35,11 @@ class TelegramClient:
     async def send(self, payload: dict) -> None:
         await self._call("sendMessage", payload)
 
+    async def send_document(self, chat_id: int, data: bytes, filename: str, caption: str = "") -> None:
+        resp = await self._http.post(f"{self._bot}/sendDocument", data={"chat_id": chat_id, "caption": caption[:1000]},
+                                     files={"document": (filename, data)})
+        resp.raise_for_status()
+
     async def answer(self, callback_id: str, text: str = "") -> None:
         await self._call("answerCallbackQuery", {"callback_query_id": callback_id, "text": text})
 

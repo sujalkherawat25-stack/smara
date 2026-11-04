@@ -77,6 +77,8 @@ owner taps Approve (deterministic code, never the model) → re-check policy →
 ```
 
 - **Tools:** `query_ledger_sql` (separate read-only Postgres role, row-level security pins it to the tenant, 3 s timeout), `resolve_continuum_memory`, `write_continuum_evidence`, `inspect_and_import_file` (returns sheet vs ledger totals so the agent verifies its import), `browser_step` (one persistent page per session: observe → act → observe), `propose_ledger_adjustment`, `send_whatsapp_message`.
+- **Time and context:** the system prompt is rebuilt at the start of every run (IST date and time, live ledger snapshot, the owner's standing instructions from shop memory), so a reused conversation never carries yesterday's date. `get_current_time` is the only source of time the agent may trust, and old tool output is compacted to keep the context bounded.
+- **Its own future work:** `schedule_followup` writes to `agent_tasks`; a scheduler tick wakes a SYSTEM session when due. Approved customer messages that fall in quiet hours become deferred `send_message` tasks. Neither runs between 21:00 and 08:00 IST.
 - **Self-verification:** tool results and errors go back to the model; the prompt requires reading back after any write, and the loop allows retries up to 12 steps.
 - **PreToolUse (`src/agent/policy.py`)** is the only path to a side effect. Counterparty-started sessions are `UNTRUSTED` and may only record evidence or propose an adjustment for their own party; everything else is refused there, whatever the model was told.
 - **Approvals are never model-driven:** the stored arguments the owner saw are the ones executed; a second tap finds nothing waiting.

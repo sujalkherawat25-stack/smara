@@ -5,6 +5,7 @@ and puts the owner's Approve/Reject card up; the session then suspends.
 `execute_approved` runs only after the owner tapped Approve, using the exact
 arguments that were frozen in the session when the card was shown.
 """
+import json
 from datetime import date, datetime, timedelta, timezone
 
 from src import clock
@@ -74,6 +75,25 @@ async def _obligation(pool, ctx: SessionCtx, oid) -> dict | None:
         return await cur.fetchone()
 
 
+def _compute_amount(args: dict, owed: float) -> str | None:
+    """The model states what the customer said; the arithmetic is ours. paid_rupees and discount_percent
+    set new_amount_rupees (what is still owed) deterministically, overriding any figure the model computed."""
+    try:
+        if args.get("kind") == "PARTIAL_PAYMENT" and args.get("paid_rupees") is not None:
+            paid = float(args["paid_rupees"])
+            if not 0 < paid < owed:
+                return f"paid_rupees must be above 0 and below the amount owed (Rs {owed:,.2f})"
+            args["new_amount_rupees"] = round(owed - paid, 2)
+        elif args.get("kind") == "DISCOUNT_CLAIM" and args.get("discount_percent") is not None:
+            pct = float(args["discount_percent"])
+            if not 0 < pct < 100:
+                return "discount_percent must be between 0 and 100"
+            args["new_amount_rupees"] = round(owed * (1 - pct / 100), 2)
+    except (TypeError, ValueError):
+        return "paid_rupees / discount_percent must be numbers"
+    return None
+
+
 async def validate_gated(app, ctx: SessionCtx, name: str, args: dict) -> str | None:
     """Concrete checks before any card is shown. Returns an error for the model, or None."""
     pool = app.state.pool
@@ -90,8 +110,11 @@ async def validate_gated(app, ctx: SessionCtx, name: str, args: dict) -> str | N
             return "unknown or already paid obligation_id"
         if args.get("kind") not in ("DISCOUNT_CLAIM", "PARTIAL_PAYMENT", "PROMISE_DATE_CHANGE", "UTR_PROOF"):
             return "kind must be DISCOUNT_CLAIM, PARTIAL_PAYMENT, PROMISE_DATE_CHANGE or UTR_PROOF"
+        err = _compute_amount(args, o["amount_paise"] / 100)
+        if err:
+            return err
         if args["kind"] in ("DISCOUNT_CLAIM", "PARTIAL_PAYMENT") and args.get("new_amount_rupees") is None:
-            return "new_amount_rupees (what is still owed afterwards) is required for this kind"
+            return "give paid_rupees (part-payment), discount_percent, or new_amount_rupees (the new total owed)"
         if ctx.trust == "UNTRUSTED" and str(o["party_id"]) != ctx.party_id:
             return "a counterparty may only propose changes to its own invoices"
         amt = args.get("new_amount_rupees")
@@ -144,6 +167,23 @@ async def execute_approved(app, ctx: SessionCtx, tenant, name: str, args: dict) 
         return await app.state.browsers.step(ctx.id, args)
     if name != "send_whatsapp_message":
         return {"error": f"{name} cannot be executed here"}
+    s = app.state.settings
+    if clock.is_quiet(s):
+        # The owner approved this exact text, but customers are not messaged at night: send it when the shop opens.
+        at = clock.next_open(s)
+        p = await party_in_tenant(app.state.pool, ctx.tenant_id, args["to"])
+        async with app.state.pool.connection() as conn:
+            await conn.execute(
+                """INSERT INTO agent_tasks (tenant_id, run_at, kind, payload, created_by_session)
+                   VALUES (%s, %s, 'send_message', %s, %s)""",
+                (ctx.tenant_id, at, json.dumps({**args, "label": p["canonical_name"]}), ctx.id))
+        return {"sent": False, "deferred": True, "will_send_at_ist": at.strftime("%Y-%m-%d %H:%M"),
+                "note": "Approved. It is quiet hours, so it will be sent automatically when the shop opens."}
+    return await deliver_message(app, ctx, tenant, args)
+
+
+async def deliver_message(app, ctx: SessionCtx, tenant, args: dict) -> dict:
+    """Send an owner-approved message to a customer: free text inside the 24h window, the approved template outside it."""
     pool, s, now = app.state.pool, app.state.settings, datetime.now(timezone.utc)
     p = await party_in_tenant(pool, ctx.tenant_id, args["to"])
     o = await _obligation(pool, ctx, args["obligation_id"]) if args.get("obligation_id") else None

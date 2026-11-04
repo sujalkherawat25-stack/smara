@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from src.bridge.continuum import ContinuumClient, scope_user
-from src import tenants
+from src import clock, tenants
 from src.bridge.outbox import enqueue_standalone
 from src.loop.outbound import record
 from src.loop.upi import pay_url, rupees, upi_text
@@ -112,6 +112,9 @@ def _debtor_payload(o: dict, tenant, settings, now: datetime) -> dict:
 async def decide_reminder(app, tenant_id: str, obligation_id: str, action: str, now: datetime) -> str | None:
     """Owner tap on a reminder card. Returns a reply for the owner, None if stale."""
     pool, s = app.state.pool, app.state.settings
+    if action == "send" and clock.is_quiet(s, now):
+        return (f"Abhi raat ka samay hai ({s.quiet_start_hour}:00-{s.quiet_end_hour}:00 IST); customers ko is waqt message nahi "
+                f"bhejte. Subah {s.quiet_end_hour}:00 ke baad Send dabayein.")
     async with pool.connection() as conn:
         async with conn.transaction():
             cur = await conn.execute(

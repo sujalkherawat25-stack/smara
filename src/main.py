@@ -66,7 +66,14 @@ async def healthz(response: Response):
     ok = ob["dead"] == 0 and ob["oldest_pending_s"] < STALE_OUTBOX_S and sandbox_ok
     if not ok:
         response.status_code = 503
+    from src import clock
+    async with app.state.pool.connection() as conn:
+        ops = await (await conn.execute(
+            """SELECT (SELECT count(*) FROM agent_tasks WHERE status = 'PENDING') tasks_pending,
+                      (SELECT count(*) FROM outbound_messages WHERE status = 'held') cards_held,
+                      (SELECT count(*) FROM agent_sessions WHERE status = 'FAILED' AND updated_at > now() - interval '1 hour') failed_sessions_1h""")).fetchone()
     return {"ok": ok, "db": True, "outbox": ob, "sandbox": sandbox_ok, "continuum": await _continuum_probe(),
+            "ops": {**ops, "quiet_hours_now": clock.is_quiet(st.settings)},
             "agent_model": st.llm.agent_model if getattr(st, "llm", None) and st.llm.enabled else None}
 
 

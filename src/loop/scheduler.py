@@ -2,11 +2,12 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from src import tenants
+from src import clock, tenants
 from src.bridge.outbox import drain
 from src.loop.digest import build_digest
 from src.loop.reminders import claim_due, draft_reminder, release_claim, reminder_card, state_card
-from src.loop.owner_channel import send_to_owner
+from src.loop.owner_channel import flush_held, send_to_owner
+from src.loop.tasks import run_due
 from src.loop.whatsapp import text_message
 
 log = logging.getLogger(__name__)
@@ -21,6 +22,13 @@ async def tick(app, now: datetime) -> int:
         await drain(pool, app.state.continuum, now)
     except Exception:
         log.exception("outbox drain failed")  # must never block reminders
+    if clock.is_quiet(app.state.settings, now):
+        return 0          # nothing proactive at night: reminders wait, tasks wait, cards stay held
+    try:
+        await flush_held(app)
+        await run_due(app, now)
+    except Exception:
+        log.exception("held-card flush / scheduled tasks failed")
     for o in await claim_due(pool, now):
         tid = str(o["tenant_id"])
         if tid not in known:
@@ -88,13 +96,19 @@ async def send_digests(app, local: datetime) -> int:
     return sent
 
 
+def digest_window_open(settings, now: datetime) -> bool:
+    """The morning digest goes out between digest_hour and +3h IST, never at night and never late in the evening."""
+    h = now.astimezone(IST).hour
+    return settings.digest_hour_ist <= h < settings.digest_hour_ist + 3 and not clock.is_quiet(settings, now)
+
+
 async def run_forever(app) -> None:
     while True:
         try:
             now = datetime.now(timezone.utc)
             await tick(app, now)
             local = now.astimezone(IST)
-            if local.hour >= app.state.settings.digest_hour_ist:
+            if digest_window_open(app.state.settings, now):
                 await send_digests(app, local)
         except Exception:
             log.exception("scheduler tick failed")

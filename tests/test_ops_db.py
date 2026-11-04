@@ -130,8 +130,11 @@ async def test_healthz_flags_dead_outbox(app):
     from src.box.sandbox import Sandbox
     fastapi_app.state.pool = app.state.pool
     fastapi_app.state.sandbox = Sandbox("data/test-sandbox", "local")
+    fastapi_app.state.settings = Settings(quiet_start_hour=21, quiet_end_hour=8)
     r = Response()
-    assert (await healthz(r))["ok"] is True and r.status_code == 200
+    first = await healthz(r)
+    assert first["ok"] is True and r.status_code == 200
+    assert set(first["ops"]) == {"tasks_pending", "cards_held", "failed_sessions_1h", "quiet_hours_now"}
     async with app.state.pool.connection() as c:
         await c.execute("INSERT INTO continuum_outbox (user_id, source_id, text, trusted, status) "
                         "VALUES ('u','s1','t',false,'DEAD')")

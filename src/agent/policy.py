@@ -5,7 +5,8 @@ The model cannot reach a side effect any other way.
 
   T0 read      query ledger (read-only role + RLS), resolve memory, inspect file, browser navigate/read,
                run_python (isolated sandbox: no network, no ledger access, own files only)
-  T1 internal  write evidence, import the owner's own file, message the owner
+  T1 internal  write evidence, import the owner's own file, message the owner, schedule/cancel the
+               agent's own follow-ups, send the owner a file the sandbox produced
   T2 outward   message a counterparty, browser click/fill/press        -> owner approval
   T3 money     propose a ledger adjustment                              -> owner approval
 
@@ -39,8 +40,11 @@ class Decision:
 
 
 def tier_of(name: str, args: dict) -> str:
-    if name in ("query_ledger_sql", "resolve_continuum_memory", "run_python"):
+    if name in ("query_ledger_sql", "resolve_continuum_memory", "run_python", "get_current_time", "check_gstin",
+                "build_payment_request", "list_followups"):
         return "T0"
+    if name in ("schedule_followup", "cancel_followup", "send_file_to_owner"):
+        return "T1"
     if name == "inspect_and_import_file":
         return "T1" if args.get("mode") == "import" else "T0"
     if name == "write_continuum_evidence":
@@ -73,6 +77,9 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
             return Decision("deny", tier, "only files attached to this conversation can be opened")
         if tier == "T1" and ctx.trust != "TRUSTED":
             return Decision("deny", tier, "only the owner's own uploads can be imported")
+    if name == "send_file_to_owner":
+        if args.get("file_ref") not in ctx.files or not str(args.get("file_ref", "")).startswith("sandbox:"):
+            return Decision("deny", tier, "only files you created with run_python in this conversation can be sent")
     if name == "run_python":
         refs = args.get("file_refs") or []
         if not isinstance(refs, list) or any(r not in ctx.files for r in refs):
