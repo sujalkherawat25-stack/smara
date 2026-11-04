@@ -325,26 +325,39 @@ def startup_command() -> list[str]:
     return [str(pyw if pyw.is_file() else exe), str(Path(__file__).resolve()), "run"]
 
 
-def cmd_install_startup() -> int:
-    """Windows: start the helper (no window) every time you sign in. The browser only appears when Smara needs it."""
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+
+def _start_now() -> None:
     import subprocess
+    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    subprocess.Popen(startup_command(), creationflags=flags, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, close_fds=True)
+
+
+def cmd_install_startup() -> int:
+    """Windows: start the helper (no window) every time you sign in. The browser only appears when Smara needs it.
+    Uses your own per-user 'Run' list, so no administrator rights are needed."""
     if platform.system() != "Windows":
         print("Auto-start is set up for Windows only for now. On macOS/Linux add 'python munim_bridge.py run' to your login items.")
         return 1
+    import winreg
     run_line = " ".join(f'"{x}"' for x in startup_command())
-    r = subprocess.run(["schtasks", "/Create", "/TN", TASK_NAME, "/TR", run_line, "/SC", "ONLOGON", "/RL", "LIMITED", "/F"],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        print("Could not create the startup task:", (r.stderr or r.stdout).strip()[:300])
-        return 1
-    subprocess.run(["schtasks", "/Run", "/TN", TASK_NAME], capture_output=True, text=True)
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
+        winreg.SetValueEx(k, TASK_NAME, 0, winreg.REG_SZ, run_line)
+    _start_now()
     print("Done. Smara's browser helper now starts by itself when you sign in to Windows and is running now.")
     return 0
 
 
 def cmd_uninstall_startup() -> int:
-    import subprocess
-    subprocess.run(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"], capture_output=True, text=True)
+    if platform.system() == "Windows":
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
+                winreg.DeleteValue(k, TASK_NAME)
+        except OSError:
+            pass
     return cmd_stop()
 
 
