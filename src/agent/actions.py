@@ -165,14 +165,15 @@ async def open_gate(app, ctx: SessionCtx, tenant, name: str, args: dict, card: s
     await send_to_owner(app, tenant, {
         "messaging_product": "whatsapp", "to": tenant.owner_phone, "type": "interactive", "interactive": {
             "type": "button", "body": {"text": (who + card)[:1024]},
-            "action": {"buttons": [btn("ag_ok", "Approve"), btn("ag_no", "Reject")]}}},
+            "action": {"buttons": [btn("ag_ok", "Approve"), *([btn("ag_site", "Approve + this site")] if name == "browser_step" else []),
+                                   btn("ag_no", "Reject")]}}},
         kind="owner_agent_card", agent_session_id=ctx.id)
     return {"card": (who + card)[:1024]}
 
 
 async def execute_approved(app, ctx: SessionCtx, tenant, name: str, args: dict) -> dict:
     if name == "browser_step":
-        return await app.state.browsers.step(ctx.id, args)
+        return await app.state.browsers.step(ctx.id, args, tenant_id=ctx.tenant_id)
     if name != "send_whatsapp_message":
         return {"error": f"{name} cannot be executed here"}
     s = app.state.settings

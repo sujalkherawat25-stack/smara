@@ -172,7 +172,8 @@ async def _rebuild(app, tenant, r: dict) -> dict | None:
             btn = lambda k, t: {"type": "reply", "reply": {"id": f"{k}:{sess['id']}", "title": t}}
             return {"messaging_product": "whatsapp", "to": tenant.owner_phone, "type": "interactive", "interactive": {
                 "type": "button", "body": {"text": sess["pending"]["card"][:1024]},
-                "action": {"buttons": [btn("ag_ok", "Approve"), btn("ag_no", "Reject")]}}}
+                "action": {"buttons": [btn("ag_ok", "Approve"), *([btn("ag_site", "Approve + this site")] if sess["pending"].get("name") == "browser_step" else []),
+                                       btn("ag_no", "Reject")]}}}
         if r["kind"] == "owner_reminder_card":
             cur = await conn.execute(
                 """SELECT o.*, p.canonical_name FROM obligations o JOIN parties p ON p.id = o.party_id

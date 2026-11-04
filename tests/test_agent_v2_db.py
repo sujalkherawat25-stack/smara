@@ -516,7 +516,7 @@ async def test_telegram_owner_approves_a_browser_click_end_to_end(env):
     card = tg.sent[-1]
     assert "click" in card["text"] and "Form" in card["text"] and "example.com/form" in card["text"]   # page context shown
     sid = (await one(env.pool, "select id from agent_sessions where status = 'WAITING_APPROVAL'"))["id"]
-    assert [b[0]["callback_data"] for b in card["reply_markup"]["inline_keyboard"]] == [f"ag_ok:{sid}", f"ag_no:{sid}"]
+    assert [b[0]["callback_data"] for b in card["reply_markup"]["inline_keyboard"]] == [f"ag_ok:{sid}", f"ag_site:{sid}", f"ag_no:{sid}"]
     await tgmod.handle_update(env.app, {"callback_query": {"id": "cb1", "data": f"ag_ok:{sid}", "message": {"chat": {"id": 555}}}})
     assert [s["action"] for s in br.steps] == ["navigate", "click"]
     assert tg.sent[-1]["text"] == "Clicked and checked the page." and env.app.state.wa.sent == []   # all on Telegram

@@ -76,7 +76,7 @@ class FakeBrowsers:
     def alive(self, sid):
         return sid in self.open
 
-    async def step(self, sid, args):
+    async def step(self, sid, args, **kw):
         self.steps.append(args)
         self.open.add(sid)
         return {"url": "https://example.com/form", "title": "Form", "text": "ok", "elements": [{"selector": "#go"}]}

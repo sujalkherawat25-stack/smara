@@ -14,6 +14,7 @@ UNTRUSTED sessions (started by a counterparty's message) may only record
 evidence and propose an adjustment for their own party; everything else is
 blocked here, whatever the model was talked into.
 """
+import re
 from dataclasses import dataclass, field
 
 UNTRUSTED_ALLOWED = frozenset({"write_continuum_evidence", "propose_ledger_adjustment"})
@@ -29,6 +30,8 @@ class SessionCtx:
     party_id: str | None = None     # UNTRUSTED: the only party this session may touch
     files: tuple[str, ...] = ()     # file refs attached to the triggering event
     call_id: str = ""
+    grants: tuple[str, ...] = ()    # sites the owner let this session act on without a tap per click
+    host: str = ""                 # the site the browser is on right now
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,19 @@ class Decision:
     tier: str = ""
     reason: str = ""
     card: str = ""                  # what the owner sees on the approval card
+
+
+# Even on a site the owner allowed, anything that spends, sends, deletes, books or submits still needs its own tap.
+SENSITIVE_STEP = re.compile(
+    r"pay|buy|purchase|checkout|check.?out|order|confirm|submit|delete|remove|transfer|send|book|subscribe|cancel|"
+    r"logout|log.?out|sign.?out|post|publish|withdraw|donate|upi|net.?banking|place|apply|accept|agree|verify|login|log.?in|sign.?in",
+    re.I)
+
+
+def sensitive_step(args: dict) -> bool:
+    if args.get("action") == "press":
+        return str(args.get("value", "Enter")).lower() in ("enter", "return", "numpadenter", "space")
+    return bool(SENSITIVE_STEP.search(f"{args.get('selector', '')} {args.get('value', '')}"))
 
 
 def tier_of(name: str, args: dict) -> str:
@@ -88,6 +104,8 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
             return Decision("deny", tier, "code must be a non-empty string under 20,000 characters")
     if tier in ("T0", "T1"):
         return Decision("allow", tier)
+    if name == "browser_step" and ctx.trust == "TRUSTED" and ctx.host and ctx.host in ctx.grants and not sensitive_step(args):
+        return Decision("allow", "T2g", "the owner allowed this site for this task")
     return Decision("approve", tier, card=approval_text(name, args))
 
 

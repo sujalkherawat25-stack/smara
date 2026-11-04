@@ -10,6 +10,8 @@ from src.db import migrate, open_pool
 from src.ingest.telegram import TelegramClient
 from src.ingest.telegram import router as telegram_router
 from src.ingest.webhook import router
+from src.bridge.device import BrowserRouter
+from src.bridge.device_api import router as device_router
 from src.box.browser_session import BrowserSessions
 from src.box.sandbox import Sandbox
 from src.loop.llm import LLM
@@ -30,7 +32,7 @@ async def lifespan(app: FastAPI):
                         agent_model=s.llm_agent_model, max_concurrency=s.llm_max_concurrency,
                         agent_rpm=s.llm_agent_rpm, fallback_model=s.llm_fallback_model)
     app.state.bg = set()
-    app.state.browsers = BrowserSessions()
+    app.state.browsers = BrowserRouter(app.state.pool, BrowserSessions())   # the owner's own device first, else the server browser
     app.state.sandbox = Sandbox(s.sandbox_jobs_dir, s.sandbox_mode)
     app.state.tg = TelegramClient(s.telegram_bot_token) if s.telegram_bot_token else None
     ticker = asyncio.create_task(run_forever(app))
@@ -47,6 +49,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Smara Munim", lifespan=lifespan)
 app.include_router(router)
+app.include_router(device_router)
 app.include_router(pay_router)
 app.include_router(telegram_router)
 

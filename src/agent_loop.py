@@ -11,6 +11,8 @@ handled deterministically (never by the model) and resumes from that call.
 import asyncio
 import json
 import re
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 import logging
 from datetime import date, datetime, timedelta, timezone
 
@@ -40,9 +42,20 @@ def _spawn(app, coro) -> None:
     task.add_done_callback(app.state.bg.discard)
 
 
-def _ctx(row, call_id: str = "") -> SessionCtx:
-    return SessionCtx(id=str(row["id"]), tenant_id=str(row["tenant_id"]), trust=row["trust"],
-                      party_id=str(row["party_id"]) if row["party_id"] else None, files=tuple(row["files"]), call_id=call_id)
+def active_grants(row) -> tuple[str, ...]:
+    now = datetime.now(timezone.utc).isoformat()
+    return tuple(g["host"] for g in (row.get("grants") or []) if g.get("until", "") > now)
+
+
+def host_of(page: dict) -> str:
+    return (urlparse((page or {}).get("url", "")).hostname or "").lower()
+
+
+def _ctx(row, call_id: str = "", browsers=None) -> SessionCtx:
+    sid = str(row["id"])
+    return SessionCtx(id=sid, tenant_id=str(row["tenant_id"]), trust=row["trust"],
+                      party_id=str(row["party_id"]) if row["party_id"] else None, files=tuple(row["files"]), call_id=call_id,
+                      grants=active_grants(row), host=host_of(browsers.page(sid)) if browsers else "")
 
 
 async def _save(pool, sid, messages, *, status=None, pending=..., steps=None) -> None:
@@ -179,7 +192,7 @@ async def _process(app, row, messages: list, calls: list) -> bool:
             args = json.loads(call["function"].get("arguments") or "{}")
         except ValueError:
             args = None
-        ctx = _ctx(row, cid)
+        ctx = _ctx(row, cid, getattr(app.state, "browsers", None))
         d = pre_tool_use(ctx, name, args, tools.TOOL_NAMES)
         if d.verdict == "deny":
             result = {"error": f"blocked by policy: {d.reason}"}
@@ -211,7 +224,7 @@ async def _execute(app, ctx, tenant, name, args) -> dict:
             via = await send_to_owner(app, tenant, text, kind=kind)
             return {"sent": via != "held", "to": "owner", "queued_until_owner_reachable": via == "held"}
         if name == "browser_step":
-            return await app.state.browsers.step(ctx.id, args)
+            return await app.state.browsers.step(ctx.id, args, tenant_id=ctx.tenant_id)
         return await EXECUTORS[name](app, ctx, args)
     except Exception as e:
         return {"error": f"{type(e).__name__}: {str(e)[:300]}"}
@@ -222,6 +235,23 @@ async def _finish(app, row, text: str) -> None:
         tenant = await tenants.by_id(app.state.pool, str(row["tenant_id"]))
         await send_to_owner(app, tenant, text_message(tenant.owner_phone, text[:4000]), kind="owner_text",
                             reply_channel=row["channel"])
+
+
+GRANT_FOR = timedelta(minutes=15)
+
+
+async def grant_site(app, tenant_id: str, sid: str) -> str | None:
+    """Owner tapped 'approve and allow this site': the agent may click and type here (nothing sensitive) for 15 minutes."""
+    host = host_of(app.state.browsers.page(sid)) if getattr(app.state, "browsers", None) else ""
+    if not host:
+        return None
+    until = (datetime.now(timezone.utc) + GRANT_FOR).isoformat()
+    async with app.state.pool.connection() as conn:
+        row = await (await conn.execute(
+            """UPDATE agent_sessions SET grants = (SELECT coalesce(jsonb_agg(g), '[]'::jsonb) FROM jsonb_array_elements(grants) g
+                                                      WHERE g->>'host' <> %(h)s) || jsonb_build_array(jsonb_build_object('host', %(h)s::text, 'until', %(u)s::text))
+                WHERE id::text = %(s)s AND tenant_id = %(t)s RETURNING id""", {"h": host, "u": until, "s": sid, "t": tenant_id})).fetchone()
+    return host if row else None
 
 
 async def resume(app, tenant_id: str, *, sid: str | None = None, adjustment_id: str | None = None,
@@ -235,10 +265,10 @@ async def resume(app, tenant_id: str, *, sid: str | None = None, adjustment_id: 
     if row is None:
         return False
     p, messages = row["pending"], row["messages"]
-    ctx, tenant = _ctx(row, p["call_id"]), await tenants.by_id(app.state.pool, tenant_id)
+    ctx, tenant = _ctx(row, p["call_id"], getattr(app.state, "browsers", None)), await tenants.by_id(app.state.pool, tenant_id)
     if outcome is not None:          # propose_ledger_adjustment: the ledger path already applied the decision
         result = outcome
-    elif approved and pre_tool_use(ctx, p["name"], p["args"], tools.TOOL_NAMES).verdict == "approve":
+    elif approved and pre_tool_use(ctx, p["name"], p["args"], tools.TOOL_NAMES).verdict in ("approve", "allow"):
         result = await actions.execute_approved(app, ctx, tenant, p["name"], p["args"])
     else:
         await actions.on_rejected(app, ctx, p["name"], p["args"])

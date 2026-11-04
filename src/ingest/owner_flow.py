@@ -45,14 +45,32 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         if action in ("send", "snooze", "paid"):
             return await decide_reminder(app, tenant_id, ref, action, datetime.now(timezone.utc)) \
                 or "That reminder was already handled."
-        if action in ("ag_ok", "ag_no"):
-            ok = await resume(app, tenant_id, sid=ref, approved=action == "ag_ok",
+        if action in ("ag_ok", "ag_no", "ag_site"):
+            if action == "ag_site":     # approve this step and let the agent keep working on this one site for 15 minutes
+                from src.agent_loop import grant_site
+                await grant_site(app, tenant_id, ref)
+            ok = await resume(app, tenant_id, sid=ref, approved=action != "ag_no",
                               background=getattr(app.state, "agent_background", True))
             return None if ok else "That was already handled."   # the resumed agent reports the outcome itself
         if action in ("bt_approve", "bt_reject"):
             return await decide_browser_task(app, tenant_id, msg.sender, ref, action == "bt_approve", number_id=msg.number_id,
                                              channel=msg.channel)
         return None
+    cmd = msg.text.strip().lower()
+    if cmd in ("pair browser", "pair pc", "connect browser", "browser pair"):
+        from src.bridge.device import start_pairing
+        code = await start_pairing(app.state.pool, tenant_id)
+        return (f"Browser pairing code: {code}\nValid for 1 hour, works once. On your PC, in the Smara Browser Bridge folder run:\n"
+                f"python munim_bridge.py pair --code {code}\nThen start it with: python munim_bridge.py run\n"
+                "From then on I will use your own browser (your IP and logins stay on your PC). Send 'unpair browser' to disconnect.")
+    if cmd in ("unpair browser", "disconnect browser"):
+        from src.bridge.device import revoke_all
+        n = await revoke_all(app.state.pool, tenant_id)
+        return "Your PC browser is disconnected." if n else "No PC browser was connected."
+    if cmd in ("browser status", "browser"):
+        from src.bridge.device import online_device
+        d = await online_device(app.state.pool, tenant_id)
+        return f"Your PC browser is online ({d['name']})." if d else "Your PC browser is not connected. Send 'pair browser' to connect it; until then I use the server browser."
     if msg.text.strip().lower() == "telegram":
         return await link_message(app, tenant_id)
     if msg.text.strip().lower() == "telegram off":

@@ -408,9 +408,9 @@ async def main() -> None:
     class RecBrowsers(BrowserSessions):          # real Chromium, plus a log of what the agent asked it to do
         log: list = []
 
-        async def step(self, sid, args):
+        async def step(self, sid, args, **kw):
             self.log.append(dict(args))
-            return await super().step(sid, args)
+            return await super().step(sid, args, **kw)
     wa = WA()
     app = SimpleNamespace(state=SimpleNamespace(pool=pool, settings=Settings(), wa=wa, tg=None, bg=set(), continuum=Mem(),
                                                 browsers=RecBrowsers(), llm=llm, sandbox=sb, agent_background=False))

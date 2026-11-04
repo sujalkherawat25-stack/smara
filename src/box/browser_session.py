@@ -43,7 +43,7 @@ class BrowserSessions:
         proc.stdin.flush()
         return json.loads(proc.stdout.readline() or '{"error": "browser worker exited"}')
 
-    async def step(self, sid: str, args: dict) -> dict:
+    async def step(self, sid: str, args: dict, tenant_id: str | None = None) -> dict:
         self._reap()
         lock = self._locks.setdefault(sid, asyncio.Lock())
         async with lock:

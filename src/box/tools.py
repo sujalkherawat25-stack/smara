@@ -1,4 +1,5 @@
 """Playwright tools. Run only inside the worker subprocess (see client.py)."""
+import os
 import re
 from contextlib import asynccontextmanager
 from urllib.parse import quote_plus, urlparse
@@ -24,9 +25,12 @@ _PRICE = re.compile(r"₹\s?[\d,]+(?:\.\d+)?(?:\s*/\s*[A-Za-z]+)?")
 
 @asynccontextmanager
 async def browser_page():
+    # BROWSER_CDP_URL points the server at a hosted remote browser (residential exit, anti-block handled by the
+    # provider). The same SSRF route guard applies either way. Empty = launch Chromium on this server.
+    cdp = os.environ.get("BROWSER_CDP_URL", "").strip()
     async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        ctx = await browser.new_context(user_agent=UA, viewport={"width": 1366, "height": 900})
+        browser = await (p.chromium.connect_over_cdp(cdp) if cdp else p.chromium.launch())
+        ctx = await browser.new_context(user_agent=UA, viewport={"width": 1366, "height": 900}) if not cdp             else await browser.new_context(viewport={"width": 1366, "height": 900})
 
         async def guard(route):  # subrequests too: no pivoting into private networks
             if host_blocked(urlparse(route.request.url).hostname or ""):
