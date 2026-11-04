@@ -1,0 +1,101 @@
+/* Smara Desktop design layer. Loaded after native-shell.css; tokens first, then wider layout, then refined components. */
+:root {
+  --bg: #121516; --bg-raised: #171b1d; --bg-card: #1b2022; --bg-input: #0f1213; --bg-hover: #242a2d;
+  --line: #262d30; --line-strong: #364044; --text: #e9eff0; --text-soft: #b5c0c4; --text-dim: #8a979c;
+  --accent: #7fd6bf; --accent-strong: #9ee6d2; --accent-ink: #0c2620; --accent-wash: #16322b;
+  --warn: #e3bd78; --danger: #ef6f62; --radius: 14px; --radius-sm: 9px;
+  --shadow: 0 1px 0 #ffffff08 inset, 0 10px 30px -12px #000a;
+  --content: min(1180px, 100%);
+  font: 15px/1.65 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  letter-spacing: .005em; background: var(--bg); color: var(--text);
+}
+body { background: radial-gradient(1200px 600px at 78% -10%, #17302b55, transparent 60%), var(--bg); -webkit-font-smoothing: antialiased; }
+.native-app { background: transparent; }
+* { scrollbar-width: thin; scrollbar-color: #3a4549 transparent; }
+::selection { background: #2f6b5c; color: #fff; }
+
+/* ---------- controls */
+.native-app button { border-radius: var(--radius-sm); border-color: var(--line-strong); background: #1f2527; padding: 9px 15px; font-weight: 500; transition: background .14s, border-color .14s, transform .14s, box-shadow .14s; }
+.native-app button:hover:not(:disabled) { background: var(--bg-hover); border-color: #46535a; }
+.native-app button:active:not(:disabled) { transform: translateY(1px); }
+.native-app .primary { background: linear-gradient(180deg, var(--accent-strong), var(--accent)); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 6px 18px -8px #7fd6bf99; }
+.native-app .primary:hover:not(:disabled) { background: linear-gradient(180deg, #b2f0e0, var(--accent-strong)); }
+.native-app .danger-action { color: #ffb4ab; border-color: #5b2c29; background: #2a1918; }
+.native-app .danger-action:hover:not(:disabled) { background: #3a2220; border-color: #7a3a35; }
+.native-app input, .native-app select, .native-app textarea { background: var(--bg-input); border-color: var(--line-strong); border-radius: var(--radius-sm); padding: 10px 13px; transition: border-color .14s, box-shadow .14s; }
+.native-app input:focus, .native-app select:focus, .native-app textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #7fd6bf26; outline: none; }
+.native-app .native-composer textarea:focus { box-shadow: none; }
+.native-app h1, .native-app h2, .native-app h3 { letter-spacing: -.015em; }
+.native-app p { color: var(--text-soft); }
+.native-app small { color: var(--text-dim); font-size: 12.5px; }
+
+/* ---------- shell */
+.native-layout aside { width: clamp(264px, 21vw, 320px); background: linear-gradient(180deg, #161a1c, #131618); border-right: 1px solid var(--line); padding: 22px 16px 14px; }
+.native-brand strong { font-size: 20px; letter-spacing: -.03em; }
+.native-layout aside button { border-radius: 10px; }
+.native-app .sidebar-threads button.selected, .native-app .sidebar-thread-row.selected { background: var(--accent-wash); border-color: #285247; color: #cdf3e8; }
+.native-topbar { min-height: 62px; padding: 12px clamp(20px, 3vw, 44px); border-bottom: 1px solid var(--line); background: #121516cc; backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 2; }
+.native-topbar strong { font-size: 15px; }
+
+/* ---------- chat: use the width that is there */
+.native-transcript { padding: 32px clamp(20px, 4vw, 64px) 12px; }
+.native-item, .native-approval, .native-workers { max-width: var(--content); margin-bottom: 26px; }
+.native-item { padding: 6px 2px; font-size: 15.5px; line-height: 1.75; }
+.native-item.user { max-width: min(78%, 980px); background: #1d2527; border: 1px solid #2b373a; border-radius: 20px 20px 6px 20px; padding: 14px 20px; box-shadow: var(--shadow); }
+.native-item details { background: var(--bg-raised); border-color: var(--line); border-radius: 11px; }
+.native-markdown p, .native-markdown li { color: #dbe3e5; }
+.native-markdown h3 { font-size: 19px; margin: 26px 0 10px; }
+.native-markdown .code-block { background: #0b0e0f; border-color: var(--line-strong); border-radius: 12px; padding: 18px 20px; }
+.native-markdown code { background: #1c2928; color: #bfe8da; border-radius: 5px; padding: 2px 6px; }
+.native-approval { border-radius: var(--radius); background: linear-gradient(180deg, #2a2616, #231f12); border-color: #8a7338; box-shadow: var(--shadow); }
+.native-empty { max-width: 880px; }
+.native-empty h1 { font-size: clamp(28px, 3.4vw, 42px); letter-spacing: -.035em; background: linear-gradient(180deg, #fff, #a9d9cc); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.native-empty > p { font-size: 16.5px; color: var(--text-soft); }
+.native-app .starter-cards button { border-radius: 14px; padding: 12px 16px; font-size: 13.5px; border-color: var(--line-strong); background: var(--bg-raised); }
+.native-app .starter-cards button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-wash); transform: translateY(-1px); }
+
+/* ---------- composer */
+.native-layout footer { padding: 10px clamp(20px, 4vw, 64px) 20px; background: linear-gradient(180deg, transparent, var(--bg) 35%); }
+.native-composer { max-width: var(--content); background: var(--bg-card); border: 1px solid var(--line-strong); border-radius: 22px; padding: 14px 16px; box-shadow: 0 18px 50px -20px #000c, var(--shadow); transition: border-color .15s, box-shadow .15s; }
+.native-composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px #7fd6bf1c, 0 18px 50px -20px #000c; }
+.native-app .native-composer textarea { font-size: 15.5px; min-height: 64px; line-height: 1.6; }
+.composer-status { max-width: var(--content); }
+
+/* ---------- settings: full width, cards that breathe */
+.native-settings { padding: 36px clamp(24px, 4vw, 64px) 56px; }
+.native-settings > * { max-width: 1480px; margin-left: auto; margin-right: auto; }
+.settings-heading h1 { font-size: 30px; letter-spacing: -.035em; }
+.settings-tabs { position: sticky; top: -1px; z-index: 3; background: linear-gradient(180deg, var(--bg) 82%, transparent); padding: 6px 0 14px; gap: 6px; border-bottom: 0; margin-bottom: 20px; }
+.settings-tabs button { border-radius: 999px; padding: 8px 18px; font-size: 13.5px; border-color: var(--line); background: var(--bg-raised); color: var(--text-soft); }
+.settings-tabs button.selected { background: var(--accent-wash); border-color: #2d5c4f; color: var(--accent-strong); box-shadow: none; }
+.settings-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 22px; }
+.settings-card { background: linear-gradient(180deg, #1c2224, var(--bg-card)); border-color: var(--line); border-radius: 18px; padding: 28px; box-shadow: var(--shadow); }
+.settings-card h2 { font-size: 18px; margin-bottom: 10px; }
+.settings-card p { font-size: 14px; line-height: 1.65; }
+.settings-form { gap: 16px; }
+.settings-form label { font-size: 13px; color: var(--text-soft); }
+.settings-form input, .settings-form select { background: var(--bg-input); font-size: 14px; padding: 11px 13px; }
+.model-row, .credential-row { background: var(--bg-raised); border-color: var(--line); border-radius: 12px; padding: 14px 16px; }
+.settings-notice { color: var(--accent-strong) !important; background: var(--accent-wash); border: 1px solid #2a5a4d; border-radius: 10px; padding: 10px 14px; }
+.native-error { color: #ffb4ab !important; background: #2a1918; border: 1px solid #5b2c29; border-radius: 10px; padding: 10px 14px; }
+.native-warning { background: #2a2314; border: 1px solid #6b5a2a; border-radius: 10px; padding: 10px 14px; color: var(--warn) !important; }
+
+/* ---------- browser panel: control left, activity right and wide */
+.browser-grid { grid-template-columns: minmax(380px, 5fr) minmax(420px, 7fr); }
+.browser-status { border-radius: 14px; background: var(--bg-raised); border-color: var(--line-strong); padding: 16px 18px; }
+.browser-status strong { font-size: 15.5px; }
+.browser-light { width: 14px; height: 14px; box-shadow: 0 0 0 5px #ffffff0d; }
+.browser-online .browser-light { box-shadow: 0 0 0 5px #2fb45726, 0 0 16px #2fb457aa; }
+.browser-big-controls button { border-radius: 12px; min-height: 52px; }
+.browser-feed { max-height: calc(100vh - 340px); gap: 10px; }
+.browser-step { background: var(--bg-raised); border-color: var(--line); border-radius: 12px; padding: 11px 14px; }
+.browser-step-ok .browser-step-icon { color: var(--accent); } .browser-step-error { background: #261918; }
+@media (max-width: 1100px) { .browser-grid { grid-template-columns: 1fr; } .native-layout aside { width: 232px; } }
+@media (max-width: 900px) { .native-item.user { max-width: 92%; } }
+
+/* ---------- polish after first visual pass */
+.native-item.assistant, .native-item.reasoning { background: transparent; border: 0; box-shadow: none; padding-left: 0; padding-right: 0; }
+.native-layout aside .sidebar-section-heading { display: flex; align-items: center; justify-content: space-between; margin: 18px 6px 8px; color: var(--text-dim); font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase; }
+.native-layout aside .sidebar-section-heading button { width: 30px; padding: 3px 0; margin: 0; text-align: center; }
+.native-layout aside .new-chat { background: var(--accent-wash); border-color: #2a5a4d; color: var(--accent-strong); font-weight: 600; }
+.native-layout aside .sidebar-bottom button { border-radius: 10px; }

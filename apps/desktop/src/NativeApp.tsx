@@ -20,6 +20,7 @@ import { activeTurn, answerKey, approvalResponse, displayItem, displayRuntimeErr
 import type { LocalModelProfile } from "./types";
 import packageInfo from "../package.json";
 import "./native-shell.css";
+import "./native-design.css";
 
 type Item = ViewItem;
 type Approval = { id: number | string; method: string; params: Record<string, unknown> };
