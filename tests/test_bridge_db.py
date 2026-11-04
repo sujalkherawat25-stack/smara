@@ -159,7 +159,10 @@ async def test_a_grant_never_covers_secrets_other_sites_or_customer_sessions(env
     v = lambda c, a: pre_tool_use(c, "browser_step", a, TOOL_NAMES).verdict
     assert v(ctx, {"action": "click", "selector": "#next"}) == "allow"
     assert v(ctx, {"action": "click", "selector": "#pay-now"}) == "approve"
-    assert v(ctx, {"action": "press", "value": "Enter"}) == "approve"                  # Enter submits forms
+    assert v(ctx, {"action": "press", "value": "Enter"}) == "allow"                    # fine on a normal page (search boxes)
+    sign_in = SessionCtx(id="s", tenant_id="t", trust="TRUSTED", grants=("example.com",), host="example.com",
+                         page="https://example.com/login sign in")
+    assert v(sign_in, {"action": "click", "selector": "#next"}) == "approve"           # never on a sign-in / payment page
     assert v(ctx, {"action": "click", "selector": "a:has-text('Delete account')"}) == "approve"
     other = SessionCtx(id="s", tenant_id="t", trust="TRUSTED", grants=("example.com",), host="evil.com")
     assert v(other, {"action": "click", "selector": "#next"}) == "approve"
@@ -289,3 +292,101 @@ async def test_search_api_is_used_on_the_server_and_falls_back_to_the_browser(en
     finally:
         web.api_search = real
     assert out["engine"] == "brave-api" and out["results"][0]["url"] == "https://example.org/m" and "q=pizza+banswara" in calls[0]
+
+
+# ---------------------------------------------------------------- autonomy on the owner's own browser
+
+class DeviceFakeBrowsers(FakeBrowsers):
+    """A fake browser that reports it is the owner's PC."""
+    def where(self, sid):
+        return "device" if sid in self.open else ""
+
+
+async def test_on_the_owners_pc_the_agent_clicks_and_types_by_itself_but_asks_before_spending(env):
+    br = env.app.state.browsers = DeviceFakeBrowsers()
+    env.app.state.llm = ScriptLLM(
+        call("browser_step", action="navigate", url="https://example.com/menu"),
+        call("browser_step", action="click", selector="a:has-text('Order Online')"),
+        call("browser_step", action="fill", selector="#search", value="veg pizza"),
+        call("browser_step", action="press", value="Enter"),
+        call("browser_step", action="scroll", value="down"),
+        call("browser_step", action="click", selector="button:has-text('Place order')"),     # spends money: asks
+        say("Done."))
+    await dispatch(env.app, owner("au1", "find veg pizza on example.com and get it ready"))
+    assert [s["action"] for s in br.steps] == ["navigate", "click", "fill", "press", "scroll"]       # no taps for those
+    sid = (await one(env.pool, "select id from agent_sessions where status = 'WAITING_APPROVAL'"))["id"]
+    assert "Place order" in env.app.state.wa.sent[-1]["interactive"]["body"]["text"]
+    await dispatch(env.app, owner("au2", button=f"ag_no:{sid}"))
+    assert [s["action"] for s in br.steps][-1] == "scroll"                                          # rejected: never ran
+
+
+async def test_login_captcha_and_payment_are_handed_to_the_owner_who_taps_done(env):
+    br = env.app.state.browsers = DeviceFakeBrowsers()
+    llm = env.app.state.llm = ScriptLLM(
+        call("browser_step", action="navigate", url="https://example.com/account"),
+        call("hand_off_to_owner", reason="Please sign in to your account in the open browser window."),
+        call("browser_step", action="click", selector="#orders"),
+        say("Opened your orders after you signed in."))
+    await dispatch(env.app, owner("ho1", "check my orders on example.com"))
+    sid = (await one(env.pool, "select id from agent_sessions where status = 'WAITING_APPROVAL'"))["id"]
+    card = env.app.state.wa.sent[-1]["interactive"]
+    assert "Your turn in the browser" in card["body"]["text"] and "sign in" in card["body"]["text"]
+    assert [b["reply"]["title"] for b in card["action"]["buttons"]] == ["Done, continue", "Cancel"]
+    await dispatch(env.app, owner("ho2", button=f"ag_ok:{sid}"))
+    done = json.loads([m for m in llm.seen[-1] if m["role"] == "tool"][-2]["content"])
+    assert done["owner_done"] is True and done["url"].startswith("https://example.com")               # fresh page handed back
+    assert [s["action"] for s in br.steps] == ["navigate", "read", "click"]
+    assert env.app.state.wa.sent[-1]["text"]["body"].startswith("Opened your orders")
+
+
+async def test_only_the_owners_own_conversation_can_hand_off(env):
+    from src.agent.policy import SessionCtx, pre_tool_use
+    from src.agent.tools import TOOL_NAMES
+    for trust in ("UNTRUSTED", "SYSTEM"):
+        ctx = SessionCtx(id="s", tenant_id="t", trust=trust, party_id="p")
+        assert pre_tool_use(ctx, "hand_off_to_owner", {"reason": "x"}, TOOL_NAMES).verdict == "deny"
+
+
+NEW_ACTIONS_PROBE = r"""
+import asyncio, json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import munim_bridge
+from playwright.async_api import async_playwright
+
+async def main():
+    out = {}
+    d = Path(sys.argv[2])
+    (d / "a.html").write_text("<html><body style='height:4000px'><a href='b.html'>next</a>"
+        "<select id='s'><option value='x'>X</option><option value='y'>Y</option></select><p style='margin-top:3000px'>bottom text</p></body></html>")
+    (d / "b.html").write_text("<html><body><h1>second</h1><input type='password'></body></html>")
+    (d / "c.html").write_text("<html><body><div class='g-recaptcha'></div><p>please verify you are human</p></body></html>")
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto((d / "a.html").as_uri())
+        await munim_bridge.handle(page, {"action": "scroll", "value": "bottom"}, allow_private=True)
+        out["scrolled"] = await page.evaluate("() => window.scrollY") > 500
+        await munim_bridge.handle(page, {"action": "select", "selector": "#s", "value": "y"}, allow_private=True)
+        out["selected"] = await page.input_value("#s")
+        await munim_bridge.handle(page, {"action": "wait", "value": "50"}, allow_private=True)
+        r = await munim_bridge.handle(page, {"action": "click", "selector": "a:has-text('next')"}, allow_private=True)
+        out["login_flag"] = r.get("needs_owner")
+        r = await munim_bridge.handle(page, {"action": "back"}, allow_private=True)
+        out["back"] = r["url"].endswith("a.html") and not r.get("needs_owner")
+        await page.goto((d / "c.html").as_uri())
+        out["captcha_flag"] = (await munim_bridge.handle(page, {"action": "read"}, allow_private=True)).get("needs_owner")
+        await browser.close()
+    print(json.dumps(out))
+
+asyncio.run(main())
+"""
+
+
+def test_bridge_scroll_select_back_wait_and_owner_needed_signals(tmp_path):
+    import subprocess
+    done = subprocess.run([sys.executable, "-c", NEW_ACTIONS_PROBE, str(Path(munim_bridge.__file__).parent), str(tmp_path)],
+                          capture_output=True, text=True, timeout=120)
+    out = json.loads(done.stdout.strip().splitlines()[-1])
+    assert out["scrolled"] and out["selected"] == "y" and out["back"]
+    assert out["login_flag"] == ["login"] and out["captcha_flag"] == ["captcha"]

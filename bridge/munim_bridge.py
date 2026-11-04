@@ -62,6 +62,16 @@ SNAPSHOT_JS = """() => {
     return {selector, tag, type: e.type || '', text, href: tag === 'a' ? (e.href || '') : ''};
   }).filter(x => x.selector);
 }"""
+SIGNALS_JS = """() => {
+  const t = ((document.body ? document.body.innerText : '') + ' ' + document.title).toLowerCase();
+  const out = [];
+  if (document.querySelector('iframe[src*=captcha],iframe[src*=recaptcha],.g-recaptcha,.h-captcha,[id*=captcha],[class*=captcha]')
+      || /captcha|verify you are human|not a robot|unusual traffic/.test(t)) out.push('captcha');
+  if (document.querySelector('input[type=password]')) out.push('login');
+  if (document.querySelector('input[autocomplete=one-time-code]') || /one.time password|verification code|enter otp|enter the otp/.test(t)) out.push('otp');
+  if (/card number|cvv|enter upi|select payment method|net banking|pay securely/.test(t)) out.push('payment');
+  return out;
+}"""
 SECRET_TYPES_JS = """e => ({type: (e.type || '').toLowerCase(), ac: (e.autocomplete || '').toLowerCase(),
   name: ((e.name || '') + ' ' + (e.id || '')).toLowerCase()})"""
 BROWSERS = {
@@ -107,7 +117,7 @@ def url_allowed(url: str, allow_private: bool = False) -> str | None:
 
 async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
     a = cmd.get("action")
-    if a not in ("navigate", "read", "click", "fill", "press"):
+    if a not in ("navigate", "read", "scroll", "back", "wait", "click", "fill", "select", "press"):
         return {"error": f"unsupported action {a!r}"}
     if await page.evaluate("() => !!window.__smaraPaused"):
         return {"error": "the owner paused Smara in the browser (Stop button); ask them to press Resume"}
@@ -128,10 +138,29 @@ async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
     elif a == "press":
         await page.keyboard.press(str(cmd.get("value", "Enter")))
         await page.wait_for_load_state("domcontentloaded")
+    elif a == "scroll":
+        v = str(cmd.get("value") or "down").lower()
+        js = {"top": "window.scrollTo(0, 0)", "bottom": "window.scrollTo(0, document.body.scrollHeight)",
+              "up": "window.scrollBy(0, -window.innerHeight * 0.8)"}.get(v, "window.scrollBy(0, window.innerHeight * 0.8)")
+        await page.evaluate("() => { " + js + " }")
+        await page.wait_for_timeout(500)
+    elif a == "back":
+        await page.go_back(wait_until="domcontentloaded")
+    elif a == "wait":
+        try:
+            ms = int(cmd.get("value") or 1000)
+        except (TypeError, ValueError):
+            ms = 1000
+        await page.wait_for_timeout(max(0, min(ms, 5000)))
+    elif a == "select":
+        await page.select_option(str(cmd["selector"]), str(cmd.get("value", "")))
+        await page.wait_for_load_state("domcontentloaded")
     await page.evaluate(BANNER_JS)
     text = await page.evaluate("() => document.body ? document.body.innerText : ''")
-    return {"url": page.url, "title": await page.title(), "text": text[:3000],
-            "elements": await page.evaluate(SNAPSHOT_JS)}
+    out = {"url": page.url, "title": await page.title(), "text": text[:3000], "elements": await page.evaluate(SNAPSHOT_JS)}
+    if needs := await page.evaluate(SIGNALS_JS):
+        out["needs_owner"] = needs
+    return out
 
 
 # ---------------------------------------------------------------- config
@@ -178,42 +207,164 @@ async def open_browser(p, a):
     return ctx, exe
 
 
-async def run(a) -> int:
-    from playwright.async_api import async_playwright
-    cfg = load_config()
-    if not cfg.get("token"):
-        print("Not paired yet. Send 'pair browser' to Smara in WhatsApp, then run: python munim_bridge.py pair --server ... --code ...")
-        return 1
-    headers = {"Authorization": f"Bearer {cfg['token']}"}
-    async with async_playwright() as p, httpx.AsyncClient(base_url=cfg["server"], headers=headers, timeout=45) as http:
-        ctx, exe = await open_browser(p, a)
-        await ctx.add_init_script("(" + BANNER_JS + ")()")
+LOG = HOME / "bridge.log"
+PID = HOME / "bridge.pid"
+TASK_NAME = "Smara Browser Bridge"
+
+
+def log(msg: str) -> None:
+    """Console when there is one (python), a log file always (pythonw / startup task have no console)."""
+    line = f"{__import__('datetime').datetime.now():%Y-%m-%d %H:%M:%S} {msg}"
+    try:
+        HOME.mkdir(parents=True, exist_ok=True)
+        with LOG.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+        if LOG.stat().st_size > 1_000_000:
+            LOG.write_text(LOG.read_text(encoding="utf-8")[-200_000:], encoding="utf-8")
+    except OSError:
+        pass
+    if sys.stdout:
+        print(msg, flush=True)
+
+
+class Browser:
+    """Opens your browser only when Smara has work for it, and closes it again when it has been idle for a while.
+    So the helper can sit in the background all day without a window until it is actually needed."""
+
+    def __init__(self, p, a):
+        self.p, self.a, self.ctx, self.page, self.exe, self.last = p, a, None, None, None, 0.0
+
+    def alive(self) -> bool:
+        try:
+            return self.ctx is not None and self.page is not None and not self.page.is_closed() and bool(self.ctx.pages)
+        except Exception:
+            return False
+
+    async def ensure(self):
+        if self.alive():
+            return self.page
+        await self.close()
+        self.ctx, self.exe = await open_browser(self.p, self.a)
+        await self.ctx.add_init_script("(" + BANNER_JS + ")()")
 
         async def guard(route):                       # sub-requests too: no pivoting into your private network
-            if not a.allow_private and url_allowed(route.request.url, False):
+            if not self.a.allow_private and url_allowed(route.request.url, False):
                 await route.abort()
             else:
                 await route.continue_()
-        await ctx.route("**/*", guard)
-        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        print(f"Smara Browser Bridge running for {cfg.get('shop', 'your shop')} using {exe or 'your attached browser'}. Press Ctrl+C to stop.")
+        await self.ctx.route("**/*", guard)
+        self.page = self.ctx.pages[0] if self.ctx.pages else await self.ctx.new_page()
+        log(f"opened {self.exe or 'your attached browser'}")
+        return self.page
+
+    async def close(self):
+        ctx, self.ctx, self.page = self.ctx, None, None
+        if ctx is not None and not self.a.attach:
+            try:
+                await ctx.close()
+            except Exception:
+                pass
+
+    async def idle_check(self, minutes: float):
+        import time
+        if self.alive() and minutes > 0 and self.last and time.monotonic() - self.last > minutes * 60:
+            log("closing the browser after being idle")
+            await self.close()
+
+
+async def run(a) -> int:
+    import time
+    from playwright.async_api import async_playwright
+    cfg = load_config()
+    if not cfg.get("token"):
+        log("Not paired yet. Send 'pair browser' to Smara in WhatsApp, then run: python munim_bridge.py pair --code ...")
+        return 1
+    headers = {"Authorization": f"Bearer {cfg['token']}"}
+    HOME.mkdir(parents=True, exist_ok=True)
+    PID.write_text(str(os.getpid()))
+    async with async_playwright() as p, httpx.AsyncClient(base_url=cfg["server"], headers=headers, timeout=45) as http:
+        br = Browser(p, a)
+        if not a.lazy:
+            await br.ensure()
+        log(f"Smara Browser Bridge is on for {cfg.get('shop', 'your shop')}. "
+            f"{'Browser opens when Smara needs it.' if a.lazy else 'Browser is open.'} Press Ctrl+C to stop.")
         while True:
             try:
                 r = await http.post("/bridge/poll", params={"wait": 25})
                 if r.status_code == 401:
-                    print("This PC was disconnected from Smara (unpaired). Pair again to continue.")
+                    log("This PC was disconnected from Smara (unpaired). Pair again to continue.")
                     return 1
                 job = r.json() if r.status_code == 200 else {}
             except (httpx.TransportError, ValueError):
                 await asyncio.sleep(3)
                 continue
             if not job:
+                await br.idle_check(a.idle_minutes)
                 continue
             try:
-                result = await handle(page, job["command"], a.allow_private)
+                try:
+                    page = await br.ensure()
+                    result = await handle(page, job["command"], a.allow_private)
+                except Exception as first:             # the owner may have closed the window: reopen once and retry
+                    if "closed" not in str(first).lower():
+                        raise
+                    await br.close()
+                    page = await br.ensure()
+                    result = await handle(page, job["command"], a.allow_private)
+            except SystemExit as e:
+                result = {"error": str(e)}
             except Exception as e:                    # a page error must never kill the bridge
                 result = {"error": f"{type(e).__name__}: {str(e)[:300]}"}
+            br.last = time.monotonic()
             await http.post("/bridge/result", json={"job_id": job["job_id"], "result": result})
+
+
+def startup_command() -> list[str]:
+    exe = Path(sys.executable)
+    pyw = exe.with_name("pythonw.exe")
+    return [str(pyw if pyw.is_file() else exe), str(Path(__file__).resolve()), "run"]
+
+
+def cmd_install_startup() -> int:
+    """Windows: start the helper (no window) every time you sign in. The browser only appears when Smara needs it."""
+    import subprocess
+    if platform.system() != "Windows":
+        print("Auto-start is set up for Windows only for now. On macOS/Linux add 'python munim_bridge.py run' to your login items.")
+        return 1
+    run_line = " ".join(f'"{x}"' for x in startup_command())
+    r = subprocess.run(["schtasks", "/Create", "/TN", TASK_NAME, "/TR", run_line, "/SC", "ONLOGON", "/RL", "LIMITED", "/F"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print("Could not create the startup task:", (r.stderr or r.stdout).strip()[:300])
+        return 1
+    subprocess.run(["schtasks", "/Run", "/TN", TASK_NAME], capture_output=True, text=True)
+    print("Done. Smara's browser helper now starts by itself when you sign in to Windows and is running now.")
+    return 0
+
+
+def cmd_uninstall_startup() -> int:
+    import subprocess
+    subprocess.run(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"], capture_output=True, text=True)
+    return cmd_stop()
+
+
+def cmd_stop() -> int:
+    import subprocess
+    try:
+        pid = int(PID.read_text().strip())
+    except (OSError, ValueError):
+        print("The helper is not running.")
+        return 0
+    if platform.system() == "Windows":
+        subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, text=True)
+    else:
+        try:
+            os.kill(pid, 15)
+        except OSError:
+            pass
+    PID.unlink(missing_ok=True)
+    print("Stopped.")
+    return 0
 
 
 def main() -> int:
@@ -228,12 +379,24 @@ def main() -> int:
     rp.add_argument("--attach", default="", help="CDP URL of a browser you started with --remote-debugging-port, e.g. http://127.0.0.1:9222")
     rp.add_argument("--profile", default="", help="browser profile folder (default: a dedicated Smara profile that keeps your logins)")
     rp.add_argument("--headless", action="store_true")
+    rp.add_argument("--lazy", action=argparse.BooleanOptionalAction, default=True,
+                    help="open the browser only when Smara needs it (default); --no-lazy opens it at start")
+    rp.add_argument("--idle-minutes", type=float, default=30, help="close the browser after this long with no work (0 = never)")
     rp.add_argument("--allow-private", action="store_true", help="allow localhost / private network pages (off by default)")
     sub.add_parser("status")
     sub.add_parser("unpair")
+    sub.add_parser("stop")
+    sub.add_parser("install-startup")
+    sub.add_parser("uninstall-startup")
     a = ap.parse_args()
     if a.cmd == "pair":
         return cmd_pair(a)
+    if a.cmd == "install-startup":
+        return cmd_install_startup()
+    if a.cmd == "uninstall-startup":
+        return cmd_uninstall_startup()
+    if a.cmd == "stop":
+        return cmd_stop()
     if a.cmd == "status":
         cfg = load_config()
         print(f"Paired with {cfg['shop']} at {cfg['server']}" if cfg.get("token") else "Not paired.")

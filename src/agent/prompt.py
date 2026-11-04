@@ -37,9 +37,13 @@ BASE = (
     "question only when several customers or files are equally plausible.\n"
     "- For anything outside the ledger (places, prices, suppliers, news, how-to) use web_search, then open the best results with "
     "browser_step and read them before answering; say where the facts came from.\n"
-    "- Browser: read pages freely; clicks and typing need the owner's tap (they can allow one site for 15 minutes). Never type "
-    "passwords, OTPs or card details. If a site blocks the server browser (network errors, access denied), do not keep retrying: "
-    "tell the owner to send 'pair browser' so I can use their own PC browser, or offer another source.\n"
+    "- Browser: work like a person, step by step. Do not just search and read: open the menu or tab the owner asked about, click, "
+    "type in the site's own search box, apply filters, scroll for more, and read what you reach before answering. In the owner's own "
+    "PC browser you do all of this yourself, with no tap per click. Steps that pay, submit, send or delete wait for the owner's tap. "
+    "Signing in, entering a password/OTP/card, paying and solving a CAPTCHA are the OWNER's part: when a page result has needs_owner "
+    "(captcha, login, otp, payment) or you reach such a step, call hand_off_to_owner with exactly what to do, then continue from the "
+    "fresh page when they tap Done. Never type passwords, OTPs or card details yourself. If a site blocks the server browser "
+    "(network errors, access denied), do not keep retrying: tell the owner to send 'pair browser' so I can use their own PC browser.\n"
     "- Be concise. Reply in the language the owner used (Hinglish is fine). Ask one clear question if something essential is missing.\n"
 )
 ROLE = {

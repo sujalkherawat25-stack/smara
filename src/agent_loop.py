@@ -51,11 +51,17 @@ def host_of(page: dict) -> str:
     return (urlparse((page or {}).get("url", "")).hostname or "").lower()
 
 
+def page_text(page: dict) -> str:
+    return f"{(page or {}).get('url', '')} {(page or {}).get('title', '')}".lower()
+
+
 def _ctx(row, call_id: str = "", browsers=None) -> SessionCtx:
     sid = str(row["id"])
     return SessionCtx(id=sid, tenant_id=str(row["tenant_id"]), trust=row["trust"],
                       party_id=str(row["party_id"]) if row["party_id"] else None, files=tuple(row["files"]), call_id=call_id,
-                      grants=active_grants(row), host=host_of(browsers.page(sid)) if browsers else "")
+                      grants=active_grants(row), host=host_of(browsers.page(sid)) if browsers else "",
+                      on_device=bool(browsers) and getattr(browsers, "where", lambda _: "")(sid) == "device",
+                      page=page_text(browsers.page(sid)) if browsers else "")
 
 
 async def _save(pool, sid, messages, *, status=None, pending=..., steps=None) -> None:

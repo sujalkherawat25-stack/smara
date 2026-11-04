@@ -67,10 +67,18 @@ TOOLS = [
     _fn("inspect_and_import_file", "Open a file attached to this conversation. mode=inspect previews the rows "
         "and totals; mode=import loads them into the ledger and reports sheet vs ledger totals to verify.",
         {"file_ref": _S, "mode": {"type": "string", "enum": ["inspect", "import"]}}, ["file_ref", "mode"]),
-    _fn("browser_step", "One interactive browser step; returns the page (url, title, text, clickable elements). "
-        "navigate/read run immediately; click/fill/press need the owner's approval.",
-        {"action": {"type": "string", "enum": ["navigate", "read", "click", "fill", "press"]},
+    _fn("browser_step", "Drive the browser like a person: one step, then look at the page (url, title, text, clickable elements, "
+        "needs_owner). Actions: navigate, read, scroll (value down/up/top/bottom), back, wait (value ms), click, fill (selector+value), "
+        "select (selector+value), press (value=key e.g. Enter). Work through the page yourself: open menus, tick filters, type in "
+        "search boxes, scroll for more, then read the result. In the owner's own browser clicking and typing run on their own; "
+        "steps that pay, submit, send or delete wait for the owner's tap; sign-in, OTP, payment and CAPTCHA are the owner's to do "
+        "(use hand_off_to_owner).",
+        {"action": {"type": "string", "enum": ["navigate", "read", "scroll", "back", "wait", "click", "fill", "select", "press"]},
          "url": _S, "selector": _S, "value": _S}, ["action"]),
+    _fn("hand_off_to_owner", "Pause and ask the owner to do a step themselves in the open browser: signing in, entering a password, "
+        "OTP or card details, paying, or solving a CAPTCHA. Say exactly what they should do. They tap Done when finished and you "
+        "get the fresh page back to continue. Use it whenever a page result lists needs_owner (captcha, login, otp, payment).",
+        {"reason": _S}, ["reason"]),
     _fn("propose_ledger_adjustment", "Propose changing an invoice: PARTIAL_PAYMENT (give paid_rupees), DISCOUNT_CLAIM "
         "(give discount_percent, or new_amount_rupees if they state a new total), PROMISE_DATE_CHANGE (new_due_date), or "
         "UTR_PROOF (fully paid, with proof). Do not do the arithmetic yourself. Nothing changes until the owner approves.",

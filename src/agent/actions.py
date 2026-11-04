@@ -165,8 +165,9 @@ async def open_gate(app, ctx: SessionCtx, tenant, name: str, args: dict, card: s
     await send_to_owner(app, tenant, {
         "messaging_product": "whatsapp", "to": tenant.owner_phone, "type": "interactive", "interactive": {
             "type": "button", "body": {"text": (who + card)[:1024]},
-            "action": {"buttons": [btn("ag_ok", "Approve"), *([btn("ag_site", "Approve + this site")] if name == "browser_step" else []),
-                                   btn("ag_no", "Reject")]}}},
+            "action": {"buttons": [btn("ag_ok", "Done, continue") if name == "hand_off_to_owner" else btn("ag_ok", "Approve"),
+                                   *([btn("ag_site", "Approve + this site")] if name == "browser_step" else []),
+                                   btn("ag_no", "Cancel") if name == "hand_off_to_owner" else btn("ag_no", "Reject")]}}},
         kind="owner_agent_card", agent_session_id=ctx.id)
     return {"card": (who + card)[:1024]}
 
@@ -174,6 +175,9 @@ async def open_gate(app, ctx: SessionCtx, tenant, name: str, args: dict, card: s
 async def execute_approved(app, ctx: SessionCtx, tenant, name: str, args: dict) -> dict:
     if name == "browser_step":
         return await app.state.browsers.step(ctx.id, args, tenant_id=ctx.tenant_id)
+    if name == "hand_off_to_owner":
+        page = await app.state.browsers.step(ctx.id, {"action": "read"}, tenant_id=ctx.tenant_id) if app.state.browsers.alive(ctx.id) else {}
+        return {"owner_done": True, "note": "The owner says they finished their part. Check the page below and continue.", **page}
     if name != "send_whatsapp_message":
         return {"error": f"{name} cannot be executed here"}
     s = app.state.settings

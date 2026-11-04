@@ -18,8 +18,8 @@ import re
 from dataclasses import dataclass, field
 
 UNTRUSTED_ALLOWED = frozenset({"write_continuum_evidence", "propose_ledger_adjustment"})
-BROWSER_READ = frozenset({"navigate", "read"})
-BROWSER_ACT = frozenset({"click", "fill", "press"})
+BROWSER_READ = frozenset({"navigate", "read", "scroll", "back", "wait"})
+BROWSER_ACT = frozenset({"click", "fill", "press", "select"})
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,8 @@ class SessionCtx:
     call_id: str = ""
     grants: tuple[str, ...] = ()    # sites the owner let this session act on without a tap per click
     host: str = ""                 # the site the browser is on right now
+    on_device: bool = False         # the browser is the owner's own PC, in front of them with a Stop button
+    page: str = ""                 # lower-case url + title of the current page
 
 
 @dataclass(frozen=True)
@@ -42,17 +44,19 @@ class Decision:
     card: str = ""                  # what the owner sees on the approval card
 
 
-# Even on a site the owner allowed, anything that spends, sends, deletes, books or submits still needs its own tap.
-SENSITIVE_STEP = re.compile(
-    r"pay|buy|purchase|checkout|check.?out|order|confirm|submit|delete|remove|transfer|send|book|subscribe|cancel|"
-    r"logout|log.?out|sign.?out|post|publish|withdraw|donate|upi|net.?banking|place|apply|accept|agree|verify|login|log.?in|sign.?in",
-    re.I)
+# Steps that spend, send, delete, book or publish always need the owner's tap, wherever the browser is.
+# (Opening a menu, adding to a cart, filtering, searching or logging-in pages are NOT in this list: the agent just does them.)
+OUTWARD_STEP = re.compile(
+    r"\b(pay|payment|pay now|buy|buy now|purchase|checkout|check out|place order|place my order|confirm order|order now|"
+    r"submit|delete|remove account|transfer|send|send money|book now|confirm booking|subscribe|cancel order|withdraw|donate|"
+    r"upi|net ?banking|publish|post)\b", re.I)
+# Pages where any click or typing waits for the owner: signing in, paying, one-time codes.
+SENSITIVE_PAGE = re.compile(r"login|log-in|signin|sign-in|sign in|checkout|payment|/pay|otp|verify|security|password|captcha", re.I)
 
 
 def sensitive_step(args: dict) -> bool:
-    if args.get("action") == "press":
-        return str(args.get("value", "Enter")).lower() in ("enter", "return", "numpadenter", "space")
-    return bool(SENSITIVE_STEP.search(f"{args.get('selector', '')} {args.get('value', '')}"))
+    """True when this step must not run on its own even where the agent is otherwise free to act."""
+    return bool(OUTWARD_STEP.search(f"{args.get('selector', '')} {args.get('value', '')}"))
 
 
 def tier_of(name: str, args: dict) -> str:
@@ -65,6 +69,8 @@ def tier_of(name: str, args: dict) -> str:
         return "T1" if args.get("mode") == "import" else "T0"
     if name == "write_continuum_evidence":
         return "T1"
+    if name == "hand_off_to_owner":
+        return "T2"
     if name == "browser_step":
         return "T0" if args.get("action") in BROWSER_READ else "T2"
     if name == "send_whatsapp_message":
@@ -102,10 +108,18 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
             return Decision("deny", tier, "only files attached to this conversation can be opened")
         if not isinstance(args.get("code"), str) or not args["code"].strip() or len(args["code"]) > 20_000:
             return Decision("deny", tier, "code must be a non-empty string under 20,000 characters")
+    if name == "hand_off_to_owner" and ctx.trust != "TRUSTED":
+        return Decision("deny", tier, "only a conversation with the owner can hand a step to them")
     if tier in ("T0", "T1"):
         return Decision("allow", tier)
-    if name == "browser_step" and ctx.trust == "TRUSTED" and ctx.host and ctx.host in ctx.grants and not sensitive_step(args):
-        return Decision("allow", "T2g", "the owner allowed this site for this task")
+    if name == "browser_step" and ctx.trust == "TRUSTED" and not sensitive_step(args):
+        # On the owner's own PC (visible, with a Stop button) the agent acts freely, except on pages where the owner must
+        # act (sign-in, payment, one-time codes). On the server browser the owner approves, or allows a site for a while.
+        on_page = bool(SENSITIVE_PAGE.search(ctx.page))
+        if ctx.on_device and not on_page:
+            return Decision("allow", "T2a", "autonomous on the owner's own browser")
+        if ctx.host and ctx.host in ctx.grants and not on_page:
+            return Decision("allow", "T2g", "the owner allowed this site for this task")
     return Decision("approve", tier, card=approval_text(name, args))
 
 
@@ -119,6 +133,8 @@ def approval_text(name: str, args: dict, page: dict | None = None) -> str:
         if args.get("new_due_date"):
             parts.append(f"pay by {args['new_due_date']}")
         return "Change this invoice? " + ", ".join(parts)
+    if name == "hand_off_to_owner":
+        return f"Your turn in the browser: {str(args.get('reason', ''))[:600]}\n\nDo it yourself, then tap Done and I will carry on."
     if name == "browser_step":
         where = f" on {(page or {}).get('title') or (page or {}).get('url')} ({(page or {}).get('url', '')[:80]})" if page else ""
         what = args.get("value") if args.get("action") in ("fill", "press") else args.get("selector")
