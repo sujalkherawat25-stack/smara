@@ -21,7 +21,7 @@ async def dispatch(app, msg: InboundMessage) -> None:
     try:
         owner = await tenants.by_owner_phone(pool, msg.sender)
         if owner:
-            await tenants.touch_owner_inbound(pool, owner.id)   # opens the owner's 24h window
+            await tenants.touch_owner_inbound(pool, owner.id, msg.channel)   # remembers the channel; WhatsApp also opens the 24h window
             owner = await tenants.by_id(pool, owner.id)
             await handle_owner(app, owner, msg)
             await resend_undelivered(app, owner, channel="whatsapp")

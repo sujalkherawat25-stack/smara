@@ -6,6 +6,7 @@ and puts the owner's Approve/Reject card up; the session then suspends.
 arguments that were frozen in the session when the card was shown.
 """
 import json
+import re
 from datetime import date, datetime, timedelta, timezone
 
 from src import clock
@@ -94,6 +95,9 @@ def _compute_amount(args: dict, owed: float) -> str | None:
     return None
 
 
+SECRET_FIELD = re.compile(r"pass(word|wd)|\botp\b|\bpin\b|cvv|card.?number|\bupi.?pin\b|secret", re.I)
+
+
 async def validate_gated(app, ctx: SessionCtx, name: str, args: dict) -> str | None:
     """Concrete checks before any card is shown. Returns an error for the model, or None."""
     pool = app.state.pool
@@ -128,6 +132,10 @@ async def validate_gated(app, ctx: SessionCtx, name: str, args: dict) -> str | N
                 return "new_due_date must be YYYY-MM-DD"
     elif name == "browser_step" and not app.state.browsers.alive(ctx.id):
         return "no open page: call browser_step with action=navigate first"
+    elif name == "browser_step" and args.get("action") == "fill" and SECRET_FIELD.search(
+            f"{args.get('selector', '')} {args.get('value', '')}"):
+        return ("I never type passwords, OTPs, PINs or card details. Stop here and ask the owner to enter that "
+                "step themselves, or use an official API instead")
     return None
 
 

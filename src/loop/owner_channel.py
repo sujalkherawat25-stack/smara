@@ -25,6 +25,19 @@ def window_open(tenant, now: datetime) -> bool:
     return bool(last) and now - last < WINDOW
 
 
+def pick_channel(app, tenant, now: datetime, reply_channel: str | None = None) -> str:
+    """Where an owner-bound message goes. A reply stays on the channel the owner wrote on. Anything else
+    (approvals, reminders, files the agent started) follows the owner's last-used channel. If WhatsApp is the
+    preferred one but its 24h window is closed and Telegram is linked, Telegram carries it instead of holding it."""
+    tg_ok = bool(getattr(app.state, "tg", None) and tenant.telegram_chat_id)
+    if reply_channel:
+        return "telegram" if reply_channel == "telegram" and tg_ok else "whatsapp"
+    last = tenant.owner_last_channel or ("telegram" if tg_ok else "whatsapp")
+    if tg_ok and (last == "telegram" or not window_open(tenant, now)):
+        return "telegram"
+    return "whatsapp"
+
+
 def wa_to_telegram(payload: dict, chat_id: int) -> dict:
     if payload.get("type") == "interactive":
         it = payload["interactive"]
@@ -46,7 +59,7 @@ async def send_to_owner(app, tenant, payload: dict, *, kind: str, obligation_id=
                      status="held", obligation_id=obligation_id, adjustment_id=adjustment_id,
                      agent_session_id=agent_session_id, payload=payload if kind == "owner_note" else None)
         return "held"
-    if tg and tenant.telegram_chat_id and reply_channel in (None, "telegram"):
+    if pick_channel(app, tenant, now, reply_channel) == "telegram":
         await tg.send(wa_to_telegram(payload, tenant.telegram_chat_id))
         return "telegram"
     if reply_channel is None and s.wa_owner_template and not window_open(tenant, now) \
@@ -69,9 +82,8 @@ async def send_document_to_owner(app, tenant, data: bytes, filename: str, mime: 
                                  reply_channel: str | None = None) -> str:
     """Send a file to the owner: Telegram if linked, else WhatsApp (needs the 24h window).
     Returns 'telegram', 'whatsapp' or 'window_closed'."""
-    tg = getattr(app.state, "tg", None)
-    if tg and tenant.telegram_chat_id and reply_channel in (None, "telegram"):
-        await tg.send_document(tenant.telegram_chat_id, data, filename, caption)
+    if pick_channel(app, tenant, datetime.now(timezone.utc), reply_channel) == "telegram":
+        await app.state.tg.send_document(tenant.telegram_chat_id, data, filename, caption)
         return "telegram"
     if not window_open(tenant, datetime.now(timezone.utc)):
         return "window_closed"
@@ -98,7 +110,8 @@ async def flush_held(app) -> int:
         t = await tenants.by_id(app.state.pool, tid)
         if t is None:
             continue
-        if getattr(app.state, "tg", None) and t.telegram_chat_id:
+        via = pick_channel(app, t, datetime.now(timezone.utc))
+        if via == "telegram":
             delivered += await resend_undelivered(app, t, channel="telegram")
         elif window_open(t, datetime.now(timezone.utc)):
             delivered += await resend_undelivered(app, t, channel="whatsapp")

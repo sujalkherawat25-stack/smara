@@ -444,3 +444,89 @@ async def test_llm_calls_are_limited_to_the_configured_concurrency():
               client=httpx.AsyncClient(base_url="https://llm.test", transport=httpx.MockTransport(handler)))
     await asyncio.gather(*[llm.chat([], []) for _ in range(12)])
     assert live["peak"] == 3                                                     # 12 requests, never more than 3 in flight
+
+
+# ---------------------------------------------------------------- approvals follow the owner's channel
+
+class TG:
+    def __init__(self):
+        self.sent, self.docs, self.answered = [], [], []
+
+    async def send(self, payload):
+        self.sent.append(payload)
+
+    async def send_document(self, chat_id, data, filename, caption=""):
+        self.docs.append((chat_id, filename))
+
+    async def answer(self, cb_id):
+        self.answered.append(cb_id)
+
+
+async def _approval(env):
+    from src.loop.owner_channel import send_to_owner
+    t = await tenants.by_id(env.pool, env.t.id)
+    payload = {"messaging_product": "whatsapp", "to": t.owner_phone, "type": "text", "text": {"body": "Approve?"}}
+    return await send_to_owner(env.app, t, payload, kind="owner_agent_card")
+
+
+async def _set(env, **cols):
+    async with env.pool.connection() as c:
+        for k, v in cols.items():
+            await c.execute(f"update tenants set {k} = %s where id = %s", (v, env.t.id))
+
+
+async def test_approval_goes_to_the_channel_the_owner_last_used(env):
+    env.app.state.tg = TG()
+    await _set(env, telegram_chat_id=555)
+    await tenants.touch_owner_inbound(env.pool, env.t.id, "whatsapp")
+    assert await _approval(env) == "whatsapp"                      # chatting on WhatsApp: stay there
+    await tenants.touch_owner_inbound(env.pool, env.t.id, "telegram")
+    assert await _approval(env) == "telegram" and env.app.state.tg.sent[-1]["chat_id"] == 555
+
+
+async def test_a_telegram_message_does_not_open_the_whatsapp_window(env):
+    from src.loop.owner_channel import window_open
+    env.app.state.tg = TG()
+    await _set(env, telegram_chat_id=555, owner_last_inbound_at=datetime.now(timezone.utc) - timedelta(days=2))
+    await tenants.touch_owner_inbound(env.pool, env.t.id, "telegram")
+    t = await tenants.by_id(env.pool, env.t.id)
+    assert not window_open(t, datetime.now(timezone.utc)) and t.owner_last_channel == "telegram"
+
+
+async def test_closed_whatsapp_window_falls_back_to_telegram_instead_of_holding(env):
+    env.app.state.tg = TG()
+    await _set(env, telegram_chat_id=555, owner_last_channel="whatsapp",
+               owner_last_inbound_at=datetime.now(timezone.utc) - timedelta(days=2))
+    assert await _approval(env) == "telegram"
+    await _set(env, telegram_chat_id=None)
+    env.app.state.tg = None
+    assert await _approval(env) in ("whatsapp", "held")             # nothing else to try
+
+
+async def test_telegram_owner_approves_a_browser_click_end_to_end(env):
+    from src.ingest import telegram as tgmod
+    tg = env.app.state.tg = TG()
+    await _set(env, telegram_chat_id=555)
+    br = env.app.state.browsers
+    env.app.state.llm = ScriptLLM(call("browser_step", action="navigate", url="https://example.com/form"),
+                                  call("browser_step", action="click", selector="#go"),
+                                  say("Clicked and checked the page."))
+    await tgmod.handle_update(env.app, {"message": {"chat": {"id": 555, "type": "private"}, "message_id": 1,
+                                                    "text": "submit the form on example.com"}})
+    card = tg.sent[-1]
+    assert "click" in card["text"] and "Form" in card["text"] and "example.com/form" in card["text"]   # page context shown
+    sid = (await one(env.pool, "select id from agent_sessions where status = 'WAITING_APPROVAL'"))["id"]
+    assert [b[0]["callback_data"] for b in card["reply_markup"]["inline_keyboard"]] == [f"ag_ok:{sid}", f"ag_no:{sid}"]
+    await tgmod.handle_update(env.app, {"callback_query": {"id": "cb1", "data": f"ag_ok:{sid}", "message": {"chat": {"id": 555}}}})
+    assert [s["action"] for s in br.steps] == ["navigate", "click"]
+    assert tg.sent[-1]["text"] == "Clicked and checked the page." and env.app.state.wa.sent == []   # all on Telegram
+
+
+async def test_browser_never_types_passwords_or_otps(env):
+    env.app.state.llm = ScriptLLM(call("browser_step", action="navigate", url="https://example.com/login"),
+                                  call("browser_step", action="fill", selector="input[name=password]", value="hunter2"),
+                                  call("browser_step", action="fill", selector="#code", value="OTP 482913"),
+                                  lambda m: say(json.dumps([json.loads(x["content"]).get("error", "")[:30] for x in m if x["role"] == "tool"][-2:])))
+    await dispatch(env.app, owner("bl1", "log in to the portal"))
+    assert [s["action"] for s in env.app.state.browsers.steps] == ["navigate"]          # no fill ever reached the page
+    assert (await one(env.pool, "select count(*) n from agent_sessions where status = 'WAITING_APPROVAL'"))["n"] == 0

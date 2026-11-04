@@ -42,7 +42,7 @@ class ScriptLLM:
     def __init__(self, *steps):
         self.steps, self.seen = list(steps), []
 
-    async def chat(self, messages, tools):
+    async def chat(self, messages, tools, allow_fallback=True):
         self.seen.append(json.loads(json.dumps(messages)))
         step = self.steps.pop(0) if self.steps else say("done")
         if isinstance(step, Exception):
@@ -80,6 +80,9 @@ class FakeBrowsers:
         self.steps.append(args)
         self.open.add(sid)
         return {"url": "https://example.com/form", "title": "Form", "text": "ok", "elements": [{"selector": "#go"}]}
+
+    def page(self, sid):
+        return {"url": "https://example.com/form", "title": "Form"} if sid in self.open else {}
 
     async def close(self, sid):
         self.open.discard(sid)
@@ -437,3 +440,13 @@ async def test_file_request_without_a_file_gets_one_nudge(env):
     llm2 = env.app.state.llm = ScriptLLM(say("Theek hai."))
     await dispatch(env.app, owner("chat1", "Ravi ka kitna baaki hai?"))
     assert len(llm2.seen) == 1                                                          # unrelated messages are untouched
+
+
+def test_heavy_work_never_uses_the_fallback_model():
+    from src.agent_loop import heavy
+    sys_, user = {"role": "system", "content": "s"}, lambda t: {"role": "user", "content": t}
+    assert not heavy([sys_, user("Ravi ka kitna baaki hai?")])
+    assert heavy([sys_, user("Ravi ka statement pdf bhejo")])
+    assert heavy([sys_, user("import this\n[The owner attached a file: file_ref=whatsapp:M1:a.xlsx; caption: -]")])
+    assert heavy([sys_, user("hi"), {"role": "assistant", "content": "", "tool_calls": [
+        {"id": "1", "type": "function", "function": {"name": "run_python", "arguments": "{}"}}]}])

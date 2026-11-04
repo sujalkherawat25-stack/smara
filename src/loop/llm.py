@@ -106,13 +106,14 @@ class LLM:
         })
         return json.loads(body["choices"][0]["message"]["content"])
 
-    async def chat(self, messages: list[dict], tools: list[dict]) -> dict:
+    async def chat(self, messages: list[dict], tools: list[dict], allow_fallback: bool = True) -> dict:
         """One agent step: returns the assistant message (content and/or tool_calls)."""
         req = {"model": self.agent_model, "temperature": 0, "messages": messages}
         if tools:
             req.update(tools=tools, tool_choice="auto")
+        fb = bool(self.fallback_model) and self.fallback_model != self.agent_model and allow_fallback
         if self._agent_bucket:
-            if self.fallback_model and self.fallback_model != self.agent_model and                     self._agent_bucket.wait_needed() > self.fallback_after_s / 2:
+            if fb and self._agent_bucket.wait_needed() > self.fallback_after_s / 2:
                 self.stats["fallbacks"] += 1                    # the main model is busy: do not queue, use the spare one
                 body = await self._post({**req, "model": self.fallback_model})
                 self.last_usage = body.get("usage") or {}
@@ -120,9 +121,9 @@ class LLM:
             await self._agent_bucket.take()
         try:
             # with a fallback model, do not queue behind a rate limit for long: switch after a few seconds
-            body = await self._post(req, max_wait=self.fallback_after_s if self.fallback_model else None)
+            body = await self._post(req, max_wait=self.fallback_after_s if fb else None)
         except RateLimited:
-            if not self.fallback_model or self.fallback_model == self.agent_model:
+            if not fb:
                 raise
             log.warning("agent model %s is rate limited; answering this step with %s", self.agent_model, self.fallback_model)
             self.stats["fallbacks"] += 1

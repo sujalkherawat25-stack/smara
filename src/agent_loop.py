@@ -85,6 +85,17 @@ async def start_session(app, *, tenant, trust: str, trigger: str, content: str, 
     return sid
 
 
+HEAVY_TOOLS = frozenset({"run_python", "inspect_and_import_file", "browser_step"})
+
+
+def heavy(messages: list[dict]) -> bool:
+    """File, spreadsheet and browser work needs the strong model start to finish; only light chat may use the fallback."""
+    used = any(c["function"]["name"] in HEAVY_TOOLS for m in messages for c in (m.get("tool_calls") or []))
+    attached = any("file_ref=" in str(m.get("content", "")) for m in messages if m["role"] == "user")
+    asked = any(_FILE_ASK.search(str(m.get("content", ""))) for m in messages[-6:] if m["role"] == "user")
+    return used or attached or asked
+
+
 _FILE_ASK = re.compile(r"\b(pdf|excel|xlsx)\b", re.I)
 _SEND_ASK = re.compile(r"(bhej|send|bana|de do|dedo|chahiye|chahie|mail)", re.I)
 
@@ -111,7 +122,7 @@ async def run(app, sid: str, fallback=None) -> None:
             messages[0] = {"role": "system", "content": await build_system(app, tenant, row["trust"])}
         while budget < MAX_STEPS:
             messages = compact(messages)
-            msg = await app.state.llm.chat(messages, tools.TOOLS)
+            msg = await app.state.llm.chat(messages, tools.TOOLS, allow_fallback=not heavy(messages))
             steps += 1
             budget += 1
             calls = msg.get("tool_calls") or []
@@ -181,7 +192,7 @@ async def _process(app, row, messages: list, calls: list) -> bool:
         else:
             err = await actions.validate_gated(app, ctx, name, args)
             if err is None:
-                extra = await actions.open_gate(app, ctx, tenant, name, args, approval_text(name, args))   # args now hold computed amounts
+                extra = await actions.open_gate(app, ctx, tenant, name, args, approval_text(name, args, getattr(getattr(app.state, "browsers", None), "page", lambda _: None)(ctx.id)))   # args now hold computed amounts
                 pending = {"call_id": cid, "name": name, "args": args, "card": extra.get("card", d.card),
                            "remaining": calls[i + 1:], **{k: v for k, v in extra.items() if k != "card"}}
                 await _save(app.state.pool, ctx.id, messages, status="WAITING_APPROVAL", pending=pending)

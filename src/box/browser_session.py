@@ -20,7 +20,11 @@ class BrowserSessions:
     def __init__(self, max_sessions: int = 3, idle_s: int = 600, step_timeout_s: int = 45):
         self._procs: dict[str, tuple[subprocess.Popen, float]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._pages: dict[str, dict] = {}       # last url/title seen per session, shown on approval cards
         self.max_sessions, self.idle_s, self.step_timeout_s = max_sessions, idle_s, step_timeout_s
+
+    def page(self, sid: str) -> dict:
+        return self._pages.get(sid, {})
 
     def alive(self, sid: str) -> bool:
         entry = self._procs.get(sid)
@@ -57,6 +61,8 @@ class BrowserSessions:
                 await self.close(sid)
                 return {"error": f"browser step timed out after {self.step_timeout_s}s"}
             self._procs[sid] = (proc, time.monotonic())
+            if isinstance(out, dict) and out.get("url"):
+                self._pages[sid] = {"url": out["url"], "title": out.get("title", "")}
             return out
 
     def _reap(self) -> None:
@@ -68,6 +74,7 @@ class BrowserSessions:
 
     async def close(self, sid: str) -> None:
         entry = self._procs.pop(sid, None)
+        self._pages.pop(sid, None)
         if entry:
             entry[0].kill()
 

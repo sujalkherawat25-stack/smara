@@ -73,7 +73,7 @@ async def link_message(app, tenant_id: str) -> str:
 
 async def unlink(app, tenant_id: str) -> str:
     async with app.state.pool.connection() as conn:
-        await conn.execute("UPDATE tenants SET telegram_chat_id = NULL WHERE id = %s", (tenant_id,))
+        await conn.execute("UPDATE tenants SET telegram_chat_id = NULL, owner_last_channel = 'whatsapp' WHERE id = %s", (tenant_id,))
     return "Telegram disconnected. I'll message you on WhatsApp."
 
 
@@ -83,7 +83,7 @@ async def _link(pool, code: str, chat_id: int) -> str:
         if await cur.fetchone():
             return "This Telegram is already linked to a shop. Send 'telegram off' on WhatsApp there first."
         cur = await conn.execute(
-            """UPDATE tenants SET telegram_chat_id = %s, telegram_link_code = NULL, telegram_link_expires_at = NULL
+            """UPDATE tenants SET telegram_chat_id = %s, owner_last_channel = 'telegram', telegram_link_code = NULL, telegram_link_expires_at = NULL
                 WHERE telegram_link_code = %s AND telegram_link_expires_at > now() RETURNING name""", (chat_id, code))
         row = await cur.fetchone()
     return f"Linked to {row['name']}. Approval cards and your digest will now come here." if row \
@@ -146,5 +146,6 @@ async def _owner(app, tenant, msg: InboundMessage) -> None:
 
     if not await _claim(app.state.pool, msg.wamid):
         return
+    await tenants.touch_owner_inbound(app.state.pool, tenant.id, "telegram")   # approvals now follow the owner here
     await handle_owner(app, tenant, msg)
     await resend_undelivered(app, tenant, channel="telegram")

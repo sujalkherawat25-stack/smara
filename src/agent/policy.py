@@ -91,7 +91,7 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
     return Decision("approve", tier, card=approval_text(name, args))
 
 
-def approval_text(name: str, args: dict) -> str:
+def approval_text(name: str, args: dict, page: dict | None = None) -> str:
     if name == "send_whatsapp_message":
         return f"Send this WhatsApp message?\n\n\"{str(args.get('text', ''))[:700]}\""
     if name == "propose_ledger_adjustment":
@@ -102,6 +102,8 @@ def approval_text(name: str, args: dict) -> str:
             parts.append(f"pay by {args['new_due_date']}")
         return "Change this invoice? " + ", ".join(parts)
     if name == "browser_step":
+        where = f" on {(page or {}).get('title') or (page or {}).get('url')} ({(page or {}).get('url', '')[:80]})" if page else ""
         what = args.get("value") if args.get("action") in ("fill", "press") else args.get("selector")
-        return f"Allow the browser to {args.get('action')} {str(what)[:120]!r}?"
+        target = f" in {str(args.get('selector'))[:60]!r}" if args.get("action") == "fill" else ""
+        return f"Allow the browser to {args.get('action')} {str(what)[:120]!r}{target}{where}?"
     return f"Allow {name}?"

@@ -5,7 +5,7 @@ from datetime import datetime
 from psycopg_pool import AsyncConnectionPool
 
 _COLS = ("id, name, owner_phone, upi_vpa, upi_name, wa_phone_number_id, owner_last_inbound_at, "
-         "owner_nudged_at, telegram_chat_id")
+         "owner_nudged_at, telegram_chat_id, owner_last_channel")
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,7 @@ class Tenant:
     owner_last_inbound_at: datetime | None = None
     owner_nudged_at: datetime | None = None
     telegram_chat_id: int | None = None
+    owner_last_channel: str | None = None
 
     @property
     def upi(self) -> dict | None:
@@ -72,6 +73,10 @@ async def by_telegram_chat(pool, chat_id: int) -> Tenant | None:
     return await _one(pool, "telegram_chat_id", chat_id)
 
 
-async def touch_owner_inbound(pool, tenant_id: str) -> None:
+async def touch_owner_inbound(pool, tenant_id: str, channel: str = "whatsapp") -> None:
+    """The owner just wrote. Remember where; only a WhatsApp message opens WhatsApp's 24h window."""
     async with pool.connection() as conn:
-        await conn.execute("UPDATE tenants SET owner_last_inbound_at = now() WHERE id = %s", (tenant_id,))
+        await conn.execute(
+            """UPDATE tenants SET owner_last_channel = %(c)s, owner_last_active_at = now(),
+                      owner_last_inbound_at = CASE WHEN %(c)s = 'whatsapp' THEN now() ELSE owner_last_inbound_at END
+                WHERE id = %(t)s""", {"c": channel, "t": tenant_id})
