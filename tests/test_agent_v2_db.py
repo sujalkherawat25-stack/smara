@@ -530,3 +530,108 @@ async def test_browser_never_types_passwords_or_otps(env):
     await dispatch(env.app, owner("bl1", "log in to the portal"))
     assert [s["action"] for s in env.app.state.browsers.steps] == ["navigate"]          # no fill ever reached the page
     assert (await one(env.pool, "select count(*) n from agent_sessions where status = 'WAITING_APPROVAL'"))["n"] == 0
+
+
+# ---------------------------------------------------------------- Smara must not forget earlier chats
+
+async def test_a_new_chat_remembers_what_was_said_in_earlier_chats(env):
+    llm = env.app.state.llm = ScriptLLM(say("Ravi ka Rs 10,000 baaki hai."), say("Haan, usi Ravi ko reminder draft karta hoon."))
+    await dispatch(env.app, owner("r1", "Ravi kirana ka kitna baaki hai?"))
+    async with env.pool.connection() as c:           # two hours of silence: the next message starts a new session
+        await c.execute("update agent_sessions set updated_at = now() - interval '2 hours', created_at = now() - interval '2 hours'")
+    await dispatch(env.app, owner("r2", "usko reminder bhejo"))
+    assert (await one(env.pool, "select count(*) n from agent_sessions"))["n"] == 2
+    system = llm.seen[1][0]["content"]
+    assert "Earlier chats with the owner" in system and "Ravi kirana ka kitna baaki hai?" in system and "Rs 10,000 baaki" in system
+    assert "usko reminder bhejo" not in system                      # the current message is not repeated in the digest
+
+
+async def test_the_chat_in_progress_is_not_duplicated_into_its_own_context(env):
+    llm = env.app.state.llm = ScriptLLM(say("pehla"), say("doosra"))
+    await dispatch(env.app, owner("d1", "pehla sawaal"))
+    await dispatch(env.app, owner("d2", "doosra sawaal"))           # within 30 min: same session continues
+    assert (await one(env.pool, "select count(*) n from agent_sessions"))["n"] == 1
+    assert "Earlier chats with the owner" not in llm.seen[1][0]["content"]
+
+
+async def test_customer_sessions_never_see_the_owners_chat_history(env):
+    from src.agent.prompt import build_system
+    from src import tenants as tn
+    env.app.state.llm = ScriptLLM(say("ok"))
+    await dispatch(env.app, owner("u1", "mera private note: Sharma ko discount nahi dena"))
+    t = await tn.by_id(env.pool, env.t.id)
+    assert "private note" not in await build_system(env.app, t, "UNTRUSTED")
+
+
+# ---------------------------------------------------------------- durable facts are saved without being asked
+
+class JsonLLM(ScriptLLM):
+    def __init__(self, facts):
+        super().__init__()
+        self.facts, self.calls_json = facts, []
+
+    async def json(self, system, user, **kw):
+        self.calls_json.append(user)
+        if isinstance(self.facts, Exception):
+            raise self.facts
+        return {"facts": self.facts}
+
+
+async def test_durable_facts_from_the_owner_go_to_the_right_memory_scope(env):
+    from src.agent import memory_pass
+    llm = env.app.state.llm = JsonLLM([
+        {"about": "customer", "customer": "Ravi", "fact": "Ravi pays only after the 10th of each month."},
+        {"about": "shop", "customer": "", "fact": "The shop is closed on Sundays."},
+        {"about": "customer", "customer": "Unknown Traders", "fact": "Prefers payment by cheque."}])
+    msgs = [{"role": "system", "content": "s"},
+            {"role": "user", "content": "Ravi 10 tareekh ke baad hi paisa deta hai, aur Sunday ko dukaan band rehti hai"},
+            {"role": "assistant", "content": "Theek hai, note kar liya."}]
+    assert await memory_pass.remember_from_turn(env.app, env.t.id, "sess-1", msgs) == 3
+    rows = await q_outbox(env)
+    by_scope = {r["user_id"].rsplit("_", 1)[-1] if r["user_id"].endswith("_shop") else "party": r["text"] for r in rows}
+    assert env.pid in [r["user_id"].split("_")[-1] for r in rows]                       # Ravi's own scope
+    assert any(r["user_id"].endswith("_shop") and "Sundays" in r["text"] for r in rows)
+    assert any(r["user_id"].endswith("_shop") and r["text"].startswith("About Unknown Traders") for r in rows)  # not in ledger: name kept
+    assert all(r["trusted"] for r in rows) and by_scope
+
+
+async def q_outbox(env):
+    async with env.pool.connection() as c:
+        return await (await c.execute("select user_id, text, trusted from continuum_outbox order by id")).fetchall()
+
+
+async def test_memory_pass_skips_chatter_failures_and_what_the_agent_already_saved(env):
+    from src.agent import memory_pass
+    llm = env.app.state.llm = JsonLLM([{"about": "shop", "customer": "", "fact": "x" * 40}])
+    save = {"role": "assistant", "content": "", "tool_calls": [{"id": "1", "type": "function", "function": {"name": "write_continuum_evidence", "arguments": "{}"}}]}
+    base = [{"role": "system", "content": "s"}, {"role": "user", "content": "yaad rakhna Sharma ko Friday ke baad remind karna"}]
+    assert await memory_pass.remember_from_turn(env.app, env.t.id, "s", base + [save, {"role": "assistant", "content": "done"}]) == 0
+    assert await memory_pass.remember_from_turn(env.app, env.t.id, "s", [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]) == 0
+    assert llm.calls_json == []                                                         # neither case even asked the model
+    env.app.state.llm = JsonLLM(RuntimeError("model down"))
+    assert await memory_pass.remember_from_turn(env.app, env.t.id, "s", base + [{"role": "assistant", "content": "ok"}]) == 0   # never raises
+    assert await q_outbox(env) == []
+
+
+# ---------------------------------------------------------------- a busy model is not a failed job
+
+async def test_a_rate_limited_model_is_waited_out_not_reported_as_a_failure(env, monkeypatch):
+    from src import agent_loop
+    from src.loop.llm import RateLimited
+    monkeypatch.setattr(agent_loop, "RATE_RETRY_S", 0)
+    env.app.state.llm = ScriptLLM(RateLimited("busy"), RateLimited("busy"), say("Ravi ka Rs 10,000 baaki hai."))
+    await dispatch(env.app, owner("rl1", "Ravi ka kitna baaki hai?"))
+    texts = [m["text"]["body"] for m in env.app.state.wa.to(OWNER) if m.get("type") == "text"]
+    assert len([t for t in texts if "busy" in t]) == 1                         # told once, not twice
+    assert texts[-1].startswith("Ravi ka Rs 10,000")
+    assert (await one(env.pool, "select status from agent_sessions"))["status"] == "DONE"
+
+
+async def test_a_model_that_stays_busy_eventually_fails_cleanly(env, monkeypatch):
+    from src import agent_loop
+    from src.loop.llm import RateLimited
+    monkeypatch.setattr(agent_loop, "RATE_RETRY_S", 0)
+    env.app.state.llm = ScriptLLM(*[RateLimited("busy") for _ in range(10)])
+    await dispatch(env.app, owner("rl2", "hello there friend"))
+    assert (await one(env.pool, "select status from agent_sessions"))["status"] == "FAILED"
+    assert "could not finish" in env.app.state.wa.sent[-1]["text"]["body"]

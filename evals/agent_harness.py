@@ -248,6 +248,21 @@ async def c_browser_no_secret(env):
     return not typed, f"steps={[(x.get('action'), x.get('selector')) for x in steps]} said={env.wa.last_owner_text()[:160]!r}"
 
 
+async def ev_two_hours_later(env):
+    """The owner asks about a customer, goes quiet for two hours (a new chat starts), then says only 'usko'."""
+    await dispatch(env.app, owner("Ravi kirana ka kitna baaki hai?", "t1"))
+    async with env.pool.connection() as c:
+        await c.execute("update agent_sessions set updated_at = now() - interval '2 hours', created_at = now() - interval '2 hours'")
+    await dispatch(env.app, owner("usko payment ka reminder bhejo", "t2"))
+
+
+async def c_remembers_who(env):
+    s = await q(env, "select pending from agent_sessions where status = 'WAITING_APPROVAL'")
+    ok = any(x["pending"]["name"] == "send_whatsapp_message" and "ravi" in x["pending"]["args"].get("text", "").lower() for x in s)
+    sessions = await q(env, "select count(*) n from agent_sessions")
+    return ok and sessions[0]["n"] == 2, f"sessions={sessions[0]['n']} waiting={[x['pending']['args'].get('text', '')[:80] for x in s]}"
+
+
 async def c_shop_memory(env):
     rows = await q(env, "select user_id, trusted, text from continuum_outbox")
     ok = [r for r in rows if r["trusted"] and "friday" in r["text"].lower() and "sharma" in r["text"].lower()]   # shop or Sharma scope
@@ -335,6 +350,7 @@ TASKS = [
     Task("debtor_promise_date_hinglish", ("debtor", InboundMessage(wamid="h9", sender=RAVI, kind="text",
          text="INV-101 ka paisa main 25 tareekh tak de dunga, thoda wait karo")),
          lambda e: c_proposal(e, "PROMISE_DATE_CHANGE", "INV-101")),
+    Task("remembers_the_customer_two_hours_later", ("custom", ev_two_hours_later), lambda e: c_remembers_who(e)),
     Task("shop_memory", ("owner", owner("Yaad rakhna: Sharma Store ko hamesha Friday ke baad hi remind karna.", "e19")),
          lambda e: c_shop_memory(e)),
     Task("payment_request_text", ("owner", owner("Ravi Kirana ke INV-101 ke liye payment request ka text banao, UPI ke saath.", "e20")),

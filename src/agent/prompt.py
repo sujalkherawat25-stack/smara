@@ -21,6 +21,8 @@ BASE = (
     "- After any import, proposal or file you create, verify by reading the result back (totals, rows) before answering. "
     "If a tool errors, read the error, fix the call and retry once or twice.\n"
     "- For Excel, CSV, Tally and PDF work, write Python with run_python on the attached files. Show the totals you computed.\n"
+    "- Dates: 'due in the next N days' means due_date from today to today+N; overdue invoices are a separate group, so give both "
+    "numbers and label them instead of adding them together.\n"
     "- Money: amounts in the ledger are paise (divide by 100). Show rupees with Indian grouping (Rs 1,85,750).\n"
     "- Anything that reaches a customer, changes an invoice, or clicks on a website needs the owner's approval; "
     "you ask by calling the tool, and the owner's tap decides. Never claim something was sent or changed until the tool result says so.\n"
@@ -44,6 +46,9 @@ BASE = (
     "(captcha, login, otp, payment) or you reach such a step, call hand_off_to_owner with exactly what to do, then continue from the "
     "fresh page when they tap Done. Never type passwords, OTPs or card details yourself. If a site blocks the server browser "
     "(network errors, access denied), do not keep retrying: tell the owner to send 'pair browser' so I can use their own PC browser.\n"
+    "- Before you talk about or message a customer in detail, call resolve_continuum_memory for them: promises, disputes and "
+    "what the owner told you about them matter. When the owner tells you something durable (a customer's habits, a promise, "
+    "a rule), save it with write_continuum_evidence in the same turn.\n"
     "- Be concise. Reply in the language the owner used (Hinglish is fine). Ask one clear question if something essential is missing.\n"
 )
 ROLE = {
@@ -89,9 +94,50 @@ def forget_standing(tenant_id: str) -> None:
     _STANDING.pop(tenant_id, None)
 
 
-async def build_system(app, tenant, trust: str) -> str:
+RECENT_SESSIONS = 8
+RECENT_DAYS = 14
+
+
+def _clip(text: str, n: int) -> str:
+    text = " ".join(str(text).split())
+    return text if len(text) <= n else text[: n - 1] + "..."
+
+
+async def recent_conversations(pool, tenant_id: str, exclude_sid: str | None = None) -> str:
+    """What the owner and Smara said in earlier chats. A chat is its own session after 30 quiet minutes, so without this
+    every new conversation would start blank and Smara would 'forget' what was said an hour ago or yesterday."""
+    async with pool.connection() as conn:
+        rows = await (await conn.execute(
+            """SELECT created_at, messages FROM agent_sessions
+                WHERE tenant_id = %s AND trust = 'TRUSTED' AND status = 'DONE' AND created_at > now() - make_interval(days => %s)
+                  AND (%s::text IS NULL OR id::text <> %s::text)
+                ORDER BY created_at DESC LIMIT %s""", (tenant_id, RECENT_DAYS, exclude_sid, exclude_sid, RECENT_SESSIONS))).fetchall()
+    lines = []
+    for r in reversed(rows):
+        msgs = r["messages"]
+        # every owner message and Smara's reply in that chat, newest few only
+        pairs, owner_text = [], None
+        for m in msgs:
+            c = str(m.get("content") or "")
+            if m["role"] == "user" and not c.startswith("[system note]") and not c.startswith("[Earlier conversation omitted"):
+                owner_text = c
+            elif m["role"] == "assistant" and c.strip() and not m.get("tool_calls") and owner_text is not None:
+                pairs.append((owner_text, c))
+                owner_text = None
+        when = r["created_at"].astimezone(clock.IST).strftime("%d %b %H:%M")
+        for q, a in pairs[-3:]:
+            lines.append(f"[{when}] Owner: {_clip(q, 220)} | You: {_clip(a, 260)}")
+    return "\n".join(lines[-16:])
+
+
+async def build_system(app, tenant, trust: str, session_id: str | None = None) -> str:
     base = BASE.format(shop=tenant.name, now=clock.describe(), ledger=await ledger_line(app.state.pool, tenant.id))
     standing = await standing_instructions(app, tenant) if trust != "UNTRUSTED" else ""
     if standing:
         base += f"\nThe owner's standing instructions (from memory; follow them):\n{standing}\n"
+    if trust == "TRUSTED":
+        recent = await recent_conversations(app.state.pool, tenant.id, session_id)
+        if recent:
+            base += ("\nEarlier chats with the owner, oldest first (use them for context such as who or what 'that customer' or "
+                     "'the same file' means; they may be out of date, so check the ledger for current numbers):\n" + recent + "\n")
     return base + "\n" + ROLE[trust]

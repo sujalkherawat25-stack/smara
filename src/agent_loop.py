@@ -17,14 +17,17 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from src import clock, tenants
-from src.agent import actions, extras, tools, web
+from src.agent import actions, extras, memory_pass, tools, web
 from src.agent.context import compact
 from src.agent.policy import SessionCtx, approval_text, pre_tool_use
 from src.agent.prompt import build_system
+from src.loop.llm import RateLimited
 from src.loop.owner_channel import send_to_owner
 from src.loop.whatsapp import text_message
 
 log = logging.getLogger(__name__)
+RATE_RETRY_S = 25         # the model is busy (rate limited): wait and try the same step again
+RATE_RETRIES = 4
 MAX_STEPS = 30          # model calls per turn (each owner message / resume gets a fresh budget)
 CONTINUE_WITHIN = timedelta(minutes=30)
 EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memory": tools.resolve_continuum_memory,
@@ -148,14 +151,23 @@ async def run(app, sid: str, fallback=None) -> None:
     if row is None:
         return
     messages, steps, suspended, empties = row["messages"], row["steps"], False, 0
-    budget, seen, nudged = 0, {}, False
+    budget, seen, nudged, busy = 0, {}, False, 0
     try:
         tenant = await tenants.by_id(pool, str(row["tenant_id"]))
         if messages and messages[0]["role"] == "system":      # never carry a stale date/ledger/instructions into a new turn
-            messages[0] = {"role": "system", "content": await build_system(app, tenant, row["trust"])}
+            messages[0] = {"role": "system", "content": await build_system(app, tenant, row["trust"], str(row["id"]))}
         while budget < MAX_STEPS:
             messages = compact(messages)
-            msg = await app.state.llm.chat(messages, tools.TOOLS, allow_fallback=not heavy(messages))
+            try:
+                msg = await app.state.llm.chat(messages, tools.TOOLS, allow_fallback=not heavy(messages))
+            except RateLimited:
+                busy += 1                   # a busy model is not a failed job: tell the owner once, wait, try the same step again
+                if busy > RATE_RETRIES:
+                    raise
+                if busy == 1 and row["trust"] == "TRUSTED":
+                    await _finish(app, row, "Model abhi busy hai, main thodi der mein dobara try karta hoon. Aapko kuch nahi karna.")
+                await asyncio.sleep(RATE_RETRY_S)
+                continue
             await _record_usage(pool, row, msg.pop("_usage", None))
             steps += 1
             budget += 1
@@ -174,7 +186,10 @@ async def run(app, sid: str, fallback=None) -> None:
                 continue
             if not calls:
                 await _save(pool, sid, messages, status="DONE", steps=steps)
-                return await _finish(app, row, msg.get("content") or "")
+                await _finish(app, row, msg.get("content") or "")
+                if row["trust"] == "TRUSTED":          # keep what is worth remembering, without slowing the reply
+                    _spawn(app, memory_pass.remember_from_turn(app, str(row["tenant_id"]), sid, list(messages)))
+                return
             for c in calls:                       # the same call over and over is a loop: tell the model to change approach
                 key = (c["function"]["name"], c["function"]["arguments"])
                 seen[key] = seen.get(key, 0) + 1
