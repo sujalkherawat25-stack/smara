@@ -429,3 +429,19 @@ async def test_an_offline_paired_pc_is_explained_to_the_agent_not_re_paired(env)
     env.app.state.browsers = router
     res = await web.web_search(env.app, SessionCtx(id="w1", tenant_id=env.t.id, trust="TRUSTED"), {"query": "banarasi saree"})
     assert "already paired" in res["next"]
+
+
+def test_activity_lines_never_include_typed_values():
+    line = munim_bridge.describe_step({"action": "fill", "selector": "#qty", "value": "secret 1234"},
+                                      {"url": "https://example.com/x", "title": "Cart"})
+    assert "secret" not in line and "example.com" in line and "fill #qty" in line
+    assert "error" in munim_bridge.describe_step({"action": "navigate", "url": "https://a.com"}, {"error": "blocked"})
+
+
+def test_pause_and_resume_commands_use_a_flag_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(munim_bridge, "HOME", tmp_path)
+    monkeypatch.setattr(munim_bridge, "PAUSE", tmp_path / "paused")
+    monkeypatch.setattr(sys, "argv", ["munim-bridge", "pause"])
+    assert munim_bridge.main() == 0 and (tmp_path / "paused").exists()
+    monkeypatch.setattr(sys, "argv", ["munim-bridge", "resume"])
+    assert munim_bridge.main() == 0 and not (tmp_path / "paused").exists()
