@@ -88,3 +88,8 @@ test("approval cards: first answer wins and the site grant lasts 15 minutes", ()
   assert.equal(v.approvalOutcome(405), "unsupported");
   assert.equal(v.approvalOutcome(500), "error");
 });
+
+test("a repeated delivery of the same event does not duplicate feed rows", () => {
+  const step = { kind: "step", ts: 5, job_id: "x", action: "read" };
+  assert.equal(v.mergeEvents(v.mergeEvents([], step), { ...step }).length, 1);
+});

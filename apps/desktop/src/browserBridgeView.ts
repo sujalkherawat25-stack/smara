@@ -72,6 +72,7 @@ export function settleFeed(rows: FeedRow[], running: boolean): FeedRow[] {
 
 export function mergeEvents(current: BridgeEvent[], event: BridgeEvent): BridgeEvent[] {
   if (event.kind === "poll" && event.ok) return current;          // heartbeat only; it moves the online light, not the feed
+  if (current.some(e => e.ts === event.ts && e.kind === event.kind && e.job_id === event.job_id)) return current;   // a repeated delivery
   const next = [...current, event];
   return next.length > MAX_FEED * 2 ? next.slice(-MAX_FEED * 2) : next;
 }
