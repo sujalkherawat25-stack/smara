@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 mod native_runtime;
+mod browser_bridge;
 use native_runtime::{native_send, native_start, native_status, native_stop};
 
 fn app_data_dir() -> PathBuf {
@@ -278,10 +279,10 @@ fn main() {
         return;
     }
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file, native_project_files])
+        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file, native_project_files, browser_bridge::bridge_state, browser_bridge::bridge_pair, browser_bridge::bridge_save_options, browser_bridge::bridge_start, browser_bridge::bridge_stop, browser_bridge::bridge_pause, browser_bridge::bridge_unpair, browser_bridge::bridge_check])
         .build(tauri::generate_context!()).expect("Could not build Smara Desktop")
         .run(|_, event| {
-            if matches!(event, tauri::RunEvent::ExitRequested { .. }) { let _ = native_runtime::stop_current(); }
+            if matches!(event, tauri::RunEvent::ExitRequested { .. }) { let _ = native_runtime::stop_current(); browser_bridge::stop_on_exit(); }
         });
 }
 

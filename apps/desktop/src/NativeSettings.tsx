@@ -6,6 +6,7 @@ import NativeMemorySettings from "./NativeMemorySettings";
 import NativeEmail from "./NativeEmail";
 import NativeBackground from "./NativeBackground";
 import NativeAutomation from "./NativeAutomation";
+import NativeBrowser from "./NativeBrowser";
 
 const aliases: Record<string, string> = { tavily: "TAVILY_API_KEY", exa: "EXA_API_KEY", serper: "SERPER_API_KEY", brave: "BRAVE_SEARCH_API_KEY" };
 const emptyModel = { id: "", label: "", provider: "", base_url: "", model: "", api_key: "", auth_header: "authorization" };
@@ -54,7 +55,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
   };
   return <section className="native-settings">
     <div className="settings-heading"><div><h1>Settings</h1><p>Your models and connected services.</p></div><button disabled={pending || integrationPending} onClick={onClose}>← Back to chat</button></div>
-    <nav className="settings-tabs" aria-label="Settings sections">{["models", "memory", "tools", "email", "background", "telegram", "help"].map(value => <button disabled={pending || integrationPending} key={value} className={tab === value ? "selected" : ""} onClick={() => { setTab(value); setSecret(""); setModel(current => ({ ...current, api_key: "" })); }}>{value === "models" ? "Models" : value === "memory" ? "Memory" : value === "tools" ? "Integrations" : value === "email" ? "Email" : value === "background" ? "Background" : value === "telegram" ? "Telegram" : "Help & setup"}</button>)}</nav>
+    <nav className="settings-tabs" aria-label="Settings sections">{["models", "memory", "tools", "email", "background", "browser", "telegram", "help"].map(value => <button disabled={pending || integrationPending} key={value} className={tab === value ? "selected" : ""} onClick={() => { setTab(value); setSecret(""); setModel(current => ({ ...current, api_key: "" })); }}>{value === "models" ? "Models" : value === "memory" ? "Memory" : value === "tools" ? "Integrations" : value === "email" ? "Email" : value === "background" ? "Background" : value === "browser" ? "Browser" : value === "telegram" ? "Telegram" : "Help & setup"}</button>)}</nav>
     {locked && <p className="native-warning">Finishing session setup. Settings will be available shortly.</p>}
     {error && <p role="alert" className="native-error">{error.replaceAll("Settings → Tools", "Settings → Integrations")}</p>}{notice && <p role="status" className="settings-notice">{notice}</p>}
     {tab === "models" && <div className="settings-grid"><section className="settings-card"><h2>Configured models</h2><p>These endpoints are used as selected. Smara never silently replaces your model.</p>
@@ -88,6 +89,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
       <h3>Saved credential aliases</h3>{setup.credentials.length ? setup.credentials.map(c => <div className="credential-row" key={c.name}><div><code>{c.name}</code><small>{c.provider} · protected on this computer</small></div><button disabled={disabled} onClick={() => { if (window.confirm(`Remove ${c.name}? Tools/models using it will stop working until you save a replacement.`)) void save("delete_credential", { name: c.name }); }}>Remove</button></div>) : <p>No keys saved.</p>}
       <button disabled={pending} onClick={() => void save("bootstrap", {})}>Refresh readiness</button>
     </section></div></>}
+    {tab === "browser" && <NativeBrowser locked={disabled} />}
     {tab === "telegram" && <NativeTelegramSettings workspace={setup.preferences.workspace} profile={setup.preferences.active_model} locked={disabled} onSaved={() => { void nativeSettings().then(onUpdate); }} />}
     {tab === "help" && <div className="settings-grid help-grid">
       <section className="settings-card"><h2>Get started</h2>
