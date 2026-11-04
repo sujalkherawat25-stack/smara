@@ -64,6 +64,20 @@ def _ctx(row, call_id: str = "", browsers=None) -> SessionCtx:
                       page=page_text(browsers.page(sid)) if browsers else "")
 
 
+async def _record_usage(pool, row, usage: dict | None) -> None:
+    """Best effort: metering must never break a conversation."""
+    if not usage or not usage.get("total"):
+        return
+    try:
+        async with pool.connection() as conn:
+            await conn.execute(
+                """INSERT INTO llm_usage (tenant_id, session_id, model, prompt_tokens, completion_tokens, total_tokens)
+                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                (row["tenant_id"], row["id"], usage["model"], usage["prompt"], usage["completion"], usage["total"]))
+    except Exception:
+        log.warning("could not record model usage", exc_info=True)
+
+
 async def _save(pool, sid, messages, *, status=None, pending=..., steps=None) -> None:
     sets, vals = ["messages = %s", "updated_at = now()"], [json.dumps(messages, default=str)]
     for col, v in (("status", status), ("steps", steps)):
@@ -142,6 +156,7 @@ async def run(app, sid: str, fallback=None) -> None:
         while budget < MAX_STEPS:
             messages = compact(messages)
             msg = await app.state.llm.chat(messages, tools.TOOLS, allow_fallback=not heavy(messages))
+            await _record_usage(pool, row, msg.pop("_usage", None))
             steps += 1
             budget += 1
             calls = msg.get("tool_calls") or []

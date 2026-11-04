@@ -116,8 +116,7 @@ class LLM:
             if fb and self._agent_bucket.wait_needed() > self.fallback_after_s / 2:
                 self.stats["fallbacks"] += 1                    # the main model is busy: do not queue, use the spare one
                 body = await self._post({**req, "model": self.fallback_model})
-                self.last_usage = body.get("usage") or {}
-                return body["choices"][0]["message"]
+                return self._reply(body, self.fallback_model)
             await self._agent_bucket.take()
         try:
             # with a fallback model, do not queue behind a rate limit for long: switch after a few seconds
@@ -128,8 +127,16 @@ class LLM:
             log.warning("agent model %s is rate limited; answering this step with %s", self.agent_model, self.fallback_model)
             self.stats["fallbacks"] += 1
             body = await self._post({**req, "model": self.fallback_model})
+            return self._reply(body, self.fallback_model)
+        return self._reply(body, self.agent_model)
+
+    def _reply(self, body: dict, model: str) -> dict:
         self.last_usage = body.get("usage") or {}
-        return body["choices"][0]["message"]
+        msg = dict(body["choices"][0]["message"])
+        u = self.last_usage
+        msg["_usage"] = {"model": model, "prompt": int(u.get("prompt_tokens") or 0),
+                         "completion": int(u.get("completion_tokens") or 0), "total": int(u.get("total_tokens") or 0)}
+        return msg
 
     async def aclose(self) -> None:
         await self._http.aclose()
