@@ -56,13 +56,22 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
             return await decide_browser_task(app, tenant_id, msg.sender, ref, action == "bt_approve", number_id=msg.number_id,
                                              channel=msg.channel)
         return None
-    cmd = msg.text.strip().lower()
-    if cmd in ("pair browser", "pair pc", "connect browser", "browser pair"):
-        from src.bridge.device import start_pairing
+    cmd = " ".join(msg.text.strip().lower().replace("'", "").split())
+    if len(cmd) <= 30 and "unpair" not in cmd and any(k in cmd for k in ("pair browser", "pair pc", "connect browser", "browser pair", "pair new browser")):
+        from src.bridge.device import online_device, paired_device, start_pairing
+        if "new" not in cmd:
+            if d := await online_device(app.state.pool, tenant_id):
+                return f"Your PC browser ({d['name']}) is already connected. Nothing to do: just ask me what to look up or do."
+            if d := await paired_device(app.state.pool, tenant_id):
+                return (f"Your PC ({d['name']}) is already paired. Its helper starts by itself when the PC is on and when Smara "
+                        "Desktop is open, so you do not need to type anything. Just switch the PC on. "
+                        "(To connect a different PC, send 'pair new browser'.)")
         code = await start_pairing(app.state.pool, tenant_id)
-        return (f"Browser pairing code: {code}\nValid for 1 hour, works once. On your PC, in the Smara Browser Bridge folder run:\n"
-                f"python munim_bridge.py pair --code {code}\nThen start it with: python munim_bridge.py run\n"
-                "From then on I will use your own browser (your IP and logins stay on your PC). Send 'unpair browser' to disconnect.")
+        return (f"Browser pairing code: {code}\n(valid 1 hour, works once)\n\n"
+                "On your PC open Smara Desktop > Settings > Browser, paste the code and press Pair. That is all: after this it "
+                "starts by itself whenever the PC is on, and I will use your own browser (your logins stay on your PC).\n\n"
+                f"No Smara Desktop? Run once: python munim_bridge.py pair --code {code} && python munim_bridge.py install-startup\n"
+                "Send 'unpair browser' to disconnect.")
     if cmd in ("unpair browser", "disconnect browser"):
         from src.bridge.device import revoke_all
         n = await revoke_all(app.state.pool, tenant_id)

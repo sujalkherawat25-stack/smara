@@ -329,10 +329,18 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 
 def _start_now() -> None:
+    """Start the helper fully on its own: detached, in its own process group and outside the starting program's job,
+    so closing the window or app that started it does not stop it."""
     import subprocess
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen(startup_command(), creationflags=flags, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, close_fds=True)
+    base = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    breakaway = 0x01000000                     # CREATE_BREAKAWAY_FROM_JOB
+    for flags in ((base | breakaway, base) if platform.system() == "Windows" else (0,)):
+        try:
+            subprocess.Popen(startup_command(), creationflags=flags, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, close_fds=True, start_new_session=platform.system() != "Windows")
+            return
+        except OSError:
+            continue                           # the parent job does not allow breakaway: start it the plain way
 
 
 def cmd_install_startup() -> int:
@@ -399,6 +407,7 @@ def main() -> int:
     sub.add_parser("status")
     sub.add_parser("unpair")
     sub.add_parser("stop")
+    sub.add_parser("ensure")
     sub.add_parser("install-startup")
     sub.add_parser("uninstall-startup")
     a = ap.parse_args()
@@ -418,10 +427,63 @@ def main() -> int:
         CONFIG.unlink(missing_ok=True)
         print("Forgot this pairing. (Send 'unpair browser' in chat to revoke it on the server too.)")
         return 0
-    try:
-        return asyncio.run(run(a))
-    except KeyboardInterrupt:
+    if a.cmd == "ensure":                       # what Smara Desktop / startup call: start it only if it is not running
+        if running_pid():
+            print("Already running.")
+            return 0
+        _start_now()
+        print("Started.")
         return 0
+    if running_pid() and running_pid() != os.getpid():
+        log("Another Smara Browser Bridge is already running; this one exits.")
+        return 0
+    return supervise(a)
+
+
+def running_pid() -> int | None:
+    """PID of a live helper from the pid file, else None."""
+    try:
+        pid = int(PID.read_text().strip())
+    except (OSError, ValueError):
+        return None
+    if pid == os.getpid():
+        return pid
+    if platform.system() == "Windows":
+        import ctypes
+        h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)        # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return None
+        code = ctypes.c_ulong()
+        ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+        ctypes.windll.kernel32.CloseHandle(h)
+        return pid if code.value == 259 else None                         # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+        return pid
+    except OSError:
+        return None
+
+
+def supervise(a) -> int:
+    """Keep the helper alive: if the work loop crashes, log why and start it again (backing off up to a minute)."""
+    import time
+    import traceback
+    delay = 5
+    while True:
+        started = time.monotonic()
+        try:
+            code = asyncio.run(run(a))
+            if code:                            # not paired / unpaired: nothing to retry
+                return code
+        except KeyboardInterrupt:
+            return 0
+        except SystemExit as e:
+            log(f"stopped: {e}")
+            return 1
+        except BaseException:
+            log("helper crashed, restarting:\n" + traceback.format_exc()[-1500:])
+        delay = 5 if time.monotonic() - started > 300 else min(delay * 2, 60)
+        time.sleep(delay)
 
 
 if __name__ == "__main__":

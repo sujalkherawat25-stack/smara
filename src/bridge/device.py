@@ -80,6 +80,26 @@ async def online_device(pool, tenant_id: str) -> dict | None:
                 ORDER BY last_seen_at DESC LIMIT 1""", (tenant_id, datetime.now(timezone.utc) - ONLINE_WITHIN))).fetchone()
 
 
+async def paired_device(pool, tenant_id: str) -> dict | None:
+    """The shop's most recent PC that is paired (not revoked), online or not."""
+    async with pool.connection() as conn:
+        return await (await conn.execute(
+            """SELECT id, name, last_seen_at FROM bridge_devices WHERE tenant_id = %s AND revoked_at IS NULL
+                ORDER BY last_seen_at DESC NULLS LAST LIMIT 1""", (tenant_id,))).fetchone()
+
+
+def offline_note(dev: dict | None) -> str:
+    """What to tell the agent when the shop's PC is paired but its helper is not running right now."""
+    if not dev:
+        return ""
+    from src import clock
+    seen = dev["last_seen_at"].astimezone(clock.IST).strftime("%d %b %H:%M") if dev.get("last_seen_at") else "never"
+    return (f"The owner's PC ({dev['name']}) is already paired, but its browser helper is not running right now (last seen {seen} IST), "
+            "so this used the server browser, which many sites block. Do NOT ask the owner to pair again or to run commands: tell "
+            "them their PC just needs to be on (the helper starts by itself with Windows and with Smara Desktop), and offer to "
+            "retry in a few minutes with schedule_followup.")
+
+
 async def claim_job(pool, device: dict) -> dict | None:
     async with pool.connection() as conn:
         row = await (await conn.execute(
@@ -187,6 +207,12 @@ class BrowserRouter:
                 return {"error": "no open page: navigate first"}
             on_device = bool(tenant_id) and bool(await online_device(self.pool, tenant_id))
             b = self._route[sid] = self.device if on_device else self.server
+            if not on_device and tenant_id:
+                note = offline_note(await paired_device(self.pool, tenant_id))
+                out = await b.step(sid, args)
+                if note and isinstance(out, dict):
+                    out = {**out, "pc_helper": note}
+                return out
         if b is self.device:
             return await b.step(sid, args, tenant_id=tenant_id)
         return await b.step(sid, args)

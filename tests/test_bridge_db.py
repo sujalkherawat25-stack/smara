@@ -390,3 +390,42 @@ def test_bridge_scroll_select_back_wait_and_owner_needed_signals(tmp_path):
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["scrolled"] and out["selected"] == "y" and out["back"]
     assert out["login_flag"] == ["login"] and out["captcha_flag"] == ["captcha"]
+
+
+# ---------------------------------------------------------------- no commands for an owner whose PC is already paired
+
+async def test_pair_browser_does_not_ask_again_when_a_pc_is_already_paired(env):
+    env.app.state.llm.enabled = False
+    async with api(env) as http:
+        await pair(env, http)
+    await dispatch(env.app, owner("np1", "pair browser"))
+    assert "already connected" in env.app.state.wa.sent[-1]["text"]["body"]                     # online: nothing to do
+    async with env.pool.connection() as c:
+        await c.execute("update bridge_devices set last_seen_at = now() - interval '3 hours'")
+    await dispatch(env.app, owner("np2", "Ha pair browser"))                                     # in a short sentence too
+    body = env.app.state.wa.sent[-1]["text"]["body"]
+    assert "already paired" in body and "--code" not in body and "python" not in body            # offline: no commands
+    await dispatch(env.app, owner("np3", "pair new browser"))
+    body = env.app.state.wa.sent[-1]["text"]["body"]
+    assert "Smara Desktop > Settings > Browser" in body and "--code" in body                     # deliberate new PC: a code
+
+
+async def test_an_offline_paired_pc_is_explained_to_the_agent_not_re_paired(env):
+    from src.agent import web
+    from src.agent.policy import SessionCtx
+    server = FakeBrowsers()
+
+    async def blocked(sid, args, **kw):
+        server.steps.append(args)
+        return {"url": args.get("url", ""), "title": "403", "text": "403 Forbidden", "elements": []}
+    server.step = blocked
+    router = BrowserRouter(env.pool, server, DeviceBrowser(env.pool, step_timeout_s=2))
+    async with api(env) as http:
+        await pair(env, http)
+    async with env.pool.connection() as c:
+        await c.execute("update bridge_devices set last_seen_at = now() - interval '2 hours'")
+    out = await router.step("s9", {"action": "navigate", "url": "https://www.indiamart.com/"}, tenant_id=env.t.id)
+    assert "already paired" in out["pc_helper"] and "Do NOT ask the owner to pair again" in out["pc_helper"]
+    env.app.state.browsers = router
+    res = await web.web_search(env.app, SessionCtx(id="w1", tenant_id=env.t.id, trust="TRUSTED"), {"query": "banarasi saree"})
+    assert "already paired" in res["next"]

@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smara Business Plan</title>
+<style>
+:root{
+  --bg:#fbfaf7; --panel:#ffffff; --ink:#1d1b18; --muted:#615c55; --line:#e4ded4;
+  --accent:#0b6b4f; --accent-soft:#e3f2ec; --warn:#a0520c; --warn-soft:#fbeee0; --bad:#a3262d; --bad-soft:#f8e4e4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#151412; --panel:#1e1c19; --ink:#efece6; --muted:#a8a197; --line:#36322c;
+    --accent:#5cc79f; --accent-soft:#183329; --warn:#e6a35c; --warn-soft:#3a2a17; --bad:#ec7f86; --bad-soft:#3b1d20;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#151412; --panel:#1e1c19; --ink:#efece6; --muted:#a8a197; --line:#36322c;
+  --accent:#5cc79f; --accent-soft:#183329; --warn:#e6a35c; --warn-soft:#3a2a17; --bad:#ec7f86; --bad-soft:#3b1d20;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:920px;margin:0 auto;padding:32px 16px 80px}
+h1{font-size:30px;line-height:1.2;margin:0 0 8px}
+h2{font-size:22px;margin:48px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
+h3{font-size:17px;margin:24px 0 6px}
+p{margin:8px 0}
+.lede{font-size:18px;color:var(--muted);margin-bottom:20px}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+.answer{border-left:4px solid var(--accent);background:var(--accent-soft)}
+.warn{border-left:4px solid var(--warn);background:var(--warn-soft)}
+ul,ol{padding-left:22px;margin:8px 0}
+li{margin:4px 0}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:15px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.tag{display:inline-block;font-size:12px;font-weight:600;padding:1px 8px;border-radius:99px;white-space:nowrap}
+.ok{background:var(--accent-soft);color:var(--accent)}
+.mid{background:var(--warn-soft);color:var(--warn)}
+.no{background:var(--bad-soft);color:var(--bad)}
+figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+figure svg{width:100%;height:auto;display:block;color:var(--ink)}
+figcaption{font-size:14px;color:var(--muted);margin-top:8px}
+.tablewrap{overflow-x:auto}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:640px){.grid2{grid-template-columns:1fr} h1{font-size:25px}}
+small,.src{color:var(--muted);font-size:13px}
+a{color:var(--accent)}
+.num{font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<main>
+
+<h1>Smara for Indian MSMEs: what to sell, to whom, and in what order</h1>
+<p class="lede">A business and product audit, written in plain language, with the plan from 30 Banswara users to 3 paying ones, a grant, and then 100+ users.</p>
+
+<div class="box answer">
+<p><strong>Short answer.</strong> Indian owners pay for one thing: money and time they can see. So Smara should not be sold as "an AI assistant". It should be sold as <strong>"your udhaar comes back faster, and your khata stays clean, without you chasing anyone"</strong>.</p>
+<ol>
+<li><strong>Now:</strong> sell <em>vasooli</em> (collections) plus clean statements, on WhatsApp. It is built, safe and measurable in rupees.</li>
+<li><strong>Next:</strong> order-to-cash on WhatsApp: order, then bill, then UPI link, then payment matched, then reminder.</li>
+<li><strong>Then:</strong> the Smara Network. When a buyer and a seller both use Smara, their agents confirm ledgers, send quotes and purchase orders, and track dispatch, and each owner taps to approve.</li>
+<li><strong>Later:</strong> answering IndiaMART leads, agent-to-agent price deals inside limits the owner sets, and early-payment financing referrals.</li>
+</ol>
+<p>Do not lead with the B2B agent marketplace. It is the right big vision, but it needs both sides on Smara first. Collections gets you the first side.</p>
+</div>
+
+<h2>1. How messy it is today</h2>
+<p>For a typical Banswara wholesaler, distributor or manufacturer, the money cycle runs on memory, phone calls and a diary or Tally:</p>
+
+<figure>
+<svg viewBox="0 0 880 330" role="img" aria-label="Today the owner does every step by hand and money gets stuck at the follow-up step; with Smara the agent does the follow-up and the owner only approves.">
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    <marker id="a1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#0b6b4f"/></marker>
+  </defs>
+  <text x="10" y="22" font-size="14" font-weight="700" fill="currentColor">TODAY</text>
+  <g font-size="12" fill="currentColor">
+    <rect x="10" y="36" width="140" height="56" rx="8" fill="none" stroke="currentColor"/>
+    <text x="80" y="60" text-anchor="middle">Sale on credit</text><text x="80" y="76" text-anchor="middle">(udhaar)</text>
+    <rect x="185" y="36" width="140" height="56" rx="8" fill="none" stroke="currentColor"/>
+    <text x="255" y="60" text-anchor="middle">Entry in Tally /</text><text x="255" y="76" text-anchor="middle">diary / Excel</text>
+    <rect x="360" y="36" width="150" height="56" rx="8" fill="none" stroke="#a3262d" stroke-width="2"/>
+    <text x="435" y="60" text-anchor="middle">Owner must remember</text><text x="435" y="76" text-anchor="middle">who owes what</text>
+    <rect x="545" y="36" width="150" height="56" rx="8" fill="none" stroke="#a3262d" stroke-width="2"/>
+    <text x="620" y="60" text-anchor="middle">Calls, WhatsApp,</text><text x="620" y="76" text-anchor="middle">"kal de dunga"</text>
+    <rect x="730" y="36" width="140" height="56" rx="8" fill="none" stroke="currentColor"/>
+    <text x="800" y="60" text-anchor="middle">Month end: CA</text><text x="800" y="76" text-anchor="middle">fixes mismatches</text>
+    <line x1="150" y1="64" x2="183" y2="64" stroke="currentColor" marker-end="url(#a1)"/>
+    <line x1="325" y1="64" x2="358" y2="64" stroke="currentColor" marker-end="url(#a1)"/>
+    <line x1="510" y1="64" x2="543" y2="64" stroke="currentColor" marker-end="url(#a1)"/>
+    <line x1="695" y1="64" x2="728" y2="64" stroke="currentColor" marker-end="url(#a1)"/>
+    <path d="M620,92 C620,130 435,130 435,94" fill="none" stroke="#a3262d" stroke-dasharray="4 3" marker-end="url(#a1)"/>
+    <text x="528" y="128" text-anchor="middle" fill="#a3262d">forgotten, repeats for weeks</text>
+  </g>
+  <text x="10" y="186" font-size="14" font-weight="700" fill="#0b6b4f">WITH SMARA</text>
+  <g font-size="12" fill="currentColor">
+    <rect x="10" y="200" width="140" height="56" rx="8" fill="none" stroke="currentColor"/>
+    <text x="80" y="224" text-anchor="middle">Sale on credit</text><text x="80" y="240" text-anchor="middle">(same as today)</text>
+    <rect x="185" y="200" width="140" height="56" rx="8" fill="none" stroke="currentColor"/>
+    <text x="255" y="224" text-anchor="middle">Owner forwards sheet</text><text x="255" y="240" text-anchor="middle">or Tally file once</text>
+    <rect x="360" y="200" width="150" height="56" rx="8" fill="none" stroke="#0b6b4f" stroke-width="2"/>
+    <text x="435" y="224" text-anchor="middle">Smara tracks every</text><text x="435" y="240" text-anchor="middle">due date + promise</text>
+    <rect x="545" y="200" width="150" height="56" rx="8" fill="none" stroke="#0b6b4f" stroke-width="2"/>
+    <text x="620" y="224" text-anchor="middle">Drafts reminder +</text><text x="620" y="240" text-anchor="middle">UPI link + statement</text>
+    <rect x="730" y="200" width="140" height="56" rx="8" fill="none" stroke="currentColor"/>
+    <text x="800" y="224" text-anchor="middle">Owner taps</text><text x="800" y="240" text-anchor="middle">Approve (5 sec)</text>
+    <line x1="150" y1="228" x2="183" y2="228" stroke="currentColor" marker-end="url(#a1)"/>
+    <line x1="325" y1="228" x2="358" y2="228" stroke="#0b6b4f" marker-end="url(#a1g)"/>
+    <line x1="510" y1="228" x2="543" y2="228" stroke="#0b6b4f" marker-end="url(#a1g)"/>
+    <line x1="695" y1="228" x2="728" y2="228" stroke="#0b6b4f" marker-end="url(#a1g)"/>
+    <path d="M800,256 C800,300 435,300 435,258" fill="none" stroke="#0b6b4f" stroke-dasharray="4 3" marker-end="url(#a1g)"/>
+    <text x="618" y="298" text-anchor="middle" fill="#0b6b4f">customer replies "25 ko dunga" → saved as a promise, checked on the 26th</text>
+  </g>
+</svg>
+<figcaption>The money gets stuck at the red boxes: remembering and following up. That is exactly the work Smara already does, with the owner only approving.</figcaption>
+</figure>
+
+<h3>What the numbers say</h3>
+<ul>
+<li><strong>Stuck money is huge.</strong> A government-linked estimate puts MSME money locked in delayed payments at about <span class="num">₹7.34 lakh crore</span> (<a href="https://www.freepressjournal.in/business/quantum-of-delayed-payments-to-msmes-steadily-declines-to-734-lakh-crore-roars-positive-impact-of-policy-measures">Free Press Journal</a>). Even the cases formally filed on the government's Samadhaan portal leave about <span class="num">₹21–22 thousand crore</span> still unpaid, and one study found only about 22% of portal cases resolved (<a href="https://intelligence.crisil.com/en/homepage/newsroom/press-releases/2026/08/executed-well-msme-bill-can-be-an-ibc-moment-for-delayed-payments.html">Crisil</a>, <a href="https://zenodo.org/records/17527605">Zenodo study</a>). Owners do not go to the government for this. They chase it themselves.</li>
+<li><strong>The law helps manufacturers, not traders.</strong> Since April 2024, buyers lose a tax deduction if they pay a registered micro or small supplier after 45 days (15 without a written agreement). Several sources say this mostly does not protect pure traders (<a href="https://business-standard.com/amp/finance/personal-finance/45-day-msme-payment-rule-impact-and-details-of-section-43b-h-explained-124032600333_1.html">Business Standard</a>, <a href="https://busy.in/tds/section-43bh-msme-payment-rule-and-45-day-limit-explained/">Busy</a>). So a small manufacturer can say "you must pay me in 45 days", and a trader has to keep chasing. Both need follow-up.</li>
+<li><strong>Tally is the backbone.</strong> About one in four MSMEs use Tally (<a href="https://www.magzter.com/fr/stories/newspaper/Mint-Mumbai/MEET-THE-BOOKKEEPER-TO-INDIAS-MSMES">Mint</a>). Smara already reads Tally and Excel exports, so owners do not have to switch software. That matters a lot in India.</li>
+<li><strong>Invoice finance barely reaches small firms.</strong> TReDS (selling invoices for early cash) is growing, but under 1% of registered MSMEs are on it (<a href="https://credable.in/insights-by-credable/budget-2026-for-msmes-why-invoice-discounting-will-decide-the-next-phase-of-msme-growth/">Credable</a>, <a href="https://www.m1xchange.com/thought-xchange/rbi-rationalises-treds-rules-in-2026-one-master-direction-a-complete-overhaul/">M1xchange</a>). Clean, verified receivables data from Smara is what a lender needs later.</li>
+<li><strong>IndiaMART leads are a race.</strong> An enquiry is usually shared with several suppliers, so the one who replies first and best wins, and sellers complain about weak or resold leads (<a href="https://garnetmarketplace.com/marketplaces/indiamart.html">Garnet</a>, <a href="https://help.indiamart.com/knowledge-base/buy-lead-vs-enquiry">IndiaMART help</a>). Paid sellers can pull their leads by API (<a href="https://help.indiamart.com/knowledge-base/lms-crm-integration-v2">IndiaMART Pull API</a>), so an agent can answer in minutes.</li>
+<li><strong>GST matching hurts buyers.</strong> A buyer's input tax credit depends on the supplier filing correctly, so every month there are mismatches to chase (<a href="https://tallysolutions.com/gst/gstr-2b-reconciliation-mismatches-how-to-fix/">Tally</a>). This is a B2B problem by nature: both sides must agree. That is a strong reason for the Smara Network later.</li>
+</ul>
+<p class="src">Several figures come from news and vendor sources that disagree on dates; treat them as direction, not exact values.</p>
+
+<h2>2. What is already built (honest audit)</h2>
+<div class="tablewrap">
+<table>
+<tr><th>Piece</th><th>What it does for the owner</th><th>Status</th></tr>
+<tr><td>Ledger Q&amp;A on WhatsApp/Telegram, voice notes</td><td>"Ravi ka kitna baaki?" in Hinglish or Hindi, typed or spoken</td><td><span class="tag ok">Works, tested live</span></td></tr>
+<tr><td>Import from Excel, CSV, Tally XML</td><td>Forward the file once; totals are checked against the sheet</td><td><span class="tag ok">Works on test files</span> <span class="tag mid">Needs real shop files</span></td></tr>
+<tr><td>Reminders with approval, quiet hours</td><td>Smara drafts; the owner taps; nothing goes out at night</td><td><span class="tag ok">Works</span> <span class="tag no">Meta templates pending</span></td></tr>
+<tr><td>Customer replies become proposals</td><td>"5% discount do" or "25 ko dunga" turns into a card for the owner; the ledger only changes on a tap</td><td><span class="tag ok">Works</span></td></tr>
+<tr><td>PDF statements, Excel reports, UPI request text</td><td>Send a customer an account statement in seconds</td><td><span class="tag ok">Works</span></td></tr>
+<tr><td>Memory (Continuum)</td><td>Remembers promises, habits and rules per customer; carries context between chats</td><td><span class="tag ok">Works, verified live</span></td></tr>
+<tr><td>Web search and browser on the owner's PC</td><td>Reads and clicks on real sites (tested on Zomato); login, OTP and payment are handed to the owner</td><td><span class="tag ok">Works</span> <span class="tag mid">Ordering not tested</span></td></tr>
+<tr><td>Safety and operations</td><td>Every outward or money action needs a tap; shops are isolated; watchdog alerts; usage per shop; data export and erase</td><td><span class="tag ok">In place</span></td></tr>
+<tr><td>Invoicing, GST filing, inventory, payroll</td><td>None</td><td><span class="tag no">Not built</span></td></tr>
+<tr><td>Onboarding without us</td><td>Owner signs up alone</td><td><span class="tag no">Manual today</span></td></tr>
+</table>
+</div>
+
+<h3>Continuum (MemoryOS): what to do with it</h3>
+<div class="box">
+<p>Continuum is a serious memory engine (vector search, knowledge graph, decay and evidence), and it is live. Indian MSMEs will never buy "agent memory". Indian developer teams are also slow buyers. So:</p>
+<ul>
+<li><strong>Use it as Smara's moat, not as a product to sell in India.</strong> Customer by customer, it is what makes Smara remember "Ravi always pays after the 10th", "Sharma disputes freight", or "this buyer bargains 3%". Competitors' reminder apps do not have this.</li>
+<li><strong>Keep the open Community Edition alive cheaply</strong> for global developers. It is good proof of technical depth for grant reviewers and investors.</li>
+<li><strong>Do not spend your selling hours on it</strong> until Smara has 100+ users. Revisit then, perhaps as "memory for Indian enterprise agents" or for global buyers.</li>
+</ul>
+</div>
+
+<h2>3. Where the real value is, in rupees</h2>
+<p>Owners decide in rupees. Here is the kind of math to show a Banswara distributor (illustrative; replace with each shop's real numbers in week 1):</p>
+<div class="grid2">
+<div class="box">
+<h3>Value to the owner (per month)</h3>
+<ul>
+<li>₹40 lakh outstanding with customers.</li>
+<li>If Smara's steady follow-up brings payment in <strong>10 days earlier</strong> on average, that frees about <strong>₹13,000 a month</strong> of interest at 12% (40L × 12% × 10/365), or that much less on the OD account.</li>
+<li>Plus 1 hour a day of the owner's or munim's time not spent calling and writing statements.</li>
+<li>Plus fewer disputes, because every promise and claim is on record.</li>
+</ul>
+</div>
+<div class="box">
+<h3>Cost to run (per shop per month, estimate)</h3>
+<ul>
+<li><strong>Model:</strong> a simple question used about 9,300 tokens on live logs. An active shop might use 10–15 million tokens a month. At ₹10–40 per million tokens, that is <strong>₹100–600</strong>. Sarvam is free for now; measure with the usage report.</li>
+<li><strong>WhatsApp:</strong> replies inside 24 hours are free. A reminder template costs about ₹0.12–0.15 each, so 300 reminders is about <strong>₹40</strong> (<a href="https://www.robylon.ai/blog/whatsapp-business-api-pricing-india">Robylon</a>, <a href="https://developers.facebook.com/docs/whatsapp/pricing">Meta</a>).</li>
+<li><strong>Server:</strong> one VM handles 30 shops, so about <strong>₹50–100</strong> per shop.</li>
+<li><strong>Total:</strong> roughly <strong>₹200–750 per active shop.</strong></li>
+</ul>
+</div>
+</div>
+<div class="box answer">
+<p><strong>Pricing to test with power users:</strong> ₹999 a month, or "₹1,999 a month, or 1% of extra money collected, whichever is lower". Ask for the first payment only after the owner has seen at least one month of collections. Indians pay for results they already saw, not for promises.</p>
+</div>
+
+<h2>4. The product stages</h2>
+<figure>
+<svg viewBox="0 0 880 300" role="img" aria-label="Four stages: collections now, order to cash next, the Smara network when buyers and sellers both join, and agent deals last; each stage reuses the previous one.">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+  </defs>
+  <g font-size="12" fill="currentColor">
+    <rect x="10" y="20" width="200" height="250" rx="10" fill="none" stroke="#0b6b4f" stroke-width="2.5"/>
+    <text x="110" y="44" text-anchor="middle" font-weight="700" fill="#0b6b4f">1. VASOOLI (now)</text>
+    <text x="22" y="72">• Dues, reminders</text><text x="22" y="92">• Statements, UPI link</text><text x="22" y="112">• Customer promises</text><text x="22" y="132">• Voice, Hinglish</text>
+    <text x="22" y="170" font-weight="700">Proof:</text><text x="22" y="190">₹ collected, days</text><text x="22" y="208">to pay, hours saved</text>
+    <text x="22" y="246" font-weight="700">Month 0–2</text>
+
+    <rect x="230" y="20" width="200" height="250" rx="10" fill="none" stroke="currentColor"/>
+    <text x="330" y="44" text-anchor="middle" font-weight="700">2. ORDER-TO-CASH</text>
+    <text x="242" y="72">• Order on WhatsApp</text><text x="242" y="92">• Bill / challan PDF</text><text x="242" y="112">• Payment auto-match</text><text x="242" y="132">  (UPI / bank file)</text><text x="242" y="152">• Stock low alerts</text>
+    <text x="242" y="190" font-weight="700">Proof:</text><text x="242" y="208">no missed bills,</text><text x="242" y="226">no manual matching</text>
+    <text x="242" y="246" font-weight="700">Month 2–4</text>
+
+    <rect x="450" y="20" width="200" height="250" rx="10" fill="none" stroke="currentColor"/>
+    <text x="550" y="44" text-anchor="middle" font-weight="700">3. SMARA NETWORK</text>
+    <text x="462" y="72">• Buyer + seller both</text><text x="462" y="92">  on Smara</text><text x="462" y="112">• Ledger auto-confirm</text><text x="462" y="132">• Quote → PO → dispatch</text><text x="462" y="152">• IndiaMART lead replies</text>
+    <text x="462" y="190" font-weight="700">Proof:</text><text x="462" y="208">invites accepted,</text><text x="462" y="226">orders through Smara</text>
+    <text x="462" y="246" font-weight="700">Month 4–8</text>
+
+    <rect x="670" y="20" width="200" height="250" rx="10" fill="none" stroke="currentColor" stroke-dasharray="5 4"/>
+    <text x="770" y="44" text-anchor="middle" font-weight="700">4. AGENT DEALS</text>
+    <text x="682" y="72">• Agents negotiate</text><text x="682" y="92">  inside owner limits</text><text x="682" y="112">• Early-payment</text><text x="682" y="132">  finance referrals</text><text x="682" y="152">• GST match with CA</text>
+    <text x="682" y="190" font-weight="700">Proof:</text><text x="682" y="208">deals closed,</text><text x="682" y="226">revenue share</text>
+    <text x="682" y="246" font-weight="700">After PMF</text>
+
+    <line x1="210" y1="145" x2="228" y2="145" stroke="currentColor" marker-end="url(#a2)"/>
+    <line x1="430" y1="145" x2="448" y2="145" stroke="currentColor" marker-end="url(#a2)"/>
+    <line x1="650" y1="145" x2="668" y2="145" stroke="currentColor" marker-end="url(#a2)"/>
+  </g>
+</svg>
+<figcaption>Each stage stands on the one before it. Collections data (who owes whom) is exactly what the network needs to match two businesses' ledgers.</figcaption>
+</figure>
+
+<h3>Why this order</h3>
+<ul>
+<li><strong>Stage 1 sells on day one.</strong> One owner gets value alone. No network is needed.</li>
+<li><strong>Stage 2 keeps them daily.</strong> Orders and bills happen every day, but dues only weekly. Daily use is what makes someone pay.</li>
+<li><strong>Stage 3 is the growth engine.</strong> Every Smara user has 20–200 customers and suppliers. When Smara sends "Ravi Traders has shared their ledger with you, tap to confirm", the other business sees Smara working before they sign up. That is your free distribution inside Banswara.</li>
+<li><strong>Stage 4 needs trust and data.</strong> Agents bargaining on price only works once owners trust Smara's judgement and both sides have history.</li>
+</ul>
+
+<h2>5. The B2B agent channel, designed to be safe</h2>
+<p>Your idea, "my company's agent deals with your company's agent", is right. Gartner expects most B2B buying to pass through AI agents within a few years (<a href="https://www.keelvar.com/blog/ai-negotiation-not-chatbot">Keelvar summary</a>). For Indian SMEs it must work like this:</p>
+
+<figure>
+<svg viewBox="0 0 880 280" role="img" aria-label="Each owner talks only to their own Smara agent; the two agents exchange structured documents over the Smara Network; nothing binding happens without each owner's tap.">
+  <defs>
+    <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+  </defs>
+  <g font-size="12" fill="currentColor">
+    <rect x="10" y="90" width="130" height="70" rx="10" fill="none" stroke="currentColor"/>
+    <text x="75" y="120" text-anchor="middle" font-weight="700">Buyer owner</text><text x="75" y="138" text-anchor="middle">(WhatsApp)</text>
+    <rect x="200" y="90" width="150" height="70" rx="10" fill="none" stroke="#0b6b4f" stroke-width="2"/>
+    <text x="275" y="120" text-anchor="middle" font-weight="700">Buyer's Smara</text><text x="275" y="138" text-anchor="middle">knows budget, history</text>
+    <rect x="410" y="70" width="60" height="110" rx="8" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+    <text x="440" y="118" text-anchor="middle" font-weight="700">Smara</text><text x="440" y="134" text-anchor="middle">Network</text>
+    <rect x="530" y="90" width="150" height="70" rx="10" fill="none" stroke="#0b6b4f" stroke-width="2"/>
+    <text x="605" y="120" text-anchor="middle" font-weight="700">Seller's Smara</text><text x="605" y="138" text-anchor="middle">knows stock, floor price</text>
+    <rect x="740" y="90" width="130" height="70" rx="10" fill="none" stroke="currentColor"/>
+    <text x="805" y="120" text-anchor="middle" font-weight="700">Seller owner</text><text x="805" y="138" text-anchor="middle">(WhatsApp)</text>
+    <line x1="142" y1="125" x2="198" y2="125" stroke="currentColor" marker-start="url(#a3)" marker-end="url(#a3)"/>
+    <line x1="352" y1="125" x2="408" y2="125" stroke="currentColor" marker-start="url(#a3)" marker-end="url(#a3)"/>
+    <line x1="472" y1="125" x2="528" y2="125" stroke="currentColor" marker-start="url(#a3)" marker-end="url(#a3)"/>
+    <line x1="682" y1="125" x2="738" y2="125" stroke="currentColor" marker-start="url(#a3)" marker-end="url(#a3)"/>
+    <text x="170" y="112" text-anchor="middle">taps</text>
+    <text x="770" y="112" text-anchor="middle">taps</text>
+    <text x="440" y="40" text-anchor="middle" font-weight="700">Only structured documents move:</text>
+    <text x="440" y="58" text-anchor="middle">enquiry · quote · PO · dispatch note · ledger confirmation · payment advice</text>
+    <text x="440" y="214" text-anchor="middle" font-weight="700" fill="#a3262d">Never without a tap: accepting a price, placing an order, changing a ledger.</text>
+    <text x="440" y="234" text-anchor="middle" fill="#a3262d">Never at all: moving money, sharing a customer's data with another shop.</text>
+    <text x="440" y="254" text-anchor="middle">Every message is signed and logged, so either owner can show what was agreed.</text>
+  </g>
+</svg>
+<figcaption>Agents prepare and exchange; owners decide. Start with the dull, high-value documents (ledger confirmation, quotes, POs) before any free-form bargaining.</figcaption>
+</figure>
+
+<h3>The first network feature to build: "Khata Milao" (ledger match)</h3>
+<ul>
+<li>A seller's Smara sends the buyer a ledger confirmation: "As per our books you owe ₹1,85,750, made of these 3 bills".</li>
+<li>The buyer's Smara compares it with the buyer's own books. If they match, the buyer taps "Confirm". If not, it lists exactly which bill differs.</li>
+<li>Today this is done by phone, PDF and CA calls at year end and before GST filing. It is boring, important and safe, and it pulls the other business onto Smara.</li>
+</ul>
+
+<h3>IndiaMART: help sellers win leads (do not copy IndiaMART)</h3>
+<ul>
+<li>For paid IndiaMART sellers: Smara pulls new leads through IndiaMART's own API and drafts a reply with price and stock from the owner's data. The owner taps, and the buyer gets an answer in minutes instead of hours.</li>
+<li>That is real value (more leads won) using an official route, with no scraping. Build it once 2–3 pilot users are IndiaMART sellers.</li>
+</ul>
+
+<h2>6. Banswara go-to-market: 30 users, 3 paying</h2>
+
+<figure>
+<svg viewBox="0 0 880 250" role="img" aria-label="Funnel from 60 conversations to 30 onboarded, 15 using it every week and 3 paying, over about 10 weeks.">
+  <g font-size="13" fill="currentColor">
+    <rect x="20" y="20" width="840" height="40" rx="8" fill="none" stroke="currentColor"/>
+    <text x="440" y="45" text-anchor="middle"><tspan font-weight="700">60 conversations</tspan> — visits, CA referrals, trader associations, mandi (weeks 1–3)</text>
+    <rect x="120" y="72" width="640" height="40" rx="8" fill="none" stroke="currentColor"/>
+    <text x="440" y="97" text-anchor="middle"><tspan font-weight="700">30 onboarded</tspan> — their sheet imported, totals checked with them</text>
+    <rect x="220" y="124" width="440" height="40" rx="8" fill="none" stroke="#0b6b4f" stroke-width="2"/>
+    <text x="440" y="149" text-anchor="middle"><tspan font-weight="700">15 weekly active</tspan> — approve reminders every week</text>
+    <rect x="320" y="176" width="240" height="40" rx="8" fill="none" stroke="#0b6b4f" stroke-width="2.5"/>
+    <text x="440" y="201" text-anchor="middle" font-weight="700" fill="#0b6b4f">3 paying power users</text>
+    <text x="440" y="240" text-anchor="middle">about 10 weeks</text>
+  </g>
+</svg>
+<figcaption>The middle step (weekly active) is the one to watch; if fewer than half of onboarded users approve reminders weekly, fix the product before adding users.</figcaption>
+</figure>
+
+<h3>Who to pick in Banswara</h3>
+<p>Pick businesses that give a lot of credit, to many customers, and already keep some records:</p>
+<div class="tablewrap">
+<table>
+<tr><th>Segment</th><th>Why they need it</th><th>Hook sentence</th></tr>
+<tr><td>FMCG / kirana distributors and wholesalers</td><td>100+ retailers on credit, weekly collection rounds</td><td>"Har retailer ka baaki, har hafte, bina call kiye"</td></tr>
+<tr><td>Building material, hardware, cement dealers</td><td>Big tickets, contractors pay late</td><td>"Contractor ka paisa time pe"</td></tr>
+<tr><td>Yarn, textile traders and job workers (Banswara Syntex supply chain)</td><td>B2B bills, GST matching, 45-day rule</td><td>"Bill, statement aur GST milaan ek jagah"</td></tr>
+<tr><td>Agri-input dealers (seed, fertiliser) around maize and soybean</td><td>Season credit to farmers and retailers</td><td>"Season ka udhaar, season pe wapas"</td></tr>
+<tr><td>Marble and slab traders</td><td>Large dispatches, transporters, disputes</td><td>"Har dispatch aur payment ka hisaab"</td></tr>
+</table>
+</div>
+<p class="src">Banswara's mix of synthetic yarn, textiles, marble and agriculture is from the <a href="https://dcmsme.gov.in/dips/DIPR_ Banswara.pdf">DC-MSME district profile</a> and the <a href="https://www.india.gov.in/explore-india/odop/details/synthetic-yarn">ODOP page</a>.</p>
+
+<h3>How to win trust in a small city</h3>
+<ul>
+<li><strong>Go through the local CA.</strong> One CA has 50–200 business clients and is already trusted with their books. Offer CAs a free dashboard of their clients' receivables, then a referral share.</li>
+<li><strong>Sit with the owner for 20 minutes, in person.</strong> Import their sheet together and show their top 10 dues on WhatsApp. The "wow" is seeing their own customers' names.</li>
+<li><strong>Never send anything to their customers without them.</strong> Say this first. It is the number one fear.</li>
+<li><strong>Weekly 5-minute check-in call</strong> for the first month. Turn every complaint into a fix and a test.</li>
+</ul>
+
+<h3>What to measure every week (this is also your grant evidence)</h3>
+<ul>
+<li>₹ collected after Smara reminders (from the ledger: invoices marked paid after a reminder).</li>
+<li>Average days from due date to payment, before and after.</li>
+<li>Weekly active owners, and approvals per owner.</li>
+<li>Hours saved, asked directly: "How many calls did you not make this week?"</li>
+<li>Cost per shop from the usage report.</li>
+</ul>
+
+<h2>7. Grants, then PMF, then funding</h2>
+<figure>
+<svg viewBox="0 0 880 170" role="img" aria-label="Timeline: pilot to month 3, apply for grants with pilot numbers by month 3 to 4, reach 100 users and product-market fit by month 9 to 12, then raise funding.">
+  <defs><marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+  <g font-size="12" fill="currentColor">
+    <line x1="20" y1="70" x2="860" y2="70" stroke="currentColor" marker-end="url(#a4)"/>
+    <circle cx="80" cy="70" r="7" fill="#0b6b4f"/><text x="80" y="50" text-anchor="middle" font-weight="700">Now</text><text x="80" y="98" text-anchor="middle">Banswara pilot</text><text x="80" y="114" text-anchor="middle">30 users</text>
+    <circle cx="290" cy="70" r="7" fill="currentColor"/><text x="290" y="50" text-anchor="middle" font-weight="700">Month 3</text><text x="290" y="98" text-anchor="middle">3 paying, ₹ proof</text><text x="290" y="114" text-anchor="middle">apply iStart + SISFS</text>
+    <circle cx="500" cy="70" r="7" fill="currentColor"/><text x="500" y="50" text-anchor="middle" font-weight="700">Month 4–6</text><text x="500" y="98" text-anchor="middle">grant money: 2 hires</text><text x="500" y="114" text-anchor="middle">(field sales + engineer)</text>
+    <circle cx="710" cy="70" r="7" fill="currentColor"/><text x="710" y="50" text-anchor="middle" font-weight="700">Month 9–12</text><text x="710" y="98" text-anchor="middle">100+ users, 2–3 cities</text><text x="710" y="114" text-anchor="middle">network live → raise</text>
+  </g>
+</svg>
+<figcaption>Grant reviewers fund evidence: real users, rupees collected, retention. The pilot is the application.</figcaption>
+</figure>
+
+<div class="tablewrap">
+<table>
+<tr><th>Option</th><th>What it gives (check current terms)</th><th>Fit for you</th></tr>
+<tr><td><strong>Rajasthan iStart</strong></td><td>Ideation grant about ₹2.4 lakh; seed grants about ₹10 lakh and more, depending on the QRate score (<a href="https://taxguru.in/corporate-law/funding-startups-businesses-rajasthan-istart-initiative-details.html">Taxguru</a>, <a href="https://www.drishtiias.com/state-pcs-current-affairs/rajasthans-istart-portal/print_manually">Drishti</a>)</td><td><span class="tag ok">Best first step</span> You are in Rajasthan and the pilot is in Banswara.</td></tr>
+<tr><td><strong>Startup India Seed Fund (SISFS)</strong></td><td>Up to ₹20 lakh grant for proof of concept and trials, given through a recognised incubator (<a href="https://www.myscheme.gov.in/schemes/sisfs-fs">myScheme</a>)</td><td><span class="tag ok">Strong</span> Apply through an incubator near you or online.</td></tr>
+<tr><td><strong>Uttar Pradesh Startup Policy 2026</strong></td><td>Matching R&amp;D grant, compute support; needs Startup India recognition, StartInUP registration and a UP incubator (<a href="https://startupmission.up.gov.in/pages/startup-policy">Startup in UP</a>)</td><td><span class="tag mid">Only if you base or incubate in UP</span></td></tr>
+<tr><td><strong>MeitY SAMRIDH</strong></td><td>Reported to have concluded in January 2026 (<a href="https://organiser.org/2026/02/13/339734/bharat/uttar-pradesh-emerges-as-start-up-powerhouse-under-meitys-samridh-programme/">Organiser</a>)</td><td><span class="tag no">Not a 2026 route</span></td></tr>
+</table>
+</div>
+<p class="src">I could not confirm which iHub you mean. If it is a specific IIT or technology hub, check whether it funds fintech/AI for MSMEs and whether it needs you to be based there.</p>
+
+<h2>8. Risks, and what fixes each</h2>
+<div class="tablewrap">
+<table>
+<tr><th>Risk</th><th>Fix</th></tr>
+<tr><td>"Khatabook and OkCredit already send free reminders"</td><td>They send a reminder when you press a button. Smara does the follow-up for you: it remembers promises, handles replies and disputes, makes statements and reads Tally. Show their own customer replies turning into cards.</td></tr>
+<tr><td>Owners fear losing customers to "AI messages"</td><td>Nothing goes to a customer without the owner's tap; polite templates; quiet hours. Say it first, every time.</td></tr>
+<tr><td>WhatsApp limits (test number, templates pending, 250/day before verification)</td><td>Finish Meta setup now: real number, business verification, approved templates. This is the single biggest blocker to real customers.</td></tr>
+<tr><td>Model cost when Sarvam's free period ends</td><td>Measure per-shop cost weekly (built). Keep heavy tasks on the strong model and routine replies on the light one. Price above about 3× cost.</td></tr>
+<tr><td>Wrong numbers break trust once</td><td>Every import shows sheet total against ledger total, and the owner confirms in week 1. Every complaint becomes a test.</td></tr>
+<tr><td>Too wide too early (GST, inventory, payroll)</td><td>Say no until stage 1 has 15 weekly active users. Order-to-cash is the only next step.</td></tr>
+<tr><td>One server, one founder</td><td>Grant money goes first to a second engineer and off-server backups; the watchdog is already alerting.</td></tr>
+</table>
+</div>
+
+<h2>9. Next 30 days</h2>
+<ol>
+<li><strong>Meta:</strong> get a real business number, start business verification, get one template set approved (v1 or v2).</li>
+<li><strong>List 60 Banswara businesses</strong> across the five segments, plus 3 CAs. Visit 10 a week.</li>
+<li><strong>Onboard the first 5 in person.</strong> Import real files, fix every import bug the same day, and confirm totals.</li>
+<li><strong>Add a weekly "result card" for each owner</strong> on WhatsApp: "This week: ₹X collected after reminders, Y promises tracked, Z calls saved". This is the feature that sells, and it is small to build.</li>
+<li><strong>Start the iStart application</strong> with pilot numbers; register for Startup India recognition (needed for SISFS).</li>
+<li><strong>Design "Khata Milao"</strong> (ledger match between two Smara users) and ship it once 2 pilot users trade with each other.</li>
+</ol>
+
+<div class="box warn">
+<p><strong>The one thing to remember:</strong> win Banswara with vasooli that saves real rupees, make every result visible in a weekly WhatsApp card, and let the network grow from the ledgers your users already share with each other. The agent-to-agent B2B channel is where this ends up, not where it starts.</p>
+</div>
+
+<p class="src">Sources are linked inline. Live cost and usage figures come from Smara's own server logs (November 2026).</p>
+</main>
+</body>
+</html>

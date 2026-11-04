@@ -102,5 +102,11 @@ async def web_search(app, ctx: SessionCtx, args: dict) -> dict:
             await browsers.close(sid)
     finally:
         await browsers.close(sid)
-    return {"error": f"search did not work: {last_error[:200]}. If this keeps happening, ask the owner to send 'pair browser' "
-                     "so searches run in their own browser."}
+    from src.bridge.device import offline_note, paired_device
+    try:
+        note = offline_note(await paired_device(app.state.pool, ctx.tenant_id))
+    except Exception:
+        note = ""
+    return {"error": f"search did not work: {last_error[:200]}.",
+            "next": note or "The owner has no PC connected. Searches work best through their own browser: suggest they "
+                            "open Smara Desktop (Settings > Browser) or send 'pair browser' once."}
