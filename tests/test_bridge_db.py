@@ -229,3 +229,42 @@ def test_bridge_never_types_into_password_fields_and_honours_the_stop_button(tmp
     assert out["fill_ok"] and out["user_value"] == "ravi"
     assert "never type" in out["pw"] and "never type" in out["otp"] and out["pw_value"] == ""
     assert "paused" in out["paused"] and out["resumed"] and out["banner"]
+
+
+# ---------------------------------------------------------------- web search
+
+def test_search_results_are_unwrapped_deduplicated_and_skip_the_engine_itself():
+    from src.agent.web import parse_results
+    els = [
+        {"tag": "a", "text": "DuckDuckGo", "href": "https://duckduckgo.com/"},
+        {"tag": "a", "text": "Best pizza in Banswara - Zomato", "href": "//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.zomato.com%2Fbanswara&rut=x"},
+        {"tag": "a", "text": "Top 10 pizza places with reviews, menus and prices in Banswara", "href": "//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.zomato.com%2Fbanswara&rut=x"},
+        {"tag": "a", "text": "Pizza Hut Banswara", "href": "https://www.bing.com/ck/a?u=https%3A%2F%2Fwww.pizzahut.co.in%2Fbanswara"},
+        {"tag": "button", "text": "Search", "href": ""},
+    ]
+    out = parse_results(els)
+    assert [r["url"] for r in out] == ["https://www.zomato.com/banswara", "https://www.pizzahut.co.in/banswara"]
+    assert out[0]["title"].startswith("Best pizza") and out[0]["snippet"].startswith("Top 10")
+
+
+async def test_agent_searches_then_reads_a_result(env):
+    from src.agent.policy import SessionCtx, pre_tool_use
+    from src.agent.tools import TOOL_NAMES
+    assert pre_tool_use(SessionCtx(id="s", tenant_id="t", trust="TRUSTED"), "web_search", {"query": "pizza"}, TOOL_NAMES).verdict == "allow"
+    assert pre_tool_use(SessionCtx(id="s", tenant_id="t", trust="UNTRUSTED", party_id="p"), "web_search", {"query": "x"}, TOOL_NAMES).verdict == "deny"
+    br = env.app.state.browsers
+
+    async def step(sid, args, **kw):
+        br.steps.append(args)
+        br.open.add(sid)
+        if "duckduckgo" in args.get("url", ""):
+            return {"url": args["url"], "title": "q", "elements": [
+                {"tag": "a", "text": "Best pizza in Banswara", "href": "//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Fpizza"}]}
+        return {"url": args.get("url", ""), "title": "Pizza", "text": "Mario's, Rs 299", "elements": []}
+    br.step = step
+    env.app.state.llm = ScriptLLM(call("web_search", query="best pizza banswara"),
+                                  lambda m: call("browser_step", action="navigate", url=json.loads(m[-1]["content"])["results"][0]["url"]),
+                                  say("Mario's, Rs 299 (example.org)."))
+    await dispatch(env.app, owner("ws1", "best pizza shop in banswara?"))
+    assert [s["url"] for s in br.steps if s["action"] == "navigate"][1] == "https://example.org/pizza"
+    assert env.app.state.wa.sent[-1]["text"]["body"].startswith("Mario")

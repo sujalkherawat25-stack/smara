@@ -53,13 +53,13 @@ BANNER_JS = """() => {
 SNAPSHOT_JS = """() => {
   const els = [...document.querySelectorAll('a,button,input,select,textarea,[role=button]')]
     .filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && e.id !== 'smara-agent-banner'
-                   && !e.closest('#smara-agent-banner'); }).slice(0, 40);
+                   && !e.closest('#smara-agent-banner'); }).slice(0, 60);
   return els.map(e => {
     const tag = e.tagName.toLowerCase();
     const text = (e.innerText || e.value || e.placeholder || e.getAttribute('aria-label') || '').trim().slice(0, 60);
     let selector = e.id ? '#' + CSS.escape(e.id) : (e.name ? `${tag}[name="${e.name}"]` : null);
     if (!selector && text) selector = `${tag}:has-text("${text.replace(/"/g, '')}")`;
-    return {selector, tag, type: e.type || '', text};
+    return {selector, tag, type: e.type || '', text, href: tag === 'a' ? (e.href || '') : ''};
   }).filter(x => x.selector);
 }"""
 SECRET_TYPES_JS = """e => ({type: (e.type || '').toLowerCase(), ac: (e.autocomplete || '').toLowerCase(),

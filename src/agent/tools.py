@@ -37,6 +37,10 @@ def _fn(name: str, desc: str, props: dict, required: list[str]) -> dict:
 _S = {"type": "string"}
 TOOLS = [
     _fn("query_ledger_sql", "Run ONE read-only SELECT on the shop's ledger. " + LEDGER_SCHEMA, {"sql": _S}, ["sql"]),
+    _fn("web_search", "Search the web (DuckDuckGo, then Bing). Returns up to 8 results with title, url and a snippet, using the "
+        "owner's own PC browser when it is connected. Then open a result with browser_step navigate and read it. Use it for "
+        "anything outside the ledger: prices, places, suppliers, news, how-to. Quote what you read; never invent details.",
+        {"query": _S}, ["query"]),
     _fn("get_current_time", "The current date and time in India (IST), the weekday, and whether it is business hours. "
         "Call this whenever the date or time matters; never guess it.", {}, []),
     _fn("resolve_continuum_memory", "Get the evidence-backed state card (promises, disputes, history) for a party. "
