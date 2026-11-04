@@ -10,6 +10,7 @@ handled deterministically (never by the model) and resumes from that call.
 """
 import asyncio
 import json
+import re
 import logging
 from datetime import date, datetime, timedelta, timezone
 
@@ -22,7 +23,7 @@ from src.loop.owner_channel import send_to_owner
 from src.loop.whatsapp import text_message
 
 log = logging.getLogger(__name__)
-MAX_STEPS = 12
+MAX_STEPS = 30          # model calls per turn (each owner message / resume gets a fresh budget)
 CONTINUE_WITHIN = timedelta(minutes=30)
 EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memory": tools.resolve_continuum_memory,
              "write_continuum_evidence": tools.write_continuum_evidence,
@@ -58,9 +59,9 @@ async def _save(pool, sid, messages, *, status=None, pending=..., steps=None) ->
 async def start_session(app, *, tenant, trust: str, trigger: str, content: str, party_id=None, files=(),
                         channel: str = "whatsapp", background: bool = True, fallback=None) -> str:
     pool, user = app.state.pool, {"role": "user", "content": content}
-    async with pool.connection() as conn:
-        row = None
-        if trust == "TRUSTED":   # an owner's follow-up continues the recent conversation
+    row = None
+    if trust == "TRUSTED":   # an owner's follow-up continues the recent conversation
+        async with pool.connection() as conn:
             cur = await conn.execute(
                 """UPDATE agent_sessions SET status = 'RUNNING', messages = messages || %s::jsonb, files = files || %s,
                           updated_at = now() WHERE id = (SELECT id FROM agent_sessions WHERE tenant_id = %s
@@ -68,8 +69,11 @@ async def start_session(app, *, tenant, trust: str, trigger: str, content: str, 
                           ORDER BY updated_at DESC LIMIT 1) RETURNING id""",
                 (json.dumps([user]), list(files), tenant.id, channel, CONTINUE_WITHIN))
             row = await cur.fetchone()
-        if row is None:
-            system = {"role": "system", "content": await build_system(app, tenant, trust)}
+    if row is None:
+        # Built BEFORE taking a connection: it queries the pool itself, and holding one while asking for
+        # another deadlocks the small pool as soon as a few sessions start at once.
+        system = {"role": "system", "content": await build_system(app, tenant, trust)}
+        async with pool.connection() as conn:
             cur = await conn.execute(
                 """INSERT INTO agent_sessions (tenant_id, trust, trigger, party_id, channel, files, messages)
                    VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
@@ -81,6 +85,18 @@ async def start_session(app, *, tenant, trust: str, trigger: str, content: str, 
     return sid
 
 
+_FILE_ASK = re.compile(r"\b(pdf|excel|xlsx)\b", re.I)
+_SEND_ASK = re.compile(r"(bhej|send|bana|de do|dedo|chahiye|chahie|mail)", re.I)
+
+
+def owes_file(messages: list[dict]) -> bool:
+    """True when the owner's latest message asked for a PDF/Excel file and this turn never sent one."""
+    last = max((i for i, m in enumerate(messages) if m["role"] == "user" and not m["content"].startswith("[system note]")), default=-1)
+    if last < 0 or not (_FILE_ASK.search(messages[last]["content"]) and _SEND_ASK.search(messages[last]["content"])):
+        return False
+    return not any(m["role"] == "tool" and '"sent": true' in m["content"] and '"filename"' in m["content"] for m in messages[last:])
+
+
 async def run(app, sid: str, fallback=None) -> None:
     pool = app.state.pool
     async with pool.connection() as conn:
@@ -88,14 +104,16 @@ async def run(app, sid: str, fallback=None) -> None:
     if row is None:
         return
     messages, steps, suspended, empties = row["messages"], row["steps"], False, 0
+    budget, seen, nudged = 0, {}, False
     try:
         tenant = await tenants.by_id(pool, str(row["tenant_id"]))
         if messages and messages[0]["role"] == "system":      # never carry a stale date/ledger/instructions into a new turn
             messages[0] = {"role": "system", "content": await build_system(app, tenant, row["trust"])}
-        while steps < MAX_STEPS:
+        while budget < MAX_STEPS:
             messages = compact(messages)
             msg = await app.state.llm.chat(messages, tools.TOOLS)
             steps += 1
+            budget += 1
             calls = msg.get("tool_calls") or []
             if not calls and not (msg.get("content") or "").strip():
                 empties += 1          # a provider hiccup, not an answer: ask again instead of going silent
@@ -103,15 +121,32 @@ async def run(app, sid: str, fallback=None) -> None:
                     raise RuntimeError("the model returned empty replies")
                 continue
             messages.append({"role": "assistant", "content": msg.get("content") or "", **({"tool_calls": calls} if calls else {})})
+            if not calls and not nudged and owes_file(messages[:-1]):
+                nudged = True      # self-check: they asked for a file and none went out, so do it now rather than describe it
+                messages.append({"role": "user", "content": "[system note] The owner asked for a file and you have not sent one in this "
+                                 "turn. Create it with run_python (the file type they asked for) and send it with send_file_to_owner, "
+                                 "then confirm. Do this even if you sent a similar file earlier."})
+                continue
             if not calls:
                 await _save(pool, sid, messages, status="DONE", steps=steps)
                 return await _finish(app, row, msg.get("content") or "")
+            for c in calls:                       # the same call over and over is a loop: tell the model to change approach
+                key = (c["function"]["name"], c["function"]["arguments"])
+                seen[key] = seen.get(key, 0) + 1
+                if seen[key] == 3:
+                    messages.append({"role": "user", "content": "[system note] You have made this exact call 3 times with the same "
+                                     "result. Change your approach (different tool, different arguments) or explain what is blocking you."})
             if await _process(app, row, messages, calls):
                 suspended = True   # keep the browser page alive for the approved step
                 return await _save(pool, sid, messages, steps=steps)
             await _save(pool, sid, messages, steps=steps)
-        await _save(pool, sid, messages, status="FAILED", steps=steps)
-        await _finish(app, row, f"I stopped after {MAX_STEPS} steps without finishing. Please try a simpler request.")
+        # Out of budget: never go silent. Ask the model for an honest status instead of a dead end.
+        messages.append({"role": "user", "content": "[system note] Step budget reached. Without calling any tool, tell the owner "
+                         "briefly what you finished, what is left, and what you need from them to continue."})
+        summary = ((await app.state.llm.chat(messages, [])).get("content") or "").strip()
+        messages.append({"role": "assistant", "content": summary})
+        await _save(pool, sid, messages, status="DONE", steps=steps)
+        await _finish(app, row, summary or "This took more steps than I can do in one go. Tell me to continue and I will pick it up.")
     except Exception:
         log.exception("agent session %s failed", sid)
         await _save(pool, sid, messages, status="FAILED", steps=steps)

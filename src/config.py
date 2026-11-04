@@ -36,6 +36,8 @@ class Settings:
     llm_reasoning_model: str = ""
     llm_agent_model: str = ""
     llm_max_concurrency: int = 4
+    llm_agent_rpm: float = 0
+    llm_fallback_model: str = ""
     sarvam_api_key: str = ""
     tick_seconds: int = 60
     digest_hour_ist: int = 9
@@ -69,6 +71,8 @@ def load_settings() -> Settings:
         llm_reasoning_model=env.get("LLM_REASONING_MODEL", ""),
         llm_agent_model=env.get("LLM_AGENT_MODEL", ""),
         llm_max_concurrency=int(env.get("LLM_MAX_CONCURRENCY", "4")),
+        llm_agent_rpm=float(env.get("LLM_AGENT_RPM", "0")),
+        llm_fallback_model=env.get("LLM_FALLBACK_MODEL", ""),
         sarvam_api_key=env.get("SARVAM_API_KEY", ""),
         tick_seconds=int(env.get("TICK_SECONDS", "60")),
         digest_hour_ist=int(env.get("DIGEST_HOUR_IST", "9")),

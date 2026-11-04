@@ -27,7 +27,8 @@ async def lifespan(app: FastAPI):
     app.state.continuum = ContinuumClient(s.continuum_url, s.continuum_api_key)
     app.state.wa = WhatsAppClient(s.wa_phone_number_id, s.wa_access_token)
     app.state.llm = LLM(s.llm_base_url, s.llm_api_key, s.llm_model, s.llm_reasoning_model,
-                        agent_model=s.llm_agent_model, max_concurrency=s.llm_max_concurrency)
+                        agent_model=s.llm_agent_model, max_concurrency=s.llm_max_concurrency,
+                        agent_rpm=s.llm_agent_rpm, fallback_model=s.llm_fallback_model)
     app.state.bg = set()
     app.state.browsers = BrowserSessions()
     app.state.sandbox = Sandbox(s.sandbox_jobs_dir, s.sandbox_mode)
@@ -74,7 +75,8 @@ async def healthz(response: Response):
                       (SELECT count(*) FROM agent_sessions WHERE status = 'FAILED' AND updated_at > now() - interval '1 hour') failed_sessions_1h""")).fetchone()
     return {"ok": ok, "db": True, "outbox": ob, "sandbox": sandbox_ok, "continuum": await _continuum_probe(),
             "ops": {**ops, "quiet_hours_now": clock.is_quiet(st.settings)},
-            "agent_model": st.llm.agent_model if getattr(st, "llm", None) and st.llm.enabled else None}
+            "agent_model": st.llm.agent_model if getattr(st, "llm", None) and st.llm.enabled else None,
+            "llm": getattr(getattr(st, "llm", None), "stats", None)}
 
 
 _probe = {"at": 0.0, "ok": None, "ms": None}

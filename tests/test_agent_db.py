@@ -1,4 +1,5 @@
 """Agent loop against Postgres with a scripted model: tools, PreToolUse, gates, resume, self-verification."""
+import asyncio
 import json
 import os
 from datetime import date, datetime, timedelta, timezone
@@ -176,11 +177,22 @@ async def test_owner_question_multi_turn_with_retry_after_tool_error(env):
     assert s == {"status": "DONE", "steps": 3}
 
 
-async def test_step_limit_stops_runaway_loop(env):
-    env.app.state.llm = ScriptLLM(*[call("query_ledger_sql", sql="select 1") for _ in range(MAX_STEPS + 3)])
+async def test_step_budget_ends_with_a_status_not_silence(env):
+    llm = env.app.state.llm = ScriptLLM(*[call("query_ledger_sql", sql="select 1") for _ in range(MAX_STEPS)],
+                                        say("Checked the ledger 30 times; I still need the invoice number."))
     await dispatch(env.app, owner("w2", "loop forever"))
-    assert (await one(env.pool, "select status from agent_sessions"))["status"] == "FAILED"
-    assert "stopped after" in env.app.state.wa.sent[-1]["text"]["body"]
+    assert (await one(env.pool, "select status from agent_sessions"))["status"] == "DONE"
+    assert "still need the invoice number" in env.app.state.wa.sent[-1]["text"]["body"]
+    assert "[system note] You have made this exact call 3 times" in json.dumps(llm.seen[5])    # loop was called out
+
+
+async def test_step_budget_is_per_turn_not_per_session(env):
+    env.app.state.llm = ScriptLLM(say("first"), say("second"))
+    await dispatch(env.app, owner("w3", "one"))
+    async with env.pool.connection() as c:
+        await c.execute("update agent_sessions set steps = 500")
+    await dispatch(env.app, owner("w4", "two"))
+    assert env.app.state.wa.sent[-1]["text"]["body"] == "second"
 
 
 # ---------------------------------------------------------------- untrusted debtor session
@@ -351,8 +363,36 @@ async def test_llm_retries_rate_limits_then_succeeds():
     assert (await llm.chat([], []))["content"] == "ok" and hits["n"] == 3 and llm.last_usage["total_tokens"] == 5
     never = LLM("https://llm.test", "k", "m", max_retries=1, client=httpx.AsyncClient(
         base_url="https://llm.test", transport=httpx.MockTransport(lambda r: httpx.Response(429, headers={"retry-after": "0"}))))
-    with pytest.raises(httpx.HTTPStatusError):
+    from src.loop.llm import RateLimited
+    with pytest.raises(RateLimited):
         await never.chat([], [])
+
+
+async def test_llm_falls_back_to_a_second_model_when_rate_limited():
+    import httpx
+    from src.loop.llm import LLM
+    seen = []
+
+    def handler(request):
+        model = __import__("json").loads(request.content)["model"]
+        seen.append(model)
+        if model == "big":
+            return httpx.Response(429, headers={"retry-after": "0"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "from-small"}}]})
+    llm = LLM("https://llm.test", "k", "small", agent_model="big", fallback_model="small", max_retries=1,
+              client=httpx.AsyncClient(base_url="https://llm.test", transport=httpx.MockTransport(handler)))
+    assert (await llm.chat([], []))["content"] == "from-small"
+    assert seen == ["big", "big", "small"] and llm.stats["fallbacks"] == 1
+
+
+async def test_token_bucket_paces_after_the_burst():
+    import time
+    from src.loop.llm import Bucket
+    b = Bucket(rpm=600, burst=2)                    # 10 per second
+    t = time.monotonic()
+    for _ in range(4):
+        await b.take()
+    assert 0.15 < time.monotonic() - t < 0.6        # 2 immediate, 2 paced at ~0.1 s each
 
 
 async def test_rules_fallback_uses_the_invoice_the_debtor_names(env):
@@ -370,3 +410,30 @@ async def test_business_dates_are_ist(env):
     rows = (await query_ledger_sql(env.app, SessionCtx("s", env.t.id, "TRUSTED"), {"sql": "select current_date d"}))["rows"]
     assert rows[0]["d"] == clock.today()                                   # SQL "today" is the shop's today
     assert clock.today() == datetime.now(tz(timedelta(hours=5, minutes=30))).date()
+
+
+async def test_many_sessions_starting_at_once_never_deadlock_a_tiny_pool(env):
+    """Regression: start_session built the prompt (needs a connection) while holding one, so a handful of
+    simultaneous owner messages exhausted the pool and every one of them timed out."""
+    from psycopg.rows import dict_row
+    from psycopg_pool import AsyncConnectionPool
+    tiny = AsyncConnectionPool(URL, kwargs={"row_factory": dict_row}, min_size=2, max_size=2, timeout=8, open=False)
+    await tiny.open()
+    try:
+        real, env.app.state.pool = env.app.state.pool, tiny
+        env.app.state.llm = ScriptLLM(*[say(f"ok{i}") for i in range(8)])
+        await asyncio.wait_for(asyncio.gather(*[dispatch(env.app, owner(f"par{i}", f"parallel {i}")) for i in range(8)]), 30)
+        env.app.state.pool = real
+    finally:
+        await tiny.close()
+    assert len([m for m in env.app.state.wa.to(OWNER) if m.get("type") == "text"]) >= 1
+
+
+async def test_file_request_without_a_file_gets_one_nudge(env):
+    llm = env.app.state.llm = ScriptLLM(say("Pehle hi bhej diya hai."), say("Ab bhej raha hoon."))
+    await dispatch(env.app, owner("pdfreq", "Aur mujhe pdf statement bhejo"))
+    assert "owner asked for a file" in llm.seen[1][-1]["content"]
+    assert env.app.state.wa.sent[-1]["text"]["body"] == "Ab bhej raha hoon."          # the nudge is once, not a loop
+    llm2 = env.app.state.llm = ScriptLLM(say("Theek hai."))
+    await dispatch(env.app, owner("chat1", "Ravi ka kitna baaki hai?"))
+    assert len(llm2.seen) == 1                                                          # unrelated messages are untouched

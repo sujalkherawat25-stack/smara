@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from psycopg.rows import dict_row
@@ -8,7 +9,7 @@ MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
 
 async def open_pool(database_url: str) -> AsyncConnectionPool:
     pool = AsyncConnectionPool(
-        database_url, kwargs={"row_factory": dict_row}, open=False
+        database_url, kwargs={"row_factory": dict_row}, open=False, min_size=2, max_size=int(os.environ.get("DB_POOL_MAX", "16")), timeout=20
     )
     await pool.open()
     return pool

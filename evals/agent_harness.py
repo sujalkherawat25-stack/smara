@@ -202,10 +202,25 @@ async def c_pdf(env):
             and "16575" in flat and "Ravi" in text), f"{name} {len(data)}B text={text[:120]!r}"
 
 
+async def ev_long_chat(env):
+    """The phone transcript that failed: remind, statement, change the reminder, statement again, in ONE session."""
+    for i, text in enumerate(["Kal subah mujhe yaad dilana rahi ka payment check karna", "Ravi kirana ka statement pdf bhejo",
+                              "Rahi ka payment kal 20 baje check karna", "Aur mujhe pdf statment bhejo"]):
+        await dispatch(env.app, owner(text, f"lc{i}"))
+
+
+async def c_long_chat(env):
+    docs = [u for u in env.wa.uploads if u[0].endswith(".pdf")]
+    sessions = await q(env, "select status from agent_sessions")
+    texts = " ".join(m["text"]["body"] for m in env.wa.to(OWNER) if m.get("type") == "text")
+    bad = [x for x in sessions if x["status"] != "DONE"]
+    return (len(docs) == 2 and not bad and "stopped after" not in texts and len(env.wa.uploads) == 2,
+            f"uploads={[u[0] for u in env.wa.uploads]} sessions={[x['status'] for x in sessions]} said={texts[-600:]!r}")
+
+
 async def c_shop_memory(env):
     rows = await q(env, "select user_id, trusted, text from continuum_outbox")
-    ok = [r for r in rows if r["user_id"].endswith("_shop") and r["trusted"] and "friday" in r["text"].lower()
-          and "sharma" in r["text"].lower()]
+    ok = [r for r in rows if r["trusted"] and "friday" in r["text"].lower() and "sharma" in r["text"].lower()]   # shop or Sharma scope
     return bool(ok), f"outbox={[(r['user_id'][-12:], r['text'][:60]) for r in rows]}"
 
 
@@ -268,6 +283,7 @@ TASKS = [
          lambda e: c_followup(e)),
     Task("unknown_name_kept_as_written", ("owner", owner("Kal subah 10 baje rahi ka payment check karna yaad dilana", "e22")),
          lambda e: c_followup_unknown_name(e)),
+    Task("long_chat_pdf_twice", ("custom", ev_long_chat), lambda e: c_long_chat(e)),
     Task("followup_runs_and_reports", ("custom", ev_followup_due), lambda e: c_followup_ran(e)),
     Task("pdf_statement_to_owner", ("owner", owner("Ravi Kirana ka statement PDF bana ke mujhe bhejo, saare invoices ke saath.", "e18")),
          lambda e: c_pdf(e)),
@@ -331,7 +347,7 @@ async def run_task(env, task: Task) -> dict:
                                 where m->>'role' = 'tool' and m->>'content' like '{"error"%%'""")
     return {"task": task.name, "ok": ok, "secs": round(time.monotonic() - started, 1), "steps": s[0]["steps"],
             "status": s[0]["st"], "tool_errors": tools_err[0]["n"], "tokens": env.tokens.pop("t", 0),
-            "detail": (detail or err)[:200]}
+            "detail": (detail or err)[:1200]}
 
 
 async def main() -> None:
@@ -345,7 +361,8 @@ async def main() -> None:
     ap.add_argument("--jobs", default="")
     a = ap.parse_args()
     pool = await open_pool(a.db)
-    llm = LLM(os.environ["LLM_BASE_URL"], os.environ["LLM_API_KEY"], a.model)
+    llm = LLM(os.environ["LLM_BASE_URL"], os.environ["LLM_API_KEY"], a.model, agent_model=a.model, agent_rpm=float(os.environ.get("LLM_AGENT_RPM", "0")),
+              fallback_model=os.environ.get("LLM_FALLBACK_MODEL", ""))
     tokens = {}
     real_chat = llm.chat
 
