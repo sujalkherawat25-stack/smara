@@ -27,6 +27,9 @@ struct ReviewActivity {
     unknown: bool,
 }
 
+/// Unknown models are assumed to have a 128k window so automatic compaction (at 80%) always engages; an unset limit never compacts and the chat dies when full.
+pub const DEFAULT_CONTEXT_WINDOW: u64 = 128_000;
+
 impl ReviewActivity {
     fn collaboration(&mut self, item: &Value) {
         if item["type"] != "collabAgentToolCall" { return; }
@@ -240,7 +243,7 @@ fn start_session(app: AppHandle, workspace: String, profile_id: String, tools_en
     };
     let config = json!({"binary": native_binary, "workspace": root,
         "home": super::state_path().parent().unwrap_or(std::path::Path::new(".")).join("native-runtime"), "model": profile.model,
-        "base_url": profile.base_url, "api_key": secret, "auth_header": profile.auth_header, "context_window": profile.context_window,
+        "base_url": profile.base_url, "api_key": secret, "auth_header": profile.auth_header, "context_window": profile.context_window.or(Some(DEFAULT_CONTEXT_WINDOW)),
         "tools_enabled": tools_enabled.unwrap_or(false), "workers_enabled": workers_enabled.unwrap_or(false), "browser_origins": browser_origins.unwrap_or_default()});
     if writeln!(input, "{config}").and_then(|_| input.flush()).is_err() {
         let _ = process.kill(); let _ = process.wait();

@@ -11,6 +11,9 @@ export function displayRuntimeError(value: unknown): string {
   if (/incomplete response returned,\s*reason:\s*max_output_tokens/i.test(message)) {
     return "The model reached its response-token limit before finishing this step. Incomplete tool calls were not executed. Use Continue to inspect completed work and resume; Smara will not replay the original actions.";
   }
+  if (/context.{0,12}(length|window)|maximum context|too many tokens|prompt is too long|exceeds? the (model|context)|context_length_exceeded/i.test(message)) {
+    return "This conversation filled the model's context window. Smara compacts older turns automatically, but this request was still too large. Use Continue to resume from the summary, or start a new chat; if your model has a larger window, set it under Settings → Models → Context window.";
+  }
   return message;
 }
 export function workerSnapshot(workers: WorkerView[], id: string, turn: NativeTurn, now: number): WorkerView[] {
