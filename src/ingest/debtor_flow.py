@@ -1,5 +1,6 @@
 """Thread B: debtor messages are UNTRUSTED. Evidence + PENDING proposal + owner card only."""
 from src import clock
+import json
 import logging
 from datetime import date
 
@@ -10,6 +11,7 @@ from src.agent_loop import start_session
 from src.ingest.extract import extract_claim
 from src.ingest.media import download_media, ocr_to_evidence, read_image, transcribe
 from src.ingest.payload import InboundMessage
+from src.loop.whatsapp import shop_choice_message
 from src.loop.upi import rupees
 from src.loop.owner_channel import send_to_owner
 from src.loop.whatsapp import owner_approval_card
@@ -45,9 +47,64 @@ async def _claim_notification(pool, adjustment_id: str) -> bool:
         return await cur.fetchone() is not None
 
 
-async def handle_debtor(app, msg: InboundMessage) -> None:
+async def _shop_from_context(pool, msg: InboundMessage, candidates: set[str]) -> str | None:
+    """Which shop a message on the shared number is about, from what we already know: the message of ours they replied
+    to, or the only shop that wrote to them in the last 3 days."""
+    async with pool.connection() as conn:
+        if msg.reply_to:
+            r = await (await conn.execute("SELECT tenant_id FROM outbound_messages WHERE msg_id = %s AND to_phone = %s",
+                                          (msg.reply_to, msg.sender))).fetchone()
+            if r and str(r["tenant_id"]) in candidates:
+                return str(r["tenant_id"])
+        recent = await (await conn.execute(
+            """SELECT DISTINCT tenant_id FROM outbound_messages
+                WHERE to_phone = %s AND created_at > now() - interval '3 days' AND kind IN ('debtor_reminder', 'customer_text')""",
+            (msg.sender,))).fetchall()
+    hits = {str(r["tenant_id"]) for r in recent} & candidates
+    return hits.pop() if len(hits) == 1 else None
+
+
+async def _ask_which_shop(app, msg: InboundMessage, rows) -> None:
+    from dataclasses import asdict
+    pool, seen, options = app.state.pool, set(), []
+    for r in rows:
+        tid = str(r["tenant_id"])
+        if tid not in seen:
+            seen.add(tid)
+            t = await tenants.by_id(pool, tid)
+            options.append({"tenant_id": tid, "name": t.name if t else "Shop"})
+    async with pool.connection() as conn:
+        row = await (await conn.execute(
+            "INSERT INTO customer_routing (phone, number_id, original, options) VALUES (%s, %s, %s, %s) RETURNING id",
+            (msg.sender, msg.number_id or "", json.dumps(asdict(msg)), json.dumps(options)))).fetchone()
+    await app.state.wa.send(shop_choice_message(msg.sender, options, str(row["id"])), number_id=msg.number_id or None)
+    log.info("asked %s which shop (%d options) for %s", msg.sender[-4:], len(options), msg.wamid)
+
+
+async def _picked_shop(app, msg: InboundMessage) -> bool:
+    """The customer tapped a shop button: process their waiting message for that shop. True if handled."""
+    _, tid, rid = (msg.button_id.split(":", 2) + ["", ""])[:3]
+    async with app.state.pool.connection() as conn:
+        row = await (await conn.execute(
+            """UPDATE customer_routing SET resolved_at = now(), tenant_id = %s::uuid
+                WHERE id::text = %s AND phone = %s AND resolved_at IS NULL AND options @> %s::jsonb RETURNING original""",
+            (tid, rid, msg.sender, json.dumps([{"tenant_id": tid}])))).fetchone()
+    if row is None:
+        return False
+    original = InboundMessage(**{k: v for k, v in row["original"].items() if k in InboundMessage.__dataclass_fields__})
+    await handle_debtor(app, original, forced_tenant_id=tid)
+    return True
+
+
+async def handle_debtor(app, msg: InboundMessage, forced_tenant_id: str | None = None) -> None:
     pool = app.state.pool
+    if msg.button_id and msg.button_id.startswith("shop:"):
+        if not await _picked_shop(app, msg):
+            log.info("stale or foreign shop choice ignored: %s", msg.wamid)
+        return
     receiving = await tenants.by_number_id(pool, msg.number_id) if msg.number_id else None
+    if forced_tenant_id:
+        receiving = await tenants.by_id(pool, forced_tenant_id)
     async with pool.connection() as conn:
         cur = await conn.execute(
             """SELECT p.id AS party_id, p.tenant_id, p.canonical_name, o.id AS obligation_id,
@@ -61,9 +118,11 @@ async def handle_debtor(app, msg: InboundMessage) -> None:
     if not rows:
         log.info("message from unknown/no-open-obligation sender dropped: %s", msg.wamid)
         return
-    if len({r["tenant_id"] for r in rows}) > 1:  # same debtor owes several tenants, number gives no hint
-        log.warning("ambiguous tenant for sender on shared number, dropped: %s", msg.wamid)
-        return
+    if len({r["tenant_id"] for r in rows}) > 1:  # the same customer deals with several shops on the shared number
+        tid = await _shop_from_context(pool, msg, {str(r["tenant_id"]) for r in rows})
+        if tid is None:
+            return await _ask_which_shop(app, msg, rows)     # never drop it: keep it and ask
+        rows = [r for r in rows if str(r["tenant_id"]) == tid]
     named = [r for r in rows if r["invoice_ref"] and r["invoice_ref"].lower() in (msg.text or "").lower()]
     row = named[0] if named else rows[0]       # the invoice the debtor names, else the oldest open one
     tenant_id, party_id = str(row["tenant_id"]), str(row["party_id"])

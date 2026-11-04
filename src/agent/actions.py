@@ -18,7 +18,7 @@ from src.ingest.media import download_media, read_image
 from src.ingest.sheet_mapper import map_sheet
 from src.loop.outbound import record
 from src.loop.owner_channel import send_to_owner
-from src.loop.whatsapp import owner_approval_card, template_message, text_message
+from src.loop.whatsapp import from_shop, owner_approval_card, template_message, text_message
 
 WINDOW = timedelta(hours=24)
 
@@ -108,6 +108,9 @@ async def validate_gated(app, ctx: SessionCtx, name: str, args: dict) -> str | N
             return "text must be 1-1000 characters"
         if args.get("obligation_id") and not await _obligation(pool, ctx, args["obligation_id"]):
             return "unknown obligation_id"
+        from src import tenants
+        t = await tenants.by_id(pool, ctx.tenant_id)
+        args["text"] = from_shop(t, str(args["text"]))     # the owner approves exactly what the customer will see
     elif name == "propose_ledger_adjustment":
         o = await _obligation(pool, ctx, args.get("obligation_id"))
         if not o or o["state"] == "PAID":
@@ -202,7 +205,7 @@ async def deliver_message(app, ctx: SessionCtx, tenant, args: dict) -> dict:
     o = await _obligation(pool, ctx, args["obligation_id"]) if args.get("obligation_id") else None
     in_window = p["last_inbound_at"] and now - p["last_inbound_at"] < WINDOW
     if in_window:
-        payload, via = text_message(p["whatsapp_phone"], str(args["text"])), "text"
+        payload, via = text_message(p["whatsapp_phone"], from_shop(tenant, str(args["text"]))), "text"
     elif o and s.wa_reminder_template:
         from src.loop.upi import rupees
         payload, via = template_message(p["whatsapp_phone"], s.wa_reminder_template, s.wa_reminder_lang,
@@ -213,7 +216,7 @@ async def deliver_message(app, ctx: SessionCtx, tenant, args: dict) -> dict:
                                         "approved template, and none is configured for this case"}
     msg_id = await app.state.wa.send(payload, number_id=tenant.wa_phone_number_id)
     if msg_id:
-        await record(pool, msg_id, tenant_id=ctx.tenant_id, kind="debtor_reminder" if o else "owner_text",
+        await record(pool, msg_id, tenant_id=ctx.tenant_id, kind="debtor_reminder" if o else "customer_text",
                      to_phone=p["whatsapp_phone"], obligation_id=o["id"] if o else None)
     if o and o["state"] == "WAITING_OWNER_APPROVAL":
         await _transition(pool, o["id"], "WAITING_OWNER_APPROVAL", "DISPATCHED", now + timedelta(days=3), 1)

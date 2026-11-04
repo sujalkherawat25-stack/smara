@@ -246,7 +246,8 @@ async def test_trusted_gate_suspends_and_resumes_exact_call(env):
     card = env.app.state.wa.to(OWNER)[-1]
     assert text in card["interactive"]["body"]["text"] and "Ravi" in card["interactive"]["body"]["text"]
     await dispatch(env.app, owner("w5", button=f"ag_ok:{sid}"))
-    assert env.app.state.wa.to(DEBTOR)[0]["text"]["body"] == text                   # exactly what was shown
+    shown = card["interactive"]["body"]["text"]
+    assert env.app.state.wa.to(DEBTOR)[0]["text"]["body"] == "*Shop*" + chr(10) + text and "*Shop*" in shown   # exactly what was shown
     assert env.app.state.wa.sent[-1]["text"]["body"] == "Sent."
     await dispatch(env.app, owner("w6", button=f"ag_ok:{sid}"))
     assert len(env.app.state.wa.to(DEBTOR)) == 1 and "already handled" in env.app.state.wa.sent[-1]["text"]["body"]

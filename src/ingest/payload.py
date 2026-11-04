@@ -18,6 +18,7 @@ class InboundMessage:
     number_id: str = ""   # our WhatsApp number that received it
     channel: str = "whatsapp"   # whatsapp | telegram
     chat_id: int | None = None  # telegram chat
+    reply_to: str = ""          # the message of ours they replied to (WhatsApp context.id), if any
 
     @property
     def evidence_text(self) -> str:
@@ -54,6 +55,7 @@ def parse_messages(payload: dict) -> list[InboundMessage]:
                     filename=(m.get(kind) or {}).get("filename", "") if kind == "document" else "",
                     number_id=number_id,
                     button_id=((m.get("interactive") or {}).get("button_reply") or {}).get("id"),
+                    reply_to=(m.get("context") or {}).get("id", ""),
                 )
                 if msg.wamid and msg.sender:
                     out.append(msg)

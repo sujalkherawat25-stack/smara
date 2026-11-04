@@ -30,6 +30,23 @@ def owner_approval_card(
     }
 
 
+def from_shop(tenant, text: str) -> str:
+    """On the shared Smara number, start every customer message with the shop's name so the customer always knows who
+    is writing. A shop with its own number needs no prefix: the number itself is the shop."""
+    if getattr(tenant, "wa_phone_number_id", None) or not getattr(tenant, "name", ""):
+        return text
+    return text if text.lstrip().lstrip("*").lower().startswith(tenant.name.lower()) else f"*{tenant.name}*\n{text}"
+
+
+def shop_choice_message(to: str, options: list[dict], routing_id: str) -> dict:
+    """Ask a customer who deals with several Smara shops which one their message is about."""
+    buttons = [{"type": "reply", "reply": {"id": f"shop:{o['tenant_id']}:{routing_id}", "title": o["name"][:20]}}
+               for o in options[:3]]
+    return {"messaging_product": "whatsapp", "to": to, "type": "interactive", "interactive": {
+        "type": "button", "body": {"text": "Namaste! Aapka message kis business ke liye hai? / Which business is your message for?"},
+        "action": {"buttons": buttons}}}
+
+
 def text_message(to: str, text: str) -> dict:
     return {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
 

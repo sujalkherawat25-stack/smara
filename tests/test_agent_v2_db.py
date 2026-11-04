@@ -235,12 +235,12 @@ async def test_approved_customer_message_defers_overnight_and_goes_out_when_open
     assert env.app.state.wa.to(DEBTOR) == []                                     # approved, but it is 2 AM
     assert "quiet hours" in env.app.state.wa.sent[-1]["text"]["body"]
     task = await one(env.pool, "select kind, run_at, payload from agent_tasks")
-    assert task["kind"] == "send_message" and task["run_at"] == at(8) and task["payload"]["text"] == text
+    assert task["kind"] == "send_message" and task["run_at"] == at(8) and task["payload"]["text"] == "*Shop*" + chr(10) + text
     assert (await one(env.pool, "select state from obligations where id = %s", env.oid))["state"] == "WAITING_OWNER_APPROVAL"
     assert await tasks.run_due(env.app, at(7, 59)) == 0
     monkeypatch.setattr(clock, "now", lambda: at(8, 1))                          # the shop opens
     assert await tasks.run_due(env.app, at(8, 1)) == 1                           # 8 AM: delivered, exactly the approved text
-    assert env.app.state.wa.to(DEBTOR)[0]["text"]["body"] == text
+    assert env.app.state.wa.to(DEBTOR)[0]["text"]["body"] == "*Shop*" + chr(10) + text
     assert (await one(env.pool, "select state from obligations where id = %s", env.oid))["state"] == "DISPATCHED"
     assert "Sent the reminder to Ravi" in env.app.state.wa.sent[-1]["text"]["body"]
 
