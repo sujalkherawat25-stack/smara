@@ -37,8 +37,33 @@ TEMPLATES = [
 ]
 
 
+# Neutral account-statement wording (v2). Same number of variables as v1, so src/loop code needs no change.
+TEMPLATES_V2 = [
+    {
+        "name": "smara_payment_reminder_v2", "language": "en", "category": "UTILITY",
+        "components": [{
+            "type": "BODY",
+            "text": "Hello {{1}}, this is an account statement update: invoice {{2}} for {{3}} was due on {{4}} and is shown as open. "
+                    "If it is already settled or you would like to discuss it, please reply here and we will update the record.",
+            "example": {"body_text": [["Ravi Kirana Store", "INV-101", "Rs 12,500", "22 Oct"]]},
+        }],
+    },
+    {
+        "name": "smara_owner_waiting_v2", "language": "en", "category": "UTILITY",
+        "components": [{
+            "type": "BODY",
+            "text": "Your Smara account statement has {{1}} update(s) waiting for your review. Reply to this message to view them.",
+            "example": {"body_text": [["3"]]},
+        }],
+    },
+]
+
+
 def load_env() -> None:
-    for line in (Path(__file__).resolve().parents[1] / ".env").read_text(encoding="utf-8").splitlines():
+    env_file = Path(__file__).resolve().parents[1] / ".env"
+    if not env_file.exists():          # inside the app container the variables are already in the environment
+        return
+    for line in env_file.read_text(encoding="utf-8").splitlines():
         if "=" in line and not line.startswith("#"):
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip())
@@ -47,11 +72,12 @@ def load_env() -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--waba", required=True)
+    ap.add_argument("--set", choices=["v1", "v2"], default="v1", help="v2 = neutral account-statement wording, new names")
     a = ap.parse_args()
     load_env()
     token = os.environ["WA_ACCESS_TOKEN"]
     ok = True
-    for t in TEMPLATES:
+    for t in (TEMPLATES_V2 if a.set == "v2" else TEMPLATES):
         r = httpx.post(f"{GRAPH}/{a.waba}/message_templates", headers={"Authorization": "Bearer " + token},
                        json=t, timeout=30)
         print(t["name"], r.status_code, r.text[:200].replace(token, "<token>"))
