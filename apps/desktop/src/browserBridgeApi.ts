@@ -8,3 +8,4 @@ export const bridgeStop = () => invoke<BridgeState>("bridge_stop");
 export const bridgePair = (server: string, code: string) => invoke<BridgeState>("bridge_pair", { server, code });
 export const bridgeUnpair = () => invoke<BridgeState>("bridge_unpair");
 export const bridgeInstallComponents = () => invoke<Components>("bridge_install_components");
+export const bridgePause = (paused: boolean) => invoke<BridgeState>("bridge_pause", { paused });

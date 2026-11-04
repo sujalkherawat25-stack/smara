@@ -26,13 +26,28 @@ test("log lines become rows, newest first, with errors flagged", () => {
   assert.doesNotMatch(v.friendlyLog(v.parseLog(["2026-11-05 01:50:56 Smara Browser Bridge is on for Demo Shop. Press Ctrl+C to stop."])[0].message), /Ctrl\+C/);
 });
 
-test("connection state: paired and running is on, a trailing error is a problem", () => {
+test("online only while the helper's heartbeat is under 60 s old", () => {
   const ok = ["2026-11-05 01:50:56 Smara Browser Bridge is on for Demo Shop."];
-  assert.equal(v.connection({ paired: false, running: false, log: [] }), "unpaired");
-  assert.equal(v.connection({ paired: true, running: false, log: ok }), "stopped");
-  assert.equal(v.connection({ paired: true, running: true, log: ok }), "running");
-  assert.equal(v.connection({ paired: true, running: true, log: [...ok, "2026-11-05 02:00:00 helper crashed, restarting:"] }), "problem");
-  assert.equal(v.connection({ paired: true, running: true, log: [] }), "running");
+  const st = (over = {}) => ({ paired: true, running: true, paused: false, log: ok, status: { last_poll_at: 1000, last_step: "", last_step_at: 0 }, now: 1030, ...over });
+  assert.equal(v.connection(st({ paired: false })), "unpaired");
+  assert.equal(v.connection(st({ running: false })), "stopped");
+  assert.equal(v.connection(st({ paused: true })), "paused");
+  assert.equal(v.connection(st()), "online");
+  assert.equal(v.connection(st({ now: 1061 })), "offline");
+  assert.equal(v.connection(st({ status: null })), "offline");
+  assert.equal(v.connection(st({ log: [...ok, "2026-11-05 02:00:00 helper crashed, restarting:"] })), "problem");
+  assert.equal(v.connection(st({ log: [...ok, "2026-11-05 02:00:00 step read on a.com: ok (Page with error in title)"] })), "online");
+});
+
+test("per-step log lines read like sentences and never show typed values", () => {
+  const f = line => v.friendlyLog(v.parseLog([`2026-11-05 02:00:00 ${line}`])[0].message);
+  assert.equal(f("step navigate on example.com: ok (Example Domain)"), "Opened example.com — Example Domain");
+  assert.equal(f("step click #buy on shop.example: ok (Cart)"), "Clicked #buy on shop.example — Cart");
+  assert.equal(f("step fill #q on shop.example: ok (Search)"), "Typed into #q on shop.example — Search");
+  assert.match(f("step click #buy on shop.example: error: Timeout 10000ms exceeded"), /^Clicked #buy on shop\.example failed: Timeout/);
+  assert.equal(f("step read refused: paused"), "A step was refused because Smara is paused");
+  assert.equal(v.parseLog(["2026-11-05 02:00:00 step click #x on a.com: error: boom"])[0].level, "error");
+  assert.equal(v.parseLog(["2026-11-05 02:00:00 step read on a.com: ok (Anything failed here)"])[0].level, "info");
 });
 
 test("missing Python, components or browser are named plainly, in the order they must be fixed", () => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { bridgeCheck, bridgeEnsure, bridgeInstallComponents, bridgePair, bridgeState, bridgeStop, bridgeUnpair } from "./browserBridgeApi";
+import { bridgeCheck, bridgeEnsure, bridgeInstallComponents, bridgePair, bridgePause, bridgeState, bridgeStop, bridgeUnpair } from "./browserBridgeApi";
 import { connection, connectionText, friendlyLog, missingComponents, missingText, parseLog, shouldEnsure, validatePairInput, type BridgeState, type Components } from "./browserBridgeView";
 
 /** Smara's browser helper runs by itself in the background. This panel only shows its state and offers pairing, stop and repair. */
@@ -79,10 +79,11 @@ export default function NativeBrowser({ locked }: { locked: boolean }) {
         </div>
         <div className="browser-big-controls">
           {state.running
-            ? <button className="danger-action" disabled={busy} onClick={() => void run("stop", bridgeStop, "Stopped. Smara cannot use your browser until you turn it on again.")}>■ Stop</button>
+            ? <><button className={state.paused ? "primary" : "browser-pause"} disabled={busy} onClick={() => void run("pause", () => bridgePause(!state.paused))}>{state.paused ? "▶ Resume Smara" : "⏸ Pause Smara"}</button>
+              <button className="danger-action" disabled={busy} onClick={() => void run("stop", bridgeStop, "Stopped. Smara cannot use your browser until you turn it on again.")}>■ Stop</button></>
             : <button className="primary" disabled={busy || missing.length > 0} onClick={() => void run("start", bridgeEnsure, "Turned on.")}>Turn on</button>}
         </div>
-        <small>To pause Smara on one page, press Stop on the blue banner at the top of that page.</small>
+        <small>Pause refuses every step at once; the blue banner on each page also has a Stop button for that page.</small>
         <div className="telegram-pairing-section">
           <h3>This PC</h3>
           {!confirmUnpair

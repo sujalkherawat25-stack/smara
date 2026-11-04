@@ -1,5 +1,6 @@
 /** Presentation logic for the Browser panel. No imports: unit-tested directly. The helper (munim_bridge.py) owns the pairing and the browser. */
-export type BridgeState = { paired: boolean; server: string; shop: string; running: boolean; startup: boolean; log: string[]; default_server: string };
+export type Heartbeat = { last_poll_at: number; last_step: string; last_step_at: number } | null;
+export type BridgeState = { paired: boolean; server: string; shop: string; running: boolean; startup: boolean; paused: boolean; log: string[]; default_server: string; status: Heartbeat; now: number };
 export type Components = { python: boolean; modules: boolean; browsers: { brave: boolean; chrome: boolean; edge: boolean } };
 export type LogRow = { id: string; time: string; message: string; level: "info" | "error" };
 
@@ -12,10 +13,17 @@ export function parseLog(lines: string[]): LogRow[] {
   return lines.map((line, index) => {
     const match = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) (.*)$/.exec(line);
     const message = (match ? match[3] : line).trim();
-    return { id: `${index}-${line.length}`, time: match ? match[2] : "", message, level: ERROR_WORDS.test(message) ? "error" as const : "info" as const };
+    return { id: `${index}-${line.length}`, time: match ? match[2] : "", message, level: ERROR_WORDS.test(message) && !/^step .*: ok/.test(message) ? "error" as const : "info" as const };
   }).slice(-MAX_LOG_ROWS).reverse();
 }
 export function friendlyLog(message: string): string {
+  const step = /^step (\S+)(?: (.*?))? on ([^:]+): (ok|error|refused)(?:: (.*)| \((.*)\))?$/.exec(message);
+  if (step) {
+    const [, action, selector, host, outcome, errorText, title] = step;
+    const what = action === "navigate" ? `Opened ${host}` : action === "read" ? `Read ${host}` : action === "click" ? `Clicked${selector ? ` ${selector}` : ""} on ${host}` : action === "fill" ? `Typed into${selector ? ` ${selector}` : " a field"} on ${host}` : `${action} on ${host}`;
+    return outcome === "ok" ? `${what}${title ? ` — ${title}` : ""}` : `${what} failed${errorText ? `: ${errorText}` : ""}`;
+  }
+  if (/^step .*refused: paused/i.test(message)) return "A step was refused because Smara is paused";
   if (/^opened /i.test(message)) return `Opened your browser (${message.replace(/^opened /i, "").split(/[\\/]/).pop()})`;
   if (/closing the browser after being idle/i.test(message)) return "Closed the browser after a quiet period";
   if (/is on for/i.test(message)) return message.replace(/ Press Ctrl\+C to stop\./, "");
@@ -23,18 +31,23 @@ export function friendlyLog(message: string): string {
   return message;
 }
 
-export type Connection = "unpaired" | "stopped" | "running" | "problem";
-/** A paired, running helper whose most recent log line is an error is shown as a problem, not as healthy. */
-export function connection(state: Pick<BridgeState, "paired" | "running" | "log">): Connection {
+/** The helper polls about every 25 s; it counts as online while its last poll is under this old. */
+export const ONLINE_WITHIN_S = 60;
+export type Connection = "unpaired" | "stopped" | "paused" | "online" | "offline" | "problem";
+export function connection(state: Pick<BridgeState, "paired" | "running" | "paused" | "log" | "status" | "now">): Connection {
   if (!state.paired) return "unpaired";
   if (!state.running) return "stopped";
+  if (state.paused) return "paused";
+  const polled = state.status?.last_poll_at ?? 0;
+  if (!polled || state.now - polled > ONLINE_WITHIN_S) return "offline";
   const last = parseLog(state.log)[0];
-  return last && last.level === "error" ? "problem" : "running";
+  return last && last.level === "error" && !/^step .*: ok/.test(last.message) ? "problem" : "online";
 }
 export function connectionText(value: Connection): string {
   return {
-    unpaired: "Not paired", stopped: "Stopped — Smara cannot use your browser", running: "On — Smara can use your browser when it needs to",
-    problem: "Running, but the last step reported a problem",
+    unpaired: "Not paired", stopped: "Stopped — Smara cannot use your browser", paused: "Paused — Smara will not touch your browser",
+    online: "On — Smara can use your browser when it needs to", offline: "Running, but no contact with the Smara server yet",
+    problem: "On, but the last step reported a problem",
   }[value];
 }
 

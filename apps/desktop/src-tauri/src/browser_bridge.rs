@@ -60,6 +60,12 @@ pub fn tasklist_has(output: &str, pid: u32) -> bool {
     let needle = format!("\"{pid}\"");
     output.lines().any(|line| line.contains(&needle))
 }
+/// The helper's heartbeat (status.json). It never contains the token; keep only the fields the panel shows.
+pub fn parse_status(text: &str) -> Value {
+    let Ok(value) = serde_json::from_str::<Value>(text) else { return Value::Null };
+    json!({"last_poll_at": value["last_poll_at"].as_f64().unwrap_or(0.0), "last_step": value["last_step"].as_str().unwrap_or_default(),
+           "last_step_at": value["last_step_at"].as_f64().unwrap_or(0.0)})
+}
 pub fn tail_lines(text: &str, count: usize) -> Vec<String> {
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     lines[lines.len().saturating_sub(count)..].iter().map(|l| (*l).to_owned()).collect()
@@ -93,7 +99,9 @@ fn snapshot() -> Value {
     json!({
         "paired": paired, "server": config.as_ref().map(|c| c.0.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| DEFAULT_SERVER.into()),
         "shop": config.as_ref().map(|c| c.1.clone()).unwrap_or_default(), "running": paired && helper_pid().is_some(),
-        "startup": startup_registered(), "log": log, "default_server": DEFAULT_SERVER,
+        "startup": startup_registered(), "log": log, "paused": home().join("paused").exists(),
+        "status": std::fs::read_to_string(home().join("status.json")).map(|t| parse_status(&t)).unwrap_or(Value::Null),
+        "now": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0), "default_server": DEFAULT_SERVER,
     })
 }
 
@@ -141,6 +149,17 @@ pub async fn bridge_ensure() -> Result<Value, String> {
 #[tauri::command]
 pub async fn bridge_stop() -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(|| { let (_, _) = helper(&["stop"])?; Ok(snapshot()) }).await.map_err(|e| e.to_string())?
+}
+
+/// Pause/Resume is a file the helper checks before every step; the helper's own `pause`/`resume` commands write the same file.
+#[tauri::command]
+pub async fn bridge_pause(paused: bool) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let flag = home().join("paused");
+        if paused { std::fs::create_dir_all(home()).and_then(|_| std::fs::write(&flag, "paused")).map_err(|e| format!("Could not pause: {e}"))?; }
+        else { match std::fs::remove_file(&flag) { Ok(()) => {}, Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}, Err(e) => return Err(format!("Could not resume: {e}")) } }
+        Ok(snapshot())
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -204,6 +223,14 @@ mod tests {
         assert!(tasklist_has("\"pythonw.exe\",\"35060\",\"Console\",\"1\",\"40,000 K\"", 35060));
         assert!(!tasklist_has("INFO: No tasks are running which match the specified criteria.", 35060));
         assert!(!tasklist_has("\"python.exe\",\"350601\",\"Console\"", 35060));
+    }
+    #[test]
+    fn heartbeat_keeps_only_display_fields() {
+        let status = parse_status(r#"{"last_poll_at": 100.5, "online": true, "paused": false, "pid": 7, "token": "x", "last_step": "navigate on a.com", "last_step_at": 99.0}"#);
+        assert_eq!(status["last_poll_at"], 100.5);
+        assert_eq!(status["last_step"], "navigate on a.com");
+        assert!(status.get("token").is_none() && status.get("pid").is_none());
+        assert!(parse_status("garbage").is_null());
     }
     #[test]
     fn log_tail_skips_blank_lines() {

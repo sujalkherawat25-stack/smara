@@ -279,7 +279,7 @@ fn main() {
         return;
     }
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file, native_project_files, browser_bridge::bridge_state, browser_bridge::bridge_check, browser_bridge::bridge_ensure, browser_bridge::bridge_stop, browser_bridge::bridge_pair, browser_bridge::bridge_unpair, browser_bridge::bridge_install_components])
+        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file, native_project_files, browser_bridge::bridge_state, browser_bridge::bridge_check, browser_bridge::bridge_ensure, browser_bridge::bridge_stop, browser_bridge::bridge_pause, browser_bridge::bridge_pair, browser_bridge::bridge_unpair, browser_bridge::bridge_install_components])
         .setup(|_| { browser_bridge::ensure_on_startup(); Ok(()) })
         .build(tauri::generate_context!()).expect("Could not build Smara Desktop")
         .run(|_, event| {

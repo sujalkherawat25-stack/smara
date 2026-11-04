@@ -208,6 +208,8 @@ async def open_browser(p, a):
 
 
 LOG = HOME / "bridge.log"
+STATUS = HOME / "status.json"       # heartbeat for Smara Desktop: last successful poll, last step, paused
+PAUSE = HOME / "paused"             # present = paused (Smara Desktop's Pause button creates/deletes it)
 PID = HOME / "bridge.pid"
 TASK_NAME = "Smara Browser Bridge"
 
@@ -225,6 +227,30 @@ def log(msg: str) -> None:
         pass
     if sys.stdout:
         print(msg, flush=True)
+
+
+def write_status(**fields) -> None:
+    """Small JSON file Smara Desktop reads to show On/Paused/last step. Never contains the token."""
+    try:
+        cur = json.loads(STATUS.read_text(encoding="utf-8")) if STATUS.exists() else {}
+    except (OSError, ValueError):
+        cur = {}
+    cur.update(fields, pid=os.getpid())
+    try:
+        STATUS.write_text(json.dumps(cur), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def describe_step(cmd: dict, result: dict) -> str:
+    """One activity line: action and site, never typed values."""
+    host = urlparse(str(result.get("url") or cmd.get("url") or "")).hostname or ""
+    what = cmd.get("action", "?")
+    if what in ("click", "fill", "select"):
+        what += f" {str(cmd.get('selector', ''))[:60]}"
+    if result.get("error"):
+        return f"step {what} on {host or 'page'}: error: {str(result['error'])[:120]}"
+    return f"step {what} on {host or 'page'}: ok ({str(result.get('title', ''))[:60]})"
 
 
 class Browser:
@@ -298,8 +324,14 @@ async def run(a) -> int:
             except (httpx.TransportError, ValueError):
                 await asyncio.sleep(3)
                 continue
+            write_status(last_poll_at=time.time(), online=True, paused=PAUSE.exists())
             if not job:
                 await br.idle_check(a.idle_minutes)
+                continue
+            if PAUSE.exists():                     # paused from Smara Desktop: answer at once, do nothing
+                await http.post("/bridge/result", json={"job_id": job["job_id"], "result": {
+                    "error": "the owner paused Smara's browser in Smara Desktop; ask them to press Resume"}})
+                log(f"step {job['command'].get('action')} refused: paused")
                 continue
             try:
                 try:
@@ -316,6 +348,8 @@ async def run(a) -> int:
             except Exception as e:                    # a page error must never kill the bridge
                 result = {"error": f"{type(e).__name__}: {str(e)[:300]}"}
             br.last = time.monotonic()
+            log(describe_step(job["command"], result))
+            write_status(last_step_at=time.time(), last_step=describe_step(job["command"], result))
             await http.post("/bridge/result", json={"job_id": job["job_id"], "result": result})
 
 
@@ -408,6 +442,8 @@ def main() -> int:
     sub.add_parser("unpair")
     sub.add_parser("stop")
     sub.add_parser("ensure")
+    sub.add_parser("pause")
+    sub.add_parser("resume")
     sub.add_parser("install-startup")
     sub.add_parser("uninstall-startup")
     a = ap.parse_args()
@@ -426,6 +462,15 @@ def main() -> int:
     if a.cmd == "unpair":
         CONFIG.unlink(missing_ok=True)
         print("Forgot this pairing. (Send 'unpair browser' in chat to revoke it on the server too.)")
+        return 0
+    if a.cmd == "pause":
+        HOME.mkdir(parents=True, exist_ok=True)
+        PAUSE.write_text("paused")
+        print("Paused: Smara will not use this browser until you resume.")
+        return 0
+    if a.cmd == "resume":
+        PAUSE.unlink(missing_ok=True)
+        print("Resumed.")
         return 0
     if a.cmd == "ensure":                       # what Smara Desktop / startup call: start it only if it is not running
         if running_pid():
