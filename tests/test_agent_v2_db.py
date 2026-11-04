@@ -145,6 +145,8 @@ async def test_due_followup_wakes_the_agent_and_messages_the_owner(env, monkeypa
     await dispatch(env.app, owner("f1", "3 baje check karna Ravi ne pay kiya ya nahi"))
     task = await one(env.pool, "select id, run_at, status from agent_tasks")
     assert task["status"] == "PENDING" and task["run_at"] == at(15)
+    said = (await one(env.pool, "select payload from agent_tasks"))["payload"]["owner_said"]
+    assert said == "3 baje check karna Ravi ne pay kiya ya nahi"                  # the owner's words, verbatim
     assert await tasks.run_due(env.app, at(14, 59)) == 0                         # not yet due
     assert await tasks.run_due(env.app, at(22, 30)) == 0                         # due but it is night: waits
     n_before = len(env.app.state.wa.sent)
@@ -155,6 +157,7 @@ async def test_due_followup_wakes_the_agent_and_messages_the_owner(env, monkeypa
     assert sess == {"trust": "SYSTEM", "trigger": "scheduled_followup"}
     assert any("INV-1 abhi bhi ACTIVE" in m.get("text", {}).get("body", "") for m in env.app.state.wa.sent[n_before:])
     assert "Check whether Ravi paid" in llm.seen[2][1]["content"] and "15:01 IST" in llm.seen[2][1]["content"]
+    assert "exact words" in llm.seen[2][1]["content"] and "3 baje check karna Ravi ne pay kiya ya nahi" in llm.seen[2][1]["content"]
 
 
 async def test_failed_task_retries_then_gives_up(env):

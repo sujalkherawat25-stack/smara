@@ -179,6 +179,16 @@ async def c_followup(env):
     return len(ok) == 1 and "101" in json.dumps(ok[0]["payload"]), f"tasks={[(str(r['run_at']), r['payload']) for r in rows]}"
 
 
+async def c_followup_unknown_name(env):
+    """A name that is not in the ledger must stay exactly as the owner wrote it (never swapped for a similar customer)."""
+    from src import clock
+    rows = await q(env, "select run_at, payload from agent_tasks where kind = 'followup' and status = 'PENDING'")
+    tomorrow = clock.today() + timedelta(days=1)
+    ok = [r for r in rows if r["run_at"].astimezone(clock.IST).date() == tomorrow and r["run_at"].astimezone(clock.IST).hour == 10]
+    kept = [r["payload"].get("owner_said", "").lower() for r in rows]
+    return len(ok) == 1 and any("rahi ka payment" in k for k in kept), f"payloads={[r['payload'] for r in rows]}"
+
+
 async def c_pdf(env):
     docs = [m for m in env.wa.to(OWNER) if m.get("type") == "document"]
     if not docs or not env.wa.uploads:
@@ -256,6 +266,8 @@ TASKS = [
     Task("time_awareness", ("owner", owner("Abhi kya time ho raha hai? din aur time dono batao.", "e16")), lambda e: c_time(e)),
     Task("schedule_followup", ("owner", owner("Kal subah 10 baje mujhe yaad dilana ki Ravi Kirana ka INV-101 follow-up karna hai.", "e17")),
          lambda e: c_followup(e)),
+    Task("unknown_name_kept_as_written", ("owner", owner("Kal subah 10 baje rahi ka payment check karna yaad dilana", "e22")),
+         lambda e: c_followup_unknown_name(e)),
     Task("followup_runs_and_reports", ("custom", ev_followup_due), lambda e: c_followup_ran(e)),
     Task("pdf_statement_to_owner", ("owner", owner("Ravi Kirana ka statement PDF bana ke mujhe bhejo, saare invoices ke saath.", "e18")),
          lambda e: c_pdf(e)),

@@ -47,7 +47,8 @@ TOOLS = [
         {"party_id": _S, "text": _S}, ["party_id", "text"]),
     _fn("schedule_followup", "Wake yourself up later to do something (e.g. check if a customer paid, nudge the owner). "
         "Give either at_ist ('YYYY-MM-DD HH:MM', Indian time) or in_minutes. Times in quiet hours (9 PM to 8 AM) move to "
-        "the next morning. When it fires you get the instruction and can use all tools; outward actions still need approval.",
+        "the next morning. Copy any names exactly as the owner wrote them. When it fires you get the instruction and can use all "
+        "tools; outward actions still need approval.",
         {"instruction": _S, "at_ist": _S, "in_minutes": {"type": "integer"}}, ["instruction"]),
     _fn("list_followups", "List your pending scheduled follow-ups.", {}, []),
     _fn("cancel_followup", "Cancel a pending follow-up by task_id.", {"task_id": _S}, ["task_id"]),
@@ -84,7 +85,10 @@ TOOLS = [
         "Tally Prime XML: mh.tally_receivables(xml_path) gives sales invoices WITH phones (from ledger masters) "
         "and due dates (credit period) ready for mh.to_rows_csv; mh.tally_vouchers / mh.tally_ledgers for the raw data; "
         "mh.to_rows_csv(records) writes out/rows.csv (records: party, phone, invoice, due_date, amount in rupees) "
-        "in the format the importer reads. Always print or RESULT the totals you computed so you can verify them.",
+        "in the format the importer reads. For documents to send the owner: mh.statement_pdf('out/statement.pdf', shop=..., "
+        "party=..., rows=[{invoice, date, due_date, amount, paid}], note=...) writes a customer account statement PDF and "
+        "mh.write_xlsx({'Sheet': DataFrame}, 'out/report.xlsx') writes a formatted Excel file. Make the file type the "
+        "owner asked for (PDF means .pdf, Excel means .xlsx), not a CSV. Always print or RESULT the totals you computed so you can verify them.",
         {"code": _S, "file_refs": {"type": "array", "items": _S}}, ["code"]),
     _fn("send_whatsapp_message", "Send a WhatsApp message. to='owner' messages the shop owner directly; "
         "to=<party_id> messages a customer and needs the owner's approval first.",

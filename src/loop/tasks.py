@@ -51,7 +51,9 @@ async def _run_one(app, t: dict) -> None:
         return
     payload = t["payload"]
     if t["kind"] == "followup":
-        content = (f"A follow-up you scheduled has come due. What you asked yourself to do:\n{payload['instruction']}\n"
+        said = (f"The owner's exact words when they asked (trust these over the summary): \"{payload['owner_said']}\"\n"
+                if payload.get("owner_said") else "")
+        content = (f"A follow-up you scheduled has come due. What you asked yourself to do:\n{payload['instruction']}\n{said}"
                    f"It is now {clock.describe()}. If the owner should know the outcome, message them with "
                    f"send_whatsapp_message(to='owner').")
         sid = await start_session(app, tenant=tenant, trust="SYSTEM", trigger="scheduled_followup", content=content,

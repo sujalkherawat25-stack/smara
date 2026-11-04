@@ -47,6 +47,19 @@ def _when(args: dict, now: datetime) -> datetime | str:
     return at.replace(tzinfo=clock.IST) if at.tzinfo is None else at.astimezone(clock.IST)
 
 
+async def _owner_words(app, session_id: str) -> str:
+    """The owner's latest message in this conversation, verbatim. Stored with a follow-up so that if the model
+    paraphrases or 'corrects' a name or a time, the original words still travel with the task."""
+    try:
+        async with app.state.pool.connection() as conn:
+            row = await (await conn.execute("SELECT messages FROM agent_sessions WHERE id::text = %s", (session_id,))).fetchone()
+    except Exception:
+        return ""
+    users = [m["content"] for m in (row["messages"] if row else []) if m["role"] == "user"
+             and not m["content"].startswith("[Earlier conversation omitted")]
+    return users[-1][:500] if users else ""
+
+
 async def schedule_followup(app, ctx: SessionCtx, args: dict) -> dict:
     instruction = str(args.get("instruction") or "").strip()
     if not instruction or len(instruction) > 1000:
@@ -57,6 +70,7 @@ async def schedule_followup(app, ctx: SessionCtx, args: dict) -> dict:
         return {"error": at}
     if at < now + MIN_AHEAD or at > now + MAX_AHEAD:
         return {"error": "the time must be between 1 minute and 60 days from now (check get_current_time)"}
+    owner_said = await _owner_words(app, ctx.id)
     shifted = clock.is_quiet(app.state.settings, at)
     at = clock.next_open(app.state.settings, at)
     async with app.state.pool.connection() as conn:
@@ -69,9 +83,10 @@ async def schedule_followup(app, ctx: SessionCtx, args: dict) -> dict:
         row = await (await conn.execute(
             """INSERT INTO agent_tasks (tenant_id, run_at, kind, payload, created_by_session)
                VALUES (%s, %s, 'followup', %s, %s) RETURNING id""",
-            (ctx.tenant_id, at, json.dumps({"instruction": instruction}), ctx.id))).fetchone()
+            (ctx.tenant_id, at, json.dumps({"instruction": instruction, "owner_said": owner_said}), ctx.id))).fetchone()
     return {"task_id": str(row["id"]), "will_run_at_ist": at.strftime("%Y-%m-%d %H:%M"),
-            "moved_out_of_quiet_hours": shifted}
+            "moved_out_of_quiet_hours": shifted,
+            "note": "When you confirm to the owner, use their exact words for any name; do not change names."}
 
 
 async def list_followups(app, ctx: SessionCtx, args: dict) -> dict:
@@ -80,7 +95,8 @@ async def list_followups(app, ctx: SessionCtx, args: dict) -> dict:
             """SELECT id, run_at, kind, payload FROM agent_tasks
                 WHERE tenant_id = %s AND status = 'PENDING' ORDER BY run_at LIMIT 30""", (ctx.tenant_id,))).fetchall()
     return {"pending": [{"task_id": str(r["id"]), "run_at_ist": r["run_at"].astimezone(clock.IST).strftime("%Y-%m-%d %H:%M"),
-                         "kind": r["kind"], "what": (r["payload"].get("instruction") or r["payload"].get("text") or "")[:200]}
+                         "kind": r["kind"], "what": (r["payload"].get("instruction") or r["payload"].get("text") or "")[:200],
+                         "owner_said": r["payload"].get("owner_said", "")}
                         for r in rows]}
 
 
