@@ -19,19 +19,22 @@ RETRY_STATUS = {429, 500, 502, 503, 504}
 class LLM:
     def __init__(self, base_url: str, api_key: str, model: str, reasoning_model: str = "",
                  client: httpx.AsyncClient | None = None, agent_model: str = "",
-                 max_retries: int = 5, max_backoff_s: float = 20.0):
+                 max_retries: int = 5, max_backoff_s: float = 20.0, max_concurrency: int = 4):
         self.enabled = bool(base_url)
         self._model, self._reasoning = model, reasoning_model or model
         self.agent_model = agent_model or model     # the tool loop can run on a stronger model than extraction
         self.last_usage: dict = {}
         self.max_retries, self.max_backoff_s = max_retries, max_backoff_s
+        # Bursts queue here instead of colliding with the provider's rate limit (shared with MemoryOS)
+        self._slots = asyncio.Semaphore(max_concurrency)
         self._http = client or httpx.AsyncClient(
             base_url=base_url, headers={"Authorization": f"Bearer {api_key}"}, timeout=90)
 
     async def _post(self, body: dict) -> dict:
         for attempt in range(self.max_retries + 1):
             try:
-                resp = await self._http.post("/chat/completions", json=body)
+                async with self._slots:
+                    resp = await self._http.post("/chat/completions", json=body)
             except (httpx.TimeoutException, httpx.TransportError):
                 if attempt == self.max_retries:
                     raise

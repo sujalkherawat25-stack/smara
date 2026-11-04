@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
     app.state.continuum = ContinuumClient(s.continuum_url, s.continuum_api_key)
     app.state.wa = WhatsAppClient(s.wa_phone_number_id, s.wa_access_token)
     app.state.llm = LLM(s.llm_base_url, s.llm_api_key, s.llm_model, s.llm_reasoning_model,
-                        agent_model=s.llm_agent_model)
+                        agent_model=s.llm_agent_model, max_concurrency=s.llm_max_concurrency)
     app.state.bg = set()
     app.state.browsers = BrowserSessions()
     app.state.sandbox = Sandbox(s.sandbox_jobs_dir, s.sandbox_mode)

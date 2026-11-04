@@ -423,3 +423,21 @@ async def test_persistently_empty_replies_tell_the_owner_instead_of_going_silent
     await dispatch(env.app, owner("e2", "hello"))
     assert (await one(env.pool, "select status from agent_sessions"))["status"] == "FAILED"
     assert "Sorry, I could not finish" in env.app.state.wa.sent[-1]["text"]["body"]
+
+
+async def test_llm_calls_are_limited_to_the_configured_concurrency():
+    import asyncio
+    import httpx
+    from src.loop.llm import LLM
+    live = {"now": 0, "peak": 0}
+
+    async def handler(request):
+        live["now"] += 1
+        live["peak"] = max(live["peak"], live["now"])
+        await asyncio.sleep(0.05)
+        live["now"] -= 1
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+    llm = LLM("https://llm.test", "k", "m", max_concurrency=3,
+              client=httpx.AsyncClient(base_url="https://llm.test", transport=httpx.MockTransport(handler)))
+    await asyncio.gather(*[llm.chat([], []) for _ in range(12)])
+    assert live["peak"] == 3                                                     # 12 requests, never more than 3 in flight
