@@ -11,59 +11,49 @@ vm.runInNewContext(code, { module, exports: module.exports });
 const v = module.exports;
 const base = { paired: true, running: true, paused: false, last_poll_ok_ms: 100_000 };
 
-test("online light follows the server's 45 second window", () => {
-  assert.equal(v.connection({ ...base, paired: false }, 1), "unpaired");
-  assert.equal(v.connection({ ...base, running: false }, 1), "stopped");
-  assert.equal(v.connection({ ...base, last_poll_ok_ms: 0 }, 1), "starting");
-  assert.equal(v.connection(base, 100_000 + 44_000), "online");
-  assert.equal(v.connection(base, 100_000 + 46_000), "offline");
-  assert.equal(v.connection({ ...base, paused: true }, 100_001), "paused");
-});
-
-test("steps pair with results and failures stay visible", () => {
-  const rows = v.buildFeed([
-    { kind: "started", ts: 1 },
-    { kind: "step", ts: 2, job_id: "a", action: "navigate", host: "example.com", url: "https://example.com/x" },
-    { kind: "result", ts: 3, job_id: "a", ok: true, title: "Example", host: "example.com", ms: 1200 },
-    { kind: "step", ts: 4, job_id: "b", action: "fill", selector: "#q", value: "shoes" },
-    { kind: "result", ts: 5, job_id: "b", ok: false, error: "I never type into password fields" },
-    { kind: "step", ts: 6, job_id: "c", action: "click", selector: "#buy" },
+test("log lines become rows, newest first, with errors flagged", () => {
+  const rows = v.parseLog([
+    "2026-11-05 01:50:56 Smara Browser Bridge is on for Demo Shop. Browser opens when Smara needs it. Press Ctrl+C to stop.",
+    String.raw`2026-11-05 01:51:10 opened C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe`,
+    "2026-11-05 01:52:00 helper crashed, restarting:",
   ]);
   assert.equal(rows.length, 3);
-  assert.deepEqual(JSON.parse(JSON.stringify(rows.map(r => [r.label, r.status]))),
-    [["Open example.com", "ok"], ["Type into #q “shoes”", "error"], ["Click #buy", "running"]]);
-  assert.equal(rows[0].title, "Example");
-  assert.match(rows[1].error, /never type/);
-  assert.equal(v.settleFeed(rows, true)[2].status, "running");
-  assert.equal(v.settleFeed(rows, false)[2].status, "error");
+  assert.equal(rows[0].level, "error");
+  assert.equal(rows[0].time, "01:52:00");
+  assert.equal(rows[1].level, "info");
+  assert.match(v.friendlyLog(rows[1].message), /Opened your browser \(brave\.exe\)/);
+  assert.doesNotMatch(v.friendlyLog(rows[2].message + ""), /Press Ctrl/);
+  assert.doesNotMatch(v.friendlyLog(v.parseLog(["2026-11-05 01:50:56 Smara Browser Bridge is on for Demo Shop. Press Ctrl+C to stop."])[0].message), /Ctrl\+C/);
 });
 
-test("heartbeat polls stay out of the feed but poll failures and exits show", () => {
-  let events = [];
-  events = v.mergeEvents(events, { kind: "poll", ts: 1, ok: true });
-  assert.equal(events.length, 0);
-  events = v.mergeEvents(events, { kind: "poll", ts: 2, ok: false, status: 502 });
-  events = v.mergeEvents(events, { kind: "exited", ts: 3, code: 1 });
-  const rows = v.buildFeed(events);
-  assert.match(rows[0].label, /HTTP 502/);
-  assert.match(rows[1].label, /code 1/);
+test("connection state: paired and running is on, a trailing error is a problem", () => {
+  const ok = ["2026-11-05 01:50:56 Smara Browser Bridge is on for Demo Shop."];
+  assert.equal(v.connection({ paired: false, running: false, log: [] }), "unpaired");
+  assert.equal(v.connection({ paired: true, running: false, log: ok }), "stopped");
+  assert.equal(v.connection({ paired: true, running: true, log: ok }), "running");
+  assert.equal(v.connection({ paired: true, running: true, log: [...ok, "2026-11-05 02:00:00 helper crashed, restarting:"] }), "problem");
+  assert.equal(v.connection({ paired: true, running: true, log: [] }), "running");
 });
 
-test("feed and event buffers are bounded", () => {
-  let events = [];
-  for (let i = 0; i < 1000; i++) events = v.mergeEvents(events, { kind: "step", ts: i, job_id: `j${i}`, action: "read" });
-  assert.ok(events.length <= v.MAX_FEED * 2);
-  assert.ok(v.buildFeed(events).length <= v.MAX_FEED);
+test("missing Python, components or browser are named plainly, in the order they must be fixed", () => {
+  const all = { python: true, modules: true, browsers: { brave: true, chrome: false, edge: false } };
+  assert.deepEqual(JSON.parse(JSON.stringify(v.missingComponents(all))), []);
+  assert.deepEqual(JSON.parse(JSON.stringify(v.missingComponents({ ...all, python: false, modules: false }))), ["python"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(v.missingComponents({ ...all, modules: false, browsers: { brave: false, chrome: false, edge: false } }))), ["modules", "browser"]);
+  assert.match(v.missingText(["python"]), /python\.org/);
+  assert.match(v.missingText(["modules"]), /one-click/);
+  assert.doesNotMatch(v.missingText(["modules", "browser"]), /terminal|pip|command/i);
+  assert.equal(v.missingText([]), "");
 });
 
-test("autostart fires once, only when paired and idle", () => {
-  const s = (over = {}) => ({ paired: true, running: false, config: { autostart: true }, ...over });
-  assert.equal(v.shouldAutoStart(s(), false, false), true);
-  assert.equal(v.shouldAutoStart(s({ paired: false }), false, false), false);
-  assert.equal(v.shouldAutoStart(s({ running: true }), false, false), false);
-  assert.equal(v.shouldAutoStart(s({ config: { autostart: false } }), false, false), false);
-  assert.equal(v.shouldAutoStart(s(), true, false), false);
-  assert.equal(v.shouldAutoStart(s(), false, true), false);
+test("ensure runs automatically only for a paired, stopped helper with nothing missing, and not in a loop", () => {
+  const st = (over = {}) => ({ paired: true, running: false, ...over });
+  assert.equal(v.shouldEnsure(st(), [], 0, 100_000), true);
+  assert.equal(v.shouldEnsure(st({ paired: false }), [], 0, 100_000), false);
+  assert.equal(v.shouldEnsure(st({ running: true }), [], 0, 100_000), false);
+  assert.equal(v.shouldEnsure(st(), ["modules"], 0, 100_000), false);
+  assert.equal(v.shouldEnsure(st(), [], 90_000, 100_000), false);        // tried 10 s ago
+  assert.equal(v.shouldEnsure(st(), [], 60_000, 100_000), true);         // 40 s ago
 });
 
 test("pairing input is validated before anything is sent", () => {
@@ -87,9 +77,4 @@ test("approval cards: first answer wins and the site grant lasts 15 minutes", ()
   assert.equal(v.approvalOutcome(404), "already");
   assert.equal(v.approvalOutcome(405), "unsupported");
   assert.equal(v.approvalOutcome(500), "error");
-});
-
-test("a repeated delivery of the same event does not duplicate feed rows", () => {
-  const step = { kind: "step", ts: 5, job_id: "x", action: "read" };
-  assert.equal(v.mergeEvents(v.mergeEvents([], step), { ...step }).length, 1);
 });

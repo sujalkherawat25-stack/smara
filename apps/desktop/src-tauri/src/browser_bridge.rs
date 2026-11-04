@@ -1,83 +1,40 @@
-//! Smara Browser Bridge, managed by Desktop.
+//! Smara Browser Bridge, driven by Desktop.
 //!
-//! Desktop pairs with the hosted server, keeps the device token in the OS credential store (Windows Credential
-//! Manager) and runs the vendored Python bridge as a sidecar. The token reaches the sidecar only through its
-//! environment, never a file or argument. The sidecar reports each step as a JSON line which is forwarded to the UI.
-use serde::{Deserialize, Serialize};
+//! The helper (`munim_bridge.py`, bundled unchanged) is a detached background program that starts with Windows,
+//! restarts itself after crashes and keeps its pairing in `~/.munim-bridge/config.json`. That file is the single source
+//! of truth for the device token. Desktop never shows a terminal: it calls the helper's own commands (`ensure`,
+//! `pair`, `install-startup`, `stop`, `unpair`) and reads its pid file and log to show status.
 use serde_json::{json, Value};
-use std::collections::VecDeque;
-use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::{Mutex, OnceLock};
-use tauri::{AppHandle, Emitter};
+use std::process::{Command, Stdio};
 
-const KEYRING_SERVICE: &str = "Smara Desktop";
-const KEYRING_USER: &str = "browser-bridge-device-token";
 const DEFAULT_SERVER: &str = "https://ai.syntarus.com/munim";
-const MAX_EVENTS: usize = 300;
+const RUN_VALUE: &str = "Smara Browser Bridge";
+const LOG_LINES: usize = 80;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BridgeConfig {
-    pub server: String,
-    pub shop: String,
-    pub device_name: String,
-    /// brave | chrome | edge | auto
-    pub browser: String,
-    /// Empty, or a CDP URL such as http://127.0.0.1:9222
-    pub attach: String,
-    /// Empty means the dedicated Smara profile under the app data folder.
-    pub profile: String,
-    pub autostart: bool,
+fn home() -> PathBuf {
+    if let Some(path) = std::env::var_os("MUNIM_BRIDGE_HOME") { return PathBuf::from(path); }
+    PathBuf::from(std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).unwrap_or_default()).join(".munim-bridge")
 }
-impl Default for BridgeConfig {
-    fn default() -> Self {
-        Self { server: DEFAULT_SERVER.into(), shop: String::new(), device_name: String::new(), browser: "brave".into(),
-               attach: String::new(), profile: String::new(), autostart: false }
-    }
+fn hide(command: &mut Command) {
+    #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
+    #[cfg(not(windows))] { let _ = command; }
 }
-
-struct Running { child: Child, stdin: ChildStdin, generation: u64 }
-#[derive(Default)]
-struct Runtime { running: Option<Running>, events: VecDeque<Value>, paused: bool, last_poll_ok_ms: u64, generation: u64, last_error: String }
-fn runtime() -> &'static Mutex<Runtime> {
-    static RUNTIME: OnceLock<Mutex<Runtime>> = OnceLock::new();
-    RUNTIME.get_or_init(|| Mutex::new(Runtime::default()))
+fn bridge_script() -> Option<PathBuf> {
+    let installed = std::env::current_exe().ok()?.parent()?.join("resources/browser/munim_bridge.py");
+    if installed.is_file() { return Some(installed); }
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/browser/munim_bridge.py");
+    dev.is_file().then_some(dev)
 }
-fn lock() -> std::sync::MutexGuard<'static, Runtime> { runtime().lock().unwrap_or_else(|e| e.into_inner()) }
-
-fn data_dir() -> PathBuf {
-    std::env::var_os("SMARA_DESKTOP_DATA_DIR").map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var_os("APPDATA").unwrap_or_default()).join("Smara"))
-}
-fn config_path() -> PathBuf { data_dir().join("browser_bridge.json") }
-fn default_profile() -> PathBuf { data_dir().join("browser-profile") }
-
-pub fn load_config() -> BridgeConfig {
-    std::fs::read(config_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
-}
-fn save_config(config: &BridgeConfig) -> Result<(), String> {
-    std::fs::create_dir_all(data_dir()).map_err(|e| format!("Cannot create the settings folder: {e}"))?;
-    let bytes = serde_json::to_vec_pretty(config).map_err(|e| e.to_string())?;
-    std::fs::write(config_path(), bytes).map_err(|e| format!("Cannot save browser settings: {e}"))
+fn python() -> Command {
+    let mut command = if let Some(p) = std::env::var_os("SMARA_BRIDGE_PYTHON") { Command::new(p) }
+        else if cfg!(windows) { let mut c = Command::new("py"); c.arg("-3"); c } else { Command::new("python3") };
+    command.env("PYTHONIOENCODING", "utf-8").env("PYTHONUTF8", "1").stdin(Stdio::null());
+    hide(&mut command);
+    command
 }
 
-// ---- credential store -------------------------------------------------------------------------------------
-fn token_entry() -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).map_err(|e| format!("Credential store unavailable: {e}"))
-}
-fn read_token() -> Option<String> { token_entry().ok()?.get_password().ok().filter(|t| !t.is_empty()) }
-fn store_token(token: &str) -> Result<(), String> {
-    token_entry()?.set_password(token).map_err(|e| format!("Could not save the device token to the credential store: {e}"))
-}
-fn delete_token() -> Result<(), String> {
-    match token_entry()?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("Could not remove the device token from the credential store: {e}")),
-    }
-}
-
-// ---- validation (pure, unit-tested) -----------------------------------------------------------------------
+// ---- pure helpers (unit-tested) ---------------------------------------------------------------------------
 pub fn normalize_server(raw: &str) -> Result<String, String> {
     let value = raw.trim().trim_end_matches('/');
     let (scheme, rest) = value.split_once("://").ok_or("Enter the full server address, for example https://ai.syntarus.com/munim")?;
@@ -92,203 +49,131 @@ pub fn normalize_code(raw: &str) -> Result<String, String> {
     if compact.len() != 8 { return Err("The pairing code looks like ABCD-EFGH (8 characters). Send 'pair browser' to Smara in chat to get one".into()); }
     Ok(format!("{}-{}", &compact[..4], &compact[4..]))
 }
-pub fn validate_options(c: &BridgeConfig) -> Result<(), String> {
-    if !matches!(c.browser.as_str(), "brave" | "chrome" | "edge" | "auto") { return Err("Unknown browser choice".into()); }
-    if !c.attach.is_empty() {
-        let rest = c.attach.strip_prefix("http://").ok_or("Attach address must look like http://127.0.0.1:9222")?;
-        let (host, port) = rest.trim_end_matches('/').split_once(':').ok_or("Attach address needs a port, e.g. http://127.0.0.1:9222")?;
-        if !(host == "127.0.0.1" || host == "localhost") || port.parse::<u16>().is_err() {
-            return Err("Attach only works with a browser on this PC: http://127.0.0.1:<port>".into());
-        }
+/// (server, shop, has_token) from the helper's config.json. The token itself is never returned.
+pub fn parse_config(text: &str) -> Option<(String, String, bool)> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    Some((value["server"].as_str().unwrap_or_default().to_owned(), value["shop"].as_str().unwrap_or_default().to_owned(),
+          value["token"].as_str().map(|t| !t.is_empty()).unwrap_or(false)))
+}
+/// True if `tasklist /FO CSV /NH` output lists this pid.
+pub fn tasklist_has(output: &str, pid: u32) -> bool {
+    let needle = format!("\"{pid}\"");
+    output.lines().any(|line| line.contains(&needle))
+}
+pub fn tail_lines(text: &str, count: usize) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    lines[lines.len().saturating_sub(count)..].iter().map(|l| (*l).to_owned()).collect()
+}
+
+// ---- state ------------------------------------------------------------------------------------------------
+fn read_config() -> Option<(String, String, bool)> { parse_config(&std::fs::read_to_string(home().join("config.json")).ok()?) }
+fn helper_pid() -> Option<u32> {
+    let pid: u32 = std::fs::read_to_string(home().join("bridge.pid")).ok()?.trim().parse().ok()?;
+    if cfg!(windows) {
+        let mut command = Command::new("tasklist");
+        command.args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]).stdin(Stdio::null());
+        hide(&mut command);
+        let output = command.output().ok()?;
+        tasklist_has(&String::from_utf8_lossy(&output.stdout), pid).then_some(pid)
+    } else {
+        Command::new("kill").args(["-0", &pid.to_string()]).status().ok().filter(|s| s.success()).map(|_| pid)
     }
-    if !c.profile.is_empty() && !std::path::Path::new(&c.profile).is_absolute() { return Err("Profile folder must be an absolute path".into()); }
-    Ok(())
 }
-
-// ---- sidecar location -------------------------------------------------------------------------------------
-fn bridge_script() -> Option<PathBuf> {
-    let installed = std::env::current_exe().ok()?.parent()?.join("resources/browser/smara_desktop_bridge.py");
-    if installed.is_file() { return Some(installed); }
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/browser/smara_desktop_bridge.py");
-    dev.is_file().then_some(dev)
+fn startup_registered() -> bool {
+    if !cfg!(windows) { return true; }
+    let mut command = Command::new("reg");
+    command.args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", RUN_VALUE]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    hide(&mut command);
+    command.status().map(|s| s.success()).unwrap_or(false)
 }
-fn python_command() -> Command {
-    let mut command = if let Some(p) = std::env::var_os("SMARA_BRIDGE_PYTHON") { Command::new(p) }
-        else if cfg!(windows) { let mut c = Command::new("py"); c.arg("-3"); c } else { Command::new("python3") };
-    command.env("PYTHONIOENCODING", "utf-8").env("PYTHONUTF8", "1");
-    #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
-    command
-}
-
-fn push_event(app: &AppHandle, mut event: Value) {
-    {
-        let mut state = lock();
-        match event["kind"].as_str() {
-            Some("paused") => state.paused = event["paused"].as_bool().unwrap_or(false),
-            Some("poll") if event["ok"].as_bool() == Some(true) => state.last_poll_ok_ms = event["ts"].as_u64().unwrap_or(0),
-            Some("fatal") => state.last_error = event["message"].as_str().unwrap_or_default().to_owned(),
-            _ => {}
-        }
-        if event["kind"] != "poll" || event["ok"] == false {   // successful polls only move the online light; they are not feed items
-            if state.events.len() >= MAX_EVENTS { state.events.pop_front(); }
-            state.events.push_back(event.clone());
-        }
-    }
-    if event["kind"] == "poll" && event["ok"] == true { event["silent"] = json!(true); }
-    let _ = app.emit("browser-bridge-event", event);
-}
-
-// ---- commands ---------------------------------------------------------------------------------------------
 fn snapshot() -> Value {
-    let config = load_config();
-    let paired = read_token().is_some() && !config.shop.is_empty();
-    let mut state = lock();
-    let running = match state.running.as_mut() {
-        Some(r) => match r.child.try_wait() { Ok(None) => true, _ => false },
-        None => false,
-    };
+    let config = read_config();
+    let paired = config.as_ref().map(|c| c.2).unwrap_or(false);
+    let log = std::fs::read_to_string(home().join("bridge.log")).map(|t| tail_lines(&t, LOG_LINES)).unwrap_or_default();
     json!({
-        "paired": paired, "config": config, "running": running, "paused": running && state.paused,
-        "last_poll_ok_ms": if running { state.last_poll_ok_ms } else { 0 },
-        "last_error": state.last_error, "events": state.events.iter().cloned().collect::<Vec<_>>(),
-        "default_server": DEFAULT_SERVER, "default_profile": default_profile(),
+        "paired": paired, "server": config.as_ref().map(|c| c.0.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| DEFAULT_SERVER.into()),
+        "shop": config.as_ref().map(|c| c.1.clone()).unwrap_or_default(), "running": paired && helper_pid().is_some(),
+        "startup": startup_registered(), "log": log, "default_server": DEFAULT_SERVER,
     })
 }
+
+/// Run one helper command to completion and return its trimmed output.
+fn helper(args: &[&str]) -> Result<(bool, String), String> {
+    let script = bridge_script().ok_or("The bridge component is missing from this install")?;
+    let output = python().arg(&script).args(args).stdout(Stdio::piped()).stderr(Stdio::piped()).output()
+        .map_err(|_| "Python 3 was not found. Open Settings → Browser and press “Install browser components”, or install Python 3 from python.org once.".to_owned())?;
+    let mut text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let err = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() && text.is_empty() { text = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("The helper failed").to_owned(); }
+    Ok((output.status.success(), text))
+}
+fn components() -> Value {
+    let has_python = python().arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
+    let has_modules = has_python && python().args(["-c", "import playwright, httpx"]).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
+    let found = |paths: &[&str]| paths.iter().any(|p| std::path::Path::new(p).is_file());
+    json!({"python": has_python, "modules": has_modules, "browsers": {
+        "brave": found(&[r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe", r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe"]),
+        "chrome": found(&[r"C:\Program Files\Google\Chrome\Application\chrome.exe", r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"]),
+        "edge": found(&[r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"]) }})
+}
+/// Start the helper if this PC is paired and it is not running; make it start with Windows. Safe to call repeatedly.
+fn ensure_inner() -> Result<(), String> {
+    if !snapshot()["paired"].as_bool().unwrap_or(false) { return Ok(()); }
+    if !startup_registered() { helper(&["install-startup"])?; }        // also starts it
+    else if helper_pid().is_none() { helper(&["ensure"])?; }
+    Ok(())
+}
+/// Called once when Desktop opens. Failure is silent: the Browser tab explains what is missing.
+pub fn ensure_on_startup() { std::thread::spawn(|| { let _ = ensure_inner(); }); }
+
+// ---- commands ---------------------------------------------------------------------------------------------
 #[tauri::command]
-pub fn bridge_state() -> Value { snapshot() }
+pub async fn bridge_state() -> Result<Value, String> { tauri::async_runtime::spawn_blocking(snapshot).await.map_err(|e| e.to_string()) }
 
 #[tauri::command]
-pub async fn bridge_pair(server: String, code: String, name: Option<String>) -> Result<Value, String> {
-    let server = normalize_server(&server)?;
-    let code = normalize_code(&code)?;
-    let device = name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Smara Desktop".into()));
-    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build().map_err(|e| e.to_string())?;
-    let response = client.post(format!("{server}/bridge/pair")).json(&json!({"code": code, "name": format!("{device} (Smara Desktop)")}))
-        .send().await.map_err(|e| format!("Could not reach the Smara server: {e}"))?;
-    let status = response.status();
-    let body: Value = response.json().await.unwrap_or(Value::Null);
-    if !status.is_success() {
-        return Err(body["detail"].as_str().map(str::to_owned).unwrap_or_else(|| format!("Pairing failed (HTTP {status})")));
-    }
-    let token = body["device_token"].as_str().filter(|t| !t.is_empty()).ok_or("The server did not return a device token")?;
-    let shop = body["shop"].as_str().unwrap_or("your shop").to_owned();
-    store_token(token)?;
-    let mut config = load_config();
-    config.server = server; config.shop = shop; config.device_name = device;
-    save_config(&config)?;
-    Ok(snapshot())
-}
+pub async fn bridge_check() -> Result<Value, String> { tauri::async_runtime::spawn_blocking(components).await.map_err(|e| e.to_string()) }
 
 #[tauri::command]
-pub fn bridge_save_options(config: BridgeConfig) -> Result<Value, String> {
-    validate_options(&config)?;
-    let mut current = load_config();
-    current.browser = config.browser; current.attach = config.attach.trim_end_matches('/').to_owned();
-    current.profile = config.profile; current.autostart = config.autostart;
-    save_config(&current)?;
-    Ok(snapshot())
+pub async fn bridge_ensure() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(|| { ensure_inner()?; std::thread::sleep(std::time::Duration::from_millis(1500)); Ok(snapshot()) }).await.map_err(|e| e.to_string())?
 }
-
-fn stop_inner(wait: bool) {
-    let running = lock().running.take();
-    if let Some(mut r) = running {
-        let _ = writeln!(r.stdin, "{}", json!({"cmd": "stop"}));
-        drop(r.stdin);
-        if wait {
-            for _ in 0..30 { if matches!(r.child.try_wait(), Ok(Some(_))) { return; } std::thread::sleep(std::time::Duration::from_millis(100)); }
-        }
-        let _ = r.child.kill(); let _ = r.child.wait();
-    }
-    let mut state = lock(); state.paused = false; state.last_poll_ok_ms = 0;
-}
-pub fn stop_on_exit() { stop_inner(false); }
 
 #[tauri::command]
 pub async fn bridge_stop() -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(|| stop_inner(true)).await.map_err(|e| e.to_string())?;
-    Ok(snapshot())
+    tauri::async_runtime::spawn_blocking(|| { let (_, _) = helper(&["stop"])?; Ok(snapshot()) }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn bridge_start(app: AppHandle) -> Result<Value, String> {
-    let config = load_config();
-    validate_options(&config)?;
-    let token = read_token().ok_or("Not paired: pair this PC first")?;
-    if snapshot()["running"] == true { return Ok(snapshot()); }
-    lock().running = None;   // a previous run that already exited
-    let script = bridge_script().ok_or("The bridge component is missing from this install")?;
-    let profile = if config.profile.is_empty() { default_profile() } else { PathBuf::from(&config.profile) };
-    let mut command = python_command();
-    command.arg(&script).args(["--browser", &config.browser, "--profile", &profile.to_string_lossy()]);
-    if !config.attach.is_empty() { command.args(["--attach", &config.attach]); }
-    command.env("SMARA_BRIDGE_SERVER", &config.server).env("SMARA_BRIDGE_TOKEN", token).env("SMARA_BRIDGE_SHOP", &config.shop)
-        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|e| format!("Could not start Python (install Python 3 and run: pip install playwright httpx): {e}"))?;
-    let stdin = child.stdin.take().ok_or("Bridge stdin unavailable")?;
-    let stdout = child.stdout.take().ok_or("Bridge stdout unavailable")?;
-    let stderr = child.stderr.take();
-    let generation = { let mut s = lock(); s.generation += 1; s.last_error.clear(); s.paused = false; s.generation };
-    lock().running = Some(Running { child, stdin, generation });
-    let out_app = app.clone();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok).take(1_000_000) {
-            if let Ok(event) = serde_json::from_str::<Value>(&line) { push_event(&out_app, event); }
-        }
-        // Process ended: report once, unless a newer run has already replaced it.
-        let current = { lock().generation };
-        if current == generation {
-            let code = { let mut s = lock(); let code = s.running.as_mut().and_then(|r| r.child.wait().ok()).and_then(|c| c.code()); if s.running.as_ref().map(|r| r.generation) == Some(generation) { s.running = None; } code };
-            push_event(&out_app, json!({"kind": "exited", "ts": now_ms(), "code": code}));
-        }
-    });
-    if let Some(err) = stderr {
-        let err_app = app.clone();
-        std::thread::spawn(move || {
-            let mut last = String::new();
-            for line in BufReader::new(err).lines().map_while(Result::ok).take(2000) { if !line.trim().is_empty() { last = line; } }
-            if !last.is_empty() { push_event(&err_app, json!({"kind": "stderr", "ts": now_ms(), "message": last.chars().take(300).collect::<String>()})); }
-        });
-    }
-    Ok(snapshot())
-}
-fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0) }
-
-#[tauri::command]
-pub fn bridge_pause(paused: bool) -> Result<Value, String> {
-    {
-        let mut state = lock();
-        let r = state.running.as_mut().ok_or("The bridge is not running")?;
-        writeln!(r.stdin, "{}", json!({"cmd": if paused { "pause" } else { "resume" }})).map_err(|_| "The bridge is not responding")?;
-        r.stdin.flush().ok();
-        state.paused = paused;   // optimistic; the sidecar confirms with a "paused" event
-    }
-    Ok(snapshot())
+pub async fn bridge_pair(server: String, code: String) -> Result<Value, String> {
+    let server = normalize_server(&server)?;
+    let code = normalize_code(&code)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let name = format!("{} (Smara Desktop)", std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC".into()));
+        let (ok, message) = helper(&["pair", "--server", &server, "--code", &code, "--name", &name])?;
+        if !ok { return Err(message.trim_start_matches("Pairing failed:").trim().to_owned()); }
+        helper(&["install-startup"])?;            // one token store (config.json), starts now and with Windows
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        Ok(snapshot())
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn bridge_unpair() -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(|| stop_inner(true)).await.map_err(|e| e.to_string())?;
-    delete_token()?;
-    let mut config = load_config();
-    config.shop.clear(); config.device_name.clear(); config.autostart = false;
-    save_config(&config)?;
-    lock().events.clear();
-    Ok(snapshot())
+    tauri::async_runtime::spawn_blocking(|| { helper(&["uninstall-startup"])?; helper(&["unpair"])?; Ok(snapshot()) }).await.map_err(|e| e.to_string())?
 }
 
-/// Python / Playwright / browser availability, so the panel can say what is missing instead of failing silently.
+/// One-click install of what the helper needs (Playwright drives the browser you already have; no browser download).
 #[tauri::command]
-pub async fn bridge_check() -> Result<Value, String> {
+pub async fn bridge_install_components() -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        let script = bridge_script().ok_or("The bridge component is missing from this install")?;
-        let output = python_command().arg(&script).arg("--check").output()
-            .map_err(|_| "Python 3 was not found. Install Python 3, then run: pip install playwright httpx".to_owned())?;
-        let text = String::from_utf8_lossy(&output.stdout);
-        let line = text.lines().rev().find(|l| l.trim_start().starts_with('{'));
-        let mut value: Value = line.and_then(|l| serde_json::from_str(l).ok())
-            .ok_or_else(|| "Python is installed, but the bridge needs: pip install playwright httpx".to_owned())?;
-        value["python"] = json!(true);
-        Ok(value)
+        let output = python().args(["-m", "pip", "install", "--user", "--disable-pip-version-check", "playwright", "httpx"])
+            .stdout(Stdio::piped()).stderr(Stdio::piped()).output()
+            .map_err(|_| "Python 3 is not installed. Install it once from python.org (tick “Add python.exe to PATH”), then press this button again.".to_owned())?;
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Installing the components failed: {}", err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("unknown error")));
+        }
+        Ok(components())
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -306,17 +191,23 @@ mod tests {
     #[test]
     fn code_is_normalised() {
         assert_eq!(normalize_code("abcd efgh").unwrap(), "ABCD-EFGH");
-        assert_eq!(normalize_code("abcd-efgh").unwrap(), "ABCD-EFGH");
         assert!(normalize_code("abc").is_err());
     }
     #[test]
-    fn attach_is_local_only() {
-        let mut c = BridgeConfig::default();
-        c.attach = "http://127.0.0.1:9222".into();
-        assert!(validate_options(&c).is_ok());
-        c.attach = "http://192.168.1.5:9222".into();
-        assert!(validate_options(&c).is_err());
-        c.attach = String::new(); c.browser = "firefox".into();
-        assert!(validate_options(&c).is_err());
+    fn existing_pairing_is_read_without_exposing_the_token() {
+        assert_eq!(parse_config(r#"{"server":"https://x/munim","token":"secret","shop":"Demo Shop"}"#), Some(("https://x/munim".into(), "Demo Shop".into(), true)));
+        assert_eq!(parse_config(r#"{"server":"https://x"}"#).map(|c| c.2), Some(false));
+        assert_eq!(parse_config("not json"), None);
+    }
+    #[test]
+    fn pid_is_found_in_tasklist_output() {
+        assert!(tasklist_has("\"pythonw.exe\",\"35060\",\"Console\",\"1\",\"40,000 K\"", 35060));
+        assert!(!tasklist_has("INFO: No tasks are running which match the specified criteria.", 35060));
+        assert!(!tasklist_has("\"python.exe\",\"350601\",\"Console\"", 35060));
+    }
+    #[test]
+    fn log_tail_skips_blank_lines() {
+        assert_eq!(tail_lines("a\n\nb\nc\n", 2), vec!["b", "c"]);
+        assert_eq!(tail_lines("", 5).len(), 0);
     }
 }

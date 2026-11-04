@@ -1,84 +1,61 @@
-/** Presentation logic for the Browser panel. No imports: unit-tested directly. Rust owns pairing, the token and the process. */
-export type BridgeConfig = { server: string; shop: string; device_name: string; browser: string; attach: string; profile: string; autostart: boolean };
-export type BridgeEvent = {
-  kind: string; ts: number; job_id?: string; action?: string; host?: string; url?: string; selector?: string; value?: string;
-  title?: string; ok?: boolean; error?: string | null; ms?: number; paused?: boolean; message?: string; status?: number;
-  silent?: boolean; code?: number | null; browser?: string; unpaired?: boolean;
-};
-export type BridgeState = {
-  paired: boolean; config: BridgeConfig; running: boolean; paused: boolean; last_poll_ok_ms: number; last_error: string;
-  events: BridgeEvent[]; default_server: string; default_profile: string;
-};
-export type FeedRow = { id: string; ts: number; action: string; label: string; host: string; title: string; status: "running" | "ok" | "error"; error: string; ms: number };
+/** Presentation logic for the Browser panel. No imports: unit-tested directly. The helper (munim_bridge.py) owns the pairing and the browser. */
+export type BridgeState = { paired: boolean; server: string; shop: string; running: boolean; startup: boolean; log: string[]; default_server: string };
+export type Components = { python: boolean; modules: boolean; browsers: { brave: boolean; chrome: boolean; edge: boolean } };
+export type LogRow = { id: string; time: string; message: string; level: "info" | "error" };
 
-/** The server counts a bridge as online for 45 s after its last poll; match that window. */
-export const ONLINE_WITHIN_MS = 45_000;
+export const MAX_LOG_ROWS = 60;
 export const SITE_GRANT_MS = 15 * 60_000;
-export const MAX_FEED = 200;
 
-export type Connection = "unpaired" | "stopped" | "starting" | "online" | "offline" | "paused";
-export function connection(state: Pick<BridgeState, "paired" | "running" | "paused" | "last_poll_ok_ms">, now: number): Connection {
+const ERROR_WORDS = /crash|disconnected|unpaired|failed|no brave|stopped:|error|could not/i;
+/** bridge.log lines look like "2026-11-05 01:50:56 message". */
+export function parseLog(lines: string[]): LogRow[] {
+  return lines.map((line, index) => {
+    const match = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) (.*)$/.exec(line);
+    const message = (match ? match[3] : line).trim();
+    return { id: `${index}-${line.length}`, time: match ? match[2] : "", message, level: ERROR_WORDS.test(message) ? "error" as const : "info" as const };
+  }).slice(-MAX_LOG_ROWS).reverse();
+}
+export function friendlyLog(message: string): string {
+  if (/^opened /i.test(message)) return `Opened your browser (${message.replace(/^opened /i, "").split(/[\\/]/).pop()})`;
+  if (/closing the browser after being idle/i.test(message)) return "Closed the browser after a quiet period";
+  if (/is on for/i.test(message)) return message.replace(/ Press Ctrl\+C to stop\./, "");
+  if (/disconnected from smara/i.test(message)) return "This PC was unpaired from Smara. Pair again to continue.";
+  return message;
+}
+
+export type Connection = "unpaired" | "stopped" | "running" | "problem";
+/** A paired, running helper whose most recent log line is an error is shown as a problem, not as healthy. */
+export function connection(state: Pick<BridgeState, "paired" | "running" | "log">): Connection {
   if (!state.paired) return "unpaired";
   if (!state.running) return "stopped";
-  if (state.paused) return "paused";
-  if (!state.last_poll_ok_ms) return "starting";
-  return now - state.last_poll_ok_ms <= ONLINE_WITHIN_MS ? "online" : "offline";
+  const last = parseLog(state.log)[0];
+  return last && last.level === "error" ? "problem" : "running";
 }
 export function connectionText(value: Connection): string {
   return {
-    unpaired: "Not paired", stopped: "Stopped", starting: "Starting…", online: "Online — Smara can use your browser",
-    offline: "Offline — no contact with the Smara server", paused: "Paused — Smara will not touch your browser",
+    unpaired: "Not paired", stopped: "Stopped — Smara cannot use your browser", running: "On — Smara can use your browser when it needs to",
+    problem: "Running, but the last step reported a problem",
   }[value];
 }
 
-export function stepLabel(event: Pick<BridgeEvent, "action" | "url" | "selector" | "value" | "host">): string {
-  const target = event.selector ? ` ${event.selector}` : "";
-  switch (event.action) {
-    case "navigate": return `Open ${event.host || event.url || "page"}`;
-    case "read": return "Read page";
-    case "click": return `Click${target}`;
-    case "fill": return `Type into${target}${event.value ? ` “${event.value}”` : ""}`;
-    case "press": return `Press ${event.value || "Enter"}`;
-    default: return event.action ? String(event.action) : "Step";
-  }
+export type Missing = "python" | "modules" | "browser";
+export function missingComponents(c: Components): Missing[] {
+  if (!c.python) return ["python"];
+  const result: Missing[] = [];
+  if (!c.modules) result.push("modules");
+  if (!c.browsers.brave && !c.browsers.chrome && !c.browsers.edge) result.push("browser");
+  return result;
 }
-
-/** Pair each step with its result and keep failures visible; non-step events become notes. */
-export function buildFeed(events: BridgeEvent[]): FeedRow[] {
-  const rows: FeedRow[] = [];
-  const byJob = new Map<string, FeedRow>();
-  for (const event of events) {
-    if (event.kind === "step" && event.job_id) {
-      const row: FeedRow = { id: event.job_id, ts: event.ts, action: event.action || "", label: stepLabel(event), host: event.host || "", title: "", status: "running", error: "", ms: 0 };
-      byJob.set(event.job_id, row); rows.push(row);
-    } else if (event.kind === "result" && event.job_id) {
-      const row = byJob.get(event.job_id);
-      if (!row) continue;
-      row.status = event.ok ? "ok" : "error"; row.error = event.error || ""; row.title = event.title || ""; row.ms = event.ms || 0;
-      if (event.host) row.host = event.host;
-    } else if (["fatal", "exited", "stderr"].includes(event.kind) || (event.kind === "poll" && event.ok === false)) {
-      const message = event.kind === "exited" ? `Bridge stopped${event.code ? ` (code ${event.code})` : ""}`
-        : event.kind === "poll" ? `Cannot reach server${event.status ? ` (HTTP ${event.status})` : ""}` : event.message || "Bridge error";
-      rows.push({ id: `${event.kind}-${event.ts}-${rows.length}`, ts: event.ts, action: event.kind, label: message, host: "", title: "", status: event.kind === "exited" ? "ok" : "error", error: event.kind === "exited" ? "" : message, ms: 0 });
-    }
-  }
-  return rows.slice(-MAX_FEED);
+export function missingText(missing: Missing[]): string {
+  if (missing.includes("python")) return "Python 3 is not installed. Install it once from python.org (tick “Add python.exe to PATH”), then come back here.";
+  const parts = [];
+  if (missing.includes("modules")) parts.push("the browser components (a one-click install)");
+  if (missing.includes("browser")) parts.push("Brave, Chrome or Edge");
+  return parts.length ? `Smara still needs ${parts.join(" and ")}.` : "";
 }
-
-/** A step that never got a result while the bridge is stopped did not finish. */
-export function settleFeed(rows: FeedRow[], running: boolean): FeedRow[] {
-  return running ? rows : rows.map(row => row.status === "running" ? { ...row, status: "error" as const, error: "Stopped before this step finished" } : row);
-}
-
-export function mergeEvents(current: BridgeEvent[], event: BridgeEvent): BridgeEvent[] {
-  if (event.kind === "poll" && event.ok) return current;          // heartbeat only; it moves the online light, not the feed
-  if (current.some(e => e.ts === event.ts && e.kind === event.kind && e.job_id === event.job_id)) return current;   // a repeated delivery
-  const next = [...current, event];
-  return next.length > MAX_FEED * 2 ? next.slice(-MAX_FEED * 2) : next;
-}
-
-export function shouldAutoStart(state: Pick<BridgeState, "paired" | "running" | "config">, starting: boolean, already: boolean): boolean {
-  return !!state.config.autostart && state.paired && !state.running && !starting && !already;
+/** Start the helper on its own only when it can work: paired, not running, nothing missing, and not tried again too soon. */
+export function shouldEnsure(state: Pick<BridgeState, "paired" | "running">, missing: Missing[], lastTriedMs: number, now: number): boolean {
+  return state.paired && !state.running && missing.length === 0 && now - lastTriedMs > 30_000;
 }
 
 export function validatePairInput(server: string, code: string): string {
@@ -89,11 +66,6 @@ export function validatePairInput(server: string, code: string): string {
   if (match[1].toLowerCase() === "http" && !local) return "The server address must start with https://";
   if (code.replace(/[^a-z0-9]/gi, "").length !== 8) return "The pairing code looks like ABCD-EFGH. Send “pair browser” to Smara in chat to get one.";
   return "";
-}
-
-export function describeBrowser(config: Pick<BridgeConfig, "browser" | "attach">): string {
-  if (config.attach) return `Attached to the browser at ${config.attach}`;
-  return { brave: "Brave", chrome: "Chrome", edge: "Edge", auto: "First browser found" }[config.browser as "brave"] ?? config.browser;
 }
 
 // ---- approvals: the same card the chat shows. Chat stays authoritative; first answer wins. -------------------
