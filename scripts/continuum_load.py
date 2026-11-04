@@ -25,11 +25,16 @@ async def main(shops: int, facts: int) -> int:
         async def write(scope, marker, k):
             t = time.monotonic()
             sid = f"{scope}-{k}"
-            r = await h.post("/memories", headers={"Idempotency-Key": sid}, json={
+            body = {
                 "user_id": scope, "source_id": sid, "ingestion_mode": "hybrid",
                 "messages": [{"role": "user", "content": f"[TRUSTED] Customer {marker} promised to pay invoice {marker}-{k} "
                                                           f"of Rs {10000 + k} by {10 + k} December 2026."}],
-                "metadata": {"trust": "trusted", "probe": True}})
+                "metadata": {"trust": "trusted", "probe": True}}
+            for attempt in range(6):          # like the outbox worker: a 429 is retried with backoff, never lost
+                r = await h.post("/memories", headers={"Idempotency-Key": sid}, json=body)
+                if r.status_code != 429:
+                    break
+                await asyncio.sleep(float(r.headers.get("retry-after", 2)) + attempt)
             lat.append(time.monotonic() - t)
             codes.append(r.status_code)
 
