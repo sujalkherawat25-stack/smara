@@ -661,3 +661,24 @@ def test_enter_in_a_search_box_just_searches_and_is_not_reported_as_unsent(tmp_p
                           capture_output=True, text=True, timeout=120)
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["error"] == "" and out["results"] == "results for veg pizza"
+
+
+def test_the_models_odd_selectors_are_turned_into_what_a_person_would_look_for():
+    assert munim_bridge._text_of("div[text*='Durex Extra Time Ultra Thin Condom']") == "Durex Extra Time Ultra Thin Condom"
+    assert munim_bridge._text_of("button[text='ADD']") == "ADD"
+    assert munim_bridge._text_of("text=JBL Tune 310C, Hi-Res Audio with DAC , 3-Button EQ , Co...") == "JBL Tune 310C, Hi-Res Audio with DAC , 3-Button EQ"
+    assert munim_bridge._split_selectors("div[data-id='grid-item'] a, a[title*='JBL, Tune'], div.x a") == [
+        "div[data-id='grid-item'] a", "a[title*='JBL, Tune']", "div.x a"]
+
+
+def test_a_rupee_sign_in_a_log_line_never_stops_the_helper(monkeypatch, tmp_path):
+    import io
+    monkeypatch.setattr(munim_bridge, "HOME", tmp_path)
+    monkeypatch.setattr(munim_bridge, "LOG", tmp_path / "bridge.log")
+
+    class Cp1252Console(io.TextIOWrapper):
+        pass
+    console = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", console)
+    munim_bridge.log("step click text=₹389 TOTAL on blinkit.com: ok")                   # used to raise UnicodeEncodeError
+    assert "₹389" in (tmp_path / "bridge.log").read_text(encoding="utf-8")

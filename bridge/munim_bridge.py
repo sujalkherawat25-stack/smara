@@ -81,15 +81,46 @@ SNAPSHOT_JS = r"""() => {
 }"""
 
 
+def _clean_label(text: str) -> str:
+    """'JBL Tune 310C, Hi-Res Audio ... Co...' -> without the cut-off tail a snapshot added."""
+    text = text.strip().strip('"').strip("'")
+    for tail in ("...", "\u2026"):
+        if text.endswith(tail):
+            text = text[: -len(tail)].rsplit(" ", 1)[0] if " " in text[: -len(tail)] else text[: -len(tail)]
+    return text.strip(" ,")
+
+
 def _text_of(selector: str) -> str:
-    """The visible text a selector is aiming at, if it names one (text=..., :has-text("..."), [aria-label="..."])."""
+    """The visible text a selector is aiming at, if it names one (text=..., :has-text("..."), [aria-label="..."],
+    and the made-up [text='...'] the model sometimes writes)."""
     if selector.startswith("text="):
-        return selector[5:].strip().strip('"')
+        return _clean_label(selector[5:])
     import re
     m = re.search(r':has-text\("([^"]+)"\)', selector)
-    if not m:       # button[aria-label="Send"], a[title='Next'], input[value*="Save"]: the label is what a person sees
-        m = re.search(r"""\[(?:aria-label|title|value|placeholder)\*?=["']?([^"'\]]+)""", selector)
-    return m.group(1).strip() if m else ""
+    if not m:       # button[aria-label="Send"], a[title='Next'], input[value*="Save"], div[text*='ADD']
+        m = re.search(r"""\[(?:aria-label|title|value|placeholder|text|innertext)[*^$~|]?=["']?([^"'\]]+)""", selector, re.I)
+    return _clean_label(m.group(1)) if m else ""
+
+
+def _split_selectors(selector: str) -> list[str]:
+    """'a, b, c' -> ['a', 'b', 'c'], ignoring commas inside quotes or brackets."""
+    parts, depth, quote, cur = [], 0, "", ""
+    for ch in selector:
+        if quote:
+            quote = "" if ch == quote else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "[(":
+            depth += 1
+        elif ch in "])":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append(cur.strip())
+            cur = ""
+            continue
+        cur += ch
+    parts.append(cur.strip())
+    return [x for x in parts if x]
 
 
 async def settle(page, max_ms: int = 12000) -> None:
@@ -352,13 +383,22 @@ async def dismiss_popups(page) -> list:
 def _locators(page, selector: str):
     """Every reasonable way a person would find this thing, in order: as written, by its visible words, by label,
     placeholder or role, and the same inside iframes (government portals and payment pages often use them)."""
-    text = _text_of(selector)
+    parts = _split_selectors(selector) if "," in selector and not selector.startswith("text=") else [selector]
+    texts = []
+    for part in parts:
+        t = _text_of(part)
+        if t and t not in texts:
+            texts.append(t)
+            words = t.split()
+            if len(words) > 6:                  # a whole product card's text: the name at its start is what to click
+                texts.append(" ".join(words[:5]))
     for scope in [page] + list(page.frames[1:6]):
-        try:
-            yield scope.locator(selector).first
-        except Exception:
-            pass
-        if text:
+        for part in parts:
+            try:
+                yield scope.locator(part).first
+            except Exception:
+                pass
+        for text in texts:
             yield scope.get_by_role("button", name=text).first
             yield scope.get_by_role("link", name=text).first
             yield scope.get_by_label(text).first
@@ -694,7 +734,14 @@ def log(msg: str) -> None:
     except OSError:
         pass
     if sys.stdout:
-        print(msg, flush=True)
+        try:
+            print(msg, flush=True)
+        except Exception:               # a console that cannot show "₹" or Hindi must never stop the helper
+            try:
+                sys.stdout.buffer.write((msg + "\n").encode("utf-8", "replace"))
+                sys.stdout.flush()
+            except Exception:
+                pass
 
 
 def write_status(**fields) -> None:
