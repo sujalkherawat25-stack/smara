@@ -141,7 +141,7 @@ async def smart_click(page, selector: str) -> None:
         except Exception as e:      # try the next way of finding it
             last = e
     raise last
-SIGNALS_JS = """() => {
+SIGNALS_JS = r"""() => {
   const t = ((document.body ? document.body.innerText : '') + ' ' + document.title).toLowerCase();
   const out = [];
   if (document.querySelector('iframe[src*=captcha],iframe[src*=recaptcha],.g-recaptcha,.h-captcha,[id*=captcha],[class*=captcha]')
