@@ -34,7 +34,7 @@ class ManagedBrowser:
     def start(self):
         if not self.executable:raise BrowserUnavailable("no supported Chromium executable")
         from playwright.sync_api import sync_playwright
-        self.runtime=sync_playwright().start(); self.browser=self.runtime.chromium.launch(headless=self.headless,executable_path=self.executable,args=["--disable-dev-shm-usage"])
+        self.runtime=sync_playwright().start(); self.browser=self.runtime.chromium.launch(headless=self.headless,executable_path=self.executable,args=["--disable-dev-shm-usage","--disable-gpu"])
     def create(self,context_options=None,configure_context=None):
         if self.browser is None:self.start()
         ident=f"browser_{uuid.uuid4().hex[:20]}"; context=self.browser.new_context(**(context_options or {"accept_downloads":True}))
@@ -53,6 +53,8 @@ class ManagedBrowser:
         session=self.sessions[session_id]; self.page(session).goto(url,wait_until="domcontentloaded"); session.generation+=1; return self.observe(session_id)
     def observe(self,session_id):
         session=self.sessions[session_id]; page=self.page(session); session.generation+=1; refs={}; ref_index=0
+        try:page.wait_for_load_state("domcontentloaded",timeout=5000)
+        except Exception:pass
         for frame_index,frame in enumerate(page.frames):
             elements=frame.locator("a,button,input,select,textarea,[role]")
             for index in range(min(elements.count(),200-len(refs))):
