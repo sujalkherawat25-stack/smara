@@ -23,7 +23,7 @@ from src.loop.scheduler import tick
 
 URL = os.environ.get("TEST_DATABASE_URL")
 OWNER, DEBTOR = "919000000001", "919876543210"
-NOW = datetime.now(timezone.utc) + timedelta(minutes=1)
+NOW = datetime.now(timezone.utc) + timedelta(minutes=20)  # ahead of DB now() even after a slow full run
 _ids = count(1)
 
 

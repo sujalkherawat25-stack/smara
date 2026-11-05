@@ -543,6 +543,75 @@ def test_enter_in_a_message_box_really_sends_and_says_so_when_it_did_not(tmp_pat
     assert out["nothing"]["via"] is None and "NOT sent" in out["nothing"]["error"] and out["nothing"]["sent"] == []
 
 
+RECOVERY_PROBE = r"""
+import asyncio, json, sys
+sys.path.insert(0, sys.argv[1])
+import munim_bridge as mb
+from playwright.async_api import async_playwright
+async def page_with(browser, html):
+    page = await browser.new_page(); await page.set_content(html); return page
+async def main():
+    out = {}
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        # consent banner with Accept and Reject: Reject is chosen; with only Accept: nothing is accepted
+        pg = await page_with(browser, '''<div id=cookie-banner class=cookie>We use cookies <button onclick="window.choice='accept';this.parentNode.remove()">Accept all</button>
+            <button onclick="window.choice='reject';this.parentNode.remove()">Reject all</button></div><button id=go onclick="window.went=1">Go</button>''')
+        await mb.dismiss_popups(pg)                      # what opening a page does
+        r = await mb.handle(pg, {"action": "click", "selector": "#go"})
+        out["consent_choice"] = await pg.evaluate("window.choice || null")
+        out["went"] = await pg.evaluate("window.went || 0")
+        pg = await page_with(browser, '''<div class=cookie-consent>Cookies <button onclick="window.choice='accept'">I agree</button></div><p>x</p>''')
+        await mb.dismiss_popups(pg)
+        out["accept_only_choice"] = await pg.evaluate("window.choice || null")
+        # the thing appears late and further down: found by waiting and scrolling, by its visible words
+        pg = await page_with(browser, '''<div style="height:3000px"></div><script>setTimeout(() => document.body.insertAdjacentHTML('beforeend',
+            '<a href="#" onclick="window.late=1">Download report</a>'), 1500)</script>''')
+        r = await mb.handle(pg, {"action": "click", "selector": 'a:has-text("Download report")'})
+        out["late"] = await pg.evaluate("window.late || 0")
+        # a disabled button: a clear hint, never a forced press
+        pg = await page_with(browser, '<button id=b disabled onclick="window.pressed=1">Search</button>')
+        r = await mb.handle(pg, {"action": "click", "selector": "#b"})
+        out["disabled_hint"] = "disabled" in r.get("hint", "")
+        out["disabled_pressed"] = await pg.evaluate("window.pressed || 0")
+        # a wrong selector: similar elements to pick from
+        pg = await page_with(browser, '<button>Track order</button><a href="#">Order history</a>')
+        r = await mb.handle(pg, {"action": "click", "selector": 'button[aria-label="Orders"]'})
+        out["similar"] = sorted(x["text"] for x in r.get("similar", []))
+        # a submit button is pressed exactly once even when the page reacts slowly
+        pg = await page_with(browser, '<form onsubmit="window.n=(window.n||0)+1;return false"><input name=q><button type=submit>Submit</button></form>')
+        await mb.handle(pg, {"action": "click", "selector": "text=Submit"})
+        out["submits"] = await pg.evaluate("window.n || 0")
+        # card fields inside a payment frame are never typed
+        pg = await page_with(browser, '<iframe srcdoc="<input id=num placeholder=\'Card number\'>"></iframe>')
+        await pg.wait_for_timeout(300)
+        r = await mb.handle(pg, {"action": "fill", "selector": "#num", "value": "4111111111111111"})
+        out["card_refused"] = "never type" in r.get("error", "")
+        # a click that opens a new tab: the next step works in that tab
+        pg = await page_with(browser, '<a href="#" onclick="const w = window.open(); w.document.write(`<title>Second</title><p>second tab</p>`); return false">Open details</a>')
+        r = await mb.handle(pg, {"action": "click", "selector": "text=Open details"})
+        out["new_tab"] = bool(r.get("opened_new_tab")) and r.get("title") == "Second"
+        await browser.close()
+    print(json.dumps(out))
+asyncio.run(main())
+"""
+
+
+def test_the_bridge_recovers_like_a_person_but_never_accepts_presses_twice_or_types_secrets(tmp_path):
+    import subprocess
+    done = subprocess.run([sys.executable, "-c", RECOVERY_PROBE, str(Path(munim_bridge.__file__).parent)],
+                          capture_output=True, text=True, timeout=180)
+    out = json.loads(done.stdout.strip().splitlines()[-1])
+    assert out["consent_choice"] == "reject" and out["went"] == 1          # privacy choice, then the real click
+    assert out["accept_only_choice"] is None                               # never accepts on the owner's behalf
+    assert out["late"] == 1                                                # waited and scrolled for it
+    assert out["disabled_hint"] and out["disabled_pressed"] == 0
+    assert out["similar"] == ["Order history", "Track order"]
+    assert out["submits"] == 1
+    assert out["card_refused"]
+    assert out["new_tab"]
+
+
 async def test_pressing_enter_in_a_message_box_needs_the_owners_tap_but_search_boxes_do_not(env):
     br = env.app.state.browsers = DeviceFakeBrowsers()
     env.app.state.llm = ScriptLLM(

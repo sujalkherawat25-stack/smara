@@ -11,7 +11,7 @@ from src.db import migrate, open_pool
 
 URL = os.environ.get("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL not set")
-NOW = datetime.now(timezone.utc) + timedelta(minutes=1)  # DB defaults use the real clock
+NOW = datetime.now(timezone.utc) + timedelta(minutes=20)  # ahead of DB now() even after a slow full run
 
 
 class FakeContinuum:
