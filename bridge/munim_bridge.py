@@ -20,6 +20,7 @@ import ipaddress
 import json
 import os
 import platform
+import re
 import socket
 import sys
 from pathlib import Path
@@ -169,6 +170,91 @@ def url_allowed(url: str, allow_private: bool = False) -> str | None:
     return None
 
 
+_LAST_TYPED: dict[int, str] = {}       # page -> selector of the box Smara last typed into (what Enter should send)
+BOX_TEXT_JS = "e => e.isConnected ? (e.isContentEditable ? e.innerText : (e.value ?? '')) : null"
+# The message box's own send control: walk up from the box and pick the closest visible, enabled button named like
+# Send / Submit / Post / Reply (or the form's submit button). Marked so Playwright can click it like a person would.
+FIND_SEND_JS = """box => {
+  document.querySelectorAll('[data-smara-send]').forEach(x => x.removeAttribute('data-smara-send'));
+  const name = b => ((b.getAttribute('aria-label') || '') + ' ' + (b.innerText || b.value || '') + ' ' + (b.title || '')).trim().toLowerCase();
+  const ok = b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !b.closest('#smara-agent-banner'); };
+  const words = /\\b(send|submit|post|reply|comment)\\b/;
+  for (let node = box, depth = 0; node && depth < 10; node = node.parentElement, depth++) {
+    const buttons = [...node.querySelectorAll('button,[role=button],input[type=submit]')].filter(ok);
+    const hit = buttons.find(b => words.test(name(b))) || buttons.find(b => b.type === 'submit' && b.form && b.form.contains(box));
+    if (hit) { hit.setAttribute('data-smara-send', '1'); return name(hit) || 'send'; }
+  }
+  return null;
+}"""
+
+
+async def type_into(page, selector: str, value: str) -> None:
+    """Type like a person. Rich message boxes (LinkedIn, Facebook, Slack-style editors) ignore text that is set
+    directly; they only notice real input events, and their Send button stays disabled until they do."""
+    box = page.locator(selector).first
+    if not await box.evaluate("e => e.isContentEditable", timeout=10000):
+        await box.fill(value, timeout=10000)
+        return
+    await box.click(timeout=10000)
+    await page.keyboard.press("ControlOrMeta+A")
+    await page.keyboard.press("Delete")
+    await page.keyboard.insert_text(value)
+    if ((await box.evaluate(BOX_TEXT_JS)) or "").strip() != value.strip():   # editor rejected it: last resort
+        await box.fill(value, timeout=10000)
+
+
+async def is_message_box(page, selector: str) -> bool:
+    """A box whose text is sent (chat, comment, post editor), as opposed to a search field, which keeps its text after
+    Enter and must not be treated as 'not sent'."""
+    if re.search(r"search|query|\bq\b|find|filter", selector, re.I):
+        return False
+    try:
+        return bool(await page.locator(selector).first.evaluate(
+            "e => e.isContentEditable || e.tagName === 'TEXTAREA' || e.getAttribute('role') === 'textbox'", timeout=3000))
+    except Exception:
+        return False
+
+
+async def send_message(page, selector: str) -> dict:
+    """Enter right after typing into a message box. Many sites send on Enter; others (LinkedIn by default) add a new
+    line and need their Send button. Do whichever works, then CHECK the box emptied, so 'sent' is never a guess."""
+    box = page.locator(selector).first
+    try:
+        before = await box.evaluate(BOX_TEXT_JS, timeout=5000)
+    except Exception:
+        before = None
+    if not (before or "").strip():
+        await page.keyboard.press("Enter")
+        return {}
+    await box.focus()
+    await page.keyboard.press("Enter")
+    await page.wait_for_timeout(900)
+
+    async def still_there() -> bool:
+        try:
+            now = await box.evaluate(BOX_TEXT_JS, timeout=2000)
+        except Exception:
+            return False                                  # the box went away: the site moved on after sending
+        return now is not None and now.strip() != "" and before.strip() in now.strip()
+
+    if not await still_there():
+        return {"sent_via": "enter"}
+    now = await box.evaluate(BOX_TEXT_JS)
+    if now and now != before and now.strip() == before.strip():   # Enter only added a new line here: take it back
+        await page.keyboard.press("Backspace")
+    if await box.evaluate(FIND_SEND_JS):
+        await page.locator("[data-smara-send]").first.click(timeout=6000)
+        await page.wait_for_timeout(1200)
+        if not await still_there():
+            try:
+                await box.focus(timeout=2000)            # never leave focus on Send: a stray Enter must not press it again
+            except Exception:
+                pass
+            return {"sent_via": "send button"}
+    return {"error": "the message is still in the box: it was NOT sent (Enter did not send it and no Send button "
+                     "worked). Read the page and look for the send button, or ask the owner to press Send."}
+
+
 async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
     a = cmd.get("action")
     if isinstance(cmd.get("selector"), str):               # models sometimes send JSON-escaped quotes: div[role=\\"x\\"]
@@ -177,7 +263,9 @@ async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
         return {"error": f"unsupported action {a!r}"}
     if await page.evaluate("() => !!window.__smaraPaused"):
         return {"error": "the owner paused Smara in the browser (Stop button); ask them to press Resume"}
+    extra: dict = {}
     if a == "navigate":
+        _LAST_TYPED.pop(id(page), None)
         why = url_allowed(str(cmd.get("url", "")), allow_private)
         if why:
             return {"error": f"blocked url: {why}"}
@@ -190,9 +278,19 @@ async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
         if info["type"] == "password" or "one-time-code" in info["ac"] or any(
                 k in info["name"] for k in ("otp", "pin", "cvv", "card", "passw")):
             return {"error": "I never type into password, OTP, PIN or card fields; please do that step yourself in the browser"}
-        await page.locator(str(cmd["selector"])).first.fill(str(cmd.get("value", "")), timeout=10000)
+        await type_into(page, str(cmd["selector"]), str(cmd.get("value", "")))
+        _LAST_TYPED[id(page)] = str(cmd["selector"])
     elif a == "press":
-        await page.keyboard.press(str(cmd.get("value", "Enter")))
+        key = str(cmd.get("value") or "Enter")
+        target = _LAST_TYPED.get(id(page))
+        if key == "Enter" and target and await is_message_box(page, target):
+            sent = await send_message(page, target)
+            if sent.get("error"):
+                return sent
+            extra = sent
+            _LAST_TYPED.pop(id(page), None)          # sent: a second Enter must never send it again
+        else:
+            await page.keyboard.press(key)
         await page.wait_for_load_state("domcontentloaded")
     elif a == "scroll":
         v = str(cmd.get("value") or "down").lower()
@@ -218,6 +316,7 @@ async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
     out = {"url": page.url, "title": await page.title(), "text": text[:3000], "elements": await page.evaluate(SNAPSHOT_JS)}
     if needs := await page.evaluate(SIGNALS_JS):
         out["needs_owner"] = needs
+    out.update(extra)
     return out
 
 

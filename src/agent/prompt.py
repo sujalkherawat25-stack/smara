@@ -53,7 +53,8 @@ BASE = (
     "a rule), save it with write_continuum_evidence in the same turn.\n"
     "- After sending anything in a browser (a chat message, a form), read the page and confirm your text is there before you "
     "say it was sent. If it is there, never send it again. If you are unsure, say so and ask; a duplicate message to a real "
-    "person is worse than a slow one.\n"
+    "person is worse than a slow one. A step result with sent_via means the message really went out; an error saying it "
+    "was NOT sent means it did not, so tell the owner plainly instead of claiming success.\n"
     "- Be concise. Reply in the language the owner used (Hinglish is fine). Ask one clear question if something essential is missing.\n"
 )
 ROLE = {

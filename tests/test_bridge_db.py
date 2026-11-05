@@ -500,6 +500,49 @@ def test_bridge_handles_app_like_pages_lists_dynamic_ids_and_message_boxes(tmp_p
     assert out["typed"] == "hi manvi" and out["banner_not_in_text"]
 
 
+SEND_PROBE = r"""
+import asyncio, json, sys
+sys.path.insert(0, sys.argv[1])
+import munim_bridge as mb
+from playwright.async_api import async_playwright
+SENT = "<script>window.sent=[]</script>"
+LINKEDIN_LIKE = SENT + '''<form onsubmit="return false"><div contenteditable=true role=textbox><p><br></p></div>
+  <button class=msg-form__send-button type=submit disabled>Send</button></form>
+  <script>let s='';const ed=document.querySelector('[role=textbox]'),b=document.querySelector('button');
+  ed.addEventListener('input',()=>{s=ed.innerText.trim();b.disabled=!s});
+  b.addEventListener('click',()=>{if(s){window.sent.push(s);ed.innerHTML='<p><br></p>';s='';b.disabled=true}})</script>'''
+ENTER_SENDS = SENT + '''<div contenteditable=true role=textbox id=box></div><script>box.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();if(box.innerText.trim())window.sent.push(box.innerText.trim());box.innerText=''}})</script>'''
+NOTHING = SENT + '<div contenteditable=true role=textbox id=box></div>'
+async def one(browser, html, sel):
+    page = await browser.new_page(); await page.set_content(html)
+    await mb.handle(page, {"action": "fill", "selector": sel, "value": "hi manvi"})
+    first = await mb.handle(page, {"action": "press", "value": "Enter"})
+    await mb.handle(page, {"action": "press", "value": "Enter"})
+    return {"via": first.get("sent_via"), "error": first.get("error", ""), "sent": await page.evaluate("window.sent")}
+async def main():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        out = {"linkedin": await one(browser, LINKEDIN_LIKE, 'div[role="textbox"]'),
+               "enter": await one(browser, ENTER_SENDS, '#box'), "nothing": await one(browser, NOTHING, '#box')}
+        await browser.close()
+    print(json.dumps(out))
+asyncio.run(main())
+"""
+
+
+def test_enter_in_a_message_box_really_sends_and_says_so_when_it_did_not(tmp_path):
+    """LinkedIn adds a new line on Enter and needs its Send button (which has no aria-label and stays disabled until
+    real input events arrive); chat apps send on Enter; and when nothing sends, the agent must hear NOT sent."""
+    import subprocess
+    done = subprocess.run([sys.executable, "-c", SEND_PROBE, str(Path(munim_bridge.__file__).parent)],
+                          capture_output=True, text=True, timeout=120)
+    out = json.loads(done.stdout.strip().splitlines()[-1])
+    assert out["linkedin"] == {"via": "send button", "error": "", "sent": ["hi manvi"]}        # exactly once
+    assert out["enter"]["via"] == "enter" and out["enter"]["sent"] == ["hi manvi"]
+    assert out["nothing"]["via"] is None and "NOT sent" in out["nothing"]["error"] and out["nothing"]["sent"] == []
+
+
 async def test_pressing_enter_in_a_message_box_needs_the_owners_tap_but_search_boxes_do_not(env):
     br = env.app.state.browsers = DeviceFakeBrowsers()
     env.app.state.llm = ScriptLLM(
@@ -517,3 +560,35 @@ async def test_pressing_enter_in_a_message_box_needs_the_owners_tap_but_search_b
     sid = (await one(env.pool, "select id from agent_sessions where status = 'WAITING_APPROVAL'"))["id"]
     await dispatch(env.app, owner("lk2", button=f"ag_ok:{sid}"))
     assert [s["action"] for s in br.steps][-1] == "press"                               # sent only after the tap
+
+
+SEARCH_ENTER_PROBE = r"""
+import asyncio, json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import munim_bridge
+from playwright.async_api import async_playwright
+
+async def main():
+    f = Path(sys.argv[2]) / "search.html"
+    f.write_text("<html><body><form onsubmit=\"event.preventDefault(); document.getElementById('r').textContent='results for '+document.getElementById('q').value\">"
+                 "<input id='q' name='q' placeholder='Search'></form><div id='r'></div></body></html>")
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(f.as_uri())
+        await munim_bridge.handle(page, {"action": "fill", "selector": "#q", "value": "veg pizza"}, allow_private=True)
+        r = await munim_bridge.handle(page, {"action": "press", "value": "Enter"}, allow_private=True)
+        print(json.dumps({"error": r.get("error", ""), "results": await page.text_content("#r")}))
+        await browser.close()
+
+asyncio.run(main())
+"""
+
+
+def test_enter_in_a_search_box_just_searches_and_is_not_reported_as_unsent(tmp_path):
+    import subprocess
+    done = subprocess.run([sys.executable, "-c", SEARCH_ENTER_PROBE, str(Path(munim_bridge.__file__).parent), str(tmp_path)],
+                          capture_output=True, text=True, timeout=120)
+    out = json.loads(done.stdout.strip().splitlines()[-1])
+    assert out["error"] == "" and out["results"] == "results for veg pizza"
