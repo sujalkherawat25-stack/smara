@@ -155,7 +155,7 @@ def _target(selector: str) -> str:
     """A selector in words an owner understands: 'the "Send" button', 'the message box'."""
     sel = selector.strip()
     sel = sel.replace("\\", "")                                # models sometimes send JSON-escaped quotes
-    found = (re.search(r"""\[(?:aria-label|title|name|placeholder|value)\*?=["']?([^"'\]]+)""", sel)
+    found = (re.search(r"""\[(?:data-smara-name|aria-label|title|name|placeholder|value)\*?=["']?([^"'\]]+)""", sel)
              or re.search(r"^text=(.+)$", sel) or re.search(r""":has-text\(["']([^"']+)""", sel))
     label = found.group(1).strip().strip('"') if found else ""
     if not label and (ident := re.match(r"^#([\w-]+)$", sel)):

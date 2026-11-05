@@ -495,7 +495,7 @@ def test_bridge_handles_app_like_pages_lists_dynamic_ids_and_message_boxes(tmp_p
     done = subprocess.run([sys.executable, "-c", APP_LIKE_PROBE, str(Path(munim_bridge.__file__).parent), str(tmp_path)],
                           capture_output=True, text=True, timeout=120)
     out = json.loads(done.stdout.strip().splitlines()[-1])
-    assert out["no_dynamic_ids"] and out["manvi_selector"].startswith("text=")
+    assert out["no_dynamic_ids"] and "[data-smara-ref=" in out["manvi_selector"] and 'data-smara-name="Manvi Jain"' in out["manvi_selector"]   # a numbered handle carrying the visible name, never a guess
     assert out["opened"] == "Chat with Manvi Jain" and out["fallback_click_ok"]
     assert out["typed"] == "hi manvi" and out["banner_not_in_text"]
 
@@ -612,6 +612,85 @@ def test_the_bridge_recovers_like_a_person_but_never_accepts_presses_twice_or_ty
     assert out["new_tab"]
 
 
+HUMAN_PROBE = r'''
+import asyncio, json, sys, tempfile, time
+sys.path.insert(0, sys.argv[1])
+import munim_bridge as mb
+from playwright.async_api import async_playwright
+
+LOGGER = """<script>window.ev={move:0,wheel:0,key:0,untrusted:0,down:0};
+['mousemove','wheel','keydown','mousedown'].forEach(t=>document.addEventListener(t,e=>{
+  window.ev[t==='mousemove'?'move':t==='wheel'?'wheel':t==='keydown'?'key':'down']++; if(!e.isTrusted) window.ev.untrusted++;},true));</script>"""
+PAGES = {
+ "card": LOGGER + """<div style="height:300px"></div><a id=card href="#product" onclick="document.title='PRODUCT PAGE';document.body.insertAdjacentHTML('beforeend','<h1>SONY PS5 product details and price</h1>');return false">
+   <div><span>SONY PS5 Console Digital (CFI-2116B01Y) 825 GB</span></div></a><p>footer text</p>""",
+ "dead": LOGGER + """<p><span>Just a label that does nothing</span></p>""",
+ "hover": LOGGER + """<button id=b disabled onclick="document.title='CLICKED'">Search</button>
+   <div id=area style="width:900px;height:500px;background:#ddd" onmousemove="document.getElementById('b').disabled=false">move over me</div>""",
+ "typing": LOGGER + """<input id=q placeholder="Search products"><div id=out></div>""",
+ "scroll": LOGGER + """<div style="height:5000px">tall</div>""",
+}
+
+async def main():
+    out = {}
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(); ctx = await browser.new_context(viewport={"width": 1280, "height": 800})
+        async def fresh(name):
+            pg = await ctx.new_page(); await pg.set_content(PAGES[name]); return pg
+        # 1. card title inside a link: real pointer travel, effect seen, clicked through a numbered handle
+        pg = await fresh("card")
+        r = await mb.handle(pg, {"action": "read"})
+        card = next((e for e in r["elements"] if "SONY" in e["text"]), None)
+        out["ref_selector_shape"] = bool(card) and 'data-smara-ref="' in card["selector"] and 'data-smara-name="SONY PS5 Console Digital' in card["selector"]
+        r = await mb.handle(pg, {"action": "click", "selector": card["selector"]})
+        ev = await pg.evaluate("window.ev")
+        out["card_changed"] = r.get("changed") is True and "PRODUCT PAGE" in r.get("title", "")
+        out["pointer_travelled"] = ev["move"] >= 8 and ev["down"] == 1 and ev["untrusted"] == 0
+        # 1b. the same element found again after the page re-rendered (attributes wiped)
+        pg = await fresh("card"); r = await mb.handle(pg, {"action": "read"})
+        card = next(e for e in r["elements"] if "SONY" in e["text"])
+        await pg.evaluate("() => document.querySelectorAll('[data-smara-ref]').forEach(e => e.removeAttribute('data-smara-ref'))")
+        r = await mb.handle(pg, {"action": "click", "selector": card["selector"]})
+        out["ref_survives_rerender"] = r.get("changed") is True
+        # 2. a click that does nothing is reported, with a hint not to repeat it
+        pg = await fresh("dead"); r = await mb.handle(pg, {"action": "click", "selector": "text=Just a label that does nothing"})
+        out["dead_click_reported"] = r.get("changed") is False and "Do NOT repeat" in r.get("hint", "")
+        # 3. a control that only enables after the pointer moves over the page
+        pg = await fresh("hover"); await pg.mouse.move(5, 5)
+        await pg.evaluate("document.getElementById('b').disabled = true")
+        await pg.mouse.move(300, 400); await pg.mouse.move(310, 410)
+        r = await mb.handle(pg, {"action": "click", "selector": "#b"})
+        out["hover_enabled_click"] = r.get("title") == "CLICKED"
+        # 4. typing: real key events, human pace
+        pg = await fresh("typing"); t = time.monotonic()
+        r = await mb.handle(pg, {"action": "fill", "selector": "#q", "value": "sony ps5 console"})
+        ev = await pg.evaluate("window.ev"); val = await pg.evaluate("document.getElementById('q').value")
+        out["typed_like_a_person"] = val == "sony ps5 console" and ev["key"] >= 16 and ev["untrusted"] == 0 and (time.monotonic() - t) > 0.5
+        # 5. wheel scrolling
+        pg = await fresh("scroll")
+        await mb.handle(pg, {"action": "scroll", "value": "down"}); y1 = await pg.evaluate("window.scrollY")
+        await mb.handle(pg, {"action": "scroll", "value": "bottom"}); y2 = await pg.evaluate("window.scrollY")
+        await mb.handle(pg, {"action": "scroll", "value": "top"}); y3 = await pg.evaluate("window.scrollY")
+        ev = await pg.evaluate("window.ev")
+        out["wheel_scroll"] = y1 > 200 and y2 > y1 and y3 == 0 and ev["wheel"] >= 5 and ev["untrusted"] == 0
+        await ctx.close()
+    print(json.dumps(out))
+    
+
+asyncio.run(main())
+'''
+
+
+def test_the_bridge_moves_the_real_pointer_types_like_a_person_and_reports_clicks_that_did_nothing(tmp_path):
+    """Numbered handles survive a re-render, the pointer travels before it presses, keys are real key events, scrolling is
+    the wheel, and a click that changed nothing says so (the Flipkart loop: three 'ok' clicks, same page)."""
+    import subprocess
+    done = subprocess.run([sys.executable, "-c", HUMAN_PROBE, str(Path(munim_bridge.__file__).parent)],
+                          capture_output=True, text=True, timeout=240)
+    out = json.loads(done.stdout.strip().splitlines()[-1])
+    assert all(out.values()), [k for k, v in out.items() if not v]
+
+
 async def test_pressing_enter_in_a_message_box_needs_the_owners_tap_but_search_boxes_do_not(env):
     br = env.app.state.browsers = DeviceFakeBrowsers()
     env.app.state.llm = ScriptLLM(
@@ -682,3 +761,11 @@ def test_a_rupee_sign_in_a_log_line_never_stops_the_helper(monkeypatch, tmp_path
     monkeypatch.setattr(sys, "stdout", console)
     munim_bridge.log("step click text=₹389 TOTAL on blinkit.com: ok")                   # used to raise UnicodeEncodeError
     assert "₹389" in (tmp_path / "bridge.log").read_text(encoding="utf-8")
+
+
+def test_numbered_handles_keep_their_words_for_the_approval_card_and_the_send_rule():
+    from src.agent.policy import _target, sensitive_step
+    send = 'button[data-smara-ref="21"][data-smara-name="Send"]'
+    assert "Send" in _target(send) and "button" in _target(send) and sensitive_step({"action": "click", "selector": send})
+    menu = 'a[data-smara-ref="4"][data-smara-name="Order Online"]'
+    assert "Order Online" in _target(menu) and "link" in _target(menu) and not sensitive_step({"action": "click", "selector": menu})

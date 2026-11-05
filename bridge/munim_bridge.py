@@ -62,6 +62,8 @@ SNAPSHOT_JS = r"""() => {
   });
   const onScreen = e => { const r = e.getBoundingClientRect(); return r.bottom > 0 && r.top < window.innerHeight; };
   els.sort((x, y) => (onScreen(y) ? 1 : 0) - (onScreen(x) ? 1 : 0));          // what is on screen first
+  window.__smaraRefs = window.__smaraRefs || {map: new WeakMap(), n: 0};
+  const R = window.__smaraRefs;
   return els.slice(0, 80).map(e => {
     const tag = e.tagName.toLowerCase();
     const editable = e.isContentEditable;
@@ -75,7 +77,14 @@ SNAPSHOT_JS = r"""() => {
     // first line only: a list item's text spans several child elements, and the name is what a person clicks
     const first = (e.innerText || label || '').trim().split('\n')[0].trim().slice(0, 50);
     if (!selector && first) selector = `text=${first}`;                   // matches any element type
-    return {selector, tag, type: editable ? 'editable' : (e.type || e.getAttribute('role') || ''), text,
+    // A numbered handle, like the accessibility index Codex's browser uses: always a real selector, never a guess.
+    let ref = R.map.get(e); if (!ref) { ref = ++R.n; R.map.set(e, ref); }
+    e.setAttribute('data-smara-ref', String(ref));
+    const nm = (label || first || text || '').replace(/["'\[\]\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (nm) e.setAttribute('data-smara-name', nm); else e.removeAttribute('data-smara-name');
+    const kind = tag === 'a' ? 'link' : (tag === 'button' || e.getAttribute('role') === 'button') ? 'button' :
+                 (tag === 'input' || tag === 'textarea' || editable) ? 'field' : tag === 'select' ? 'menu' : (e.getAttribute('role') || tag);
+    return {selector: `${tag}[data-smara-ref="${ref}"]` + (nm ? `[data-smara-name="${nm}"]` : ''), kind, alt: selector, rawhref: e.getAttribute('href') || '', ref, tag, type: editable ? 'editable' : (e.type || e.getAttribute('role') || ''), text,
             href: tag === 'a' ? (e.href || '') : ''};
   }).filter(x => x.selector);
 }"""
@@ -260,15 +269,17 @@ FIND_SEND_JS = """box => {
 async def type_into(page, selector: str, value: str) -> None:
     """Type like a person. Rich message boxes (LinkedIn, Facebook, Slack-style editors) ignore text that is set
     directly; they only notice real input events, and their Send button stays disabled until they do."""
-    box = page.locator(selector).first
+    box = await find(page, selector) or page.locator(selector).first
     if not await box.evaluate("e => e.isContentEditable", timeout=10000):
         await box.fill(value, timeout=10000)
         return
-    await box.click(timeout=10000)
-    await page.keyboard.press("ControlOrMeta+A")
-    await page.keyboard.press("Delete")
-    await page.keyboard.insert_text(value)
-    if ((await box.evaluate(BOX_TEXT_JS)) or "").strip() != value.strip():   # editor rejected it: last resort
+    await human_type(page, box, value)
+    if ((await box.evaluate(BOX_TEXT_JS)) or "").strip() != value.strip():   # editor dropped keys: insert it whole
+        await box.click(timeout=10000)
+        await page.keyboard.press("ControlOrMeta+A")
+        await page.keyboard.press("Delete")
+        await page.keyboard.insert_text(value)
+    if ((await box.evaluate(BOX_TEXT_JS)) or "").strip() != value.strip():   # last resort
         await box.fill(value, timeout=10000)
 
 
@@ -383,6 +394,20 @@ async def dismiss_popups(page) -> list:
 def _locators(page, selector: str):
     """Every reasonable way a person would find this thing, in order: as written, by its visible words, by label,
     placeholder or role, and the same inside iframes (government portals and payment pages often use them)."""
+    ref = re.fullmatch(r'\s*[a-z0-9]*\[data-smara-ref="(\d+)"\](\[data-smara-name="[^"]*"\])?\s*', selector)
+    if ref:
+        info = REF_INFO.get(id(page), {}).get(ref.group(1))
+        for scope in [page] + list(page.frames[1:6]):
+            yield scope.locator(selector).first
+        if info:                                         # re-rendered: find it again by what it was
+            if info.get("href") and '"' not in info["href"] and not info["href"].startswith(("#", "javascript")):
+                for scope in [page] + list(page.frames[1:6]):
+                    yield scope.locator(f'a[href="{info["href"]}"]').first      # a link is best found by where it goes
+            if info.get("alt") and "data-smara-ref" not in str(info["alt"]):
+                yield from _locators(page, info["alt"])
+            if info.get("text"):
+                yield from _locators(page, "text=" + info["text"])
+        return
     parts = _split_selectors(selector) if "," in selector and not selector.startswith("text=") else [selector]
     texts = []
     for part in parts:
@@ -441,44 +466,210 @@ async def similar(page, selector: str) -> list:
         return []
 
 
+
+# ---------------------------------------------------------------- behave like a person at the keyboard and mouse
+import math
+import random
+
+REF_INFO: dict[int, dict] = {}         # page -> {ref: {text, tag, alt}} from its last snapshot (to find an element again)
+_MOUSE: dict[int, tuple] = {}          # page -> where the pointer is now
+CLICKABLE_UP_JS = """e => { let n = e;
+  for (let i = 0; i < 6 && n; i++, n = n.parentElement)
+    if (n.matches('a[href],button,[role=button],[role=link],[role=tab],[role=menuitem],[role=option],input[type=submit],input[type=button],summary,label,[onclick]')) return n;
+  return e; }"""
+HIT_JS = """(e, p) => { const t = document.elementFromPoint(p[0], p[1]); return !!t && (e === t || e.contains(t) || t.contains(e)); }"""
+SIGNATURE_JS = """() => [location.href, document.title, document.body ? document.body.innerText.length : 0,
+  document.querySelectorAll('[role=dialog],[aria-modal=true],dialog[open]').length,
+  document.querySelectorAll('[aria-expanded=true]').length].join('\u001f')"""
+
+
+async def human_move(page, x: float, y: float) -> None:
+    """Move the real pointer along a gentle curve, the way a hand does: eases out, a little wobble, never a teleport."""
+    sx, sy = _MOUSE.get(id(page), (random.uniform(80, 400), random.uniform(80, 300)))
+    dist = math.hypot(x - sx, y - sy)
+    steps = max(8, min(36, int(dist / 22)))
+    cx = (sx + x) / 2 + random.uniform(-0.12, 0.12) * dist
+    cy = (sy + y) / 2 + random.uniform(-0.12, 0.12) * dist
+    for i in range(1, steps + 1):
+        t = i / steps
+        k = t * t * (3 - 2 * t)
+        bx = (1 - k) ** 2 * sx + 2 * (1 - k) * k * cx + k * k * x
+        by = (1 - k) ** 2 * sy + 2 * (1 - k) * k * cy + k * k * y
+        wobble = 0 if i == steps else random.uniform(-1.2, 1.2)
+        await page.mouse.move(bx + wobble, by + wobble)
+        await page.wait_for_timeout(random.randint(5, 16))
+    _MOUSE[id(page)] = (x, y)
+
+
+async def clickable_target(loc):
+    """The link or button a person would actually press for this element (a card's title sits inside its link)."""
+    try:
+        handle = await loc.element_handle(timeout=3000)
+        up = await handle.evaluate_handle(CLICKABLE_UP_JS)
+        el = up.as_element()
+        return el or handle
+    except Exception:
+        return None
+
+
+async def human_click(page, target) -> bool:
+    """Real pointer travel, a short hover, then press and release. False if the point is covered by something else."""
+    await target.scroll_into_view_if_needed(timeout=3000)
+    box = await target.bounding_box()
+    if not box or box["width"] < 1 or box["height"] < 1:
+        return False
+    for fx, fy in ((random.uniform(0.3, 0.7), random.uniform(0.35, 0.65)), (0.5, 0.5)):
+        x, y = box["x"] + box["width"] * fx, box["y"] + box["height"] * fy
+        if await target.evaluate(HIT_JS, [x, y]):
+            await human_move(page, x, y)
+            await page.wait_for_timeout(random.randint(70, 190))      # hover: menus and "enable on hover" widgets react
+            await page.mouse.down()
+            try:
+                await page.wait_for_timeout(random.randint(45, 120))
+                await page.mouse.up()
+            except Exception:
+                pass          # the press already happened (the page may have navigated away): it must never be pressed again
+            return True
+    return False
+
+
+async def human_type(page, box, value: str) -> None:
+    """Click into the box, clear it, then type with a person's rhythm (key by key, short pauses)."""
+    if await human_click(page, box):
+        pass
+    else:
+        await box.focus()
+    await page.keyboard.press("ControlOrMeta+A")
+    await page.keyboard.press("Delete")
+    fast = len(value) > 80
+    for i, ch in enumerate(value):
+        await page.keyboard.type(ch)
+        await page.wait_for_timeout(random.randint(6, 22) if fast else random.randint(35, 120) + (150 if ch == " " and i % 7 == 0 else 0))
+
+
+async def wheel_scroll(page, direction: str) -> None:
+    """Scroll with the mouse wheel in a few small steps, with the pointer over the page, like a person reading."""
+    vp = page.viewport_size or {"width": 1280, "height": 800}
+    await human_move(page, vp["width"] * random.uniform(0.45, 0.6), vp["height"] * random.uniform(0.45, 0.6))
+    if direction in ("top", "bottom"):
+        for _ in range(16):
+            before = await page.evaluate("() => [window.scrollY, document.body ? document.body.scrollHeight : 0].join()")
+            await page.mouse.wheel(0, -1800 if direction == "top" else 1800)
+            await page.wait_for_timeout(260)
+            if await page.evaluate("() => [window.scrollY, document.body ? document.body.scrollHeight : 0].join()") == before:
+                break
+        return
+    total = vp["height"] * 0.8 * (-1 if direction == "up" else 1)
+    for _ in range(5):
+        await page.mouse.wheel(0, total / 5)
+        await page.wait_for_timeout(random.randint(60, 140))
+    await page.wait_for_timeout(500)
+
+
+async def signature(page) -> str:
+    try:
+        return await page.evaluate(SIGNATURE_JS)
+    except Exception:
+        return ""
+
+
+def sig_changed(a: str, b: str) -> bool:
+    """Address, title, an opened dialog or menu, the focused control, or a real change in how much text there is."""
+    pa, pb = a.split(""), b.split("")
+    if len(pa) < 5 or len(pb) < 5:
+        return a != b
+    if pa[0] != pb[0] or pa[1] != pb[1] or pa[3:] != pb[3:]:
+        return True
+    la, lb = int(pa[2] or 0), int(pb[2] or 0)
+    return abs(la - lb) > max(80, 0.05 * max(la, lb))
+
+
 OUTWARD_JS = r"""e => {
   const n = ((e.getAttribute('aria-label') || '') + ' ' + (e.innerText || e.value || '') + ' ' + (e.title || '')).toLowerCase();
-  return e.type === 'submit' || /\b(send|submit|post|reply|pay|buy|book|place order|checkout|confirm|delete|remove|apply|register|sign up)\b/.test(n);
+  return e.type === 'submit' || /\b(send|submit|post|reply|pay|buy|book|order|place order|checkout|confirm|delete|remove|apply|register|sign up|add|add to cart|add to bag|add to basket|cart|wishlist|save|update|cancel|subscribe|follow|connect|like|accept|request|invite|share|upload|download|claim|redeem|transfer|withdraw|proceed|publish)\b/.test(n);
 }"""
 
 
 async def recovering_click(page, selector: str):
-    """Click and return the page to keep working on (a new tab if the click opened one)."""
+    """Click like a person and return (the page to keep working on, whether the page visibly changed).
+    A control that sends, submits, pays, books or confirms gets exactly one press; everything else is retried a
+    different way when the first press changed nothing."""
     ctx = page.context
-    before = len(ctx.pages)
+    before_tabs = len(ctx.pages)
     loc = await find(page, selector)
     if loc is None:
         raise LookupError(selector)
-    await loc.scroll_into_view_if_needed(timeout=3000)
-    disabled = await loc.evaluate("e => !!(e.disabled || e.getAttribute('aria-disabled') === 'true' || "
-                                  "/\\bdisabl/i.test(typeof e.className === 'string' ? e.className : ''))")
+    target = await clickable_target(loc) or loc
+    await target.scroll_into_view_if_needed(timeout=3000)
+    check = "e => !!(e.disabled || e.getAttribute('aria-disabled') === 'true' || /\\bdisabl/i.test(typeof e.className === 'string' ? e.className : ''))"
+    disabled = await target.evaluate(check)
     if disabled:
         await page.wait_for_timeout(2500)               # many forms enable it a moment after the last field
-        disabled = await loc.evaluate("e => !!(e.disabled || e.getAttribute('aria-disabled') === 'true' || "
-                                      "/\\bdisabl/i.test(typeof e.className === 'string' ? e.className : ''))")
+        disabled = await target.evaluate(check)
     if disabled:
         raise RuntimeError("DISABLED")
-    # A control that sends, submits, pays, books or confirms is pressed exactly once: a retry could do it twice.
-    outward = await loc.evaluate(OUTWARD_JS)
+    outward = await target.evaluate(OUTWARD_JS)
+    toggle = await target.evaluate("e => !!(e.getAttribute('aria-pressed') || e.getAttribute('aria-checked') || "
+                                   "e.getAttribute('role') === 'switch' || e.getAttribute('role') === 'checkbox' || "
+                                   "(e.tagName === 'INPUT' && /checkbox|radio/.test(e.type)))")
+    is_link = await target.evaluate("e => { const a = e.closest('a[href]'); return !!a && !/^(#|javascript)/i.test(a.getAttribute('href') || ''); }")
+    sig = await signature(page)
+    pressed = False
     try:
-        await loc.click(timeout=6000, trial=outward)    # trial: check it is clickable without pressing it yet
-        if outward:
-            await loc.click(timeout=6000, no_wait_after=True)
+        pressed = await human_click(page, target)
     except Exception:
-        if outward:
-            raise
-        await dismiss_popups(page)                       # usually a popup or sticky header sits on top of it
-        try:
-            await loc.click(timeout=4000)
-        except Exception:
-            await loc.dispatch_event("click")           # still covered: press it directly
-    await page.wait_for_timeout(600)
-    if len(ctx.pages) > before:                         # opened in a new tab: carry on there, like a person would
+        pressed = False
+    if not pressed:
+        if outward:                                      # one press only: hand it to Playwright's own careful click
+            await target.click(timeout=6000)
+        else:
+            await dismiss_popups(page)
+            try:
+                await target.click(timeout=4000)
+            except Exception:
+                await target.dispatch_event("click")
+
+    def opened_tab():
+        return len(ctx.pages) > before_tabs
+
+    async def effect(wait_ms: int) -> bool:
+        """Give the site time to react (slow redirects, new tabs) before deciding the press did nothing. A real link must
+        lead somewhere (a new address or tab); other controls only need the page to visibly change."""
+        waited = 0
+        while True:
+            await page.wait_for_timeout(250)
+            waited += 250
+            if opened_tab():
+                return True
+            now = await signature(page)
+            if is_link:
+                if now.split("\u001f")[0] != sig.split("\u001f")[0]:
+                    return True
+            elif sig_changed(sig, now):
+                return True
+            if waited >= wait_ms:
+                return False
+
+    changed = await effect(5000 if is_link else 2500)
+    if not changed and not outward and not toggle:       # nothing happened: press it another way, once or twice
+        for how in ("native", "dispatch", "href"):
+            try:
+                if how == "native":
+                    await target.click(timeout=4000)
+                elif how == "dispatch":
+                    await target.dispatch_event("click")
+                else:
+                    href = await target.evaluate("e => e.closest('a[href]') ? e.closest('a[href]').href : ''")
+                    if href.startswith("http") and not url_allowed(href):
+                        await page.goto(href, wait_until="domcontentloaded", timeout=30000)
+                    else:
+                        break
+            except Exception:
+                continue
+            changed = await effect(2000)
+            if changed:
+                break
+    if opened_tab():                                    # opened in a new tab: carry on there, like a person would
         new = ctx.pages[-1]
         try:
             await new.wait_for_load_state("domcontentloaded", timeout=20000)
@@ -489,13 +680,13 @@ async def recovering_click(page, selector: str):
             raise PermissionError("the link opened a page on a private or local address, which is blocked; it was closed")
         await new.bring_to_front()
         await settle(new)
-        return new
+        return new, True
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=15000)
     except Exception:
         pass
     await settle(page)
-    return page
+    return page, changed
 
 
 async def goto(page, url: str) -> None:
@@ -566,10 +757,16 @@ async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
         elif a == "read":
             await settle(page)
         elif a == "click":
-            new = await recovering_click(page, sel)
+            new, changed = await recovering_click(page, sel)
             if new is not page:
                 PAGES[id(page)] = new
                 page, extra = new, {"opened_new_tab": True}
+            if not changed:
+                extra = {**extra, "changed": False, "hint": "that click had no visible effect on the page (it was pressed "
+                         "more than one way). Do NOT repeat it: read the page and choose a different element, scroll to "
+                         "find the real link or button, or use the site's own search box."}
+            else:
+                extra = {**extra, "changed": True}
         elif a == "fill":
             box = await find(page, sel)
             if box is None:
@@ -587,13 +784,11 @@ async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
             elif kind == "editable":
                 await type_into(page, sel, value)
             elif kind == "suggest":                              # city / product boxes only react to real keystrokes
-                await box.fill("")
-                await box.press_sequentially(value, delay=60)
+                await human_type(page, box, value)
                 await page.wait_for_timeout(1200)
                 extra = {"hint": "this box suggests matches as you type: read the page and click the right suggestion"}
             elif len(value) <= 300:                              # type it key by key, like a person: many forms
-                await box.fill("")                               # (GSTIN, PAN, PIN code checks) validate on keystrokes
-                await box.press_sequentially(value, delay=25)
+                await human_type(page, box, value)               # (GSTIN, PAN, PIN code checks) validate on keystrokes
                 if (await box.input_value()) != value:
                     await box.fill(value, timeout=10000)
             else:
@@ -610,8 +805,11 @@ async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
                 _LAST_TYPED.pop(id(page), None)          # sent: a second Enter must never send it again
             else:
                 ctx, before = page.context, len(page.context.pages)
+                sig = await signature(page)
                 await page.keyboard.press(key)
-                await page.wait_for_timeout(500)
+                await page.wait_for_timeout(700)
+                if key in ("Enter", "Return"):
+                    extra = {"changed": before != len(ctx.pages) or sig_changed(sig, await signature(page))}
                 if len(ctx.pages) > before:
                     new = ctx.pages[-1]
                     if url_allowed(new.url) and new.url != "about:blank":
@@ -627,10 +825,7 @@ async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
             await settle(page)
         elif a == "scroll":
             v = str(cmd.get("value") or "down").lower()
-            js = {"top": "window.scrollTo(0, 0)", "bottom": "window.scrollTo(0, document.body.scrollHeight)",
-                  "up": "window.scrollBy(0, -window.innerHeight * 0.8)"}.get(v, "window.scrollBy(0, window.innerHeight * 0.8)")
-            await page.evaluate("() => { " + js + " }")
-            await page.wait_for_timeout(700)
+            await wheel_scroll(page, v if v in ("top", "bottom", "up") else "down")
         elif a == "back":
             await page.go_back(wait_until="domcontentloaded")
             await settle(page)
@@ -662,7 +857,11 @@ async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
                 pass
     for banner in ("Smara is working on this page\nStop", "Smara is paused\nResume"):
         text = text.replace(banner, "")
-    out = {"url": page.url, "title": await page.title(), "text": text[:4000], "elements": await page.evaluate(SNAPSHOT_JS)}
+    elements = await page.evaluate(SNAPSHOT_JS)
+    REF_INFO[id(page)] = {str(e["ref"]): {"text": e.get("text", ""), "alt": e.get("alt") or "", "href": e.get("rawhref") or ""}
+                          for e in elements if e.get("ref")}
+    elements = [{k: v for k, v in e.items() if k not in ("alt", "ref", "rawhref")} for e in elements]
+    out = {"url": page.url, "title": await page.title(), "text": text[:4000], "elements": elements}
     if needs := await page.evaluate(SIGNALS_JS):
         out["needs_owner"] = needs
         out["hint"] = ("this page needs the owner (" + ", ".join(needs) + "): never solve a CAPTCHA or type secrets; "
