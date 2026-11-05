@@ -11,6 +11,7 @@ RUN python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml
  && playwright install --with-deps chromium
 
 COPY src ./src
+COPY bridge ./bridge
 COPY migrations ./migrations
 COPY scripts ./scripts
 COPY sandbox ./sandbox
