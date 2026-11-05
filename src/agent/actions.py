@@ -18,7 +18,7 @@ from src.ingest.media import download_media, read_image
 from src.ingest.sheet_mapper import map_sheet
 from src.loop.outbound import record
 from src.loop.owner_channel import send_to_owner
-from src.loop.whatsapp import from_shop, owner_approval_card, template_message, text_message
+from src.loop.whatsapp import from_shop, reminder_params, owner_approval_card, template_message, text_message
 
 WINDOW = timedelta(hours=24)
 
@@ -207,10 +207,9 @@ async def deliver_message(app, ctx: SessionCtx, tenant, args: dict) -> dict:
     if in_window:
         payload, via = text_message(p["whatsapp_phone"], from_shop(tenant, str(args["text"]))), "text"
     elif o and s.wa_reminder_template:
-        from src.loop.upi import rupees
         payload, via = template_message(p["whatsapp_phone"], s.wa_reminder_template, s.wa_reminder_lang,
-                                        [p["canonical_name"], o["invoice_ref"], rupees(o["amount_paise"]),
-                                         f"{o['due_date']:%d %b}"]), "approved template (outside 24h window)"
+                                        reminder_params(s, {**o, "canonical_name": p["canonical_name"]}, tenant)), \
+            "approved template (outside 24h window)"
     else:
         return {"sent": False, "error": "the customer has not messaged in 24 hours; WhatsApp only allows an "
                                         "approved template, and none is configured for this case"}

@@ -8,7 +8,7 @@ from src import clock, tenants
 from src.bridge.outbox import enqueue_standalone
 from src.loop.outbound import record
 from src.loop.upi import pay_url, rupees, upi_text
-from src.loop.whatsapp import from_shop, template_message, text_message
+from src.loop.whatsapp import from_shop, reminder_params, template_message, text_message
 
 log = logging.getLogger(__name__)
 MAX_ATTEMPTS = 4
@@ -106,7 +106,7 @@ def _debtor_payload(o: dict, tenant, settings, now: datetime) -> dict:
     if (last and now - last < WINDOW) or not settings.wa_reminder_template:
         return text_message(o["whatsapp_phone"], from_shop(tenant, draft_reminder(o, tenant.upi, settings.public_base_url)))
     return template_message(o["whatsapp_phone"], settings.wa_reminder_template, settings.wa_reminder_lang,
-                            [o["canonical_name"], o["invoice_ref"], rupees(o["amount_paise"]), f"{o['due_date']:%d %b}"])
+                            reminder_params(settings, o, tenant))
 
 
 async def decide_reminder(app, tenant_id: str, obligation_id: str, action: str, now: datetime) -> str | None:

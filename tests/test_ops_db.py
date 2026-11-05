@@ -192,3 +192,14 @@ async def test_healthz_flags_dead_outbox(app):
     r = Response()
     out = await healthz(r)
     assert out["ok"] is False and out["outbox"]["dead"] == 1 and r.status_code == 503
+
+
+def test_reminder_template_variables_follow_the_configured_order():
+    from types import SimpleNamespace
+    from src.loop.whatsapp import reminder_params
+    o = {"canonical_name": "Ravi", "invoice_ref": "INV-1", "amount_paise": 1_250_000, "due_date": NOW.date()}
+    shop = SimpleNamespace(name="Sharma Traders")
+    old = Settings(wa_reminder_template="t")
+    assert reminder_params(old, o, shop)[:3] == ["Ravi", "INV-1", "₹12,500"]                    # v1/v2 order unchanged
+    v3 = Settings(wa_reminder_template="smara_account_update", wa_reminder_params="customer,shop,invoice,amount,due")
+    assert reminder_params(v3, o, shop)[:3] == ["Ravi", "Sharma Traders", "INV-1"] and len(reminder_params(v3, o, shop)) == 5

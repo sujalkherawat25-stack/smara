@@ -38,6 +38,15 @@ def from_shop(tenant, text: str) -> str:
     return text if text.lstrip().lstrip("*").lower().startswith(tenant.name.lower()) else f"*{tenant.name}*\n{text}"
 
 
+def reminder_params(settings, o: dict, tenant) -> list[str]:
+    """Template variables in the order the approved template expects (WA_REMINDER_PARAMS)."""
+    from src.loop.upi import rupees
+    values = {"customer": o["canonical_name"], "shop": getattr(tenant, "name", "") or "your supplier",
+              "invoice": o["invoice_ref"], "amount": rupees(o["amount_paise"]), "due": f"{o['due_date']:%d %b}"}
+    order = [k.strip() for k in str(getattr(settings, "wa_reminder_params", "") or "customer,invoice,amount,due").split(",")]
+    return [values[k] for k in order if k in values]
+
+
 def shop_choice_message(to: str, options: list[dict], routing_id: str) -> dict:
     """Ask a customer who deals with several Smara shops which one their message is about."""
     buttons = [{"type": "reply", "reply": {"id": f"shop:{o['tenant_id']}:{routing_id}", "title": o["name"][:20]}}
