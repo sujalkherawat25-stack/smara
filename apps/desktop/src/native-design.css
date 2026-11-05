@@ -126,3 +126,5 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline
 .browser-step-error { background: #271a18; border-color: #55302b; }
 @media (max-width: 1100px) { .browser-grid { grid-template-columns: 1fr; } .native-layout aside { width: 224px; } }
 @media (max-width: 900px) { .native-item.user { max-width: 100%; } }
+.browser-step > div { min-width: 0; }
+.browser-step strong { overflow-wrap: anywhere; }
