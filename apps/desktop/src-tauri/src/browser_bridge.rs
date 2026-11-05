@@ -85,13 +85,25 @@ fn helper_pid() -> Option<u32> {
         Command::new("kill").args(["-0", &pid.to_string()]).status().ok().filter(|s| s.success()).map(|_| pid)
     }
 }
-fn startup_registered() -> bool {
-    if !cfg!(windows) { return true; }
+/// The Windows startup command for the helper, or None if it is not registered.
+fn startup_command() -> Option<String> {
+    if !cfg!(windows) { return None; }
     let mut command = Command::new("reg");
-    command.args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", RUN_VALUE]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    command.args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", RUN_VALUE]).stdin(Stdio::null()).stderr(Stdio::null());
     hide(&mut command);
-    command.status().map(|s| s.success()).unwrap_or(false)
+    let output = command.output().ok().filter(|o| o.status.success())?;
+    parse_run_value(&String::from_utf8_lossy(&output.stdout))
 }
+/// Data of `reg query` output: `    Name    REG_SZ    <data>`.
+pub fn parse_run_value(output: &str) -> Option<String> {
+    output.lines().find_map(|line| line.split_once("REG_SZ").map(|(_, data)| data.trim().to_owned())).filter(|v| !v.is_empty())
+}
+/// True when the startup entry already launches this exact script (case-insensitive, slashes normalised).
+pub fn startup_uses(command: &str, script: &std::path::Path) -> bool {
+    let norm = |t: &str| t.replace('/', "\\").to_ascii_lowercase();
+    norm(command).contains(&norm(&script.to_string_lossy()))
+}
+fn startup_registered() -> bool { startup_command().is_some() || !cfg!(windows) }
 fn snapshot() -> Value {
     let config = read_config();
     let paired = config.as_ref().map(|c| c.2).unwrap_or(false);
@@ -127,7 +139,9 @@ fn components() -> Value {
 /// Start the helper if this PC is paired and it is not running; make it start with Windows. Safe to call repeatedly.
 fn ensure_inner() -> Result<(), String> {
     if !snapshot()["paired"].as_bool().unwrap_or(false) { return Ok(()); }
-    if !startup_registered() { helper(&["install-startup"])?; }        // also starts it
+    // One canonical copy: the startup entry must launch the bundled helper, so a reboot never brings back an older one.
+    let current = bridge_script().map(|script| startup_command().map(|command| startup_uses(&command, &script)).unwrap_or(false)).unwrap_or(true);
+    if !current { helper(&["install-startup"])?; }        // rewrites the entry to the bundled script; starts it only if not running
     else if helper_pid().is_none() { helper(&["ensure"])?; }
     Ok(())
 }
@@ -231,6 +245,15 @@ mod tests {
         assert_eq!(status["last_step"], "navigate on a.com");
         assert!(status.get("token").is_none() && status.get("pid").is_none());
         assert!(parse_status("garbage").is_null());
+    }
+    #[test]
+    fn startup_entry_is_compared_with_the_bundled_script() {
+        let out = "\nHKEY_CURRENT_USER\\Software\\X\\Run\n    Smara Browser Bridge    REG_SZ    \"C:\\Python314\\pythonw.exe\" \"C:\\Users\\sujal\\smara-munim\\bridge\\munim_bridge.py\" \"run\"\n";
+        let cmd = parse_run_value(out).unwrap();
+        assert!(startup_uses(&cmd, std::path::Path::new(r"C:\Users\sujal\smara-munim\bridge\munim_bridge.py")));
+        assert!(!startup_uses(&cmd, std::path::Path::new(r"C:\Users\sujal\AppData\Local\Smara Desktop\resources\browser\munim_bridge.py")));
+        assert!(startup_uses(&cmd.to_uppercase(), std::path::Path::new("c:/users/sujal/smara-munim/bridge/munim_bridge.py")));
+        assert_eq!(parse_run_value("ERROR: not found"), None);
     }
     #[test]
     fn log_tail_skips_blank_lines() {
