@@ -1,6 +1,6 @@
 """Owned Playwright browser contexts with observation-bound actions."""
 from __future__ import annotations
-import hashlib, shutil, time, uuid
+import hashlib, shutil, sys, time, uuid
 from dataclasses import dataclass,field
 from pathlib import Path
 from typing import Any
@@ -14,6 +14,14 @@ class ManagedBrowser:
         self.root=Path(artifact_root); self.root.mkdir(parents=True,exist_ok=True); self.executable=executable_path or self._find(); self.headless=headless; self.runtime=None; self.browser=None; self.sessions={}
     @staticmethod
     def _find():
+        if sys.platform.startswith("linux"):
+            # System Chrome on Linux runners has crashed on popup tabs; the Playwright build is the tested one.
+            try:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as runtime:
+                    bundled=runtime.chromium.executable_path
+                    if bundled and Path(bundled).is_file():return str(Path(bundled))
+            except Exception:pass
         candidates=[shutil.which("chrome"),shutil.which("chromium"),shutil.which("chromium-browser"),shutil.which("google-chrome"),shutil.which("msedge"),r"C:\Program Files\Google\Chrome\Application\chrome.exe",r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"]
         installed=next((str(p) for p in candidates if p and Path(p).is_file()),None)
         if installed:
@@ -34,7 +42,7 @@ class ManagedBrowser:
     def start(self):
         if not self.executable:raise BrowserUnavailable("no supported Chromium executable")
         from playwright.sync_api import sync_playwright
-        self.runtime=sync_playwright().start(); self.browser=self.runtime.chromium.launch(headless=self.headless,executable_path=self.executable)
+        self.runtime=sync_playwright().start(); self.browser=self.runtime.chromium.launch(headless=self.headless,executable_path=self.executable,args=["--disable-dev-shm-usage","--disable-gpu"])
     def create(self,context_options=None,configure_context=None):
         if self.browser is None:self.start()
         ident=f"browser_{uuid.uuid4().hex[:20]}"; context=self.browser.new_context(**(context_options or {"accept_downloads":True}))
@@ -53,6 +61,8 @@ class ManagedBrowser:
         session=self.sessions[session_id]; self.page(session).goto(url,wait_until="domcontentloaded"); session.generation+=1; return self.observe(session_id)
     def observe(self,session_id):
         session=self.sessions[session_id]; page=self.page(session); session.generation+=1; refs={}; ref_index=0
+        try:page.wait_for_load_state("domcontentloaded",timeout=5000)
+        except Exception:pass
         for frame_index,frame in enumerate(page.frames):
             elements=frame.locator("a,button,input,select,textarea,[role]")
             for index in range(min(elements.count(),200-len(refs))):
