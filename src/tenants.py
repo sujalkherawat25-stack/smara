@@ -5,7 +5,7 @@ from datetime import datetime
 from psycopg_pool import AsyncConnectionPool
 
 _COLS = ("id, name, owner_phone, upi_vpa, upi_name, wa_phone_number_id, owner_last_inbound_at, "
-         "owner_nudged_at, telegram_chat_id, owner_last_channel")
+         "owner_nudged_at, telegram_chat_id, owner_last_channel, limits_exempt")
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,7 @@ class Tenant:
     owner_nudged_at: datetime | None = None
     telegram_chat_id: int | None = None
     owner_last_channel: str | None = None
+    limits_exempt: bool = False
 
     @property
     def upi(self) -> dict | None:

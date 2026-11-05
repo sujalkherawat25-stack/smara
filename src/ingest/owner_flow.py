@@ -80,6 +80,19 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         from src.bridge.device import online_device
         d = await online_device(app.state.pool, tenant_id)
         return f"Your PC browser is online ({d['name']})." if d else "Your PC browser is not connected. Send 'pair browser' to connect it; until then I use the server browser."
+    if cmd in ("delete my data", "mera data delete karo", "data delete karo", "delete my account"):
+        async with app.state.pool.connection() as conn:
+            open_ = await (await conn.execute("SELECT 1 FROM data_requests WHERE tenant_id = %s AND kind = 'delete' AND status = 'OPEN'",
+                                              (tenant_id,))).fetchone()
+            if not open_:
+                await conn.execute("INSERT INTO data_requests (tenant_id, kind) VALUES (%s, 'delete')", (tenant_id,))
+        return ("Aapka data delete karne ka request mil gaya. 7 din ke andar aapka shop, customers, baaki rakam aur messages "
+                "hata diye jayenge, aur hum yahin bata denge. Rokna ho to 'cancel delete' likhiye.")
+    if cmd in ("cancel delete", "delete cancel"):
+        async with app.state.pool.connection() as conn:
+            n = (await conn.execute("DELETE FROM data_requests WHERE tenant_id = %s AND kind = 'delete' AND status = 'OPEN'",
+                                    (tenant_id,))).rowcount
+        return "Delete request cancel kar diya." if n else "Koi delete request khula nahi tha."
     if cmd in ("connect whatsapp", "whatsapp connect", "connect my whatsapp", "apna number jodo", "number connect karo"):
         from src.ingest.connect import configured, new_link
         if not configured(app.state.settings):

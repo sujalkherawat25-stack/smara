@@ -8,6 +8,7 @@ from src.bridge.outbox import stats as outbox_stats
 from src.config import load_settings
 from src.db import migrate, open_pool
 from src.ingest.connect import router as connect_router
+from src.ingest.legal import router as legal_router
 from src.ingest.connect import token_for_number
 from src.ingest.telegram import TelegramClient
 from src.ingest.telegram import router as telegram_router
@@ -63,6 +64,7 @@ app.include_router(router)
 app.include_router(device_router)
 app.include_router(pay_router)
 app.include_router(connect_router)
+app.include_router(legal_router)
 app.include_router(telegram_router)
 
 
