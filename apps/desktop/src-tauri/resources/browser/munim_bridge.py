@@ -524,8 +524,11 @@ async def human_click(page, target) -> bool:
             await human_move(page, x, y)
             await page.wait_for_timeout(random.randint(70, 190))      # hover: menus and "enable on hover" widgets react
             await page.mouse.down()
-            await page.wait_for_timeout(random.randint(45, 120))
-            await page.mouse.up()
+            try:
+                await page.wait_for_timeout(random.randint(45, 120))
+                await page.mouse.up()
+            except Exception:
+                pass          # the press already happened (the page may have navigated away): it must never be pressed again
             return True
     return False
 
