@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from src.bridge.coordinator import decide_adjustment
 from src.ingest.box_commands import decide_browser_task, handle_text
 from src.ingest.importer import import_rows
-from src.ingest.media import clean_phone_caption, download_media, read_image, transcribe
+from src.ingest.media import clean_phone_caption, download_media, media_token, read_image, transcribe
 from src.ingest.payload import InboundMessage
 from src.ingest.telegram import link_message, unlink
 from src.ingest.sheet_mapper import SheetRow, map_sheet, parse_amount_paise, parse_date, parse_phone
@@ -80,6 +80,14 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         from src.bridge.device import online_device
         d = await online_device(app.state.pool, tenant_id)
         return f"Your PC browser is online ({d['name']})." if d else "Your PC browser is not connected. Send 'pair browser' to connect it; until then I use the server browser."
+    if cmd in ("connect whatsapp", "whatsapp connect", "connect my whatsapp", "apna number jodo", "number connect karo"):
+        from src.ingest.connect import configured, new_link
+        if not configured(app.state.settings):
+            return ("Apna khud ka WhatsApp number jodna abhi chalu nahi hua hai (Meta ki manzoori baaki hai). "
+                    "Jaise hi chalu hoga, main aapko bataunga.")
+        link = await new_link(app.state.pool, app.state.settings, tenant_id)
+        return ("Apna WhatsApp Business number Smara se jodne ke liye ye link kholiye (24 ghante, ek baar):\n"
+                f"{link}\n\nAapke customers ko message aapke apne number se jayenge. Kuch bhi bina aapke tap ke nahi jata.")
     if msg.text.strip().lower() == "telegram":
         return await link_message(app, tenant_id)
     if msg.text.strip().lower() == "telegram off":
@@ -131,7 +139,7 @@ async def fetch_media(app, msg: InboundMessage) -> tuple[bytes, str]:
     if msg.channel == "telegram":
         mime = "image/jpeg" if msg.kind == "image" else "application/octet-stream"
         return await app.state.tg.download(msg.media_id), mime
-    return await download_media(app.state.settings.wa_access_token, msg.media_id)
+    return await download_media(await media_token(app, msg.number_id), msg.media_id)
 
 
 async def _sheet(app, tenant_id: str, msg: InboundMessage) -> str:

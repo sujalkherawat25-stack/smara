@@ -7,6 +7,8 @@ from src.bridge.continuum import ContinuumClient
 from src.bridge.outbox import stats as outbox_stats
 from src.config import load_settings
 from src.db import migrate, open_pool
+from src.ingest.connect import router as connect_router
+from src.ingest.connect import token_for_number
 from src.ingest.telegram import TelegramClient
 from src.ingest.telegram import router as telegram_router
 from src.ingest.webhook import router
@@ -27,7 +29,8 @@ async def lifespan(app: FastAPI):
     app.state.pool = await open_pool(s.database_url)
     await migrate(app.state.pool)
     app.state.continuum = ContinuumClient(s.continuum_url, s.continuum_api_key)
-    app.state.wa = WhatsAppClient(s.wa_phone_number_id, s.wa_access_token)
+    app.state.wa = WhatsAppClient(s.wa_phone_number_id, s.wa_access_token,
+                                  token_for=lambda n: token_for_number(app.state.pool, n))   # shops' own numbers
     app.state.llm = LLM(s.llm_base_url, s.llm_api_key, s.llm_model, s.llm_reasoning_model,
                         agent_model=s.llm_agent_model, max_concurrency=s.llm_max_concurrency,
                         agent_rpm=s.llm_agent_rpm, fallback_model=s.llm_fallback_model)
@@ -59,6 +62,7 @@ app = FastAPI(title="Smara Munim", lifespan=lifespan)
 app.include_router(router)
 app.include_router(device_router)
 app.include_router(pay_router)
+app.include_router(connect_router)
 app.include_router(telegram_router)
 
 

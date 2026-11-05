@@ -96,7 +96,7 @@ async def test_shared_number_ambiguity_asks_which_shop_and_dedicated_number_rout
     assert ask["to"] == "919876543210" and [x["reply"]["title"] for x in ask["interactive"]["action"]["buttons"]] == ["alpha", "beta"]
     await dispatch(app, msg("w4", number_id="N-B"))  # arrives on beta's number
     assert (await one(app, "SELECT count(*) n FROM proposed_adjustments"))["n"] == 1
-    assert app.state.wa.sent[-1]["to"] == b.owner_phone and app.state.wa.numbers[-1] == "N-B"
+    assert app.state.wa.sent[-1]["to"] == b.owner_phone and app.state.wa.numbers[-1] is None   # the owner hears from Smara's number
     row = await one(app, "SELECT o.tenant_id FROM proposed_adjustments a JOIN obligations o ON o.id = a.obligation_id")
     assert str(row["tenant_id"]) == b.id
 

@@ -71,7 +71,7 @@ async def send_to_owner(app, tenant, payload: dict, *, kind: str, obligation_id=
         await nudge(app, tenant)
         return "held"
     msg_id = await app.state.wa.send({**payload, "to": tenant.owner_phone},
-                                     number_id=number_id or tenant.wa_phone_number_id)
+                                     number_id=number_id)   # owners hear from Smara's own number, never from their shop's
     if msg_id:
         await record(pool, msg_id, tenant_id=tenant.id, kind=kind, to_phone=tenant.owner_phone,
                      obligation_id=obligation_id, adjustment_id=adjustment_id, agent_session_id=agent_session_id)
@@ -87,9 +87,9 @@ async def send_document_to_owner(app, tenant, data: bytes, filename: str, mime: 
         return "telegram"
     if not window_open(tenant, datetime.now(timezone.utc)):
         return "window_closed"
-    media_id = await app.state.wa.upload_media(data, mime, filename, number_id=tenant.wa_phone_number_id)
+    media_id = await app.state.wa.upload_media(data, mime, filename, number_id=None)
     msg_id = await app.state.wa.send(document_message(tenant.owner_phone, media_id, filename, caption),
-                                     number_id=tenant.wa_phone_number_id)
+                                     number_id=None)
     if msg_id:
         await record(app.state.pool, msg_id, tenant_id=tenant.id, kind="owner_document", to_phone=tenant.owner_phone)
     return "whatsapp"
@@ -133,7 +133,7 @@ async def nudge(app, tenant) -> None:
         await conn.execute("UPDATE tenants SET owner_nudged_at = now() WHERE id = %s", (tenant.id,))
     s = app.state.settings
     await app.state.wa.send(template_message(tenant.owner_phone, s.wa_owner_template, s.wa_reminder_lang, [str(max(n, 1))]),
-                            number_id=tenant.wa_phone_number_id)
+                            number_id=None)
 
 
 async def resend_undelivered(app, tenant, channel: str) -> int:

@@ -9,7 +9,7 @@ from src.bridge.coordinator import submit_debtor_claim
 from src.bridge.outbox import enqueue_standalone
 from src.agent_loop import start_session
 from src.ingest.extract import extract_claim
-from src.ingest.media import download_media, ocr_to_evidence, read_image, transcribe
+from src.ingest.media import download_media, media_token, ocr_to_evidence, read_image, transcribe
 from src.ingest.payload import InboundMessage
 from src.loop.whatsapp import shop_choice_message, text_message
 from src.loop.upi import rupees
@@ -26,11 +26,11 @@ async def _evidence(app, msg: InboundMessage) -> str:
     text, s = msg.evidence_text, app.state.settings
     try:
         if msg.kind == "audio" and msg.media_id:
-            audio, mime = await download_media(s.wa_access_token, msg.media_id)
+            audio, mime = await download_media(await media_token(app, msg.number_id), msg.media_id)
             if spoken := await transcribe(s.sarvam_api_key, audio, mime):
                 return f"{text} Transcript: {spoken}"
         elif msg.kind == "image" and msg.media_id:
-            img, mime = await download_media(s.wa_access_token, msg.media_id)
+            img, mime = await download_media(await media_token(app, msg.number_id), msg.media_id)
             if extra := ocr_to_evidence(await read_image(app.state.llm, img, mime)):
                 return f"{text} {extra}"
     except Exception:

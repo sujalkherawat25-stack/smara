@@ -64,17 +64,27 @@ class WhatsAppClient:
     """Sends payloads. Owner-bound messages only in Phase 1; debtor-bound
     sends must go through WAITING_OWNER_APPROVAL (Phase 2)."""
 
-    def __init__(self, phone_number_id: str, access_token: str, client: httpx.AsyncClient | None = None):
+    def __init__(self, phone_number_id: str, access_token: str, client: httpx.AsyncClient | None = None,
+                 token_for=None):
         self._default_number = phone_number_id
+        self._token_for = token_for          # async (number_id) -> the shop's own token, or None to use ours
         self._http = client or httpx.AsyncClient(
             headers={"Authorization": f"Bearer {access_token}"}, timeout=15
         )
+
+    async def _headers(self, number_id: str | None) -> dict:
+        if number_id and number_id != self._default_number and self._token_for:
+            tok = await self._token_for(number_id)
+            if tok:
+                return {"Authorization": f"Bearer {tok}"}
+        return {}
 
     async def send(self, payload: dict, *, number_id: str | None = None) -> str | None:
         """`number_id` picks the sending WhatsApp number (per-tenant). Returns Meta's message id.
 
         A 200 only means Meta accepted it; delivery failures arrive later as status receipts."""
-        resp = await self._http.post(f"{GRAPH}/{number_id or self._default_number}/messages", json=payload)
+        resp = await self._http.post(f"{GRAPH}/{number_id or self._default_number}/messages", json=payload,
+                                     headers=await self._headers(number_id))
         resp.raise_for_status()
         return ((resp.json().get("messages") or [{}])[0]).get("id")
 
@@ -82,7 +92,7 @@ class WhatsAppClient:
         """Upload a file to WhatsApp and return its media id (used to send it as a document)."""
         resp = await self._http.post(f"{GRAPH}/{number_id or self._default_number}/media",
                                      data={"messaging_product": "whatsapp", "type": mime},
-                                     files={"file": (filename, data, mime)})
+                                     files={"file": (filename, data, mime)}, headers=await self._headers(number_id))
         resp.raise_for_status()
         return resp.json()["id"]
 

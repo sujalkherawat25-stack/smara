@@ -15,6 +15,8 @@ class Settings:
     continuum_api_key: str = ""
     wa_verify_token: str = ""
     wa_app_secret: str = ""
+    meta_app_id: str = ""            # Meta app used for Embedded Signup (shops connecting their own numbers)
+    meta_es_config_id: str = ""      # Embedded Signup configuration id
     wa_access_token: str = ""
     wa_phone_number_id: str = ""
     # Approved Meta template for reminders sent outside the 24h reply window ("" = text only)
@@ -58,6 +60,8 @@ def load_settings() -> Settings:
         continuum_api_key=env.get("CONTINUUM_API_KEY", ""),
         wa_verify_token=env.get("WA_VERIFY_TOKEN", ""),
         wa_app_secret=env.get("WA_APP_SECRET", ""),
+        meta_app_id=env.get("META_APP_ID", ""),
+        meta_es_config_id=env.get("META_ES_CONFIG_ID", ""),
         wa_access_token=env.get("WA_ACCESS_TOKEN", ""),
         wa_phone_number_id=env.get("WA_PHONE_NUMBER_ID", ""),
         wa_reminder_template=env.get("WA_REMINDER_TEMPLATE", ""),

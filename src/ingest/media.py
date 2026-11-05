@@ -21,6 +21,15 @@ BILL_PROMPT = (
 )
 
 
+async def media_token(app, number_id: str) -> str:
+    """The token that can read media sent to this number: the shop's own for its own number, else Smara's."""
+    from src.ingest.connect import token_for_number
+    if number_id and number_id != app.state.settings.wa_phone_number_id:
+        if tok := await token_for_number(app.state.pool, number_id):
+            return tok
+    return app.state.settings.wa_access_token
+
+
 async def download_media(access_token: str, media_id: str, client: httpx.AsyncClient | None = None) -> tuple[bytes, str]:
     http = client or httpx.AsyncClient(timeout=30, headers={"Authorization": f"Bearer {access_token}"})
     try:
