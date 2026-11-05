@@ -29,7 +29,7 @@
     "active": true,
     "targets": "all",
     "icon": ["icons/icon.ico", "icons/icon.icns", "icons/icon.png"],
-    "resources": ["resources/smara-desktop.exe", "resources/LIVE_WEB_ACCEPTANCE_V5*.json", "resources/native/", "resources/browser/"],
+    "resources": ["resources/smara-desktop.exe", "resources/_internal/", "resources/LIVE_WEB_ACCEPTANCE_V5*.json", "resources/native/", "resources/browser/"],
     "category": "Utility",
     "shortDescription": "A private, approval-first desktop companion for Smara",
     "longDescription": "Smara Desktop runs its source-owned native agent harness with your selected model provider, separate local projects, saved sessions, explicit approvals and workspace sandboxing. Native settings manage DPAPI-protected credentials. Public research, local-memory readers, isolated workers and public DOM browsing are opt-in. Historical data remains untouched; old execution engines are not included.",

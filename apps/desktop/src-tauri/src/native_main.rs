@@ -63,10 +63,10 @@ fn management(request: Value) -> Result<Value, String> {
         output.take(8_000_001).read_to_end(&mut bytes).map(|_| bytes)
     });
     let mut finished = false;
-    let polls = if request["operation"] == "outreach" { 900 } else { 300 };
+    let polls = if request["operation"] == "outreach" { 4500 } else { 1500 };   // checked every 20 ms: the same 90 s / 30 s limits, without up to 100 ms of idle wait per call
     for _ in 0..polls {
         if process.try_wait().map_err(|_| "Cannot inspect settings companion")?.is_some() { finished = true; break; }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
     if !finished {
         let _ = process.kill(); let _ = process.wait();
