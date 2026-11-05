@@ -20,6 +20,7 @@ import ipaddress
 import json
 import os
 import platform
+import re
 import socket
 import sys
 from pathlib import Path
@@ -202,6 +203,18 @@ async def type_into(page, selector: str, value: str) -> None:
         await box.fill(value, timeout=10000)
 
 
+async def is_message_box(page, selector: str) -> bool:
+    """A box whose text is sent (chat, comment, post editor), as opposed to a search field, which keeps its text after
+    Enter and must not be treated as 'not sent'."""
+    if re.search(r"search|query|\bq\b|find|filter", selector, re.I):
+        return False
+    try:
+        return bool(await page.locator(selector).first.evaluate(
+            "e => e.isContentEditable || e.tagName === 'TEXTAREA' || e.getAttribute('role') === 'textbox'", timeout=3000))
+    except Exception:
+        return False
+
+
 async def send_message(page, selector: str) -> dict:
     """Enter right after typing into a message box. Many sites send on Enter; others (LinkedIn by default) add a new
     line and need their Send button. Do whichever works, then CHECK the box emptied, so 'sent' is never a guess."""
@@ -270,7 +283,7 @@ async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
     elif a == "press":
         key = str(cmd.get("value") or "Enter")
         target = _LAST_TYPED.get(id(page))
-        if key == "Enter" and target:
+        if key == "Enter" and target and await is_message_box(page, target):
             sent = await send_message(page, target)
             if sent.get("error"):
                 return sent
