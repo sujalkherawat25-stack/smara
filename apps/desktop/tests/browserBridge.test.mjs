@@ -43,6 +43,9 @@ test("per-step log lines read like sentences and never show typed values", () =>
   const f = line => v.friendlyLog(v.parseLog([`2026-11-05 02:00:00 ${line}`])[0].message);
   assert.equal(f("step navigate on example.com: ok (Example Domain)"), "Opened example.com — Example Domain");
   assert.equal(f("step click #buy on shop.example: ok (Cart)"), "Clicked #buy on shop.example — Cart");
+  assert.equal(f('step click [31] button "Add to cart" on www.shop.example: ok (Earphones)'), 'Clicked the "Add to cart" button on www.shop.example — Earphones');
+  assert.equal(f('step fill [4] textbox "Turn on alerts for" on shop.example: ok (T)'), 'Typed into the "Turn on alerts for" box on shop.example — T');
+  assert.equal(f('step hover [9] link "Electronics" on shop.example: ok (Home)'), 'Pointed at the "Electronics" link on shop.example — Home');
   assert.equal(f("step fill #q on shop.example: ok (Search)"), "Typed into #q on shop.example — Search");
   assert.match(f("step click #buy on shop.example: error: Timeout 10000ms exceeded"), /^Clicked #buy on shop\.example failed: Timeout/);
   assert.equal(f("step read refused: paused"), "A step was refused because Smara is paused");
