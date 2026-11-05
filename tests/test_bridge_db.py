@@ -498,3 +498,22 @@ def test_bridge_handles_app_like_pages_lists_dynamic_ids_and_message_boxes(tmp_p
     assert out["no_dynamic_ids"] and out["manvi_selector"].startswith("text=")
     assert out["opened"] == "Chat with Manvi Jain" and out["fallback_click_ok"]
     assert out["typed"] == "hi manvi" and out["banner_not_in_text"]
+
+
+async def test_pressing_enter_in_a_message_box_needs_the_owners_tap_but_search_boxes_do_not(env):
+    br = env.app.state.browsers = DeviceFakeBrowsers()
+    env.app.state.llm = ScriptLLM(
+        call("browser_step", action="navigate", url="https://www.linkedin.com/messaging/"),
+        call("browser_step", action="fill", selector="input[aria-label='Search messages']", value="Manvi Jain"),
+        call("browser_step", action="press", value="Enter"),                           # search: runs by itself
+        call("browser_step", action="click", selector="text=Manvi Jain"),
+        call("browser_step", action="fill", selector='div[role="textbox"]', value="hi manvi, this is Smara"),
+        call("browser_step", action="press", value="Enter"),                           # sends a message: waits
+        say("Sent."))
+    await dispatch(env.app, owner("lk1", "LinkedIn pe Manvi ko hi bolo"))
+    assert [s["action"] for s in br.steps] == ["navigate", "fill", "press", "click", "fill"]
+    card = env.app.state.wa.sent[-1]["interactive"]["body"]["text"]
+    assert "Send this on" in card and "hi manvi, this is Smara" in card                 # the owner sees the exact text
+    sid = (await one(env.pool, "select id from agent_sessions where status = 'WAITING_APPROVAL'"))["id"]
+    await dispatch(env.app, owner("lk2", button=f"ag_ok:{sid}"))
+    assert [s["action"] for s in br.steps][-1] == "press"                               # sent only after the tap

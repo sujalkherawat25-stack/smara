@@ -100,6 +100,8 @@ async def snapshot(page) -> dict:
 
 async def handle(page, cmd: dict) -> dict:
     a = cmd.get("action")
+    if isinstance(cmd.get("selector"), str):               # models sometimes send JSON-escaped quotes: div[role=\\"x\\"]
+        cmd = {**cmd, "selector": cmd["selector"].replace('\\"', '"').replace("\\'", "'").strip()}
     if a == "navigate":
         await check_url(str(cmd.get("url", "")))
         await page.goto(cmd["url"], wait_until="domcontentloaded")

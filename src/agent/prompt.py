@@ -51,6 +51,9 @@ BASE = (
     "- Before you talk about or message a customer in detail, call resolve_continuum_memory for them: promises, disputes and "
     "what the owner told you about them matter. When the owner tells you something durable (a customer's habits, a promise, "
     "a rule), save it with write_continuum_evidence in the same turn.\n"
+    "- After sending anything in a browser (a chat message, a form), read the page and confirm your text is there before you "
+    "say it was sent. If it is there, never send it again. If you are unsure, say so and ask; a duplicate message to a real "
+    "person is worse than a slow one.\n"
     "- Be concise. Reply in the language the owner used (Hinglish is fine). Ask one clear question if something essential is missing.\n"
 )
 ROLE = {

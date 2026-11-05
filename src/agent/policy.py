@@ -34,6 +34,8 @@ class SessionCtx:
     host: str = ""                 # the site the browser is on right now
     on_device: bool = False         # the browser is the owner's own PC, in front of them with a Stop button
     page: str = ""                 # lower-case url + title of the current page
+    last_fill: str = ""            # selector of the last box the agent typed into in this conversation
+    last_fill_value: str = ""      # and what it typed there
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,17 @@ OUTWARD_STEP = re.compile(
     r"upi|net ?banking|publish|post)\b", re.I)
 # Pages where any click or typing waits for the owner: signing in, paying, one-time codes.
 SENSITIVE_PAGE = re.compile(r"login|log-in|signin|sign-in|sign in|checkout|payment|/pay|otp|verify|security|password|captcha", re.I)
+
+
+SEARCH_BOX = re.compile(r"search|query|\bq\b|find|filter|lookup|khoj", re.I)
+
+
+def submits_typed_text(args: dict, ctx) -> bool:
+    """Pressing Enter right after typing into anything that is not a search box sends what was typed (a chat message,
+    a comment, a form). That is outward, exactly like clicking Send."""
+    if args.get("action") != "press" or str(args.get("value", "")).lower() not in ("enter", "return", "numpadenter"):
+        return False
+    return bool(ctx.last_fill) and not SEARCH_BOX.search(ctx.last_fill)
 
 
 def sensitive_step(args: dict) -> bool:
@@ -112,7 +125,7 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
         return Decision("deny", tier, "only a conversation with the owner can hand a step to them")
     if tier in ("T0", "T1"):
         return Decision("allow", tier)
-    if name == "browser_step" and ctx.trust == "TRUSTED" and not sensitive_step(args):
+    if name == "browser_step" and ctx.trust == "TRUSTED" and not sensitive_step(args) and not submits_typed_text(args, ctx):
         # On the owner's own PC (visible, with a Stop button) the agent acts freely, except on pages where the owner must
         # act (sign-in, payment, one-time codes). On the server browser the owner approves, or allows a site for a while.
         on_page = bool(SENSITIVE_PAGE.search(ctx.page))
@@ -123,7 +136,7 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
     return Decision("approve", tier, card=approval_text(name, args))
 
 
-def approval_text(name: str, args: dict, page: dict | None = None) -> str:
+def approval_text(name: str, args: dict, page: dict | None = None, typed: str = "") -> str:
     if name == "send_whatsapp_message":
         return f"Send this WhatsApp message?\n\n\"{str(args.get('text', ''))[:700]}\""
     if name == "propose_ledger_adjustment":
@@ -135,6 +148,9 @@ def approval_text(name: str, args: dict, page: dict | None = None) -> str:
         return "Change this invoice? " + ", ".join(parts)
     if name == "hand_off_to_owner":
         return f"Your turn in the browser: {str(args.get('reason', ''))[:600]}\n\nDo it yourself, then tap Done and I will carry on."
+    if name == "browser_step" and typed and args.get("action") == "press":
+        site = (page or {}).get("url", "")[:80]
+        return f"Send this on {(page or {}).get('title') or site}?\n\n\"{typed[:600]}\"\n\n({site})"
     if name == "browser_step":
         where = f" on {(page or {}).get('title') or (page or {}).get('url')} ({(page or {}).get('url', '')[:80]})" if page else ""
         what = args.get("value") if args.get("action") in ("fill", "press") else args.get("selector")

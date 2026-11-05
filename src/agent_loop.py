@@ -58,13 +58,30 @@ def page_text(page: dict) -> str:
     return f"{(page or {}).get('url', '')} {(page or {}).get('title', '')}".lower()
 
 
+def last_fill(messages: list[dict]) -> tuple[str, str]:
+    """(selector, value) of the agent's most recent browser 'fill' in this conversation."""
+    for m in reversed(messages):
+        for c in reversed(m.get("tool_calls") or []):
+            if c["function"]["name"] == "browser_step":
+                try:
+                    a = json.loads(c["function"].get("arguments") or "{}")
+                except ValueError:
+                    continue
+                if a.get("action") == "fill":
+                    return str(a.get("selector", "")), str(a.get("value", ""))
+                if a.get("action") == "navigate":
+                    return "", ""
+    return "", ""
+
+
 def _ctx(row, call_id: str = "", browsers=None) -> SessionCtx:
     sid = str(row["id"])
     return SessionCtx(id=sid, tenant_id=str(row["tenant_id"]), trust=row["trust"],
                       party_id=str(row["party_id"]) if row["party_id"] else None, files=tuple(row["files"]), call_id=call_id,
                       grants=active_grants(row), host=host_of(browsers.page(sid)) if browsers else "",
                       on_device=bool(browsers) and getattr(browsers, "where", lambda _: "")(sid) == "device",
-                      page=page_text(browsers.page(sid)) if browsers else "")
+                      page=page_text(browsers.page(sid)) if browsers else "",
+                      last_fill=last_fill(row.get("messages") or [])[0], last_fill_value=last_fill(row.get("messages") or [])[1])
 
 
 async def _record_usage(pool, row, usage: dict | None) -> None:
@@ -227,6 +244,7 @@ async def _process(app, row, messages: list, calls: list) -> bool:
             args = json.loads(call["function"].get("arguments") or "{}")
         except ValueError:
             args = None
+        row["messages"] = messages                    # the policy needs this turn's typing, not the saved copy
         ctx = _ctx(row, cid, getattr(app.state, "browsers", None))
         d = pre_tool_use(ctx, name, args, tools.TOOL_NAMES)
         if d.verdict == "deny":
@@ -240,7 +258,8 @@ async def _process(app, row, messages: list, calls: list) -> bool:
         else:
             err = await actions.validate_gated(app, ctx, name, args)
             if err is None:
-                extra = await actions.open_gate(app, ctx, tenant, name, args, approval_text(name, args, getattr(getattr(app.state, "browsers", None), "page", lambda _: None)(ctx.id)))   # args now hold computed amounts
+                extra = await actions.open_gate(app, ctx, tenant, name, args, approval_text(name, args, getattr(getattr(app.state, "browsers", None), "page", lambda _: None)(ctx.id),
+                                                       ctx.last_fill_value if name == "browser_step" else ""))   # args now hold computed amounts
                 pending = {"call_id": cid, "name": name, "args": args, "card": extra.get("card", d.card),
                            "remaining": calls[i + 1:], **{k: v for k, v in extra.items() if k != "card"}}
                 await _save(app.state.pool, ctx.id, messages, status="WAITING_APPROVAL", pending=pending)
