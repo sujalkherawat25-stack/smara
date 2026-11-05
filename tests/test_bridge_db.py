@@ -445,3 +445,56 @@ def test_pause_and_resume_commands_use_a_flag_file(tmp_path, monkeypatch):
     assert munim_bridge.main() == 0 and (tmp_path / "paused").exists()
     monkeypatch.setattr(sys, "argv", ["munim-bridge", "resume"])
     assert munim_bridge.main() == 0 and not (tmp_path / "paused").exists()
+
+
+APP_LIKE_PROBE = r"""
+import asyncio, json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import munim_bridge
+from playwright.async_api import async_playwright
+
+PAGE = '''<html><body>
+<ul><li id="ember201" tabindex="0" onclick="document.getElementById('thread').textContent='Chat with Manvi Jain'">
+  <div><span>Manvi Jain</span><p>Oct 10: shared a post</p></div></li>
+  <li id="ember202" tabindex="0"><span>Dhiraj Daga</span></li></ul>
+<div id="thread"></div>
+<div class="msg-form" contenteditable="true" aria-label="Write a message"></div>
+</body></html>'''
+
+async def main():
+    out = {}
+    f = Path(sys.argv[2]) / "msg.html"
+    f.write_text(PAGE)
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        await page.goto(f.as_uri())
+        snap = await munim_bridge.handle(page, {"action": "read"}, allow_private=True)
+        sels = [e["selector"] for e in snap["elements"]]
+        out["no_dynamic_ids"] = not any("ember" in s for s in sels)
+        manvi = next(e["selector"] for e in snap["elements"] if "Manvi Jain" in e["text"])
+        out["manvi_selector"] = manvi
+        r = await munim_bridge.handle(page, {"action": "click", "selector": manvi}, allow_private=True)
+        out["opened"] = await page.text_content("#thread")
+        r2 = await munim_bridge.handle(page, {"action": "click", "selector": 'a:has-text("Dhiraj Daga")'}, allow_private=True)
+        out["fallback_click_ok"] = not r2.get("error")       # not an <a>: found by its text instead
+        box = next(e["selector"] for e in snap["elements"] if e["type"] == "editable")
+        await munim_bridge.handle(page, {"action": "fill", "selector": box, "value": "hi manvi"}, allow_private=True)
+        out["typed"] = await page.text_content(".msg-form")
+        out["banner_not_in_text"] = "Smara is working" not in r["text"]
+        await browser.close()
+    print(json.dumps(out))
+
+asyncio.run(main())
+"""
+
+
+def test_bridge_handles_app_like_pages_lists_dynamic_ids_and_message_boxes(tmp_path):
+    import subprocess
+    done = subprocess.run([sys.executable, "-c", APP_LIKE_PROBE, str(Path(munim_bridge.__file__).parent), str(tmp_path)],
+                          capture_output=True, text=True, timeout=120)
+    out = json.loads(done.stdout.strip().splitlines()[-1])
+    assert out["no_dynamic_ids"] and out["manvi_selector"].startswith("text=")
+    assert out["opened"] == "Chat with Manvi Jain" and out["fallback_click_ok"]
+    assert out["typed"] == "hi manvi" and out["banner_not_in_text"]

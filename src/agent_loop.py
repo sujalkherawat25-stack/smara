@@ -214,9 +214,8 @@ async def run(app, sid: str, fallback=None) -> None:
             await fallback()   # e.g. the deterministic debtor path, so a claim is never lost
         elif row["trust"] == "TRUSTED":
             await _finish(app, row, "Sorry, I could not finish that right now. Please try again in a minute.")
-    finally:
-        if not suspended and getattr(app.state, "browsers", None):
-            await app.state.browsers.close(sid)
+    # The browser page is NOT closed when a turn ends: the owner's next message in this conversation ("now open her chat")
+    # continues on the same page. Idle pages are closed by the browser manager after a while.
 
 
 async def _process(app, row, messages: list, calls: list) -> bool:
