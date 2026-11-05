@@ -19,10 +19,10 @@ from uuid import UUID
 import psycopg
 from psycopg.rows import dict_row
 
-SECRET_COLUMNS = {"token_hash", "telegram_link_code", "code_hash"}
+SECRET_COLUMNS = {"token_hash", "telegram_link_code", "code_hash", "ciphertext", "wrapped_key", "nonce"}
 # deleted first, in this order, because rows below depend on them
 VIA_OBLIGATION = ("proposed_adjustments", "obligation_events")
-LAST = ("obligations", "parties")
+LAST = ("tenant_secrets", "tenant_keys", "obligations", "parties")
 
 
 def _plain(v):

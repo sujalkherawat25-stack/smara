@@ -34,6 +34,9 @@ services:
       PUBLIC_BASE_URL: https://ai.syntarus.com/munim
       SANDBOX_MODE: container
       SANDBOX_JOBS_DIR: /jobs
+      VAULT_MASTER_KEY_FILE: /run/secrets/vault_master_key
+    secrets:
+      - vault_master_key
     volumes:
       - munim_jobs:/jobs
     ports:
@@ -75,6 +78,11 @@ networks:
   munim: {}
   memoryos_default:
     external: true
+
+# The vault master key lives only in this file on the host (never in .env, git or the image).
+secrets:
+  vault_master_key:
+    file: ../secrets/vault_master_key
 
 volumes:
   munim_pgdata:

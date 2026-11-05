@@ -50,6 +50,7 @@ async def claim_due(pool, now: datetime, limit: int = 20) -> list[dict]:
                      SELECT id, state AS prev FROM obligations
                       WHERE state IN ('ACTIVE', 'DISPATCHED', 'SNOOZED')
                         AND next_followup_at <= %s AND attempt_count < %s
+                        AND NOT EXISTS (SELECT 1 FROM parties x WHERE x.id = obligations.party_id AND x.opted_out_at IS NOT NULL)
                       ORDER BY next_followup_at LIMIT %s FOR UPDATE SKIP LOCKED)
                    UPDATE obligations o SET state = 'WAITING_OWNER_APPROVAL'
                      FROM due, parties p
@@ -118,13 +119,18 @@ async def decide_reminder(app, tenant_id: str, obligation_id: str, action: str, 
     async with pool.connection() as conn:
         async with conn.transaction():
             cur = await conn.execute(
-                """SELECT o.*, p.canonical_name, p.whatsapp_phone, p.last_inbound_at FROM obligations o
+                """SELECT o.*, p.canonical_name, p.whatsapp_phone, p.last_inbound_at, p.opted_out_at FROM obligations o
                      JOIN parties p ON p.id = o.party_id
                     WHERE o.id = %s AND o.tenant_id = %s AND o.state = 'WAITING_OWNER_APPROVAL'
                     FOR UPDATE OF o""", (obligation_id, tenant_id))
             o = await cur.fetchone()
             if o is None:
                 return None
+            if action == "send" and o["opted_out_at"]:
+                await conn.execute("UPDATE obligations SET state = 'SNOOZED', next_followup_at = %s WHERE id = %s",
+                                   (now + timedelta(days=30), obligation_id))
+                return (f"{o['canonical_name']} ne WhatsApp updates band karne ko kaha tha (STOP), isliye message nahi bheja. "
+                        "Aap unhe call kar sakte hain.")
             to, nxt = {"send": ("DISPATCHED", now + RETRY_AFTER), "snooze": ("SNOOZED", now + SNOOZE),
                        "paid": ("PAID", None)}[action]
             await conn.execute(

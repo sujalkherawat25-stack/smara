@@ -13,3 +13,4 @@ tests/*
 !tests/fixtures
 !tests/sandbox_escape_probe.py
 *.log
+secrets/

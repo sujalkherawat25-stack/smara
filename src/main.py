@@ -47,6 +47,14 @@ async def lifespan(app: FastAPI):
     await app.state.pool.close()
 
 
+def _vault_ready() -> bool:
+    from src.vault import master_keys
+    try:
+        return bool(master_keys())
+    except Exception:
+        return False
+
+
 app = FastAPI(title="Smara Munim", lifespan=lifespan)
 app.include_router(router)
 app.include_router(device_router)
@@ -79,7 +87,8 @@ async def healthz(response: Response):
     return {"ok": ok, "db": True, "outbox": ob, "sandbox": sandbox_ok, "continuum": await _continuum_probe(),
             "ops": {**ops, "quiet_hours_now": clock.is_quiet(st.settings)},
             "agent_model": st.llm.agent_model if getattr(st, "llm", None) and st.llm.enabled else None,
-            "llm": getattr(getattr(st, "llm", None), "stats", None)}
+            "llm": getattr(getattr(st, "llm", None), "stats", None),
+            "vault": _vault_ready()}
 
 
 _probe = {"at": 0.0, "ok": None, "ms": None}

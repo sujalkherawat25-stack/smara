@@ -11,7 +11,7 @@ from src.agent_loop import start_session
 from src.ingest.extract import extract_claim
 from src.ingest.media import download_media, ocr_to_evidence, read_image, transcribe
 from src.ingest.payload import InboundMessage
-from src.loop.whatsapp import shop_choice_message
+from src.loop.whatsapp import shop_choice_message, text_message
 from src.loop.upi import rupees
 from src.loop.owner_channel import send_to_owner
 from src.loop.whatsapp import owner_approval_card
@@ -45,6 +45,52 @@ async def _claim_notification(pool, adjustment_id: str) -> bool:
             """UPDATE proposed_adjustments SET owner_notified_at = now()
                 WHERE id = %s AND status = 'PENDING' AND owner_notified_at IS NULL RETURNING id""", (adjustment_id,))
         return await cur.fetchone() is not None
+
+
+STOP_EXACT = {"stop", "stop karo", "unsubscribe", "band karo", "band kro", "band", "mat bhejo", "message mat bhejo",
+              "msg mat bhejo", "rok do", "बंद करो", "बंद", "मत भेजो"}
+STOP_PARTS = ("stop", "unsubscribe", "mat bhejo", "band karo", "बंद करो", "मत भेजो")
+START_EXACT = {"start", "start karo", "shuru karo", "chalu karo", "resume", "शुरू करो"}
+
+
+def opt_intent(text: str) -> str | None:
+    """'stop' or 'start' when a customer clearly asks to stop or restart messages; short messages only, so a sentence that
+    merely mentions the word is not taken as an opt-out."""
+    t = " ".join("".join(c for c in (text or "").lower() if c.isalnum() or c.isspace() or ord(c) > 127).split())
+    if not t or len(t) > 30:
+        return None
+    if t in STOP_EXACT or any(p in t for p in STOP_PARTS):
+        return "stop"
+    if t in START_EXACT:
+        return "start"
+    return None
+
+
+async def _handle_opt(app, msg: InboundMessage, intent: str, receiving) -> bool:
+    """Apply STOP/START to every shop this number belongs to (or only the shop whose number they wrote to). True if done."""
+    pool = app.state.pool
+    async with pool.connection() as conn:
+        parties = await (await conn.execute(
+            """SELECT p.id, p.tenant_id, p.canonical_name, t.name AS shop FROM parties p JOIN tenants t ON t.id = p.tenant_id
+                WHERE p.whatsapp_phone = %s AND (%s::uuid IS NULL OR p.tenant_id = %s::uuid)""",
+            (msg.sender, receiving and receiving.id, receiving and receiving.id))).fetchall()
+        if not parties:
+            return False
+        await conn.execute(f"UPDATE parties SET opted_out_at = {'now()' if intent == 'stop' else 'NULL'}, last_inbound_at = now() "
+                           "WHERE id = ANY(%s)", ([p["id"] for p in parties],))
+    shops = ", ".join(sorted({p["shop"] for p in parties}))
+    reply = (f"Theek hai. {shops} ki taraf se aapko WhatsApp par payment updates nahi aayenge. Dobara chahiye to START bhejein."
+             if intent == "stop" else f"Theek hai, {shops} ki taraf se updates phir se shuru ho gaye.")
+    await app.state.wa.send(text_message(msg.sender, reply), number_id=msg.number_id or None)
+    for p in parties:
+        t = await tenants.by_id(pool, str(p["tenant_id"]))
+        note = (f"{p['canonical_name']} ne WhatsApp updates band karne ko kaha (STOP). Smara ab unhe koi message nahi bhejega; "
+                "zarurat ho to aap khud call kar lijiye." if intent == "stop"
+                else f"{p['canonical_name']} ne WhatsApp updates phir se shuru karne ko kaha (START).")
+        if t:
+            await send_to_owner(app, t, text_message(t.owner_phone, note), kind="owner_note")
+    log.info("customer %s sent %s for %d shop(s)", msg.sender[-4:], intent.upper(), len(parties))
+    return True
 
 
 async def _shop_from_context(pool, msg: InboundMessage, candidates: set[str]) -> str | None:
@@ -105,6 +151,8 @@ async def handle_debtor(app, msg: InboundMessage, forced_tenant_id: str | None =
     receiving = await tenants.by_number_id(pool, msg.number_id) if msg.number_id else None
     if forced_tenant_id:
         receiving = await tenants.by_id(pool, forced_tenant_id)
+    if msg.kind == "text" and (intent := opt_intent(msg.text)) and await _handle_opt(app, msg, intent, receiving):
+        return                                         # STOP/START is honoured at once, for every shop, without asking
     async with pool.connection() as conn:
         cur = await conn.execute(
             """SELECT p.id AS party_id, p.tenant_id, p.canonical_name, o.id AS obligation_id,

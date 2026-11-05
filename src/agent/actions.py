@@ -102,8 +102,12 @@ async def validate_gated(app, ctx: SessionCtx, name: str, args: dict) -> str | N
     """Concrete checks before any card is shown. Returns an error for the model, or None."""
     pool = app.state.pool
     if name == "send_whatsapp_message":
-        if not await party_in_tenant(pool, ctx.tenant_id, args.get("to")):
+        p = await party_in_tenant(pool, ctx.tenant_id, args.get("to"))
+        if not p:
             return "to must be 'owner' or a party_id of this shop"
+        if p.get("opted_out_at"):
+            return (f"{p['canonical_name']} replied STOP on {p['opted_out_at']:%d %b} and must not be messaged on WhatsApp. "
+                    "Tell the owner; they can call the customer themselves.")
         if not str(args.get("text", "")).strip() or len(str(args["text"])) > 1000:
             return "text must be 1-1000 characters"
         if args.get("obligation_id") and not await _obligation(pool, ctx, args["obligation_id"]):
@@ -202,6 +206,8 @@ async def deliver_message(app, ctx: SessionCtx, tenant, args: dict) -> dict:
     """Send an owner-approved message to a customer: free text inside the 24h window, the approved template outside it."""
     pool, s, now = app.state.pool, app.state.settings, datetime.now(timezone.utc)
     p = await party_in_tenant(pool, ctx.tenant_id, args["to"])
+    if p and p.get("opted_out_at"):              # they said STOP after the owner approved: never send
+        return {"sent": False, "error": f"{p['canonical_name']} has opted out of WhatsApp messages (STOP)"}
     o = await _obligation(pool, ctx, args["obligation_id"]) if args.get("obligation_id") else None
     in_window = p["last_inbound_at"] and now - p["last_inbound_at"] < WINDOW
     if in_window:

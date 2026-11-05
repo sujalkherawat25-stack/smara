@@ -9,6 +9,12 @@ TARBALL=$1; VERSION=$2
 cd "$(dirname "$0")/.."
 sudo BACKUP_ROOT=/var/backups/munim bash deploy/backup.sh
 tar xzf "$TARBALL" && rm -f "$TARBALL"
+# Vault master key: created once, kept outside the release tree's tracked files. Back it up offline: without it the
+# shops' encrypted secrets cannot be read.
+if [ ! -s secrets/vault_master_key ]; then
+  (umask 077; mkdir -p secrets; python3 -c 'import os,base64; print(base64.b64encode(os.urandom(32)).decode())' > secrets/vault_master_key)
+  echo "created a new vault master key in secrets/vault_master_key - back it up offline" >&2
+fi
 PREVIOUS=$(docker inspect -f '{{.Config.Image}}' munim_app 2>/dev/null | cut -d: -f2 || true)
 export MUNIM_VERSION=$VERSION
 docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d --build munim_sandbox munim_app
