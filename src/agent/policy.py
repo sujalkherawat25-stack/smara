@@ -136,6 +136,47 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
     return Decision("approve", tier, card=approval_text(name, args))
 
 
+def _site(page: dict | None) -> str:
+    """'linkedin.com/messaging (Messaging)': the REAL address (never a name guessed from it, which a look-alike
+    domain could imitate), shortened to the first two path segments, plus the page title when it adds something."""
+    from urllib.parse import urlparse
+    page = page or {}
+    u = urlparse(page.get("url", ""))
+    host = (u.hostname or "").removeprefix("www.")
+    title = re.sub(r"^\(\d+\)\s*", "", (page.get("title") or "").strip())       # "(1) Messaging | LinkedIn" -> "Messaging | LinkedIn"
+    if not host:
+        return title or "this page"
+    where = host + "".join("/" + seg for seg in [x for x in u.path.split("/") if x][:2])
+    part = title.split("|")[0].strip()
+    return f"{where} ({part})" if part and part.lower() != host.split(".")[0] else where
+
+
+def _target(selector: str) -> str:
+    """A selector in words an owner understands: 'the "Send" button', 'the message box'."""
+    sel = selector.strip()
+    sel = sel.replace("\\", "")                                # models sometimes send JSON-escaped quotes
+    found = (re.search(r"""\[(?:aria-label|title|name|placeholder|value)\*?=["']?([^"'\]]+)""", sel)
+             or re.search(r"^text=(.+)$", sel) or re.search(r""":has-text\(["']([^"']+)""", sel))
+    label = found.group(1).strip().strip('"') if found else ""
+    if not label and (ident := re.match(r"^#([\w-]+)$", sel)):
+        label = ident.group(1).replace("-", " ").replace("_", " ")
+    tag = re.match(r"[a-z]+", sel.lower())
+    tag = tag.group(0) if tag else ""
+    if 'role="textbox"' in sel or "contenteditable" in sel or "textbox" in sel:
+        kind = "the message box"
+    elif tag == "button" or "role=button" in sel.replace('"', ""):
+        kind = f"the “{label}” button" if label else "a button"
+    elif tag == "a":
+        kind = f"the “{label}” link" if label else "a link"
+    elif tag in ("input", "textarea"):
+        kind = f"the “{label}” field" if label else "a text field"
+    elif sel.startswith("text="):
+        kind = f"“{label}”"
+    else:
+        kind = f"“{label}”" if label else "a control"
+    return kind
+
+
 def approval_text(name: str, args: dict, page: dict | None = None, typed: str = "") -> str:
     if name == "send_whatsapp_message":
         return f"Send this WhatsApp message?\n\n\"{str(args.get('text', ''))[:700]}\""
@@ -149,11 +190,15 @@ def approval_text(name: str, args: dict, page: dict | None = None, typed: str = 
     if name == "hand_off_to_owner":
         return f"Your turn in the browser: {str(args.get('reason', ''))[:600]}\n\nDo it yourself, then tap Done and I will carry on."
     if name == "browser_step" and typed and args.get("action") == "press":
-        site = (page or {}).get("url", "")[:80]
-        return f"Send this on {(page or {}).get('title') or site}?\n\n\"{typed[:600]}\"\n\n({site})"
+        return f"Smara is about to SEND this message on {_site(page)}:\n\n\"{typed[:600]}\"\n\nApprove to send it."
     if name == "browser_step":
-        where = f" on {(page or {}).get('title') or (page or {}).get('url')} ({(page or {}).get('url', '')[:80]})" if page else ""
-        what = args.get("value") if args.get("action") in ("fill", "press") else args.get("selector")
-        target = f" in {str(args.get('selector'))[:60]!r}" if args.get("action") == "fill" else ""
-        return f"Allow the browser to {args.get('action')} {str(what)[:120]!r}{target}{where}?"
+        act, sel, val = args.get("action"), str(args.get("selector") or ""), str(args.get("value") or "")
+        site = _site(page)
+        if act == "click":
+            return f"Smara wants to click {_target(sel)} on {site}.\n\nApprove?"
+        if act == "fill":
+            return f"Smara wants to type into {_target(sel)} on {site}:\n\n\"{val[:300]}\"\n\nApprove?"
+        if act == "press":
+            return f"Smara wants to press {val or 'Enter'} on {site}.\n\nApprove?"
+        return f"Smara wants to {act} {_target(sel)} on {site}.\n\nApprove?"
     return f"Allow {name}?"

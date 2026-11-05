@@ -513,7 +513,7 @@ async def test_pressing_enter_in_a_message_box_needs_the_owners_tap_but_search_b
     await dispatch(env.app, owner("lk1", "LinkedIn pe Manvi ko hi bolo"))
     assert [s["action"] for s in br.steps] == ["navigate", "fill", "press", "click", "fill"]
     card = env.app.state.wa.sent[-1]["interactive"]["body"]["text"]
-    assert "Send this on" in card and "hi manvi, this is Smara" in card                 # the owner sees the exact text
+    assert "SEND this message on" in card and "hi manvi, this is Smara" in card                 # the owner sees the exact text
     sid = (await one(env.pool, "select id from agent_sessions where status = 'WAITING_APPROVAL'"))["id"]
     await dispatch(env.app, owner("lk2", button=f"ag_ok:{sid}"))
     assert [s["action"] for s in br.steps][-1] == "press"                               # sent only after the tap

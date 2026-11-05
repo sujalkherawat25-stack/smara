@@ -81,11 +81,14 @@ SNAPSHOT_JS = r"""() => {
 
 
 def _text_of(selector: str) -> str:
-    """The visible text a selector is aiming at, if it names one (text=..., :has-text("..."))."""
+    """The visible text a selector is aiming at, if it names one (text=..., :has-text("..."), [aria-label="..."])."""
     if selector.startswith("text="):
         return selector[5:].strip().strip('"')
-    m = __import__("re").search(r':has-text\("([^"]+)"\)', selector)
-    return m.group(1) if m else ""
+    import re
+    m = re.search(r':has-text\("([^"]+)"\)', selector)
+    if not m:       # button[aria-label="Send"], a[title='Next'], input[value*="Save"]: the label is what a person sees
+        m = re.search(r"""\[(?:aria-label|title|value|placeholder)\*?=["']?([^"'\]]+)""", selector)
+    return m.group(1).strip() if m else ""
 
 
 async def settle(page) -> None:
