@@ -37,11 +37,19 @@ def is_note(m: dict) -> bool:
     return m["role"] == "user" and (m.get("content") or "").startswith("[Earlier conversation omitted")
 
 
+def _is_page(m: dict) -> bool:
+    return m["role"] == "tool" and '"page": "' in (m.get("content") or "")
+
+
 def compact(messages: list[dict], *, keep_recent: int = 10, tool_chars: int = 600, arg_chars: int = 500,
-            budget_chars: int = 60_000) -> list[dict]:
+            budget_chars: int = 60_000, keep_pages: int = 2) -> list[dict]:
     cutoff = len(messages) - keep_recent
+    pages = [i for i, m in enumerate(messages) if _is_page(m)]
+    old_pages = set(pages[:-keep_pages]) if keep_pages else set(pages)
     out = []
     for i, m in enumerate(messages):
+        if i in old_pages and i >= cutoff:              # an earlier page: what happened stays, its long listing goes
+            m = {**m, "content": _clip(m.get("content") or "", 1500)}
         if i < cutoff and m["role"] == "tool":
             m = {**m, "content": _clip(m.get("content") or "", tool_chars)}
         elif i < cutoff and m["role"] == "assistant" and m.get("tool_calls"):

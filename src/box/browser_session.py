@@ -54,7 +54,7 @@ class BrowserSessions:
                     return {"error": "too many browser sessions open; try again shortly"}
                 self._procs[sid] = (await asyncio.to_thread(self._start), time.monotonic())
             proc = self._procs[sid][0]
-            cmd = {k: args[k] for k in ("action", "url", "selector", "value") if args.get(k) is not None}
+            cmd = {k: args[k] for k in ("action", "url", "ref", "text", "selector", "value") if args.get(k) is not None}
             try:
                 out = await asyncio.wait_for(asyncio.to_thread(self._exchange, proc, cmd), self.step_timeout_s)
             except asyncio.TimeoutError:
@@ -62,7 +62,8 @@ class BrowserSessions:
                 return {"error": f"browser step timed out after {self.step_timeout_s}s"}
             self._procs[sid] = (proc, time.monotonic())
             if isinstance(out, dict) and out.get("url"):
-                self._pages[sid] = {"url": out["url"], "title": out.get("title", "")}
+                self._pages[sid] = {"url": out["url"], "title": out.get("title", ""),
+                                      "page": out.get("page") or self._pages.get(sid, {}).get("page", "")}
             return out
 
     def _reap(self) -> None:

@@ -67,14 +67,21 @@ TOOLS = [
     _fn("inspect_and_import_file", "Open a file attached to this conversation. mode=inspect previews the rows "
         "and totals; mode=import loads them into the ledger and reports sheet vs ledger totals to verify.",
         {"file_ref": _S, "mode": {"type": "string", "enum": ["inspect", "import"]}}, ["file_ref", "mode"]),
-    _fn("browser_step", "Drive the browser like a person: one step, then look at the page (url, title, text, clickable elements, "
-        "needs_owner). Actions: navigate, read, scroll (value down/up/top/bottom), back, wait (value ms), click, fill (selector+value), "
-        "select (selector+value), press (value=key e.g. Enter). Work through the page yourself: open menus, tick filters, type in "
-        "search boxes, scroll for more, then read the result. In the owner's own browser clicking and typing run on their own; "
-        "steps that pay, submit, send or delete wait for the owner's tap; sign-in, OTP, payment and CAPTCHA are the owner's to do "
-        "(use hand_off_to_owner).",
-        {"action": {"type": "string", "enum": ["navigate", "read", "scroll", "back", "wait", "click", "fill", "select", "press"]},
-         "url": _S, "selector": _S, "value": _S}, ["action"]),
+    _fn("browser_step", "Drive the browser like a person: one step, then you get the page back. The result has url, title, "
+        "changes (exactly what your step changed: new or gone controls, labels that changed, messages the site showed), page "
+        "(every control as '[ref] role \"name\" state', an open dialog first) and text. Act ONLY by a ref number from the latest "
+        "page: never invent selectors. Some sites draw buttons as plain boxes that have no ref: if you can see a button's "
+        "words in the page text but not in the list, act on it with text = its exact words instead of ref. Actions: navigate "
+        "(url), read, text (the whole page text, for reading long pages), click (ref or text), hover (ref or text, opens "
+        "menus), fill (ref + value), select (ref + value), press (value = key, e.g. Enter; ref optional), scroll (value "
+        "down/up/top/bottom, or ref/text to bring it into view), back, wait (value ms). In the owner's own "
+        "browser most steps run on their own; paying, placing orders, sending, deleting and signing in wait for the owner's tap; "
+        "OTP, card details and CAPTCHA are the owner's to do (use hand_off_to_owner).",
+        {"action": {"type": "string", "enum": ["navigate", "read", "text", "click", "hover", "fill", "select", "press", "scroll",
+                                               "back", "wait"]},
+         "url": _S, "ref": {"type": "integer", "description": "the number in [ ] before a control in the latest page"},
+         "text": {"type": "string", "description": "exact visible words of a control that has no ref"},
+         "value": _S}, ["action"]),
     _fn("hand_off_to_owner", "Pause and ask the owner to do a step themselves in the open browser: signing in, entering a password, "
         "OTP or card details, paying, or solving a CAPTCHA. Say exactly what they should do. They tap Done when finished and you "
         "get the fresh page back to continue. Use it whenever a page result lists needs_owner (captcha, login, otp, payment).",
@@ -118,6 +125,8 @@ def _plain(v):
 
 
 def bounded(result: dict, limit: int = 6000) -> str:
+    """A tool result as JSON, cut to `limit` characters. Browser results put what changed and the numbered controls
+    before the page text, so a cut only ever loses text."""
     text = json.dumps(result, default=_plain, ensure_ascii=False)
     return text if len(text) <= limit else text[:limit] + '..."[truncated]"'
 

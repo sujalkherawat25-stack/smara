@@ -25,6 +25,20 @@ the profile remembers them. To drive a browser you already have open instead, st
 - Pages on your own network (localhost, router, office servers) and `file://` pages are blocked.
 - Send `unpair browser` in chat (or `python munim_bridge.py unpair`) to disconnect. `browser status` shows if it is online.
 
+## How Smara sees and acts on a page
+
+The same way the leading browser agents do (Playwright MCP, Claude in Chrome, browser-use), with no rules for any
+particular site:
+
+- Every control a person could use is listed with a number, its role, its name and its state, across the whole page
+  (an open dialog first, frames and shadow DOM included): `[31] button "Add to cart"`, `[12] searchbox "Search" value=""`,
+  `[40] button "Buy now" disabled`.
+- Smara acts only by those numbers. A guessed selector is refused and the fresh page is sent back instead.
+- After every step Smara is told exactly what changed, for example
+  `changed: [31] button "Add to cart" -> [31] button "Go to cart"`, new or gone controls, a dialog that opened, or
+  the site's own message ("Added to your cart"). If nothing changed it is told so, and does not repeat the step.
+- The pointer moves and keys are typed like a person's. Nothing hides that the browser is automated.
+
 ## How it connects
 
 The bridge only connects **out** to the Smara server and long-polls for commands. Nothing on your PC is exposed. The

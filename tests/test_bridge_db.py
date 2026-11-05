@@ -196,25 +196,34 @@ sys.path.insert(0, sys.argv[1])
 import munim_bridge
 from playwright.async_api import async_playwright
 
+import re
+async def R(mb, page, role, name):
+    # the ref of the control with this role and exact name, from a fresh read (as the agent would see it)
+    r = await mb.handle(page, {"action": "read"}, allow_private=True)
+    m = re.search(r"\[(\d+)\] " + re.escape(role) + ' "' + re.escape(name) + '"', r["page"])
+    return int(m.group(1)) if m else None
+
 async def main():
     out = {}
+    mb = munim_bridge
     page_file = Path(sys.argv[2]) / "login.html"
     page_file.write_text("<html><body><input id='user' name='user'><input id='pw' type='password' name='pw'>"
-                         "<input id='code' autocomplete='one-time-code'><button id='go'>Next</button></body></html>")
+                         "<input id='code' name='code' autocomplete='one-time-code'><button id='go'>Next</button></body></html>")
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
         await page.goto(page_file.as_uri())
-        ok = await munim_bridge.handle(page, {"action": "fill", "selector": "#user", "value": "ravi"}, allow_private=True)
+        ok = await mb.handle(page, {"action": "fill", "ref": await R(mb, page, "textbox", "user"), "value": "ravi"}, allow_private=True)
         out["fill_ok"] = not ok.get("error") and ok["url"].startswith("file:")
-        out["pw"] = (await munim_bridge.handle(page, {"action": "fill", "selector": "#pw", "value": "x"})).get("error", "")
-        out["otp"] = (await munim_bridge.handle(page, {"action": "fill", "selector": "#code", "value": "1"})).get("error", "")
+        out["pw"] = (await mb.handle(page, {"action": "fill", "ref": await R(mb, page, "textbox", "pw"), "value": "x"})).get("error", "")
+        out["otp"] = (await mb.handle(page, {"action": "fill", "ref": await R(mb, page, "textbox", "code"), "value": "1"})).get("error", "")
         out["pw_value"] = await page.input_value("#pw")
         out["user_value"] = await page.input_value("#user")
+        go = await R(mb, page, "button", "Next")
         await page.evaluate("() => { window.__smaraPaused = true }")
-        out["paused"] = (await munim_bridge.handle(page, {"action": "click", "selector": "#go"})).get("error", "")
+        out["paused"] = (await mb.handle(page, {"action": "click", "ref": go})).get("error", "")
         await page.evaluate("() => { window.__smaraPaused = false }")
-        out["resumed"] = not (await munim_bridge.handle(page, {"action": "read"})).get("error")
+        out["resumed"] = not (await mb.handle(page, {"action": "read"})).get("error")
         out["banner"] = await page.evaluate("() => !!document.getElementById('smara-agent-banner')")
         await browser.close()
     print(json.dumps(out))
@@ -354,28 +363,37 @@ sys.path.insert(0, sys.argv[1])
 import munim_bridge
 from playwright.async_api import async_playwright
 
+import re
+async def R(mb, page, role, name):
+    # the ref of the control with this role and exact name, from a fresh read (as the agent would see it)
+    r = await mb.handle(page, {"action": "read"}, allow_private=True)
+    m = re.search(r"\[(\d+)\] " + re.escape(role) + ' "' + re.escape(name) + '"', r["page"])
+    return int(m.group(1)) if m else None
+
 async def main():
     out = {}
+    mb = munim_bridge
     d = Path(sys.argv[2])
     (d / "a.html").write_text("<html><body style='height:4000px'><a href='b.html'>next</a>"
-        "<select id='s'><option value='x'>X</option><option value='y'>Y</option></select><p style='margin-top:3000px'>bottom text</p></body></html>")
+        "<select id='s' name='s'><option value='x'>X</option><option value='y'>Y</option></select><p style='margin-top:3000px'>bottom text</p></body></html>")
     (d / "b.html").write_text("<html><body><h1>second</h1><input type='password'></body></html>")
     (d / "c.html").write_text("<html><body><div class='g-recaptcha'></div><p>please verify you are human</p></body></html>")
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
         await page.goto((d / "a.html").as_uri())
-        await munim_bridge.handle(page, {"action": "scroll", "value": "bottom"}, allow_private=True)
+        sel, nxt = await R(mb, page, "combobox", "s"), await R(mb, page, "link", "next")
+        await mb.handle(page, {"action": "scroll", "value": "bottom"}, allow_private=True)
         out["scrolled"] = await page.evaluate("() => window.scrollY") > 500
-        await munim_bridge.handle(page, {"action": "select", "selector": "#s", "value": "y"}, allow_private=True)
+        await mb.handle(page, {"action": "select", "ref": sel, "value": "Y"}, allow_private=True)
         out["selected"] = await page.input_value("#s")
-        await munim_bridge.handle(page, {"action": "wait", "value": "50"}, allow_private=True)
-        r = await munim_bridge.handle(page, {"action": "click", "selector": "a:has-text('next')"}, allow_private=True)
+        await mb.handle(page, {"action": "wait", "value": "50"}, allow_private=True)
+        r = await mb.handle(page, {"action": "click", "ref": nxt}, allow_private=True)
         out["login_flag"] = r.get("needs_owner")
-        r = await munim_bridge.handle(page, {"action": "back"}, allow_private=True)
+        r = await mb.handle(page, {"action": "back"}, allow_private=True)
         out["back"] = r["url"].endswith("a.html") and not r.get("needs_owner")
         await page.goto((d / "c.html").as_uri())
-        out["captcha_flag"] = (await munim_bridge.handle(page, {"action": "read"}, allow_private=True)).get("needs_owner")
+        out["captcha_flag"] = (await mb.handle(page, {"action": "read"}, allow_private=True)).get("needs_owner")
         await browser.close()
     print(json.dumps(out))
 
@@ -447,59 +465,6 @@ def test_pause_and_resume_commands_use_a_flag_file(tmp_path, monkeypatch):
     assert munim_bridge.main() == 0 and not (tmp_path / "paused").exists()
 
 
-APP_LIKE_PROBE = r"""
-import asyncio, json, sys
-from pathlib import Path
-sys.path.insert(0, sys.argv[1])
-import munim_bridge
-from playwright.async_api import async_playwright
-
-PAGE = '''<html><body>
-<ul><li id="ember201" tabindex="0" onclick="document.getElementById('thread').textContent='Chat with Manvi Jain'">
-  <div><span>Manvi Jain</span><p>Oct 10: shared a post</p></div></li>
-  <li id="ember202" tabindex="0"><span>Dhiraj Daga</span></li></ul>
-<div id="thread"></div>
-<div class="msg-form" contenteditable="true" aria-label="Write a message"></div>
-</body></html>'''
-
-async def main():
-    out = {}
-    f = Path(sys.argv[2]) / "msg.html"
-    f.write_text(PAGE)
-    async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        page = await browser.new_page()
-        await page.goto(f.as_uri())
-        snap = await munim_bridge.handle(page, {"action": "read"}, allow_private=True)
-        sels = [e["selector"] for e in snap["elements"]]
-        out["no_dynamic_ids"] = not any("ember" in s for s in sels)
-        manvi = next(e["selector"] for e in snap["elements"] if "Manvi Jain" in e["text"])
-        out["manvi_selector"] = manvi
-        r = await munim_bridge.handle(page, {"action": "click", "selector": manvi}, allow_private=True)
-        out["opened"] = await page.text_content("#thread")
-        r2 = await munim_bridge.handle(page, {"action": "click", "selector": 'a:has-text("Dhiraj Daga")'}, allow_private=True)
-        out["fallback_click_ok"] = not r2.get("error")       # not an <a>: found by its text instead
-        box = next(e["selector"] for e in snap["elements"] if e["type"] == "editable")
-        await munim_bridge.handle(page, {"action": "fill", "selector": box, "value": "hi manvi"}, allow_private=True)
-        out["typed"] = await page.text_content(".msg-form")
-        out["banner_not_in_text"] = "Smara is working" not in r["text"]
-        await browser.close()
-    print(json.dumps(out))
-
-asyncio.run(main())
-"""
-
-
-def test_bridge_handles_app_like_pages_lists_dynamic_ids_and_message_boxes(tmp_path):
-    import subprocess
-    done = subprocess.run([sys.executable, "-c", APP_LIKE_PROBE, str(Path(munim_bridge.__file__).parent), str(tmp_path)],
-                          capture_output=True, text=True, timeout=120)
-    out = json.loads(done.stdout.strip().splitlines()[-1])
-    assert out["no_dynamic_ids"] and "[data-smara-ref=" in out["manvi_selector"] and 'data-smara-name="Manvi Jain"' in out["manvi_selector"]   # a numbered handle carrying the visible name, never a guess
-    assert out["opened"] == "Chat with Manvi Jain" and out["fallback_click_ok"]
-    assert out["typed"] == "hi manvi" and out["banner_not_in_text"]
-
-
 SEND_PROBE = r"""
 import asyncio, json, sys
 sys.path.insert(0, sys.argv[1])
@@ -516,7 +481,9 @@ ENTER_SENDS = SENT + '''<div contenteditable=true role=textbox id=box></div><scr
 NOTHING = SENT + '<div contenteditable=true role=textbox id=box></div>'
 async def one(browser, html, sel):
     page = await browser.new_page(); await page.set_content(html)
-    await mb.handle(page, {"action": "fill", "selector": sel, "value": "hi manvi"})
+    r = await mb.handle(page, {"action": "read"})
+    box = int(__import__("re").search(r"\[(\d+)\] textbox", r["page"]).group(1))
+    await mb.handle(page, {"action": "fill", "ref": box, "value": "hi manvi"})
     first = await mb.handle(page, {"action": "press", "value": "Enter"})
     await mb.handle(page, {"action": "press", "value": "Enter"})
     return {"via": first.get("sent_via"), "error": first.get("error", ""), "sent": await page.evaluate("window.sent")}
@@ -548,6 +515,14 @@ import asyncio, json, sys
 sys.path.insert(0, sys.argv[1])
 import munim_bridge as mb
 from playwright.async_api import async_playwright
+
+import re
+async def R(mb, page, role, name):
+    # the ref of the control with this role and exact name, from a fresh read (as the agent would see it)
+    r = await mb.handle(page, {"action": "read"}, allow_private=True)
+    m = re.search(r"\[(\d+)\] " + re.escape(role) + ' "' + re.escape(name) + '"', r["page"])
+    return int(m.group(1)) if m else None
+
 async def page_with(browser, html):
     page = await browser.new_page(); await page.set_content(html); return page
 async def main():
@@ -558,38 +533,33 @@ async def main():
         pg = await page_with(browser, '''<div id=cookie-banner class=cookie>We use cookies <button onclick="window.choice='accept';this.parentNode.remove()">Accept all</button>
             <button onclick="window.choice='reject';this.parentNode.remove()">Reject all</button></div><button id=go onclick="window.went=1">Go</button>''')
         await mb.dismiss_popups(pg)                      # what opening a page does
-        r = await mb.handle(pg, {"action": "click", "selector": "#go"})
+        await mb.handle(pg, {"action": "click", "ref": await R(mb, pg, "button", "Go")})
         out["consent_choice"] = await pg.evaluate("window.choice || null")
         out["went"] = await pg.evaluate("window.went || 0")
         pg = await page_with(browser, '''<div class=cookie-consent>Cookies <button onclick="window.choice='accept'">I agree</button></div><p>x</p>''')
         await mb.dismiss_popups(pg)
         out["accept_only_choice"] = await pg.evaluate("window.choice || null")
-        # the thing appears late and further down: found by waiting and scrolling, by its visible words
-        pg = await page_with(browser, '''<div style="height:3000px"></div><script>setTimeout(() => document.body.insertAdjacentHTML('beforeend',
-            '<a href="#" onclick="window.late=1">Download report</a>'), 1500)</script>''')
-        r = await mb.handle(pg, {"action": "click", "selector": 'a:has-text("Download report")'})
-        out["late"] = await pg.evaluate("window.late || 0")
-        # a disabled button: a clear hint, never a forced press
+        # a disabled button: a clear message, never a forced press
         pg = await page_with(browser, '<button id=b disabled onclick="window.pressed=1">Search</button>')
-        r = await mb.handle(pg, {"action": "click", "selector": "#b"})
-        out["disabled_hint"] = "disabled" in r.get("hint", "")
+        r = await mb.handle(pg, {"action": "click", "ref": await R(mb, pg, "button", "Search")})
+        out["disabled_said"] = "disabled" in r.get("error", "")
         out["disabled_pressed"] = await pg.evaluate("window.pressed || 0")
-        # a wrong selector: similar elements to pick from
+        # a guessed selector is never used: the agent gets the page to pick a ref from
         pg = await page_with(browser, '<button>Track order</button><a href="#">Order history</a>')
         r = await mb.handle(pg, {"action": "click", "selector": 'button[aria-label="Orders"]'})
-        out["similar"] = sorted(x["text"] for x in r.get("similar", []))
+        out["guess_refused"] = "ref number" in r.get("error", "") and 'button "Track order"' in r.get("page", "")
         # a submit button is pressed exactly once even when the page reacts slowly
         pg = await page_with(browser, '<form onsubmit="window.n=(window.n||0)+1;return false"><input name=q><button type=submit>Submit</button></form>')
-        await mb.handle(pg, {"action": "click", "selector": "text=Submit"})
+        await mb.handle(pg, {"action": "click", "ref": await R(mb, pg, "button", "Submit")})
         out["submits"] = await pg.evaluate("window.n || 0")
-        # card fields inside a payment frame are never typed
+        # card fields inside a frame are never typed
         pg = await page_with(browser, '<iframe srcdoc="<input id=num placeholder=\'Card number\'>"></iframe>')
         await pg.wait_for_timeout(300)
-        r = await mb.handle(pg, {"action": "fill", "selector": "#num", "value": "4111111111111111"})
+        r = await mb.handle(pg, {"action": "fill", "ref": await R(mb, pg, "textbox", "Card number"), "value": "4111111111111111"})
         out["card_refused"] = "never type" in r.get("error", "")
         # a click that opens a new tab: the next step works in that tab
         pg = await page_with(browser, '<a href="#" onclick="const w = window.open(); w.document.write(`<title>Second</title><p>second tab</p>`); return false">Open details</a>')
-        r = await mb.handle(pg, {"action": "click", "selector": "text=Open details"})
+        r = await mb.handle(pg, {"action": "click", "ref": await R(mb, pg, "link", "Open details")})
         out["new_tab"] = bool(r.get("opened_new_tab")) and r.get("title") == "Second"
         await browser.close()
     print(json.dumps(out))
@@ -597,23 +567,22 @@ asyncio.run(main())
 """
 
 
-def test_the_bridge_recovers_like_a_person_but_never_accepts_presses_twice_or_types_secrets(tmp_path):
+def test_the_bridge_never_accepts_never_guesses_presses_once_and_never_types_secrets(tmp_path):
     import subprocess
     done = subprocess.run([sys.executable, "-c", RECOVERY_PROBE, str(Path(munim_bridge.__file__).parent)],
                           capture_output=True, text=True, timeout=180)
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["consent_choice"] == "reject" and out["went"] == 1          # privacy choice, then the real click
     assert out["accept_only_choice"] is None                               # never accepts on the owner's behalf
-    assert out["late"] == 1                                                # waited and scrolled for it
-    assert out["disabled_hint"] and out["disabled_pressed"] == 0
-    assert out["similar"] == ["Order history", "Track order"]
+    assert out["disabled_said"] and out["disabled_pressed"] == 0
+    assert out["guess_refused"]
     assert out["submits"] == 1
     assert out["card_refused"]
     assert out["new_tab"]
 
 
 HUMAN_PROBE = r'''
-import asyncio, json, sys, tempfile, time
+import asyncio, json, re, sys, tempfile, time
 sys.path.insert(0, sys.argv[1])
 import munim_bridge as mb
 from playwright.async_api import async_playwright
@@ -624,7 +593,7 @@ LOGGER = """<script>window.ev={move:0,wheel:0,key:0,untrusted:0,down:0};
 PAGES = {
  "card": LOGGER + """<div style="height:300px"></div><a id=card href="#product" onclick="document.title='PRODUCT PAGE';document.body.insertAdjacentHTML('beforeend','<h1>SONY PS5 product details and price</h1>');return false">
    <div><span>SONY PS5 Console Digital (CFI-2116B01Y) 825 GB</span></div></a><p>footer text</p>""",
- "dead": LOGGER + """<p><span>Just a label that does nothing</span></p>""",
+ "dead": LOGGER + """<button>Does nothing</button>""",
  "hover": LOGGER + """<button id=b disabled onclick="document.title='CLICKED'">Search</button>
    <div id=area style="width:900px;height:500px;background:#ddd" onmousemove="document.getElementById('b').disabled=false">move over me</div>""",
  "typing": LOGGER + """<input id=q placeholder="Search products"><div id=out></div>""",
@@ -640,30 +609,32 @@ async def main():
         # 1. card title inside a link: real pointer travel, effect seen, clicked through a numbered handle
         pg = await fresh("card")
         r = await mb.handle(pg, {"action": "read"})
-        card = next((e for e in r["elements"] if "SONY" in e["text"]), None)
-        out["ref_selector_shape"] = bool(card) and 'data-smara-ref="' in card["selector"] and 'data-smara-name="SONY PS5 Console Digital' in card["selector"]
-        r = await mb.handle(pg, {"action": "click", "selector": card["selector"]})
+        m = re.search(r'\[(\d+)\] link "SONY PS5 Console Digital', r["page"])
+        out["card_listed"] = bool(m)
+        card = int(m.group(1))
+        r = await mb.handle(pg, {"action": "click", "ref": card})
         ev = await pg.evaluate("window.ev")
         out["card_changed"] = r.get("changed") is True and "PRODUCT PAGE" in r.get("title", "")
         out["pointer_travelled"] = ev["move"] >= 8 and ev["down"] == 1 and ev["untrusted"] == 0
         # 1b. the same element found again after the page re-rendered (attributes wiped)
         pg = await fresh("card"); r = await mb.handle(pg, {"action": "read"})
-        card = next(e for e in r["elements"] if "SONY" in e["text"])
+        card = int(re.search(r'\[(\d+)\] link "SONY', r["page"]).group(1))
         await pg.evaluate("() => document.querySelectorAll('[data-smara-ref]').forEach(e => e.removeAttribute('data-smara-ref'))")
-        r = await mb.handle(pg, {"action": "click", "selector": card["selector"]})
+        r = await mb.handle(pg, {"action": "click", "ref": card})
         out["ref_survives_rerender"] = r.get("changed") is True
-        # 2. a click that does nothing is reported, with a hint not to repeat it
-        pg = await fresh("dead"); r = await mb.handle(pg, {"action": "click", "selector": "text=Just a label that does nothing"})
-        out["dead_click_reported"] = r.get("changed") is False and "Do NOT repeat" in r.get("hint", "")
+        # 2. a click that does nothing is reported, so the agent does not repeat it
+        pg = await fresh("dead"); r = await mb.handle(pg, {"action": "read"})
+        r = await mb.handle(pg, {"action": "click", "ref": int(re.search(r'\[(\d+)\] button "Does nothing"', r["page"]).group(1))})
+        out["dead_click_reported"] = r.get("changed") is False and "Do not repeat" in r.get("changes", "")
         # 3. a control that only enables after the pointer moves over the page
         pg = await fresh("hover"); await pg.mouse.move(5, 5)
         await pg.evaluate("document.getElementById('b').disabled = true")
         await pg.mouse.move(300, 400); await pg.mouse.move(310, 410)
-        r = await mb.handle(pg, {"action": "click", "selector": "#b"})
+        r = await mb.handle(pg, {"action": "click", "selector": "Search"})          # an exact name works as well as a ref
         out["hover_enabled_click"] = r.get("title") == "CLICKED"
         # 4. typing: real key events, human pace
         pg = await fresh("typing"); t = time.monotonic()
-        r = await mb.handle(pg, {"action": "fill", "selector": "#q", "value": "sony ps5 console"})
+        r = await mb.handle(pg, {"action": "fill", "selector": "Search products", "value": "sony ps5 console"})
         ev = await pg.evaluate("window.ev"); val = await pg.evaluate("document.getElementById('q').value")
         out["typed_like_a_person"] = val == "sony ps5 console" and ev["key"] >= 16 and ev["untrusted"] == 0 and (time.monotonic() - t) > 0.5
         # 5. wheel scrolling
@@ -682,8 +653,8 @@ asyncio.run(main())
 
 
 def test_the_bridge_moves_the_real_pointer_types_like_a_person_and_reports_clicks_that_did_nothing(tmp_path):
-    """Numbered handles survive a re-render, the pointer travels before it presses, keys are real key events, scrolling is
-    the wheel, and a click that changed nothing says so (the Flipkart loop: three 'ok' clicks, same page)."""
+    """Refs survive a re-render, the pointer travels before it presses, keys are real key events, scrolling is the
+    wheel, and a click that changed nothing says so (the Flipkart loop: three 'ok' clicks, same page)."""
     import subprocess
     done = subprocess.run([sys.executable, "-c", HUMAN_PROBE, str(Path(munim_bridge.__file__).parent)],
                           capture_output=True, text=True, timeout=240)
@@ -725,7 +696,7 @@ async def main():
         browser = await p.chromium.launch()
         page = await browser.new_page()
         await page.goto(f.as_uri())
-        await munim_bridge.handle(page, {"action": "fill", "selector": "#q", "value": "veg pizza"}, allow_private=True)
+        await munim_bridge.handle(page, {"action": "fill", "selector": "Search", "value": "veg pizza"}, allow_private=True)
         r = await munim_bridge.handle(page, {"action": "press", "value": "Enter"}, allow_private=True)
         print(json.dumps({"error": r.get("error", ""), "results": await page.text_content("#r")}))
         await browser.close()
@@ -742,14 +713,6 @@ def test_enter_in_a_search_box_just_searches_and_is_not_reported_as_unsent(tmp_p
     assert out["error"] == "" and out["results"] == "results for veg pizza"
 
 
-def test_the_models_odd_selectors_are_turned_into_what_a_person_would_look_for():
-    assert munim_bridge._text_of("div[text*='Durex Extra Time Ultra Thin Condom']") == "Durex Extra Time Ultra Thin Condom"
-    assert munim_bridge._text_of("button[text='ADD']") == "ADD"
-    assert munim_bridge._text_of("text=JBL Tune 310C, Hi-Res Audio with DAC , 3-Button EQ , Co...") == "JBL Tune 310C, Hi-Res Audio with DAC , 3-Button EQ"
-    assert munim_bridge._split_selectors("div[data-id='grid-item'] a, a[title*='JBL, Tune'], div.x a") == [
-        "div[data-id='grid-item'] a", "a[title*='JBL, Tune']", "div.x a"]
-
-
 def test_a_rupee_sign_in_a_log_line_never_stops_the_helper(monkeypatch, tmp_path):
     import io
     monkeypatch.setattr(munim_bridge, "HOME", tmp_path)
@@ -763,9 +726,15 @@ def test_a_rupee_sign_in_a_log_line_never_stops_the_helper(monkeypatch, tmp_path
     assert "₹389" in (tmp_path / "bridge.log").read_text(encoding="utf-8")
 
 
-def test_numbered_handles_keep_their_words_for_the_approval_card_and_the_send_rule():
-    from src.agent.policy import _target, sensitive_step
-    send = 'button[data-smara-ref="21"][data-smara-name="Send"]'
-    assert "Send" in _target(send) and "button" in _target(send) and sensitive_step({"action": "click", "selector": send})
-    menu = 'a[data-smara-ref="4"][data-smara-name="Order Online"]'
-    assert "Order Online" in _target(menu) and "link" in _target(menu) and not sensitive_step({"action": "click", "selector": menu})
+def test_approvals_read_the_controls_name_from_the_page_listing():
+    from src.agent.policy import SessionCtx, approval_text, sensitive_step, submits_typed_text
+    listing = ('page:\n  [21] button "Send"\n  [4] link "Order Online"\n  [7] button "Add to cart"\n  [9] button "Place order"\n'
+               '  [3] searchbox "Search messages" value=""\n  [5] textbox "Write a message" value="hi"')
+    ctx = SessionCtx(id="s", tenant_id="t", trust="TRUSTED", controls=listing)
+    assert sensitive_step({"action": "click", "ref": 21}, ctx) and sensitive_step({"action": "click", "ref": 9}, ctx)
+    assert not sensitive_step({"action": "click", "ref": 4}, ctx) and not sensitive_step({"action": "click", "ref": 7}, ctx)
+    card = approval_text("browser_step", {"action": "click", "ref": 9}, {"url": "https://shop.example/cart", "title": "Cart", "page": listing})
+    assert "the “Place order” button" in card and "shop.example/cart" in card
+    enter = {"action": "press", "value": "Enter"}
+    assert submits_typed_text(enter, SessionCtx(id="s", tenant_id="t", trust="TRUSTED", controls=listing, last_fill="5"))
+    assert not submits_typed_text(enter, SessionCtx(id="s", tenant_id="t", trust="TRUSTED", controls=listing, last_fill="3"))

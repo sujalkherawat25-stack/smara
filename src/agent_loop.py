@@ -28,7 +28,8 @@ from src.loop.whatsapp import text_message
 log = logging.getLogger(__name__)
 RATE_RETRY_S = 25         # the model is busy (rate limited): wait and try the same step again
 RATE_RETRIES = 4
-MAX_STEPS = 30          # model calls per turn (each owner message / resume gets a fresh budget)
+MAX_STEPS = 40          # model calls per turn (each owner message / resume gets a fresh budget)
+BROWSER_RESULT_CHARS = 20000   # one page: what changed + every numbered control + some text
 CONTINUE_WITHIN = timedelta(minutes=30)
 EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memory": tools.resolve_continuum_memory,
              "write_continuum_evidence": tools.write_continuum_evidence,
@@ -59,7 +60,7 @@ def page_text(page: dict) -> str:
 
 
 def last_fill(messages: list[dict]) -> tuple[str, str]:
-    """(selector, value) of the agent's most recent browser 'fill' in this conversation."""
+    """(ref, value) of the agent's most recent browser 'fill' in this conversation."""
     for m in reversed(messages):
         for c in reversed(m.get("tool_calls") or []):
             if c["function"]["name"] == "browser_step":
@@ -68,7 +69,7 @@ def last_fill(messages: list[dict]) -> tuple[str, str]:
                 except ValueError:
                     continue
                 if a.get("action") == "fill":
-                    return str(a.get("selector", "")), str(a.get("value", ""))
+                    return str(a.get("ref", a.get("selector", ""))), str(a.get("value", ""))
                 if a.get("action") == "navigate":
                     return "", ""
     return "", ""
@@ -81,6 +82,7 @@ def _ctx(row, call_id: str = "", browsers=None) -> SessionCtx:
                       grants=active_grants(row), host=host_of(browsers.page(sid)) if browsers else "",
                       on_device=bool(browsers) and getattr(browsers, "where", lambda _: "")(sid) == "device",
                       page=page_text(browsers.page(sid)) if browsers else "",
+                      controls=str((browsers.page(sid) or {}).get("page", "")) if browsers else "",
                       last_fill=last_fill(row.get("messages") or [])[0], last_fill_value=last_fill(row.get("messages") or [])[1])
 
 
@@ -265,7 +267,8 @@ async def _process(app, row, messages: list, calls: list) -> bool:
                 await _save(app.state.pool, ctx.id, messages, status="WAITING_APPROVAL", pending=pending)
                 return True
             result = {"error": err}
-        messages.append({"role": "tool", "tool_call_id": cid, "content": tools.bounded(result)})
+        messages.append({"role": "tool", "tool_call_id": cid,
+                         "content": tools.bounded(result, BROWSER_RESULT_CHARS if name == "browser_step" else 6000)})
     return False
 
 

@@ -142,7 +142,7 @@ class DeviceBrowser:
         if not await online_device(self.pool, tenant_id):
             self._open.discard(sid)
             return {"error": "the owner's browser bridge is offline; start Smara Browser Bridge on the PC, or ask me to use the server browser"}
-        cmd = {k: args[k] for k in ("action", "url", "selector", "value") if args.get(k) is not None}
+        cmd = {k: args[k] for k in ("action", "url", "ref", "text", "selector", "value") if args.get(k) is not None}
         if cmd.get("action") != "navigate" and sid not in self._open:
             return {"error": "no open page: navigate first"}
         async with self.pool.connection() as conn:
@@ -158,7 +158,8 @@ class DeviceBrowser:
                 if cmd.get("action") == "navigate" and not out.get("error"):
                     self._open.add(sid)
                 if out.get("url"):
-                    self._pages[sid] = {"url": out["url"], "title": out.get("title", "")}
+                    self._pages[sid] = {"url": out["url"], "title": out.get("title", ""),
+                                      "page": out.get("page") or self._pages.get(sid, {}).get("page", "")}
                 return out
             if job["status"] == "EXPIRED":
                 return {"error": "the browser bridge was disconnected"}

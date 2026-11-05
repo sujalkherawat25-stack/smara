@@ -10,7 +10,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 
 from src import clock
-from src.agent.policy import SessionCtx
+from src.agent.policy import SessionCtx, target_words
 from src.agent.tools import party_in_tenant
 from src.bridge.coordinator import submit_debtor_claim
 from src.ingest.importer import import_rows
@@ -95,7 +95,7 @@ def _compute_amount(args: dict, owed: float) -> str | None:
     return None
 
 
-SECRET_FIELD = re.compile(r"pass(word|wd)|\botp\b|\bpin\b|cvv|card.?number|\bupi.?pin\b|secret", re.I)
+SECRET_FIELD = re.compile(r"pass(word|wd)|\botp\b|\bm?pin\b(?!.?code)|cvv|card.?number|\bupi.?pin\b|secret", re.I)
 
 
 async def validate_gated(app, ctx: SessionCtx, name: str, args: dict) -> str | None:
@@ -140,7 +140,7 @@ async def validate_gated(app, ctx: SessionCtx, name: str, args: dict) -> str | N
     elif name == "browser_step" and not app.state.browsers.alive(ctx.id):
         return "no open page: call browser_step with action=navigate first"
     elif name == "browser_step" and args.get("action") == "fill" and SECRET_FIELD.search(
-            f"{args.get('selector', '')} {args.get('value', '')}"):
+            f"{target_words(args, ctx)} {args.get('value', '')}"):
         return ("I never type passwords, OTPs, PINs or card details. Stop here and ask the owner to enter that "
                 "step themselves, or use an official API instead")
     return None

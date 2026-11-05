@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass, field
 
 UNTRUSTED_ALLOWED = frozenset({"write_continuum_evidence", "propose_ledger_adjustment"})
-BROWSER_READ = frozenset({"navigate", "read", "scroll", "back", "wait"})
+BROWSER_READ = frozenset({"navigate", "read", "text", "scroll", "back", "wait", "hover"})
 BROWSER_ACT = frozenset({"click", "fill", "press", "select"})
 
 
@@ -34,8 +34,9 @@ class SessionCtx:
     host: str = ""                 # the site the browser is on right now
     on_device: bool = False         # the browser is the owner's own PC, in front of them with a Stop button
     page: str = ""                 # lower-case url + title of the current page
-    last_fill: str = ""            # selector of the last box the agent typed into in this conversation
+    last_fill: str = ""            # ref of the last box the agent typed into in this conversation
     last_fill_value: str = ""      # and what it typed there
+    controls: str = ""             # the numbered controls of the current page ('[12] button "Add to cart"' per line)
 
 
 @dataclass(frozen=True)
@@ -53,10 +54,24 @@ OUTWARD_STEP = re.compile(
     r"submit|delete|remove account|transfer|send|send money|book now|confirm booking|subscribe|cancel order|withdraw|donate|"
     r"upi|net ?banking|publish|post)\b", re.I)
 # Pages where any click or typing waits for the owner: signing in, paying, one-time codes.
-SENSITIVE_PAGE = re.compile(r"login|log-in|signin|sign-in|sign in|checkout|payment|/pay|otp|verify|security|password|captcha", re.I)
+SENSITIVE_PAGE = re.compile(r"login|log-in|signin|sign-in|sign in|checkout|payment|/pay|otp|password|captcha", re.I)
 
 
 SEARCH_BOX = re.compile(r"search|query|\bq\b|find|filter|lookup|khoj", re.I)
+
+
+def control(controls: str, ref) -> str:
+    """'button "Add to cart"' for a ref, from the page listing the agent acted on ('' if it is not there)."""
+    m = re.search(r"^\s*\[" + re.escape(str(ref).strip().strip("[]")) + r"\] (.+)$", controls or "", re.M)
+    return re.sub(r' value=".*$', "", m.group(1)) if m else ""
+
+
+def target_words(args: dict, ctx) -> str:
+    """What a step acts on, in words, for the rules below: the control's role and name (or a name the agent wrote)."""
+    named = control(ctx.controls, args["ref"]) if args.get("ref") not in (None, "") else ""
+    if not named and args.get("text"):
+        named = f'clickable "{args["text"]}"'
+    return named or str(args.get("selector") or "")
 
 
 def submits_typed_text(args: dict, ctx) -> bool:
@@ -64,12 +79,14 @@ def submits_typed_text(args: dict, ctx) -> bool:
     a comment, a form). That is outward, exactly like clicking Send."""
     if args.get("action") != "press" or str(args.get("value", "")).lower() not in ("enter", "return", "numpadenter"):
         return False
-    return bool(ctx.last_fill) and not SEARCH_BOX.search(ctx.last_fill)
+    box = control(ctx.controls, ctx.last_fill) or ctx.last_fill
+    return bool(ctx.last_fill) and not SEARCH_BOX.search(box)
 
 
-def sensitive_step(args: dict) -> bool:
+def sensitive_step(args: dict, ctx=None) -> bool:
     """True when this step must not run on its own even where the agent is otherwise free to act."""
-    return bool(OUTWARD_STEP.search(f"{args.get('selector', '')} {args.get('value', '')}"))
+    words = target_words(args, ctx) if ctx is not None else str(args.get("selector") or "")
+    return bool(OUTWARD_STEP.search(f"{words} {args.get('value', '')}"))
 
 
 def tier_of(name: str, args: dict) -> str:
@@ -125,7 +142,7 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
         return Decision("deny", tier, "only a conversation with the owner can hand a step to them")
     if tier in ("T0", "T1"):
         return Decision("allow", tier)
-    if name == "browser_step" and ctx.trust == "TRUSTED" and not sensitive_step(args) and not submits_typed_text(args, ctx):
+    if name == "browser_step" and ctx.trust == "TRUSTED" and not sensitive_step(args, ctx) and not submits_typed_text(args, ctx):
         # On the owner's own PC (visible, with a Stop button) the agent acts freely, except on pages where the owner must
         # act (sign-in, payment, one-time codes). On the server browser the owner approves, or allows a site for a while.
         on_page = bool(SENSITIVE_PAGE.search(ctx.page))
@@ -133,7 +150,7 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
             return Decision("allow", "T2a", "autonomous on the owner's own browser")
         if ctx.host and ctx.host in ctx.grants and not on_page:
             return Decision("allow", "T2g", "the owner allowed this site for this task")
-    return Decision("approve", tier, card=approval_text(name, args))
+    return Decision("approve", tier, card=approval_text(name, args, {"page": ctx.controls}))
 
 
 def _site(page: dict | None) -> str:
@@ -149,6 +166,19 @@ def _site(page: dict | None) -> str:
     where = host + "".join("/" + seg for seg in [x for x in u.path.split("/") if x][:2])
     part = title.split("|")[0].strip()
     return f"{where} ({part})" if part and part.lower() != host.split(".")[0] else where
+
+
+def _described(line: str) -> str:
+    """'button "Place order"' -> 'the “Place order” button'."""
+    m = re.match(r'(\S+) "(.*?)"', line)
+    if not m:
+        return "a control"
+    role, label = m.group(1), m.group(2)[:60]
+    kind = {"button": "button", "link": "link", "textbox": "box", "searchbox": "search box", "combobox": "list",
+            "checkbox": "tick box", "radio": "option", "tab": "tab", "menuitem": "menu item", "option": "option"}.get(role, "")
+    if not label:
+        return f"a {kind or 'control'}"
+    return f"the “{label}” {kind}".rstrip() if kind else f"“{label}”"
 
 
 def _target(selector: str) -> str:
@@ -194,11 +224,15 @@ def approval_text(name: str, args: dict, page: dict | None = None, typed: str = 
     if name == "browser_step":
         act, sel, val = args.get("action"), str(args.get("selector") or ""), str(args.get("value") or "")
         site = _site(page)
+        line = control((page or {}).get("page", ""), args["ref"]) if args.get("ref") not in (None, "") else ""
+        if not line and args.get("text"):
+            line = f'clickable "{args["text"]}"'
+        what = _described(line) if line else (_target(sel) if sel else "a control")
         if act == "click":
-            return f"Smara wants to click {_target(sel)} on {site}.\n\nApprove?"
+            return f"Smara wants to click {what} on {site}.\n\nApprove?"
         if act == "fill":
-            return f"Smara wants to type into {_target(sel)} on {site}:\n\n\"{val[:300]}\"\n\nApprove?"
+            return f"Smara wants to type into {what} on {site}:\n\n\"{val[:300]}\"\n\nApprove?"
         if act == "press":
             return f"Smara wants to press {val or 'Enter'} on {site}.\n\nApprove?"
-        return f"Smara wants to {act} {_target(sel)} on {site}.\n\nApprove?"
+        return f"Smara wants to {act} {what} on {site}.\n\nApprove?"
     return f"Allow {name}?"
