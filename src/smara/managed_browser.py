@@ -1,6 +1,6 @@
 """Owned Playwright browser contexts with observation-bound actions."""
 from __future__ import annotations
-import hashlib, shutil, time, uuid
+import hashlib, shutil, sys, time, uuid
 from dataclasses import dataclass,field
 from pathlib import Path
 from typing import Any
@@ -14,6 +14,14 @@ class ManagedBrowser:
         self.root=Path(artifact_root); self.root.mkdir(parents=True,exist_ok=True); self.executable=executable_path or self._find(); self.headless=headless; self.runtime=None; self.browser=None; self.sessions={}
     @staticmethod
     def _find():
+        if sys.platform.startswith("linux"):
+            # System Chrome on Linux runners has crashed on popup tabs; the Playwright build is the tested one.
+            try:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as runtime:
+                    bundled=runtime.chromium.executable_path
+                    if bundled and Path(bundled).is_file():return str(Path(bundled))
+            except Exception:pass
         candidates=[shutil.which("chrome"),shutil.which("chromium"),shutil.which("chromium-browser"),shutil.which("google-chrome"),shutil.which("msedge"),r"C:\Program Files\Google\Chrome\Application\chrome.exe",r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"]
         installed=next((str(p) for p in candidates if p and Path(p).is_file()),None)
         if installed:
