@@ -92,12 +92,36 @@ def _text_of(selector: str) -> str:
     return m.group(1).strip() if m else ""
 
 
-async def settle(page) -> None:
-    """App-like sites keep loading after the first paint: give them a moment, never fail on it."""
+async def settle(page, max_ms: int = 12000) -> None:
+    """App-like sites (search results, government portals, travel sites) keep drawing long after 'load' and often
+    never go network-idle. Wait until the visible text has stopped changing, so a read is never of a half-built page.
+    Never fails."""
     try:
-        await page.wait_for_load_state("networkidle", timeout=5000)
+        await page.wait_for_load_state("networkidle", timeout=4000)
     except Exception:
         pass
+    size_js = "() => (document.body ? document.body.innerText.length : 0) + document.querySelectorAll('a,button,input').length"
+    last, stable, waited = -1, 0, 0
+    while waited < max_ms:
+        try:
+            size = await page.evaluate(size_js)
+        except Exception:                                # mid-navigation (Enter or a click opened the next page)
+            if page.is_closed():
+                return
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=8000)
+            except Exception:
+                pass
+            waited += 500
+            last, stable = -1, 0
+            continue
+        loading = size < 300 and waited < 3000           # near-empty early on: probably still being built
+        stable = stable + 1 if size == last and not loading else 0
+        if stable >= 2:
+            return
+        last = size
+        await page.wait_for_timeout(500)
+        waited += 500
 
 
 async def smart_click(page, selector: str) -> None:
@@ -125,10 +149,24 @@ SIGNALS_JS = """() => {
   if (document.querySelector('input[type=password]')) out.push('login');
   if (document.querySelector('input[autocomplete=one-time-code]') || /one.time password|verification code|enter otp|enter the otp/.test(t)) out.push('otp');
   if (/card number|cvv|enter upi|select payment method|net banking|pay securely/.test(t)) out.push('payment');
+  if (/digital signature certificate|\bdsc\b|emsigner|sign with dsc/.test(t)) out.push('dsc');
+  // The site refuses automated browsers (some government portals do): never try to get around it, hand it over.
+  if (t.length < 1500 && /permission denied|access denied|request blocked|you have been blocked|automated (access|queries)|bot detected|forbidden.{0,3}403/.test(t)) out.push('blocked');
   return out;
 }"""
 SECRET_TYPES_JS = """e => ({type: (e.type || '').toLowerCase(), ac: (e.autocomplete || '').toLowerCase(),
-  name: ((e.name || '') + ' ' + (e.id || '')).toLowerCase()})"""
+  name: ((e.name || '') + ' ' + (e.id || '') + ' ' + (e.placeholder || '') + ' ' + (e.getAttribute('aria-label') || '')).toLowerCase(),
+  frame: location.href.toLowerCase(), framed: window !== window.top})"""
+SECRET_WORDS = ("otp", "pin", "cvv", "cvc", "card", "passw", "upi", "vpa", "netbank", "expiry", "account number", "aadhaar")
+PAYMENT_OR_LOGIN_FRAME = re.compile(r"razorpay|paytm|payu|ccavenue|billdesk|stripe|juspay|cashfree|phonepe|"
+                                    r"checkout|payment|/pay|login|signin|auth|accounts\.google|captcha", re.I)
+
+
+def secret_field(info: dict) -> bool:
+    """Password, OTP, PIN, card, UPI or bank fields, and anything inside a payment or sign-in frame: never typed."""
+    return (info["type"] == "password" or "one-time-code" in info["ac"] or info["ac"].startswith("cc-")
+            or any(k in info["name"] for k in SECRET_WORDS)
+            or (info.get("framed") and bool(PAYMENT_OR_LOGIN_FRAME.search(info.get("frame", "")))))
 BROWSERS = {
     "Windows": [r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
                 r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
@@ -255,7 +293,220 @@ async def send_message(page, selector: str) -> dict:
                      "worked). Read the page and look for the send button, or ask the owner to press Send."}
 
 
+# ---------------------------------------------------------------- self-recovery: what a careful person does when a step fails
+POPUP_JS = r"""() => {
+  // Close what stands between the agent and the page: cookie/consent banners, sign-up nags, "allow notifications" boxes,
+  // app-download sheets. Prefer the privacy-preserving or neutral choice; never press anything that pays, sends or signs in.
+  const visible = e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const label = b => ((b.getAttribute('aria-label') || '') + ' ' + (b.innerText || b.value || '') + ' ' + (b.title || '')).trim().toLowerCase();
+  const prefer = [/^(reject all|reject|decline|decline all|necessary only|only necessary|use necessary cookies only|essential only)$/,
+                  /^(no thanks|not now|maybe later|later|skip|dismiss|close|cancel|×|✕|x|continue without accepting)$/];
+  // Never accept or agree to anything (cookies, terms, sign-ups, permissions): those stay with the owner.
+  const danger = /pay|buy|book|send|submit|sign ?in|sign ?up|log ?in|register|subscribe|download|install|delete|confirm|accept|agree|allow|authori[sz]e|continue/;
+  const boxes = [...document.querySelectorAll('[role=dialog],[aria-modal=true],[id*=cookie],[class*=cookie],[id*=consent],[class*=consent],' +
+                 '[id*=gdpr],[class*=gdpr],[class*=modal],[class*=popup],[id*=popup],[class*=interstitial]')]
+                 .filter(visible).filter(e => !e.closest('#smara-agent-banner'));
+  const cls = b => { const c = b.className; return (c && c.baseVal !== undefined ? c.baseVal : c) || ''; };
+  const closed = [];
+  for (const box of boxes) {
+    const buttons = [...box.querySelectorAll('button,[role=button],a,input[type=button],input[type=submit],span[class*=close],div[class*=close],i[class*=close]')].filter(visible);
+    let hit = null;
+    for (const rx of prefer) { hit = buttons.find(b => rx.test(label(b)) && !danger.test(label(b))); if (hit) break; }
+    if (!hit) hit = buttons.find(b => /close|dismiss/.test(cls(b) + ' ' + label(b)) && !danger.test(label(b)));
+    if (hit) { hit.click(); closed.push(label(hit) || 'close'); }
+  }
+  return closed;
+}"""
+
+SIMILAR_JS = r"""(words) => {
+  // Elements on the page whose visible name shares a word with what the agent was looking for: the agent picks one next.
+  const sel = 'a,button,input,select,textarea,[role=button],[role=link],[role=option],[role=tab],[role=combobox],[contenteditable=true],label';
+  const name = e => (e.getAttribute('aria-label') || e.innerText || e.value || e.placeholder || e.title || '').trim().replace(/\s+/g, ' ');
+  const out = [];
+  for (const e of document.querySelectorAll(sel)) {
+    const r = e.getBoundingClientRect(); if (!r.width || !r.height || e.closest('#smara-agent-banner')) continue;
+    const n = name(e); if (!n) continue;
+    const low = n.toLowerCase();
+    if (!words.length || words.some(w => low.includes(w.slice(0, Math.max(4, w.length - 2))))) out.push({tag: e.tagName.toLowerCase(), text: n.slice(0, 60),
+      selector: e.id && !/\d{3,}/.test(e.id) ? '#' + CSS.escape(e.id) : (e.name ? `${e.tagName.toLowerCase()}[name="${e.name}"]` : `text=${n.split('\n')[0].slice(0, 50)}`)});
+    if (out.length >= 10) break;
+  }
+  return out;
+}"""
+
+
+async def dismiss_popups(page) -> list:
+    """Close consent banners and nags in the page and its frames. Never fails."""
+    closed = []
+    for frame in page.frames[:8]:
+        try:
+            closed += await frame.evaluate(POPUP_JS)
+        except Exception:
+            pass
+    if closed:
+        await page.wait_for_timeout(600)
+    return closed
+
+
+def _locators(page, selector: str):
+    """Every reasonable way a person would find this thing, in order: as written, by its visible words, by label,
+    placeholder or role, and the same inside iframes (government portals and payment pages often use them)."""
+    text = _text_of(selector)
+    for scope in [page] + list(page.frames[1:6]):
+        try:
+            yield scope.locator(selector).first
+        except Exception:
+            pass
+        if text:
+            yield scope.get_by_role("button", name=text).first
+            yield scope.get_by_role("link", name=text).first
+            yield scope.get_by_label(text).first
+            yield scope.get_by_placeholder(text).first
+            yield scope.get_by_text(text, exact=False).first
+
+
+async def find(page, selector: str):
+    """A visible element for this selector, recovering the way a person would: look again a moment later, let the
+    page finish, close popups, scroll to load more, look inside frames. About 8 s at most; None only after all of it."""
+    recover = [lambda: page.wait_for_timeout(1200),
+               lambda: settle(page, max_ms=4000),
+               lambda: dismiss_popups(page),
+               lambda: page.evaluate("() => window.scrollBy(0, window.innerHeight * 0.9)"),
+               lambda: page.evaluate("() => window.scrollBy(0, window.innerHeight * 0.9)"),
+               lambda: page.wait_for_timeout(1500)]
+    for step in [None] + recover:
+        if step is not None:
+            try:
+                await step()
+            except Exception:
+                pass
+            await page.wait_for_timeout(250)
+        for loc in _locators(page, selector):
+            try:
+                if await loc.is_visible():
+                    return loc
+            except Exception:
+                continue
+    return None
+
+
+async def similar(page, selector: str) -> list:
+    import re
+    skip = {"text", "button", "div", "span", "input", "role", "aria", "label", "class", "has", "href", "name", "type"}
+    words = [w.lower() for w in re.findall(r"[A-Za-zऀ-ॿ]{3,}", _text_of(selector) or selector) if w.lower() not in skip][:4]
+    try:
+        return await page.evaluate(SIMILAR_JS, words)
+    except Exception:
+        return []
+
+
+OUTWARD_JS = r"""e => {
+  const n = ((e.getAttribute('aria-label') || '') + ' ' + (e.innerText || e.value || '') + ' ' + (e.title || '')).toLowerCase();
+  return e.type === 'submit' || /\b(send|submit|post|reply|pay|buy|book|place order|checkout|confirm|delete|remove|apply|register|sign up)\b/.test(n);
+}"""
+
+
+async def recovering_click(page, selector: str):
+    """Click and return the page to keep working on (a new tab if the click opened one)."""
+    ctx = page.context
+    before = len(ctx.pages)
+    loc = await find(page, selector)
+    if loc is None:
+        raise LookupError(selector)
+    await loc.scroll_into_view_if_needed(timeout=3000)
+    disabled = await loc.evaluate("e => !!(e.disabled || e.getAttribute('aria-disabled') === 'true' || "
+                                  "/\\bdisabl/i.test(typeof e.className === 'string' ? e.className : ''))")
+    if disabled:
+        await page.wait_for_timeout(2500)               # many forms enable it a moment after the last field
+        disabled = await loc.evaluate("e => !!(e.disabled || e.getAttribute('aria-disabled') === 'true' || "
+                                      "/\\bdisabl/i.test(typeof e.className === 'string' ? e.className : ''))")
+    if disabled:
+        raise RuntimeError("DISABLED")
+    # A control that sends, submits, pays, books or confirms is pressed exactly once: a retry could do it twice.
+    outward = await loc.evaluate(OUTWARD_JS)
+    try:
+        await loc.click(timeout=6000, trial=outward)    # trial: check it is clickable without pressing it yet
+        if outward:
+            await loc.click(timeout=6000, no_wait_after=True)
+    except Exception:
+        if outward:
+            raise
+        await dismiss_popups(page)                       # usually a popup or sticky header sits on top of it
+        try:
+            await loc.click(timeout=4000)
+        except Exception:
+            await loc.dispatch_event("click")           # still covered: press it directly
+    await page.wait_for_timeout(600)
+    if len(ctx.pages) > before:                         # opened in a new tab: carry on there, like a person would
+        new = ctx.pages[-1]
+        try:
+            await new.wait_for_load_state("domcontentloaded", timeout=20000)
+        except Exception:
+            pass
+        if url_allowed(new.url) and new.url != "about:blank":
+            await new.close()                           # a tab to a private/local address is never used
+            raise PermissionError("the link opened a page on a private or local address, which is blocked; it was closed")
+        await new.bring_to_front()
+        await settle(new)
+        return new
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=15000)
+    except Exception:
+        pass
+    await settle(page)
+    return page
+
+
+async def goto(page, url: str) -> None:
+    """Open a page; slow sites (many government portals) get a second, more patient try."""
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    except Exception:
+        await page.goto(url, wait_until="commit", timeout=45000)
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=20000)
+        except Exception:
+            pass
+    await settle(page)
+    await dismiss_popups(page)
+
+
+def failure(e: BaseException, action: str, selector: str, found: list) -> dict:
+    """An error the agent can act on: what happened, and what to try next."""
+    msg = str(e) or type(e).__name__
+    if msg == "DISABLED" or "not enabled" in msg.lower():
+        hint = ("that control is disabled: the page wants something first (fill a required field, pick a date or an "
+                "option from a list, tick a box), or the site is holding the step back. Read the page, complete what is "
+                "missing, then try again; if nothing is missing, try another way (a different site or link).")
+        return {"error": f"could not {action} {selector!r}: {hint}", "similar": found, "hint": hint}
+    if isinstance(e, LookupError) or ("timeout" in msg.lower() and "waiting for" in msg.lower()):
+        hint = ("not on the page, even after waiting, closing popups, scrolling and looking in frames. Pick one of "
+                "'similar' (they are on the page now), or read the page again.") if found else (
+                "not on the page, even after waiting, closing popups, scrolling and looking in frames. Read the page "
+                "again; the content may have changed or need another step first (a tab, a menu, a search).")
+        return {"error": f"could not {action} {selector!r}: {hint}", "similar": found, "hint": hint}
+    if "net::" in msg or "navigation" in msg.lower():
+        return {"error": f"the page did not load ({msg[:160]}). Try navigate again once, or a different page.",
+                "hint": "retry navigate once; if it fails again the site may be down"}
+    return {"error": f"{type(e).__name__}: {msg[:300]}", "similar": found,
+            "hint": "read the page, then try a different element from 'elements' or 'similar'"}
+
+
+PAGES: dict[int, object] = {}       # page -> the page to continue on (a click may open a new tab)
+
+
+def current(page):
+    """The page the next step should use."""
+    nxt = PAGES.get(id(page), page)
+    try:
+        return page if nxt.is_closed() else nxt
+    except Exception:
+        return page
+
+
 async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
+    page = current(page)
     a = cmd.get("action")
     if isinstance(cmd.get("selector"), str):               # models sometimes send JSON-escaped quotes: div[role=\\"x\\"]
         cmd = {**cmd, "selector": cmd["selector"].replace('\\"', '"').replace("\\'", "'").strip()}
@@ -264,58 +515,118 @@ async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
     if await page.evaluate("() => !!window.__smaraPaused"):
         return {"error": "the owner paused Smara in the browser (Stop button); ask them to press Resume"}
     extra: dict = {}
-    if a == "navigate":
-        _LAST_TYPED.pop(id(page), None)
-        why = url_allowed(str(cmd.get("url", "")), allow_private)
-        if why:
-            return {"error": f"blocked url: {why}"}
-        await page.goto(cmd["url"], wait_until="domcontentloaded", timeout=30000)
-        await settle(page)
-    elif a == "click":
-        await smart_click(page, str(cmd["selector"]))
-    elif a == "fill":
-        info = await page.locator(str(cmd["selector"])).first.evaluate(SECRET_TYPES_JS, timeout=10000)
-        if info["type"] == "password" or "one-time-code" in info["ac"] or any(
-                k in info["name"] for k in ("otp", "pin", "cvv", "card", "passw")):
-            return {"error": "I never type into password, OTP, PIN or card fields; please do that step yourself in the browser"}
-        await type_into(page, str(cmd["selector"]), str(cmd.get("value", "")))
-        _LAST_TYPED[id(page)] = str(cmd["selector"])
-    elif a == "press":
-        key = str(cmd.get("value") or "Enter")
-        target = _LAST_TYPED.get(id(page))
-        if key == "Enter" and target and await is_message_box(page, target):
-            sent = await send_message(page, target)
-            if sent.get("error"):
-                return sent
-            extra = sent
-            _LAST_TYPED.pop(id(page), None)          # sent: a second Enter must never send it again
-        else:
-            await page.keyboard.press(key)
-        await page.wait_for_load_state("domcontentloaded")
-    elif a == "scroll":
-        v = str(cmd.get("value") or "down").lower()
-        js = {"top": "window.scrollTo(0, 0)", "bottom": "window.scrollTo(0, document.body.scrollHeight)",
-              "up": "window.scrollBy(0, -window.innerHeight * 0.8)"}.get(v, "window.scrollBy(0, window.innerHeight * 0.8)")
-        await page.evaluate("() => { " + js + " }")
-        await page.wait_for_timeout(500)
-    elif a == "back":
-        await page.go_back(wait_until="domcontentloaded")
-    elif a == "wait":
-        try:
-            ms = int(cmd.get("value") or 1000)
-        except (TypeError, ValueError):
-            ms = 1000
-        await page.wait_for_timeout(max(0, min(ms, 5000)))
-    elif a == "select":
-        await page.select_option(str(cmd["selector"]), str(cmd.get("value", "")))
-        await page.wait_for_load_state("domcontentloaded")
+    sel = str(cmd.get("selector") or "")
+    try:
+        if a == "navigate":
+            _LAST_TYPED.pop(id(page), None)
+            why = url_allowed(str(cmd.get("url", "")), allow_private)
+            if why:
+                return {"error": f"blocked url: {why}"}
+            await goto(page, cmd["url"])
+        elif a == "read":
+            await settle(page)
+        elif a == "click":
+            new = await recovering_click(page, sel)
+            if new is not page:
+                PAGES[id(page)] = new
+                page, extra = new, {"opened_new_tab": True}
+        elif a == "fill":
+            box = await find(page, sel)
+            if box is None:
+                raise LookupError(sel)
+            info = await box.evaluate(SECRET_TYPES_JS, timeout=10000)
+            if secret_field(info):
+                return {"error": "I never type into password, OTP, PIN, card, UPI or bank fields, or into payment or "
+                                 "sign-in boxes; please do that step yourself in the browser",
+                        "needs_owner": ["login_or_payment"], "hint": "hand this step to the owner"}
+            value = str(cmd.get("value", ""))
+            kind = await box.evaluate("""e => e.tagName === 'SELECT' ? 'select' : e.isContentEditable ? 'editable'
+                : (e.getAttribute('role') === 'combobox' || e.getAttribute('aria-autocomplete') || e.getAttribute('list')) ? 'suggest' : 'plain'""")
+            if kind == "select":
+                await box.select_option(label=value)
+            elif kind == "editable":
+                await type_into(page, sel, value)
+            elif kind == "suggest":                              # city / product boxes only react to real keystrokes
+                await box.fill("")
+                await box.press_sequentially(value, delay=60)
+                await page.wait_for_timeout(1200)
+                extra = {"hint": "this box suggests matches as you type: read the page and click the right suggestion"}
+            elif len(value) <= 300:                              # type it key by key, like a person: many forms
+                await box.fill("")                               # (GSTIN, PAN, PIN code checks) validate on keystrokes
+                await box.press_sequentially(value, delay=25)
+                if (await box.input_value()) != value:
+                    await box.fill(value, timeout=10000)
+            else:
+                await box.fill(value, timeout=10000)
+            _LAST_TYPED[id(page)] = sel
+        elif a == "press":
+            key = str(cmd.get("value") or "Enter")
+            target = _LAST_TYPED.get(id(page))
+            if key == "Enter" and target and await is_message_box(page, target):
+                sent = await send_message(page, target)
+                if sent.get("error"):
+                    return sent
+                extra = sent
+                _LAST_TYPED.pop(id(page), None)          # sent: a second Enter must never send it again
+            else:
+                ctx, before = page.context, len(page.context.pages)
+                await page.keyboard.press(key)
+                await page.wait_for_timeout(500)
+                if len(ctx.pages) > before:
+                    new = ctx.pages[-1]
+                    if url_allowed(new.url) and new.url != "about:blank":
+                        await new.close()
+                        raise PermissionError("that opened a page on a private or local address, which is blocked; it was closed")
+                    await new.bring_to_front()
+                    PAGES[id(page)] = new
+                    page, extra = new, {"opened_new_tab": True}
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=15000)
+            except Exception:
+                pass
+            await settle(page)
+        elif a == "scroll":
+            v = str(cmd.get("value") or "down").lower()
+            js = {"top": "window.scrollTo(0, 0)", "bottom": "window.scrollTo(0, document.body.scrollHeight)",
+                  "up": "window.scrollBy(0, -window.innerHeight * 0.8)"}.get(v, "window.scrollBy(0, window.innerHeight * 0.8)")
+            await page.evaluate("() => { " + js + " }")
+            await page.wait_for_timeout(700)
+        elif a == "back":
+            await page.go_back(wait_until="domcontentloaded")
+            await settle(page)
+        elif a == "wait":
+            try:
+                ms = int(cmd.get("value") or 1000)
+            except (TypeError, ValueError):
+                ms = 1000
+            await page.wait_for_timeout(max(0, min(ms, 8000)))
+        elif a == "select":
+            box = await find(page, sel)
+            if box is None:
+                raise LookupError(sel)
+            value = str(cmd.get("value", ""))
+            try:
+                await box.select_option(value, timeout=5000)
+            except Exception:
+                await box.select_option(label=value, timeout=5000)
+            await settle(page)
+    except Exception as e:
+        return failure(e, a, sel or str(cmd.get("url", "")), await similar(page, sel) if sel else [])
     await page.evaluate(BANNER_JS)
     text = await page.evaluate("() => document.body ? document.body.innerText : ''")
+    if len(text) < 400:                                   # framed pages (older portals): read the frames too
+        for frame in page.frames[1:5]:
+            try:
+                text += "\n" + await frame.evaluate("() => document.body ? document.body.innerText : ''")
+            except Exception:
+                pass
     for banner in ("Smara is working on this page\nStop", "Smara is paused\nResume"):
         text = text.replace(banner, "")
-    out = {"url": page.url, "title": await page.title(), "text": text[:3000], "elements": await page.evaluate(SNAPSHOT_JS)}
+    out = {"url": page.url, "title": await page.title(), "text": text[:4000], "elements": await page.evaluate(SNAPSHOT_JS)}
     if needs := await page.evaluate(SIGNALS_JS):
         out["needs_owner"] = needs
+        out["hint"] = ("this page needs the owner (" + ", ".join(needs) + "): never solve a CAPTCHA or type secrets; "
+                       "hand off with hand_off_to_owner, then continue after they say done")
     out.update(extra)
     return out
 
@@ -505,6 +816,8 @@ async def run(a) -> int:
             except Exception as e:                    # a page error must never kill the bridge
                 result = {"error": f"{type(e).__name__}: {str(e)[:300]}"}
             br.last = time.monotonic()
+            if br.page is not None:
+                br.page = current(br.page)            # a click that opened a new tab: the next step works there
             where = result if result.get("url") else {**result, "url": getattr(br.page, "url", "") if br.page else ""}
             log(describe_step(job["command"], where))
             write_status(last_step_at=time.time(), last_step=describe_step(job["command"], where))
