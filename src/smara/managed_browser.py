@@ -34,7 +34,7 @@ class ManagedBrowser:
     def start(self):
         if not self.executable:raise BrowserUnavailable("no supported Chromium executable")
         from playwright.sync_api import sync_playwright
-        self.runtime=sync_playwright().start(); self.browser=self.runtime.chromium.launch(headless=self.headless,executable_path=self.executable)
+        self.runtime=sync_playwright().start(); self.browser=self.runtime.chromium.launch(headless=self.headless,executable_path=self.executable,args=["--disable-dev-shm-usage"])
     def create(self,context_options=None,configure_context=None):
         if self.browser is None:self.start()
         ident=f"browser_{uuid.uuid4().hex[:20]}"; context=self.browser.new_context(**(context_options or {"accept_downloads":True}))
