@@ -3,15 +3,21 @@ import { nativeProbe, nativeSettings, type NativeSetup } from "./nativeApi";
 
 type Props = { setup: NativeSetup; locked: boolean; onUpdate: (value: NativeSetup) => void; onPendingChange: (value: boolean) => void };
 
+/** Memory is on by default for a fresh setup, but nothing is sent until a key is saved and the owner confirms the consent prompt. */
+export function memoryDefaultEnabled(memory?: { enabled: boolean; user_id: string; configured: boolean }): boolean {
+  if (!memory) return true;
+  if (memory.enabled) return true;
+  return !memory.user_id;        // a saved identity means the owner already decided; respect an explicit "off"
+}
 export default function NativeMemorySettings({ setup, locked, onUpdate, onPendingChange }: Props) {
   const [secret, setSecret] = useState("");
-  const [enabled, setEnabled] = useState(setup.memory?.enabled ?? false);
+  const [enabled, setEnabled] = useState(memoryDefaultEnabled(setup.memory));
   const [scope, setScope] = useState<"project" | "personal">(setup.memory?.scope ?? "project");
   const [identity, setIdentity] = useState(setup.memory?.user_id ?? "");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  useEffect(() => { setEnabled(setup.memory?.enabled ?? false); setScope(setup.memory?.scope ?? "project"); setIdentity(setup.memory?.user_id ?? ""); }, [setup.memory?.enabled, setup.memory?.scope, setup.memory?.user_id]);
+  useEffect(() => { setEnabled(memoryDefaultEnabled(setup.memory)); setScope(setup.memory?.scope ?? "project"); setIdentity(setup.memory?.user_id ?? ""); }, [setup.memory?.enabled, setup.memory?.scope, setup.memory?.user_id]);
   const disabled = locked || pending;
   const run = async (action: "save" | "refresh" | "probe" | "remove") => {
     if (disabled) return;
@@ -34,6 +40,7 @@ export default function NativeMemorySettings({ setup, locked, onUpdate, onPendin
   return <div className="settings-grid">
     <form className="settings-card settings-form" onSubmit={event => { event.preventDefault(); void run("save"); }}>
       <h2>Conversation memory · Continuum</h2>
+      {!setup.memory?.enabled && !setup.memory?.user_id && <p role="status" className="settings-notice">Memory is recommended: Smara remembers you across chats. Paste your Syntarus key and press Save; you will be asked to confirm before anything is sent.</p>}
       <p>Recall your preferences, decisions and past conversations before answering. Save completed responses for future conversations using the Syntarus Python SDK.</p>
       <label>Syntarus project key<input aria-label="Syntarus project key" type="password" autoComplete="off" disabled={disabled} value={secret} onChange={event => setSecret(event.target.value)} placeholder="Paste your key; leave blank to keep the saved key" /></label>
       <small>Encrypted with Windows DPAPI. The key is never returned to the UI, model, tools or skills.</small>

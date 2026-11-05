@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 mod native_runtime;
+mod browser_bridge;
 use native_runtime::{native_send, native_start, native_status, native_stop};
 
 fn app_data_dir() -> PathBuf {
@@ -62,10 +63,10 @@ fn management(request: Value) -> Result<Value, String> {
         output.take(8_000_001).read_to_end(&mut bytes).map(|_| bytes)
     });
     let mut finished = false;
-    let polls = if request["operation"] == "outreach" { 900 } else { 300 };
+    let polls = if request["operation"] == "outreach" { 4500 } else { 1500 };   // checked every 20 ms: the same 90 s / 30 s limits, without up to 100 ms of idle wait per call
     for _ in 0..polls {
         if process.try_wait().map_err(|_| "Cannot inspect settings companion")?.is_some() { finished = true; break; }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
     if !finished {
         let _ = process.kill(); let _ = process.wait();
@@ -278,7 +279,8 @@ fn main() {
         return;
     }
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file, native_project_files])
+        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file, native_project_files, browser_bridge::bridge_state, browser_bridge::bridge_check, browser_bridge::bridge_ensure, browser_bridge::bridge_stop, browser_bridge::bridge_pause, browser_bridge::bridge_pair, browser_bridge::bridge_unpair, browser_bridge::bridge_install_components])
+        .setup(|_| { browser_bridge::ensure_on_startup(); Ok(()) })
         .build(tauri::generate_context!()).expect("Could not build Smara Desktop")
         .run(|_, event| {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) { let _ = native_runtime::stop_current(); }

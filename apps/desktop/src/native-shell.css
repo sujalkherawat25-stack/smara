@@ -308,3 +308,21 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .voice-review { position: absolute; bottom: 40px; left: 0; width: min(380px, 70vw); padding: 16px; background: #202326; border: 1px solid #454b51; border-radius: 12px; display: flex; flex-wrap: wrap; gap: 10px; z-index: 4; box-shadow: 0 8px 32px #0006; }
 .voice-review small { flex-basis: 100%; line-height: 1.5; }
 .voice-read { display: inline-flex; gap: 8px; align-items: center; }
+
+/* Browser bridge panel */
+.browser-grid { align-items: start; }
+.browser-status { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid #2d3536; border-radius: 10px; margin: 14px 0; }
+.browser-status small { display: block; color: #9aa8af; word-break: break-all; }
+.browser-light { width: 12px; height: 12px; border-radius: 50%; background: #6b7780; flex: none; }
+.browser-online .browser-light { background: #2fb457; }
+.browser-offline .browser-light, .browser-paused .browser-light { background: #d9382a; }
+.browser-starting .browser-light { background: #d6a61f; }
+.browser-big-controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.browser-big-controls button { font-size: 16px; font-weight: 700; padding: 14px 22px; min-width: 150px; }
+.browser-pause { background: #b42318; color: #fff; border-color: #b42318; }
+.browser-feed { list-style: none; padding: 0; margin: 0; max-height: 520px; overflow-y: auto; display: grid; gap: 8px; }
+.browser-step { display: flex; gap: 10px; padding: 8px 10px; border: 1px solid #2d3536; border-radius: 8px; }
+.browser-step small { display: block; color: #9aa8af; overflow-wrap: anywhere; }
+.browser-step-error { border-color: #7a2a24; }
+.browser-step-icon { width: 18px; text-align: center; flex: none; }
+.browser-approval { padding: 10px; border: 1px solid #0b5fff; border-radius: 8px; margin-bottom: 10px; }

@@ -64,7 +64,9 @@ try {
         '-m', 'PyInstaller'
         '--noconfirm'
         '--clean'
-        '--onefile'
+        # A folder, not a single file: a single file unpacks ~70 MB into %TEMP% on EVERY start (about 2.5 s per call, and
+        # it leaves a temp folder behind each time). A folder starts in about 0.5 s. The entry point keeps the same path.
+        '--onedir'
         '--paths', 'src'
         '--add-data', ((Join-Path $repoRoot 'release\VERSION') + ';release')
         '--hidden-import', 'smara.native_management'
@@ -95,6 +97,10 @@ try {
         '--hidden-import', 'smara.native_browser_transfer'
         '--hidden-import', 'smara.native_computer'
         '--hidden-import', 'smara.native_windows'
+        '--hidden-import', 'smara.native_office'
+        '--hidden-import', 'smara.native_tally'
+        '--hidden-import', 'win32com.client'
+        '--hidden-import', 'pythoncom'
         '--collect-all', 'pywinauto'
         '--collect-all', 'comtypes'
         '--hidden-import', 'psutil'
@@ -113,7 +119,12 @@ try {
     Assert-NativeSuccess 'PyInstaller'
     $resourceDir = Join-Path $appRoot 'src-tauri\resources'
     New-Item -ItemType Directory -Force -Path $resourceDir | Out-Null
-    Copy-Item -LiteralPath (Join-Path $executorDist 'smara-desktop.exe') -Destination (Join-Path $resourceDir 'smara-desktop.exe') -Force
+    # Same path as before (resources\smara-desktop.exe), with its support files in resources\_internal.
+    $executorFolder = Join-Path $executorDist 'smara-desktop'
+    Copy-Item -LiteralPath (Join-Path $executorFolder 'smara-desktop.exe') -Destination (Join-Path $resourceDir 'smara-desktop.exe') -Force
+    $internalTarget = Join-Path $resourceDir '_internal'
+    if (Test-Path -LiteralPath $internalTarget) { Remove-Item -LiteralPath $internalTarget -Recurse -Force }
+    Copy-Item -LiteralPath (Join-Path $executorFolder '_internal') -Destination $internalTarget -Recurse -Force
     $nativeResourceDir = Join-Path $resourceDir 'native'
     New-Item -ItemType Directory -Force -Path $nativeResourceDir | Out-Null
     foreach ($nativeResource in @('smara-native.exe', 'codex-windows-sandbox-setup.exe', 'codex-command-runner.exe', 'LICENSE', 'NOTICE', 'UPSTREAM.json')) {

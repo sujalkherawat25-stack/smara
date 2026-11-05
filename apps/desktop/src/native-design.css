@@ -1,0 +1,130 @@
+/* Smara Desktop design layer: a calm, neutral, Claude-Code-like workspace.
+   Loaded after native-shell.css. Tokens first, then shell, chat, composer, settings and the Browser tab. */
+:root {
+  --bg: #1b1b1a; --bg-side: #171716; --bg-raised: #222221; --bg-card: #212120; --bg-input: #1a1a19; --bg-hover: #2a2a28; --bg-select: #2c2c2a;
+  --line: #2b2b29; --line-strong: #3a3a37; --text: #ecebe8; --text-soft: #c4c3be; --text-dim: #8f8e89;
+  --accent: #d97757; --accent-soft: #3a2a23; --focus: #5b9bf6; --ok: #6fbf8a; --warn: #e3b768; --danger: #ef7a6c;
+  --radius: 12px; --radius-sm: 8px; --column: 800px;
+  --shadow: 0 1px 0 #ffffff07 inset, 0 8px 24px -12px #000a;
+  font: 15px/1.65 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; letter-spacing: 0;
+  background: var(--bg); color: var(--text);
+}
+body { background: var(--bg); -webkit-font-smoothing: antialiased; }
+.native-app { background: var(--bg); }
+* { scrollbar-width: thin; scrollbar-color: #3a3a37 transparent; }
+::selection { background: #3d5a8f; color: #fff; }
+
+/* ---------- controls: flat, quiet, one clear primary ---------- */
+.native-app button { border-radius: var(--radius-sm); border-color: var(--line-strong); background: var(--bg-raised); color: var(--text); padding: 7px 13px; font-weight: 500; transition: background .12s, border-color .12s; }
+.native-app button:hover:not(:disabled) { background: var(--bg-hover); border-color: #4a4a46; }
+.native-app .primary { background: var(--text); border-color: var(--text); color: #1b1b1a; font-weight: 600; box-shadow: none; }
+.native-app .primary:hover:not(:disabled) { background: #fff; border-color: #fff; }
+.native-app .danger-action { color: #ffb4a8; border-color: #55302b; background: #2a1c1a; }
+.native-app .danger-action:hover:not(:disabled) { background: #3a2421; border-color: #744039; }
+.native-app input, .native-app select, .native-app textarea { background: var(--bg-input); border-color: var(--line-strong); border-radius: var(--radius-sm); padding: 9px 12px; color: var(--text); transition: border-color .12s, box-shadow .12s; }
+.native-app input:focus, .native-app select:focus, .native-app textarea:focus { border-color: var(--focus); box-shadow: 0 0 0 3px #5b9bf622; outline: none; }
+.native-app h1, .native-app h2, .native-app h3 { letter-spacing: -.01em; }
+.native-app p { color: var(--text-soft); }
+.native-app small { color: var(--text-dim); font-size: 12.5px; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* ---------- sidebar: navigation rows and a tree of chats ---------- */
+.native-layout aside { width: clamp(248px, 19vw, 300px); background: var(--bg-side); border-right: 1px solid var(--line); padding: 14px 10px 10px; gap: 0; }
+.native-brand { padding: 4px 8px 14px; gap: 9px; }
+.native-brand strong { font-size: 15px; font-weight: 600; letter-spacing: 0; }
+.brand-mark { width: 24px; height: 24px; border-radius: 7px; background: var(--accent); color: #fff; font-size: 14px; }
+.native-layout aside button { border-radius: 8px; }
+.native-layout aside .new-chat, .native-layout aside .sidebar-bottom button, .native-layout aside .project-button {
+  background: transparent; border: 0; color: var(--text-soft); text-align: left; padding: 7px 10px; font-size: 14px; font-weight: 450; width: 100%; margin: 0 0 1px; }
+.native-layout aside .new-chat { color: var(--text); font-weight: 500; }
+.native-layout aside .new-chat:hover:not(:disabled), .native-layout aside .sidebar-bottom button:hover:not(:disabled), .native-layout aside .project-button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.native-layout aside .project-button.selected, .native-layout aside .sidebar-bottom button.selected { background: var(--bg-select); color: var(--text); }
+.native-layout aside .sidebar-section-heading { display: flex; align-items: center; justify-content: space-between; margin: 14px 8px 4px; color: var(--text-dim); font-size: 12px; font-weight: 500; letter-spacing: .02em; }
+.native-layout aside .sidebar-section-heading button { width: 24px; height: 24px; padding: 0; margin: 0; text-align: center; color: var(--text-dim); }
+.native-layout aside .sidebar-section-heading select { background: transparent; border: 0; color: var(--text-dim); font-size: 12px; padding: 2px; }
+.sidebar-threads { margin-left: 14px; border-left: 1px solid var(--line); padding-left: 4px; gap: 1px; }
+.native-app .sidebar-threads .sidebar-thread-select { background: transparent; border: 0; color: var(--text-soft); text-align: left; padding: 6px 9px; font-size: 13.5px; font-weight: 400; border-radius: 8px; }
+.native-app .sidebar-threads .sidebar-thread-select:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.native-app .sidebar-threads .sidebar-thread-select.selected { background: var(--bg-select); color: var(--text); }
+.native-app .sidebar-threads .chat-menu-trigger { background: transparent; border: 0; color: var(--text-dim); }
+.sidebar-bottom { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 6px; }
+.status-dot.online { background: var(--ok); }
+
+/* ---------- top bar ---------- */
+.native-topbar { min-height: 48px; padding: 8px clamp(16px, 2.5vw, 32px); border-bottom: 1px solid var(--line); background: var(--bg); position: sticky; top: 0; z-index: 2; }
+.native-topbar strong { font-size: 14px; font-weight: 500; color: var(--text); }
+.native-app .workspace-actions button { background: transparent; border-color: transparent; color: var(--text-soft); font-size: 12.5px; }
+.native-app .workspace-actions button:hover:not(:disabled) { background: var(--bg-hover); border-color: transparent; }
+
+/* ---------- conversation: one calm centered column ---------- */
+.native-transcript { padding: 28px clamp(16px, 4vw, 56px) 8px; }
+.native-item, .native-approval, .native-workers { max-width: var(--column); margin: 0 auto 22px; }
+.native-item { padding: 2px 0; font-size: 15px; line-height: 1.72; }
+.native-item.assistant, .native-item.reasoning { background: transparent; border: 0; box-shadow: none; padding: 2px 0; }
+.native-item.user { max-width: min(var(--column), 100%); margin-left: auto; margin-right: auto; background: var(--bg-raised); border: 1px solid var(--line); border-radius: 14px; padding: 10px 16px; }
+.item-heading { margin-bottom: 4px; }
+.item-heading > small { color: var(--text-dim); font-size: 12px; font-weight: 500; }
+.native-markdown p, .native-markdown li { color: var(--text); }
+.native-markdown h3 { font-size: 17px; font-weight: 600; margin: 22px 0 8px; }
+.native-markdown ul { padding-left: 22px; }
+.native-markdown li { padding: 2px 0; }
+.native-markdown a { color: #8ab4f8; text-underline-offset: 3px; }
+.native-markdown code { background: #272726; color: #e6c9a8; border-radius: 5px; padding: 1px 6px; font-size: 13px; }
+.native-markdown .code-block { background: #141413; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+.native-markdown .code-block code { background: transparent; color: var(--text); padding: 0; }
+.native-item details { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 10px; }
+.native-approval { border-radius: var(--radius); background: #26221a; border: 1px solid #5a4a28; }
+.native-empty { max-width: 720px; }
+.native-empty h1 { font-size: clamp(26px, 3vw, 36px); font-weight: 600; letter-spacing: -.02em; background: none; color: var(--text); -webkit-text-fill-color: var(--text); }
+.native-empty > p { color: var(--text-dim); font-size: 16px; }
+.native-app .starter-cards button { border-radius: 12px; background: var(--bg-raised); border-color: var(--line); padding: 10px 14px; font-size: 13.5px; }
+.native-app .starter-cards button:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--line-strong); }
+
+/* ---------- composer: a rounded box with its status line underneath ---------- */
+.native-layout footer { padding: 6px clamp(16px, 4vw, 56px) 10px; background: linear-gradient(180deg, transparent, var(--bg) 30%); }
+.native-composer { max-width: var(--column); background: var(--bg-card); border: 1px solid var(--line-strong); border-radius: 18px; padding: 10px 12px; box-shadow: var(--shadow); transition: border-color .12s; }
+.native-composer:focus-within { border-color: #55554f; box-shadow: var(--shadow); }
+.native-app .native-composer textarea { font-size: 15px; min-height: 52px; line-height: 1.6; background: transparent; }
+.native-app .composer-actions select { color: var(--text-soft); font-size: 12.5px; }
+.native-app .composer-actions button { background: var(--text); border-color: var(--text); color: #1b1b1a; }
+.native-app .composer-actions button:disabled { background: var(--bg-hover); border-color: var(--bg-hover); color: var(--text-dim); }
+.composer-status { max-width: var(--column); padding: 0 6px; }
+.composer-status small { color: var(--text-dim); font-size: 12px; }
+
+/* ---------- settings: full width, quiet cards ---------- */
+.native-settings { padding: 28px clamp(20px, 4vw, 56px) 48px; }
+.native-settings > * { max-width: 1280px; margin-left: auto; margin-right: auto; }
+.settings-heading h1 { font-size: 24px; font-weight: 600; letter-spacing: -.02em; color: var(--text); }
+.settings-heading p { color: var(--text-dim); }
+.settings-tabs { position: sticky; top: -1px; z-index: 3; background: var(--bg); padding: 4px 0 12px; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
+.settings-tabs button { border: 0; border-radius: 8px; padding: 6px 14px; font-size: 13.5px; background: transparent; color: var(--text-dim); }
+.settings-tabs button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.settings-tabs button.selected { background: var(--bg-select); color: var(--text); box-shadow: none; }
+.settings-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 16px; }
+.settings-card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; box-shadow: none; }
+.settings-card h2 { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: var(--text); }
+.settings-card p { font-size: 14px; color: var(--text-soft); }
+.settings-form { gap: 14px; }
+.settings-form label { font-size: 13px; color: var(--text-soft); }
+.settings-form input, .settings-form select { background: var(--bg-input); border: 1px solid var(--line-strong); }
+.model-row, .credential-row { background: var(--bg-input); border: 1px solid var(--line); border-radius: 10px; }
+.settings-notice { color: #9ed8b4 !important; background: #1c2a22; border: 1px solid #2f4a3a; border-radius: 10px; padding: 9px 13px; }
+.native-error { color: #ffb4a8 !important; background: #2a1c1a; border: 1px solid #55302b; border-radius: 10px; padding: 9px 13px; }
+.native-warning { background: #2a2418; border: 1px solid #5f5028; border-radius: 10px; padding: 9px 13px; color: var(--warn) !important; }
+
+/* ---------- Browser tab ---------- */
+.browser-grid { grid-template-columns: minmax(360px, 5fr) minmax(400px, 7fr); }
+.browser-status { border-radius: 12px; background: var(--bg-input); border-color: var(--line); padding: 14px 16px; }
+.browser-status strong { font-size: 15px; }
+.browser-light { width: 12px; height: 12px; box-shadow: 0 0 0 4px #ffffff0a; }
+.browser-online .browser-light, .browser-running .browser-light { background: var(--ok); box-shadow: 0 0 0 4px #6fbf8a22; }
+.browser-big-controls button { border-radius: 10px; min-height: 46px; }
+.browser-pause { background: #7a2a22; color: #fff; border-color: #7a2a22; }
+.browser-feed { max-height: calc(100vh - 300px); gap: 8px; }
+.browser-step { background: var(--bg-input); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; }
+.browser-step-ok .browser-step-icon { color: var(--ok); }
+.browser-step-error { background: #271a18; border-color: #55302b; }
+@media (max-width: 1100px) { .browser-grid { grid-template-columns: 1fr; } .native-layout aside { width: 224px; } }
+@media (max-width: 900px) { .native-item.user { max-width: 100%; } }
+.browser-step > div { min-width: 0; }
+.browser-step strong { overflow-wrap: anywhere; }

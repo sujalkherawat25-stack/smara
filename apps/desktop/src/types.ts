@@ -62,6 +62,7 @@ export interface LocalModelProfile {
   model: string;
   credential_name: string;
   auth_header: string;
+  context_window?: number | null;
   updated_at: string;
 }
 

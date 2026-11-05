@@ -128,3 +128,12 @@ test("native MCP action confirmation grants once, never copies persistent metada
     assert.throws(() => approvalResponse("mcpServer/elicitation/request", unsupported, true), /cannot be approved/);
   }
 });
+
+test("a full context window gets an actionable message", () => {
+  for (const raw of ["This model's maximum context length is 131072 tokens", "context_length_exceeded", "prompt is too long: 250000 tokens"]) {
+    const message = displayRuntimeError(raw);
+    assert.match(message, /filled the model's context window/);
+    assert.match(message, /Context window/);
+  }
+  assert.equal(displayRuntimeError("provider unavailable"), "provider unavailable");
+});

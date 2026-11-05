@@ -6,9 +6,10 @@ import NativeMemorySettings from "./NativeMemorySettings";
 import NativeEmail from "./NativeEmail";
 import NativeBackground from "./NativeBackground";
 import NativeAutomation from "./NativeAutomation";
+import NativeBrowser from "./NativeBrowser";
 
 const aliases: Record<string, string> = { tavily: "TAVILY_API_KEY", exa: "EXA_API_KEY", serper: "SERPER_API_KEY", brave: "BRAVE_SEARCH_API_KEY" };
-const emptyModel = { id: "", label: "", provider: "", base_url: "", model: "", api_key: "", auth_header: "authorization" };
+const emptyModel = { id: "", label: "", provider: "", base_url: "", model: "", api_key: "", auth_header: "authorization", context_window: "" as string | number | null };
 type SettingsProps = {
   initialTab?: "models" | "memory" | "tools";
   setup: NativeSetup; locked: boolean; version: string; runtimeBuilt: boolean;
@@ -17,6 +18,12 @@ type SettingsProps = {
   toolsEnabled: boolean; workersEnabled: boolean; browserOrigins: string;
   onToolsChange: (enabled: boolean) => void; onWorkersChange: (enabled: boolean) => void; onOriginsChange: (origins: string) => void;
 };
+/** Blank context window means "use the default"; anything else must be a whole number of tokens. */
+export function modelPayload(model: Record<string, unknown>) {
+  const { context_window, ...rest } = model;
+  const value = String(context_window ?? "").trim();
+  return value ? { ...rest, context_window: Number(value) } : rest;
+}
 export default function NativeSettings({ setup, locked, onUpdate, onClose, onPendingChange, version, runtimeBuilt, toolsEnabled, workersEnabled, browserOrigins, onToolsChange, onWorkersChange, onOriginsChange, initialTab = "models" }: SettingsProps) {
   const [tab, setTab] = useState(initialTab as string);
   const [model, setModel] = useState(emptyModel);
@@ -36,7 +43,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
     catch (reason) { setError(String(reason)); }
     finally { onPendingChange(false); setPending(false); setSecret(""); setModel(current => ({ ...current, api_key: "" })); }
   };
-  const edit = (profile: LocalModelProfile) => { setModel({ ...emptyModel, ...profile, api_key: "" }); setNotice(""); };
+  const edit = (profile: LocalModelProfile) => { setModel({ ...emptyModel, ...profile, context_window: profile.context_window ?? "", api_key: "" }); setNotice(""); };
   const runProbe = async (operation: "test_model" | "test_search") => {
     if (disabled || probePending) return;
     const explanation = operation === "test_model"
@@ -54,19 +61,21 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
   };
   return <section className="native-settings">
     <div className="settings-heading"><div><h1>Settings</h1><p>Your models and connected services.</p></div><button disabled={pending || integrationPending} onClick={onClose}>← Back to chat</button></div>
-    <nav className="settings-tabs" aria-label="Settings sections">{["models", "memory", "tools", "email", "background", "telegram", "help"].map(value => <button disabled={pending || integrationPending} key={value} className={tab === value ? "selected" : ""} onClick={() => { setTab(value); setSecret(""); setModel(current => ({ ...current, api_key: "" })); }}>{value === "models" ? "Models" : value === "memory" ? "Memory" : value === "tools" ? "Integrations" : value === "email" ? "Email" : value === "background" ? "Background" : value === "telegram" ? "Telegram" : "Help & setup"}</button>)}</nav>
+    <nav className="settings-tabs" aria-label="Settings sections">{["models", "memory", "tools", "email", "background", "browser", "telegram", "help"].map(value => <button disabled={pending || integrationPending} key={value} className={tab === value ? "selected" : ""} onClick={() => { setTab(value); setSecret(""); setModel(current => ({ ...current, api_key: "" })); }}>{value === "models" ? "Models" : value === "memory" ? "Memory" : value === "tools" ? "Integrations" : value === "email" ? "Email" : value === "background" ? "Background" : value === "browser" ? "Browser" : value === "telegram" ? "Telegram" : "Help & setup"}</button>)}</nav>
     {locked && <p className="native-warning">Finishing session setup. Settings will be available shortly.</p>}
     {error && <p role="alert" className="native-error">{error.replaceAll("Settings → Tools", "Settings → Integrations")}</p>}{notice && <p role="status" className="settings-notice">{notice}</p>}
     {tab === "models" && <div className="settings-grid"><section className="settings-card"><h2>Configured models</h2><p>These endpoints are used as selected. Smara never silently replaces your model.</p>
       {!setup.profiles.length && <p>No models configured. Add your provider on the right.</p>}
       {setup.profiles.map(profile => <div className="model-row" key={profile.id}><div><strong>{profile.label}</strong><small>{profile.model} · {profile.provider}</small><small className="endpoint">{profile.base_url}</small></div><button disabled={disabled} onClick={() => edit(profile)}>Edit</button></div>)}
       <button disabled={disabled} onClick={() => setModel(emptyModel)}>＋ Add model</button>
-    </section><form className="settings-card settings-form" onSubmit={event => { event.preventDefault(); void save("save_model", { profile: model }); }}><h2>{setup.profiles.some(p => p.id === model.id) ? "Edit model" : "Add model"}</h2>
+    </section><form className="settings-card settings-form" onSubmit={event => { event.preventDefault(); void save("save_model", { profile: modelPayload(model) }); }}><h2>{setup.profiles.some(p => p.id === model.id) ? "Edit model" : "Add model"}</h2>
       <div className="form-pair"><label>Profile ID<input required disabled={disabled} placeholder="sarvam_glm" value={model.id} onChange={e => setModel({ ...model, id: e.target.value })} /></label><label>Display name<input required disabled={disabled} placeholder="Sarvam GLM" value={model.label} onChange={e => setModel({ ...model, label: e.target.value })} /></label></div>
       <label>Provider<input required disabled={disabled} placeholder="sarvam" value={model.provider} onChange={e => setModel({ ...model, provider: e.target.value })} /></label>
       <label>Chat-compatible endpoint<input required disabled={disabled} placeholder="https://api.sarvam.ai/v2" value={model.base_url} onChange={e => setModel({ ...model, base_url: e.target.value })} /></label>
       <label>Model ID<input required disabled={disabled} placeholder="Your provider's exact model ID" value={model.model} onChange={e => setModel({ ...model, model: e.target.value })} /></label>
       <label>Authentication<select disabled={disabled} value={model.auth_header} onChange={e => setModel({ ...model, auth_header: e.target.value })}><option value="authorization">Bearer authorization</option><option value="api-subscription-key">Sarvam · api-subscription-key</option></select></label>
+      <label>Context window (tokens, optional)<input inputMode="numeric" disabled={disabled} placeholder="Blank = assume 128,000" value={model.context_window ?? ""} onChange={e => setModel({ ...model, context_window: e.target.value.replace(/[^0-9]/g, "") })} /></label>
+      <small>Smara summarises older turns automatically at 80% of this size so long chats keep working. Set it to your model's real limit.</small>
       <label>API key<input type="password" autoComplete="off" disabled={disabled} value={model.api_key} placeholder="Leave blank when editing to keep the saved key" onChange={e => setModel({ ...model, api_key: e.target.value })} /></label>
       <small>Encrypted with Windows DPAPI. Key values are never returned to this screen. Only chat-compatible APIs are supported by this adapter.</small><button className="primary" disabled={disabled}>Save model</button>
     </form></div>}
@@ -88,6 +97,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
       <h3>Saved credential aliases</h3>{setup.credentials.length ? setup.credentials.map(c => <div className="credential-row" key={c.name}><div><code>{c.name}</code><small>{c.provider} · protected on this computer</small></div><button disabled={disabled} onClick={() => { if (window.confirm(`Remove ${c.name}? Tools/models using it will stop working until you save a replacement.`)) void save("delete_credential", { name: c.name }); }}>Remove</button></div>) : <p>No keys saved.</p>}
       <button disabled={pending} onClick={() => void save("bootstrap", {})}>Refresh readiness</button>
     </section></div></>}
+    {tab === "browser" && <NativeBrowser locked={disabled} />}
     {tab === "telegram" && <NativeTelegramSettings workspace={setup.preferences.workspace} profile={setup.preferences.active_model} locked={disabled} onSaved={() => { void nativeSettings().then(onUpdate); }} />}
     {tab === "help" && <div className="settings-grid help-grid">
       <section className="settings-card"><h2>Get started</h2>
