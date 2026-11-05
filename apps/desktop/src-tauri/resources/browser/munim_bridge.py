@@ -168,6 +168,8 @@ def url_allowed(url: str, allow_private: bool = False) -> str | None:
 
 async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
     a = cmd.get("action")
+    if isinstance(cmd.get("selector"), str):               # models sometimes send JSON-escaped quotes: div[role=\\"x\\"]
+        cmd = {**cmd, "selector": cmd["selector"].replace('\\"', '"').replace("\\'", "'").strip()}
     if a not in ("navigate", "read", "scroll", "back", "wait", "click", "fill", "select", "press"):
         return {"error": f"unsupported action {a!r}"}
     if await page.evaluate("() => !!window.__smaraPaused"):
@@ -401,8 +403,9 @@ async def run(a) -> int:
             except Exception as e:                    # a page error must never kill the bridge
                 result = {"error": f"{type(e).__name__}: {str(e)[:300]}"}
             br.last = time.monotonic()
-            log(describe_step(job["command"], result))
-            write_status(last_step_at=time.time(), last_step=describe_step(job["command"], result))
+            where = result if result.get("url") else {**result, "url": getattr(br.page, "url", "") if br.page else ""}
+            log(describe_step(job["command"], where))
+            write_status(last_step_at=time.time(), last_step=describe_step(job["command"], where))
             await http.post("/bridge/result", json={"job_id": job["job_id"], "result": result})
 
 
