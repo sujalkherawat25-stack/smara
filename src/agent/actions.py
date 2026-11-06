@@ -15,6 +15,8 @@ from src.agent.tools import party_in_tenant
 from src.bridge.coordinator import submit_debtor_claim
 from src.ingest.importer import import_rows
 from src.ingest.media import download_media, read_image
+from src import tenants
+from src.ingest.media import media_token
 from src.ingest.sheet_mapper import map_sheet
 from src.loop.outbound import record
 from src.loop.owner_channel import send_to_owner
@@ -23,23 +25,30 @@ from src.loop.whatsapp import from_shop, reminder_params, owner_approval_card, t
 WINDOW = timedelta(hours=24)
 
 
-async def _fetch(app, file_ref: str) -> tuple[bytes, str, str]:
+async def _fetch(app, file_ref: str, ctx: SessionCtx | None = None) -> tuple[bytes, str, str]:
     channel, media_id, filename = (file_ref.split(":", 2) + ["", ""])[:3]
     if channel == "sandbox":
         return app.state.sandbox.read_output(media_id, filename), "application/octet-stream", filename
     if channel == "telegram":
         return await app.state.tg.download(media_id), "application/octet-stream", filename
-    data, mime = await download_media(app.state.settings.wa_access_token, media_id)
+    number_id = ""
+    if ctx is not None:                          # a shop on its own number: its own token reads its media
+        t = await tenants.by_id(app.state.pool, ctx.tenant_id)
+        number_id = (t.wa_phone_number_id or "") if t else ""
+    data, mime = await download_media(await media_token(app, number_id), media_id)
     return data, mime, filename
 
 
 async def inspect_and_import_file(app, ctx: SessionCtx, args: dict) -> dict:
-    data, mime, filename = await _fetch(app, args["file_ref"])
-    if not filename.lower().endswith((".xlsx", ".xlsm", ".csv")):
+    data, mime, filename = await _fetch(app, args["file_ref"], ctx)
+    if not filename.lower().endswith((".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".txt")):
         if mime.startswith("image/"):
             return {"kind": "image", "ocr": await read_image(app.state.llm, data, mime)}
-        return {"error": f"unsupported file {filename!r}; send .xlsx or .csv"}
-    rows, skipped = map_sheet(filename, data)
+        return {"error": f"unsupported file {filename!r}; send .xlsx, .xls or .csv"}
+    async with app.state.pool.connection() as conn:           # customers already on file supply missing mobile numbers
+        known = {r["canonical_name"]: r["whatsapp_phone"] for r in await (await conn.execute(
+            "SELECT canonical_name, whatsapp_phone FROM parties WHERE tenant_id = %s", (ctx.tenant_id,))).fetchall()}
+    rows, skipped = map_sheet(filename, data, known)
     total = sum(r.amount_paise for r in rows)
     preview = {"rows_found": len(rows), "sheet_total_rupees": total / 100, "skipped": skipped[:10],
                "sample": [{"party": r.party, "invoice": r.invoice_ref, "rupees": r.amount_paise / 100,
@@ -59,7 +68,7 @@ async def inspect_and_import_file(app, ctx: SessionCtx, args: dict) -> dict:
 async def run_python(app, ctx: SessionCtx, args: dict) -> dict:
     inputs = {}
     for ref in args.get("file_refs") or []:
-        data, _, filename = await _fetch(app, ref)
+        data, _, filename = await _fetch(app, ref, ctx)
         inputs[filename or "file"] = data
     res = await app.state.sandbox.run(args["code"], inputs)
     refs = [f"sandbox:{res['job_id']}:{n}" for n in res.get("outputs") or []] if res.get("job_id") else []

@@ -14,7 +14,7 @@ from uuid import uuid4
 
 _NAME = re.compile(r"[^A-Za-z0-9._-]")
 _JOB = re.compile(r"^[0-9a-f]{32}$")
-MAX_INPUT_BYTES = 25_000_000
+MAX_INPUT_BYTES = 100_000_000
 
 
 def safe_name(name: str) -> str:
@@ -35,7 +35,7 @@ class Sandbox:
         if not self.enabled:
             return {"error": "the Python sandbox is not enabled on this server"}
         if sum(len(b) for b in inputs.values()) > MAX_INPUT_BYTES:
-            return {"error": "input files are too large for the sandbox (25 MB max)"}
+            return {"error": "input files are too large for the sandbox (100 MB max)"}
         jid = uuid4().hex
         d = self.jobs / jid
         d.mkdir(mode=0o700)                 # job dirs are private: a running job cannot read another's

@@ -91,7 +91,7 @@ def sensitive_step(args: dict, ctx=None) -> bool:
 
 def tier_of(name: str, args: dict) -> str:
     if name in ("query_ledger_sql", "resolve_continuum_memory", "run_python", "get_current_time", "check_gstin",
-                "build_payment_request", "list_followups", "web_search"):
+                "build_payment_request", "list_followups", "web_search", "read_attachment"):
         return "T0"
     if name in ("schedule_followup", "cancel_followup", "send_file_to_owner"):
         return "T1"
@@ -124,6 +124,8 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
             return Decision("deny", tier, "a counterparty session may only touch its own party")
     if name == "browser_step" and args.get("action") not in BROWSER_READ | BROWSER_ACT:
         return Decision("deny", tier, "unsupported browser action")
+    if name == "read_attachment" and args.get("file_ref") not in ctx.files:
+        return Decision("deny", tier, "only files attached to this conversation can be opened")
     if name == "inspect_and_import_file":
         if args.get("file_ref") not in ctx.files:
             return Decision("deny", tier, "only files attached to this conversation can be opened")
