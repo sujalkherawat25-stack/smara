@@ -5,6 +5,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from src.bridge import device
+from src.ingest.tally_sync import SyncBody, apply_sync
 
 router = APIRouter(prefix="/bridge")
 
@@ -56,3 +57,10 @@ async def result(body: ResultBody, request: Request, authorization: str | None =
     if not await device.finish_job(request.app.state.pool, dev, body.job_id, body.result):
         raise HTTPException(status_code=404, detail="no such job in progress")
     return {"ok": True}
+
+
+@router.post("/sync/tally")
+async def sync_tally(body: SyncBody, request: Request, authorization: str | None = Header(default=None)):
+    """The Desktop app posts the shop's open receivables and payables from Tally; nothing is sent to anyone by this."""
+    dev = await _device(request, authorization)
+    return await apply_sync(request.app.state.pool, str(dev["tenant_id"]), str(dev.get("id") or ""), body)
