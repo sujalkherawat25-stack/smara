@@ -146,9 +146,11 @@ async def test_home_page_describes_smara_and_links_the_policies():
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://smara.test") as http:
         r = await http.get("/")
     assert r.status_code == 200
-    for needle in ("Smara", "WhatsApp", "Tally", "approve", "never moves money", "hello@syntarus.com", 'href="privacy"', 'href="terms"'):
+    for needle in ("Smara", "WhatsApp", "Tally", "approve", "never moves money", "hello@syntarus.com", 'href="privacy"', 'href="terms"',
+                   "not a debt collection agency", "agreed to hear from you"):
         assert needle in r.text, needle
     assert "Continuum" not in r.text and "munim" not in r.text.lower()
+    assert "collections" not in r.text.lower() and "chase" not in r.text.lower()
 
 
 async def test_page_links_follow_public_base_url_when_set():

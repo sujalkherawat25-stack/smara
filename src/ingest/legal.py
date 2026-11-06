@@ -41,43 +41,48 @@ def _shell(request: Request, title: str, content: str, heading: bool = True) -> 
     h1 = f"<h1>{html.escape(title)}</h1>" if heading else ""
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)}</title>
-<meta name="description" content="Smara is a WhatsApp assistant for Indian businesses. It helps collect payments you are owed and keeps track of what you owe, with every message approved by you first.">
+<meta name="description" content="Smara is a WhatsApp assistant for Indian businesses. It helps you follow up on invoices your own customers have not paid and keeps track of what you owe, with every message approved by you first.">
 {STYLE}</head><body><main>{nav}{h1}{content}
 <p class="muted">Smara is a product of Syntarus. Questions: <a href="mailto:{EMAIL}">{EMAIL}</a>. Last updated {UPDATED}.</p></main></body></html>""")
 
 
 @router.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return _shell(request, "Smara: your collections and back-office assistant on WhatsApp", f"""
+    return _shell(request, "Smara: your payments and back-office assistant on WhatsApp", f"""
 <div class="hero"><h1>Smara</h1>
-<p>An assistant on WhatsApp that helps Indian businesses collect the money they are owed and keep track of what they owe.
+<p>An assistant on WhatsApp that helps Indian businesses follow up on invoices their own customers have not paid, and keep track of the bills they owe.
 It works from your own records, and nothing goes out to your customers until you approve it.</p>
 <a class="btn" href="mailto:{EMAIL}?subject=Smara%20early%20access">Ask for early access</a></div>
 <h2>What Smara does</h2>
 <div class="cards">
-<div class="card"><h3>Chases dues</h3><p>Tells you who owes you and how late they are, and drafts polite reminders in your customer's language. You approve each one.</p></div>
+<div class="card"><h3>Follows up on payments</h3><p>Shows who owes you and how late they are, and drafts polite reminders about a specific invoice, in your customer's language. You approve each one.</p></div>
 <div class="card"><h3>Reads what you send</h3><p>Send a Tally export, an Excel or CSV sheet, a PDF, a bill photo or a voice note. Smara reads it and asks you before it imports anything.</p></div>
 <div class="card"><h3>Tracks what you owe</h3><p>Keeps your supplier bills and the dates they are due, including the Section 43B(h) payment limit for small suppliers, as an estimate to check with your accountant.</p></div>
 <div class="card"><h3>Makes documents</h3><p>Customer statements, monthly reports and reminder letters as PDF or Word, with amounts in lakh and crore.</p></div>
 <div class="card"><h3>Connects to Tally</h3><p>With the optional Smara Desktop app, your open bills are synced from Tally on your own PC every night. Your Tally login never leaves your PC.</p></div>
 <div class="card"><h3>Stays in your control</h3><p>You approve every message to a customer. Smara never moves money and never asks for bank passwords, card numbers, UPI PINs or OTPs.</p></div>
 </div>
+<h2>What Smara is not</h2>
+<p>Smara is software for your own business. It is not a debt collection agency: it does not buy or collect debts for anyone else, does not contact
+people on behalf of a third party, and does not send threats or pressure. Reminders are about a specific invoice that your own customer has with you,
+and go only to customers who have given you their number and agreed to hear from you on WhatsApp.</p>
 <h2>How it works</h2>
 <ol><li>Message Smara on WhatsApp and share your dues: a file, a photo, or a connection to Tally.</li>
 <li>Smara shows you the totals and who is overdue, and drafts the reminders.</li>
 <li>You approve what goes out. Customers can reply STOP at any time and will not be messaged again by your business.</li></ol>
 <h2>Who it is for</h2>
 <p>Traders, wholesalers and distributors in India who run their accounts on Tally or spreadsheets and chase payments by phone and WhatsApp today.</p>
-<h2>Early access</h2>
-<p>Smara is in early access with a small number of businesses, and is free during this period. To join, write to <a href="mailto:{EMAIL}?subject=Smara%20early%20access">{EMAIL}</a>
-or read how we handle your data in the <a href="{_url(request, "privacy")}">privacy policy</a>.</p>""", heading=False)
+<h2>Early access and support</h2>
+<p>Smara is in early access with a small number of businesses, and is free during this period. To join, or to talk to a person about anything,
+write to <a href="mailto:{EMAIL}?subject=Smara%20early%20access">{EMAIL}</a>. You can also read how we handle your data in the
+<a href="{_url(request, "privacy")}">privacy policy</a>.</p>""", heading=False)
 
 
 @router.get("/privacy", response_class=HTMLResponse)
 async def privacy(request: Request):
     return _shell(request, "Smara Privacy Policy", """
-<p>Smara is an assistant for businesses in India that works on WhatsApp. It helps a business collect the payments it is owed and keep track
-of what it owes. This page says what we keep and why.</p>
+<p>Smara is an assistant for businesses in India that works on WhatsApp. It helps a business follow up on invoices its own customers have not
+paid, and keep track of what it owes. It is not a debt collection service. This page says what we keep and why.</p>
 <h2>Who is responsible for what</h2>
 <p>The business that uses Smara decides which customer and supplier details to share, and is responsible to its own customers for that.
 Syntarus runs Smara for the business and handles that information only to provide the service.</p>
@@ -92,9 +97,10 @@ customers send to the shop's Smara number.</li></ul>
 <h2>What we do with it</h2>
 <ul><li>Answer the owner's questions, prepare statements, reports and reminders (including as PDF or Word files), and remember promises and
 notes so the owner does not have to.</li>
-<li>Customers are messaged only after the owner approves each message, and only about dues. A customer can reply STOP at any time and
-will not be messaged again by that shop.</li>
-<li>We never move money and never store bank passwords, card numbers, UPI PINs or OTPs.</li></ul>
+<li>Customers are messaged only after the owner approves each message, only about an unpaid invoice they have with that business, and only if
+they have agreed to hear from the business on WhatsApp. A customer can reply STOP at any time and will not be messaged again by that shop.</li>
+<li>We never move money and never store bank passwords, card numbers, UPI PINs or OTPs.</li>
+<li>We do not use customer details for anything other than the business's own messages: no marketing, no sharing between businesses.</li></ul>
 <h2>Who processes it</h2>
 <p>Our server in India; an AI model provider (Sarvam), which reads message text and the text of files and photos, and turns voice notes into text,
 to answer; Syntarus's own memory service, which keeps notes and promises; and WhatsApp (Meta), which delivers messages and files.
@@ -117,7 +123,9 @@ async def terms(request: Request):
 It can make mistakes: check amounts before you approve anything. Smara never sends a message to your customers, changes an invoice, or does
 anything on a website without your approval.</p>
 <h2>Your responsibilities</h2>
-<ul><li>Share only customer information you are allowed to share, and message customers only about dues they owe you.</li>
+<ul><li>Share only customer information you are allowed to share, and message customers only about unpaid invoices they have with you.</li>
+<li>Message only customers who have given you their number and agreed to hear from you on WhatsApp, and stop when they ask you to.</li>
+<li>Use Smara for your own business's invoices only, not to collect debts for anyone else, and never to threaten or pressure anyone.</li>
 <li>Do not use Smara to harass anyone or to send misleading messages.</li>
 <li>Keep your own phone and accounts secure.</li>
 <li>Check any document Smara makes before you share it. Dates and tax deadlines it shows, such as Section 43B(h) payment dates, are
