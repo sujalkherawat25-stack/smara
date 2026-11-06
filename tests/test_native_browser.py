@@ -69,3 +69,55 @@ def test_any_public_site_still_refuses_private_addresses():
     assert browser.allowed("https://example.com/a?b=1")
     assert not browser.allowed("http://127.0.0.1:8000/")
     assert not browser.allowed("file:///etc/passwd")
+
+
+class _FakeEngine:
+    """Stands in for the managed browser so close/reopen rules can be tested without launching Chromium."""
+    def __init__(self): self.created = 0; self.shut = 0; self.sessions = {}
+    def create(self, _options, _configure): self.created += 1; return "s%d" % self.created
+    def navigate(self, _session, _url): pass
+    def shutdown(self): self.shut += 1
+
+
+def _fake_browser(tmp_path):
+    browser = NativeBrowser(tmp_path, ["https://example.com"])
+    browser.engine = _FakeEngine()
+    browser.observe = lambda: {"observation_id": "o", "url": "https://example.com/"}
+    return browser
+
+
+def test_agent_can_reopen_after_its_own_close_within_the_same_budget(tmp_path):
+    browser = _fake_browser(tmp_path)
+    browser.call("browser_open", {"url": "https://example.com/"})
+    deadline = browser.deadline
+    assert browser.call("browser_close", {})["can_reopen"] is True
+    browser.call("browser_open", {"url": "https://example.com/"})
+    assert browser.engine.created == 2 and browser.session == "s2"
+    assert browser.deadline == deadline, "a reopen must not buy a fresh time budget"
+    assert browser.actions == 2, "a reopen still counts against the action limit"
+
+
+def test_budget_still_ends_the_session_after_an_agent_close(tmp_path):
+    browser = _fake_browser(tmp_path)
+    browser.call("browser_open", {"url": "https://example.com/"})
+    browser.call("browser_close", {})
+    browser.deadline = 0.0  # time budget already spent
+    with pytest.raises(ValueError, match="bound reached"):
+        browser.call("browser_open", {"url": "https://example.com/"})
+
+
+def test_closure_not_requested_by_the_agent_still_needs_an_explicit_reconnect(tmp_path):
+    browser = _fake_browser(tmp_path)
+    browser.call("browser_open", {"url": "https://example.com/"})
+    browser.session = None  # e.g. the owner stopped it or the engine dropped it
+    with pytest.raises(ValueError, match="reconnect explicitly"):
+        browser.call("browser_open", {"url": "https://example.com/"})
+
+
+def test_failures_report_our_own_message_and_one_line_for_engine_errors():
+    from smara.native_browser import failure_text
+    assert failure_text(ValueError("Browser was closed; reconnect explicitly")) == "Browser was closed; reconnect explicitly"
+    assert failure_text(StaleObservation("Observation expired; observe again")) == "Observation expired; observe again"
+    engine_error = type("Error", (Exception,), {})("Page.goto: net::ERR_BLOCKED\nCall log:\n  - navigating to https://x/ secret-token-123")
+    text = failure_text(engine_error)
+    assert text.startswith("Error: Page.goto: net::ERR_BLOCKED.") and "Call log" not in text and "secret-token" not in text and "computer_" in text

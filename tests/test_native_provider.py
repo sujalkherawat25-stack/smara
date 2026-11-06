@@ -501,6 +501,24 @@ def test_native_browser_is_opt_in_and_each_tool_requires_prompt(tmp_path, monkey
         adapter.server.server_close(); adapter.client.close()
 
 
+def test_computer_tools_are_offered_in_every_chat_but_only_required_with_a_grant(tmp_path, monkeypatch):
+    adapter = ResponsesAdapter(ChatEndpoint("http://127.0.0.1", "synthetic", ""))
+    try:
+        monkeypatch.setattr("smara.native_computer.selected", lambda _workspace: None)
+        none, _ = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path, interactive=True)
+        # Visible without a grant, so the model can tell the owner how to switch control on; a failure to start must not block chat.
+        assert "mcp_servers.smara_computer.enabled=true" in none and "mcp_servers.smara_computer.required=false" in none
+        monkeypatch.setattr("smara.native_computer.selected", lambda _workspace: {"id": "grant"})
+        granted, _ = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path, interactive=True)
+        assert "mcp_servers.smara_computer.enabled=true" in granted and "mcp_servers.smara_computer.required=true" in granted
+        for name in ("computer_act_confirmed", "excel_save"):          # outward or file-changing steps still ask
+            assert f'mcp_servers.smara_computer.tools.{name}.approval_mode="prompt"' in granted
+        background, _ = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path)
+        assert "mcp_servers.smara_computer.enabled=false" in background   # unattended runs never get desktop control
+    finally:
+        adapter.server.server_close(); adapter.client.close()
+
+
 @pytest.mark.parametrize("profiles, selected", [([], "missing"), ([{"id": "other"}], "missing"), ([{"id": "same"}, {"id": "same"}], "same")])
 def test_native_model_selection_never_silently_substitutes(profiles, selected):
     with pytest.raises(RuntimeError, match="not silently substitute"):

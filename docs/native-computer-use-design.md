@@ -68,6 +68,16 @@ Decision: **read path through HTTP is implemented** (`tally_read`: companies, le
 
 Existing file tools cover offline read/create. Live control is COM (not UI clicks): open a workspace workbook with macros disabled, read ranges (values + formulas), write cells/formulas (external-data/exec functions refused), `formula_check` recalculates, lists `#REF!`-type errors and compares expected values. UI-level `computer_*` still works on Excel for anything COM cannot do (verified key entry).
 
+## 5b. The owner's real browser (added 2026-11-07)
+
+Found from a real run: the managed browser (`browser_open`, Playwright) is blocked by some sites (Google News) and, after the model called `browser_close`, refused every later `browser_open` with a bare `ValueError`. The model then opened the default browser with PowerShell, but the computer tools were not loaded because no grant existed, so it said it could not click.
+
+* **Managed browser:** a close the model asked for can be followed by a new `browser_open` (the original time and action limits keep counting); a stop, timeout or budget end still needs an explicit reconnect. Failures now say why (our own refusals verbatim; engine errors as type plus one short line) instead of only the exception class.
+* **Always offered, granted per call:** `smara_computer` is configured in every interactive chat. Each call re-checks the grant, so without one the tools reply with how to switch control on (Settings > Automation > Grant any app for 30 minutes), and a grant made mid-chat works without a restart. The server is `required` only while a grant is active, so a UIA problem cannot stop chat from starting. Unattended runs still get no desktop control.
+* **`computer_open_url`:** opens a public http(s) page in the default browser (private/loopback/credentialed URLs refused) and returns the browser window.
+* **Browser warm-up:** Chromium and Firefox expose a page's accessibility tree only after the first UIA request, so a first look shows just the browser UI. `computer_observe` on a browser window looks again (up to 3 times, 1.5 s apart) until a `Document` appears, and reports `page_ready`. Verified live on a throwaway Chromium window on a local page: first look 18 elements (no page), later look has the page, a click by element index changed the page title.
+* **Not verified:** the owner's own Brave/Chrome profile (deliberately not touched in tests), pages whose content is canvas-only, and Brave's own accessibility toggle (`brave://accessibility`) if a browser refuses to expose the page.
+
 ## 6. Not done / follow-ups
 
 * `tally_read` is verified only against a fake server producing Tally-style XML. Never run against real Tally (not running here).

@@ -190,6 +190,9 @@ class WindowsBackend:
     def launch(self, path):
         os.startfile(path)  # noqa: S606 - path vetted by policy layer
 
+    def open_url(self, url):
+        os.startfile(url)  # noqa: S606 - public http(s) URL vetted by the policy layer; the shell hands it to the default browser
+
     # ---- observation ---------------------------------------------------
     def _uia(self):
         from pywinauto.uia_element_info import UIAElementInfo
