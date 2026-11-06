@@ -182,6 +182,7 @@ async def test_grants_expire(env):
 
 def test_bridge_blocks_private_networks_and_odd_schemes():
     assert munim_bridge.url_allowed("file:///etc/passwd")
+    assert "hand_off_to_owner" in munim_bridge.url_allowed("upi://pay?pa=shop@bank&am=100")
     assert munim_bridge.url_allowed("http://127.0.0.1:8000/admin")
     assert munim_bridge.url_allowed("http://192.168.1.1/")
     assert munim_bridge.url_allowed("http://169.254.169.254/latest")
