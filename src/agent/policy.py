@@ -91,7 +91,7 @@ def sensitive_step(args: dict, ctx=None) -> bool:
 
 def tier_of(name: str, args: dict) -> str:
     if name in ("query_ledger_sql", "resolve_continuum_memory", "run_python", "get_current_time", "check_gstin",
-                "build_payment_request", "list_followups", "web_search", "read_attachment"):
+                "build_payment_request", "list_followups", "web_search", "read_attachment", "make_document", "load_skill"):
         return "T0"
     if name in ("schedule_followup", "cancel_followup", "send_file_to_owner"):
         return "T1"

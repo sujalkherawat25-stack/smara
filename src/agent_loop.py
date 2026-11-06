@@ -17,7 +17,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from src import clock, tenants
-from src.agent import actions, extras, memory_pass, tools, web, reader
+from src.agent import actions, documents, extras, memory_pass, reader, skills, tools, web
 from src.agent.context import compact
 from src.agent.policy import SessionCtx, approval_text, pre_tool_use
 from src.agent.prompt import build_system
@@ -33,7 +33,7 @@ BROWSER_RESULT_CHARS = 20000   # one page: what changed + every numbered control
 CONTINUE_WITHIN = timedelta(minutes=30)
 EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memory": tools.resolve_continuum_memory,
              "write_continuum_evidence": tools.write_continuum_evidence,
-             "inspect_and_import_file": actions.inspect_and_import_file, "read_attachment": reader.read_attachment, "run_python": actions.run_python,
+             "inspect_and_import_file": actions.inspect_and_import_file, "read_attachment": reader.read_attachment, "make_document": documents.make_document, "load_skill": skills.load_skill, "run_python": actions.run_python,
              "get_current_time": extras.get_current_time, "schedule_followup": extras.schedule_followup,
              "list_followups": extras.list_followups, "cancel_followup": extras.cancel_followup,
              "check_gstin": extras.check_gstin, "build_payment_request": extras.build_payment_request,
@@ -140,7 +140,7 @@ async def start_session(app, *, tenant, trust: str, trigger: str, content: str, 
     return sid
 
 
-HEAVY_TOOLS = frozenset({"run_python", "inspect_and_import_file", "browser_step", "read_attachment"})
+HEAVY_TOOLS = frozenset({"run_python", "inspect_and_import_file", "browser_step", "read_attachment", "make_document"})
 
 
 def heavy(messages: list[dict]) -> bool:

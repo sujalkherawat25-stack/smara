@@ -60,7 +60,9 @@ def execute(job_dir: Path, *, isolate: bool = True) -> dict:
         shutil.copytree(job_dir / "in", work / "in")
         (work / "out").mkdir()
         shutil.copy(job_dir / "code.py", work / "user_code.py")
-        shutil.copy(HERE / "munim_helpers.py", work / "munim_helpers.py")
+        for helper in ("munim_helpers.py", "munim_docs.py"):
+            if (HERE / helper).exists():
+                shutil.copy(HERE / helper, work / helper)
         (work / "_run.py").write_text(WRAPPER, encoding="utf-8")
         posix = os.name == "posix"
         if posix and isolate and os.getuid() == 0:
