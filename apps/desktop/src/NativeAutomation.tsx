@@ -14,8 +14,8 @@ export default function NativeAutomation({ workspace, locked, onPendingChange, o
   };
   useEffect(() => { void request("browser_control"); }, [workspace]);
   const disabled = locked || pending;
-  return <section className="settings-card settings-form"><h2>Browser & computer</h2>{error && <p role="alert">{error}</p>}
-    <p>Use fresh owned browser sessions, never your personal browser profile. Sites must also be listed in Approved public browser origins above.</p>
+  return <section className="settings-card settings-form"><h2>Windows apps & owned browser</h2>{error && <p role="alert">{error}</p>}
+    <p>Smara can drive a fresh browser window of its own (never your personal profile) and Windows apps such as Tally and Excel. Sites follow the website setting above.</p>
     {browser && <><label><input type="checkbox" disabled={disabled} checked={browser.options.visible} onChange={event => setBrowser({ ...browser, options: { ...browser.options, visible: event.target.checked } })} /> Show owned browser</label>
       <label><input type="checkbox" disabled={disabled} checked={browser.options.transfers} onChange={event => setBrowser({ ...browser, options: { ...browser.options, transfers: event.target.checked } })} /> Allow reviewed file transfers</label>
       <small>Transfers still ask for native approval. Uploads may transmit immediately. Accepted files are at most 10 MB; executables and hidden files are blocked. Retrieval size is checked after browser download, not a network byte quota.</small>

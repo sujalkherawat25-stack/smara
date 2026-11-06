@@ -90,6 +90,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
     if (name === "@tauri-apps/api/core") return { invoke: async () => ({ built: true, windowsTerminalBuild: terminalPlatformSupported }) };
     if (name.endsWith("NativeSettings")) return { default: Settings, __esModule: true };
+    if (name.endsWith("NativeMemorySettings")) return { default: () => null, memoryShouldBeOn: () => false, __esModule: true };
     if (name.endsWith("NativeGoals")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeVoice")) return { default: () => null, ReadAloud: () => null, __esModule: true };
     if (name.endsWith("goalApi")) return { ...goal, goalRequest: async (action, values = {}) => {
@@ -105,7 +106,6 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     if (name.endsWith("NativeChanges")) return { default: Changes, __esModule: true, reviewRequest: async (workspace, operation, values) => { calls.push({ method: `review/${operation}`, workspace, values }); return operation === "capture" ? { snapshot: "synthetic-local-snapshot", excluded: 0 } : {}; } };
     if (name.endsWith("NativeCommand")) return { default: Command, __esModule: true };
     if (name.endsWith("NativeOutcome")) return { default: () => null, __esModule: true };
-    if (name.endsWith("NativeHealth")) return { default: () => null, __esModule: true };
     if (name.endsWith("chatStatus")) return chatStatus;
     if (name.endsWith("nativeApi")) return api;
     if (name.endsWith("nativeRpc")) return { NativeRpc, RpcOutcomeUnknown };
@@ -245,11 +245,11 @@ test("a user Git action synchronously blocks sending or changing project", async
   assert.equal(f.button("Send message").props.disabled, false);
 });
 
-test("startup prepares a project without sending a turn or enabling optional tools", async () => {
+test("startup prepares a project without sending a turn; browsing any public site is on, coding workers are off", async () => {
   const f = fixture(); await f.flush();
   const connect = f.calls.find(call => call.method === "connect");
   assert.equal(connect.profile, "one");
-  assert.equal(connect.readers, false); assert.equal(connect.workers, false); assert.equal(connect.origins.length, 0);
+  assert.equal(connect.readers, true); assert.equal(connect.workers, false); assert.deepEqual(connect.origins, ["*"]);
   assert.equal(f.calls.filter(call => call.method === "connect").length, 1);
   assert.equal(f.calls.some(call => call.method === "turn/start"), false);
   assert.equal(f.nodes().some(node => node.type === "button" && ["Connect", "Disconnect", "Manage settings"].includes(node.props.children)), false);
@@ -363,7 +363,7 @@ test("project changes never restore a different project's thread or carry option
   const project = f.nodes().find(node => node.type === "button" && node.props.title === "C:/second");
   await project.props.onClick(); await f.flush();
   const last = f.calls.filter(call => call.method === "connect").at(-1);
-  assert.equal(last.workspace, "C:/second"); assert.equal(last.readers, false); assert.equal(last.workers, false); assert.equal(last.origins.length, 0);
+  assert.equal(last.workspace, "C:/second"); assert.equal(last.readers, true); assert.equal(last.workers, false); assert.deepEqual(last.origins, ["*"]);   // defaults, never the other project's choices
   assert.equal(f.calls.filter(call => call.method === "thread/resume").length, 1);
 });
 

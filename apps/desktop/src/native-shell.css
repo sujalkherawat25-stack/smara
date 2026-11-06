@@ -19,9 +19,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .native-app .primary:hover:not(:disabled) { background: #b2e5d8; }
 .native-layout { display: flex; height: 100%; min-height: 0; }
 .native-layout aside { width: 262px; flex-shrink: 0; background: #1e2021; border-right: 1px solid #2e3335; display: flex; flex-direction: column; padding: 20px 14px 12px; height: 100%; min-height: 0; overflow: hidden; }
-.native-brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 22px; flex-shrink: 0; }
-.native-brand strong { font-size: 19px; letter-spacing: -.4px; flex: 1; }
-.brand-mark, .empty-mark { display: inline-grid; place-items: center; font-weight: 700; font-style: italic; background: #213b34; color: #b5e6d4; border: 1px solid #41695a; border-radius: 12px; font-size: 23px; width: 34px; height: 34px; }
 .native-layout aside .new-chat { text-align: left; margin-bottom: 16px; padding: 10px 12px; border-color: transparent; background: transparent; flex-shrink: 0; }
 .sidebar-section-heading { display: flex; justify-content: space-between; align-items: center; color: #999; font-size: 12px; font-weight: 600; padding: 10px 10px 6px; flex-shrink: 0; }
 .sidebar-section-heading button { padding: 1px 8px; border: none; background: transparent; font-size: 18px; }
@@ -105,9 +102,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .native-empty { max-width: 800px; margin: clamp(30px, 18vh, 160px) auto 20px; text-align: center; }
 .native-empty h1 { font-size: clamp(24px, 2.8vw, 32px); letter-spacing: -.7px; margin: 20px 0 12px; font-weight: 600; }
 .native-empty > p { font-size: 15px; line-height: 1.8; margin-bottom: 28px; color: #a6a6a6; }
-.starter-cards { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; }
-.native-app .starter-cards button { padding: 9px 13px; text-align: left; border-color: #3c3c3c; background: transparent; display: flex; align-items: center; gap: 14px; font-size: 12px; border-radius: 20px; }
-.starter-cards span { color: #aaa; }
 .empty-hint { display: block; margin-top: 24px; line-height: 1.7; }
 .native-item, .native-approval, .native-workers { max-width: 920px; margin: 0 auto 24px; overflow-wrap: anywhere; }
 .native-item { padding: 10px 2px; }
@@ -175,12 +169,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .settings-form input:focus, .settings-form select:focus { border-color: #588a75; outline: none; }
 .settings-form label:has(> input[type="checkbox"]) { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; }
 .settings-form input[type="checkbox"] { flex: 0 0 auto; width: auto; margin: 0; padding: 0; accent-color: #9ed8c9; }
-.chat-health { margin: 0 28px 8px; font-size: 12px; color: #9aaba3; }
-.chat-health summary { cursor: pointer; padding: 5px 0; }
-.chat-health.has-warning summary { color: #f0c981; }
-.chat-health p { margin: 8px 0; }
-.chat-health small { display: block; line-height: 1.5; }
-.chat-health button { margin: 5px 8px 5px 0; }
 .form-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .settings-card small { display: block; line-height: 1.7; overflow-wrap: anywhere; color: #8e9e97; }
 .model-row, .credential-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 14px; border: 1px solid #2d3637; background: #15191b; border-radius: 8px; margin-bottom: 10px; transition: border-color 0.15s ease; }
@@ -219,7 +207,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .project-form input { width: 100%; font-size: 12px; padding: 6px 8px; }
 .project-form small { font-size: 10px; }
 @media (max-width: 1060px) { .native-layout aside { width: 220px; } .native-topbar { padding: 12px 20px; } .native-settings { padding: 22px; } .settings-grid { grid-template-columns: 1fr; } }
-@media (max-width: 700px) { .native-layout aside { width: 170px; padding: 16px 8px; } .native-brand { padding-bottom: 16px; } .native-topbar { padding: 10px 16px; } .header-chat-title { display: none; } .native-transcript { padding: 16px; } .native-layout footer { padding: 10px 12px; } .native-empty { margin-top: 35px; } .composer-actions { gap: 6px; } .native-app .composer-actions select { max-width: 160px; } .composer-toolbar > small, .composer-status > small:last-child { display: none; } .form-pair { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .native-layout aside { width: 170px; padding: 16px 8px; } .native-topbar { padding: 10px 16px; } .header-chat-title { display: none; } .native-transcript { padding: 16px; } .native-layout footer { padding: 10px 12px; } .native-empty { margin-top: 35px; } .composer-actions { gap: 6px; } .native-app .composer-actions select { max-width: 160px; } .composer-toolbar > small, .composer-status > small:last-child { display: none; } .form-pair { grid-template-columns: 1fr; } }
 .native-inline-file { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; vertical-align: baseline; }
 .native-inline-file code { overflow-wrap: anywhere; }
 .native-app button.native-inline-preview { padding: 2px 7px; border-radius: 999px; color: #b8d6ff; font-size: 11px; line-height: 1.4; }

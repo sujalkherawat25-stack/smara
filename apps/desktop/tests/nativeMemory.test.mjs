@@ -44,49 +44,57 @@ function fixture({ configured = false, enabled = false, locked = false, confirm 
   };
 }
 
-test("Memory settings start disabled, show local skills and do not make startup requests", () => {
+test("Memory settings show how to connect, list local skills and make no startup requests", () => {
   const ui = fixture(); ui.render();
   assert.equal(ui.calls.length, 0);
-  assert.match(ui.text(), /Disabled/);
+  assert.match(ui.text(), /Add your key to turn it on/);
   assert.match(ui.text(), /SKILL\.md/);
   assert.equal(ui.find(n => n.props?.["aria-label"] === "Syntarus project key").props.type, "password");
+  assert.equal(ui.find(n => n.type === "input" && n.props?.type === "checkbox"), undefined);   // no on/off switch to forget about
 });
 
-test("Saving a key without enabling memory does not authorize uploads", async () => {
+test("Saving a key connects and turns memory on in one step, without a confirmation pop-up", async () => {
   const ui = fixture(); await ui.change("Syntarus project key", "synthetic-secret"); await ui.submit();
   assert.equal(ui.calls[0].operation, "save_memory");
-  assert.equal(ui.calls[0].values.memory.enabled, false);
+  assert.equal(ui.calls[0].values.memory.enabled, true);
   assert.equal(ui.confirmations.length, 0);
   assert.equal(ui.find(n => n.props?.["aria-label"] === "Syntarus project key").props.value, "");
   assert.deepEqual(ui.pending, [true, false]);
+  assert.match(ui.text(), /Syntarus memory is on/);
 });
 
-test("Enabling personal recall requires explicit consent and retains stable identity", async () => {
+test("A saved key whose memory was left off is switched back on by the app", () => {
+  const source = readFileSync(new URL("../src/NativeMemorySettings.tsx", import.meta.url), "utf8");
+  assert.match(source, /return !!memory\?\.configured && !memory\.enabled/);
+});
+
+test("Scope and identity changes keep the stable identity and need no consent pop-up", async () => {
   const ui = fixture({ configured: true });
-  await ui.change("enable", "", true); await ui.change("Conversation memory scope", "personal"); await ui.submit();
+  await ui.change("Conversation memory scope", "personal"); await ui.click("Save scope and ID");
   assert.equal(ui.calls[0].values.memory.scope, "personal");
   assert.equal(ui.calls[0].values.memory.user_id, "synthetic-person");
-  assert.match(ui.confirmations[0], /private code/);
-  assert.match(ui.confirmations[0], /will not be bulk-uploaded/);
-});
-
-test("Declining consent sends no settings write or provider request", async () => {
-  const ui = fixture({ configured: true, confirm: false });
-  await ui.change("enable", "", true); await ui.submit();
-  assert.equal(ui.calls.length, 0);
+  assert.equal(ui.calls[0].values.memory.enabled, true);
+  assert.equal(ui.confirmations.length, 0);
 });
 
 test("Existing memory identity can be selected without importing local history", async () => {
-  const ui = fixture({ configured: true }); await ui.change("Syntarus memory user ID", "existing-synthetic-user"); await ui.submit();
+  const ui = fixture({ configured: true }); await ui.change("Syntarus memory user ID", "existing-synthetic-user"); await ui.click("Save scope and ID");
   assert.equal(ui.calls[0].values.memory.user_id, "existing-synthetic-user");
   assert.match(ui.text(), /does not migrate memories/);
 });
 
 test("Connection probe confirms a fixed synthetic read and has no save side effect", async () => {
-  const ui = fixture({ configured: true }); await ui.click("Test memory connection");
+  const ui = fixture({ configured: true }); await ui.click("Test connection");
   assert.deepEqual(ui.calls, [{ operation: "test_memory" }]);
   assert.match(ui.confirmations[0], /No personal conversation/);
   assert.match(ui.text(), /reads only/);
+});
+
+test("Disconnecting asks first, then removes the key", async () => {
+  const declined = fixture({ configured: true, confirm: false }); await declined.click("Disconnect");
+  assert.equal(declined.calls.length, 0);
+  const ui = fixture({ configured: true }); await ui.click("Disconnect");
+  assert.equal(JSON.stringify(ui.calls), JSON.stringify([{ operation: "delete_credential", values: { name: "SYNTARUS_API_KEY" } }]));
 });
 
 test("Failed save clears the secret and releases the UI lock", async () => {
@@ -97,6 +105,6 @@ test("Failed save clears the secret and releases the UI lock", async () => {
 });
 
 test("Locked settings cannot save or test a connection", async () => {
-  const ui = fixture({ configured: true, locked: true }); await ui.submit(); await ui.click("Test memory connection");
+  const ui = fixture({ configured: true, locked: true }); await ui.submit(); await ui.click("Test connection");
   assert.equal(ui.calls.length, 0);
 });

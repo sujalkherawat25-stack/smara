@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import NativeSettings from "./NativeSettings";
+import { memoryShouldBeOn } from "./NativeMemorySettings";
 import NativeVoice, { ReadAloud } from "./NativeVoice";
 import { goalLabel, goalRequest, type Goal, type GoalList } from "./goalApi";
 import NativeMarkdown from "./NativeMarkdown";
@@ -11,7 +12,6 @@ import NativeTerminal from "./NativeTerminal";
 import NativeChanges, { reviewRequest } from "./NativeChanges";
 import NativeCommand from "./NativeCommand";
 import NativeOutcome from "./NativeOutcome";
-import NativeHealth from "./NativeHealth";
 import { requestQuestions, waitingReason } from "./chatStatus";
 import { nativeSettings, sameWorkspace, type NativeSetup } from "./nativeApi";
 import { NativeRpc, RpcOutcomeUnknown, type RpcMessage } from "./nativeRpc";
@@ -64,7 +64,7 @@ const NATIVE_DEVELOPER_INSTRUCTIONS = [
 
 export default function NativeApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<"models" | "memory" | "tools">("models");
+  const [settingsTab, setSettingsTab] = useState<"models" | "memory" | "tools" | "browser">("models");
   const [goalWorking, setGoalWorking] = useState(false);
   const [currentGoal, setCurrentGoal] = useState<Goal | null>(null);
   const [goalServiceRunning, setGoalServiceRunning] = useState(false);
@@ -99,10 +99,10 @@ export default function NativeApp() {
   const [activityClock, setActivityClock] = useState(Date.now());
   const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
   const [uncertain, setUncertain] = useState(false);
-  const [toolsEnabled, setToolsEnabled] = useState(false);
+  const [toolsEnabled, setToolsEnabled] = useState(true);
   const [workersEnabled, setWorkersEnabled] = useState(false);
   const [workers, setWorkers] = useState<WorkerView[]>([]);
-  const [browserOrigins, setBrowserOrigins] = useState("");
+  const [browserOrigins, setBrowserOrigins] = useState("*");
   const [draft, setDraft] = useState("");
   const [contextOpen, setContextOpen] = useState(false);
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
@@ -573,7 +573,7 @@ export default function NativeApp() {
         if (disposed) return;
         setSetup(initial); setWorkspace(initial.preferences.workspace); setProfiles(initial.profiles); setBuilt(native.built);
         const options = initial.preferences.projects.find(project => sameWorkspace(project.workspace, initial.preferences.workspace))?.options;
-        setToolsEnabled(options?.tools_enabled ?? false); setWorkersEnabled(options?.workers_enabled ?? false); setBrowserOrigins(options?.browser_origins.join(" ") ?? "");
+        setToolsEnabled(options?.tools_enabled ?? true); setWorkersEnabled(options?.workers_enabled ?? false); setBrowserOrigins(options?.browser_origins.join(" ") ?? "*");
         setTerminalPlatformSupported(native.windowsTerminalBuild === true);
         const selected = initial.preferences.active_model;
         const configured = initial.profiles.some(model => model.id === selected);
@@ -869,6 +869,13 @@ export default function NativeApp() {
     } else { setUncertain(true); setStatus("Worker shutdown is unconfirmed. Recover chat before starting more work."); }
   };
 
+  const memoryRepaired = useRef(false);
+  useEffect(() => {
+    const memory = setup?.memory;
+    if (!memoryShouldBeOn(memory) || memoryRepaired.current || !memory) return;
+    memoryRepaired.current = true;
+    void nativeSettings("save_memory", { secret: "", memory: { enabled: true, scope: memory.scope, user_id: memory.user_id } }).then(value => { setSetup(value); setProfiles(value.profiles); }).catch(() => { /* Settings → Memory shows the reason. */ });
+  }, [setup?.memory?.configured, setup?.memory?.enabled]);
   const updateSetup = (value: NativeSetup) => {
     setSetup(value); setProfiles(value.profiles);
     if (!value.profiles.some(model => model.id === profile)) setProfile("");
@@ -889,7 +896,7 @@ export default function NativeApp() {
       currentGoalRef.current = null; goalFingerprintRef.current = ""; setCurrentGoal(null); setGoalWorking(false); setAnswers({}); setGoalFeedback(""); setGoalPollError("");
       restoreThreadRef.current = ""; threadRef.current = ""; setThreadId("");
       const options = next.preferences.projects.find(project => sameWorkspace(project.workspace, next.preferences.workspace))?.options;
-      setToolsEnabled(options?.tools_enabled ?? false); setWorkersEnabled(options?.workers_enabled ?? false); setBrowserOrigins(options?.browser_origins.join(" ") ?? ""); setDraft(projectDrafts.current[next.preferences.workspace] ?? "");
+      setToolsEnabled(options?.tools_enabled ?? true); setWorkersEnabled(options?.workers_enabled ?? false); setBrowserOrigins(options?.browser_origins.join(" ") ?? "*"); setDraft(projectDrafts.current[next.preferences.workspace] ?? "");
       setContextFiles(projectContexts.current[next.preferences.workspace] ?? []); setContextOpen(false);
       setAddingProject(false); setProjectPath(""); setProjectName(""); setSettingsOpen(false);
       setPanel(null); setTurnDiff(""); setReviewNotice(""); setPreviewPath(null);
@@ -908,7 +915,7 @@ export default function NativeApp() {
   };
   const project = setup?.preferences.projects.find(p => sameWorkspace(p.workspace, workspace));
   const navigationLocked = busy || connecting || loadingThread || settingsSaving || reviewBusy || goalPending || approvals.length > 0 || workers.some(workerOutstanding);
-  const toggleSettings = async (section: "models" | "memory" | "tools" = "models") => {
+  const toggleSettings = async (section: "models" | "memory" | "tools" | "browser" = "models") => {
     if (navigationLocked || lifecycleRef.current || settingsPendingRef.current) return;
     if (settingsOpen) { setSettingsOpen(false); return; }
     // Pause the idle transport internally so credentials can be edited safely.
@@ -1005,8 +1012,7 @@ export default function NativeApp() {
     // not trigger a retry loop or automatically repeat user work.
   }, [built, workspace, profile, settingsOpen]);
   return <div className="native-app">
-    <div className="native-layout"><aside>
-      <div className="native-brand"><span className="brand-mark">s</span><strong>Smara</strong></div>
+    <div className={`native-layout${settingsOpen ? " settings-mode" : ""}`}><aside>
       <button className="new-chat" disabled={navigationLocked} onClick={newConversation}>＋ New chat</button>
       <div className="sidebar-section-heading"><span>Projects</span><button aria-label="Add project" disabled={navigationLocked} onClick={() => setAddingProject(!addingProject)}>＋</button></div>
       {setup?.preferences.projects.map(p => <button className={`project-button ${sameWorkspace(p.workspace, workspace) ? "selected" : ""}`} key={p.workspace} title={p.workspace} disabled={navigationLocked} onClick={() => { if (!sameWorkspace(p.workspace, workspace)) void switchProject(p.workspace); else setSettingsOpen(false); }}><span>▱</span>{p.label}</button>)}
@@ -1086,9 +1092,9 @@ export default function NativeApp() {
       <div className="native-transcript" aria-live="off">
         {busy && turnStartedAt && <p role="status">{waitingReason(items, approvals.length, activityClock, lastNativeEventRef.current)} · {Math.max(0, Math.floor((activityClock - turnStartedAt) / 1000))}s elapsed</p>}
         {!!workers.length && <section className="native-workers"><strong>Workers · {workers.filter(worker => worker.status === "completed").length}/{workers.length} complete · changes are not auto-merged</strong>{liveWorkers && <button disabled={connecting || loadingThread} title="Stops this chat's native runtime and all its workers; saved history is kept" onClick={() => void stopWorkers()}>Stop workers</button>}{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status}{worker.activity && <span> · {worker.activity}{worker.lastActivityAt && ` · ${Math.max(0, Math.floor((activityClock - worker.lastActivityAt) / 1000))}s ago`}</span>} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
-        {!items.length && <div className="native-empty"><h1>What can I help you with?</h1><p>Research, build, and get work done.</p><div className="starter-cards">{[{ title: "Understand this project", text: "Inspect this project and explain its architecture, entry points and how to run its tests. Do not change files." }, { title: "Find & fix a bug", text: "Inspect this project for a reproducible bug. Show evidence, make a minimal fix, and run the relevant tests." }, { title: "Research a topic", text: "Research a topic using public sources. Read the actual clock for time-sensitive questions, verify claims against fetched pages and cite them. Ask me for the topic first." }].map(card => <button key={card.title} title={card.text} onClick={() => setDraft(card.text)}>{card.title}<span>↗</span></button>)}</div>{!profile && <small className="empty-hint">Add your model in Settings to get started.</small>}</div>}
+        {!items.length && <div className="native-empty"><h1>{project?.label || "Smara"}</h1>{!profile ? <small className="empty-hint">Add a model in Settings to get started.</small> : <small className="empty-hint">{connecting ? "Preparing project…" : "Type a message below, or / for commands."}</small>}</div>}
         {items.map(item => <article key={item.id} className={`native-item ${item.kind}`}>
-          <div className="item-heading"><small>{item.kind === "assistant" ? "Smara" : item.kind === "user" ? "You" : item.kind} {item.status && `· ${item.status}`}</small><div>
+          <div className="item-heading">{item.kind !== "assistant" && item.kind !== "user" && <small>{item.kind} {item.status && `· ${item.status}`}</small>}<div>
             {item.kind === "assistant" && <ReadAloud text={item.text} disabled={busy} />}
             {(item.kind === "assistant" || item.kind === "user") && <button className="text-button" title={item.kind === "assistant" ? "Copy response" : "Copy your message"} aria-label={item.kind === "assistant" ? "Copy response" : "Copy your message"} onClick={() => void copyMessage(item)}>{copiedItemId === item.id ? "✓ Copied" : item.kind === "assistant" ? "Copy response" : "Copy"}</button>}
             {item.kind === "user" && !busy && <button className="text-button" title="Load this text into the composer; sending creates a new follow-up" onClick={() => editMessage(item.text)}>Edit</button>}
@@ -1116,7 +1122,7 @@ export default function NativeApp() {
         {!!contextFiles.length && <div className="composer-files">{contextFiles.map(file => <span key={file.path}><button type="button" title={file.path} onClick={() => setPreviewPath(file.path)}>{file.name}</button><button type="button" aria-label={`Remove ${file.name}`} disabled={navigationLocked} onClick={() => setContextFiles(current => current.filter(item => item.path !== file.path))}>×</button></span>)}</div>}
         {editingPrompt && <div className="composer-edit-notice">Sending this edited text adds a follow-up; the original stays in chat history. <button type="button" onClick={() => { setEditingPrompt(false); setDraft(""); }}>Cancel edit</button></div>}
         {slashOptions.length > 0 && <div className="slash-command-menu" role="listbox" aria-label="Smara commands">{slashOptions.map((option, index) => <button type="button" role="option" aria-selected={index === slashSelection} key={option.command} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setSlashSelection(index)} onClick={() => chooseSlashCommand(option.command)}><code>{option.command}</code><span><strong>{option.label}</strong><small>{option.description}</small></span><kbd>↵</kbd></button>)}</div>}
-        <textarea ref={composerRef} aria-label="Message Smara" rows={2} placeholder="Ask Smara anything… · type / for commands" value={draft} onChange={event => { setDraft(event.target.value); setSlashSelection(0); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 260)}px`; }} onKeyDown={event => {
+        <textarea ref={composerRef} aria-label="Message Smara" rows={2} placeholder="Message… (/ for commands)" value={draft} onChange={event => { setDraft(event.target.value); setSlashSelection(0); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 260)}px`; }} onKeyDown={event => {
           if (slashOptions.length && !event.shiftKey && !event.nativeEvent.isComposing) {
             if (event.key === "ArrowDown") { event.preventDefault(); setSlashSelection(value => (value + 1) % slashOptions.length); return; }
             if (event.key === "ArrowUp") { event.preventDefault(); setSlashSelection(value => (value + slashOptions.length - 1) % slashOptions.length); return; }
@@ -1130,8 +1136,7 @@ export default function NativeApp() {
           <select aria-label="Model" title="Choose a model" value={profile} disabled={navigationLocked} onChange={event => void selectModel(event.target.value)}><option value="" disabled>Choose model</option>{profiles.map(model => <option value={model.id} key={model.id}>{model.label}</option>)}</select>
           <button className={busy ? "stop-button" : "primary"} aria-label={busy ? "Stop response" : "Send message"} title={busy ? "Stop response" : "Send message"} type={busy ? "button" : "submit"} disabled={reviewBusy || connecting || loadingThread || goalPending || (busy ? !turnId : workers.some(workerOutstanding) || (goalWorking && !/^\/goal(?:\s|$)/i.test(draft.trim())) || !profile || built !== true || !draft.trim() || approvals.length > 0)} onClick={busy ? () => void stopTurn() : undefined}>{busy ? "■" : "↑"}</button>
         </div></div>
-      </form><div className="composer-status"><small role="status">{reviewBusy ? "Saving local review…" : busy || uncertain || loadingThread || (status !== "Ready" && status !== "completed") ? status : ""}</small><small>Shift+Enter for a new line</small></div></footer>
-      <NativeHealth key={workspace} workspace={workspace} locked={navigationLocked} onSettings={section => void toggleSettings(section)} />
+      </form><div className="composer-status"><small role="status">{reviewBusy ? "Saving local review…" : busy || uncertain || loadingThread || (status !== "Ready" && status !== "completed") ? status : ""}</small></div></footer>
       </div>
       {panel === "changes" && <NativeChanges key={workspace + threadId} workspace={workspace} threadId={threadId} locked={navigationLocked || terminalActive || goalWorking} revision={reviewRevision} notice={reviewNotice} onBusyChange={reviewPending} onPreviewFile={setPreviewPath} onClose={() => setPanel(null)} />}
       {panel === "terminal" && <NativeTerminal workspace={workspace} connected={connected} session={terminalSession} interactiveSupported={terminalPlatformSupported} onConnect={() => { void connect(); }} onStart={() => startTerminal()} onInput={value => { void writeTerminal(value); }} onInterrupt={interruptTerminal} onStop={() => { void stopTerminal(); }} onResize={resizeTerminal} onClear={() => setTerminalSession(current => current ? { ...current, output: "", truncated: false } : current)} onClose={() => setPanel(null)} />}
