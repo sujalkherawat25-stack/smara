@@ -65,6 +65,16 @@ TOOLS = [
     _fn("send_file_to_owner", "Send the owner a file you created in the sandbox (PDF statement, Excel report, CSV). "
         "file_ref must be one of the output_file_refs from run_python.",
         {"file_ref": _S, "caption": _S}, ["file_ref"]),
+    _fn("make_document", "Make a professional PDF (or Word, format=docx) document for the owner: kind=statement (a customer's "
+        "account statement, needs party_id), reminder_letter (needs party_id and body = the letter's paragraph(s) only), "
+        "payables_schedule (supplier bills with 43B(h) deadlines), owner_report (receivables, ageing, collections; days = period), "
+        "or custom (title + blocks you provide). Numbers for the first four come from the database, not from you. Returns a "
+        "file_ref and the headline figures; then call send_file_to_owner. Read the making-documents skill for custom blocks.",
+        {"kind": {"type": "string", "enum": ["statement", "reminder_letter", "payables_schedule", "owner_report", "custom"]},
+         "format": {"type": "string", "enum": ["pdf", "docx"]}, "party_id": _S, "body": _S, "days": {"type": "integer"},
+         "title": _S, "subtitle": _S, "blocks": {"type": "array", "items": {"type": "object"}}}, ["kind"]),
+    _fn("load_skill", "Load detailed step-by-step instructions for a kind of task (the list of skills is in your instructions). "
+        "Load the matching skill BEFORE starting that task, then follow it.", {"name": _S}, ["name"]),
     _fn("read_attachment", "Read ANY file the owner attached: PDF, Word, PowerPoint, text, photo or scan (OCR), voice note, "
         "or a zip (lists what is inside). Returns the text so you can answer from it. For spreadsheets use inspect_and_import_file; "
         "for heavy processing use run_python.", {"file_ref": _S}, ["file_ref"]),

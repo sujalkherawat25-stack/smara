@@ -5,6 +5,7 @@ import logging
 import time
 
 from src import clock
+from src.agent import skills
 from src.bridge.continuum import scope_user
 
 log = logging.getLogger(__name__)
@@ -160,4 +161,7 @@ async def build_system(app, tenant, trust: str, session_id: str | None = None) -
         if recent:
             base += ("\nEarlier chats with the owner, oldest first (use them for context such as who or what 'that customer' or "
                      "'the same file' means; they may be out of date, so check the ledger for current numbers):\n" + recent + "\n")
+    if trust != "UNTRUSTED" and (listing := skills.index()):
+        base += ("\nSkills (call load_skill with the name BEFORE starting a task of that kind, then follow it; they hold the "
+                 "detailed rules and checklists):\n" + listing + "\n")
     return base + "\n" + ROLE[trust]
