@@ -136,8 +136,8 @@ async def _agent(app, tenant_id: str, msg: InboundMessage) -> None:
         if not spoken.strip():
             return "Voice note samajh nahi aaya. Kripya type karke bhejiye ya dobara bolkar bhejiye."
         content = f"[voice note, transcribed] {spoken.strip()}"
-    elif msg.media_id and msg.kind in ("document", "image"):
-        ref = f"{msg.channel}:{msg.media_id}:{msg.filename or ('photo.jpg' if msg.kind == 'image' else 'file')}"
+    elif msg.media_id and msg.kind in ("document", "image", "video", "sticker"):
+        ref = f"{msg.channel}:{msg.media_id}:{file_name(msg)}"
         files = (ref,)
         content = f"{content}\n[The owner attached a file: file_ref={ref}; caption: {msg.caption or '-'}]".strip()
     if not content:
@@ -146,6 +146,20 @@ async def _agent(app, tenant_id: str, msg: InboundMessage) -> None:
     await start_session(app, tenant=tenant, trust="TRUSTED", trigger="owner_message", content=content,
                         files=files, channel=msg.channel, background=getattr(app.state, "agent_background", True))
     return None
+
+
+_EXT = {"image": ".jpg", "video": ".mp4", "sticker": ".webp", "audio": ".ogg"}
+
+
+def file_name(msg: InboundMessage) -> str:
+    """A safe name with an extension, so the agent and the sandbox can tell what kind of file it is."""
+    import mimetypes
+    from src.box.sandbox import safe_name
+    name = safe_name(msg.filename) if msg.filename else ""
+    if not name or "." not in name:
+        ext = mimetypes.guess_extension((msg.mime or "").split(";")[0]) or _EXT.get(msg.kind, "")
+        name = (name or {"image": "photo", "video": "video", "sticker": "sticker"}.get(msg.kind, "file")) + ext
+    return name
 
 
 async def fetch_media(app, msg: InboundMessage) -> tuple[bytes, str]:

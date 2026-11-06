@@ -278,7 +278,7 @@ async def test_browser_read_runs_but_click_waits_for_owner(env):
 
 async def test_import_reports_totals_for_the_agent_to_verify(env, monkeypatch):
     csv = b"Party Name,Mobile Number,Invoice No,Due Date,Balance\nAsha,9811122233,V-1,15/11/2026,500\nBina,9811122234,V-2,16/11/2026,250\n"
-    async def fake_fetch(app, ref):
+    async def fake_fetch(app, ref, ctx=None):
         return csv, "text/csv", "out.csv"
     monkeypatch.setattr(actions, "_fetch", fake_fetch)
     ref = "whatsapp:MEDIA1:out.csv"
@@ -319,7 +319,7 @@ async def test_agent_converts_tally_xml_in_sandbox_and_verifies_import(env, monk
     xml = (Path(__file__).parent / "fixtures" / "tally_daybook.xml").read_bytes()
     real_fetch = actions._fetch
 
-    async def fetch(app, ref):
+    async def fetch(app, ref, ctx=None):
         return (xml, "text/xml", "daybook.xml") if ref.startswith("whatsapp:") else await real_fetch(app, ref)
     monkeypatch.setattr(actions, "_fetch", fetch)
     code = ("import munim_helpers as mh\nfrom datetime import timedelta\n"

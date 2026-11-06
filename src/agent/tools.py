@@ -65,6 +65,9 @@ TOOLS = [
     _fn("send_file_to_owner", "Send the owner a file you created in the sandbox (PDF statement, Excel report, CSV). "
         "file_ref must be one of the output_file_refs from run_python.",
         {"file_ref": _S, "caption": _S}, ["file_ref"]),
+    _fn("read_attachment", "Read ANY file the owner attached: PDF, Word, PowerPoint, text, photo or scan (OCR), voice note, "
+        "or a zip (lists what is inside). Returns the text so you can answer from it. For spreadsheets use inspect_and_import_file; "
+        "for heavy processing use run_python.", {"file_ref": _S}, ["file_ref"]),
     _fn("inspect_and_import_file", "Open a file attached to this conversation. mode=inspect previews the rows "
         "and totals; mode=import loads them into the ledger and reports sheet vs ledger totals to verify.",
         {"file_ref": _S, "mode": {"type": "string", "enum": ["inspect", "import"]}}, ["file_ref", "mode"]),

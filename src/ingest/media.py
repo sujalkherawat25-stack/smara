@@ -3,6 +3,7 @@
 External-API shapes here (Graph media fetch, Sarvam /speech-to-text, OpenAI-style
 image_url parts) follow the vendors' public docs but are not yet exercised live.
 """
+import asyncio
 import base64
 import re
 
@@ -12,6 +13,12 @@ from src.loop.llm import LLM
 
 GRAPH = "https://graph.facebook.com/v20.0"
 SARVAM_STT = "https://api.sarvam.ai/speech-to-text"
+MAX_MEDIA_BYTES = 100 * 1024 * 1024      # WhatsApp itself accepts at most 100 MB per document
+ATTEMPTS = 3
+
+
+class MediaError(Exception):
+    """A file could not be fetched; the message is safe to show the owner."""
 
 BILL_PROMPT = (
     "Extract a payment document from the image. Return JSON with keys: "
@@ -30,13 +37,30 @@ async def media_token(app, number_id: str) -> str:
     return app.state.settings.wa_access_token
 
 
-async def download_media(access_token: str, media_id: str, client: httpx.AsyncClient | None = None) -> tuple[bytes, str]:
-    http = client or httpx.AsyncClient(timeout=30, headers={"Authorization": f"Bearer {access_token}"})
+async def download_media(access_token: str, media_id: str, client: httpx.AsyncClient | None = None,
+                         max_bytes: int = MAX_MEDIA_BYTES) -> tuple[bytes, str]:
+    """Fetch a WhatsApp file of any type. Large files are streamed and capped, and a dropped connection is retried."""
+    http = client or httpx.AsyncClient(timeout=httpx.Timeout(30, read=180), headers={"Authorization": f"Bearer {access_token}"})
     try:
         meta = (await http.get(f"{GRAPH}/{media_id}")).raise_for_status().json()
-        blob = await http.get(meta["url"])
-        blob.raise_for_status()
-        return blob.content, meta.get("mime_type", "application/octet-stream")
+        mime = meta.get("mime_type", "application/octet-stream")
+        if int(meta.get("file_size") or 0) > max_bytes:
+            raise MediaError(f"That file is {int(meta['file_size']) // 1_000_000} MB; the limit is {max_bytes // 1_000_000} MB.")
+        last: Exception | None = None
+        for attempt in range(ATTEMPTS):
+            try:
+                buf = bytearray()
+                async with http.stream("GET", meta["url"]) as r:
+                    r.raise_for_status()
+                    async for chunk in r.aiter_bytes(1 << 20):
+                        buf += chunk
+                        if len(buf) > max_bytes:
+                            raise MediaError(f"That file is larger than {max_bytes // 1_000_000} MB, which is the limit.")
+                return bytes(buf), mime
+            except (httpx.TransportError, httpx.HTTPStatusError) as e:
+                last = e
+                await asyncio.sleep(1 + attempt)
+        raise MediaError("The file could not be downloaded from WhatsApp. Please send it again.") from last
     finally:
         if client is None:
             await http.aclose()
@@ -67,6 +91,18 @@ async def read_image(llm: LLM, image: bytes, mime: str) -> dict:
         return {}
     url = f"data:{mime};base64,{base64.b64encode(image).decode()}"
     return await llm.json(BILL_PROMPT, [{"type": "image_url", "image_url": {"url": url}}])
+
+
+READ_PROMPT = ("Read this image for a shop owner. Return JSON with keys: kind ('bill'|'invoice'|'cheque'|'statement'|'screenshot'|'photo'|'other'), "
+               "text (all legible text, in reading order, any language), summary (one sentence). Never guess unreadable text.")
+
+
+async def read_image_text(llm: LLM, image: bytes, mime: str) -> dict:
+    """General vision read of any photo or scan. {} when no LLM is configured."""
+    if not llm.enabled:
+        return {}
+    url = f"data:{mime};base64,{base64.b64encode(image).decode()}"
+    return await llm.json(READ_PROMPT, [{"type": "image_url", "image_url": {"url": url}}])
 
 
 def ocr_to_evidence(ocr: dict) -> str:

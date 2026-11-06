@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from src.config import normalize_phone
 
 
+MEDIA_KINDS = ("audio", "image", "document", "video", "sticker")
+
+
 @dataclass(frozen=True)
 class InboundMessage:
     wamid: str
@@ -19,6 +22,7 @@ class InboundMessage:
     channel: str = "whatsapp"   # whatsapp | telegram
     chat_id: int | None = None  # telegram chat
     reply_to: str = ""          # the message of ours they replied to (WhatsApp context.id), if any
+    mime: str = ""             # media type as WhatsApp reports it
 
     @property
     def evidence_text(self) -> str:
@@ -50,10 +54,11 @@ def parse_messages(payload: dict) -> list[InboundMessage]:
                     sender=normalize_phone(m.get("from", "")),
                     kind=kind,
                     text=(m.get("text") or {}).get("body", ""),
-                    media_id=(m.get(kind) or {}).get("id") if kind in ("audio", "image", "document") else None,
-                    caption=(m.get(kind) or {}).get("caption", "") if kind in ("image", "document") else "",
+                    media_id=(m.get(kind) or {}).get("id") if kind in MEDIA_KINDS else None,
+                    caption=(m.get(kind) or {}).get("caption", "") if kind in ("image", "document", "video") else "",
                     filename=(m.get(kind) or {}).get("filename", "") if kind == "document" else "",
                     number_id=number_id,
+                    mime=(m.get(kind) or {}).get("mime_type", "") if kind in MEDIA_KINDS else "",
                     button_id=((m.get("interactive") or {}).get("button_reply") or {}).get("id"),
                     reply_to=(m.get("context") or {}).get("id", ""),
                 )
