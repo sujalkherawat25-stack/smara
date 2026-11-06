@@ -59,7 +59,7 @@ def _vault_ready() -> bool:
         return False
 
 
-app = FastAPI(title="Smara Munim", lifespan=lifespan)
+app = FastAPI(title="Smara", lifespan=lifespan)
 app.include_router(router)
 app.include_router(device_router)
 app.include_router(pay_router)

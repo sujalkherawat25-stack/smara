@@ -22,7 +22,7 @@ JOIN_WORD = re.compile(r"^\s*(?:join|code|invite)\b[\s:\-]*([A-Za-z0-9\-]{4,14})
 UPI = re.compile(r"^[a-z0-9.\-_]{2,40}@[a-z][a-z0-9]{1,20}$", re.I)
 SKIP = {"skip", "nahi", "no", "none", "baad mein", "later", "-"}
 
-WELCOME_ASK_SHOP = ("Namaste! Main Smara hoon, aapke business ka digital munim.\n\nShuru karne ke liye bataiye: "
+WELCOME_ASK_SHOP = ("Namaste! Main Smara hoon, aapke business ka digital saathi.\n\nShuru karne ke liye bataiye: "
                     "aapki dukaan ya business ka naam kya hai?")
 ASK_UPI = ("Dhanyavaad! Ab apna UPI ID bhejiye (jaise ramesh@upi) taaki customers ko payment link ke saath bhej sakun. "
            "Abhi nahi dena ho to 'skip' likhiye.")
