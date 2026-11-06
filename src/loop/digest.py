@@ -1,7 +1,9 @@
 """Owner morning digest. All numbers come from Postgres, never from search."""
-from datetime import date
+from datetime import date, timedelta
 
 from src.loop.upi import rupees
+
+SOON_DAYS = 5   # warn this many days before a 43B(h) deadline
 
 
 async def build_digest(pool, tenant_id: str, today: date) -> str:
@@ -26,11 +28,24 @@ async def build_digest(pool, tenant_id: str, today: date) -> str:
                 WHERE o.tenant_id = %s AND a.status = 'PENDING'""", (tenant_id,))
         pending_adj = (await cur.fetchone())["n"]
 
+        cur = await conn.execute(
+            """SELECT supplier, bill_ref, amount_paise,
+                      bill_date + CASE WHEN agreement_45 THEN 45 ELSE 15 END AS due
+                 FROM payables WHERE tenant_id = %s AND paid_at IS NULL AND msme_class IN ('micro','small')
+                ORDER BY due LIMIT 40""", (tenant_id,))
+        bills = await cur.fetchall()
+
     lines = [f"Good morning. Overdue: {agg['od_n']} invoices, {rupees(agg['od_amt'])}.",
              f"Due in next 7 days: {agg['wk_n']} invoices, {rupees(agg['wk_amt'])}."]
     if top:
         lines.append("\nBiggest overdue:")
         lines += [f"- {r['canonical_name']} {r['invoice_ref']} {rupees(r['amount_paise'])} ({r['days']}d late)" for r in top]
+    late = [b for b in bills if b["due"] < today]
+    soon = [b for b in bills if today <= b["due"] <= today + timedelta(days=SOON_DAYS)]
+    if late or soon:
+        lines.append("\nSupplier payments (tax deduction at risk if paid late, Section 43B(h)):")
+        lines += [f"- PAST DEADLINE: {b['supplier']} {b['bill_ref']} {rupees(b['amount_paise'])} (was due {b['due']})" for b in late[:5]]
+        lines += [f"- Pay by {b['due']}: {b['supplier']} {b['bill_ref']} {rupees(b['amount_paise'])}" for b in soon[:5]]
     waiting = agg["waiting"] + pending_adj
     if waiting:
         lines.append(f"\n{waiting} item(s) waiting for your approval above.")

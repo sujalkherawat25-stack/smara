@@ -25,6 +25,7 @@ LEDGER_SCHEMA = (
     "proposed_adjustments(id, obligation_id, adjustment_type, proposed_amount_paise, proposed_date, "
     "raw_evidence_text, status PENDING|APPROVED|REJECTED, created_at); "
     "obligation_events(obligation_id, from_state, to_state, actor OWNER|DEBTOR|SYSTEM_CRON, created_at). "
+    "payables(supplier, supplier_gstin, bill_ref, bill_date, amount_paise, msme_class micro|small|other|unknown, agreement_45, paid_at; micro/small suppliers must be paid within 15 days of bill_date, or 45 with a written agreement, or the tax deduction is lost). "
     "Money is in paise (divide by 100 for rupees)."
 )
 
