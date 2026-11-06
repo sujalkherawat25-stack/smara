@@ -146,7 +146,10 @@ def url_allowed(url: str, allow_private: bool = False) -> str | None:
     """None if the URL may be opened, else the reason it may not."""
     u = urlparse(url)
     if u.scheme not in ("http", "https") or not u.hostname:
-        return "only http and https pages can be opened"
+        if u.scheme in ("upi", "intent", "tel", "mailto", "sms", "whatsapp", "paytmmp", "phonepe", "gpay", "tez", "market"):
+            return (f"{u.scheme}: links open an app on a phone, not a web page. For a payment, call hand_off_to_owner: the "
+                    "owner pays (QR or UPI on their phone, or the site's own pay page); then continue from the fresh page")
+        return "only http and https pages can be opened (use the page's own links and buttons instead of a made-up address)"
     if allow_private:
         return None
     try:
