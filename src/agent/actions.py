@@ -35,11 +35,14 @@ async def _fetch(app, file_ref: str) -> tuple[bytes, str, str]:
 
 async def inspect_and_import_file(app, ctx: SessionCtx, args: dict) -> dict:
     data, mime, filename = await _fetch(app, args["file_ref"])
-    if not filename.lower().endswith((".xlsx", ".xlsm", ".csv")):
+    if not filename.lower().endswith((".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".txt")):
         if mime.startswith("image/"):
             return {"kind": "image", "ocr": await read_image(app.state.llm, data, mime)}
-        return {"error": f"unsupported file {filename!r}; send .xlsx or .csv"}
-    rows, skipped = map_sheet(filename, data)
+        return {"error": f"unsupported file {filename!r}; send .xlsx, .xls or .csv"}
+    async with app.state.pool.connection() as conn:           # customers already on file supply missing mobile numbers
+        known = {r["canonical_name"]: r["whatsapp_phone"] for r in await (await conn.execute(
+            "SELECT canonical_name, whatsapp_phone FROM parties WHERE tenant_id = %s", (ctx.tenant_id,))).fetchall()}
+    rows, skipped = map_sheet(filename, data, known)
     total = sum(r.amount_paise for r in rows)
     preview = {"rows_found": len(rows), "sheet_total_rupees": total / 100, "skipped": skipped[:10],
                "sample": [{"party": r.party, "invoice": r.invoice_ref, "rupees": r.amount_paise / 100,

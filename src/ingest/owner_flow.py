@@ -156,10 +156,13 @@ async def fetch_media(app, msg: InboundMessage) -> tuple[bytes, str]:
 
 
 async def _sheet(app, tenant_id: str, msg: InboundMessage) -> str:
-    if not msg.filename.lower().endswith((".xlsx", ".xlsm", ".csv")):
-        return "I can read .xlsx or .csv sheets. Please export your outstanding report in one of those."
+    if not msg.filename.lower().endswith((".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".txt")):
+        return "I can read .xlsx, .xls or .csv sheets. Please export your outstanding report in one of those."
     data, _ = await fetch_media(app, msg)
-    rows, skipped = map_sheet(msg.filename, data)
+    async with app.state.pool.connection() as conn:       # customers already on file supply missing mobile numbers
+        known = {r["canonical_name"]: r["whatsapp_phone"] for r in await (await conn.execute(
+            "SELECT canonical_name, whatsapp_phone FROM parties WHERE tenant_id = %s", (tenant_id,))).fetchall()}
+    rows, skipped = map_sheet(msg.filename, data, known)
     result = await import_rows(app.state.pool, tenant_id, rows) if rows else {"created": 0, "updated": 0}
     out = f"Imported {result['created']} new, {result['updated']} updated invoices."
     if skipped:
