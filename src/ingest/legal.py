@@ -71,7 +71,7 @@ and go only to customers who have given you their number and agreed to hear from
 <li>Smara shows you the totals and who is overdue, and drafts the reminders.</li>
 <li>You approve what goes out. Customers can reply STOP at any time and will not be messaged again by your business.</li></ol>
 <h2>Who it is for</h2>
-<p>Traders, wholesalers and distributors in India who run their accounts on Tally or spreadsheets and chase payments by phone and WhatsApp today.</p>
+<p>Traders, wholesalers and distributors in India who run their accounts on Tally or spreadsheets and follow up on unpaid invoices by phone and WhatsApp today.</p>
 <h2>Early access and support</h2>
 <p>Smara is in early access with a small number of businesses, and is free during this period. To join, or to talk to a person about anything,
 write to <a href="mailto:{EMAIL}?subject=Smara%20early%20access">{EMAIL}</a>. You can also read how we handle your data in the
