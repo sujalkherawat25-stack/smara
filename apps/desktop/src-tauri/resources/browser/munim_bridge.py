@@ -146,7 +146,10 @@ def url_allowed(url: str, allow_private: bool = False) -> str | None:
     """None if the URL may be opened, else the reason it may not."""
     u = urlparse(url)
     if u.scheme not in ("http", "https") or not u.hostname:
-        return "only http and https pages can be opened"
+        if u.scheme in ("upi", "intent", "tel", "mailto", "sms", "whatsapp", "paytmmp", "phonepe", "gpay", "tez", "market"):
+            return (f"{u.scheme}: links open an app on a phone, not a web page. For a payment, call hand_off_to_owner: the "
+                    "owner pays (QR or UPI on their phone, or the site's own pay page); then continue from the fresh page")
+        return "only http and https pages can be opened (use the page's own links and buttons instead of a made-up address)"
     if allow_private:
         return None
     try:
@@ -1152,6 +1155,7 @@ async def run(a) -> int:
                 await asyncio.sleep(3)
                 continue
             write_status(last_poll_at=time.time(), online=True, paused=PAUSE.exists())
+            await maybe_tally_sync(cfg)
             if not job:
                 await br.idle_check(a.idle_minutes)
                 continue
@@ -1181,6 +1185,56 @@ async def run(a) -> int:
             log(describe_step(job["command"], where))
             write_status(last_step_at=time.time(), last_step=describe_step(job["command"], where))
             await http.post("/bridge/result", json={"job_id": job["job_id"], "result": result})
+
+
+async def maybe_tally_sync(cfg: dict) -> None:
+    """Opt-in nightly sync of open bills from the owner's TallyPrime to their own Smara shop."""
+    ts = cfg.get("tally_sync") or {}
+    if not ts.get("enabled"):
+        return
+    import time
+    from datetime import datetime
+    import tally_sender
+    if not tally_sender.due_now(ts.get("last_run"), datetime.now()):
+        return
+    ts["last_run"] = time.time()                       # one attempt a day; a failure waits for tomorrow or `tally-sync now`
+    cfg["tally_sync"] = ts
+    save_config(cfg)
+    try:
+        payload = await asyncio.to_thread(tally_sender.collect, int(ts.get("port", 9000)), ts.get("company", ""), ts.get("msme"))
+        res = await asyncio.to_thread(tally_sender.send, cfg["server"], cfg["token"], payload)
+        skipped = payload["_skipped_no_phone"]
+        write_status(last_tally_sync=time.time(), tally_sync=f"ok: {res}", tally_no_phone=len(skipped))
+        log(f"Tally sync ok: {res}" + (f"; {len(skipped)} parties have no mobile number in Tally" if skipped else ""))
+    except Exception as e:
+        write_status(tally_sync=f"failed: {str(e)[:200]}")
+        log(f"Tally sync failed: {str(e)[:200]}")
+
+
+def cmd_tally_sync(a) -> int:
+    import tally_sender
+    cfg = load_config()
+    ts = cfg.get("tally_sync") or {}
+    if a.action in ("enable", "disable"):
+        ts["enabled"] = a.action == "enable"
+        ts["port"] = a.port
+        if a.company:
+            ts["company"] = a.company
+        cfg["tally_sync"] = ts
+        save_config(cfg)
+        print(f"Nightly Tally sync is {'on' if ts['enabled'] else 'off'}.")
+        return 0
+    if not cfg.get("token"):
+        print("Not paired.")
+        return 1
+    payload = tally_sender.collect(a.port, a.company or ts.get("company", ""), ts.get("msme"))
+    skipped = payload.pop("_skipped_no_phone")
+    print(f"Found {len(payload['receivables'])} receivables, {len(payload['payables'])} payables; "
+          f"{len(skipped)} parties have no mobile number in Tally.")
+    if a.action == "check":
+        return 0
+    print("Sent:", tally_sender.send(cfg["server"], cfg["token"], payload))
+    return 0
 
 
 def startup_command() -> list[str]:
@@ -1268,6 +1322,10 @@ def main() -> int:
                     help="open the browser only when Smara needs it (default); --no-lazy opens it at start")
     rp.add_argument("--idle-minutes", type=float, default=30, help="close the browser after this long with no work (0 = never)")
     rp.add_argument("--allow-private", action="store_true", help="allow localhost / private network pages (off by default)")
+    tp = sub.add_parser("tally-sync")
+    tp.add_argument("action", choices=["enable", "disable", "check", "now"])
+    tp.add_argument("--port", type=int, default=9000)
+    tp.add_argument("--company", default="")
     sub.add_parser("status")
     sub.add_parser("unpair")
     sub.add_parser("stop")
@@ -1279,6 +1337,8 @@ def main() -> int:
     a = ap.parse_args()
     if a.cmd == "pair":
         return cmd_pair(a)
+    if a.cmd == "tally-sync":
+        return cmd_tally_sync(a)
     if a.cmd == "install-startup":
         return cmd_install_startup()
     if a.cmd == "uninstall-startup":
