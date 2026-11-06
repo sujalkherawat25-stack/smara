@@ -193,7 +193,7 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
     if os.getenv("SMARA_DESKTOP_CREDENTIALS"):
         settings["mcp_servers.smara_readers.env.SMARA_DESKTOP_CREDENTIALS"] = str(Path(os.environ["SMARA_DESKTOP_CREDENTIALS"]).resolve())
     if browser_origins:
-        from .native_browser import configured_origins, TOOLS as browser_tools
+        from .native_browser import configured_origins, LOOK_ONLY, TOOLS as browser_tools
         configured_origins(browser_origins)
         browser_args = (["--native-browser"] if getattr(sys, "frozen", False) else ["-m", "smara.native_browser"])
         browser_args += ["--workspace", str(workspace.resolve())]
@@ -214,7 +214,7 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         if not getattr(sys, "frozen", False):
             settings["mcp_servers.smara_browser.env.PYTHONPATH"] = str((source_root() / "src").resolve())
         for entry in browser_tools:
-            settings[f'mcp_servers.smara_browser.tools.{entry["name"]}.approval_mode'] = "prompt"
+            settings[f'mcp_servers.smara_browser.tools.{entry["name"]}.approval_mode'] = "approve" if entry["name"] in LOOK_ONLY else "prompt"
     if interactive:
         from .native_computer import selected, approval_mode, TOOLS as computer_tools
         if selected(workspace):

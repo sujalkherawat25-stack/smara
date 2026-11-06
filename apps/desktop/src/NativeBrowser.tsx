@@ -52,7 +52,7 @@ export default function NativeBrowser({ locked }: { locked: boolean }) {
 
   return <div className="settings-grid browser-grid">
     <section className="settings-card browser-control">
-      <h2>Smara Browser</h2>
+      <h2>Your own browser (your logins)</h2>
       <p>Smara uses your own browser on this PC — your home connection and your logins. It runs quietly in the background and starts with Windows, so you never need to open a terminal. Passwords, OTPs and card fields are never typed, and every page Smara works on shows a blue banner with a Stop button.</p>
       {error && <p role="alert" className="native-error">{error}</p>}
       {notice && <p role="status" className="settings-notice">{notice}</p>}

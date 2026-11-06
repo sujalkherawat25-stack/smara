@@ -59,3 +59,13 @@ def test_real_dom_actions_pagination_stale_and_auth_denial(tmp_path, monkeypatch
         assert browser.engine.sessions[browser.session].context.cookies() == []
     finally:
         browser.engine.shutdown(); server.shutdown(); server.server_close()
+
+
+def test_any_public_site_still_refuses_private_addresses():
+    from smara.native_browser import ANY_PUBLIC_SITE
+    assert configured_origins([ANY_PUBLIC_SITE]) == {ANY_PUBLIC_SITE}
+    browser = NativeBrowser.__new__(NativeBrowser)
+    browser.origins = configured_origins([ANY_PUBLIC_SITE])
+    assert browser.allowed("https://example.com/a?b=1")
+    assert not browser.allowed("http://127.0.0.1:8000/")
+    assert not browser.allowed("file:///etc/passwd")

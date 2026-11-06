@@ -16,11 +16,22 @@ export function parseLog(lines: string[]): LogRow[] {
     return { id: `${index}-${line.length}`, time: match ? match[2] : "", message, level: ERROR_WORDS.test(message) && !/^step .*: ok/.test(message) ? "error" as const : "info" as const };
   }).slice(-MAX_LOG_ROWS).reverse();
 }
+const ROLE_WORDS: Record<string, string> = { button: "button", link: "link", textbox: "box", searchbox: "search box", combobox: "list", checkbox: "tick box", radio: "option", tab: "tab", menuitem: "menu item", option: "option" };
+/** '[31] button "Add to cart"' (what the helper logs now) -> 'the "Add to cart" button'; older selectors pass through. */
+export function controlName(target: string): string {
+  const m = /^\[\d+\] (\S+) "(.*)"/.exec(target.trim());
+  if (!m) return target;
+  const kind = ROLE_WORDS[m[1]] ?? "";
+  if (!m[2]) return `a ${kind || "control"}`;
+  return kind ? `the "${m[2]}" ${kind}` : `"${m[2]}"`;
+}
 export function friendlyLog(message: string): string {
-  const step = /^step (\S+)(?: (.*?))? on ([^:]+): (ok|error|refused)(?:: (.*)| \((.*)\))?$/.exec(message);
+  const step = /^step (\S+)(?: (.*))? on ([^\s:]+): (ok|error|refused)(?:: (.*)| \((.*)\))?$/.exec(message);
   if (step) {
-    const [, action, selector, host, outcome, errorText, title] = step;
-    const what = action === "navigate" ? `Opened ${host}` : action === "read" ? `Read ${host}` : action === "click" ? `Clicked${selector ? ` ${selector}` : ""} on ${host}` : action === "fill" ? `Typed into${selector ? ` ${selector}` : " a field"} on ${host}` : `${action} on ${host}`;
+    const [, action, rawTarget, host, outcome, errorText, title] = step;
+    const selector = rawTarget ? controlName(rawTarget) : "";
+    const verbs: Record<string, string> = { click: "Clicked", hover: "Pointed at", select: "Picked from", fill: "Typed into" };
+    const what = action === "navigate" ? `Opened ${host}` : action === "read" ? `Read ${host}` : action === "text" ? `Read the text of ${host}` : verbs[action] ? `${verbs[action]}${selector ? ` ${selector}` : action === "fill" ? " a field" : ""} on ${host}` : `${action} on ${host}`;
     return outcome === "ok" ? `${what}${title ? ` — ${title}` : ""}` : `${what} failed${errorText ? `: ${errorText}` : ""}`;
   }
   if (/^step .*refused: paused/i.test(message)) return "A step was refused because Smara is paused";

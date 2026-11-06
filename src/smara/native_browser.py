@@ -28,16 +28,24 @@ def origin(url):
     return f"{parsed.scheme}://{host}:{port}"
 
 
+# Looking is free; only steps that change something (click, fill, upload, download) ask the owner first.
+LOOK_ONLY = frozenset({"browser_open", "browser_observe", "browser_text_page", "browser_snapshot", "browser_tabs", "browser_switch",
+                       "browser_scroll", "browser_close", "browser_handoff"})
+ANY_PUBLIC_SITE = "*"     # "any public website": private and local addresses are still refused
+
+
 def configured_origins(values):
     if not isinstance(values, list) or not 1 <= len(values) <= 32:
         raise ValueError("Configure 1..32 exact public browser origins")
     for value in values:
         if not isinstance(value, str) or len(value) > 1000:
             raise ValueError("Invalid browser origin")
+        if value == ANY_PUBLIC_SITE:
+            continue
         parsed = urlsplit(value)
         if parsed.path not in {"", "/"} or parsed.query or parsed.fragment or not _is_public_http_url(value):
             raise ValueError("Browser origins must be public HTTP(S) origins, not paths or private hosts")
-    return {origin(value) for value in values}
+    return {ANY_PUBLIC_SITE if value == ANY_PUBLIC_SITE else origin(value) for value in values}
 
 
 TOOLS = [
@@ -78,7 +86,7 @@ class NativeBrowser:
 
     def allowed(self, url):
         try:
-            return origin(url) in self.origins and _is_public_http_url(url)
+            return (ANY_PUBLIC_SITE in self.origins or origin(url) in self.origins) and _is_public_http_url(url)
         except (ValueError, TypeError):
             return False
 

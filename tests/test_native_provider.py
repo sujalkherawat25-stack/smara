@@ -491,8 +491,10 @@ def test_native_browser_is_opt_in_and_each_tool_requires_prompt(tmp_path, monkey
         assert 'mcp_servers.smara_browser.args=["-m", "smara.native_browser"]' in off
         on, _ = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path, browser_origins=["https://fixture.example"])
         assert "mcp_servers.smara_browser.enabled=true" in on
-        for name in ("browser_open", "browser_observe", "browser_act", "browser_text_page", "browser_close"):
+        for name in ("browser_act", "browser_upload", "browser_download"):          # anything that changes a page still asks
             assert f'mcp_servers.smara_browser.tools.{name}.approval_mode="prompt"' in on
+        for name in ("browser_open", "browser_observe", "browser_text_page", "browser_close"):   # looking is free
+            assert f'mcp_servers.smara_browser.tools.{name}.approval_mode="approve"' in on
         with pytest.raises(ValueError):
             launch_options(adapter, home=tmp_path / "home", workspace=tmp_path, browser_origins=["http://private/"])
     finally:
