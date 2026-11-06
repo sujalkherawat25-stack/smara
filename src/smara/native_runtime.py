@@ -217,16 +217,19 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
             settings[f'mcp_servers.smara_browser.tools.{entry["name"]}.approval_mode'] = "approve" if entry["name"] in LOOK_ONLY else "prompt"
     if interactive:
         from .native_computer import selected, approval_mode, TOOLS as computer_tools
-        if selected(workspace):
-            settings.update({"mcp_servers.smara_computer.enabled": True,
-                "mcp_servers.smara_computer.command": sys.executable,
-                "mcp_servers.smara_computer.args": (["--native-computer"] if getattr(sys, "frozen", False) else ["-m", "smara.native_computer"]) + ["--workspace", str(workspace.resolve())],
-                "mcp_servers.smara_computer.env.SMARA_DESKTOP_STATE": str(state_path().resolve()),
-                "mcp_servers.smara_computer.env.PYTHONPATH": str((source_root() / "src").resolve()),
-                "mcp_servers.smara_computer.env.PYTHONIOENCODING": "utf-8", "mcp_servers.smara_computer.env.PYTHONUTF8": "1",
-                "mcp_servers.smara_computer.required": True, "mcp_servers.smara_computer.tool_timeout_sec": 60,
-                "mcp_servers.smara_computer.default_tools_approval_mode": "prompt"})
-            for entry in computer_tools: settings[f'mcp_servers.smara_computer.tools.{entry["name"]}.approval_mode'] = approval_mode(entry["name"])
+        # Always offered in interactive chats: every call re-checks the owner's grant, so without one each tool only returns the
+        # instruction to switch control on, and granting later works in the same chat without a restart. A server that cannot start
+        # is only fatal while a grant is actually active.
+        granted = bool(selected(workspace))
+        settings.update({"mcp_servers.smara_computer.enabled": True,
+            "mcp_servers.smara_computer.command": sys.executable,
+            "mcp_servers.smara_computer.args": (["--native-computer"] if getattr(sys, "frozen", False) else ["-m", "smara.native_computer"]) + ["--workspace", str(workspace.resolve())],
+            "mcp_servers.smara_computer.env.SMARA_DESKTOP_STATE": str(state_path().resolve()),
+            "mcp_servers.smara_computer.env.PYTHONPATH": str((source_root() / "src").resolve()),
+            "mcp_servers.smara_computer.env.PYTHONIOENCODING": "utf-8", "mcp_servers.smara_computer.env.PYTHONUTF8": "1",
+            "mcp_servers.smara_computer.required": granted, "mcp_servers.smara_computer.tool_timeout_sec": 60,
+            "mcp_servers.smara_computer.default_tools_approval_mode": "prompt"})
+        for entry in computer_tools: settings[f'mcp_servers.smara_computer.tools.{entry["name"]}.approval_mode'] = approval_mode(entry["name"])
     # TOML rejects JSON's surrogate-pair escapes for non-BMP characters. Keep
     # Unicode literal so emoji/non-Latin workspace paths survive native parsing.
     argv = [part for key, value in settings.items() for part in ("-c", key + "=" + json.dumps(value, ensure_ascii=False))]

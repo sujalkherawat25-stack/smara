@@ -82,6 +82,7 @@ class NativeBrowser:
         self.allow_writes = False
         self.actions = 0
         self.deadline = None
+        self.closed_by_agent = False  # A close the model asked for may be followed by a new open; a stop, timeout or budget end may not.
         self.download_allowed = False
 
     def allowed(self, url):
@@ -134,9 +135,9 @@ class NativeBrowser:
             if schema["properties"][key]["type"] == "integer" and (type(value) is not int or not schema["properties"][key].get("minimum", 0) <= value <= schema["properties"][key].get("maximum", MAX_BYTES)):
                 raise ValueError("Invalid bounded integer")
         if name == "browser_close":
-            self.engine.shutdown(); self.session = None; self.latest = None
+            self.engine.shutdown(); self.session = None; self.latest = None; self.closed_by_agent = True
             if self.control: self.control.update(closed=True)
-            return {"closed": True}
+            return {"closed": True, "can_reopen": True, "note": "Open a page again with browser_open if you need to; the original time and action limits still apply."}
         if self.control:
             state = self.control.state()
             if state.get("stopped"):
@@ -150,10 +151,13 @@ class NativeBrowser:
             if not self.allowed(arguments["url"]):
                 raise ValueError("URL is outside approved public origins")
             if not self.session:
-                if self.deadline is not None:
+                if self.deadline is not None and not self.closed_by_agent:
                     raise ValueError("Browser was closed; reconnect explicitly")
-                self.deadline = time.monotonic() + self.options["seconds"]
+                if self.deadline is None:  # A reopen after the model's own close keeps the original time budget.
+                    self.deadline = time.monotonic() + self.options["seconds"]
+                self.closed_by_agent = False
                 self.session = self.engine.create({"accept_downloads": self.options["transfers"], "service_workers": "block", "permissions": []}, self.configure)
+                if self.control: self.control.update(closed=False)
             self.latest = None; self.actions += 1
             self.engine.navigate(self.session, arguments["url"])
             return self.observe()
@@ -223,6 +227,21 @@ class NativeBrowser:
             self.allow_writes = False
 
 
+def failure_text(exc):
+    """What the model and the owner are told when a browser action fails.
+
+    Our own refusals (ValueError, StaleObservation) are written for this purpose and are returned as they are, so the model can
+    act on them (observe again, reconnect, pick another page). Anything else (page load errors from the engine) is reduced to
+    its type and a single short line, never a multi-line call log.
+    """
+    message = " ".join(str(exc).split())
+    if isinstance(exc, (ValueError, StaleObservation)):
+        return message[:300] or type(exc).__name__
+    line = (str(exc).strip().splitlines() or [""])[0].strip()[:200]
+    hint = " The page may block automated browsers or be unreachable; try another source, or open it in the owner's real browser with computer_open_url and drive it with computer_observe and computer_act (needs the owner's computer control grant in Settings > Automation)." if line or type(exc).__name__ in {"Error", "TimeoutError"} else ""
+    return (type(exc).__name__ + (": " + line if line else "") + "." + hint)
+
+
 def serve(workspace, origins, reader=None, writer=None, options=None, control=None):
     reader, writer = reader or sys.stdin, writer or sys.stdout
     browser = NativeBrowser(workspace, origins, options, control)
@@ -254,7 +273,7 @@ def serve(workspace, origins, reader=None, writer=None, options=None, control=No
                         value = browser.call(params.get("name"), params.get("arguments") or {})
                         result = {"content": [{"type": "text", "text": json.dumps(value, ensure_ascii=True)}], "isError": False}
                     except Exception as exc:
-                        result = {"content": [{"type": "text", "text": "Browser action failed: " + type(exc).__name__}], "isError": True}
+                        result = {"content": [{"type": "text", "text": "Browser action failed: " + failure_text(exc)}], "isError": True}
                 else:
                     raise ValueError("Unsupported method")
                 reply = {"jsonrpc": "2.0", "id": identifier, "result": result}

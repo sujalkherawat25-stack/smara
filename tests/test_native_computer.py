@@ -217,3 +217,72 @@ def test_tally_read_parses_tally_xml_and_only_sends_export_requests(setup, tally
 
 def test_tally_unreachable_is_a_clear_error(setup):
     with pytest.raises(ValueError, match="not reachable"): setup[0].call("tally_read", {"report": "status", "port": 1})
+
+
+def test_open_url_opens_the_default_browser_and_returns_its_window(setup, monkeypatch):
+    computer, backend, _, _ = setup
+    opened = []
+    backend.open_url = lambda url: opened.append(url)
+    brave = {"id": "9", "app": "brave.exe", "title": "TechCrunch", "pid": 2, "created": 2.0, "exe": "brave.exe", "handle": 9}
+    monkeypatch.setattr(backend, "targets", lambda: [dict(backend.window, foreground=False, minimized=False), dict(brave, foreground=True, minimized=False)])
+    monkeypatch.setattr("smara.research._is_public_http_url", lambda url: url.startswith("https://techcrunch.com"))
+    out = computer.call("computer_open_url", {"url": "https://techcrunch.com/category/artificial-intelligence/"})
+    assert opened == ["https://techcrunch.com/category/artificial-intelligence/"]
+    assert [w["app"] for w in out["windows"]] == ["brave.exe"] and out["windows"][0]["foreground"] is True
+    # The returned window can be observed straight away with the normal tools.
+    assert computer.call("computer_observe", {"window_id": "9"})["window"]["id"] == "9"
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1:9000/", "file:///C:/Users/x/secret.txt", "https://user:pw@example.com/", "javascript:alert(1)", "x" * 2500])
+def test_open_url_refuses_private_local_and_credentialed_addresses(setup, url):
+    computer, backend, _, _ = setup
+    backend.open_url = lambda _url: pytest.fail("Must not reach the browser")
+    with pytest.raises(ValueError, match="public http"):
+        computer.call("computer_open_url", {"url": url})
+
+
+def test_open_url_without_a_grant_explains_how_to_switch_control_on(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMARA_DESKTOP_STATE", str(tmp_path / "state.json"))
+    computer = Computer(tmp_path, Fake())
+    with pytest.raises(ValueError, match="Settings > Automation.*Grant any app"):
+        computer.call("computer_open_url", {"url": "https://example.com/"})
+    with pytest.raises(ValueError, match="stopped or expired"):
+        computer.call("computer_windows", {})
+
+
+def test_browser_windows_are_observed_again_until_the_page_appears(setup):
+    computer, backend, _, _ = setup
+    backend.window = dict(backend.window, app="brave.exe", exe="brave.exe")
+    page = element(1, "Document", "TechCrunch")
+    chrome_only = [element(0, "Button", "Back")]
+    real_observe, looks = backend.observe, []
+    def observe(target, identity, screenshot=True, text=True):
+        raw = real_observe(target, identity, screenshot, text)
+        raw["elements"] = chrome_only + ([page] if len(looks) >= 2 else [])  # Chromium shows the page from the third look
+        looks.append(identity)
+        return raw
+    backend.observe = observe
+    out = computer.call("computer_observe", {"window_id": "7"})
+    assert len(looks) == 3 and out["page_ready"] is True and "Document" in out["tree"] and "note" not in out
+    # The observation the agent acts on is the last one, so its ids stay valid for the click.
+    assert out["observation_id"] == looks[-1]
+
+
+def test_browser_page_that_never_appears_is_reported_not_guessed(setup):
+    computer, backend, _, _ = setup
+    backend.window = dict(backend.window, app="chrome.exe", exe="chrome.exe")
+    real_observe = backend.observe
+    def observe(target, identity, screenshot=True, text=True):
+        raw = real_observe(target, identity, screenshot, text); raw["elements"] = [element(0, "Button", "Back")]; return raw
+    backend.observe = observe
+    out = computer.call("computer_observe", {"window_id": "7"})
+    assert out["page_ready"] is False and "do not click blind" in out["note"]
+
+
+def test_non_browser_windows_are_not_delayed(setup):
+    computer, backend, _, _ = setup
+    looks = []
+    real_observe = backend.observe
+    backend.observe = lambda *a, **k: (looks.append(1), real_observe(*a, **k))[1]
+    out = computer.call("computer_observe", {"window_id": "7"})
+    assert len(looks) == 1 and "page_ready" not in out
