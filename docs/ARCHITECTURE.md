@@ -126,13 +126,13 @@ owner taps Approve (deterministic code, never the model) → re-check policy →
 
 ```
 Caddy (TLS) ── /syntarus-api/* ──► memoryos_backend :8000   (Continuum, existing)
-            └─ /munim/*        ──► munim_app 127.0.0.1:8090  (this repo)
+            └─ /smara/*        ──► munim_app 127.0.0.1:8090  (this repo)
 munim_app ──► munim_postgres (internal only)
 munim_app ──► memoryos_backend:8000/v1 over the docker network (no public hop)
 ```
 
 - Separate Postgres container and volume from MemoryOS; nightly `pg_dump` into `/var/backups/munim`.
-- Webhook: `https://ai.syntarus.com/munim/webhook`; pay links: `https://ai.syntarus.com/munim/pay`.
+- Webhook: `https://ai.syntarus.com/smara/webhook`; pay links: `https://ai.syntarus.com/smara/pay` (`/munim/*` stays as an alias for older Desktop builds).
 - Later: own subdomain (`business.syntarus.com`), blue/green deploys from CI images.
 
 ## 6. Roadmap

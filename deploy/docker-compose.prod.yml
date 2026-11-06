@@ -1,6 +1,6 @@
 # Production stack on the Oracle host, next to MemoryOS.
 #   docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d --build
-# Caddy routes https://ai.syntarus.com/munim/* -> 127.0.0.1:8090 (prefix stripped).
+# Caddy routes https://ai.syntarus.com/smara/* (and the older /munim/* alias) -> 127.0.0.1:8090 (prefix stripped).
 name: munim
 
 services:
@@ -31,7 +31,7 @@ services:
       DATABASE_URL: postgresql://munim:${MUNIM_DB_PASSWORD}@munim_postgres:5432/munim
       # Continuum over the docker network, no public round trip
       CONTINUUM_URL: http://memoryos_backend:8000/v1
-      PUBLIC_BASE_URL: https://ai.syntarus.com/munim
+      PUBLIC_BASE_URL: https://ai.syntarus.com/smara
       SANDBOX_MODE: container
       SANDBOX_JOBS_DIR: /jobs
       VAULT_MASTER_KEY_FILE: /run/secrets/vault_master_key
