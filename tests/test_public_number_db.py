@@ -138,3 +138,26 @@ async def test_privacy_terms_and_deletion_pages_are_public():
                              ("/data-deletion", "delete my data")):
             r = await http.get(path)
             assert r.status_code == 200 and needle in r.text and "<title>" in r.text
+
+
+async def test_home_page_describes_smara_and_links_the_policies():
+    app = FastAPI()
+    app.include_router(legal.router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://smara.test") as http:
+        r = await http.get("/")
+    assert r.status_code == 200
+    for needle in ("Smara", "WhatsApp", "Tally", "approve", "never moves money", "hello@syntarus.com", 'href="privacy"', 'href="terms"',
+                   "not a debt collection agency", "agreed to hear from you"):
+        assert needle in r.text, needle
+    assert "Continuum" not in r.text and "munim" not in r.text.lower()
+    assert "collections" not in r.text.lower() and "chase" not in r.text.lower()
+
+
+async def test_page_links_follow_public_base_url_when_set():
+    from types import SimpleNamespace
+    app = FastAPI()
+    app.include_router(legal.router)
+    app.state.settings = SimpleNamespace(public_base_url="https://smara.example.com/app/")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://smara.test") as http:
+        r = await http.get("/privacy")
+    assert 'href="https://smara.example.com/app/terms"' in r.text and 'href="https://smara.example.com/app/"' in r.text
