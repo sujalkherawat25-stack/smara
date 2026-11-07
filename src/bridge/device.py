@@ -155,7 +155,7 @@ class DeviceBrowser:
         if not await reachable_device(self.pool, tenant_id):
             self._open.discard(sid)
             return {"error": "the owner's PC is not connected right now: it needs to be on with Smara Desktop (or the helper) running"}
-        cmd = {k: args[k] for k in ("action", "url", "ref", "text", "selector", "value") if args.get(k) is not None}
+        cmd = {k: args[k] for k in ("action", "url", "ref", "text", "selector", "value", "links") if args.get(k) is not None}
         if cmd.get("action") != "navigate" and sid not in self._open:
             return {"error": "no open page: navigate first"}
         async with self.pool.connection() as conn:

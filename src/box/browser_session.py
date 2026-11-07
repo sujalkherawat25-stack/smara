@@ -55,7 +55,7 @@ class BrowserSessions:
                     return {"error": "too many browser sessions open; try again shortly"}
                 self._procs[sid] = (await asyncio.to_thread(self._start, tenant_id), time.monotonic())
             proc = self._procs[sid][0]
-            cmd = {k: args[k] for k in ("action", "url", "ref", "text", "selector", "value") if args.get(k) is not None}
+            cmd = {k: args[k] for k in ("action", "url", "ref", "text", "selector", "value", "links") if args.get(k) is not None}
             try:
                 out = await asyncio.wait_for(asyncio.to_thread(self._exchange, proc, cmd), self.step_timeout_s)
             except asyncio.TimeoutError:

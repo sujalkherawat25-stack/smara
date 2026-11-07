@@ -300,7 +300,7 @@ async def test_agent_searches_then_reads_a_result(env):
         br.steps.append(args)
         br.open.add(sid)
         if "duckduckgo" in args.get("url", ""):
-            return {"url": args["url"], "title": "q", "elements": [
+            return {"url": args["url"], "title": "q", "links": [
                 {"tag": "a", "text": "Best pizza in Banswara", "href": "//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Fpizza"}]}
         return {"url": args.get("url", ""), "title": "Pizza", "text": "Mario's, Rs 299", "elements": []}
     br.step = step
