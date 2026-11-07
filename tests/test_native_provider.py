@@ -479,6 +479,7 @@ def test_isolated_workers_require_explicit_launch_opt_in(tmp_path, monkeypatch):
 
 
 def test_native_browser_is_opt_in_and_each_tool_requires_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr("smara.native_runtime.shutil.which", lambda _name: None)      # no Node.js: Smara's own browser tools
     monkeypatch.setattr("smara.native_browser._is_public_http_url", lambda url: url == "https://fixture.example")
     adapter = ResponsesAdapter(ChatEndpoint("http://127.0.0.1", "synthetic", ""))
     try:
@@ -548,3 +549,20 @@ def test_full_source_import_preserves_runtime_and_sandbox():
         assert (source / "codex-rs" / component / "Cargo.toml").is_file()
     assert "Apache License" in (source / "LICENSE").read_text()
     assert (source / "NOTICE").is_file()
+
+
+def test_playwright_mcp_is_the_browser_when_node_is_installed(tmp_path, monkeypatch):
+    monkeypatch.setattr("smara.native_runtime.shutil.which", lambda _name: "npx")
+    adapter = ResponsesAdapter(ChatEndpoint("http://127.0.0.1", "synthetic", ""))
+    try:
+        on, _ = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path, browser_origins=["*"])
+        assert "mcp_servers.playwright.enabled=true" in on
+        assert 'mcp_servers.playwright.args' in " ".join(on) and "@playwright/mcp@0.0.84" in " ".join(on)
+        assert "browser_evaluate" not in " ".join(on) and "browser_run_code_unsafe" not in " ".join(on)
+        for name in ("browser_click", "browser_type", "browser_press_key", "browser_file_upload"):    # changing a page asks
+            assert f'mcp_servers.playwright.tools.{name}.approval_mode="prompt"' in on
+        for name in ("browser_navigate", "browser_snapshot", "browser_tabs"):                          # looking is free
+            assert f'mcp_servers.playwright.tools.{name}.approval_mode="approve"' in on
+        assert "mcp_servers.smara_browser.enabled=true" not in on
+    finally:
+        adapter.server.server_close(); adapter.client.close()
