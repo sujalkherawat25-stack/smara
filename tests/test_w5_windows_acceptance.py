@@ -16,14 +16,14 @@ def research(root,item):
 
 def page(root,value):
     second=root/"second.html";second.write_text("<p>beta</p>",encoding="utf-8")
-    target=root/"fixture.html";target.write_text(f'''<p>{value}</p><form onsubmit="document.body.dataset.saved=document.querySelector('input').value;return false"><input><button>Save</button></form><a target="_blank" href="{second.as_uri()}">Tab</a><a download="x.txt" href="data:text/plain,payload-42">Download</a>''',encoding="utf-8");return target
+    target=root/"fixture.html";target.write_text(f'''<p>{value}</p><form onsubmit="document.body.dataset.saved=document.querySelector('input').value;return false"><input><button>Save</button></form><a target="_blank" href="about:blank">Tab</a><a download="x.txt" href="data:text/plain,payload-42">Download</a>''',encoding="utf-8");return target
 
 def browser(root,item):
     backend=ManagedBrowser(root/"browser");session=backend.create();obs=backend.navigate(session,page(root,item["input"]["value"]).as_uri());kind=item["input"]["kind"]
     try:
         if kind=="observe":return item["input"]["value"] in obs["body_text"]
         if kind=="form":
-            inp=next(k for k,v in obs["elements"].items() if v["tag"]=="input");obs=backend.act(session,obs["observation_id"],inp,"fill","saved");button=next(k for k,v in obs["elements"].items() if v["text"]=="Save");backend.act(session,obs["observation_id"],button,"click");return backend.page(backend.sessions[session]).locator("body").get_attribute("data-saved")=="saved"
+            inp=next(k for k,v in obs["elements"].items() if v["role"]=="textbox");obs=backend.act(session,obs["observation_id"],inp,"fill","saved");button=next(k for k,v in obs["elements"].items() if v["text"]=="Save");backend.act(session,obs["observation_id"],button,"click");return backend.evaluate(session,"() => document.body.dataset.saved")=="saved"
         if kind=="tabs":
             link=next(k for k,v in obs["elements"].items() if v["text"]=="Tab");backend.act(session,obs["observation_id"],link,"click");return len(backend.tabs(session))==2
         if kind=="download":

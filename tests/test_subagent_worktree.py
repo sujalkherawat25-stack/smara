@@ -31,7 +31,9 @@ def test_worktree_lifecycle(tmp_path):
                     "-c", f"core.hooksPath={os.devnull}", "commit", "--quiet", "-m", "fixture"],
                    cwd=root, env=environment, check=True)
 
-    wt_info = create_subagent_worktree(root, subagent_id=f"test_unit_{uuid.uuid4().hex}")
+    # Same id length the production default uses: a 32-character id pushes the
+    # nested .git ref path past Windows' 260-character limit and git cannot lock the branch.
+    wt_info = create_subagent_worktree(root, subagent_id=f"test_unit_{uuid.uuid4().hex[:12]}")
     assert wt_info, "Isolated snapshot creation failed for the current Git repository"
 
     wt_path = Path(wt_info["path"])

@@ -35,7 +35,7 @@ def page(root, value):
         f"<p>{value}</p>"
         "<form onsubmit=\"document.body.dataset.saved=document.querySelector('input').value;return false\">"
         "<input><button>Save</button></form>"
-        f"<a target='_blank' href='{second.as_uri()}'>Tab</a>"
+        f"<a target='_blank' href='about:blank'>Tab</a>"
         "<a download='x.txt' href='data:text/plain,payload-84'>Download</a>",
         encoding="utf-8"
     )
@@ -51,11 +51,11 @@ def browser(root, item):
         if kind == "observe":
             return item["input"]["value"] in obs["body_text"]
         if kind == "form":
-            inp = next(k for k, v in obs["elements"].items() if v["tag"] == "input")
+            inp = next(k for k, v in obs["elements"].items() if v["role"] == "textbox")
             obs = backend.act(session, obs["observation_id"], inp, "fill", "committed")
             button = next(k for k, v in obs["elements"].items() if v["text"] == "Save")
             backend.act(session, obs["observation_id"], button, "click")
-            return backend.page(backend.sessions[session]).locator("body").get_attribute("data-saved") == "committed"
+            return backend.evaluate(session, "() => document.body.dataset.saved") == "committed"
         if kind == "tabs":
             link = next(k for k, v in obs["elements"].items() if v["text"] == "Tab")
             backend.act(session, obs["observation_id"], link, "click")
