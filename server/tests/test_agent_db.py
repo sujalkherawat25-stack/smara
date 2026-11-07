@@ -107,7 +107,7 @@ async def env():
     await import_rows(pool, other.id, [SheetRow("Secret", "919111111111", "SECRET-9", 99_900_000, date(2027, 1, 1))])
     async with pool.connection() as c:
         o = await (await c.execute("SELECT o.id, o.party_id FROM obligations o WHERE invoice_ref = 'INV-1'")).fetchone()
-    app = SimpleNamespace(state=SimpleNamespace(pool=pool, settings=Settings(), wa=FakeWA(), tg=None, bg=set(),
+    app = SimpleNamespace(state=SimpleNamespace(pool=pool, settings=Settings(reminder_send_mode="smara"), wa=FakeWA(), tg=None, bg=set(),
                                                 continuum=FakeContinuum(), browsers=FakeBrowsers(), llm=ScriptLLM(),
                                                 agent_background=False))
     yield SimpleNamespace(app=app, pool=pool, t=t, other=other, oid=str(o["id"]), pid=str(o["party_id"]))

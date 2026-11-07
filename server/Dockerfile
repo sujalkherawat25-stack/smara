@@ -19,6 +19,7 @@ COPY migrations ./migrations
 COPY scripts ./scripts
 COPY sandbox ./sandbox
 COPY skills ./skills
+COPY assets ./assets
 COPY evals ./evals
 COPY tests/fixtures ./tests/fixtures
 COPY tests/sandbox_escape_probe.py ./tests/

@@ -11,6 +11,8 @@ Not legal advice: have the privacy and consent wording reviewed before real cust
       and `WA_OWNER_TEMPLATE` in the server `.env` and restart `munim_app`.
 - [ ] Business verification started (raises the daily limit above 250 customers).
 - [ ] Dedicated model key with enough requests per minute (the shared test key allows about 10 per minute).
+      To add capacity, put every key in `LLM_API_KEYS=key1,key2,...` in the server `.env` and restart `munim_app`
+      (each key adds about 10 calls per minute; keys are never logged, the logs say `key#1`, `key#2`).
 - [ ] `OPS_ALERT_PHONE` set so the watchdog can reach you (see section 4).
 - [ ] The shop owner has read and agreed to the consent text (section 5).
 

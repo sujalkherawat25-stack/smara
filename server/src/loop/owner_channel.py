@@ -180,7 +180,8 @@ async def _rebuild(app, tenant, r: dict) -> dict | None:
                 """SELECT o.*, p.canonical_name FROM obligations o JOIN parties p ON p.id = o.party_id
                     WHERE o.id = %s AND o.state = 'WAITING_OWNER_APPROVAL'""", (r["obligation_id"],))
             o = await cur.fetchone()
-            return reminder_card(tenant.owner_phone, o, draft_reminder(o, tenant.upi, app.state.settings.public_base_url), "") if o else None
+            return reminder_card(tenant.owner_phone, o, draft_reminder(o, tenant.upi, app.state.settings.public_base_url), "",
+                                 mode=app.state.settings.reminder_send_mode) if o else None
         cur = await conn.execute(
             """SELECT a.*, o.invoice_ref, p.canonical_name FROM proposed_adjustments a
                  JOIN obligations o ON o.id = a.obligation_id JOIN parties p ON p.id = o.party_id

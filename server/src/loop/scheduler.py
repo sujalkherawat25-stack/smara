@@ -39,7 +39,8 @@ async def tick(app, now: datetime) -> int:
         if getattr(getattr(app.state, "llm", None), "enabled", False) and await _agent_reminder(app, t, o):
             sent += 1
             continue
-        card = reminder_card(t.owner_phone, o, draft_reminder(o, t.upi, app.state.settings.public_base_url), await state_card(app.state.continuum, o))
+        card = reminder_card(t.owner_phone, o, draft_reminder(o, t.upi, app.state.settings.public_base_url),
+                             await state_card(app.state.continuum, o), mode=app.state.settings.reminder_send_mode)
         try:
             await send_to_owner(app, t, card, kind="owner_reminder_card", obligation_id=o["id"])
         except Exception:
