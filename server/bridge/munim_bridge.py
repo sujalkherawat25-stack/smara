@@ -1213,7 +1213,10 @@ SHARED_READ_MAX, SHARED_WRITE_MAX, SHARED_LIST_MAX = 100_000, 1_000_000, 200
 def shared_path(rel: str) -> Path:
     """A path inside the shared folder, never outside it (no '..', no drive or absolute paths, no links that point away)."""
     root = SHARED_DIR.resolve()
-    target = (root / str(rel or "").strip().lstrip("/\\")).resolve()
+    rel = str(rel or "").strip().replace("\\", "/")           # same meaning on every OS: a backslash is a separator
+    if re.match(r"^[A-Za-z]:", rel):
+        raise ValueError("that path is outside the shared folder")
+    target = (root / rel.lstrip("/")).resolve()
     if target != root and root not in target.parents:
         raise ValueError("that path is outside the shared folder")
     return target
