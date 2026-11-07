@@ -37,7 +37,7 @@ def page(root, value):
     second.write_text("<p>gamma</p>", encoding="utf-8")
     target = root / "fixture.html"
     target.write_text(
-        f'''<p>{value}</p><form onsubmit="document.body.dataset.saved=document.querySelector('input').value;return false"><input><button>Save</button></form><a target="_blank" href="{second.as_uri()}">Tab</a><a download="x.txt" href="data:text/plain,payload-128">Download</a>''',
+        f'''<p>{value}</p><form onsubmit="document.body.dataset.saved=document.querySelector('input').value;return false"><input><button>Save</button></form><a target="_blank" href="about:blank">Tab</a><a download="x.txt" href="data:text/plain,payload-128">Download</a>''',
         encoding="utf-8"
     )
     return target
@@ -52,11 +52,11 @@ def browser(root, item):
         if kind == "observe":
             return item["input"]["value"] in obs["body_text"]
         if kind == "form":
-            inp = next(k for k, v in obs["elements"].items() if v["tag"] == "input")
+            inp = next(k for k, v in obs["elements"].items() if v["role"] == "textbox")
             obs = backend.act(session, obs["observation_id"], inp, "fill", "registered")
             button = next(k for k, v in obs["elements"].items() if v["text"] == "Save")
             backend.act(session, obs["observation_id"], button, "click")
-            return backend.page(backend.sessions[session]).locator("body").get_attribute("data-saved") == "registered"
+            return backend.evaluate(session, "() => document.body.dataset.saved") == "registered"
         if kind == "tabs":
             link = next(k for k, v in obs["elements"].items() if v["text"] == "Tab")
             backend.act(session, obs["observation_id"], link, "click")
