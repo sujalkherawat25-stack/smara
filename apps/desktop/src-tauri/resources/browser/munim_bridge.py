@@ -384,6 +384,19 @@ SNAPSHOT_JS = r"""(max) => {
     if (e.isContentEditable) return 'textbox';
     return 'clickable';
   };
+  const contextOf = (e, own) => {
+    // the nearest short text that is not the control's own words: its card or row's name (not a price)
+    const mine = own.toLowerCase();
+    let p = e.parentElement;
+    for (let up = 0; p && up < 5; up++, p = p.parentElement) {
+      for (const x of p.querySelectorAll('h1,h2,h3,h4,h5,h6,[role=heading],p,span,div,b,strong,a,label')) {
+        if (x.children.length || x.contains(e) || e.contains(x)) continue;
+        const t = clean(x.innerText || x.textContent);
+        if (t.length >= 3 && t.length <= 60 && t.toLowerCase() !== mine && !/^([₹]|rs[.]?\s|\d)/i.test(t)) return t;
+      }
+    }
+    return '';
+  };
   const nameOf = e => {
     let n = e.getAttribute('aria-label') || '';
     if (!n && e.getAttribute('aria-labelledby'))
@@ -439,6 +452,16 @@ SNAPSHOT_JS = r"""(max) => {
       item.value = e.type === 'password' ? (e.value ? '(hidden)' : '') : clean(e.isContentEditable ? e.innerText : e.value).slice(0, 80);
     if (e.type === 'password') item.secret = true;
     return item;
+  });
+  // Controls that share their role and name on this page ('ADD' on every dish) say which card they belong to, so the
+  // agent can tell them apart. Controls with a unique name keep exactly their own name.
+  const seenNames = new Map();
+  out.forEach(it => { const k = it.role + '|' + it.name; seenNames.set(k, (seenNames.get(k) || 0) + 1); });
+  out.forEach((it, i) => {
+    if (seenNames.get(it.role + '|' + it.name) > 1) {
+      const c = contextOf(picked[i], it.name);
+      if (c) it.name = (it.name + ' - ' + c).slice(0, 100);
+    }
   });
   const live = [...document.querySelectorAll('[role=alert],[role=status],[aria-live=assertive],[aria-live=polite],[class*=toast],[class*=snackbar]')]
     .filter(shown).map(x => clean(x.innerText).slice(0, 160)).filter(Boolean).slice(0, 4);
@@ -606,6 +629,9 @@ async def by_text(page, text: str):
             n = await frame.evaluate(TEXT_HIT_JS, text)
         except Exception:
             continue
+        if n > 1:
+            raise RefError(f"{n} controls show exactly {text!r}, so a click on the text could hit the wrong one: pick the one "
+                           "you mean by its ref number from the page below (controls show what they belong to)")
         if n:
             return frame.locator("[data-smara-hit]").first, n
     raise RefError(f"no visible control shows exactly {text!r}")
