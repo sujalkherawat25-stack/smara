@@ -8,6 +8,12 @@ def normalize_phone(raw: str) -> str:
     return "".join(ch for ch in raw if ch.isdigit())
 
 
+def reminder_mode(raw: str) -> str:
+    """'own' or 'smara'. Anything else falls back to the default, 'own'."""
+    value = (raw or "").strip().lower()
+    return value if value in ("own", "smara") else "own"
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str = ""
@@ -28,6 +34,9 @@ class Settings:
     wa_reminder_lang: str = "en"
     # order of the reminder template's variables; "shop" lets one shared number say which business is writing
     wa_reminder_params: str = "customer,invoice,amount,due"
+    # How a reminder reaches the customer after the owner taps Send: "own" = the owner sends it from their own
+    # WhatsApp via a wa.me link (no template or shared-number dependency); "smara" = from Smara's number
+    reminder_send_mode: str = "own"
     # Approved template that tells the owner "N items waiting" when their 24h window is closed
     wa_owner_template: str = ""
     telegram_bot_token: str = ""
@@ -40,6 +49,9 @@ class Settings:
     # OpenAI-compatible chat endpoint; fast model by default, reasoning model on escalation
     llm_base_url: str = ""
     llm_api_key: str = ""
+    # Comma-separated pool of keys for the same endpoint (each key adds its own requests-per-minute budget).
+    # When set it replaces llm_api_key; see Settings.llm_keys().
+    llm_api_keys: str = ""
     llm_model: str = "glm5.3-flash"
     llm_reasoning_model: str = ""
     llm_agent_model: str = ""
@@ -54,6 +66,14 @@ class Settings:
     # 0/0 = never quiet for a bare Settings(); production gets 21-8 from load_settings (QUIET_HOURS_IST)
     quiet_start_hour: int = 0
     quiet_end_hour: int = 0
+
+    def llm_keys(self) -> list[str]:
+        """The LLM key pool: LLM_API_KEYS if set (comma-separated), else the single LLM_API_KEY.
+        Duplicates are dropped. Keys are never logged; the LLM client refers to them as key#1, key#2."""
+        pool = [k.strip() for k in self.llm_api_keys.split(",") if k.strip()] if self.llm_api_keys else []
+        if not pool and self.llm_api_key:
+            pool = [self.llm_api_key.strip()]
+        return list(dict.fromkeys(pool))
 
 
 def load_settings() -> Settings:
@@ -76,6 +96,7 @@ def load_settings() -> Settings:
         wa_reminder_lang=env.get("WA_REMINDER_LANG", "en"),
         wa_reminder_params=env.get("WA_REMINDER_PARAMS", "customer,invoice,amount,due"),
         wa_owner_template=env.get("WA_OWNER_TEMPLATE", ""),
+        reminder_send_mode=reminder_mode(env.get("REMINDER_SEND_MODE", "own")),
         telegram_bot_token=env.get("TELEGRAM_BOT_TOKEN", ""),
         sandbox_mode=env.get("SANDBOX_MODE", "local"),
         sandbox_jobs_dir=env.get("SANDBOX_JOBS_DIR", "./data/sandbox-jobs"),
@@ -83,6 +104,7 @@ def load_settings() -> Settings:
         public_base_url=env.get("PUBLIC_BASE_URL", ""),
         llm_base_url=env.get("LLM_BASE_URL", ""),
         llm_api_key=env.get("LLM_API_KEY", ""),
+        llm_api_keys=env.get("LLM_API_KEYS", ""),
         llm_model=env.get("LLM_MODEL", "glm5.3-flash"),
         llm_reasoning_model=env.get("LLM_REASONING_MODEL", ""),
         llm_agent_model=env.get("LLM_AGENT_MODEL", ""),

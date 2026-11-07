@@ -1,4 +1,6 @@
 """WhatsApp Cloud API sender + Thread A (Owner) interactive card builders."""
+from urllib.parse import quote
+
 import httpx
 
 GRAPH = "https://graph.facebook.com/v20.0"
@@ -58,6 +60,17 @@ def shop_choice_message(to: str, options: list[dict], routing_id: str) -> dict:
 
 def text_message(to: str, text: str) -> dict:
     return {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
+
+
+def own_whatsapp_link(phone: str, text: str) -> str:
+    """A wa.me click-to-chat link: opens the owner's own WhatsApp with `text` already typed, so they tap Send.
+    Indian 10-digit numbers get the 91 country code; '+', spaces and dashes are dropped."""
+    digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
+    if len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    if len(digits) == 10:
+        digits = "91" + digits
+    return f"https://wa.me/{digits}?text={quote(text, safe='')}"
 
 
 class WhatsAppClient:

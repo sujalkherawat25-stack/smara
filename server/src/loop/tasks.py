@@ -65,6 +65,8 @@ async def _run_one(app, t: dict) -> None:
         return
     ctx = SessionCtx(id=str(t["created_by_session"] or t["id"]), tenant_id=str(t["tenant_id"]), trust="TRUSTED")
     result = await actions.deliver_message(app, ctx, tenant, payload)
+    if result.get("own_link"):      # own-WhatsApp mode: deliver_message already sent the owner the link to tap
+        return
     who = payload.get("label") or "the customer"
     note = (f"Sent the reminder to {who} (approved earlier, delivered now that the shop is open)." if result.get("sent")
             else f"I could not send the approved reminder to {who}: {result.get('error', 'unknown reason')}.")

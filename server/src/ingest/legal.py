@@ -56,7 +56,7 @@ It works from your own records, and nothing goes out to your customers until you
 <h2>What Smara does</h2>
 <div class="cards">
 <div class="card"><h3>Follows up on payments</h3><p>Shows who owes you and how late they are, and drafts polite reminders about a specific invoice, in your customer's language. You approve each one.</p></div>
-<div class="card"><h3>Reads what you send</h3><p>Send a Tally export, an Excel or CSV sheet, a PDF, a bill photo or a voice note. Smara reads it and asks you before it imports anything.</p></div>
+<div class="card"><h3>Reads what you send</h3><p>Send a Tally export, an Excel or CSV sheet, a bill photo or a voice note. Smara can also read PDFs such as bills and statements; for importing a list of dues, Excel works best. Smara asks you before it imports anything.</p></div>
 <div class="card"><h3>Tracks what you owe</h3><p>Keeps your supplier bills and the dates they are due, including the Section 43B(h) payment limit for small suppliers, as an estimate to check with your accountant.</p></div>
 <div class="card"><h3>Makes documents</h3><p>Customer statements, monthly reports and reminder letters as PDF or Word, with amounts in lakh and crore.</p></div>
 <div class="card"><h3>Connects to Tally</h3><p>With the optional Smara Desktop app, your open bills are synced from Tally on your own PC every night. Your Tally login never leaves your PC.</p></div>

@@ -8,7 +8,7 @@ from src import clock, tenants
 from src.bridge.outbox import enqueue_standalone
 from src.loop.outbound import record
 from src.loop.upi import pay_url, rupees, upi_text
-from src.loop.whatsapp import from_shop, reminder_params, template_message, text_message
+from src.loop.whatsapp import from_shop, own_whatsapp_link, reminder_params, template_message, text_message
 
 log = logging.getLogger(__name__)
 MAX_ATTEMPTS = 4
@@ -87,15 +87,17 @@ async def release_claim(pool, o: dict, now: datetime) -> None:
         await _event(conn, o["id"], "WAITING_OWNER_APPROVAL", o["prev"], "SYSTEM_CRON")
 
 
-def reminder_card(to: str, o: dict, draft: str, context: str) -> dict:
+def reminder_card(to: str, o: dict, draft: str, context: str, mode: str = "smara") -> dict:
     body = f"Send this to {o['canonical_name']}?\n\n\"{draft}\""
     if context and "No relevant state" not in context:
         body += f"\n\nContext: {context}"
     oid = str(o["id"])
     btn = lambda k, t: {"type": "reply", "reply": {"id": f"{k}:{oid}", "title": t}}
+    # own: the owner sends it from their own WhatsApp (wa.me link). Reply buttons are capped at three.
+    first = btn("own", "Send myself") if mode == "own" else btn("send", "Send")
     return {"messaging_product": "whatsapp", "to": to, "type": "interactive", "interactive": {
         "type": "button", "body": {"text": body[:1024]},
-        "action": {"buttons": [btn("send", "Send"), btn("snooze", "Snooze 3 days"), btn("paid", "Mark paid")]}}}
+        "action": {"buttons": [first, btn("snooze", "Snooze 3 days"), btn("paid", "Mark paid")]}}}
 
 
 WINDOW = timedelta(hours=24)
@@ -113,7 +115,8 @@ def _debtor_payload(o: dict, tenant, settings, now: datetime) -> dict:
 async def decide_reminder(app, tenant_id: str, obligation_id: str, action: str, now: datetime) -> str | None:
     """Owner tap on a reminder card. Returns a reply for the owner, None if stale."""
     pool, s = app.state.pool, app.state.settings
-    if action == "send" and clock.is_quiet(s, now):
+    sends = action in ("send", "own")          # both release a reminder to the customer, so both obey the same gates
+    if sends and clock.is_quiet(s, now):
         return (f"Abhi raat ka samay hai ({s.quiet_start_hour}:00-{s.quiet_end_hour}:00 IST); customers ko is waqt message nahi "
                 f"bhejte. Subah {s.quiet_end_hour}:00 ke baad Send dabayein.")
     async with pool.connection() as conn:
@@ -126,18 +129,28 @@ async def decide_reminder(app, tenant_id: str, obligation_id: str, action: str, 
             o = await cur.fetchone()
             if o is None:
                 return None
-            if action == "send" and o["opted_out_at"]:
+            if sends and o["opted_out_at"]:
                 await conn.execute("UPDATE obligations SET state = 'SNOOZED', next_followup_at = %s WHERE id = %s",
                                    (now + timedelta(days=30), obligation_id))
                 return (f"{o['canonical_name']} ne WhatsApp updates band karne ko kaha tha (STOP), isliye message nahi bheja. "
                         "Aap unhe call kar sakte hain.")
-            to, nxt = {"send": ("DISPATCHED", now + RETRY_AFTER), "snooze": ("SNOOZED", now + SNOOZE),
-                       "paid": ("PAID", None)}[action]
+            to, nxt = {"send": ("DISPATCHED", now + RETRY_AFTER), "own": ("DISPATCHED", now + RETRY_AFTER),
+                       "snooze": ("SNOOZED", now + SNOOZE), "paid": ("PAID", None)}[action]
             await conn.execute(
                 """UPDATE obligations SET state = %s, next_followup_at = %s,
                           attempt_count = attempt_count + %s WHERE id = %s""",
-                (to, nxt, int(action == "send"), obligation_id))
+                (to, nxt, int(sends), obligation_id))
             await _event(conn, o["id"], o["state"], to, "OWNER")
+    if action == "own":
+        tenant = await tenants.by_id(pool, tenant_id)
+        draft = draft_reminder(o, tenant.upi, s.public_base_url)     # no shop prefix: it comes from the owner's own number
+        await _record_sent(app, o, tenant_id)
+        if not o["whatsapp_phone"]:
+            return (f"{o['canonical_name']} ka WhatsApp number saved nahi hai, isliye link nahi bana. "
+                    f"Ye message copy karke bhejiye:\n\n{draft}")
+        link = own_whatsapp_link(o["whatsapp_phone"], draft)
+        return (f"{o['canonical_name']} ko apne WhatsApp se bhejiye (message pehle se likha hai, bas Send dabaiye):\n{link}\n\n"
+                "Bhejne ke baad agar payment aaye to 'paid' bataiye.")
     if action != "send":
         return f"Okay, {o['invoice_ref']} {'marked paid' if action == 'paid' else 'snoozed 3 days'}."
     try:

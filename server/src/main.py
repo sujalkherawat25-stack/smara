@@ -34,7 +34,8 @@ async def lifespan(app: FastAPI):
                                   token_for=lambda n: token_for_number(app.state.pool, n))   # shops' own numbers
     app.state.llm = LLM(s.llm_base_url, s.llm_api_key, s.llm_model, s.llm_reasoning_model,
                         agent_model=s.llm_agent_model, max_concurrency=s.llm_max_concurrency,
-                        agent_rpm=s.llm_agent_rpm, fallback_model=s.llm_fallback_model)
+                        agent_rpm=s.llm_agent_rpm, fallback_model=s.llm_fallback_model,
+                        api_keys=s.llm_keys())
     app.state.bg = set()
     app.state.browsers = BrowserRouter(app.state.pool, BrowserSessions())   # the owner's own device first, else the server browser
     app.state.sandbox = Sandbox(s.sandbox_jobs_dir, s.sandbox_mode)

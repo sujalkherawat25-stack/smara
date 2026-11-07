@@ -246,6 +246,23 @@ async def deliver_message(app, ctx: SessionCtx, tenant, args: dict) -> dict:
     if p and p.get("opted_out_at"):              # they said STOP after the owner approved: never send
         return {"sent": False, "error": f"{p['canonical_name']} has opted out of WhatsApp messages (STOP)"}
     o = await _obligation(pool, ctx, args["obligation_id"]) if args.get("obligation_id") else None
+    if s.reminder_send_mode == "own" and p:
+        # Own-WhatsApp mode: the owner sends the approved text from their own number. Smara messages the customer nothing.
+        from src.loop.whatsapp import own_whatsapp_link
+        link = own_whatsapp_link(p["whatsapp_phone"], str(args["text"]))
+        if p["whatsapp_phone"]:
+            await send_to_owner(app, tenant, text_message(tenant.owner_phone,
+                                f"{p['canonical_name']} ko apne WhatsApp se bhejiye (message pehle se likha hai, bas Send dabaiye):\n{link}"),
+                                kind="owner_text")
+            note = "The owner was sent a WhatsApp link with this text; they send it from their own number."
+        else:
+            await send_to_owner(app, tenant, text_message(tenant.owner_phone,
+                                f"{p['canonical_name']} ka WhatsApp number saved nahi hai. Ye message copy karke bhejiye:\n\n{args['text']}"),
+                                kind="owner_text")
+            note = "No WhatsApp number is saved for this customer; the owner was sent the text to copy."
+        if o and o["state"] == "WAITING_OWNER_APPROVAL":
+            await _transition(pool, o["id"], "WAITING_OWNER_APPROVAL", "DISPATCHED", now + timedelta(days=3), 1)
+        return {"sent": False, "via": "owner_own_whatsapp", "own_link": True, "note": note}
     in_window = p["last_inbound_at"] and now - p["last_inbound_at"] < WINDOW
     if in_window:
         payload, via = text_message(p["whatsapp_phone"], from_shop(tenant, str(args["text"]))), "text"
