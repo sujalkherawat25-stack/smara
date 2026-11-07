@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.git
+.github
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+data
+docs
+tests/*
+!tests/fixtures
+!tests/sandbox_escape_probe.py
+*.log
+secrets/

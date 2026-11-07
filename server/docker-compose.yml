@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: munim
+      POSTGRES_PASSWORD: munim
+      POSTGRES_DB: munim
+    ports:
+      - "5433:5432"
+  app:
+    build: .
+    profiles: ["app"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://munim:munim@postgres:5432/munim
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"

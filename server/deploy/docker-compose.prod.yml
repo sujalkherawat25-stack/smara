@@ -1,0 +1,93 @@
+# Production stack on the Oracle host, next to MemoryOS.
+#   docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d --build
+# Caddy routes https://ai.syntarus.com/smara/* (and the older /munim/* alias) -> 127.0.0.1:8090 (prefix stripped).
+name: munim
+
+services:
+  munim_postgres:
+    image: postgres:16-alpine
+    container_name: munim_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: munim
+      POSTGRES_PASSWORD: ${MUNIM_DB_PASSWORD:?set MUNIM_DB_PASSWORD in .env}
+      POSTGRES_DB: munim
+    volumes:
+      - munim_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U munim"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [munim]
+
+  munim_app:
+    build: ..
+    image: smara-munim:${MUNIM_VERSION:-local}
+    container_name: munim_app
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql://munim:${MUNIM_DB_PASSWORD}@munim_postgres:5432/munim
+      # Continuum over the docker network, no public round trip
+      CONTINUUM_URL: http://memoryos_backend:8000/v1
+      PUBLIC_BASE_URL: https://ai.syntarus.com/smara
+      SANDBOX_MODE: container
+      SANDBOX_JOBS_DIR: /jobs
+      VAULT_MASTER_KEY_FILE: /run/secrets/vault_master_key
+      # Each shop's server browser keeps its cookies here between chats (like a person's own browser profile)
+      BROWSER_PROFILE_ROOT: /data/browser-profiles
+    secrets:
+      - vault_master_key
+    volumes:
+      - munim_jobs:/jobs
+      - munim_browser:/data/browser-profiles
+    ports:
+      - "127.0.0.1:8090:8080"
+    depends_on:
+      munim_postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks: [munim, memoryos_default]
+
+  # Runs the agent's Python on uploaded files. No network at all, read-only root,
+  # tmpfs scratch, capped memory/CPU/pids; jobs run as `nobody` (see sandbox/runner.py).
+  munim_sandbox:
+    build:
+      context: ..
+      dockerfile: sandbox/Dockerfile
+    image: smara-munim-sandbox:${MUNIM_VERSION:-local}
+    container_name: munim_sandbox
+    restart: unless-stopped
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    volumes:
+      - munim_jobs:/jobs
+    mem_limit: 2g
+    cpus: 1.5
+    pids_limit: 256
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE]   # runner only; jobs run as nobody with no caps
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  munim: {}
+  memoryos_default:
+    external: true
+
+# The vault master key lives only in this file on the host (never in .env, git or the image).
+secrets:
+  vault_master_key:
+    file: ../secrets/vault_master_key
+
+volumes:
+  munim_pgdata:
+  munim_jobs:
+  munim_browser:
