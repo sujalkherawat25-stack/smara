@@ -1261,6 +1261,92 @@ def _start_now() -> None:
             continue                           # the parent job does not allow breakaway: start it the plain way
 
 
+WATCHDOG_TASK = "Smara Helper Watchdog"
+WATCHDOG_MINUTES = 5
+
+
+def watchdog_command() -> tuple[str, str]:
+    """(program, arguments) the watchdog runs: the same interpreter and script as the helper, with `ensure`."""
+    cmd = startup_command()
+    return cmd[0], " ".join(f'"{x}"' for x in cmd[1:-1] + ["ensure"])
+
+
+def _run_quiet(args: list[str], env: dict | None = None, timeout: int = 60):
+    import subprocess
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    return subprocess.run(args, capture_output=True, text=True, timeout=timeout, creationflags=flags, env=env)
+
+
+def watchdog_state() -> str:
+    """'current' (registered and pointing at this script), 'stale' (registered for another path) or 'missing'."""
+    if platform.system() != "Windows":
+        return "missing"
+    try:
+        out = _run_quiet(["schtasks", "/Query", "/TN", WATCHDOG_TASK, "/XML"])
+    except Exception:
+        return "missing"
+    if out.returncode != 0:
+        return "missing"
+    return "current" if str(Path(__file__).resolve()).lower() in (out.stdout or "").lower() else "stale"
+
+
+def register_watchdog() -> bool:
+    """Windows: every few minutes run `ensure`, which starts the helper only if it is not running, so a crash or a
+    killed process is repaired without waiting for the next sign-in. Per-user, no administrator rights, no window;
+    runs on battery too. Returns False (the sign-in entry still works) when it cannot be set up."""
+    if platform.system() != "Windows":
+        return False
+    program, arguments = watchdog_command()
+    script = (
+        "$ErrorActionPreference='Stop';"
+        "$a=New-ScheduledTaskAction -Execute $env:SMARA_WD_EXE -Argument $env:SMARA_WD_ARGS;"
+        f"$t=New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes {WATCHDOG_MINUTES}) -RepetitionDuration (New-TimeSpan -Days 3650);"
+        "$s=New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 2) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden;"
+        "$p=New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited;"
+        f"Register-ScheduledTask -TaskName '{WATCHDOG_TASK}' -Action $a -Trigger $t -Settings $s -Principal $p "
+        "-Description 'Starts the Smara PC helper if it is not running. Does nothing while the helper is up.' -Force | Out-Null")
+    try:
+        out = _run_quiet(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                         env={**os.environ, "SMARA_WD_EXE": program, "SMARA_WD_ARGS": arguments})
+    except Exception as e:
+        log(f"Could not set up the helper's self-repair check: {type(e).__name__}")
+        return False
+    if out.returncode != 0:
+        log("Could not set up the helper's self-repair check: " + " ".join((out.stderr or out.stdout or "").split())[:200])
+        return False
+    return True
+
+
+def remove_watchdog() -> None:
+    if platform.system() == "Windows":
+        try:
+            _run_quiet(["schtasks", "/Delete", "/TN", WATCHDOG_TASK, "/F"])
+        except Exception:
+            pass
+
+
+def startup_installed() -> bool:
+    """True when the sign-in entry exists (the owner set the helper up); the watchdog is only kept for that case."""
+    if platform.system() != "Windows":
+        return False
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_READ) as k:
+            winreg.QueryValueEx(k, TASK_NAME)
+        return True
+    except OSError:
+        return False
+
+
+def ensure_watchdog() -> str:
+    """Make sure the self-repair check exists and points at this script. Cheap when it is already right."""
+    if platform.system() != "Windows" or not startup_installed():
+        return "skipped"
+    if watchdog_state() == "current":
+        return "current"
+    return "registered" if register_watchdog() else "failed"
+
+
 def cmd_install_startup() -> int:
     """Windows: start the helper (no window) every time you sign in. The browser only appears when Smara needs it.
     Uses your own per-user 'Run' list, so no administrator rights are needed."""
@@ -1272,7 +1358,9 @@ def cmd_install_startup() -> int:
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
         winreg.SetValueEx(k, TASK_NAME, 0, winreg.REG_SZ, run_line)
     _start_now()
-    print("Done. Smara's browser helper now starts by itself when you sign in to Windows and is running now.")
+    repaired = register_watchdog()
+    print("Done. Smara's browser helper now starts by itself when you sign in to Windows and is running now."
+          + (" It is also checked every %d minutes and restarted if it ever stops." % WATCHDOG_MINUTES if repaired else ""))
     return 0
 
 
@@ -1284,6 +1372,7 @@ def cmd_uninstall_startup() -> int:
                 winreg.DeleteValue(k, TASK_NAME)
         except OSError:
             pass
+        remove_watchdog()
     return cmd_stop()
 
 
@@ -1372,6 +1461,11 @@ def main() -> int:
     if running_pid() and running_pid() != os.getpid():
         log("Another Smara Browser Bridge is already running; this one exits.")
         return 0
+    try:
+        if ensure_watchdog() == "registered":
+            log("Set up the self-repair check (restarts this helper if it ever stops).")
+    except Exception:
+        pass                                    # never let the check stop the helper itself
     return supervise(a)
 
 
