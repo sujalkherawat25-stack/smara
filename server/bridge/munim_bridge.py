@@ -477,6 +477,24 @@ _REFS: dict[int, dict] = {}            # page -> {"next": n, "key": {(frame, loc
 _SEEN: dict[int, dict] = {}            # page -> {ref: line} the agent saw last (what "changes" are measured against)
 _RN: dict[int, dict] = {}              # page -> {ref: (role, name)} from that same snapshot (to find a re-drawn control)
 _LIVE: dict[int, list] = {}            # page -> live messages already reported
+_ACTED: dict[int, list] = {}            # page -> names of the controls clicked, newest last (loop check)
+LOOP_WINDOW, LOOP_REPEATS = 8, 3
+
+
+def loop_note(page, label: str) -> str:
+    """A note when the same control has been clicked LOOP_REPEATS times in the last LOOP_WINDOW clicks on this page."""
+    m = re.search(r'"(.*)"', label or "")
+    name = (m.group(1) if m else (label or "")).strip().lower()
+    if not name:
+        return ""
+    hist = _ACTED.setdefault(id(page), [])
+    hist.append(name)
+    del hist[:-LOOP_WINDOW]
+    n = hist.count(name)
+    if n < LOOP_REPEATS:
+        return ""
+    return (f"You have clicked '{name}' {n} times in the last {LOOP_WINDOW} clicks. If it is not doing what you want, read "
+            "the open dialog or the page for what is still missing, and try a different control.")
 _LAST_TYPED: dict[int, int] = {}       # page -> ref of the box Smara last typed into (what Enter should send)
 
 
@@ -1039,6 +1057,10 @@ async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
     if cmd.get("links"):                                 # web search asks for the links on the page it just reached
         out["links"] = await page_links(page)
     head = {k: out.pop(k) for k in ("url", "title") if k in out}
+    if a == "click" and extra.get("target"):
+        note = loop_note(page, extra["target"])
+        if note:
+            extra["note"] = note
     return {**head, **extra, **out}                      # what happened first; the long page listing last
 
 
