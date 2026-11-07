@@ -80,6 +80,19 @@ async def online_device(pool, tenant_id: str) -> dict | None:
                 ORDER BY last_seen_at DESC LIMIT 1""", (tenant_id, datetime.now(timezone.utc) - ONLINE_WITHIN))).fetchone()
 
 
+REACHABLE_WITHIN = timedelta(minutes=10)    # a PC seen this recently is on and will pick the next step up on its next poll
+
+
+async def reachable_device(pool, tenant_id: str) -> dict | None:
+    """The shop's PC when it is, for browsing purposes, there: seen in the last few minutes. The helper only checks in
+    between steps, so a slow page must not make the PC look gone and push the chat onto the server browser."""
+    dev = await paired_device(pool, tenant_id)
+    seen = dev.get("last_seen_at") if dev else None
+    if seen and seen > datetime.now(timezone.utc) - REACHABLE_WITHIN:
+        return dev
+    return None
+
+
 async def paired_device(pool, tenant_id: str) -> dict | None:
     """The shop's most recent PC that is paired (not revoked), online or not."""
     async with pool.connection() as conn:
@@ -94,8 +107,8 @@ def offline_note(dev: dict | None) -> str:
         return ""
     from src import clock
     seen = dev["last_seen_at"].astimezone(clock.IST).strftime("%d %b %H:%M") if dev.get("last_seen_at") else "never"
-    return (f"The owner's PC ({dev['name']}) is already paired, but its browser helper is not running right now (last seen {seen} IST), "
-            "so this used the server browser, which many sites block. Do NOT ask the owner to pair again or to run commands: tell "
+    return (f"The owner's PC ({dev['name']}) is already paired, but it is not connected right now (last seen {seen} IST), "
+            "and Smara only browses on the owner's own PC, so nothing was opened. Do NOT ask the owner to pair again or to run commands: tell "
             "them their PC just needs to be on (the helper starts by itself with Windows and with Smara Desktop), and offer to "
             "retry in a few minutes with schedule_followup.")
 
@@ -139,9 +152,9 @@ class DeviceBrowser:
     async def step(self, sid: str, args: dict, tenant_id: str | None = None) -> dict:
         if not tenant_id:
             return {"error": "no shop for this browser step"}
-        if not await online_device(self.pool, tenant_id):
+        if not await reachable_device(self.pool, tenant_id):
             self._open.discard(sid)
-            return {"error": "the owner's browser bridge is offline; start Smara Browser Bridge on the PC, or ask me to use the server browser"}
+            return {"error": "the owner's PC is not connected right now: it needs to be on with Smara Desktop (or the helper) running"}
         cmd = {k: args[k] for k in ("action", "url", "ref", "text", "selector", "value") if args.get(k) is not None}
         if cmd.get("action") != "navigate" and sid not in self._open:
             return {"error": "no open page: navigate first"}
@@ -206,7 +219,8 @@ class BrowserRouter:
         if b is not None and args.get("action") == "navigate" and tenant_id:
             # A new page is a fresh start: use the owner's PC if it came online (or the server if it went away) instead
             # of keeping whatever was picked when this chat first browsed.
-            on_device = bool(await online_device(self.pool, tenant_id))
+            paired = await paired_device(self.pool, tenant_id)
+            on_device = bool(paired) if paired else False      # a paired PC is always the browser; the server only serves shops with none
             if on_device != (b is self.device):
                 await b.close(sid)
                 self._route.pop(sid, None)
@@ -214,14 +228,16 @@ class BrowserRouter:
         if b is None:
             if args.get("action") != "navigate":
                 return {"error": "no open page: navigate first"}
-            on_device = bool(tenant_id) and bool(await online_device(self.pool, tenant_id))
-            b = self._route[sid] = self.device if on_device else self.server
-            if not on_device and tenant_id:
-                note = offline_note(await paired_device(self.pool, tenant_id))
-                out = await b.step(sid, args, tenant_id=tenant_id)
-                if note and isinstance(out, dict):
-                    out = {**out, "pc_helper": note}
-                return out
+            paired = await paired_device(self.pool, tenant_id) if tenant_id else None
+            if paired:
+                # The owner's PC is the browser. No silent fallback to the server's, which many sites block (and which would
+                # look like the PC's helper is broken): if the PC is away, say so and let the agent retry later.
+                if not await reachable_device(self.pool, tenant_id):
+                    return {"error": offline_note(paired)}
+                b = self._route[sid] = self.device
+            else:
+                b = self._route[sid] = self.server
+                return await b.step(sid, args, tenant_id=tenant_id)
         if b is self.device:
             return await b.step(sid, args, tenant_id=tenant_id)
         return await b.step(sid, args, tenant_id=tenant_id)

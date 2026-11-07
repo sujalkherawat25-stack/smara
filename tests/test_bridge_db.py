@@ -81,7 +81,7 @@ async def test_a_device_only_sees_its_own_shops_jobs(env):
 
 async def test_device_browser_round_trip_and_offline_message(env):
     db = DeviceBrowser(env.pool, step_timeout_s=10)
-    assert "offline" in (await db.step("s1", {"action": "navigate", "url": "https://example.com"}, tenant_id=env.t.id))["error"]
+    assert "not connected" in (await db.step("s1", {"action": "navigate", "url": "https://example.com"}, tenant_id=env.t.id))["error"]
     async with api(env) as http:
         token, _ = await pair(env, http)
         out, _ = await asyncio.gather(db.step("s1", {"action": "navigate", "url": "https://example.com"}, tenant_id=env.t.id),
@@ -127,6 +127,20 @@ async def test_a_new_page_moves_to_the_owners_pc_once_its_helper_is_online(env):
                                       fake_bridge(http, token, rounds=1))
     assert router.where("a") == "device" and out["title"] == "Page"                                  # next page: the PC
     assert "a" not in server.open                                                                    # the server page was closed
+
+
+async def test_a_paired_pc_is_the_only_browser_never_silently_the_server(env):
+    server = FakeBrowsers()
+    router = BrowserRouter(env.pool, server, DeviceBrowser(env.pool, step_timeout_s=10))
+    async with api(env) as http:
+        await pair(env, http)
+    async with env.pool.connection() as conn:                       # the PC was last seen 30 s ago: busy on a slow page, still there
+        await conn.execute("UPDATE bridge_devices SET last_seen_at = now() - interval '30 seconds'")
+    assert (await device.reachable_device(env.pool, env.t.id)) is not None
+    async with env.pool.connection() as conn:                       # gone for an hour: say so, do not use the server browser
+        await conn.execute("UPDATE bridge_devices SET last_seen_at = now() - interval '1 hour'")
+    out = await router.step("z", {"action": "navigate", "url": "https://example.com"}, tenant_id=env.t.id)
+    assert "not connected right now" in out["error"] and server.steps == [] and router.where("z") == ""
 
 
 # ---------------------------------------------------------------- owner chat commands
@@ -459,7 +473,7 @@ async def test_an_offline_paired_pc_is_explained_to_the_agent_not_re_paired(env)
     async with env.pool.connection() as c:
         await c.execute("update bridge_devices set last_seen_at = now() - interval '2 hours'")
     out = await router.step("s9", {"action": "navigate", "url": "https://www.indiamart.com/"}, tenant_id=env.t.id)
-    assert "already paired" in out["pc_helper"] and "Do NOT ask the owner to pair again" in out["pc_helper"]
+    assert "already paired" in out["error"] and "Do NOT ask the owner to pair again" in out["error"] and server.steps == []
     env.app.state.browsers = router
     res = await web.web_search(env.app, SessionCtx(id="w1", tenant_id=env.t.id, trust="TRUSTED"), {"query": "banarasi saree"})
     assert "already paired" in res["next"]

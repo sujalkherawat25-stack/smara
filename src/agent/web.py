@@ -10,9 +10,9 @@ from src.agent.policy import SessionCtx
 
 
 async def _device_online(app, ctx: SessionCtx):
-    from src.bridge.device import online_device
+    from src.bridge.device import reachable_device
     try:
-        return await online_device(app.state.pool, ctx.tenant_id)
+        return await reachable_device(app.state.pool, ctx.tenant_id)
     except Exception:
         return None
 
