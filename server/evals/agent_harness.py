@@ -440,10 +440,12 @@ async def main() -> None:
     sb = Sandbox(a.jobs or tempfile.mkdtemp(prefix="harness-"), a.sandbox)
     files = {k: v for k, v in FILES.items()}
 
-    async def fetch(app, ref):
+    async def fetch(app, ref, ctx=None):      # the real _fetch takes (app, ref, ctx); the reader passes all three
         ch, mid, name = (ref.split(":", 2) + ["", ""])[:3]
         return (FILES[mid][1], "application/octet-stream", name) if ch == "whatsapp" else (sb.read_output(mid, name), "", name)
     actions._fetch = fetch
+    from src.agent import reader as _reader
+    _reader._fetch = fetch      # reader.py imported _fetch by name, so the patch above must reach it too
     from src.box.browser_session import BrowserSessions
 
     class RecBrowsers(BrowserSessions):          # real Chromium, plus a log of what the agent asked it to do
