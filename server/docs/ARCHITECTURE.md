@@ -36,7 +36,7 @@
 | Asset | State | Role in the platform |
 | --- | --- | --- |
 | **Continuum / MemoryOS** (`memoryos`) | Live at `ai.syntarus.com/syntarus-api` | Memory: source-backed evidence, Hinglish extraction, `/memories/resolve` state cards per party |
-| **Smara Munim** (`smara-munim`) | Live-tested on WhatsApp end to end (2026-11-03) | The business runtime: ledger, approval gates, collections agent, outbox to Continuum |
+| **Smara server** (`server/`) | Live-tested on WhatsApp end to end (2026-11-03) | The business runtime: ledger, approval gates, collections agent, outbox to Continuum |
 | **Smara control plane + Desktop** (`smara`) | Hosted part retired (Caddy 410); Desktop/CLI and pairing code exist | Patterns reused: device pairing, Fernet key-ring vault, desktop-side integrations, operator console |
 
 ## 3. Architecture
