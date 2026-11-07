@@ -114,6 +114,21 @@ async def test_router_uses_the_owners_device_when_online_else_the_server_browser
     assert not router.alive("b")
 
 
+async def test_a_new_page_moves_to_the_owners_pc_once_its_helper_is_online(env):
+    server = FakeBrowsers()
+    router = BrowserRouter(env.pool, server, DeviceBrowser(env.pool, step_timeout_s=10))
+    await router.step("a", {"action": "navigate", "url": "https://example.com"}, tenant_id=env.t.id)
+    assert router.where("a") == "server"                                                             # helper was offline
+    await router.step("a", {"action": "read"}, tenant_id=env.t.id)
+    assert router.where("a") == "server"                                                             # same page: no switch
+    async with api(env) as http:
+        token, _ = await pair(env, http)
+        out, _ = await asyncio.gather(router.step("a", {"action": "navigate", "url": "https://example.com/menu"}, tenant_id=env.t.id),
+                                      fake_bridge(http, token, rounds=1))
+    assert router.where("a") == "device" and out["title"] == "Page"                                  # next page: the PC
+    assert "a" not in server.open                                                                    # the server page was closed
+
+
 # ---------------------------------------------------------------- owner chat commands
 
 async def test_owner_pairs_and_unpairs_from_chat(env):

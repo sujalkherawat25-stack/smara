@@ -1,14 +1,22 @@
 """Playwright tools. Run only inside the worker subprocess (see client.py)."""
 import os
 import re
+import shutil
+import subprocess
+import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
 from playwright.async_api import async_playwright
 
 from src.box.guard import check_url, host_blocked, validate_plan
 
+# Only for the headless fallback, which would otherwise announce "HeadlessChrome". A real headed browser keeps its own.
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36"
+VIEWPORT = {"width": 1366, "height": 900}
+LOCALE, TIMEZONE = "en-IN", "Asia/Kolkata"          # the shops are in India; a US/UTC browser on an Indian site stands out
+_SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 TEXT_CAP = 1500
 
 # Smallest containers that look like a supplier card (selectors on IndiaMART are
@@ -23,28 +31,92 @@ CARD_JS = """() => {
 _PRICE = re.compile(r"₹\s?[\d,]+(?:\.\d+)?(?:\s*/\s*[A-Za-z]+)?")
 
 
+def start_virtual_display() -> subprocess.Popen | None:
+    """A virtual screen (Xvfb) so the server runs a normal, headed browser instead of a headless one. None when there is
+    already a display, or Xvfb is not installed (then the browser falls back to headless)."""
+    if os.environ.get("DISPLAY") or not shutil.which("Xvfb"):
+        return None
+    number = 100 + os.getpid() % 800                  # one screen per worker process, so workers never share one
+    proc = subprocess.Popen(["Xvfb", f":{number}", "-screen", "0", "1366x900x24", "-nolisten", "tcp"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    sock = Path(f"/tmp/.X11-unix/X{number}")
+    for _ in range(50):
+        if sock.exists() or proc.poll() is not None:
+            break
+        time.sleep(0.1)
+    if proc.poll() is not None:
+        return None
+    os.environ["DISPLAY"] = f":{number}"
+    return proc
+
+
+def profile_dir(tenant_id: str | None) -> Path | None:
+    """Where a shop's browser keeps its cookies between chats (cookie choices, sign-ins the owner completed), like a
+    person's own browser. None when profiles are off (BROWSER_PROFILE_ROOT unset) or the id is not a plain id."""
+    base = os.environ.get("BROWSER_PROFILE_ROOT", "").strip()
+    if not base or not tenant_id or not _SAFE_ID.match(tenant_id):
+        return None
+    path = Path(base) / tenant_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def launch_options(headless: bool) -> dict:
+    opts = {"headless": headless, "args": ["--lang=en-IN", "--window-size=1366,900"]}
+    return opts
+
+
+def context_options(headless: bool) -> dict:
+    opts = {"viewport": VIEWPORT, "locale": LOCALE, "timezone_id": TIMEZONE}
+    if headless:
+        opts["user_agent"] = UA                        # headless only: do not announce HeadlessChrome
+    return opts
+
+
 @asynccontextmanager
-async def browser_page():
-    # BROWSER_CDP_URL points the server at a hosted remote browser (residential exit, anti-block handled by the
-    # provider). The same SSRF route guard applies either way. Empty = launch Chromium on this server.
+async def browser_page(tenant_id: str | None = None):
+    # BROWSER_CDP_URL points the server at a hosted remote browser (a provider's real browsers and network). The same
+    # SSRF route guard applies either way. Empty = run Chromium on this server: headed on a virtual screen when Xvfb is
+    # installed, with the shop's own persistent profile when BROWSER_PROFILE_ROOT is set; else headless and fresh.
     cdp = os.environ.get("BROWSER_CDP_URL", "").strip()
-    async with async_playwright() as p:
-        browser = await (p.chromium.connect_over_cdp(cdp) if cdp else p.chromium.launch())
-        ctx = await browser.new_context(user_agent=UA, viewport={"width": 1366, "height": 900}) if not cdp             else await browser.new_context(viewport={"width": 1366, "height": 900})
-
-        async def guard(route):  # subrequests too: no pivoting into private networks
-            if host_blocked(urlparse(route.request.url).hostname or ""):
-                await route.abort()
+    display = None if cdp else start_virtual_display()
+    headless = not cdp and not os.environ.get("DISPLAY")
+    browser = ctx = None
+    try:
+        async with async_playwright() as p:
+            if cdp:
+                browser = await p.chromium.connect_over_cdp(cdp)
+                ctx = await browser.new_context(viewport=VIEWPORT, locale=LOCALE, timezone_id=TIMEZONE)
             else:
-                await route.continue_()
+                profile = profile_dir(tenant_id)
+                if profile is not None:
+                    try:                               # one browser per profile at a time; a second chat gets a fresh one
+                        ctx = await p.chromium.launch_persistent_context(str(profile), **launch_options(headless), **context_options(headless))
+                    except Exception:
+                        ctx = None
+                if ctx is None:
+                    browser = await p.chromium.launch(**launch_options(headless))
+                    ctx = await browser.new_context(**context_options(headless))
 
-        await ctx.route("**/*", guard)
-        page = await ctx.new_page()
-        page.set_default_timeout(15000)
-        try:
-            yield page
-        finally:
-            await browser.close()
+            async def guard(route):  # subrequests too: no pivoting into private networks
+                if host_blocked(urlparse(route.request.url).hostname or ""):
+                    await route.abort()
+                else:
+                    await route.continue_()
+
+            await ctx.route("**/*", guard)
+            page = await ctx.new_page()
+            page.set_default_timeout(15000)
+            try:
+                yield page
+            finally:
+                if browser is not None:
+                    await browser.close()
+                else:
+                    await ctx.close()
+    finally:
+        if display is not None:
+            display.kill()
 
 
 def parse_card(text: str) -> dict | None:

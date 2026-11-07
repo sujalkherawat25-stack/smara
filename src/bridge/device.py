@@ -203,6 +203,14 @@ class BrowserRouter:
 
     async def step(self, sid: str, args: dict, tenant_id: str | None = None) -> dict:
         b = self._backend(sid)
+        if b is not None and args.get("action") == "navigate" and tenant_id:
+            # A new page is a fresh start: use the owner's PC if it came online (or the server if it went away) instead
+            # of keeping whatever was picked when this chat first browsed.
+            on_device = bool(await online_device(self.pool, tenant_id))
+            if on_device != (b is self.device):
+                await b.close(sid)
+                self._route.pop(sid, None)
+                b = None
         if b is None:
             if args.get("action") != "navigate":
                 return {"error": "no open page: navigate first"}
@@ -210,13 +218,13 @@ class BrowserRouter:
             b = self._route[sid] = self.device if on_device else self.server
             if not on_device and tenant_id:
                 note = offline_note(await paired_device(self.pool, tenant_id))
-                out = await b.step(sid, args)
+                out = await b.step(sid, args, tenant_id=tenant_id)
                 if note and isinstance(out, dict):
                     out = {**out, "pc_helper": note}
                 return out
         if b is self.device:
             return await b.step(sid, args, tenant_id=tenant_id)
-        return await b.step(sid, args)
+        return await b.step(sid, args, tenant_id=tenant_id)
 
     async def close(self, sid: str) -> None:
         b = self._route.pop(sid, None)

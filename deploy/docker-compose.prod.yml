@@ -35,10 +35,13 @@ services:
       SANDBOX_MODE: container
       SANDBOX_JOBS_DIR: /jobs
       VAULT_MASTER_KEY_FILE: /run/secrets/vault_master_key
+      # Each shop's server browser keeps its cookies here between chats (like a person's own browser profile)
+      BROWSER_PROFILE_ROOT: /data/browser-profiles
     secrets:
       - vault_master_key
     volumes:
       - munim_jobs:/jobs
+      - munim_browser:/data/browser-profiles
     ports:
       - "127.0.0.1:8090:8080"
     depends_on:
@@ -87,3 +90,4 @@ secrets:
 volumes:
   munim_pgdata:
   munim_jobs:
+  munim_browser:

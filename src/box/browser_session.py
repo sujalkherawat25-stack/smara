@@ -30,8 +30,9 @@ class BrowserSessions:
         entry = self._procs.get(sid)
         return bool(entry) and entry[0].poll() is None
 
-    def _start(self) -> subprocess.Popen:
-        proc = subprocess.Popen([sys.executable, "-m", "src.box.session_worker"], cwd=ROOT, text=True, bufsize=1,
+    def _start(self, tenant_id: str | None = None) -> subprocess.Popen:
+        extra = ["--tenant", str(tenant_id)] if tenant_id else []
+        proc = subprocess.Popen([sys.executable, "-m", "src.box.session_worker", *extra], cwd=ROOT, text=True, bufsize=1,
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         if not json.loads(proc.stdout.readline() or "{}").get("ready"):
             proc.kill()
@@ -52,7 +53,7 @@ class BrowserSessions:
                     return {"error": "no open page: navigate first"}
                 if len(self._procs) >= self.max_sessions:
                     return {"error": "too many browser sessions open; try again shortly"}
-                self._procs[sid] = (await asyncio.to_thread(self._start), time.monotonic())
+                self._procs[sid] = (await asyncio.to_thread(self._start, tenant_id), time.monotonic())
             proc = self._procs[sid][0]
             cmd = {k: args[k] for k in ("action", "url", "ref", "text", "selector", "value") if args.get(k) is not None}
             try:
