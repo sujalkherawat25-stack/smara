@@ -1,0 +1,132 @@
+"""Web search for the agent.
+
+Runs in the same browser the agent browses with: the owner's own PC when their bridge is online (their IP,
+so search engines do not treat it as a datacenter bot), otherwise the server's browser. Read-only, so it
+runs without a tap; it returns a short list the agent can then open with browser_step.
+"""
+import base64
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse
+
+from src.agent.policy import SessionCtx
+
+
+async def _device_online(app, ctx: SessionCtx):
+    from src.bridge.device import reachable_device
+    try:
+        return await reachable_device(app.state.pool, ctx.tenant_id)
+    except Exception:
+        return None
+
+ENGINES = (
+    ("duckduckgo", "https://html.duckduckgo.com/html/?q={q}"),
+    ("bing", "https://www.bing.com/search?q={q}"),
+)
+SKIP_HOSTS = ("duckduckgo.com", "bing.com", "microsoft.com", "msn.com", "go.microsoft.com", "r.bing.com")
+MAX_RESULTS = 8
+
+
+def real_url(href: str) -> str:
+    """Search engines wrap result links in redirects; return the destination."""
+    u = urlparse(href if "://" in href else "https:" + href if href.startswith("//") else href)
+    q = parse_qs(u.query)
+    if (u.hostname or "").endswith("bing.com") and q.get("u"):
+        # Bing: u = "a1" + urlsafe base64 of the destination
+        raw = q["u"][0]
+        if raw.startswith("a1"):
+            try:
+                target = base64.urlsafe_b64decode(raw[2:] + "=" * (-len(raw[2:]) % 4)).decode("utf-8", "replace")
+                if target.startswith("http"):
+                    return target
+            except ValueError:
+                pass
+    for key in ("uddg", "u", "url"):
+        if key in q and q[key]:
+            target = unquote(q[key][0])
+            if target.startswith("http"):
+                return target
+    return href
+
+
+def parse_results(elements: list[dict]) -> list[dict]:
+    """Group links by destination: the first text is the title, a longer later one is the snippet."""
+    seen: dict[str, dict] = {}
+    for e in elements:
+        if e.get("tag") != "a" or not e.get("href"):
+            continue
+        url = real_url(e["href"])
+        host = (urlparse(url).hostname or "").lower()
+        if not url.startswith("http") or any(host == h or host.endswith("." + h) for h in SKIP_HOSTS):
+            continue
+        text = " ".join((e.get("text") or "").split())
+        if not text:
+            continue
+        hit = seen.setdefault(url, {"title": text, "url": url, "snippet": ""})
+        if text != hit["title"] and len(text) > len(hit["snippet"]):
+            hit["snippet"] = text[:300]
+    return list(seen.values())[:MAX_RESULTS]
+
+
+async def api_search(key: str, query: str, client=None) -> list[dict]:
+    """Brave Search API: reliable from a server (no bot checks). Used first when BRAVE_SEARCH_API_KEY is set."""
+    import httpx
+    http = client or httpx.AsyncClient(timeout=15)
+    try:
+        r = await http.get("https://api.search.brave.com/res/v1/web/search", params={"q": query, "count": MAX_RESULTS, "country": "in"},
+                           headers={"X-Subscription-Token": key, "Accept": "application/json"})
+        r.raise_for_status()
+        rows = (r.json().get("web") or {}).get("results") or []
+    finally:
+        if client is None:
+            await http.aclose()
+    return [{"title": x.get("title", "")[:150], "url": x.get("url", ""), "snippet": (x.get("description") or "")[:300]}
+            for x in rows if x.get("url", "").startswith("http")][:MAX_RESULTS]
+
+
+async def web_search(app, ctx: SessionCtx, args: dict) -> dict:
+    query = " ".join(str(args.get("query", "")).split())[:300]
+    if len(query) < 2:
+        return {"error": "query is too short"}
+    browsers, sid, last_error = app.state.browsers, f"{ctx.id}:search", ""
+    used_device = False
+    on_device = bool(await _device_online(app, ctx))
+    key = getattr(app.state.settings, "brave_search_api_key", "")
+    if key and not on_device:        # a PC browser (real, headed, home IP) is the better searcher when it is connected
+        try:
+            if results := await api_search(key, query):
+                return {"query": query, "engine": "brave-api", "via": "api", "results": results,
+                        "next": "open a result with browser_step navigate, then read it"}
+        except Exception as e:
+            last_error = f"search api failed: {type(e).__name__}"
+    try:
+        for name, template in ENGINES:
+            out = await browsers.step(sid, {"action": "navigate", "url": template.format(q=quote_plus(query)), "links": True},
+                                      tenant_id=ctx.tenant_id)
+            if out.get("error"):
+                last_error = out["error"]
+                await browsers.close(sid)
+                continue
+            via = browsers.where(sid) if hasattr(browsers, "where") else ""
+            used_device = used_device or via == "device"
+            results = parse_results(out.get("links") or [])
+            if results:
+                return {"query": query, "engine": name, "via": via or "server", "results": results,
+                        "next": "open a result with browser_step navigate, then read it"}
+            last_error = f"{name} returned no results (possibly a bot check)"
+            await browsers.close(sid)
+    finally:
+        await browsers.close(sid)
+    from src.bridge.device import offline_note, paired_device, reachable_device
+    try:
+        if used_device:
+            note = ("The owner's PC browser opened the search pages, but they returned no readable result links. "
+                    "Do NOT say the PC helper is disconnected; tell the owner the search results could not be read.")
+        elif await reachable_device(app.state.pool, ctx.tenant_id):
+            note = ("The owner's PC browser is connected, but the search pages returned no readable result links. "
+                    "Do NOT describe this as a PC connection problem; tell the owner the search results could not be read.")
+        else:
+            note = offline_note(await paired_device(app.state.pool, ctx.tenant_id))
+    except Exception:
+        note = "The search failed and the PC connection could not be checked. Do not say the PC helper is disconnected without evidence."
+    return {"error": f"search did not work: {last_error[:200]}.",
+            "next": note or "The owner has no PC connected. Searches work best through their own browser: suggest they "
+                            "open Smara Desktop (Settings > Browser) or send 'pair browser' once."}
