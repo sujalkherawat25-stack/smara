@@ -622,6 +622,26 @@ async def by_name(page, text: str) -> int:
     raise RefError(f"{text!r}: use a ref number from the page" + (f" ({len(hits)} controls have that name)" if hits else ""))
 
 
+# The page's visible links (where each one goes, and its text). Web search reads these: the numbered listing above has
+# the controls but not where they lead, so a search could not see any result.
+LINKS_JS = r"""() => {
+  const out = [], seen = new Set();
+  for (const a of document.querySelectorAll('a[href]')) {
+    const href = a.href || '';
+    if (!/^https?:/i.test(href)) continue;
+    const r = a.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) continue;
+    const text = (a.innerText || a.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+    if (!text) continue;
+    const key = href + '|' + text;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({tag: 'a', href, text});
+    if (out.length >= 300) break;
+  }
+  return out;
+}"""
+
 SCREEN_TEXT_JS = r"""(limit) => {
   // What a person sees on the screen right now, top to bottom: the words of every visible text inside the window.
   const vh = window.innerHeight, vw = window.innerWidth, out = [];
@@ -856,6 +876,14 @@ def failure(e: BaseException, action: str) -> dict:
     return {"error": f"could not {action}: {type(e).__name__}: {msg[:300]}"}
 
 
+async def page_links(page) -> list[dict]:
+    """Visible http(s) links on the page (main frame only): [{tag, href, text}]."""
+    try:
+        return await page.evaluate(LINKS_JS)
+    except Exception:
+        return []
+
+
 async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
     """Run one step and return the page after it: what changed, the numbered controls, the visible text."""
     page = current(page)
@@ -982,6 +1010,8 @@ async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
             out.pop("changes", None)
     else:
         out = await observe(page)
+    if cmd.get("links"):                                 # web search asks for the links on the page it just reached
+        out["links"] = await page_links(page)
     head = {k: out.pop(k) for k in ("url", "title") if k in out}
     return {**head, **extra, **out}                      # what happened first; the long page listing last
 
