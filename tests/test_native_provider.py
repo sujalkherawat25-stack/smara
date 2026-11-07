@@ -566,3 +566,16 @@ def test_playwright_mcp_is_the_browser_when_node_is_installed(tmp_path, monkeypa
         assert "mcp_servers.smara_browser.enabled=true" not in on
     finally:
         adapter.server.server_close(); adapter.client.close()
+
+
+def test_a_chat_with_the_owner_always_has_the_browser_without_any_setting(tmp_path, monkeypatch):
+    monkeypatch.setattr("smara.native_runtime.shutil.which", lambda _name: "npx")
+    adapter = ResponsesAdapter(ChatEndpoint("http://127.0.0.1", "synthetic", ""))
+    try:
+        chat, _ = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path, browser_origins=None, interactive=True)
+        assert "mcp_servers.playwright.enabled=true" in chat
+        assert "http://localhost" in " ".join(chat)                                  # local and private addresses stay blocked
+        background, _ = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path, browser_origins=None)
+        assert "mcp_servers.playwright.enabled=true" not in background             # unattended work does not get one by default
+    finally:
+        adapter.server.server_close(); adapter.client.close()

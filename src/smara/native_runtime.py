@@ -193,6 +193,11 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         settings["mcp_servers.smara_readers.env.PYTHONPATH"] = str((source_root() / "src").resolve())
     if os.getenv("SMARA_DESKTOP_CREDENTIALS"):
         settings["mcp_servers.smara_readers.env.SMARA_DESKTOP_CREDENTIALS"] = str(Path(os.environ["SMARA_DESKTOP_CREDENTIALS"]).resolve())
+    if interactive and not browser_origins:
+        # A chat with the owner always has a real browser (any public site; local and private addresses stay closed). Without
+        # this the model fell back to driving the whole computer to open a web page. Click, type and key presses still ask first.
+        from .native_browser import ANY_PUBLIC_SITE
+        browser_origins = [ANY_PUBLIC_SITE]
     npx = shutil.which("npx") if browser_origins else None
     if browser_origins and npx:
         # The browser tool Codex users plug in: Microsoft's Playwright MCP, one plain tool per action.

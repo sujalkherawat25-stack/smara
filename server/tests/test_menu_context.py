@@ -98,3 +98,20 @@ def test_each_add_names_its_dish_and_a_text_click_on_many_matches_is_refused(men
     assert cart == "Cart: 1 item(s), last Pepperoni Pizza"
     assert "12 controls show exactly 'ADD'" in error and "ref number" in error
     assert modal_hidden                                                   # the refused click did not open another dish
+
+
+def test_a_click_on_words_that_are_not_on_the_page_lists_what_is_there_instead_of_leaving_the_agent_to_guess(menu_url):
+    async def go():
+        async with async_playwright() as p:
+            exe = mb.find_browser("auto")
+            browser = await p.chromium.launch(headless=True, **({"executable_path": exe} if exe else {}))
+            try:
+                page = await browser.new_page()
+                await mb.handle(page, {"action": "navigate", "url": menu_url}, allow_private=True)
+                return (await mb.handle(page, {"action": "click", "text": "Add to basket now"}, allow_private=True)).get("error", "")
+            finally:
+                await browser.close()
+
+    error = _run(go)
+    assert "closest on the page now" in error and "ADD" in error
+    assert "scroll" in error and "ref number" in error
