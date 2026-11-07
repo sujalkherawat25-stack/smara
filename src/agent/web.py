@@ -4,6 +4,7 @@ Runs in the same browser the agent browses with: the owner's own PC when their b
 so search engines do not treat it as a datacenter bot), otherwise the server's browser. Read-only, so it
 runs without a tap; it returns a short list the agent can then open with browser_step.
 """
+import base64
 from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
 from src.agent.policy import SessionCtx
@@ -28,6 +29,16 @@ def real_url(href: str) -> str:
     """Search engines wrap result links in redirects; return the destination."""
     u = urlparse(href if "://" in href else "https:" + href if href.startswith("//") else href)
     q = parse_qs(u.query)
+    if (u.hostname or "").endswith("bing.com") and q.get("u"):
+        # Bing: u = "a1" + urlsafe base64 of the destination
+        raw = q["u"][0]
+        if raw.startswith("a1"):
+            try:
+                target = base64.urlsafe_b64decode(raw[2:] + "=" * (-len(raw[2:]) % 4)).decode("utf-8", "replace")
+                if target.startswith("http"):
+                    return target
+            except ValueError:
+                pass
     for key in ("uddg", "u", "url"):
         if key in q and q[key]:
             target = unquote(q[key][0])
@@ -76,6 +87,7 @@ async def web_search(app, ctx: SessionCtx, args: dict) -> dict:
     if len(query) < 2:
         return {"error": "query is too short"}
     browsers, sid, last_error = app.state.browsers, f"{ctx.id}:search", ""
+    used_device = False
     on_device = bool(await _device_online(app, ctx))
     key = getattr(app.state.settings, "brave_search_api_key", "")
     if key and not on_device:        # a PC browser (real, headed, home IP) is the better searcher when it is connected
@@ -87,26 +99,34 @@ async def web_search(app, ctx: SessionCtx, args: dict) -> dict:
             last_error = f"search api failed: {type(e).__name__}"
     try:
         for name, template in ENGINES:
-            out = await browsers.step(sid, {"action": "navigate", "url": template.format(q=quote_plus(query))},
+            out = await browsers.step(sid, {"action": "navigate", "url": template.format(q=quote_plus(query)), "links": True},
                                       tenant_id=ctx.tenant_id)
             if out.get("error"):
                 last_error = out["error"]
                 await browsers.close(sid)
                 continue
-            results = parse_results(out.get("elements") or [])
+            via = browsers.where(sid) if hasattr(browsers, "where") else ""
+            used_device = used_device or via == "device"
+            results = parse_results(out.get("links") or [])
             if results:
-                via = browsers.where(sid) if hasattr(browsers, "where") else ""
                 return {"query": query, "engine": name, "via": via or "server", "results": results,
                         "next": "open a result with browser_step navigate, then read it"}
             last_error = f"{name} returned no results (possibly a bot check)"
             await browsers.close(sid)
     finally:
         await browsers.close(sid)
-    from src.bridge.device import offline_note, paired_device
+    from src.bridge.device import offline_note, paired_device, reachable_device
     try:
-        note = offline_note(await paired_device(app.state.pool, ctx.tenant_id))
+        if used_device:
+            note = ("The owner's PC browser opened the search pages, but they returned no readable result links. "
+                    "Do NOT say the PC helper is disconnected; tell the owner the search results could not be read.")
+        elif await reachable_device(app.state.pool, ctx.tenant_id):
+            note = ("The owner's PC browser is connected, but the search pages returned no readable result links. "
+                    "Do NOT describe this as a PC connection problem; tell the owner the search results could not be read.")
+        else:
+            note = offline_note(await paired_device(app.state.pool, ctx.tenant_id))
     except Exception:
-        note = ""
+        note = "The search failed and the PC connection could not be checked. Do not say the PC helper is disconnected without evidence."
     return {"error": f"search did not work: {last_error[:200]}.",
             "next": note or "The owner has no PC connected. Searches work best through their own browser: suggest they "
                             "open Smara Desktop (Settings > Browser) or send 'pair browser' once."}
