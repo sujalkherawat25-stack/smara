@@ -11,3 +11,5 @@ tests/test_w3_dependable_execution.py text eol=lf
 tests/test_w4_windows_readiness.py text eol=lf
 tests/test_w5_windows_acceptance.py text eol=lf
 tests/test_h5_isolated_desktop_contract.py text eol=lf
+src/smara/munim_bridge.py text eol=lf
+apps/desktop/src-tauri/resources/browser/munim_bridge.py text eol=lf
