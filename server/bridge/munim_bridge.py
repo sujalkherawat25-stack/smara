@@ -460,7 +460,7 @@ SNAPSHOT_JS = r"""(max) => {
   out.forEach((it, i) => {
     if (seenNames.get(it.role + '|' + it.name) > 1) {
       const c = contextOf(picked[i], it.name);
-      if (c) it.name = (it.name + ' - ' + c).slice(0, 100);
+      if (c) it.name = (it.name ? it.name + ' - ' + c : c).slice(0, 100);
     }
   });
   const live = [...document.querySelectorAll('[role=alert],[role=status],[aria-live=assertive],[aria-live=polite],[class*=toast],[class*=snackbar]')]

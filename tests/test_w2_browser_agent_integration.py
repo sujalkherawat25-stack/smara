@@ -72,8 +72,8 @@ def latest(agent):
     return list(session.observations.values())[-1]
 
 
-def element(observation,*,text=None,tag=None):
-    return next(key for key,value in observation["elements"].items() if (text is None or value["text"]==text) and (tag is None or value["tag"]==tag))
+def element(observation,*,text=None,role=None):
+    return next(key for key,value in observation["elements"].items() if (text is None or value["text"]==text) and (role is None or value["role"]==role))
 
 
 @pytest.mark.parametrize("repeat",range(3))
@@ -110,13 +110,12 @@ def test_w2_form_submit_has_independently_observable_state(tmp_path,monkeypatch,
     main,_=fixture_pages(tmp_path);agent,session=make_agent(tmp_path,f"form-{repeat}")
     def script(agent,index):
         if index==1:
-            obs=latest(agent);return tool("browser_act",{"observation_id":obs["observation_id"],"ref":element(obs,tag="input"),"action":"fill","value":f"saved-{repeat}"},index)
+            obs=latest(agent);return tool("browser_act",{"observation_id":obs["observation_id"],"ref":element(obs,role="textbox"),"action":"fill","value":f"saved-{repeat}"},index)
         if index==2:
             obs=latest(agent);return tool("browser_act",{"observation_id":obs["observation_id"],"ref":element(obs,text="Submit"),"action":"click"},index)
         return [tool("browser_open",{"url":main.as_uri()},0),None,None,final("Form saved")][min(index,3)]
     try:
-        result=run_script(monkeypatch,agent,script);page=agent._browser.backend.page(agent._browser.backend.sessions[agent._browser.browser_session_id])
-        assert result["completed"] and page.locator("body").get_attribute("data-saved")==f"saved-{repeat}"
+        result=run_script(monkeypatch,agent,script);        assert result["completed"] and agent._browser.backend.evaluate(agent._browser.browser_session_id,"() => document.body.dataset.saved")==f"saved-{repeat}"
     finally:agent._browser.shutdown()
 
 

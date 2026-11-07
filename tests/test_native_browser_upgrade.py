@@ -39,12 +39,11 @@ def test_owned_chromium_screenshot_upload_download_and_handoff(tmp_path, monkeyp
         image = browser.call("browser_snapshot", {})
         assert Path(image["path"]).read_bytes().startswith(b"\x89PNG") and not image["uploaded"]
         current = browser.call("browser_observe", {})
-        ref = next(ref for ref, entry in current["elements"].items() if entry["tag"] == "input")
+        ref = next(ref for ref, entry in current["elements"].items() if entry["role"] == "file")
         (tmp_path / "note.txt").write_text("Owned synthetic upload")
         current = browser.call("browser_upload", {"observation_id": current["observation_id"], "ref": ref, "path": "note.txt"})
-        page = browser.engine.page(browser.engine.sessions[browser.session])
-        assert page.locator("input").evaluate("el=>el.files[0].name") == "note.txt"
-        ref = next(ref for ref, entry in current["elements"].items() if entry["tag"] == "a")
+        assert browser.engine.evaluate(browser.session, "() => document.querySelector('input').files[0].name") == "note.txt"
+        ref = next(ref for ref, entry in current["elements"].items() if entry["role"] == "link")
         result = browser.call("browser_download", {"observation_id": current["observation_id"], "ref": ref})
         assert Path(result["path"]).read_text() == "Owned download evidence" and not result["executed"]
         assert len(browser.call("browser_tabs", {})["tabs"]) == 1

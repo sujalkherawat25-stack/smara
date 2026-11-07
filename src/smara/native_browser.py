@@ -6,6 +6,7 @@ and confirmation. No personal profile, raw JS or arbitrary locator. Not an OS sa
 """
 from __future__ import annotations
 import argparse
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -91,36 +92,44 @@ class NativeBrowser:
         except (ValueError, TypeError):
             return False
 
-    def route(self, route):
+    async def route(self, route):
         request = route.request
         human = bool(self.control and self.options["visible"] and self.control.state().get("paused"))
         if self.allowed(request.url) and (request.method in {"GET", "HEAD"} or self.allow_writes or human):
-            route.continue_()
+            await route.continue_()
         else:
-            route.abort("blockedbyclient")
+            await route.abort("blockedbyclient")
 
-    def configure(self, context):
+    async def configure(self, context):
         context.set_default_timeout(5000)
         context.set_default_navigation_timeout(15000)
-        context.route("**/*", self.route)
-        context.route_web_socket("**/*", lambda websocket: websocket.close())
-        context.on("page", lambda value: value.on("download", lambda download: None if self.download_allowed else download.cancel()))
+        await context.route("**/*", self.route)
+        await context.route_web_socket("**/*", lambda websocket: asyncio.ensure_future(websocket.close()))
+        context.on("page", self._watch_downloads)
 
-    def observe(self):
-        observed = self.engine.observe(self.session)
+    def _watch_downloads(self, page):
+        page.on("download", lambda download: asyncio.ensure_future(self._cancel_download(download)))
+
+    async def _cancel_download(self, download):
+        if not self.download_allowed:
+            await download.cancel()
+
+    def present(self, observed):
         if not self.allowed(observed["url"]):
             raise ValueError("Current page is outside approved origins")
-        browser_page = self.engine.page(self.engine.sessions[self.session])
-        full_text = browser_page.locator("body").inner_text() if browser_page.locator("body").count() else ""
+        full_text = observed["body_text"]
         if len(full_text.encode("utf-8")) > MAX_BYTES:
             raise ValueError("Page text exceeds retrieval limit; not silently clipped")
         self.latest = {"observation": observed, "text": full_text}
-        self.engine.sessions[self.session].observations = {observed["observation_id"]: observed}
-        # This DOM-only adapter works with text-only models. Screenshots stay
-        # local; they are not dumped as base64 text or passed to GLM as images.
+        # The same numbered page the WhatsApp agent reads. Screenshots stay local; they are not sent to the model.
         result = {key: value for key, value in observed.items() if key not in {"body_text", "screenshot", "screenshot_sha256"}}
-        return {**result, **page(full_text), "element_limit": 200, "elements_may_be_incomplete": len(observed["elements"]) == 200, "modality": "DOM text; no vision",
-            "actions_used": self.actions, "action_limit": self.options["max_actions"], "seconds_limit": self.options["seconds"]}
+        return {**result, **page(full_text), "element_limit": 250,
+                "elements_may_be_incomplete": observed["total_controls"] > len(observed["elements"]),
+                "modality": "DOM text; no vision", "actions_used": self.actions,
+                "action_limit": self.options["max_actions"], "seconds_limit": self.options["seconds"]}
+
+    def observe(self):
+        return self.present(self.engine.observe(self.session))
 
     def call(self, name, arguments):
         entry = next((entry for entry in TOOLS if entry["name"] == name), None)
@@ -159,8 +168,7 @@ class NativeBrowser:
                 self.session = self.engine.create({"accept_downloads": self.options["transfers"], "service_workers": "block", "permissions": []}, self.configure)
                 if self.control: self.control.update(closed=False)
             self.latest = None; self.actions += 1
-            self.engine.navigate(self.session, arguments["url"])
-            return self.observe()
+            return self.present(self.engine.navigate(self.session, arguments["url"]))
         if not self.session:
             raise ValueError("Open an approved page first")
         if name == "browser_observe":
@@ -176,10 +184,10 @@ class NativeBrowser:
             tabs = self.engine.tabs(self.session)
             if not any(item["tab_id"] == arguments["tab_id"] and self.allowed(item["url"]) for item in tabs): raise ValueError("Tab is outside approved origins")
             self.actions += 1; self.latest = None
-            self.engine.switch(self.session, arguments["tab_id"]); return self.observe()
+            return self.present(self.engine.switch(self.session, arguments["tab_id"]))
         if name == "browser_scroll":
             self.actions += 1; self.latest = None
-            self.engine.scroll(self.session, arguments["dy"]); return self.observe()
+            return self.present(self.engine.scroll(self.session, arguments["dy"]))
         if name == "browser_snapshot":
             observed = self.observe()
             image = Path(self.latest["observation"]["screenshot"])
@@ -189,40 +197,37 @@ class NativeBrowser:
         if name == "browser_text_page":
             return page(self.latest["text"], arguments.get("offset", 0))
         observed = self.latest["observation"]
-        current = self.engine.page(self.engine.sessions[self.session])
-        if current.url != observed["url"] or not self.allowed(current.url) or time.time() - observed["timestamp"] > 120:
+        if self.engine.current_url(self.session) != observed["url"] or not self.allowed(observed["url"]) or time.time() - observed["timestamp"] > 120:
             raise StaleObservation("Page changed or observation expired")
-        target = self.engine._ground(self.engine.sessions[self.session], observed, arguments["ref"])
         if name in {"browser_upload", "browser_download"}:
             if not self.options["transfers"]: raise ValueError("File transfers require user opt-in")
             self.latest = None; self.actions += 1
             if name == "browser_upload":
                 from .native_browser_transfer import upload_file
                 path = upload_file(self.workspace, arguments["path"])
-                if (target.get_attribute("type") or "").lower() != "file": raise ValueError("Choose an observed file input")
+                if (self.engine.attribute(self.session, observed["observation_id"], arguments["ref"], "type") or "").lower() != "file":
+                    raise ValueError("Choose an observed file input")
                 self.allow_writes = True
-                try: target.set_input_files(str(path))
+                try: uploaded = self.engine.upload(self.session, observed["observation_id"], arguments["ref"], path)
                 finally: self.allow_writes = False
-                return self.observe()
-            from .native_browser_transfer import save_download
+                return self.present(uploaded)
+            from .native_browser_transfer import save_downloaded
             self.download_allowed = True; self.allow_writes = True
             try:
-                with current.expect_download(timeout=15000) as pending: target.click()
-                artifact = save_download(self.workspace, pending.value)
+                fetched = self.engine.download(self.session, observed["observation_id"], arguments["ref"])
+                artifact = save_downloaded(self.workspace, Path(fetched["path"]), fetched["suggested_filename"])
                 return {**artifact, "observation": self.observe()}
             finally: self.download_allowed = False; self.allow_writes = False
         if arguments["action"] not in {"click", "fill", "select", "check"}:
             raise ValueError("Unsupported browser action")
-        # HTML input types are case-insensitive even when get_attribute keeps
-        # the site's original spelling.
-        if (target.get_attribute("type") or "").lower() in {"file", "password"}:
+        # HTML input types are case-insensitive even when the attribute keeps the site's spelling.
+        if (self.engine.attribute(self.session, observed["observation_id"], arguments["ref"], "type") or "").lower() in {"file", "password"}:
             raise ValueError("File uploads and authentication inputs are not supported")
         self.allow_writes = True  # Only during this native-approved action.
         self.latest = None  # A failure cannot leave a reusable observation.
         self.actions += 1
         try:
-            self.engine.act(self.session, observed["observation_id"], arguments["ref"], arguments["action"], arguments.get("value"))
-            return self.observe()
+            return self.present(self.engine.act(self.session, observed["observation_id"], arguments["ref"], arguments["action"], arguments.get("value")))
         finally:
             self.allow_writes = False
 
