@@ -37,3 +37,23 @@ def save_download(workspace, download):
         return {"path": str(target), "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), "executed": False}
     finally:
         download.delete()  # Delete only this owned Playwright temporary download.
+
+
+def save_downloaded(workspace, source, suggested):
+    """Keep one file the engine downloaded, if its type and size are allowed. The engine's temporary copy is removed
+    either way, so nothing stays outside the project."""
+    try:
+        extension = Path(suggested).suffix.lower()
+        if extension not in EXTENSIONS: raise ValueError("Download type not permitted; never run retrieved files")
+        if not 0 < Path(source).stat().st_size <= MAX_TRANSFER: raise ValueError("Download exceeds 10 MB")
+        root = Path(workspace).resolve(strict=True)
+        directory = root / ".smara/downloads"
+        if not directory.resolve().is_relative_to(root): raise ValueError("Download directory escapes project")
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / (uuid.uuid4().hex + extension)
+        data = Path(source).read_bytes()
+        if len(data) > MAX_TRANSFER: raise ValueError("Download grew beyond 10 MB")
+        with target.open("xb") as output: output.write(data)
+        return {"path": str(target), "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data), "executed": False}
+    finally:
+        Path(source).unlink(missing_ok=True)

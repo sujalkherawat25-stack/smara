@@ -1,6 +1,7 @@
 """Real Chromium on owned fixture HTTP pages; not live-provider quality."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
+import time
 import pytest
 from smara.native_browser import NativeBrowser, configured_origins, TOOLS
 from smara.managed_browser import StaleObservation
@@ -41,22 +42,24 @@ def test_real_dom_actions_pagination_stale_and_auth_denial(tmp_path, monkeypatch
             result = browser.call("browser_text_page", {"observation_id": first["observation_id"], "offset": offset})
             parts.append(result["text"]); offset = result["next_offset"]
         assert len("".join(parts)) == first["total_chars"] > 16000
-        name = next(ref for ref, entry in first["elements"].items() if entry["tag"] == "input")
+        name = next(ref for ref, entry in first["elements"].items() if entry["role"] == "textbox"
+                    and browser.engine.attribute(browser.session, first["observation_id"], ref, "type") in (None, "text"))
         second = browser.call("browser_act", {"observation_id": first["observation_id"], "ref": name, "action": "fill", "value": "actual synthetic edit"})
         with pytest.raises(StaleObservation):
             browser.call("browser_act", {"observation_id": first["observation_id"], "ref": name, "action": "fill", "value": "stale"})
         button = next(ref for ref, entry in second["elements"].items() if entry["text"] == "Save locally")
         third = browser.call("browser_act", {"observation_id": second["observation_id"], "ref": button, "action": "click"})
         assert "actual synthetic edit" in third["text"]
-        native_page = browser.engine.page(browser.engine.sessions[browser.session])
-        for input_type in ("password", "PASSWORD", "file", "FILE"):
-            ref = next(ref for ref, entry in third["elements"].items() if native_page.locator(entry["selector"]).get_attribute("type") == input_type)
+        kinds = {ref: (browser.engine.attribute(browser.session, third["observation_id"], ref, "type") or "").lower()
+                 for ref, entry in third["elements"].items() if entry["role"] in {"textbox", "file"}}
+        for input_type in ("password", "file"):
+            ref = next(ref for ref, kind in kinds.items() if kind == input_type)
             with pytest.raises(ValueError, match="authentication"):
                 browser.call("browser_act", {"observation_id": third["observation_id"], "ref": ref, "action": "fill", "value": "never sent"})
         with pytest.raises(ValueError, match="origins"):
             browser.call("browser_open", {"url": "http://127.0.0.1:1/"})
         assert not posts and not browser.allow_writes
-        assert browser.engine.sessions[browser.session].context.cookies() == []
+        assert browser.engine.cookies(browser.session) == []
     finally:
         browser.engine.shutdown(); server.shutdown(); server.server_close()
 
@@ -75,8 +78,14 @@ class _FakeEngine:
     """Stands in for the managed browser so close/reopen rules can be tested without launching Chromium."""
     def __init__(self): self.created = 0; self.shut = 0; self.sessions = {}
     def create(self, _options, _configure): self.created += 1; return "s%d" % self.created
-    def navigate(self, _session, _url): pass
+    def navigate(self, _session, _url): return _fake_observation()
     def shutdown(self): self.shut += 1
+
+
+def _fake_observation():
+    return {"observation_id": "o", "session_id": "s1", "tab_id": "t", "url": "https://example.com/", "title": "",
+            "timestamp": time.time(), "generation": 1, "elements": {}, "listing": "", "total_controls": 0,
+            "body_text": "", "screenshot": "", "screenshot_sha256": ""}
 
 
 def _fake_browser(tmp_path):
