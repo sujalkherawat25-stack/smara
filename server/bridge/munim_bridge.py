@@ -1206,6 +1206,70 @@ class Browser:
             await self.close()
 
 
+SHARED_DIR = Path(os.environ.get("SMARA_SHARED_DIR", Path.home() / "Smara" / "Shared"))
+SHARED_READ_MAX, SHARED_WRITE_MAX, SHARED_LIST_MAX = 100_000, 1_000_000, 200
+
+
+def shared_path(rel: str) -> Path:
+    """A path inside the shared folder, never outside it (no '..', no drive or absolute paths, no links that point away)."""
+    root = SHARED_DIR.resolve()
+    rel = str(rel or "").strip().replace("\\", "/")           # same meaning on every OS: a backslash is a separator
+    if rel.startswith("/") or re.match(r"^[A-Za-z]:", rel):
+        raise ValueError("that path is outside the shared folder")
+    target = (root / rel).resolve()
+    if target != root and root not in target.parents:
+        raise ValueError("that path is outside the shared folder")
+    return target
+
+
+def tool_files(cmd: dict) -> dict:
+    """The one folder on this PC that Smara may reach from WhatsApp: list, read a text file, write a new one."""
+    SHARED_DIR.mkdir(parents=True, exist_ok=True)
+    action = cmd.get("action")
+    try:
+        target = shared_path(cmd.get("path", ""))
+    except ValueError as e:
+        return {"error": str(e)}
+    if action == "list":
+        if not target.is_dir():
+            return {"error": "no such folder"}
+        rows = [{"name": p.name + ("/" if p.is_dir() else ""), "bytes": p.stat().st_size if p.is_file() else None}
+                for p in sorted(target.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))[:SHARED_LIST_MAX]]
+        return {"folder": str(target.relative_to(SHARED_DIR.resolve())) or ".", "entries": rows}
+    if action == "read":
+        if not target.is_file():
+            return {"error": "no such file"}
+        data = target.read_bytes()[:SHARED_READ_MAX + 1]
+        if b"\x00" in data[:4096]:
+            return {"error": "that looks like a binary file; only text files can be read here", "bytes": target.stat().st_size}
+        return {"path": target.name, "text": data[:SHARED_READ_MAX].decode("utf-8", "replace"), "truncated": len(data) > SHARED_READ_MAX}
+    if action == "write":
+        text = cmd.get("text")
+        if not isinstance(text, str) or len(text.encode("utf-8")) > SHARED_WRITE_MAX:
+            return {"error": f"give the text to write (up to {SHARED_WRITE_MAX // 1000} KB)"}
+        if target == SHARED_DIR.resolve() or target.is_dir():
+            return {"error": "give a file name"}
+        if target.exists() and not cmd.get("overwrite"):
+            return {"error": "that file already exists; choose another name or set overwrite"}
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(text.encode("utf-8"))      # exact bytes: no newline rewriting on Windows
+        return {"written": str(target.relative_to(SHARED_DIR.resolve())), "bytes": target.stat().st_size}
+    return {"error": "action must be list, read or write"}
+
+
+TOOLS = {"files": tool_files}       # PC tools beyond the browser: a job whose command has {"tool": name, ...} lands here
+
+
+def run_tool(cmd: dict) -> dict:
+    fn = TOOLS.get(str(cmd.get("tool")))
+    if fn is None:
+        return {"error": f"this PC has no tool called {cmd.get('tool')!r}"}
+    try:
+        return fn(cmd)
+    except Exception as e:                        # a tool error must never kill the bridge
+        return {"error": f"{type(e).__name__}: {str(e)[:300]}"}
+
+
 async def run(a) -> int:
     import time
     from playwright.async_api import async_playwright
@@ -1241,6 +1305,11 @@ async def run(a) -> int:
                 await http.post("/bridge/result", json={"job_id": job["job_id"], "result": {
                     "error": "the owner paused Smara's browser in Smara Desktop; ask them to press Resume"}})
                 log(f"step {job['command'].get('action')} refused: paused")
+                continue
+            if job["command"].get("tool"):         # a PC tool, not a browser step: no browser window is opened for it
+                result = run_tool(job["command"])
+                log(f"tool {job['command']['tool']} {job['command'].get('action', '')}: {'error' if result.get('error') else 'ok'}")
+                await http.post("/bridge/result", json={"job_id": job["job_id"], "result": result})
                 continue
             try:
                 try:

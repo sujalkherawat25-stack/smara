@@ -135,6 +135,33 @@ async def finish_job(pool, device: dict, job_id: str, result: dict) -> bool:
     return row is not None
 
 
+async def run_pc_tool(pool, tenant_id: str, sid: str, tool: str, args: dict, timeout_s: int = 40) -> dict:
+    """One call to a tool on the owner's paired PC (a job whose command names the tool), answered when the helper replies.
+    The same queue the browser uses, so every PC capability reaches the PC the same way, and only the paired one."""
+    paired = await paired_device(pool, tenant_id)
+    if not paired:
+        return {"error": "no PC is paired with this shop, so there is no PC folder to reach"}
+    if not await reachable_device(pool, tenant_id):
+        return {"error": offline_note(paired)}
+    cmd = {"tool": tool, **{k: v for k, v in args.items() if v is not None}}
+    async with pool.connection() as conn:
+        row = await (await conn.execute(
+            "INSERT INTO bridge_jobs (tenant_id, session_id, command) VALUES (%s, %s, %s) RETURNING id",
+            (tenant_id, sid, json.dumps(cmd)))).fetchone()
+    job_id, deadline = row["id"], time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        async with pool.connection() as conn:
+            job = await (await conn.execute("SELECT status, result FROM bridge_jobs WHERE id = %s", (job_id,))).fetchone()
+        if job["status"] == "DONE":
+            return job["result"] or {}
+        if job["status"] == "EXPIRED":
+            return {"error": "the PC was disconnected"}
+        await asyncio.sleep(0.4)
+    async with pool.connection() as conn:
+        await conn.execute("UPDATE bridge_jobs SET status = 'EXPIRED' WHERE id = %s AND status IN ('PENDING','CLAIMED')", (job_id,))
+    return {"error": f"the owner's PC did not answer within {timeout_s}s"}
+
+
 class DeviceBrowser:
     """Same interface as BrowserSessions, executed on the owner's device via the job queue."""
 
