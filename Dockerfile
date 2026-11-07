@@ -10,6 +10,9 @@ RUN python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml
  && pip install -r /tmp/req.txt \
  && playwright install --with-deps chromium
 
+# A virtual screen, so the server runs a normal headed Chromium instead of a headless one (own layer: keeps the cache above).
+RUN apt-get update && apt-get install -y --no-install-recommends xvfb && rm -rf /var/lib/apt/lists/*
+
 COPY src ./src
 COPY bridge ./bridge
 COPY migrations ./migrations

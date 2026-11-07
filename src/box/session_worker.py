@@ -29,7 +29,8 @@ async def handle(page, cmd: dict) -> dict:
 
 async def main() -> None:
     loop = asyncio.get_running_loop()
-    async with browser_page() as page:
+    tenant = sys.argv[sys.argv.index("--tenant") + 1] if "--tenant" in sys.argv[:-1] else None
+    async with browser_page(tenant_id=tenant) as page:
         print(json.dumps({"ready": True}), flush=True)
         while line := await loop.run_in_executor(None, sys.stdin.readline):
             try:
