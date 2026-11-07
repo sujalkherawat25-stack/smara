@@ -652,7 +652,20 @@ async def by_text(page, text: str):
                            "you mean by its ref number from the page below (controls show what they belong to)")
         if n:
             return frame.locator("[data-smara-hit]").first, n
-    raise RefError(f"no visible control shows exactly {text!r}")
+    near = ""
+    try:                                                # what IS on the page that looks like it, so the agent stops guessing words
+        import difflib
+        snap = await snapshot(page)
+        names = {r: it["name"] for r, it in snap["items"].items() if it["name"]}
+        want = re.sub(r"\s+", " ", text).strip().lower()
+        words = set(want.split())
+        close = [r for r, n in names.items() if want in n.lower() or n.lower() in want or words & set(n.lower().split())]
+        close += [r for r in names if r not in close and difflib.SequenceMatcher(None, want, names[r].lower()).ratio() > 0.6]
+        near = "; closest on the page now: " + ", ".join(f"[{r}] {names[r][:50]!r}" for r in close[:5]) if close else ""
+    except Exception:
+        pass
+    raise RefError(f"no visible control shows exactly {text!r}{near}. If it is not listed it is not on screen yet: scroll, or choose "
+                   "the option it depends on (size, colour, variant) first, then click by its ref number")
 
 
 async def by_name(page, text: str) -> int:
