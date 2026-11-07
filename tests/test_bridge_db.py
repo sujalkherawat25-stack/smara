@@ -81,7 +81,7 @@ async def test_a_device_only_sees_its_own_shops_jobs(env):
 
 async def test_device_browser_round_trip_and_offline_message(env):
     db = DeviceBrowser(env.pool, step_timeout_s=10)
-    assert "offline" in (await db.step("s1", {"action": "navigate", "url": "https://example.com"}, tenant_id=env.t.id))["error"]
+    assert "not connected" in (await db.step("s1", {"action": "navigate", "url": "https://example.com"}, tenant_id=env.t.id))["error"]
     async with api(env) as http:
         token, _ = await pair(env, http)
         out, _ = await asyncio.gather(db.step("s1", {"action": "navigate", "url": "https://example.com"}, tenant_id=env.t.id),
@@ -473,7 +473,7 @@ async def test_an_offline_paired_pc_is_explained_to_the_agent_not_re_paired(env)
     async with env.pool.connection() as c:
         await c.execute("update bridge_devices set last_seen_at = now() - interval '2 hours'")
     out = await router.step("s9", {"action": "navigate", "url": "https://www.indiamart.com/"}, tenant_id=env.t.id)
-    assert "already paired" in out["pc_helper"] and "Do NOT ask the owner to pair again" in out["pc_helper"]
+    assert "already paired" in out["error"] and "Do NOT ask the owner to pair again" in out["error"] and server.steps == []
     env.app.state.browsers = router
     res = await web.web_search(env.app, SessionCtx(id="w1", tenant_id=env.t.id, trust="TRUSTED"), {"query": "banarasi saree"})
     assert "already paired" in res["next"]
