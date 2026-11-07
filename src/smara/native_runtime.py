@@ -12,6 +12,7 @@ from importlib.metadata import version as distribution_version
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -192,7 +193,16 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         settings["mcp_servers.smara_readers.env.PYTHONPATH"] = str((source_root() / "src").resolve())
     if os.getenv("SMARA_DESKTOP_CREDENTIALS"):
         settings["mcp_servers.smara_readers.env.SMARA_DESKTOP_CREDENTIALS"] = str(Path(os.environ["SMARA_DESKTOP_CREDENTIALS"]).resolve())
-    if browser_origins:
+    npx = shutil.which("npx") if browser_origins else None
+    if browser_origins and npx:
+        # The browser tool Codex users plug in: Microsoft's Playwright MCP, one plain tool per action.
+        from .native_browser import configured_origins, ANY_PUBLIC_SITE
+        from .native_playwright import settings as playwright_settings
+        from .munim_bridge import find_browser
+        settings.update(playwright_settings(npx, configured_origins(browser_origins), ANY_PUBLIC_SITE, workspace.resolve(),
+                                            (home / "playwright-profile").resolve(), find_browser("auto")))
+    elif browser_origins:
+        # No Node.js on this PC: Smara's own browser tools, on the same engine as the hosted agent.
         from .native_browser import configured_origins, LOOK_ONLY, TOOLS as browser_tools
         configured_origins(browser_origins)
         browser_args = (["--native-browser"] if getattr(sys, "frozen", False) else ["-m", "smara.native_browser"])
