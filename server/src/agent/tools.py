@@ -78,8 +78,9 @@ TOOLS = [
     _fn("read_attachment", "Read ANY file the owner attached: PDF, Word, PowerPoint, text, photo or scan (OCR), voice note, "
         "or a zip (lists what is inside). Returns the text so you can answer from it. For spreadsheets use inspect_and_import_file; "
         "for heavy processing use run_python.", {"file_ref": _S}, ["file_ref"]),
-    _fn("inspect_and_import_file", "Open a file attached to this conversation. mode=inspect previews the rows "
-        "and totals; mode=import loads them into the ledger and reports sheet vs ledger totals to verify.",
+    _fn("inspect_and_import_file", "Open a file attached to this conversation: an Excel/CSV sheet, or a Tally Prime XML export "
+        "(sales invoices are read directly). mode=inspect previews the rows and totals; mode=import loads them into the ledger "
+        "and reports sheet vs ledger totals to verify.",
         {"file_ref": _S, "mode": {"type": "string", "enum": ["inspect", "import"]}}, ["file_ref", "mode"]),
     _fn("browser_step", "Drive the browser like a person: one step, then you get the page back. The result has url, title, "
         "changes (exactly what your step changed: new or gone controls, labels that changed, messages the site showed), page "

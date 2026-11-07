@@ -17,7 +17,7 @@ from src.ingest.importer import import_rows
 from src.ingest.media import download_media, read_image
 from src import tenants
 from src.ingest.media import media_token
-from src.ingest.sheet_mapper import map_sheet
+from src.ingest.sheet_mapper import SheetRow, map_sheet
 from src.loop.outbound import record
 from src.loop.owner_channel import send_to_owner
 from src.loop.whatsapp import from_shop, reminder_params, owner_approval_card, template_message, text_message
@@ -39,16 +39,41 @@ async def _fetch(app, file_ref: str, ctx: SessionCtx | None = None) -> tuple[byt
     return data, mime, filename
 
 
+async def tally_rows(app, filename: str, data: bytes, known: dict) -> tuple[list[SheetRow], list[str]]:
+    """A Tally Prime XML export's sales invoices. The file is read in the sandbox by the same helper the agent uses
+    (it cleans Tally's bad characters), so the XML never gets parsed here."""
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", filename)[:80] or "daybook.xml"
+    code = (f"import munim_helpers as mh\n"
+            f"rows = mh.tally_receivables('in/{name}')\n"
+            "RESULT = [{'party': r['party'], 'phone': r['phone'], 'invoice': r['invoice'],\n"
+            "           'due': r['due_date'].isoformat() if r['due_date'] else None, 'rupees': float(r['amount'])} for r in rows]\n")
+    res = await app.state.sandbox.run(code, {name: data})
+    if res.get("error") or res.get("exit_code") not in (0, None) or not isinstance(res.get("result"), list):
+        return [], [f"could not read the Tally file: {(res.get('error') or res.get('stderr') or 'no sales found')[:200]}"]
+    rows, skipped = [], []
+    for r in res["result"]:
+        phone = re.sub(r"\D", "", str(r.get("phone") or "")) or known.get(r["party"], "")
+        if not r.get("due") or not r.get("invoice") or not r.get("rupees"):
+            skipped.append(f"{r.get('party')} {r.get('invoice')}: missing invoice, date or amount")
+            continue
+        rows.append(SheetRow(r["party"], phone, str(r["invoice"]), round(float(r["rupees"]) * 100), date.fromisoformat(r["due"])))
+    return rows, skipped
+
+
 async def inspect_and_import_file(app, ctx: SessionCtx, args: dict) -> dict:
     data, mime, filename = await _fetch(app, args["file_ref"], ctx)
-    if not filename.lower().endswith((".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".txt")):
+    is_tally = filename.lower().endswith(".xml") and (b"TALLYMESSAGE" in data[:20000].upper() or b"ENVELOPE" in data[:20000].upper())
+    if not is_tally and not filename.lower().endswith((".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".txt")):
         if mime.startswith("image/"):
             return {"kind": "image", "ocr": await read_image(app.state.llm, data, mime)}
-        return {"error": f"unsupported file {filename!r}; send .xlsx, .xls or .csv"}
+        return {"error": f"unsupported file {filename!r}; send .xlsx, .xls, .csv or a Tally Prime XML export"}
     async with app.state.pool.connection() as conn:           # customers already on file supply missing mobile numbers
         known = {r["canonical_name"]: r["whatsapp_phone"] for r in await (await conn.execute(
             "SELECT canonical_name, whatsapp_phone FROM parties WHERE tenant_id = %s", (ctx.tenant_id,))).fetchall()}
-    rows, skipped = map_sheet(filename, data, known)
+    if is_tally:
+        rows, skipped = await tally_rows(app, filename, data, known)
+    else:
+        rows, skipped = map_sheet(filename, data, known)
     total = sum(r.amount_paise for r in rows)
     preview = {"rows_found": len(rows), "sheet_total_rupees": total / 100, "skipped": skipped[:10],
                "sample": [{"party": r.party, "invoice": r.invoice_ref, "rupees": r.amount_paise / 100,
