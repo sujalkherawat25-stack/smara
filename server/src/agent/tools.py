@@ -123,6 +123,13 @@ TOOLS = [
         "mh.write_xlsx({'Sheet': DataFrame}, 'out/report.xlsx') writes a formatted Excel file. Make the file type the "
         "owner asked for (PDF means .pdf, Excel means .xlsx), not a CSV. Always print or RESULT the totals you computed so you can verify them.",
         {"code": _S, "file_refs": {"type": "array", "items": _S}}, ["code"]),
+    _fn("pc_files", "Reach the Smara Shared folder on the owner's own PC (only that folder, only text files). action=list shows "
+        "what is in it, read opens a text file, write saves a new text file there (the owner approves each write). Use it when the "
+        "owner says 'save this on my PC', 'what is in my Smara folder' or asks you to use a file they left on their PC.",
+        {"action": {"type": "string", "enum": ["list", "read", "write"]},
+         "path": {"type": "string", "description": "relative to the Shared folder, e.g. 'bills/oct.csv'; empty for the folder itself"},
+         "text": {"type": "string", "description": "write: the full file content"},
+         "overwrite": {"type": "boolean", "description": "write: replace a file that already exists"}}, ["action"]),
     _fn("send_whatsapp_message", "Send a WhatsApp message. to='owner' messages the shop owner directly; "
         "to=<party_id> messages a customer and needs the owner's approval first.",
         {"to": _S, "text": _S, "obligation_id": _S}, ["to", "text"]),

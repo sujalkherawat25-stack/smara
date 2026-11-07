@@ -49,6 +49,8 @@ BASE = (
     "(network errors, access denied), do not keep retrying. If a result has pc_helper or next saying the owner's PC is already paired, "
     "follow it: never ask them to pair again or to type commands; tell them the PC just needs to be on and offer to retry "
     "with schedule_followup. Only if they have never connected a PC, suggest Smara Desktop (Settings > Browser) or 'pair browser'.\n"
+    "- The owner's PC also has a Smara Shared folder you can reach with pc_files (list, read a text file, save a new one after their tap). "
+    "It is the only place on their PC you can touch. If it says no PC is paired or it is not connected, say so plainly.\n"
     "- How to drive the browser (the way the best browser agents work): every page result lists the controls as "
     "'[ref] role \"name\" state'. Act ONLY by a ref from the LATEST page; never invent selectors or reuse refs from an old "
     "page. After each step read 'changes' first: it says exactly what your step did (a label that changed, e.g. "

@@ -105,6 +105,8 @@ def tier_of(name: str, args: dict) -> str:
         return "T0" if args.get("action") in BROWSER_READ else "T2"
     if name == "send_whatsapp_message":
         return "T1" if args.get("to") == "owner" else "T2"
+    if name == "pc_files":
+        return "T2" if args.get("action") == "write" else "T0"
     if name == "propose_ledger_adjustment":
         return "T3"
     return "?"
@@ -124,6 +126,11 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
             return Decision("deny", tier, "a counterparty session may only touch its own party")
     if name == "browser_step" and args.get("action") not in BROWSER_READ | BROWSER_ACT:
         return Decision("deny", tier, "unsupported browser action")
+    if name == "pc_files":
+        if ctx.trust != "TRUSTED":
+            return Decision("deny", tier, "only a conversation with the owner can reach the files on their PC")
+        if args.get("action") not in ("list", "read", "write"):
+            return Decision("deny", tier, "action must be list, read or write")
     if name == "read_attachment" and args.get("file_ref") not in ctx.files:
         return Decision("deny", tier, "only files attached to this conversation can be opened")
     if name == "inspect_and_import_file":
@@ -219,6 +226,9 @@ def approval_text(name: str, args: dict, page: dict | None = None, typed: str = 
         if args.get("new_due_date"):
             parts.append(f"pay by {args['new_due_date']}")
         return "Change this invoice? " + ", ".join(parts)
+    if name == "pc_files":
+        return (f"Save this file on your PC (Smara Shared folder)?\n\n{str(args.get('path') or '')[:120]}"
+                f"{' (replaces the existing file)' if args.get('overwrite') else ''}\n\n\"{str(args.get('text') or '')[:400]}\"")
     if name == "hand_off_to_owner":
         return f"Your turn in the browser: {str(args.get('reason', ''))[:600]}\n\nDo it yourself, then tap Done and I will carry on."
     if name == "browser_step" and typed and args.get("action") == "press":

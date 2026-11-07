@@ -191,6 +191,9 @@ async def open_gate(app, ctx: SessionCtx, tenant, name: str, args: dict, card: s
 async def execute_approved(app, ctx: SessionCtx, tenant, name: str, args: dict) -> dict:
     if name == "browser_step":
         return await app.state.browsers.step(ctx.id, args, tenant_id=ctx.tenant_id)
+    if name == "pc_files":
+        from src.agent import pc
+        return await pc.pc_files(app, ctx, args)
     if name == "hand_off_to_owner":
         page = await app.state.browsers.step(ctx.id, {"action": "read"}, tenant_id=ctx.tenant_id) if app.state.browsers.alive(ctx.id) else {}
         return {"owner_done": True, "note": "The owner says they finished their part. Check the page below and continue.", **page}
