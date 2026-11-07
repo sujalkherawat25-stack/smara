@@ -129,6 +129,20 @@ async def test_a_new_page_moves_to_the_owners_pc_once_its_helper_is_online(env):
     assert "a" not in server.open                                                                    # the server page was closed
 
 
+async def test_a_paired_pc_is_the_only_browser_never_silently_the_server(env):
+    server = FakeBrowsers()
+    router = BrowserRouter(env.pool, server, DeviceBrowser(env.pool, step_timeout_s=10))
+    async with api(env) as http:
+        await pair(env, http)
+    async with env.pool.connection() as conn:                       # the PC was last seen 30 s ago: busy on a slow page, still there
+        await conn.execute("UPDATE bridge_devices SET last_seen_at = now() - interval '30 seconds'")
+    assert (await device.reachable_device(env.pool, env.t.id)) is not None
+    async with env.pool.connection() as conn:                       # gone for an hour: say so, do not use the server browser
+        await conn.execute("UPDATE bridge_devices SET last_seen_at = now() - interval '1 hour'")
+    out = await router.step("z", {"action": "navigate", "url": "https://example.com"}, tenant_id=env.t.id)
+    assert "not connected right now" in out["error"] and server.steps == [] and router.where("z") == ""
+
+
 # ---------------------------------------------------------------- owner chat commands
 
 async def test_owner_pairs_and_unpairs_from_chat(env):
