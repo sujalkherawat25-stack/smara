@@ -21,7 +21,7 @@ from src.loop import tasks
 from src.loop.owner_channel import flush_held
 from src.loop.scheduler import IST, digest_window_open, tick
 
-NIGHT = Settings(quiet_start_hour=21, quiet_end_hour=8)
+NIGHT = Settings(quiet_start_hour=21, quiet_end_hour=8, reminder_send_mode="smara")
 
 
 def at(h, m=0, day=4):
@@ -175,7 +175,7 @@ async def test_failed_task_retries_then_gives_up(env):
 # ------------------------------------------------------------------ quiet hours
 
 async def test_nothing_proactive_at_night_then_released_when_the_shop_opens(env, monkeypatch):
-    env.app.state.settings = Settings(quiet_start_hour=21, quiet_end_hour=8, wa_owner_template="owner_waiting")
+    env.app.state.settings = Settings(quiet_start_hour=21, quiet_end_hour=8, wa_owner_template="owner_waiting", reminder_send_mode="smara")
     env.app.state.llm.enabled = False                                            # deterministic (no model) path
     async with env.pool.connection() as c:
         await c.execute("update obligations set next_followup_at = now() - interval '1 hour' where invoice_ref = 'INV-1'")
@@ -201,7 +201,7 @@ async def test_nothing_proactive_at_night_then_released_when_the_shop_opens(env,
 
 
 async def test_telegram_owner_gets_held_cards_when_the_shop_opens(env, monkeypatch):
-    env.app.state.settings = Settings(quiet_start_hour=21, quiet_end_hour=8)
+    env.app.state.settings = Settings(quiet_start_hour=21, quiet_end_hour=8, reminder_send_mode="smara")
     env.app.state.llm.enabled = False
 
     class TG:
