@@ -40,8 +40,8 @@ def test_tally_bills_receivable_export_uses_customers_on_file_for_phones():
              [date(2026, 9, 1), "INV-77", "Ravi Traders", 50000, date(2026, 10, 1)],
              ["Total", None, None, 50000, None]]
     data = xlsx(tally)
-    rows, skipped = map_sheet("t.xlsx", data)
-    assert not rows and "Ravi Traders" in skipped[0] and "phone" in skipped[0]
+    rows, skipped = map_sheet("t.xlsx", data)                 # no number on file: kept, with no phone (never messaged)
+    assert [r.invoice_ref for r in rows] == ["INV-77"] and rows[0].phone == "" and not skipped
     rows, skipped = map_sheet("t.xlsx", data, {"ravi traders": "9812345678"})
     assert [r.invoice_ref for r in rows] == ["INV-77"] and rows[0].phone == "919812345678" and not skipped
 

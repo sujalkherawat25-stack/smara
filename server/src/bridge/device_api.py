@@ -1,11 +1,14 @@
 """HTTP side of the Smara Browser Bridge (the PC connects out to these)."""
 import asyncio
+import logging
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from src.bridge import device
 from src.ingest.tally_sync import SyncBody, apply_sync
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/bridge")
 
@@ -63,4 +66,28 @@ async def result(body: ResultBody, request: Request, authorization: str | None =
 async def sync_tally(body: SyncBody, request: Request, authorization: str | None = Header(default=None)):
     """The Desktop app posts the shop's open receivables and payables from Tally; nothing is sent to anyone by this."""
     dev = await _device(request, authorization)
-    return await apply_sync(request.app.state.pool, str(dev["tenant_id"]), str(dev.get("id") or ""), body)
+    pool, tenant_id = request.app.state.pool, str(dev["tenant_id"])
+    result = await apply_sync(pool, tenant_id, str(dev.get("id") or ""), body)
+    if result.get("closed") or result.get("close_skipped"):
+        await _tell_owner_about_sync(request.app, tenant_id, result)
+    return result
+
+
+async def _tell_owner_about_sync(app, tenant_id: str, result: dict) -> None:
+    """Closed invoices are a change the owner should see; a refused close is one they must check."""
+    from src import tenants
+    from src.loop.owner_channel import send_to_owner
+    from src.loop.whatsapp import text_message
+    tenant = await tenants.by_id(app.state.pool, tenant_id)
+    if tenant is None:
+        return
+    lines = []
+    if result.get("closed"):
+        names = ", ".join(result.get("closed_parties") or [])
+        lines.append(f"Tally sync: {result['closed']} bill paid ho gaye (Tally mein ab baaki list mein nahi): {names}.")
+    if result.get("close_skipped"):
+        lines.append(f"Dhyan dijiye: {result['close_skipped']}")
+    try:
+        await send_to_owner(app, tenant, text_message(tenant.owner_phone, "\n".join(lines)), kind="owner_text")
+    except Exception:
+        log.exception("could not tell the owner about a Tally sync for %s", tenant_id)

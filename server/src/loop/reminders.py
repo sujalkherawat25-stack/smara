@@ -51,12 +51,13 @@ async def claim_due(pool, now: datetime, limit: int = 20) -> list[dict]:
                       WHERE state IN ('ACTIVE', 'DISPATCHED', 'SNOOZED')
                         AND next_followup_at <= %s AND attempt_count < %s
                         AND NOT EXISTS (SELECT 1 FROM parties x WHERE x.id = obligations.party_id AND x.opted_out_at IS NOT NULL)
+                        AND EXISTS (SELECT 1 FROM parties x WHERE x.id = obligations.party_id AND x.whatsapp_phone IS NOT NULL)
                       ORDER BY next_followup_at LIMIT %s FOR UPDATE SKIP LOCKED)
                    UPDATE obligations o SET state = 'WAITING_OWNER_APPROVAL'
                      FROM due, parties p
                     WHERE o.id = due.id AND p.id = o.party_id
                 RETURNING o.id, o.tenant_id, o.party_id, o.invoice_ref, o.amount_paise, o.due_date,
-                          o.attempt_count, p.canonical_name, due.prev""",
+                          o.attempt_count, o.source, p.canonical_name, due.prev""",
                 (now, MAX_ATTEMPTS, limit),
             )
             rows = await cur.fetchall()
@@ -101,6 +102,21 @@ def reminder_card(to: str, o: dict, draft: str, context: str, mode: str = "smara
 
 
 WINDOW = timedelta(hours=24)
+STALE_SYNC = timedelta(hours=24)
+
+
+async def stale_sync_note(pool, tenant_id: str, now: datetime) -> str:
+    """A warning when the Tally snapshot is old: a bill may already be paid. Empty when the sync is recent."""
+    async with pool.connection() as conn:
+        row = await (await conn.execute(
+            "SELECT max(created_at) AS last FROM tally_syncs WHERE tenant_id = %s", (tenant_id,))).fetchone()
+    last = row["last"] if row else None
+    if last is None:
+        return "Note: Tally se abhi tak sync nahi hua; ye bill pehle hi chuk gaya ho sakta hai."
+    if now - last > STALE_SYNC:
+        hours = int((now - last).total_seconds() // 3600)
+        return f"Note: Tally se last sync {hours} ghante pehle hua. Ye bill shayad pehle hi chuk gaya ho."
+    return ""
 
 
 def _debtor_payload(o: dict, tenant, settings, now: datetime) -> dict:
@@ -129,6 +145,9 @@ async def decide_reminder(app, tenant_id: str, obligation_id: str, action: str, 
             o = await cur.fetchone()
             if o is None:
                 return None
+            if action == "send" and not o["whatsapp_phone"]:
+                return (f"{o['canonical_name']} ka WhatsApp number saved nahi hai, isliye Smara se message nahi ja sakta. "
+                        "Number bhejiye (jaise: " + o['canonical_name'] + " 98xxxxxxxx), ya 'Send myself' se apne WhatsApp se bhejiye.")
             if sends and o["opted_out_at"]:
                 await conn.execute("UPDATE obligations SET state = 'SNOOZED', next_followup_at = %s WHERE id = %s",
                                    (now + timedelta(days=30), obligation_id))

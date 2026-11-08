@@ -49,4 +49,9 @@ async def build_digest(pool, tenant_id: str, today: date) -> str:
     waiting = agg["waiting"] + pending_adj
     if waiting:
         lines.append(f"\n{waiting} item(s) waiting for your approval above.")
+    from src.ingest.customer_number import missing_numbers
+    no_number = await missing_numbers(pool, tenant_id)
+    if no_number:   # these customers can only be reminded once the owner gives a number
+        lines.append("\nNumber chahiye (reminder ke liye): " + ", ".join(no_number)
+                     + ". Likh dijiye, jaise: 'Ravi Traders 98xxxxxxxx'.")
     return "\n".join(lines)
