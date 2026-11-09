@@ -25,6 +25,9 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
       return [slots[index], value => { const next = typeof value === "function" ? value(slots[index]) : value; if (!Object.is(next, slots[index])) { slots[index] = next; dirty = true; } }];
     },
     useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
+    // Callbacks and memo only matter for re-render cost; the harness re-runs the render, so identity is not needed here.
+    useCallback(callback) { cursor++; return callback; },
+    memo(component) { return component; },
     useEffect(effect, deps) {
       const index = cursor++, previous = slots[index];
       if (!previous || !deps || deps.some((value, i) => !Object.is(value, previous.deps[i]))) {
@@ -79,6 +82,18 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
   const context = evaluate("../src/nativeContext.ts", () => assert.fail("Context formatting must have no side-effect imports"));
   const terminalProtocol = evaluate("../src/terminalProtocol.ts", () => assert.fail("Terminal protocol must have no side-effect imports"));
   const chatStatus = evaluate("../src/chatStatus.ts", () => assert.fail("Status formatting must have no side-effect imports"));
+  const transcriptWindow = evaluate("../src/transcriptWindow.ts", () => assert.fail("Windowing must have no side-effect imports"));
+  const settingsPolicy = evaluate("../src/nativeSettingsPolicy.ts", () => assert.fail("Settings policy must have no side-effect imports"));
+  function Markdown() {}
+  function Voice() {}
+  const transcriptItem = evaluate("../src/TranscriptItem.tsx", name => {
+    if (name === "react") return hooks;
+    if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
+    if (name.endsWith("NativeMarkdown")) return { default: Markdown, __esModule: true };
+    if (name.endsWith("NativeCommand")) return { default: Command, __esModule: true };
+    if (name.endsWith("NativeVoice")) return { default: () => null, ReadAloud: Voice, __esModule: true };
+    assert.fail(`Unexpected import ${name}`);
+  });
   const goal = evaluate("../src/goalApi.ts", n => n === "@tauri-apps/api/core" ? { invoke: async () => ({}) } : assert.fail(n));
   function Settings() {}
   function Changes() {}
@@ -89,6 +104,9 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     if (name === "react") return hooks;
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
     if (name === "@tauri-apps/api/core") return { invoke: async () => ({ built: true, windowsTerminalBuild: terminalPlatformSupported }) };
+    if (name.endsWith("TranscriptItem")) return transcriptItem;
+    if (name.endsWith("transcriptWindow")) return transcriptWindow;
+    if (name.endsWith("nativeSettingsPolicy")) return settingsPolicy;
     if (name.endsWith("NativeSettings")) return { default: Settings, __esModule: true };
     if (name.endsWith("NativeMemorySettings")) return { default: () => null, memoryShouldBeOn: () => false, __esModule: true };
     if (name.endsWith("NativeGoals")) return { default: () => null, __esModule: true };
@@ -319,7 +337,7 @@ test("setup help documents scope and gates provider checks behind confirmation",
   assert.match(settings, /Full desktop\/computer control and unattended company operations are not enabled/);
 });
 
-test("settings pause the idle runtime and restore the same chat without replay", async () => {
+test("closing Settings restores the same chat without replay", async () => {
   const f = fixture(); await f.flush();
   await f.button("Saved chat").props.onClick(); await f.flush();
   await f.button("⚙ Settings").props.onClick(); await f.flush();
@@ -327,6 +345,19 @@ test("settings pause the idle runtime and restore the same chat without replay",
   f.settings().onClose(); await f.flush();
   assert.equal(f.calls.filter(call => call.method === "thread/resume").length, 2);
   assert.equal(f.calls.some(call => call.method === "turn/start"), false);
+});
+
+test("opening Settings keeps the chat connected; only a save that needs a restart stops the runtime", async () => {
+  const f = fixture(); await f.flush();
+  await f.button("Saved chat").props.onClick(); await f.flush();
+  const stops = () => f.calls.filter(call => call.method === "stop").length;
+  const before = stops();
+  await f.button("⚙ Settings").props.onClick(); await f.flush();
+  assert.equal(stops(), before, "opening Settings must not stop the runtime");
+  await f.settings().call("save_memory", { secret: "", memory: { enabled: true, scope: "personal", user_id: "u" } }); await f.flush();
+  assert.equal(stops(), before, "a memory save must not stop the runtime");
+  await f.settings().call("save_model", { profile: { id: "one", label: "Offline one", model: "offline-one" } }); await f.flush();
+  assert.equal(stops(), before + 1, "saving the running model stops the runtime first");
 });
 
 test("composer model selection restarts the idle context and preserves history and draft", async () => {
