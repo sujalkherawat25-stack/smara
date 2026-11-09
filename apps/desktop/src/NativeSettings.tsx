@@ -51,7 +51,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
   const save = async (operation: string, args: Record<string, unknown>) => {
     if (pending || (locked && operation !== "bootstrap")) return;
     onPendingChange(true); setPending(true); setError(""); setNotice("");
-    try { onUpdate(await (call ?? nativeSettings)(operation, args)); setNotice("Saved. Changes apply when you return to chat."); }
+    try { onUpdate(await (call ?? nativeSettings)(operation, args)); setNotice("Saved. Memory and search apply right away; model, tool and site changes apply to your next message."); }
     catch (reason) { setError(String(reason)); }
     finally { onPendingChange(false); setPending(false); setSecret(""); setModel(current => ({ ...current, api_key: "" })); }
   };
