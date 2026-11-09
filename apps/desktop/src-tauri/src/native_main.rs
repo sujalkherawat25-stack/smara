@@ -166,8 +166,17 @@ fn cached_snapshot_or_refresh() -> Result<Snapshot, String> {
 fn refresh_snapshot() {
     if SNAPSHOT_LOADING.swap(true, Ordering::SeqCst) { return; }
     std::thread::spawn(|| {
-        let _ = load_snapshot();
+        // A settings change during a load makes that load discard its result. Load again, a few times at most,
+        // so the cache is not left empty until the next terminal send.
+        let mut epoch = SNAPSHOT_EPOCH.load(Ordering::SeqCst);
+        for _ in 0..3 {
+            let _ = load_snapshot();
+            if SNAPSHOT_EPOCH.load(Ordering::SeqCst) == epoch { break; }
+            epoch = SNAPSHOT_EPOCH.load(Ordering::SeqCst);
+        }
         SNAPSHOT_LOADING.store(false, Ordering::SeqCst);
+        // An invalidation that landed after the last check was refused while the flag was set: queue one more load.
+        if SNAPSHOT_EPOCH.load(Ordering::SeqCst) != epoch { refresh_snapshot(); }
     });
 }
 

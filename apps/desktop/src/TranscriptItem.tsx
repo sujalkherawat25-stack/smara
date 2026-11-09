@@ -3,11 +3,10 @@ import NativeMarkdown from "./NativeMarkdown";
 import NativeCommand from "./NativeCommand";
 import { ReadAloud } from "./NativeVoice";
 import type { ViewItem } from "./nativeView";
+import { sameTranscriptRow } from "./transcriptWindow";
 
 type Props = {
   item: ViewItem;
-  /** transcriptRowKey(item): the row re-renders only when this changes (plus busy/copied). */
-  rowKey: string;
   busy: boolean;
   copied: boolean;
   onCopy: (item: ViewItem) => void;
@@ -29,7 +28,5 @@ function TranscriptItemView({ item, busy, copied, onCopy, onEdit, onPreviewFile 
   );
 }
 
-/** Rows are memoised on their key, so a streaming delta re-renders only the row it changed. */
-export const TranscriptItem = memo(TranscriptItemView, (prev, next) =>
-  prev.rowKey === next.rowKey && prev.busy === next.busy && prev.copied === next.copied
-  && prev.onCopy === next.onCopy && prev.onEdit === next.onEdit && prev.onPreviewFile === next.onPreviewFile);
+/** A streaming delta re-renders only the row whose object changed; the others are reused (see sameTranscriptRow). */
+export const TranscriptItem = memo(TranscriptItemView, sameTranscriptRow);

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TranscriptItem } from "./TranscriptItem";
-import { INITIAL_WINDOW, transcriptRowKey, visibleWindow, widenWindow } from "./transcriptWindow";
+import { INITIAL_WINDOW, visibleWindow, widenWindow } from "./transcriptWindow";
 import { runtimeRestartNeeded } from "./nativeSettingsPolicy";
 import { invoke } from "@tauri-apps/api/core";
 import NativeSettings from "./NativeSettings";
@@ -616,6 +616,7 @@ export default function NativeApp() {
       clientRef.current = client;
       await client.connect(workspace, profile, toolsEnabled, workersEnabled, browserOrigins.split(/\s+/).filter(Boolean));
       setConnected(true); setStatus("Ready");
+      startedOptions.current = optionsKey(toolsEnabled, workersEnabled, browserOrigins);
       const list = await client.request<{ data: Thread[]; nextCursor?: string | null }>("thread/list", threadListOptions(workspace, chatSort, showArchived));
       setThreads(list.data); setNextCursor(list.nextCursor ?? null);
       if (restoreId) {
@@ -844,6 +845,9 @@ export default function NativeApp() {
       setStatus("Working");
     } catch (reason) { setError(String(reason)); }
   };
+  /** The tool, worker and site options the live runtime was started with. Only a new start can change them. */
+  const startedOptions = useRef("");
+  const optionsKey = (tools: boolean, workers: boolean, origins: string) => JSON.stringify([tools, workers, origins.split(/\s+/).filter(Boolean)]);
   const disconnect = async (preserveConversation = false, reason = "Updating project…") => {
     if (lifecycleRef.current) return false;
     restoreThreadRef.current = preserveConversation ? threadRef.current || restoreThreadRef.current : "";
@@ -943,6 +947,15 @@ export default function NativeApp() {
     }
     return nativeSettings(operation, values);
   };
+  /** Closing Settings: if the tool, worker or site options differ from what the runtime started with, restart now.
+   *  The chat accepts no input until the restart finishes, so the next message runs with what the panel shows. */
+  const closeSettings = async () => {
+    if (settingsPendingRef.current) return;
+    setSettingsOpen(false);
+    if (connected && startedOptions.current && optionsKey(toolsEnabled, workersEnabled, browserOrigins) !== startedOptions.current) {
+      if (await disconnect(true, "Restarting Smara…")) await connect();
+    }
+  };
   const goalInThisConversation = !!currentGoal && (!currentGoal.spec?.origin_thread_id || currentGoal.spec?.origin_thread_id === threadId);
   const goalInAnotherConversation = !!currentGoal?.spec?.origin_thread_id
     && currentGoal.spec?.origin_thread_id !== threadId
@@ -1027,7 +1040,9 @@ export default function NativeApp() {
     return () => window.removeEventListener("keydown", shortcut);
   }, [navigationLocked, settingsOpen, connected]);
   useEffect(() => {
-    if (built === true && workspace && profile && !settingsOpen) void connect();
+    // Closing Settings must not restart a runtime that is already connected: closeSettings restarts it only when
+    // the tool, worker or site options changed. Connect here only when nothing is connected yet.
+    if (built === true && workspace && profile && !settingsOpen && !connected) void connect();
     // Context changes prepare a new transport, not a turn. Crashes/timeouts do
     // not trigger a retry loop or automatically repeat user work.
   }, [built, workspace, profile, settingsOpen]);
@@ -1055,7 +1070,7 @@ export default function NativeApp() {
       }}>Stop computer control</button></div>}
       {built === false && <div className="native-warning">Native runtime is missing. Build scripts/build-smara-native.ps1; no old-engine fallback is used.</div>}
       {error && <div role="alert" className="native-error">{error}{!settingsOpen && !connected && (!busy || uncertain) && <button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Retry setup</button>}<button aria-label="Dismiss error" onClick={() => setError("")}>×</button></div>}
-      {settingsOpen && setup ? <NativeSettings initialTab={settingsTab} setup={setup} locked={busy || connecting || loadingThread} call={settingsCall} onUpdate={updateSetup} onClose={() => { if (!settingsPendingRef.current) setSettingsOpen(false); }} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : <>
+      {settingsOpen && setup ? <NativeSettings initialTab={settingsTab} setup={setup} locked={busy || connecting || loadingThread} call={settingsCall} onUpdate={updateSetup} onClose={() => void closeSettings()} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : <>
       <div className={`native-work-area ${panel ? "with-panel" : ""}`}>
       <div className="native-chat-area">
       {goalInAnotherConversation && <div className="goal-other-chat" role="status"><span><strong>Background goal {goalLabel(currentGoal!.state).toLowerCase()}</strong><small>Chat and project activity are paused while it works.</small></span><button disabled={connecting || loadingThread} onClick={() => void openGoalConversation()}>Open task chat</button></div>}
@@ -1114,7 +1129,7 @@ export default function NativeApp() {
         {!!workers.length && <section className="native-workers"><strong>Workers · {workers.filter(worker => worker.status === "completed").length}/{workers.length} complete · changes are not auto-merged</strong>{liveWorkers && <button disabled={connecting || loadingThread} title="Stops this chat's native runtime and all its workers; saved history is kept" onClick={() => void stopWorkers()}>Stop workers</button>}{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status}{worker.activity && <span> · {worker.activity}{worker.lastActivityAt && ` · ${Math.max(0, Math.floor((activityClock - worker.lastActivityAt) / 1000))}s ago`}</span>} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
         {!items.length && <div className="native-empty"><h1>{project?.label || "Smara"}</h1>{!profile ? <small className="empty-hint">Add a model in Settings to get started.</small> : <small className="empty-hint">{connecting ? "Preparing project…" : "Type a message below, or / for commands."}</small>}</div>}
         {windowed.hidden > 0 && <button className="text-button show-earlier" onClick={() => setVisibleLimit(widenWindow)}>Show earlier ({windowed.hidden.toLocaleString()})</button>}
-        {windowed.visible.map(item => <TranscriptItem key={item.id} item={item} rowKey={transcriptRowKey(item)} busy={busy} copied={copiedItemId === item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} />)}
+        {windowed.visible.map(item => <TranscriptItem key={item.id} item={item} busy={busy} copied={copiedItemId === item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} />)}
         {approvals.map(approval => <section className="native-approval" key={approval.id}>
           {approval.params.threadId !== undefined && approval.params.threadId !== threadId && <p>Worker / other native conversation: {String(approval.params.threadId)}. This request is not auto-approved.</p>}
           {!approvalRelevant(approval) && <p>This request belongs to a different conversation. No permission can be granted from this chat.{typeof approval.params.threadId === "string" && threads.some(thread => thread.id === approval.params.threadId) && <button disabled={busy || connecting || loadingThread} onClick={() => void selectThread(String(approval.params.threadId))}>Open requesting conversation</button>}</p>}

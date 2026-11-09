@@ -371,8 +371,10 @@ fn stop_session(expected_generation: Option<&str>) -> Result<(), String> {
             let _ = input.send("{\"method\":\"smara/shutdown\"}".to_owned());
             drop(input);
         }
-        // Give the runtime 10 s to finish its own cleanup, then kill it. The old 55 s wait froze settings saves.
-        for _ in 0..100 {
+        // Allow the native EOF cleanup (bounded to 45s by the bootstrap) to finish before killing its transport
+        // process. Stopping sooner could leave workers or Windows-sandbox cleanup unfinished. This wait runs on
+        // a blocking worker (native_stop), and the UI stays locked while a restart is in progress.
+        for _ in 0..550 {
             if running.process.try_wait().map_err(|_| "Cannot inspect stopping process")?.is_some() {
                 *lock = None;
                 return Ok(());
@@ -382,7 +384,7 @@ fn stop_session(expected_generation: Option<&str>) -> Result<(), String> {
         let pid = running.process.id();
         running.process.kill().map_err(|_| "Could not stop native transport")?;
         running.process.wait().map_err(|_| "Could not reap native transport")?;
-        log_line(&format!("native runtime pid {pid} did not exit within 10 s; killed it"));
+        log_line(&format!("native runtime pid {pid} did not exit within 55 s; killed it"));
         *lock = None;
     }
     Ok(())
