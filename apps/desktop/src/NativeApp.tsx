@@ -2,6 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { TranscriptItem } from "./TranscriptItem";
 import { INITIAL_WINDOW, visibleWindow, widenWindow } from "./transcriptWindow";
 import { runtimeRestartNeeded } from "./nativeSettingsPolicy";
+import "./ui/tokens.css";
+import { AgentRoster as AgentRosterList, type AgentDraft } from "./ui/AgentRoster";
+import { ToolGroup } from "./ui/ToolCard";
+import NativeFiles from "./ui/NativeFiles";
+import HostedPanel from "./ui/HostedPanel";
+import NativeBrowser from "./NativeBrowser";
+import NativeGoals from "./NativeGoals";
+import { EMPTY_ROSTER, agentById, chatCounts, chatsForAgent, developerInstructionsFor, type AgentRoster as RosterData } from "./agents";
+import { groupTranscript } from "./toolCards";
+import { hostedStatus, type HelperSnapshot } from "./hostedStatus";
 import { invoke } from "@tauri-apps/api/core";
 import NativeSettings from "./NativeSettings";
 import { memoryShouldBeOn } from "./NativeMemorySettings";
@@ -56,6 +66,10 @@ function terminalError(reason: unknown): string {
   }
   return message;
 }
+
+/** Right-pane tabs. The last one opened is saved in localStorage (for the next session's first open). */
+type Pane = "changes" | "terminal" | "browser" | "tasks" | "files" | "hosted";
+const PANE_KEY = "smara.lastPane";
 
 const NATIVE_DEVELOPER_INSTRUCTIONS = [
   "You are Smara. Be honest about tool outcomes. Do not claim tests passed without evidence. Ask before external writes, payments, publishing, or messaging people.",
@@ -113,7 +127,10 @@ export default function NativeApp() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [status, setStatus] = useState("Preparing project…");
-  const [panel, setPanel] = useState<"changes" | "terminal" | null>(null);
+  const [panel, setPanel] = useState<Pane | null>(null);
+  const [roster, setRoster] = useState<RosterData>(EMPTY_ROSTER);
+  const [selectedAgent, setSelectedAgent] = useState("");
+  const [helper, setHelper] = useState<HelperSnapshot>(undefined);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [terminalSession, setTerminalSession] = useState<TerminalSession | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
@@ -126,6 +143,38 @@ export default function NativeApp() {
   // How many of the newest transcript rows are rendered. Long chats show the latest 60 and reveal earlier rows on demand.
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_WINDOW);
   useEffect(() => { setVisibleLimit(INITIAL_WINDOW); }, [threadId]);
+  // Helper status for the hosted chip and panel. Read on start and every 30 s; the helper itself is never touched here.
+  useEffect(() => {
+    const load = () => { void invoke<HelperSnapshot>("bridge_state").then(value => setHelper(value)).catch(() => setHelper(null)); };
+    load();
+    const timer = setInterval(load, 30000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    try { if (panel) localStorage.setItem(PANE_KEY, panel); } catch { /* storage may be blocked */ }
+  }, [panel]);
+  // Every path that loads settings (startup, saves, project switches) goes through `setup`, so the roster follows it.
+  useEffect(() => {
+    if (!setup?.agents) return;
+    setRoster(setup.agents);
+    setSelectedAgent(current => current || setup.agents!.default);
+  }, [setup]);
+  /** Tag a new chat with the agent that was selected when it was started. Failure leaves the chat in the default agent. */
+  const assignChat = (chatId: string) => {
+    const agent = selectedAgent || roster.default;
+    void nativeSettings("agents", { action: "assign", thread_id: chatId, agent_id: agent })
+      .then(value => { if (value.agents) setRoster(value.agents); })
+      .catch(() => { /* The chat stays in the default agent. */ });
+  };
+  /** Developer instructions for a new chat: the Smara rules, then the selected agent's own instructions. */
+  const newChatInstructions = () => developerInstructionsFor(NATIVE_DEVELOPER_INSTRUCTIONS, agentById(roster, selectedAgent || roster.default));
+  const saveAgent = async (draft: AgentDraft) => {
+    const value = await nativeSettings("agents", { action: "save", agent: {
+      ...(draft.id ? { id: draft.id } : {}), name: draft.name, role: draft.role, icon: draft.icon, instructions: draft.instructions, preset: draft.preset,
+    } });
+    if (value.agents) { setRoster(value.agents); setSelectedAgent(current => current || value.agents!.default); }
+  };
+  const openPane = (next: Pane) => setPanel(current => current === next ? null : next);
   const [slashSelection, setSlashSelection] = useState(0);
   const threadRef = useRef("");
   const clientRef = useRef<NativeRpc | null>(null);
@@ -350,9 +399,9 @@ export default function NativeApp() {
         const client = clientRef.current;
         if (!client) throw new Error("The native chat session is not ready.");
         const result = await client.request<{ thread: Thread }>("thread/start", {
-          cwd: workspace, approvalPolicy: "on-request", sandbox: "workspace-write", developerInstructions: NATIVE_DEVELOPER_INSTRUCTIONS,
+          cwd: workspace, approvalPolicy: "on-request", sandbox: "workspace-write", developerInstructions: newChatInstructions(),
         });
-        threadRef.current = result.thread.id;
+        threadRef.current = result.thread.id; assignChat(result.thread.id);
         setThreadId(result.thread.id);
         setThreads(current => [result.thread, ...current.filter(thread => thread.id !== result.thread.id)]);
         void client.request("thread/name/set", { threadId: result.thread.id, name: prompt.slice(0, 72) }).catch(() => {});
@@ -750,8 +799,8 @@ export default function NativeApp() {
     try {
       let id = threadRef.current;
       if (!id) {
-        const result = await clientRef.current!.request<{ thread: Thread }>("thread/start", { cwd: workspace, approvalPolicy: "on-request", sandbox: "workspace-write", developerInstructions: NATIVE_DEVELOPER_INSTRUCTIONS });
-        id = result.thread.id; threadRef.current = id; setThreadId(id);
+        const result = await clientRef.current!.request<{ thread: Thread }>("thread/start", { cwd: workspace, approvalPolicy: "on-request", sandbox: "workspace-write", developerInstructions: newChatInstructions() });
+        id = result.thread.id; threadRef.current = id; setThreadId(id); assignChat(id);
         setThreads(current => [result.thread, ...current]);
       }
       const text = contextMessage(textToSend, filesToSend);
@@ -887,6 +936,7 @@ export default function NativeApp() {
   }, [setup?.memory?.configured, setup?.memory?.enabled]);
   const updateSetup = (value: NativeSetup) => {
     setSetup(value); setProfiles(value.profiles);
+    if (value.agents) { setRoster(value.agents); setSelectedAgent(current => current || value.agents!.default); }
     if (!value.profiles.some(model => model.id === profile)) setProfile("");
   };
   const newConversation = () => {
@@ -925,6 +975,10 @@ export default function NativeApp() {
   const project = setup?.preferences.projects.find(p => sameWorkspace(p.workspace, workspace));
   const navigationLocked = busy || connecting || loadingThread || settingsSaving || reviewBusy || goalPending || approvals.length > 0 || workers.some(workerOutstanding);
   const windowed = visibleWindow(items, visibleLimit);
+  const agentThreads = chatsForAgent(threads, roster, selectedAgent || roster.default);
+  const currentAgent = agentById(roster, selectedAgent || roster.default);
+  const activeProfile = setup?.profiles.find(item => item.id === profile);
+  const hosted = hostedStatus(helper);
   // Stable callbacks, so memoised rows are not re-rendered just because the parent did.
   const copyRef = useRef(copyMessage); copyRef.current = copyMessage;
   const editRef = useRef(editMessage); editRef.current = editMessage;
@@ -1049,11 +1103,12 @@ export default function NativeApp() {
   return <div className="native-app">
     <div className={`native-layout${settingsOpen ? " settings-mode" : ""}`}><aside>
       <button className="new-chat" disabled={navigationLocked} onClick={newConversation}>＋ New chat</button>
+      <AgentRosterList roster={roster.roster} counts={chatCounts(threads, roster)} selected={selectedAgent || roster.default} disabled={navigationLocked} onSelect={setSelectedAgent} onSave={saveAgent} />
       <div className="sidebar-section-heading"><span>Projects</span><button aria-label="Add project" disabled={navigationLocked} onClick={() => setAddingProject(!addingProject)}>＋</button></div>
       {setup?.preferences.projects.map(p => <button className={`project-button ${sameWorkspace(p.workspace, workspace) ? "selected" : ""}`} key={p.workspace} title={p.workspace} disabled={navigationLocked} onClick={() => { if (!sameWorkspace(p.workspace, workspace)) void switchProject(p.workspace); else setSettingsOpen(false); }}><span>▱</span>{p.label}</button>)}
       {(!setup?.preferences.projects.length || addingProject) && <form className="project-form" onSubmit={event => { event.preventDefault(); void switchProject(projectPath, true); }}><label>Project name<input aria-label="Project name" value={projectName} disabled={navigationLocked} placeholder="Optional name" onChange={e => setProjectName(e.target.value)} /></label><label>Local folder<input aria-label="Project folder" required value={projectPath} disabled={navigationLocked} placeholder="C:\\path\\to\\your-project" onChange={e => setProjectPath(e.target.value)} /></label><small>Adding a folder makes it available as a project. Native sandboxing still applies.</small><button disabled={navigationLocked || !projectPath.trim()}>Add project</button></form>}
       <div className="sidebar-section-heading chat-list-heading"><span>{showArchived ? "Archived" : "Chats"}</span><select aria-label="Sort conversations" value={chatSort} disabled={!connected || loadingMore} onChange={event => { const value = event.target.value as ChatSort; setChatSort(value); void refreshChats(value, showArchived); }}><option value="recent">Recent</option><option value="oldest">Oldest</option></select><button aria-label={showArchived ? "Show active chats" : "Show archived chats"} title={showArchived ? "Active chats" : "Archived chats"} disabled={!connected || loadingMore} onClick={() => { const value = !showArchived; setShowArchived(value); void refreshChats(chatSort, value); }}>{showArchived ? "↩" : "▱"}</button></div>
-      <div className="sidebar-threads">{threads.map(thread => <div className="sidebar-thread-row" key={thread.id}>
+      <div className="sidebar-threads">{agentThreads.map(thread => <div className="sidebar-thread-row" key={thread.id}>
         <button className={`sidebar-thread-select ${thread.id === threadId ? "selected" : ""}`} title={thread.name || thread.preview || "New conversation"} disabled={navigationLocked || !connected} onClick={() => { setSettingsOpen(false); setThreadMenu(""); void selectThread(thread.id); }}>{threadLabel(thread)}</button>
         <button className="chat-menu-trigger" aria-label={`Actions for ${threadLabel(thread)}`} title="Conversation actions" disabled={!connected || !!threadActionBusy || navigationLocked} onClick={() => setThreadMenu(current => current === thread.id ? "" : thread.id)}>⋯</button>
         {threadMenu === thread.id && <div className="sidebar-thread-actions">
@@ -1061,10 +1116,11 @@ export default function NativeApp() {
           {showArchived ? <><button disabled={!!threadActionBusy || navigationLocked} onClick={() => void archiveChat(thread, true)}>Restore</button><button className="danger-action" disabled={!!threadActionBusy || navigationLocked} onClick={() => void deleteChat(thread)}>Delete permanently…</button></> : <button disabled={!!threadActionBusy || navigationLocked} onClick={() => void archiveChat(thread, false)}>Archive</button>}
         </div>}
       </div>)}
-      {!threads.length && <p>{loadingMore ? "Loading chats…" : showArchived ? "No archived conversations." : connecting ? "Loading chats…" : "Your chats appear here."}</p>}{nextCursor && <button disabled={navigationLocked || loadingMore || !connected} onClick={() => void loadOlder()}>{loadingMore ? "Loading…" : "Show more"}</button>}</div>
+      {threads.length > agentThreads.length && <small className="agent-hidden-hint">{threads.length - agentThreads.length} {threads.length - agentThreads.length === 1 ? "chat" : "chats"} in other agents</small>}
+      {!agentThreads.length && <p>{loadingMore ? "Loading chats…" : showArchived ? "No archived conversations." : connecting ? "Loading chats…" : "Your chats appear here."}</p>}{nextCursor && <button disabled={navigationLocked || loadingMore || !connected} onClick={() => void loadOlder()}>{loadingMore ? "Loading…" : "Show more"}</button>}</div>
       <div className="sidebar-bottom"><button disabled={navigationLocked} className={settingsOpen ? "selected" : ""} onClick={() => void toggleSettings()}>⚙ Settings</button></div>
     </aside><main>
-      <header className="native-topbar"><span className="project-icon" aria-hidden="true">▱</span><strong title={workspace}>{settingsOpen ? "Settings" : project?.label || "Choose a project"}</strong>{!settingsOpen && threadId && <span className="header-chat-title">{threadLabel(threads.find(thread => thread.id === threadId) ?? { id: threadId })}</span>}{!settingsOpen && <div className="workspace-actions"><button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? " •" : ""}</button><button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy || goalWorking} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Terminal{terminalActive ? " •" : ""}</button></div>}</header>
+      <header className="native-topbar"><span className="project-icon" aria-hidden="true">▱</span><strong title={workspace}>{settingsOpen ? "Settings" : project?.label || "Choose a project"}</strong>{!settingsOpen && threadId && <span className="header-chat-title">{threadLabel(threads.find(thread => thread.id === threadId) ?? { id: threadId })}</span>}{!settingsOpen && <span className="smara-chip" title="The agent this chat belongs to">{currentAgent ? `${currentAgent.icon} ${currentAgent.name}` : "Agent"}</span>}{!settingsOpen && <span className="smara-chip" title="Model for this chat">{activeProfile ? activeProfile.label : "No model"}</span>}{!settingsOpen && <span className="smara-chip" data-tone={hosted.tone} title="Hosted Smara connection">{hosted.label}</span>}{!settingsOpen && <div className="workspace-actions"><button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? " •" : ""}</button><button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy || goalWorking} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Terminal{terminalActive ? " •" : ""}</button>{(["browser", "tasks", "files", "hosted"] as Pane[]).map(tab => <button key={tab} aria-pressed={panel === tab} className={panel === tab ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => openPane(tab)}>{({ browser: "Browser", tasks: "Tasks", files: "Files", hosted: "Hosted" } as Record<string, string>)[tab]}</button>)}</div>}</header>
       {setup?.computer?.enabled && <div className="native-warning" role="status">Experimental app control · after approval, bring the selected app forward within 10 seconds · 15-minute grant<button onClick={() => {
         void invoke("native_manage", { request: { operation: "computer_control", action: "stop", workspace } }).then(() => setSetup(current => current ? { ...current, computer: { enabled: false, expires: null } } : current)).catch(reason => setError(String(reason)));
       }}>Stop computer control</button></div>}
@@ -1129,7 +1185,9 @@ export default function NativeApp() {
         {!!workers.length && <section className="native-workers"><strong>Workers · {workers.filter(worker => worker.status === "completed").length}/{workers.length} complete · changes are not auto-merged</strong>{liveWorkers && <button disabled={connecting || loadingThread} title="Stops this chat's native runtime and all its workers; saved history is kept" onClick={() => void stopWorkers()}>Stop workers</button>}{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status}{worker.activity && <span> · {worker.activity}{worker.lastActivityAt && ` · ${Math.max(0, Math.floor((activityClock - worker.lastActivityAt) / 1000))}s ago`}</span>} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
         {!items.length && <div className="native-empty"><h1>{project?.label || "Smara"}</h1>{!profile ? <small className="empty-hint">Add a model in Settings to get started.</small> : <small className="empty-hint">{connecting ? "Preparing project…" : "Type a message below, or / for commands."}</small>}</div>}
         {windowed.hidden > 0 && <button className="text-button show-earlier" onClick={() => setVisibleLimit(widenWindow)}>Show earlier ({windowed.hidden.toLocaleString()})</button>}
-        {windowed.visible.map(item => <TranscriptItem key={item.id} item={item} busy={busy} copied={copiedItemId === item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} />)}
+        {groupTranscript(windowed.visible).map(segment => segment.type === "item"
+          ? <TranscriptItem key={segment.item.id} item={segment.item} busy={busy} copied={copiedItemId === segment.item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} />
+          : <ToolGroup key={segment.key} items={segment.items} running={segment.running}>{item => <TranscriptItem item={item} busy={busy} copied={copiedItemId === item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} />}</ToolGroup>)}
         {approvals.map(approval => <section className="native-approval" key={approval.id}>
           {approval.params.threadId !== undefined && approval.params.threadId !== threadId && <p>Worker / other native conversation: {String(approval.params.threadId)}. This request is not auto-approved.</p>}
           {!approvalRelevant(approval) && <p>This request belongs to a different conversation. No permission can be granted from this chat.{typeof approval.params.threadId === "string" && threads.some(thread => thread.id === approval.params.threadId) && <button disabled={busy || connecting || loadingThread} onClick={() => void selectThread(String(approval.params.threadId))}>Open requesting conversation</button>}</p>}
@@ -1168,6 +1226,10 @@ export default function NativeApp() {
       </form><div className="composer-status"><small role="status">{reviewBusy ? "Saving local review…" : busy || uncertain || loadingThread || (status !== "Ready" && status !== "completed") ? status : ""}</small></div></footer>
       </div>
       {panel === "changes" && <NativeChanges key={workspace + threadId} workspace={workspace} threadId={threadId} locked={navigationLocked || terminalActive || goalWorking} revision={reviewRevision} notice={reviewNotice} onBusyChange={reviewPending} onPreviewFile={setPreviewPath} onClose={() => setPanel(null)} />}
+      {panel === "browser" && <NativeBrowser locked={navigationLocked} />}
+      {panel === "tasks" && <NativeGoals workspace={workspace} profile={profile} locked={navigationLocked} onClose={() => setPanel(null)} onPreview={setPreviewPath} />}
+      {panel === "files" && <NativeFiles workspace={workspace} onPreview={setPreviewPath} />}
+      {panel === "hosted" && <HostedPanel snapshot={helper} locked={navigationLocked} />}
       {panel === "terminal" && <NativeTerminal workspace={workspace} connected={connected} session={terminalSession} interactiveSupported={terminalPlatformSupported} onConnect={() => { void connect(); }} onStart={() => startTerminal()} onInput={value => { void writeTerminal(value); }} onInterrupt={interruptTerminal} onStop={() => { void stopTerminal(); }} onResize={resizeTerminal} onClear={() => setTerminalSession(current => current ? { ...current, output: "", truncated: false } : current)} onClose={() => setPanel(null)} />}
       </div>
       </>}

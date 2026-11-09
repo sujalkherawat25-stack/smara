@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { LocalModelProfile, LocalCredentialSummary } from "./types";
+import type { AgentRoster } from "./agents";
 export type ProjectOptions = { tools_enabled: boolean; workers_enabled: boolean; browser_origins: string[] };
 export type Project = { workspace: string; label: string; options?: ProjectOptions };
 export type NativeSetup = {
@@ -10,6 +11,7 @@ export type NativeSetup = {
   memory?: MemoryStatus;
   skills_roots?: string[];
   computer?: { enabled: boolean; expires: number | null };
+  agents?: AgentRoster;
 };
 export type MemoryStatus = {
   enabled: boolean; user_id: string; scope: "project" | "personal"; configured: boolean;

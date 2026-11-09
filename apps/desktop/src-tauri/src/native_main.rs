@@ -82,7 +82,7 @@ fn management(request: Value) -> Result<Value, String> {
 }
 #[tauri::command]
 async fn native_manage(request: Value) -> Result<Value, String> {
-    if !matches!(request.get("operation").and_then(Value::as_str), Some("bootstrap" | "runtime_health" | "goals" | "background" | "browser_control" | "computer_control" | "voice" | "outreach" | "save_outreach" | "add_project" | "select_project" | "save_project_options" | "select_model" | "select_search" | "save_credential" | "delete_credential" | "save_model" | "save_memory" | "test_memory" | "test_model" | "test_search")) {
+    if !request.get("operation").and_then(Value::as_str).is_some_and(|operation| UI_SETTINGS_OPERATIONS.contains(&operation)) {
         return Err("Unsupported UI settings operation; secret reads and legacy execution are unavailable".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
@@ -184,6 +184,11 @@ fn invalidate_snapshot() {
     SNAPSHOT_EPOCH.fetch_add(1, Ordering::SeqCst);
     if let Ok(mut slot) = snapshot_slot().lock() { *slot = None; }
 }
+
+/// Settings operations the UI may request. Anything else (secret reads, legacy execution) is refused here.
+const UI_SETTINGS_OPERATIONS: &[&str] = &["bootstrap", "runtime_health", "goals", "background", "browser_control", "computer_control",
+    "voice", "outreach", "save_outreach", "add_project", "select_project", "save_project_options", "select_model", "select_search",
+    "save_credential", "delete_credential", "save_model", "save_memory", "test_memory", "test_model", "test_search", "agents"];
 
 /// Operations after which the cached projects or model profiles are stale. Settings that do not affect
 /// them (memory, search, keys for other models, probes, outreach) leave the cache alone.
@@ -458,6 +463,14 @@ mod snapshot_tests {
             "save_outreach", "browser_control", "computer_control", "voice", "goals", "background", "bootstrap"] {
             assert!(!refreshes_snapshot(op), "{op} must leave the cache alone");
         }
+    }
+
+    #[test]
+    fn agent_roster_is_a_ui_operation_that_never_restarts_the_runtime() {
+        assert!(UI_SETTINGS_OPERATIONS.contains(&"agents"));
+        assert!(!refreshes_snapshot("agents"));
+        assert!(!native_runtime::needs_runtime_restart("agents", &json!({"action": "assign"}), Some(("local:glm", "GLM_KEY"))));
+        assert!(!UI_SETTINGS_OPERATIONS.contains(&"read_secret"));
     }
 
     #[test]
