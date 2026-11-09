@@ -48,6 +48,8 @@ async def dispatch(app, msg: InboundMessage) -> None:
             else:
                 await handle_owner(app, owner, msg)
             await resend_undelivered(app, owner, channel="whatsapp")
+        elif msg.channel == "wa_link":                  # a customer on a shop's own SIM: always the debtor flow
+            await handle_debtor(app, msg, forced_tenant_id=msg.link_tenant_id)
         elif msg.channel == "whatsapp" and await _is_stranger(pool, msg):
             await handle_stranger(app, msg)                 # a new owner (or someone to put on the waitlist): never dropped
         else:

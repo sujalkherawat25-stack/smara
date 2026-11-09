@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from src import clock, tenants
 from src.bridge.outbox import drain
+from src.loop import wa_link
 from src.loop.digest import build_digest
 from src.loop.reminders import claim_due, draft_reminder, release_claim, reminder_card, stale_sync_note, state_card
 from src.loop.owner_channel import flush_held, send_to_owner
@@ -22,6 +23,10 @@ async def tick(app, now: datetime) -> int:
         await drain(pool, app.state.continuum, now)
     except Exception:
         log.exception("outbox drain failed")  # must never block reminders
+    try:
+        await wa_link.reconcile(app)      # a restarted sidecar: start the shops' own numbers again (also at night)
+    except Exception:
+        log.exception("link reconcile failed")
     if clock.is_quiet(app.state.settings, now):
         return 0          # nothing proactive at night: reminders wait, tasks wait, cards stay held
     try:
@@ -35,6 +40,9 @@ async def tick(app, now: datetime) -> int:
             known[tid] = await tenants.by_id(pool, tid)
         t = known[tid]
         if t is None:
+            continue
+        if await wa_link.paused(pool, tid):    # the shop's own number is down: ask nothing until it is back
+            await release_claim(pool, o, now)
             continue
         if getattr(getattr(app.state, "llm", None), "enabled", False) and await _agent_reminder(app, t, o):
             sent += 1

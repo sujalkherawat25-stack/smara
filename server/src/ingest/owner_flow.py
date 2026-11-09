@@ -14,6 +14,7 @@ from src.ingest.guides import EXPORT_GUIDE
 from src.ingest.telegram import link_message, unlink
 from src.ingest.sheet_mapper import SheetRow, map_sheet, parse_amount_paise, parse_date, parse_phone
 from src.agent_loop import resume, start_session
+from src.loop import wa_link
 from src.loop.digest import build_digest
 from src.loop.reminders import decide_reminder
 from src.loop.owner_channel import send_to_owner
@@ -100,6 +101,11 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         return "Delete request cancel kar diya." if n else "Koi delete request khula nahi tha."
     if cmd in ("connect whatsapp", "whatsapp connect", "connect my whatsapp", "apna number jodo", "number connect karo"):
         from src.ingest.connect import configured, new_link
+        if app.state.settings.wa_link_url:            # the shop's own SIM, through the link sidecar (QR code page)
+            link = await new_link(app.state.pool, app.state.settings, tenant_id, path="/connect/wa-link")
+            return (f"To link your WhatsApp SIM number to Smara, open this link (valid 24 hours, one time) and scan the QR "
+                    f"code with that SIM's WhatsApp:\n{link}\n\n"
+                    "Customer messages will go out from that number. Nothing is sent without your approval.")
         if not configured(app.state.settings):
             return ("Apna khud ka WhatsApp number jodna abhi chalu nahi hua hai (Meta ki manzoori baaki hai). "
                     "Jaise hi chalu hoga, main aapko bataunga.")
@@ -136,7 +142,16 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
     if msg.kind == "text" and msg.text.lower().startswith("browse "):
         return None  # plan card already sent
     if msg.text.strip().lower() in ("digest", "summary", "overdue", "status"):
-        return await build_digest(app.state.pool, tenant_id, clock.today())
+        digest = await build_digest(app.state.pool, tenant_id, clock.today())
+        line = await wa_link.health_line(app.state.pool, tenant_id)
+        return f"{line}\n\n{digest}" if line else digest
+    if cmd in ("whatsapp status", "wa status", "link status"):
+        return await wa_link.health_line(app.state.pool, tenant_id, always=True)
+    if cmd in ("disconnect whatsapp", "whatsapp disconnect"):
+        if not wa_link.configured(app):
+            return "No WhatsApp SIM link is set up on this server."
+        await wa_link.disconnect(app, tenant_id)
+        return "The SIM link is disconnected. Customer messages are paused until you send 'connect whatsapp' again."
     return HELP
 
 

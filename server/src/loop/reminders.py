@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from src.bridge.continuum import ContinuumClient, scope_user
 from src import clock, tenants
 from src.bridge.outbox import enqueue_standalone
+from src.loop import wa_link
 from src.loop.outbound import record
 from src.loop.upi import pay_url, rupees, upi_text
 from src.loop.whatsapp import from_shop, own_whatsapp_link, reminder_params, template_message, text_message
@@ -174,20 +175,34 @@ async def decide_reminder(app, tenant_id: str, obligation_id: str, action: str, 
         return f"Okay, {o['invoice_ref']} {'marked paid' if action == 'paid' else 'snoozed 3 days'}."
     try:
         tenant = await tenants.by_id(pool, tenant_id)
-        msg_id = await app.state.wa.send(_debtor_payload(o, tenant, s, now), number_id=tenant.wa_phone_number_id)
+        if await wa_link.uses_link(pool, tenant_id):      # the shop's own SIM (server/wa_link): the approved text, once
+            msg_id = await wa_link.send_text(app, tenant, o["whatsapp_phone"],
+                                             from_shop(tenant, draft_reminder(o, tenant.upi, s.public_base_url)),
+                                             purpose=wa_link.PROACTIVE, kind="debtor_reminder", obligation_id=o["id"])
+        else:
+            msg_id = await app.state.wa.send(_debtor_payload(o, tenant, s, now), number_id=tenant.wa_phone_number_id)
         if msg_id:
             await record(pool, msg_id, tenant_id=tenant_id, kind="debtor_reminder",
                          to_phone=o["whatsapp_phone"], obligation_id=o["id"])
+    except wa_link.SendBlocked as e:                       # a guardrail said no: nothing was sent, ask again later
+        log.info("reminder for %s held: %s", obligation_id, e.reason)
+        await _put_back(pool, o, now + e.retry_after)
+        return f"Not sent to {o['canonical_name']}: {e.reason}. I will ask again later."
     except Exception:
         log.exception("debtor send failed for %s", obligation_id)
-        async with pool.connection() as conn:
-            await conn.execute(
-                """UPDATE obligations SET state = 'ACTIVE', next_followup_at = %s,
-                          attempt_count = attempt_count - 1 WHERE id = %s""", (now + timedelta(minutes=10), obligation_id))
-            await _event(conn, o["id"], "DISPATCHED", "ACTIVE", "SYSTEM_CRON")
+        await _put_back(pool, o, now + timedelta(minutes=10))
         return "Could not send the reminder; I will retry in 10 minutes."
     await _record_sent(app, o, tenant_id)
     return f"Sent to {o['canonical_name']}."
+
+
+async def _put_back(pool, o: dict, when: datetime) -> None:
+    """The reminder was not sent: the invoice goes back to ACTIVE and is asked about again at `when`."""
+    async with pool.connection() as conn:
+        await conn.execute(
+            """UPDATE obligations SET state = 'ACTIVE', next_followup_at = %s,
+                      attempt_count = attempt_count - 1 WHERE id = %s""", (when, o["id"]))
+        await _event(conn, o["id"], "DISPATCHED", "ACTIVE", "SYSTEM_CRON")
 
 
 async def _record_sent(app, o: dict, tenant_id: str) -> None:

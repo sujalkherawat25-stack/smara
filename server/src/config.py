@@ -66,6 +66,13 @@ class Settings:
     # 0/0 = never quiet for a bare Settings(); production gets 21-8 from load_settings (QUIET_HOURS_IST)
     quiet_start_hour: int = 0
     quiet_end_hour: int = 0
+    # The shop's own WhatsApp number through the Baileys link sidecar (server/wa_link). Unofficial: see README there.
+    # Empty wa_link_url = the link is not used at all, and only the Cloud API paths run.
+    wa_link_url: str = ""
+    wa_link_token: str = ""
+    wa_link_daily_cap: int = 40          # sends per shop per IST day, customers and STOP acknowledgements included
+    wa_link_send_gap_s: float = 6.0      # pause between two sends from the same link
+
 
     def llm_keys(self) -> list[str]:
         """The LLM key pool: LLM_API_KEYS if set (comma-separated), else the single LLM_API_KEY.
@@ -75,6 +82,14 @@ class Settings:
             pool = [self.llm_api_key.strip()]
         return list(dict.fromkeys(pool))
 
+
+def _secret(env, name: str) -> str:
+    """NAME, or the contents of the file named by NAME_FILE (a Docker secret). Never printed."""
+    path = env.get(f"{name}_FILE", "")
+    if path:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip()
+    return env.get(name, "")
 
 def load_settings() -> Settings:
     env = os.environ
@@ -117,4 +132,8 @@ def load_settings() -> Settings:
         digest_hour_ist=int(env.get("DIGEST_HOUR_IST", "9")),
         quiet_start_hour=parse_quiet_hours(env.get("QUIET_HOURS_IST", "21-8"))[0],
         quiet_end_hour=parse_quiet_hours(env.get("QUIET_HOURS_IST", "21-8"))[1],
+        wa_link_url=env.get("WA_LINK_URL", ""),
+        wa_link_token=_secret(env, "WA_LINK_TOKEN"),
+        wa_link_daily_cap=int(env.get("WA_LINK_DAILY_CAP", "40")),
+        wa_link_send_gap_s=float(env.get("WA_LINK_SEND_GAP_S", "6")),
     )

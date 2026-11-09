@@ -5,3 +5,4 @@ __pycache__/
 *.egg-info/
 data/
 secrets/
+node_modules/
