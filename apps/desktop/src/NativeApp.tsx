@@ -9,7 +9,7 @@ import NativeFiles from "./ui/NativeFiles";
 import HostedPanel from "./ui/HostedPanel";
 import NativeBrowser from "./NativeBrowser";
 import NativeGoals from "./NativeGoals";
-import { EMPTY_ROSTER, agentById, chatCounts, chatsForAgent, type AgentRoster as RosterData } from "./agents";
+import { EMPTY_ROSTER, agentById, chatCounts, chatsForAgent, developerInstructionsFor, type AgentRoster as RosterData } from "./agents";
 import { groupTranscript } from "./toolCards";
 import { hostedStatus, type HelperSnapshot } from "./hostedStatus";
 import { invoke } from "@tauri-apps/api/core";
@@ -166,12 +166,11 @@ export default function NativeApp() {
       .then(value => { if (value.agents) setRoster(value.agents); })
       .catch(() => { /* The chat stays in the default agent. */ });
   };
+  /** Developer instructions for a new chat: the Smara rules, then the selected agent's own instructions. */
+  const newChatInstructions = () => developerInstructionsFor(NATIVE_DEVELOPER_INSTRUCTIONS, agentById(roster, selectedAgent || roster.default));
   const saveAgent = async (draft: AgentDraft) => {
-    const existing = draft.id ? agentById(roster, draft.id) : undefined;
     const value = await nativeSettings("agents", { action: "save", agent: {
-      ...(draft.id ? { id: draft.id } : {}), name: draft.name, role: draft.role, icon: draft.icon, instructions: draft.instructions,
-      preset: draft.preset, folders: draft.folders, origins: existing?.origins ?? [], terminal: existing?.terminal ?? false,
-      memory_scope: existing?.memory_scope ?? "project", model_profile: existing?.model_profile ?? "",
+      ...(draft.id ? { id: draft.id } : {}), name: draft.name, role: draft.role, icon: draft.icon, instructions: draft.instructions, preset: draft.preset,
     } });
     if (value.agents) { setRoster(value.agents); setSelectedAgent(current => current || value.agents!.default); }
   };
@@ -400,7 +399,7 @@ export default function NativeApp() {
         const client = clientRef.current;
         if (!client) throw new Error("The native chat session is not ready.");
         const result = await client.request<{ thread: Thread }>("thread/start", {
-          cwd: workspace, approvalPolicy: "on-request", sandbox: "workspace-write", developerInstructions: NATIVE_DEVELOPER_INSTRUCTIONS,
+          cwd: workspace, approvalPolicy: "on-request", sandbox: "workspace-write", developerInstructions: newChatInstructions(),
         });
         threadRef.current = result.thread.id; assignChat(result.thread.id);
         setThreadId(result.thread.id);
@@ -800,7 +799,7 @@ export default function NativeApp() {
     try {
       let id = threadRef.current;
       if (!id) {
-        const result = await clientRef.current!.request<{ thread: Thread }>("thread/start", { cwd: workspace, approvalPolicy: "on-request", sandbox: "workspace-write", developerInstructions: NATIVE_DEVELOPER_INSTRUCTIONS });
+        const result = await clientRef.current!.request<{ thread: Thread }>("thread/start", { cwd: workspace, approvalPolicy: "on-request", sandbox: "workspace-write", developerInstructions: newChatInstructions() });
         id = result.thread.id; threadRef.current = id; setThreadId(id); assignChat(id);
         setThreads(current => [result.thread, ...current]);
       }
@@ -1104,7 +1103,7 @@ export default function NativeApp() {
   return <div className="native-app">
     <div className={`native-layout${settingsOpen ? " settings-mode" : ""}`}><aside>
       <button className="new-chat" disabled={navigationLocked} onClick={newConversation}>＋ New chat</button>
-      <AgentRosterList roster={roster.roster} counts={chatCounts(threads, roster)} selected={selectedAgent || roster.default} projects={setup?.preferences.projects ?? []} disabled={navigationLocked} onSelect={setSelectedAgent} onSave={saveAgent} />
+      <AgentRosterList roster={roster.roster} counts={chatCounts(threads, roster)} selected={selectedAgent || roster.default} disabled={navigationLocked} onSelect={setSelectedAgent} onSave={saveAgent} />
       <div className="sidebar-section-heading"><span>Projects</span><button aria-label="Add project" disabled={navigationLocked} onClick={() => setAddingProject(!addingProject)}>＋</button></div>
       {setup?.preferences.projects.map(p => <button className={`project-button ${sameWorkspace(p.workspace, workspace) ? "selected" : ""}`} key={p.workspace} title={p.workspace} disabled={navigationLocked} onClick={() => { if (!sameWorkspace(p.workspace, workspace)) void switchProject(p.workspace); else setSettingsOpen(false); }}><span>▱</span>{p.label}</button>)}
       {(!setup?.preferences.projects.length || addingProject) && <form className="project-form" onSubmit={event => { event.preventDefault(); void switchProject(projectPath, true); }}><label>Project name<input aria-label="Project name" value={projectName} disabled={navigationLocked} placeholder="Optional name" onChange={e => setProjectName(e.target.value)} /></label><label>Local folder<input aria-label="Project folder" required value={projectPath} disabled={navigationLocked} placeholder="C:\\path\\to\\your-project" onChange={e => setProjectPath(e.target.value)} /></label><small>Adding a folder makes it available as a project. Native sandboxing still applies.</small><button disabled={navigationLocked || !projectPath.trim()}>Add project</button></form>}
@@ -1117,6 +1116,7 @@ export default function NativeApp() {
           {showArchived ? <><button disabled={!!threadActionBusy || navigationLocked} onClick={() => void archiveChat(thread, true)}>Restore</button><button className="danger-action" disabled={!!threadActionBusy || navigationLocked} onClick={() => void deleteChat(thread)}>Delete permanently…</button></> : <button disabled={!!threadActionBusy || navigationLocked} onClick={() => void archiveChat(thread, false)}>Archive</button>}
         </div>}
       </div>)}
+      {threads.length > agentThreads.length && <small className="agent-hidden-hint">{threads.length - agentThreads.length} {threads.length - agentThreads.length === 1 ? "chat" : "chats"} in other agents</small>}
       {!agentThreads.length && <p>{loadingMore ? "Loading chats…" : showArchived ? "No archived conversations." : connecting ? "Loading chats…" : "Your chats appear here."}</p>}{nextCursor && <button disabled={navigationLocked || loadingMore || !connected} onClick={() => void loadOlder()}>{loadingMore ? "Loading…" : "Show more"}</button>}</div>
       <div className="sidebar-bottom"><button disabled={navigationLocked} className={settingsOpen ? "selected" : ""} onClick={() => void toggleSettings()}>⚙ Settings</button></div>
     </aside><main>

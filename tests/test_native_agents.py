@@ -25,34 +25,35 @@ def test_bootstrap_lists_four_named_presets_with_kiran_as_default(setup):
     assert not {agent["name"] for agent in roster} & {"Munim", "Vasooli", "Browser", "Files"}
 
 
+def test_presets_carry_only_the_fields_that_do_something(setup):
+    value = management.manage({"operation": "bootstrap"})
+    for agent in value["agents"]["roster"]:
+        assert set(agent) == {"id", "name", "role", "icon", "instructions", "preset"}, agent
+
+
 def test_save_custom_agent_keeps_unrelated_settings(setup):
-    root, state = setup
+    _, state = setup
     value = management.manage({"operation": "agents", "action": "save", "agent": {
-        "name": "Meena", "role": "Stock checks", "icon": "📦", "instructions": "Check stock against the sheet.",
-        "folders": [str(root)], "terminal": False, "memory_scope": "project"}})
+        "name": "Meena", "role": "Stock checks", "icon": "📦", "instructions": "Check stock against the sheet."}})
     custom = [agent for agent in value["agents"]["roster"] if not agent["preset"]]
-    assert len(custom) == 1 and custom[0]["name"] == "Meena" and custom[0]["folders"] == [str(root)]
+    assert len(custom) == 1 and custom[0]["name"] == "Meena" and custom[0]["instructions"] == "Check stock against the sheet."
     saved = json.loads(state.read_text())
-    assert saved["history"] == "preserve" and saved["workspace"] == str(root)
+    assert saved["history"] == "preserve" and saved["workspace"] == str(setup[0])
 
 
-def test_agent_folders_must_already_be_projects(setup, tmp_path):
-    outside = tmp_path / "elsewhere"
-    outside.mkdir()
-    with pytest.raises(ValueError, match="already projects"):
-        management.manage({"operation": "agents", "action": "save", "agent": {
-            "name": "Ravi", "folders": [str(outside)]}})
-
-
-def test_agent_rejects_unknown_fields_secrets_and_oversized_text(setup):
+@pytest.mark.parametrize("field, value", [
+    ("folders", ["/elsewhere"]), ("origins", ["https://example.com"]), ("terminal", True),
+    ("memory_scope", "personal"), ("model_profile", "local:glm"), ("api_key", "synthetic"),
+])
+def test_permission_and_secret_fields_are_refused_not_stored(setup, field, value):
+    # Per-agent permissions are a later phase: a field that does nothing must not be accepted or stored.
     with pytest.raises(ValueError, match="Invalid agent"):
-        management.manage({"operation": "agents", "action": "save", "agent": {"name": "Ravi", "api_key": "synthetic"}})
+        management.manage({"operation": "agents", "action": "save", "agent": {"name": "Ravi", field: value}})
+
+
+def test_instructions_are_length_limited(setup):
     with pytest.raises(ValueError, match="at most 1500"):
         management.manage({"operation": "agents", "action": "save", "agent": {"name": "Ravi", "instructions": "x" * 1501}})
-    with pytest.raises(ValueError, match="memory must be|Memory must be"):
-        management.manage({"operation": "agents", "action": "save", "agent": {"name": "Ravi", "memory_scope": "everyone"}})
-    with pytest.raises(ValueError, match="Terminal must be"):
-        management.manage({"operation": "agents", "action": "save", "agent": {"name": "Ravi", "terminal": "yes"}})
 
 
 def test_editing_a_preset_keeps_it_a_preset_and_delete_restores_the_default(setup):
