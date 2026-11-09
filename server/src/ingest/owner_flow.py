@@ -9,6 +9,7 @@ from src.ingest.importer import import_rows
 from src.ingest.media import clean_phone_caption, download_media, media_token, read_image, transcribe
 from src.ingest.payload import InboundMessage
 from src.ingest.customer_number import add_number, parse_number_command
+from src.ingest.reopen import parse_reopen_command, reopen_invoice
 from src.ingest.guides import EXPORT_GUIDE
 from src.ingest.telegram import link_message, unlink
 from src.ingest.sheet_mapper import SheetRow, map_sheet, parse_amount_paise, parse_date, parse_phone
@@ -105,6 +106,11 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         link = await new_link(app.state.pool, app.state.settings, tenant_id)
         return ("Apna WhatsApp Business number Smara se jodne ke liye ye link kholiye (24 ghante, ek baar):\n"
                 f"{link}\n\nAapke customers ko message aapke apne number se jayenge. Kuch bhi bina aapke tap ke nahi jata.")
+    reopen_ref = parse_reopen_command(msg.text)
+    if reopen_ref:
+        reply = await reopen_invoice(app.state.pool, tenant_id, reopen_ref)
+        if reply:
+            return reply
     number_cmd = parse_number_command(msg.text)
     if number_cmd:
         reply = await add_number(app.state.pool, tenant_id, *number_cmd)

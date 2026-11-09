@@ -152,3 +152,38 @@ async def test_stale_sync_note(pool):
     await apply_sync(pool, t.id, None, SyncBody(receivables=[_rec("Tara", "9899999999", f"Q-{uuid.uuid4().hex[:5]}")]))
     assert await stale_sync_note(pool, t.id, now) == ""                 # synced just now
     assert "ghante pehle" in await stale_sync_note(pool, t.id, now + timedelta(hours=30))
+
+
+def test_parse_reopen_command():
+    from src.ingest.reopen import parse_reopen_command
+    assert parse_reopen_command("reopen A-101") == "A-101"
+    assert parse_reopen_command("  Reopen   INV/22-23/045 ") == "INV/22-23/045"
+    assert parse_reopen_command("reopen") is None
+    assert parse_reopen_command("ravi reopen kar do A-101") is None
+
+
+async def test_reopened_invoice_is_not_closed_again_by_the_next_snapshot(pool):
+    from src.ingest.reopen import reopen_invoice
+    t = await _tenant(pool)
+    ref = f"R-{uuid.uuid4().hex[:6]}"
+    keep = [f"K{i}-{uuid.uuid4().hex[:5]}" for i in range(6)]
+    await apply_sync(pool, t.id, None, SyncBody(receivables=[_rec("Ravi", "9812345678", r) for r in keep + [ref]]))
+    await apply_sync(pool, t.id, None, SyncBody(receivables=[_rec("Ravi", "9812345678", r) for r in keep]))
+    assert await _state(pool, ref) == ("PAID", "TALLY")
+
+    reply = await reopen_invoice(pool, t.id, ref)
+    assert reply and ref in reply
+    assert await _state(pool, ref) == ("ACTIVE", "REOPENED")
+
+    again = await apply_sync(pool, t.id, None, SyncBody(receivables=[_rec("Ravi", "9812345678", r) for r in keep]))
+    assert again["closed"] == 0
+    assert await _state(pool, ref) == ("ACTIVE", "REOPENED")
+
+
+async def test_reopen_refuses_unknown_or_unpaid_invoice(pool):
+    from src.ingest.reopen import reopen_invoice
+    t = await _tenant(pool)
+    ref = f"U-{uuid.uuid4().hex[:6]}"
+    await apply_sync(pool, t.id, None, SyncBody(receivables=[_rec("Ravi", "9812345678", ref)]))
+    assert await reopen_invoice(pool, t.id, ref) is None           # open, not paid: nothing to reopen
+    assert await reopen_invoice(pool, t.id, "NO-SUCH-BILL") is None
