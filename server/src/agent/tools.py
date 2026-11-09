@@ -80,8 +80,10 @@ TOOLS = [
         "for heavy processing use run_python.", {"file_ref": _S}, ["file_ref"]),
     _fn("inspect_and_import_file", "Open a file attached to this conversation: an Excel/CSV sheet, or a Tally Prime XML export "
         "(sales invoices are read directly). Not for PDFs: read a PDF with read_attachment. mode=inspect previews the rows and totals; mode=import loads them into the ledger "
-        "and reports sheet vs ledger totals to verify.",
-        {"file_ref": _S, "mode": {"type": "string", "enum": ["inspect", "import"]}}, ["file_ref", "mode"]),
+        "and reports sheet vs ledger totals to verify. The result lists open invoices in Smara that this file does not "
+        "contain (open_in_smara_not_in_file). Pass close_missing=true ONLY after the owner has said yes to marking those paid.",
+        {"file_ref": _S, "mode": {"type": "string", "enum": ["inspect", "import"]},
+         "close_missing": {"type": "boolean"}}, ["file_ref", "mode"]),
     _fn("browser_step", "Drive the browser like a person: one step, then you get the page back. The result has url, title, "
         "changes (exactly what your step changed: new or gone controls, labels that changed, messages the site showed), page "
         "(every control as '[ref] role \"name\" state', an open dialog first) and text. Act ONLY by a ref number from the latest "

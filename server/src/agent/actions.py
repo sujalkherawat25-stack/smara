@@ -13,7 +13,7 @@ from src import clock
 from src.agent.policy import SessionCtx, target_words
 from src.agent.tools import party_in_tenant
 from src.bridge.coordinator import submit_debtor_claim
-from src.ingest.importer import import_rows
+from src.ingest.importer import close_invoices, import_rows, open_refs
 from src.ingest.media import download_media, read_image
 from src import tenants
 from src.ingest.media import media_token
@@ -78,9 +78,17 @@ async def inspect_and_import_file(app, ctx: SessionCtx, args: dict) -> dict:
     preview = {"rows_found": len(rows), "sheet_total_rupees": total / 100, "skipped": skipped[:10],
                "sample": [{"party": r.party, "invoice": r.invoice_ref, "rupees": r.amount_paise / 100,
                            "due": r.due_date.isoformat(), "phone": r.phone} for r in rows[:5]]}
+    missing = []
+    if rows:   # open invoices the file does not list: reported, never closed without the owner saying so
+        listed = {r.invoice_ref for r in rows}
+        missing = [o for o in await open_refs(app.state.pool, ctx.tenant_id, None) if o["invoice_ref"] not in listed]
+        preview["open_in_smara_not_in_file"] = len(missing)
+        preview["not_in_file_sample"] = sorted({o["canonical_name"] for o in missing})[:5]
     if args.get("mode") != "import" or not rows:
         return preview
-    result = await import_rows(app.state.pool, ctx.tenant_id, rows)
+    result = await import_rows(app.state.pool, ctx.tenant_id, rows, source="TALLY" if is_tally else "SHEET")
+    if args.get("close_missing") is True and missing:
+        result["closed_missing"] = await close_invoices(app.state.pool, missing)
     async with app.state.pool.connection() as conn:   # read back for the agent to verify
         cur = await conn.execute(
             "SELECT count(*) n, coalesce(sum(amount_paise), 0) s FROM obligations WHERE tenant_id = %s AND invoice_ref = ANY(%s)",
@@ -246,7 +254,7 @@ async def deliver_message(app, ctx: SessionCtx, tenant, args: dict) -> dict:
     if p and p.get("opted_out_at"):              # they said STOP after the owner approved: never send
         return {"sent": False, "error": f"{p['canonical_name']} has opted out of WhatsApp messages (STOP)"}
     o = await _obligation(pool, ctx, args["obligation_id"]) if args.get("obligation_id") else None
-    if s.reminder_send_mode == "own" and p:
+    if p and (s.reminder_send_mode == "own" or not p["whatsapp_phone"]):   # no number: the owner copies the text
         # Own-WhatsApp mode: the owner sends the approved text from their own number. Smara messages the customer nothing.
         from src.loop.whatsapp import own_whatsapp_link
         link = own_whatsapp_link(p["whatsapp_phone"], str(args["text"]))
