@@ -35,10 +35,14 @@ services:
       SANDBOX_MODE: container
       SANDBOX_JOBS_DIR: /jobs
       VAULT_MASTER_KEY_FILE: /run/secrets/vault_master_key
+      # A shop's own SIM through the Baileys sidecar (unofficial). Empty WA_LINK_URL = not used.
+      WA_LINK_URL: http://munim_wa_link:8090
+      WA_LINK_TOKEN_FILE: /run/secrets/wa_link_token
       # Each shop's server browser keeps its cookies here between chats (like a person's own browser profile)
       BROWSER_PROFILE_ROOT: /data/browser-profiles
     secrets:
       - vault_master_key
+      - wa_link_token
     volumes:
       - munim_jobs:/jobs
       - munim_browser:/data/browser-profiles
@@ -52,7 +56,30 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    networks: [munim, memoryos_default]
+    networks: [munim, munim_link, memoryos_default]
+
+  # Baileys sidecar for shops' own WhatsApp numbers (unofficial; see server/wa_link/README.md). It is reachable only
+  # from munim_app on munim_link: no published port, no database access, no files written, credentials in memory only.
+  munim_wa_link:
+    build:
+      context: ../wa_link
+    image: smara-wa-link:${MUNIM_VERSION:-local}
+    container_name: munim_wa_link
+    restart: unless-stopped
+    environment:
+      WA_LINK_CALLBACK_URL: http://munim_app:8080/internal/wa-link
+      WA_LINK_TOKEN_FILE: /run/secrets/wa_link_token
+    secrets:
+      - wa_link_token
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    mem_limit: 512m
+    pids_limit: 256
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks: [munim_link]
 
   # Runs the agent's Python on uploaded files. No network at all, read-only root,
   # tmpfs scratch, capped memory/CPU/pids; jobs run as `nobody` (see sandbox/runner.py).
@@ -79,6 +106,7 @@ services:
 
 networks:
   munim: {}
+  munim_link: {}
   memoryos_default:
     external: true
 
@@ -86,6 +114,8 @@ networks:
 secrets:
   vault_master_key:
     file: ../secrets/vault_master_key
+  wa_link_token:
+    file: ../secrets/wa_link_token
 
 volumes:
   munim_pgdata:

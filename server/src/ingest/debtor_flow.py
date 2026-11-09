@@ -66,6 +66,21 @@ def opt_intent(text: str) -> str | None:
     return None
 
 
+async def _reply_text(app, msg: InboundMessage, text: str) -> None:
+    """Answer the customer on the channel they wrote on: the shop's own SIM, or the shared WhatsApp number.
+    A STOP/START acknowledgement is a reply to their own message, so it is not a proactive send."""
+    if msg.channel != "wa_link":
+        await app.state.wa.send(text_message(msg.sender, text), number_id=msg.number_id or None)
+        return
+    from src.loop import wa_link
+    tenant = await tenants.by_id(app.state.pool, msg.link_tenant_id)
+    try:
+        if tenant is not None:
+            await wa_link.send_text(app, tenant, msg.sender, text, purpose=wa_link.REPLY, kind="customer_text")
+    except wa_link.SendBlocked as e:
+        log.warning("reply on the shop's SIM not sent: %s", e.reason)
+
+
 async def _handle_opt(app, msg: InboundMessage, intent: str, receiving) -> bool:
     """Apply STOP/START to every shop this number belongs to (or only the shop whose number they wrote to). True if done."""
     pool = app.state.pool
@@ -81,7 +96,7 @@ async def _handle_opt(app, msg: InboundMessage, intent: str, receiving) -> bool:
     shops = ", ".join(sorted({p["shop"] for p in parties}))
     reply = (f"Theek hai. {shops} ki taraf se aapko WhatsApp par payment updates nahi aayenge. Dobara chahiye to START bhejein."
              if intent == "stop" else f"Theek hai, {shops} ki taraf se updates phir se shuru ho gaye.")
-    await app.state.wa.send(text_message(msg.sender, reply), number_id=msg.number_id or None)
+    await _reply_text(app, msg, reply)
     for p in parties:
         t = await tenants.by_id(pool, str(p["tenant_id"]))
         note = (f"{p['canonical_name']} ne WhatsApp updates band karne ko kaha (STOP). Smara ab unhe koi message nahi bhejega; "

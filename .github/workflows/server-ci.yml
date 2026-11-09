@@ -41,3 +41,21 @@ jobs:
       - run: playwright install --with-deps chromium
       - run: python -m pytest -q
       - run: python -m evals.run_claims
+
+  wa-link:
+    # The Baileys sidecar for a shop's own WhatsApp number (server/wa_link): unit tests, and the image must build.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pinned dependencies
+        working-directory: server/wa_link
+        run: npm ci --no-audit --no-fund
+      - name: Unit tests (fake WhatsApp, no network)
+        working-directory: server/wa_link
+        run: npm test
+      - name: Build the image
+        working-directory: server/wa_link
+        run: docker build -t smara-wa-link:ci .

@@ -42,13 +42,14 @@ def configured(settings) -> bool:
                 and getattr(settings, "wa_app_secret", ""))
 
 
-async def new_link(pool, settings, tenant_id: str) -> str:
+async def new_link(pool, settings, tenant_id: str, path: str = "/connect") -> str:
+    """A one-time link (24 h) the owner opens to connect a number. `path` picks the page (Meta flow or SIM link)."""
     token = secrets.token_urlsafe(24)
     async with pool.connection() as conn:
         await conn.execute("DELETE FROM whatsapp_connect_links WHERE tenant_id = %s AND used_at IS NULL", (tenant_id,))
         await conn.execute("INSERT INTO whatsapp_connect_links (token_hash, tenant_id, expires_at) VALUES (%s, %s, %s)",
                            (_hash(token), tenant_id, datetime.now(timezone.utc) + LINK_TTL))
-    return f"{settings.public_base_url.rstrip('/')}/connect?t={token}"
+    return f"{settings.public_base_url.rstrip('/')}{path}?t={token}"
 
 
 async def _link_tenant(pool, token: str, consume: bool):

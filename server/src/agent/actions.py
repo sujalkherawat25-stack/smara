@@ -18,6 +18,7 @@ from src.ingest.media import download_media, read_image
 from src import tenants
 from src.ingest.media import media_token
 from src.ingest.sheet_mapper import SheetRow, map_sheet
+from src.loop import wa_link
 from src.loop.outbound import record
 from src.loop.owner_channel import send_to_owner
 from src.loop.whatsapp import from_shop, reminder_params, owner_approval_card, template_message, text_message
@@ -246,17 +247,26 @@ async def deliver_message(app, ctx: SessionCtx, tenant, args: dict) -> dict:
     if p and p.get("opted_out_at"):              # they said STOP after the owner approved: never send
         return {"sent": False, "error": f"{p['canonical_name']} has opted out of WhatsApp messages (STOP)"}
     o = await _obligation(pool, ctx, args["obligation_id"]) if args.get("obligation_id") else None
-    in_window = p["last_inbound_at"] and now - p["last_inbound_at"] < WINDOW
-    if in_window:
-        payload, via = text_message(p["whatsapp_phone"], from_shop(tenant, str(args["text"]))), "text"
-    elif o and s.wa_reminder_template:
-        payload, via = template_message(p["whatsapp_phone"], s.wa_reminder_template, s.wa_reminder_lang,
-                                        reminder_params(s, {**o, "canonical_name": p["canonical_name"]}, tenant)), \
-            "approved template (outside 24h window)"
+    if await wa_link.uses_link(pool, ctx.tenant_id):   # the shop's own SIM: the approved text, once (no 24h window)
+        try:
+            msg_id = await wa_link.send_text(app, tenant, p["whatsapp_phone"], from_shop(tenant, str(args["text"])),
+                                             purpose=wa_link.PROACTIVE, kind="debtor_reminder" if o else "customer_text",
+                                             obligation_id=o["id"] if o else None)
+        except wa_link.SendBlocked as e:
+            return {"sent": False, "error": f"not sent: {e.reason}"}
+        via = "text (the shop's own WhatsApp link)"
     else:
-        return {"sent": False, "error": "the customer has not messaged in 24 hours; WhatsApp only allows an "
-                                        "approved template, and none is configured for this case"}
-    msg_id = await app.state.wa.send(payload, number_id=tenant.wa_phone_number_id)
+        in_window = p["last_inbound_at"] and now - p["last_inbound_at"] < WINDOW
+        if in_window:
+            payload, via = text_message(p["whatsapp_phone"], from_shop(tenant, str(args["text"]))), "text"
+        elif o and s.wa_reminder_template:
+            payload, via = template_message(p["whatsapp_phone"], s.wa_reminder_template, s.wa_reminder_lang,
+                                            reminder_params(s, {**o, "canonical_name": p["canonical_name"]}, tenant)), \
+                "approved template (outside 24h window)"
+        else:
+            return {"sent": False, "error": "the customer has not messaged in 24 hours; WhatsApp only allows an "
+                                            "approved template, and none is configured for this case"}
+        msg_id = await app.state.wa.send(payload, number_id=tenant.wa_phone_number_id)
     if msg_id:
         await record(pool, msg_id, tenant_id=ctx.tenant_id, kind="debtor_reminder" if o else "customer_text",
                      to_phone=p["whatsapp_phone"], obligation_id=o["id"] if o else None)

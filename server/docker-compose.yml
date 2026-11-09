@@ -13,7 +13,22 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://munim:munim@postgres:5432/munim
+      WA_LINK_URL: http://wa-link:8090          # the shop's own SIM link (server/wa_link); needs WA_LINK_TOKEN in .env
     depends_on:
       - postgres
     ports:
       - "8080:8080"
+    networks: [default, wa_link]
+  # Baileys sidecar for a shop's own WhatsApp number (unofficial). Reachable from the app only: no published port,
+  # and it is not on the database network.
+  wa-link:
+    build: ./wa_link
+    profiles: ["app"]
+    restart: unless-stopped
+    environment:
+      WA_LINK_TOKEN: ${WA_LINK_TOKEN:?set WA_LINK_TOKEN in .env}
+      WA_LINK_CALLBACK_URL: http://app:8080/internal/wa-link
+    networks: [wa_link]
+
+networks:
+  wa_link: {}
