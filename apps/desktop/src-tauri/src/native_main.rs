@@ -7,6 +7,8 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 mod native_runtime;
 mod browser_bridge;
 use native_runtime::{native_send, native_start, native_status, native_stop};
@@ -84,8 +86,18 @@ async fn native_manage(request: Value) -> Result<Value, String> {
         return Err("Unsupported UI settings operation; secret reads and legacy execution are unavailable".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        if request["operation"] == "bootstrap" || request["operation"] == "runtime_health" || request["operation"] == "goals" || request["operation"] == "background" || request["operation"] == "browser_control" || request["operation"] == "computer_control" || request["operation"] == "voice" { management(request) }
-        else { native_runtime::with_disconnected(|| management(request)) }
+        let operation = request["operation"].as_str().unwrap_or_default().to_owned();
+        // Only changes to what the running runtime was started with stop it. Everything else (memory, search,
+        // other models' keys, probes, outreach, adding a project) runs while the chat stays connected.
+        let running = native_runtime::running_profile();
+        let restart = native_runtime::needs_runtime_restart(&operation, &request,
+            running.as_ref().map(|(profile, key)| (profile.as_str(), key.as_str())));
+        let outcome = if restart { native_runtime::with_disconnected(|| management(request)) } else { management(request) };
+        if outcome.is_ok() && refreshes_snapshot(&operation) {
+            invalidate_snapshot();
+            refresh_snapshot();
+        }
+        outcome
     }).await.map_err(|_| "Settings worker failed".to_owned())?
 }
 /// Local, user-directed Git operations, not a model tool or shell escape.
@@ -101,15 +113,86 @@ async fn native_review(request: Value) -> Result<Value, String> {
         if read_only { action() } else { native_runtime::with_review_idle(action) }
     }).await.map_err(|_| "Git review worker failed".to_owned())?
 }
+#[derive(Clone)]
 struct Connection { allowed_roots: Vec<String>, active_workspace: String }
-fn current_connection() -> Result<Connection, String> {
+
+/// Projects and model profiles, read once from the executor and kept in memory. Every terminal, send and
+/// model start used to launch a new executor process for this; now they read this snapshot.
+#[derive(Clone)]
+struct Snapshot { connection: Connection, profiles: Result<Vec<LocalModelProfile>, String> }
+
+/// Bumped on every invalidation, so a load that started before a project or model change cannot store stale data.
+static SNAPSHOT_EPOCH: AtomicU64 = AtomicU64::new(0);
+/// At most one background load at a time.
+static SNAPSHOT_LOADING: AtomicBool = AtomicBool::new(false);
+
+fn snapshot_slot() -> &'static Mutex<Option<Snapshot>> {
+    static SLOT: OnceLock<Mutex<Option<Snapshot>>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(None))
+}
+
+fn load_snapshot() -> Result<Snapshot, String> {
+    let epoch = SNAPSHOT_EPOCH.load(Ordering::SeqCst);
     let value = management(json!({"operation":"bootstrap"}))?;
     let preferences = value.get("preferences").ok_or("Project settings are unavailable")?;
-    Ok(Connection {
+    let connection = Connection {
         allowed_roots: preferences["projects"].as_array().ok_or("Projects are invalid")?
             .iter().filter_map(|p| p["workspace"].as_str().map(str::to_owned)).collect(),
         active_workspace: preferences["workspace"].as_str().ok_or("Choose a project first")?.to_owned(),
-    })
+    };
+    let profiles: Result<Vec<LocalModelProfile>, String> = serde_json::from_value(value["profiles"].clone())
+        .map_err(|_| "Invalid native model profiles".to_owned());
+    let snapshot = Snapshot { connection, profiles };
+    if SNAPSHOT_EPOCH.load(Ordering::SeqCst) == epoch {
+        if let Ok(mut slot) = snapshot_slot().lock() { *slot = Some(snapshot.clone()); }
+    }
+    Ok(snapshot)
+}
+
+/// Loads the snapshot if nothing is cached. Only worker threads and startup may call this, because a cold load
+/// starts the executor and waits for it.
+fn cached_snapshot() -> Result<Snapshot, String> {
+    if let Some(snapshot) = snapshot_slot().lock().map_err(|_| "Settings cache is unavailable")?.clone() { return Ok(snapshot); }
+    load_snapshot()
+}
+
+/// For the send path: in memory only. With nothing cached, it starts a background load and asks the caller to retry.
+fn cached_snapshot_or_refresh() -> Result<Snapshot, String> {
+    if let Some(snapshot) = snapshot_slot().lock().map_err(|_| "Settings cache is unavailable")?.clone() { return Ok(snapshot); }
+    refresh_snapshot();
+    Err("Project settings are still loading. Try the terminal again in a moment.".into())
+}
+
+fn refresh_snapshot() {
+    if SNAPSHOT_LOADING.swap(true, Ordering::SeqCst) { return; }
+    std::thread::spawn(|| {
+        // A settings change during a load makes that load discard its result. Load again, a few times at most,
+        // so the cache is not left empty until the next terminal send.
+        let mut epoch = SNAPSHOT_EPOCH.load(Ordering::SeqCst);
+        for _ in 0..3 {
+            let _ = load_snapshot();
+            if SNAPSHOT_EPOCH.load(Ordering::SeqCst) == epoch { break; }
+            epoch = SNAPSHOT_EPOCH.load(Ordering::SeqCst);
+        }
+        SNAPSHOT_LOADING.store(false, Ordering::SeqCst);
+        // An invalidation that landed after the last check was refused while the flag was set: queue one more load.
+        if SNAPSHOT_EPOCH.load(Ordering::SeqCst) != epoch { refresh_snapshot(); }
+    });
+}
+
+fn invalidate_snapshot() {
+    SNAPSHOT_EPOCH.fetch_add(1, Ordering::SeqCst);
+    if let Ok(mut slot) = snapshot_slot().lock() { *slot = None; }
+}
+
+/// Operations after which the cached projects or model profiles are stale. Settings that do not affect
+/// them (memory, search, keys for other models, probes, outreach) leave the cache alone.
+pub fn refreshes_snapshot(operation: &str) -> bool {
+    matches!(operation, "add_project" | "select_project" | "save_project_options" | "select_model" | "save_model")
+}
+
+fn current_connection() -> Result<Connection, String> {
+    Ok(cached_snapshot()?.connection)
 }
 fn selected_workspace_dir(workspace: &str, roots: &[String]) -> Result<Option<PathBuf>, String> {
     let path = PathBuf::from(workspace);
@@ -244,11 +327,10 @@ async fn native_open_workspace_file(workspace: String, path: String) -> Result<(
         open::that_detached(&resolved).map_err(|_| "Could not open the file in its default app.".to_owned())
     }).await.map_err(|_| "File opener worker failed".to_owned())?
 }
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct LocalModelProfile { id: String, model: String, base_url: String, credential_name: String, auth_header: String, context_window: Option<u64> }
 fn stored_local_model_profiles() -> Result<Vec<LocalModelProfile>, String> {
-    let value = management(json!({"operation":"bootstrap"}))?;
-    serde_json::from_value(value["profiles"].clone()).map_err(|_| "Invalid native model profiles".into())
+    cached_snapshot()?.profiles
 }
 fn resolve_local_secret(name: &str) -> Result<String, String> {
     let value = management(json!({"operation":"resolve_credential","name":name}))?;
@@ -280,7 +362,12 @@ fn main() {
     }
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file, native_project_files, browser_bridge::bridge_state, browser_bridge::bridge_check, browser_bridge::bridge_ensure, browser_bridge::bridge_stop, browser_bridge::bridge_pause, browser_bridge::bridge_pair, browser_bridge::bridge_unpair, browser_bridge::bridge_install_components])
-        .setup(|_| { browser_bridge::ensure_on_startup(); Ok(()) })
+        .setup(|_| {
+            browser_bridge::ensure_on_startup();
+            // Load projects and model profiles in the background, so the first terminal command does not wait for it.
+            refresh_snapshot();
+            Ok(())
+        })
         .build(tauri::generate_context!()).expect("Could not build Smara Desktop")
         .run(|_, event| {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) { let _ = native_runtime::stop_current(); }
@@ -355,5 +442,29 @@ mod artifact_preview_tests {
         for extension in ["exe", "com", "bat", "cmd", "ps1", "vbs", "js", "html", "svg", "msi", "lnk"] {
             assert!(!can_open_workspace_file_externally(extension), "unexpected external open for {extension}");
         }
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn only_project_and_model_changes_refresh_the_cached_connection() {
+        for op in ["add_project", "select_project", "save_project_options", "select_model", "save_model"] {
+            assert!(refreshes_snapshot(op), "{op} must refresh the cache");
+        }
+        for op in ["save_memory", "select_search", "save_credential", "delete_credential", "test_model", "test_search",
+            "save_outreach", "browser_control", "computer_control", "voice", "goals", "background", "bootstrap"] {
+            assert!(!refreshes_snapshot(op), "{op} must leave the cache alone");
+        }
+    }
+
+    #[test]
+    fn invalidation_bumps_the_epoch_so_an_in_flight_load_cannot_store_stale_data() {
+        let before = SNAPSHOT_EPOCH.load(Ordering::SeqCst);
+        invalidate_snapshot();
+        assert_eq!(SNAPSHOT_EPOCH.load(Ordering::SeqCst), before + 1);
+        assert!(snapshot_slot().lock().unwrap().is_none());
     }
 }

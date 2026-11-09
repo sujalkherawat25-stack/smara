@@ -29,8 +29,10 @@ type SettingsProps = {
   onPendingChange: (pending: boolean) => void;
   toolsEnabled: boolean; workersEnabled: boolean; browserOrigins: string;
   onToolsChange: (enabled: boolean) => void; onWorkersChange: (enabled: boolean) => void; onOriginsChange: (origins: string) => void;
+  /** Runs one settings operation. The parent stops the chat runtime first only when the change needs it. */
+  call?: (operation: string, args: Record<string, unknown>) => Promise<NativeSetup>;
 };
-export default function NativeSettings({ setup, locked, onUpdate, onClose, onPendingChange, version, runtimeBuilt, toolsEnabled, workersEnabled, browserOrigins, onToolsChange, onWorkersChange, onOriginsChange, initialTab = "models" }: SettingsProps) {
+export default function NativeSettings({ setup, locked, onUpdate, onClose, onPendingChange, version, runtimeBuilt, toolsEnabled, workersEnabled, browserOrigins, onToolsChange, onWorkersChange, onOriginsChange, initialTab = "models", call }: SettingsProps) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [model, setModel] = useState(emptyModel);
   const [editing, setEditing] = useState(false);
@@ -49,7 +51,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
   const save = async (operation: string, args: Record<string, unknown>) => {
     if (pending || (locked && operation !== "bootstrap")) return;
     onPendingChange(true); setPending(true); setError(""); setNotice("");
-    try { onUpdate(await nativeSettings(operation, args)); setNotice("Saved. Changes apply when you return to chat."); }
+    try { onUpdate(await (call ?? nativeSettings)(operation, args)); setNotice("Saved. Memory and search apply right away; model, tool and site changes apply to your next message."); }
     catch (reason) { setError(String(reason)); }
     finally { onPendingChange(false); setPending(false); setSecret(""); setModel(current => ({ ...current, api_key: "" })); }
   };

@@ -25,6 +25,9 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
       return [slots[index], value => { const next = typeof value === "function" ? value(slots[index]) : value; if (!Object.is(next, slots[index])) { slots[index] = next; dirty = true; } }];
     },
     useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
+    // Callbacks and memo only matter for re-render cost; the harness re-runs the render, so identity is not needed here.
+    useCallback(callback) { cursor++; return callback; },
+    memo(component) { return component; },
     useEffect(effect, deps) {
       const index = cursor++, previous = slots[index];
       if (!previous || !deps || deps.some((value, i) => !Object.is(value, previous.deps[i]))) {
@@ -38,7 +41,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     const module = { exports: {} };
     const source = readFileSync(new URL(path, import.meta.url), "utf8");
     const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-    vm.runInNewContext(code, { module, exports: module.exports, require, setTimeout: callback => { timers.add(callback); return callback; }, clearTimeout: timer => timers.delete(timer), setInterval: callback => { timers.add(callback); return callback; }, clearInterval: timer => timers.delete(timer), crypto: { randomUUID: () => "fixture-terminal-id" }, TextEncoder, TextDecoder, Uint8Array, btoa, atob, window: { addEventListener() {}, removeEventListener() {} }, navigator: { clipboard: { writeText: async () => {} } } });
+    vm.runInNewContext(code, { module, exports: module.exports, require, console, setTimeout: callback => { timers.add(callback); return callback; }, clearTimeout: timer => timers.delete(timer), setInterval: callback => { timers.add(callback); return callback; }, clearInterval: timer => timers.delete(timer), crypto: { randomUUID: () => "fixture-terminal-id" }, TextEncoder, TextDecoder, Uint8Array, btoa, atob, window: { addEventListener() {}, removeEventListener() {} }, navigator: { clipboard: { writeText: async () => {} } } });
     return module.exports;
   };
   class RpcOutcomeUnknown extends Error {}
@@ -79,6 +82,19 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
   const context = evaluate("../src/nativeContext.ts", () => assert.fail("Context formatting must have no side-effect imports"));
   const terminalProtocol = evaluate("../src/terminalProtocol.ts", () => assert.fail("Terminal protocol must have no side-effect imports"));
   const chatStatus = evaluate("../src/chatStatus.ts", () => assert.fail("Status formatting must have no side-effect imports"));
+  const transcriptWindow = evaluate("../src/transcriptWindow.ts", () => assert.fail("Windowing must have no side-effect imports"));
+  const settingsPolicy = evaluate("../src/nativeSettingsPolicy.ts", () => assert.fail("Settings policy must have no side-effect imports"));
+  function Markdown() {}
+  function Voice() {}
+  const transcriptItem = evaluate("../src/TranscriptItem.tsx", name => {
+    if (name === "react") return hooks;
+    if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
+    if (name.endsWith("NativeMarkdown")) return { default: Markdown, __esModule: true };
+    if (name.endsWith("NativeCommand")) return { default: Command, __esModule: true };
+    if (name.endsWith("NativeVoice")) return { default: () => null, ReadAloud: Voice, __esModule: true };
+    if (name.endsWith("transcriptWindow")) return transcriptWindow;
+    assert.fail(`Unexpected import ${name}`);
+  });
   const goal = evaluate("../src/goalApi.ts", n => n === "@tauri-apps/api/core" ? { invoke: async () => ({}) } : assert.fail(n));
   function Settings() {}
   function Changes() {}
@@ -89,6 +105,9 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     if (name === "react") return hooks;
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
     if (name === "@tauri-apps/api/core") return { invoke: async () => ({ built: true, windowsTerminalBuild: terminalPlatformSupported }) };
+    if (name.endsWith("TranscriptItem")) return transcriptItem;
+    if (name.endsWith("transcriptWindow")) return transcriptWindow;
+    if (name.endsWith("nativeSettingsPolicy")) return settingsPolicy;
     if (name.endsWith("NativeSettings")) return { default: Settings, __esModule: true };
     if (name.endsWith("NativeMemorySettings")) return { default: () => null, memoryShouldBeOn: () => false, __esModule: true };
     if (name.endsWith("NativeGoals")) return { default: () => null, __esModule: true };
@@ -319,14 +338,60 @@ test("setup help documents scope and gates provider checks behind confirmation",
   assert.match(settings, /Full desktop\/computer control and unattended company operations are not enabled/);
 });
 
-test("settings pause the idle runtime and restore the same chat without replay", async () => {
+test("closing Settings keeps the same chat connected, without a restart or a replay", async () => {
   const f = fixture(); await f.flush();
   await f.button("Saved chat").props.onClick(); await f.flush();
   await f.button("⚙ Settings").props.onClick(); await f.flush();
   assert.equal(f.settings().locked, false);
+  const stops = f.calls.filter(call => call.method === "stop").length;
   f.settings().onClose(); await f.flush();
-  assert.equal(f.calls.filter(call => call.method === "thread/resume").length, 2);
+  assert.equal(f.calls.filter(call => call.method === "stop").length, stops, "closing alone must not stop the runtime");
+  assert.equal(f.calls.filter(call => call.method === "thread/resume").length, 1, "the chat was not reloaded");
   assert.equal(f.calls.some(call => call.method === "turn/start"), false);
+});
+
+test("opening Settings keeps the chat connected; only a save that needs a restart stops the runtime", async () => {
+  const f = fixture(); await f.flush();
+  await f.button("Saved chat").props.onClick(); await f.flush();
+  const stops = () => f.calls.filter(call => call.method === "stop").length;
+  const before = stops();
+  await f.button("⚙ Settings").props.onClick(); await f.flush();
+  assert.equal(stops(), before, "opening Settings must not stop the runtime");
+  await f.settings().call("save_memory", { secret: "", memory: { enabled: true, scope: "personal", user_id: "u" } }); await f.flush();
+  assert.equal(stops(), before, "a memory save must not stop the runtime");
+  await f.settings().call("save_model", { profile: { id: "one", label: "Offline one", model: "offline-one" } }); await f.flush();
+  assert.equal(stops(), before + 1, "saving the running model stops the runtime first");
+});
+
+test("closing Settings restarts the runtime only when tool, worker or site options changed", async () => {
+  const f = fixture(); await f.flush();
+  await f.button("Saved chat").props.onClick(); await f.flush();
+  const count = method => f.calls.filter(call => call.method === method).length;
+  await f.button("⚙ Settings").props.onClick(); await f.flush();
+  const stops = count("stop"), connects = count("connect");
+  f.settings().onClose(); await f.flush();
+  assert.equal(count("stop"), stops, "unchanged options must not restart the runtime");
+  assert.equal(count("connect"), connects);
+  await f.button("⚙ Settings").props.onClick(); await f.flush();
+  f.settings().onToolsChange(false); await f.flush();
+  f.settings().onClose(); await f.flush();
+  // connect() also issues a stop of its own (a no-op on a client that already stopped), so assert "at least one more".
+  assert.ok(count("stop") > stops, "a changed tool option stops the runtime");
+  assert.equal(count("connect"), connects + 1, "and starts it again with the new option");
+  assert.equal(f.calls.filter(call => call.method === "connect").at(-1).readers, false);
+  // Parallel workers are part of the same start options.
+  const connectsBeforeWorkers = count("connect");
+  await f.button("⚙ Settings").props.onClick(); await f.flush();
+  f.settings().onWorkersChange(true); await f.flush();
+  f.settings().onClose(); await f.flush();
+  assert.equal(count("connect"), connectsBeforeWorkers + 1, "a changed worker option restarts the runtime");
+  assert.equal(f.calls.filter(call => call.method === "connect").at(-1).workers, true);
+  // Browser sites are part of the same start options: changing them restarts too.
+  await f.button("⚙ Settings").props.onClick(); await f.flush();
+  f.settings().onOriginsChange("https://example.com"); await f.flush();
+  f.settings().onClose(); await f.flush();
+  assert.ok(count("stop") > stops + 1, "a changed site list stops the runtime");
+  assert.deepEqual(f.calls.filter(call => call.method === "connect").at(-1).origins, ["https://example.com"]);
 });
 
 test("composer model selection restarts the idle context and preserves history and draft", async () => {
@@ -352,7 +417,8 @@ test("leaving settings waits for configuration writes instead of starting stale 
   assert.equal(f.calls.filter(call => call.method === "connect").length, 1);
   f.settings().onPendingChange(false); await f.flush();
   f.settings().onClose(); await f.flush();
-  assert.equal(f.calls.filter(call => call.method === "connect").length, 2);
+  // The chat is already connected with the settings it was saved under, so closing does not start it again.
+  assert.equal(f.calls.filter(call => call.method === "connect").length, 1);
 });
 
 test("project changes never restore a different project's thread or carry optional permissions", async () => {
@@ -389,7 +455,8 @@ test("failed history restoration cannot silently send a reply into a new chat", 
   const f = fixture(); await f.flush();
   await f.button("Saved chat").props.onClick(); await f.flush();
   await f.button("⚙ Settings").props.onClick(); await f.flush();
-  f.failResume(); f.settings().onClose(); await f.flush(); await f.enter("Reply to saved history");
+  // Closing restarts only when an option changed, so change one: the restart reloads the saved chat, and that reload fails.
+  f.failResume(); f.settings().onToolsChange(false); await f.flush(); f.settings().onClose(); await f.flush(); await f.enter("Reply to saved history");
   f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} }); await f.flush();
   assert.equal(f.calls.some(call => call.method === "thread/start" || call.method === "turn/start"), false);
 });
