@@ -7,7 +7,7 @@ import ts from "typescript";
 const module = { exports: {} };
 const code = ts.transpileModule(readFileSync(new URL("../src/transcriptWindow.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 vm.runInNewContext(code, { module, exports: module.exports });
-const { INITIAL_WINDOW, WINDOW_STEP, visibleWindow, widenWindow, transcriptRowKey } = module.exports;
+const { INITIAL_WINDOW, WINDOW_STEP, visibleWindow, widenWindow, sameTranscriptRow } = module.exports;
 
 const rows = (count) => Array.from({ length: count }, (_, index) => ({ id: `item-${index}`, kind: "assistant", text: `row ${index}` }));
 
@@ -45,11 +45,14 @@ test("short chats, zero and odd limits never throw or show phantom rows", () => 
   assert.equal(visibleWindow([], 60).hidden, 0);
 });
 
-test("a row's key changes only when something it shows changes", () => {
-  const base = { id: "a", kind: "commandExecution", status: "inProgress", text: "npm test", command: "npm test" };
-  assert.equal(transcriptRowKey(base), transcriptRowKey({ ...base }));
-  assert.notEqual(transcriptRowKey(base), transcriptRowKey({ ...base, text: "npm test\nPASS" }));
-  assert.notEqual(transcriptRowKey(base), transcriptRowKey({ ...base, status: "completed" }));
-  assert.notEqual(transcriptRowKey(base), transcriptRowKey({ ...base, exitCode: 0 }));
-  assert.notEqual(transcriptRowKey(base), transcriptRowKey({ ...base, durationMs: 3200 }));
+test("a memoised row is reused only when its object and props are unchanged", () => {
+  const onCopy = () => {}, onEdit = () => {}, onPreviewFile = () => {};
+  const item = { id: "p", kind: "progress", text: "3/10" };
+  const props = { item, busy: true, copied: false, onCopy, onEdit, onPreviewFile };
+  assert.equal(sameTranscriptRow(props, { ...props }), true, "same object, same props: reuse");
+  // The review case: a same-length text replacement arrives as a new object and must re-render.
+  assert.equal(sameTranscriptRow(props, { ...props, item: { ...item, text: "4/10" } }), false);
+  assert.equal(sameTranscriptRow(props, { ...props, busy: false }), false);
+  assert.equal(sameTranscriptRow(props, { ...props, copied: true }), false);
+  assert.equal(sameTranscriptRow(props, { ...props, onCopy: () => {} }), false, "a new callback is a new prop");
 });

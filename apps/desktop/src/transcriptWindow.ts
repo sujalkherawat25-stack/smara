@@ -11,12 +11,14 @@ export function widenWindow(limit: number): number {
   return limit + WINDOW_STEP;
 }
 
-export type RowSource = { id: string; kind: string; status?: string; text: string; command?: string; exitCode?: number; durationMs?: number };
+export type RowProps<T> = { item: T; busy: boolean; copied: boolean; onCopy: unknown; onEdit: unknown; onPreviewFile: unknown };
 
 /**
- * What decides whether a transcript row must re-render. Streaming appends text, so the length
- * changes with every batched delta; a row whose key is unchanged is skipped by React.memo.
+ * Whether a memoised transcript row can be reused. Rows are compared by object identity: mergeItem and the
+ * delta updates build a new object for every row they change and keep the old object for the rest. A key
+ * built from text length would miss same-length replacements such as "3/10" to "4/10", so none is used.
  */
-export function transcriptRowKey(item: RowSource): string {
-  return [item.id, item.kind, item.status ?? "", item.text.length, item.command ?? "", item.exitCode ?? "", item.durationMs ?? ""].join("\u0000");
+export function sameTranscriptRow<T>(prev: RowProps<T>, next: RowProps<T>): boolean {
+  return prev.item === next.item && prev.busy === next.busy && prev.copied === next.copied
+    && prev.onCopy === next.onCopy && prev.onEdit === next.onEdit && prev.onPreviewFile === next.onPreviewFile;
 }
