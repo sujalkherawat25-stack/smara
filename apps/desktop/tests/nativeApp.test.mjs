@@ -420,6 +420,13 @@ test("closing Settings restarts the runtime only when tool, worker or site optio
   assert.ok(count("stop") > stops, "a changed tool option stops the runtime");
   assert.equal(count("connect"), connects + 1, "and starts it again with the new option");
   assert.equal(f.calls.filter(call => call.method === "connect").at(-1).readers, false);
+  // Parallel workers are part of the same start options.
+  const connectsBeforeWorkers = count("connect");
+  await f.button("⚙ Settings").props.onClick(); await f.flush();
+  f.settings().onWorkersChange(true); await f.flush();
+  f.settings().onClose(); await f.flush();
+  assert.equal(count("connect"), connectsBeforeWorkers + 1, "a changed worker option restarts the runtime");
+  assert.equal(f.calls.filter(call => call.method === "connect").at(-1).workers, true);
   // Browser sites are part of the same start options: changing them restarts too.
   await f.button("⚙ Settings").props.onClick(); await f.flush();
   f.settings().onOriginsChange("https://example.com"); await f.flush();
