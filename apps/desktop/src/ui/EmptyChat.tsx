@@ -22,8 +22,7 @@ export function EmptyChat({ agent, projectLabel, hasModel, connecting, onPick }:
   const starters = hasModel && !connecting ? (agent && STARTERS[agent.id]) || GENERAL : [];
   return (
     <div className="empty-chat">
-      <div className="empty-icon" aria-hidden="true">{agent?.icon ?? "✦"}</div>
-      <h1>{agent ? `Ask ${agent.name}` : "Ask Smara"}</h1>
+      <h1>{agent ? `What should ${agent.name} work on?` : "What should we work on?"}</h1>
       <div className="empty-role">{agent?.role ? `${agent.role} · ${projectLabel}` : projectLabel}</div>
       {!hasModel && <p className="empty-hint">Add a model in Settings to get started.</p>}
       {hasModel && connecting && <p className="empty-hint">Preparing your project…</p>}

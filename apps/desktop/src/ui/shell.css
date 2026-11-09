@@ -120,10 +120,8 @@
   color: var(--smara-ink); text-align: left; font-size: var(--smara-body);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.native-app .agent-row > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .native-app .agent-row:hover:not(:disabled) { background: var(--smara-hover); }
 .native-app .agent-row[aria-current="true"] { background: var(--smara-surface); box-shadow: inset 2px 0 0 var(--smara-accent); }
-.native-app .agent-count { color: var(--smara-muted); font-size: 12px; }
 .native-app .agent-item > .text-button {
   opacity: 0; padding: 4px 8px; margin-right: 2px;
   color: var(--smara-muted); font-size: 12px; border-radius: 6px;
@@ -141,6 +139,43 @@
 .native-app .agent-form input,
 .native-app .agent-form textarea { color: var(--smara-ink); background: var(--smara-bg); border: 1px solid var(--smara-line); border-radius: 8px; padding: 8px 10px; }
 .native-app .agent-form fieldset { border: none; padding: 0; }
+
+/* Agents, each with its own chats nested underneath (no separate chat list). */
+.native-app .agent-group { display: flex; flex-direction: column; margin-bottom: 2px; }
+.native-app .agent-item { display: flex; align-items: center; gap: 2px; }
+.native-app .agent-row {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  padding: 8px var(--smara-space-2);
+  border: none; border-radius: 8px; background: transparent;
+  color: var(--smara-ink); text-align: left;
+}
+.native-app .agent-row:hover:not(:disabled) { background: var(--smara-hover); }
+.native-app .agent-row[aria-current="true"] { background: var(--smara-surface); box-shadow: inset 2px 0 0 var(--smara-accent); }
+.native-app .agent-row .agent-name { font-size: 14px; font-weight: 600; }
+.native-app .agent-row .agent-role { font-size: 12px; color: var(--smara-muted); }
+.native-app .agent-item > .agent-edit { opacity: 0; padding: 4px 8px; font-size: 12px; color: var(--smara-muted); }
+.native-app .agent-item:hover > .agent-edit,
+.native-app .agent-item:focus-within > .agent-edit,
+.native-app .agent-row[aria-current="true"] ~ .agent-edit { opacity: 1; }
+.native-app .agent-chats {
+  margin: 2px 0 8px var(--smara-space-3);
+  padding-left: var(--smara-space-2);
+  border-left: 1px solid var(--smara-line);
+}
+.native-app .agent-chats-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--smara-space-2); padding: 4px 2px 6px; }
+.native-app .agent-chats-toolbar select { font-size: 12px; padding: 2px 6px; background: transparent; border: 1px solid var(--smara-line); border-radius: 6px; color: var(--smara-muted); }
+.native-app .agent-chats-toolbar button { font-size: 12px; padding: 2px 6px; border: none; background: transparent; color: var(--smara-muted); }
+.native-app .agent-chats .sidebar-threads { gap: 1px; }
+.native-app .agent-chats .agent-hidden-hint { padding: 6px 2px 2px; }
+.native-app .agent-chats p { font-size: 12px; color: var(--smara-muted); padding: 6px 2px; }
+.native-app .agent-form-actions { display: flex; gap: var(--smara-space-2); }
+.native-app .agent-form-panel { width: min(640px, calc(100% - 32px)); margin: var(--smara-space-4) auto 0; }
+.native-app .agent-form-panel .agent-form { margin: 0; box-shadow: var(--smara-shadow); }
+.native-app .native-layout aside { overflow-y: auto; }
+.native-app .sidebar-section-heading .text-button { white-space: nowrap; font-size: 12px; padding: 2px 6px; }
+.native-app .composer-toolbar button { font-size: 12px; padding: 5px 9px; white-space: nowrap; border-radius: 8px; }
+.native-app .composer-toolbar .composer-context { display: flex; align-items: center; gap: var(--smara-space-2); }
 
 /* ---------- Top bar ---------- */
 .native-app .native-topbar {
@@ -271,11 +306,13 @@
   color: var(--smara-muted); font-size: 12px; padding: 4px 8px;
 }
 .native-app .native-composer .primary,
-.native-app .native-composer button[type="submit"] {
-  width: 34px; height: 34px; padding: 0;
-  border: none; border-radius: 999px;
-  background: var(--smara-accent); color: var(--smara-on-accent); font-weight: 700;
+.native-app .native-composer button[type="submit"],
+.native-app .native-composer .stop-button {
+  height: 34px; padding: 0 14px; min-width: 64px;
+  border: none; border-radius: 999px; font-size: 13px;
+  background: var(--smara-accent); color: var(--smara-on-accent); font-weight: 600;
 }
+.native-app .native-composer .stop-button { background: var(--smara-error); color: #fff; }
 .native-app .native-composer button[type="submit"]:disabled { background: var(--smara-hover); color: var(--smara-muted); }
 
 /* ---------- Colours that the older stylesheets hard-code for dark mode only ---------- */

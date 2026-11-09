@@ -89,7 +89,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
         <div className="set-group">
           {!setup.profiles.length && <div className="set-row"><div><strong>No model yet</strong><small>Add your provider below to start chatting.</small></div></div>}
           {setup.profiles.map(profile => <div className="set-row" key={profile.id}><div><strong>{profile.label}{profile.id === setup.preferences.active_model && <span className="set-badge">Active</span>}</strong><small>{profile.model} · {profile.provider}</small></div><button disabled={disabled} onClick={() => edit(profile)}>Edit</button></div>)}
-          <div className="set-row"><button disabled={disabled} onClick={() => { setModel(emptyModel); setEditing(true); }}>＋ Add model</button></div>
+          <div className="set-row"><button disabled={disabled} onClick={() => { setModel(emptyModel); setEditing(true); }}>Add model</button></div>
         </div>
         {(editing || !setup.profiles.length) && <form className="set-group settings-form" onSubmit={event => { event.preventDefault(); const known = setup.profiles.map(p => p.id); const id = model.id || profileId(model.label, known); void save("save_model", { profile: modelPayload({ ...model, id }) }).then(() => setEditing(false)); }}>
           <div className="set-row stack"><strong>{setup.profiles.some(p => p.id === model.id) ? "Edit model" : "Add model"}</strong>
@@ -156,7 +156,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
             <ol><li>Add a chat-compatible model in <strong>Models</strong>, then choose it next to the message field.</li>
               <li>Connect <strong>Memory</strong> with your Syntarus key so Smara remembers you.</li>
               <li>Choose a trusted project folder from the sidebar. Avoid folders you do not trust.</li></ol>
-            <small>Use <strong>＋</strong> in the composer to add project files. Smara can read images and scanned PDFs with Sarvam after approval.</small></div>
+            <small>Use <strong>Attach</strong> in the composer to add project files. Smara can read images and scanned PDFs with Sarvam after approval.</small></div>
           <div className="set-row stack"><strong>Checks</strong>
             <small>Models: {setup.profiles.length ? `${setup.profiles.length} saved${activeModel ? ` · active: ${activeModel.label}` : " · choose one in the composer"}` : "none yet."} Web search: {setup.search.configured ? `${setup.search.provider} key readable locally.` : "no readable key."}</small>
             <small>Saved-key checks are local only. These tests are manual, send fixed minimal requests, and may incur provider charges; no chat history or project files are included.</small>
