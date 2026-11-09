@@ -351,3 +351,46 @@
 @media (prefers-reduced-motion: reduce) {
   .native-app *, .native-app *::before, .native-app *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
+
+/* Agents as contacts, like a chat app: one row each, opened with a tap. Older conversations scroll above. */
+.native-app .contact-list { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; overflow-y: auto; min-height: 0; flex: 1; }
+.native-app .contact-item { display: flex; align-items: center; gap: 2px; border-radius: 10px; }
+.native-app .contact {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: var(--smara-space-3);
+  padding: 10px var(--smara-space-2);
+  border: none; border-radius: 10px; background: transparent;
+  color: var(--smara-ink); text-align: left;
+}
+.native-app .contact:hover:not(:disabled) { background: var(--smara-hover); }
+.native-app .contact[aria-current="true"] { background: var(--smara-surface); }
+.native-app .avatar {
+  flex: 0 0 40px; width: 40px; height: 40px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--smara-hover); color: var(--smara-ink);
+  font-size: 16px; font-weight: 600;
+}
+.native-app .contact[aria-current="true"] .avatar { background: var(--smara-accent); color: var(--smara-on-accent); }
+.native-app .contact-text { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px; }
+.native-app .contact-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.native-app .contact-preview { font-size: 12px; color: var(--smara-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.native-app .contact-edit { opacity: 0; padding: 4px 8px; font-size: 12px; color: var(--smara-muted); }
+.native-app .contact-item:hover > .contact-edit,
+.native-app .contact-item:focus-within > .contact-edit { opacity: 1; }
+.native-app .sidebar-empty { padding: var(--smara-space-3); color: var(--smara-muted); font-size: 12px; }
+.native-app .sidebar-footer {
+  display: flex; flex-direction: column; align-items: stretch; gap: 2px;
+  margin-top: auto; padding-top: var(--smara-space-2); border-top: 1px solid var(--smara-line);
+}
+.native-app .sidebar-footer > button.text-button { text-align: left; padding: 6px var(--smara-space-2); font-size: 13px; color: var(--smara-muted); }
+.native-app .sidebar-footer > button.text-button:hover:not(:disabled) { color: var(--smara-ink); }
+.native-app .settings-button {
+  width: 100%; margin-top: var(--smara-space-1); padding: 10px var(--smara-space-2);
+  border: none; border-radius: 10px; background: transparent; color: var(--smara-ink); text-align: left; font-weight: 600;
+}
+.native-app .settings-button:hover:not(:disabled), .native-app .settings-button.selected { background: var(--smara-hover); }
+.native-app .project-list { display: flex; flex-direction: column; gap: 2px; padding: 4px 0 6px var(--smara-space-2); }
+.native-app .project-list .project-button { font-size: 13px; padding: 6px var(--smara-space-2); }
+.native-app .history-separator { display: flex; align-items: center; gap: var(--smara-space-3); margin: var(--smara-space-4) auto; color: var(--smara-muted); font-size: 12px; }
+.native-app .history-separator::before, .native-app .history-separator::after { content: ""; flex: 1; height: 1px; background: var(--smara-line); }
+.native-app .load-earlier { display: block; margin: 0 auto var(--smara-space-3); }

@@ -45,3 +45,19 @@ export function agentNameProblem(name: string): string {
   if (trimmed.length > 40) return "Keep the name under 40 characters.";
   return "";
 }
+
+/** A conversation time in milliseconds. The runtime sends seconds since 1970; some fields carry a date string. */
+export function threadTime(thread: { updatedAt?: string | number }): number {
+  const value = thread.updatedAt;
+  if (typeof value === "number") return value < 1e12 ? value * 1000 : value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+}
+
+/** An agent's conversations, most recent first. The first one is what the agent's row shows and opens. */
+export function chatsNewestFirst<T extends { id: string; updatedAt?: string | number }>(chats: T[], roster: AgentRoster, agentId: string): T[] {
+  return chatsForAgent(chats, roster, agentId).slice().sort((a, b) => threadTime(b) - threadTime(a));
+}

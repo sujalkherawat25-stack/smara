@@ -68,3 +68,11 @@ test("a finished group is collapsed (not running) and a single tool row is not g
   assert.equal(done[0].running, false);
   assert.equal(plain(groupTranscript([{ id: "solo", kind: "webSearch", text: "q" }]))[0].type, "item");
 });
+
+test("history dividers are neither tool steps nor grouped", () => {
+  const segments = plain(groupTranscript([
+    { id: "s", kind: "separator", text: "Earlier" },
+    { id: "a", kind: "commandExecution", text: "", command: "a", status: "completed", exitCode: 0 },
+  ]));
+  assert.deepEqual(segments.map(segment => segment.type), ["item", "item"]);
+});

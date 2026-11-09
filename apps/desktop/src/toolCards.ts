@@ -9,7 +9,8 @@ export type TranscriptSegment =
 const MESSAGE_KINDS = new Set(["assistant", "user"]);
 
 export function isToolItem(item: ViewItem): boolean {
-  return !MESSAGE_KINDS.has(item.kind);
+  // Messages and history dividers are not tool steps.
+  return !MESSAGE_KINDS.has(item.kind) && item.kind !== "separator";
 }
 
 function firstLine(text: string, limit: number): string {

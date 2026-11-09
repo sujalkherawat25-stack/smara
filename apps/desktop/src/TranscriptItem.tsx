@@ -15,6 +15,7 @@ type Props = {
 };
 
 function TranscriptItemView({ item, busy, copied, onCopy, onEdit, onPreviewFile }: Props) {
+  if (item.kind === "separator") return <div className="history-separator" role="separator"><span>{item.text}</span></div>;
   if (item.kind !== "assistant" && item.kind !== "user") return <ToolCard item={item} />;
   return (
     <article className={`native-item ${item.kind}`}>

@@ -5,7 +5,10 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 
-function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = true, terminalPlatformSupported = true, projectOptions, backgroundGoal = false, agentRoster } = {}) {
+const contact = (f, name) => f.nodes().find(node => node.type === "button" && node.props.className === "contact" && f.text(node).includes(name));
+const openProjects = async (f) => { f.nodes().find(node => node.type === "button" && f.text(node).startsWith("Project:")).props.onClick(); await f.flush(); };
+
+function fixture({ olderChats = [], startupFailure = false, unknownTurn = false, sandboxReady = true, terminalPlatformSupported = true, projectOptions, backgroundGoal = false, agentRoster } = {}) {
   const slots = [], calls = [], goalCalls = [], effects = [], timers = new Set();
   let cursor = 0, dirty = true, tree, failResume = false, currentRpc;
   const setup = {
@@ -63,7 +66,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     async request(method, params) {
       calls.push({ method, params: JSON.parse(JSON.stringify(params)) });
       const thread = { id: "saved", cwd: failResume ? "C:/wrong-project" : setup.preferences.workspace, turns: [{ id: "turn", status: "interrupted", items: [{ id: "user", type: "userMessage", content: [{ type: "text", text: "Synthetic saved question" }] }] }] };
-      if (method === "thread/list") return { data: [{ id: "saved", preview: "Saved chat" }] };
+      if (method === "thread/list") return { data: [{ id: "saved", preview: "Saved chat", updatedAt: 2_000_000_000 }, ...olderChats] };
       if (method === "thread/read" || method === "thread/resume") return { thread };
       if (method === "thread/start") return { thread: { id: "new" } };
       if (method === "windowsSandbox/readiness") return { status: sandboxReady ? "ready" : "notConfigured" };
@@ -317,7 +320,7 @@ test("saved project choices are restored without leaking to another project", as
   const first = f.calls.find(call => call.method === "connect");
   assert.equal(first.readers, true); assert.equal(first.workers, true);
   assert.deepEqual(first.origins, ["https://docs.python.org"]);
-  await f.nodes().find(node => node.type === "button" && node.props.title === "C:/second").props.onClick(); await f.flush();
+  await openProjects(f); await f.nodes().find(node => node.type === "button" && node.props.title === "C:/second").props.onClick(); await f.flush();
   assert.equal(f.calls.filter(call => call.method === "connect").at(-1).workers, false);
   await f.nodes().find(node => node.type === "button" && node.props.title === "C:/first").props.onClick(); await f.flush();
   assert.equal(f.calls.filter(call => call.method === "connect").at(-1).workers, true);
@@ -344,7 +347,7 @@ test("uncertain send preserves file context and project switches preserve separa
   f.button("Add project files").props.onClick(); await f.flush();
   f.contextPicker().onAttach([{ name: "notes.txt", path: "notes.txt", directory: false, size: 4 }]);
   f.contextPicker().onClose(); await f.flush();
-  await f.nodes().find(node => node.type === "button" && node.props.title === "C:/second").props.onClick(); await f.flush();
+  await openProjects(f); await f.nodes().find(node => node.type === "button" && node.props.title === "C:/second").props.onClick(); await f.flush();
   assert.equal(f.nodes().some(node => node.props?.["aria-label"] === "Remove notes.txt"), false);
   await f.nodes().find(node => node.type === "button" && node.props.title === "C:/first").props.onClick(); await f.flush();
   assert.ok(f.button("Remove notes.txt"));
@@ -375,7 +378,7 @@ test("setup help documents scope and gates provider checks behind confirmation",
 
 test("closing Settings keeps the same chat connected, without a restart or a replay", async () => {
   const f = fixture(); await f.flush();
-  await f.button("Saved chat").props.onClick(); await f.flush();
+  await contact(f, "Kiran").props.onClick(); await f.flush();
   await f.button("Settings").props.onClick(); await f.flush();
   assert.equal(f.settings().locked, false);
   const stops = f.calls.filter(call => call.method === "stop").length;
@@ -385,19 +388,15 @@ test("closing Settings keeps the same chat connected, without a restart or a rep
   assert.equal(f.calls.some(call => call.method === "turn/start"), false);
 });
 
-test("the agent roster filters the chat list to the selected agent", async () => {
-  const roster = (id, name) => ({ id, name, role: "Role " + name, icon: "🤖", instructions: "", preset: true, folders: [], origins: [], terminal: false, memory_scope: "project", model_profile: "" });
-  const f = fixture({ agentRoster: { roster: [roster("kiran", "Kiran"), roster("rohan", "Rohan")], default: "kiran", assignments: { saved: "rohan" } } });
+test("each agent shows its latest conversation, and opening an agent resumes it", async () => {
+  const agentRecord = (id, name) => ({ id, name, role: "Role " + name, icon: "", instructions: "", preset: true });
+  const f = fixture({ agentRoster: { roster: [agentRecord("kiran", "Kiran"), agentRecord("rohan", "Rohan")], default: "kiran", assignments: { saved: "rohan" } } });
   await f.flush();
-  const savedChat = () => f.nodes().some(node => node.type === "button" && f.text(node) === "Saved chat");
-  assert.equal(savedChat(), false, "the chat belongs to Rohan, so Kiran's list hides it");
-  const agentRows = () => f.nodes().filter(node => node.type === "button" && node.props.className === "agent-row");
-  const agentRow = name => agentRows().find(node => f.text(node).includes(name));
-  assert.equal(agentRows().length, 2);
-  assert.equal(agentRow("Kiran").props["aria-current"], "true");
-  agentRow("Rohan").props.onClick(); await f.flush();
-  assert.equal(savedChat(), true, "selecting Rohan lists the chat");
-  assert.equal(agentRow("Rohan").props["aria-current"], "true");
+  assert.equal(f.text(contact(f, "Rohan")).includes("Saved chat"), true, "Rohan's row previews its conversation");
+  assert.equal(f.text(contact(f, "Kiran")).includes("Saved chat"), false, "Kiran has no conversation yet");
+  contact(f, "Rohan").props.onClick(); await f.flush();
+  assert.equal(contact(f, "Rohan").props["aria-current"], "true");
+  assert.ok(f.calls.some(call => call.method === "thread/resume" && call.params.threadId === "saved"), "opening Rohan resumes its latest conversation");
 });
 
 test("a new chat runs with the Smara rules first, then the selected agent's instructions", async () => {
@@ -414,7 +413,7 @@ test("a new chat runs with the Smara rules first, then the selected agent's inst
   f.button("New chat").props.onClick(); await f.flush();
   await submit("First question");
   const plain = starts().at(-1).params.developerInstructions;
-  f.nodes().find(node => node.type === "button" && node.props.className === "agent-row" && f.text(node).includes("Rohan")).props.onClick(); await f.flush();
+  f.nodes().find(node => node.type === "button" && node.props.className === "contact" && f.text(node).includes("Rohan")).props.onClick(); await f.flush();
   f.button("New chat").props.onClick(); await f.flush();
   await submit("Second question");
   const withAgent = starts().at(-1).params.developerInstructions;
@@ -434,17 +433,20 @@ test("an empty chat names the agent and a starter prompt fills the composer with
   assert.equal(f.calls.some(call => call.method === "turn/start"), false, "a starter fills the composer; it does not send");
 });
 
-test("chats that belong to other agents are counted, not silently hidden", async () => {
-  const agentRecord = (id, name) => ({ id, name, role: "Role " + name, icon: "🤖", instructions: "", preset: true });
-  const f = fixture({ agentRoster: { roster: [agentRecord("kiran", "Kiran"), agentRecord("rohan", "Rohan")], default: "kiran", assignments: { saved: "rohan" } } });
+test("earlier conversations load above the open one, under a dated divider", async () => {
+  const f = fixture({ olderChats: [{ id: "older", preview: "Older question", updatedAt: 1_000_000_000 }] });
   await f.flush();
-  const hint = () => f.nodes().find(node => node.type === "small" && node.props.className === "agent-hidden-hint");
-  assert.equal(f.text(hint()), "1 chat in other agents");
+  contact(f, "Kiran").props.onClick(); await f.flush();
+  f.button("Show earlier conversations (1)").props.onClick(); await f.flush();
+  const divider = f.nodes().find(node => node.props?.item?.kind === "separator");
+  assert.ok(divider, "a divider marks the start of the earlier conversation");
+  assert.match(divider.props.item.text, /Older question|older/);
+  assert.equal(f.nodes().some(node => node.type === "button" && f.text(node).startsWith("Show earlier conversations")), false, "loaded once");
 });
 
 test("opening Settings keeps the chat connected; only a save that needs a restart stops the runtime", async () => {
   const f = fixture(); await f.flush();
-  await f.button("Saved chat").props.onClick(); await f.flush();
+  await contact(f, "Kiran").props.onClick(); await f.flush();
   const stops = () => f.calls.filter(call => call.method === "stop").length;
   const before = stops();
   await f.button("Settings").props.onClick(); await f.flush();
@@ -457,7 +459,7 @@ test("opening Settings keeps the chat connected; only a save that needs a restar
 
 test("closing Settings restarts the runtime only when tool, worker or site options changed", async () => {
   const f = fixture(); await f.flush();
-  await f.button("Saved chat").props.onClick(); await f.flush();
+  await contact(f, "Kiran").props.onClick(); await f.flush();
   const count = method => f.calls.filter(call => call.method === method).length;
   await f.button("Settings").props.onClick(); await f.flush();
   const stops = count("stop"), connects = count("connect");
@@ -488,7 +490,7 @@ test("closing Settings restarts the runtime only when tool, worker or site optio
 
 test("composer model selection restarts the idle context and preserves history and draft", async () => {
   const f = fixture(); await f.flush();
-  await f.button("Saved chat").props.onClick(); await f.flush();
+  await contact(f, "Kiran").props.onClick(); await f.flush();
   await f.enter("My unsubmitted draft");
   await f.model().props.onChange({ target: { value: "two" } }); await f.flush();
   assert.equal(f.calls.filter(call => call.method === "connect").at(-1).profile, "two");
@@ -515,9 +517,10 @@ test("leaving settings waits for configuration writes instead of starting stale 
 
 test("project changes never restore a different project's thread or carry optional permissions", async () => {
   const f = fixture(); await f.flush();
-  await f.button("Saved chat").props.onClick(); await f.flush();
+  await contact(f, "Kiran").props.onClick(); await f.flush();
   await f.button("Settings").props.onClick(); await f.flush();
   f.settings().onToolsChange(true); f.settings().onWorkersChange(true); f.settings().onOriginsChange("https://example.com"); await f.flush();
+  await openProjects(f);
   const project = f.nodes().find(node => node.type === "button" && node.props.title === "C:/second");
   await project.props.onClick(); await f.flush();
   const last = f.calls.filter(call => call.method === "connect").at(-1);
@@ -545,7 +548,7 @@ test("an unknown turn remains locked and cannot be automatically resent", async 
 
 test("failed history restoration cannot silently send a reply into a new chat", async () => {
   const f = fixture(); await f.flush();
-  await f.button("Saved chat").props.onClick(); await f.flush();
+  await contact(f, "Kiran").props.onClick(); await f.flush();
   await f.button("Settings").props.onClick(); await f.flush();
   // Closing restarts only when an option changed, so change one: the restart reloads the saved chat, and that reload fails.
   f.failResume(); f.settings().onToolsChange(false); await f.flush(); f.settings().onClose(); await f.flush(); await f.enter("Reply to saved history");

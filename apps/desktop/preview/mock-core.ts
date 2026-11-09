@@ -35,7 +35,13 @@ const threads = [
   { id: "t-dues", name: "Reminder for Sharma Traders", preview: "Reminder for Sharma Traders", updatedAt: nowSeconds() - 7200 },
 ];
 
-const turnsFor = (id: string) => id === "t-tally" ? [{
+const turnsFor = (id: string) => id === "t-stock" ? [{
+  id: "turn-3", status: "completed",
+  items: [
+    { id: "u3", type: "userMessage", content: [{ type: "text", text: "Compare the stock sheet with the Tally export." }] },
+    { id: "a3", type: "agentMessage", text: "Three rows differ: Gupta Kirana (4 units), Verma and Sons (2 units), and one duplicate line in the stock sheet." },
+  ],
+}] : id === "t-tally" ? [{
   id: "turn-1", status: "completed",
   items: [
     { id: "u1", type: "userMessage", content: [{ type: "text", text: "Read the Tally export and tell me who owes the most." }] },

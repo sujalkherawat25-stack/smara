@@ -10,7 +10,7 @@ import HostedPanel from "./ui/HostedPanel";
 import { EmptyChat } from "./ui/EmptyChat";
 import NativeBrowser from "./NativeBrowser";
 import NativeGoals from "./NativeGoals";
-import { EMPTY_ROSTER, agentById, agentNameProblem, chatsForAgent, developerInstructionsFor, type AgentRecord, type AgentRoster as RosterData } from "./agents";
+import { EMPTY_ROSTER, agentById, agentNameProblem, chatsForAgent, chatsNewestFirst, developerInstructionsFor, threadTime, type AgentRecord, type AgentRoster as RosterData } from "./agents";
 import { groupTranscript } from "./toolCards";
 import { hostedStatus, type HelperSnapshot } from "./hostedStatus";
 import { invoke } from "@tauri-apps/api/core";
@@ -131,6 +131,10 @@ export default function NativeApp() {
   const [status, setStatus] = useState("Preparing project…");
   const [panel, setPanel] = useState<Pane | null>(null);
   const [morePanesOpen, setMorePanesOpen] = useState(false);
+  const [projectOpen, setProjectOpen] = useState(false);
+  // Earlier conversations of the open agent, shown above the current one as one history.
+  const [earlier, setEarlier] = useState<Item[]>([]);
+  const [earlierState, setEarlierState] = useState<"none" | "loading" | "loaded">("none");
   const [roster, setRoster] = useState<RosterData>(EMPTY_ROSTER);
   const [selectedAgent, setSelectedAgent] = useState("");
   const [helper, setHelper] = useState<HelperSnapshot>(undefined);
@@ -146,6 +150,7 @@ export default function NativeApp() {
   // How many of the newest transcript rows are rendered. Long chats show the latest 60 and reveal earlier rows on demand.
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_WINDOW);
   useEffect(() => { setVisibleLimit(INITIAL_WINDOW); }, [threadId]);
+  useEffect(() => { setEarlier([]); setEarlierState("none"); }, [threadId]);
   // Helper status for the hosted chip and panel. Read on start and every 30 s; the helper itself is never touched here.
   useEffect(() => {
     const load = () => { void invoke<HelperSnapshot>("bridge_state").then(value => setHelper(value)).catch(() => setHelper(null)); };
@@ -172,6 +177,31 @@ export default function NativeApp() {
   const [agentDraft, setAgentDraft] = useState<AgentDraft | null>(null);
   const [agentProblem, setAgentProblem] = useState("");
   const activeAgentId = selectedAgent || roster.default;
+  const currentThread = threads.find(thread => thread.id === threadId);
+  /** The active agent's conversations other than the open one, newest first. */
+  const olderChats = chatsNewestFirst(threads, roster, activeAgentId).filter(chat => chat.id !== threadId);
+  /** Opening an agent shows its most recent conversation, the way a chat app opens a contact. */
+  const openAgent = (id: string) => {
+    setSelectedAgent(id); setAgentDraft(null); setSettingsOpen(false);
+    const latest = chatsNewestFirst(threads, roster, id)[0];
+    if (latest) { if (latest.id !== threadId) void selectThread(latest.id); }
+    else newConversation();
+  };
+  /** Adds the agent's earlier conversations above the open one, oldest first, each under a dated divider. */
+  const loadEarlier = async () => {
+    const client = clientRef.current;
+    if (!client || !connected || olderChats.length === 0) return;
+    setEarlierState("loading");
+    try {
+      const history: Item[] = [];
+      for (const chat of [...olderChats].reverse()) {
+        const read = await client.request<{ thread: { id: string; turns?: NativeTurn[] } }>("thread/read", { threadId: chat.id, includeTurns: true });
+        history.push({ id: `history-${chat.id}`, kind: "separator", text: `${threadLabel(chat)} · ${new Date(threadTime(chat)).toLocaleDateString()}` });
+        for (const turn of read.thread.turns ?? []) for (const entry of turn.items) history.push(displayItem(entry));
+      }
+      setEarlier(history); setEarlierState("loaded");
+    } catch (reason) { setError(String(reason)); setEarlierState("none"); }
+  };
   const startNewAgent = () => { setAgentProblem(""); setAgentDraft({ name: "", role: "", icon: "", instructions: "", preset: false }); };
   const editAgent = (agent: AgentRecord) => { setAgentProblem(""); setAgentDraft({ id: agent.id, name: agent.name, role: agent.role, icon: agent.icon, instructions: agent.instructions, preset: agent.preset }); };
   const selectAgent = (id: string) => { setSelectedAgent(id); setAgentDraft(null); };
@@ -996,7 +1026,8 @@ export default function NativeApp() {
   };
   const project = setup?.preferences.projects.find(p => sameWorkspace(p.workspace, workspace));
   const navigationLocked = busy || connecting || loadingThread || settingsSaving || reviewBusy || goalPending || approvals.length > 0 || workers.some(workerOutstanding);
-  const windowed = visibleWindow(items, visibleLimit);
+  const transcriptItems: Item[] = [...earlier, ...items];
+  const windowed = visibleWindow(transcriptItems, visibleLimit);
   const agentThreads = chatsForAgent(threads, roster, selectedAgent || roster.default);
   const currentAgent = agentById(roster, selectedAgent || roster.default);
   const activeProfile = setup?.profiles.find(item => item.id === profile);
@@ -1125,51 +1156,50 @@ export default function NativeApp() {
   return <div className="native-app">
     <div className={`native-layout${settingsOpen ? " settings-mode" : ""}`}><aside>
       <button className="new-chat" disabled={navigationLocked} onClick={newConversation}>New chat</button>
-      <div className="sidebar-section-heading"><span>Agents</span><button className="text-button" disabled={navigationLocked} onClick={startNewAgent}>New</button></div>
-      <div className="agent-roster">
+      {showArchived ? <div className="contact-list" aria-label="Archived conversations">
+        {threads.map(thread => <div className="contact-item" key={thread.id}>
+          <button className="contact" disabled={navigationLocked || !connected} onClick={() => { setSettingsOpen(false); void selectThread(thread.id); }}>
+            <span className="avatar" aria-hidden="true">{threadLabel(thread).charAt(0).toUpperCase()}</span>
+            <span className="contact-text"><span className="contact-name">{threadLabel(thread)}</span><span className="contact-preview">Archived</span></span>
+          </button>
+          <button className="text-button contact-edit" disabled={!!threadActionBusy || navigationLocked} onClick={() => void archiveChat(thread, true)}>Restore</button>
+        </div>)}
+        {!threads.length && <p className="sidebar-empty">{loadingMore ? "Loading…" : "No archived conversations."}</p>}
+      </div> : <div className="contact-list" aria-label="Agents">
         {roster.roster.map(agent => {
+          const latest = chatsNewestFirst(threads, roster, agent.id)[0];
           const selected = agent.id === activeAgentId;
-          return <div className="agent-group" key={agent.id}>
-            <div className="agent-item">
-              <button className="agent-row" aria-current={selected ? "true" : undefined} disabled={navigationLocked} onClick={() => selectAgent(agent.id)}>
-                <span className="agent-name">{agent.name}</span>
-                <span className="agent-role">{agent.role || "Agent"}</span>
-              </button>
-              <button className="text-button agent-edit" aria-label={`Edit ${agent.name}`} disabled={navigationLocked} onClick={() => editAgent(agent)}>Edit</button>
-            </div>
-            {selected && <div className="agent-chats">
-              <div className="agent-chats-toolbar">
-                <select aria-label="Sort conversations" value={chatSort} disabled={!connected || loadingMore} onChange={event => { const value = event.target.value as ChatSort; setChatSort(value); void refreshChats(value, showArchived); }}><option value="recent">Recent</option><option value="oldest">Oldest</option></select>
-                <button aria-label={showArchived ? "Show active chats" : "Show archived chats"} title={showArchived ? "Active chats" : "Archived chats"} disabled={!connected || loadingMore} onClick={() => { const value = !showArchived; setShowArchived(value); void refreshChats(chatSort, value); }}>{showArchived ? "Active" : "Archived"}</button>
-              </div>
-              <div className="sidebar-threads">{agentThreads.map(thread => <div className="sidebar-thread-row" key={thread.id}>
-        <button className={`sidebar-thread-select ${thread.id === threadId ? "selected" : ""}`} title={thread.name || thread.preview || "New conversation"} disabled={navigationLocked || !connected} onClick={() => { setSettingsOpen(false); setThreadMenu(""); void selectThread(thread.id); }}>{threadLabel(thread)}</button>
-        <button className="chat-menu-trigger" aria-label={`Actions for ${threadLabel(thread)}`} title="Conversation actions" disabled={!connected || !!threadActionBusy || navigationLocked} onClick={() => setThreadMenu(current => current === thread.id ? "" : thread.id)}>More</button>
-        {threadMenu === thread.id && <div className="sidebar-thread-actions">
-          <button disabled={!!threadActionBusy || navigationLocked} onClick={() => void renameChat(thread)}>Rename</button>
-          {showArchived ? <><button disabled={!!threadActionBusy || navigationLocked} onClick={() => void archiveChat(thread, true)}>Restore</button><button className="danger-action" disabled={!!threadActionBusy || navigationLocked} onClick={() => void deleteChat(thread)}>Delete permanently…</button></> : <button disabled={!!threadActionBusy || navigationLocked} onClick={() => void archiveChat(thread, false)}>Archive</button>}
-        </div>}
-      </div>)}</div>
-              {threads.length > agentThreads.length && <small className="agent-hidden-hint">{threads.length - agentThreads.length} {threads.length - agentThreads.length === 1 ? "chat" : "chats"} in other agents</small>}
-              {!agentThreads.length && <p>{loadingMore ? "Loading chats…" : showArchived ? "No archived conversations." : connecting ? "Loading chats…" : "Your chats appear here."}</p>}
-              {nextCursor && <button disabled={navigationLocked || loadingMore || !connected} onClick={() => void loadOlder()}>{loadingMore ? "Loading…" : "Show more"}</button>}
-            </div>}
+          return <div className="contact-item" key={agent.id}>
+            <button className="contact" aria-current={selected ? "true" : undefined} disabled={navigationLocked} onClick={() => openAgent(agent.id)}>
+              <span className="avatar" aria-hidden="true">{agent.name.charAt(0)}</span>
+              <span className="contact-text">
+                <span className="contact-name">{agent.name}</span>
+                <span className="contact-preview">{latest ? threadLabel(latest) : (agent.role || "No conversations yet")}</span>
+              </span>
+            </button>
+            <button className="text-button contact-edit" aria-label={`Edit ${agent.name}`} disabled={navigationLocked} onClick={() => editAgent(agent)}>Edit</button>
           </div>;
         })}
+        {!roster.roster.length && <p className="sidebar-empty">Agents appear here once Smara is ready.</p>}
+      </div>}
+      <div className="sidebar-footer">
+        {!showArchived && <button className="text-button" disabled={navigationLocked} onClick={startNewAgent}>New agent</button>}
+        <button className="text-button" disabled={!connected || loadingMore} onClick={() => { const value = !showArchived; setShowArchived(value); void refreshChats(chatSort, value); }}>{showArchived ? "Back to agents" : "Archived chats"}</button>
+        <button className="text-button" aria-expanded={projectOpen} onClick={() => setProjectOpen(!projectOpen)}>Project: {project?.label || "None"}</button>
+        {projectOpen && <div className="project-list">
+          <button className="text-button" disabled={navigationLocked} onClick={() => setAddingProject(!addingProject)}>Add project</button>
+          {setup?.preferences.projects.map(p => <button className={`project-button ${sameWorkspace(p.workspace, workspace) ? "selected" : ""}`} key={p.workspace} title={p.workspace} disabled={navigationLocked} onClick={() => { if (!sameWorkspace(p.workspace, workspace)) void switchProject(p.workspace); else setSettingsOpen(false); }}>{p.label}</button>)}
+          {(!setup?.preferences.projects.length || addingProject) && <form className="project-form" onSubmit={event => { event.preventDefault(); void switchProject(projectPath, true); }}><label>Project name<input aria-label="Project name" value={projectName} disabled={navigationLocked} placeholder="Optional name" onChange={e => setProjectName(e.target.value)} /></label><label>Local folder<input aria-label="Project folder" required value={projectPath} disabled={navigationLocked} placeholder="C:\\path\\to\\your-project" onChange={e => setProjectPath(e.target.value)} /></label><small>Adding a folder makes it available as a project. Native sandboxing still applies.</small><button disabled={navigationLocked || !projectPath.trim()}>Add project</button></form>}
+        </div>}
+        <button className={`settings-button${settingsOpen ? " selected" : ""}`} disabled={navigationLocked} onClick={() => void toggleSettings()}>Settings</button>
       </div>
-      <div className="sidebar-section-heading"><span>Project</span><button className="text-button" aria-label="Add project" disabled={navigationLocked} onClick={() => setAddingProject(!addingProject)}>Add</button></div>
-      {setup?.preferences.projects.map(p => <button className={`project-button ${sameWorkspace(p.workspace, workspace) ? "selected" : ""}`} key={p.workspace} title={p.workspace} disabled={navigationLocked} onClick={() => { if (!sameWorkspace(p.workspace, workspace)) void switchProject(p.workspace); else setSettingsOpen(false); }}>{p.label}</button>)}
-      {(!setup?.preferences.projects.length || addingProject) && <form className="project-form" onSubmit={event => { event.preventDefault(); void switchProject(projectPath, true); }}><label>Project name<input aria-label="Project name" value={projectName} disabled={navigationLocked} placeholder="Optional name" onChange={e => setProjectName(e.target.value)} /></label><label>Local folder<input aria-label="Project folder" required value={projectPath} disabled={navigationLocked} placeholder="C:\\path\\to\\your-project" onChange={e => setProjectPath(e.target.value)} /></label><small>Adding a folder makes it available as a project. Native sandboxing still applies.</small><button disabled={navigationLocked || !projectPath.trim()}>Add project</button></form>}
-      <div className="sidebar-bottom"><button disabled={navigationLocked} className={settingsOpen ? "selected" : ""} onClick={() => void toggleSettings()}>Settings</button></div>
     </aside><main>
       <header className="native-topbar">
         <div className="topbar-title">
-          
-          <strong title={workspace}>{settingsOpen ? "Settings" : project?.label || "Choose a project"}</strong>
-          {!settingsOpen && threadId && <><span className="topbar-sep" aria-hidden="true">/</span><span className="header-chat-title">{threadLabel(threads.find(thread => thread.id === threadId) ?? { id: threadId })}</span></>}
+          <strong title={settingsOpen ? "Settings" : currentAgent?.name}>{settingsOpen ? "Settings" : currentAgent?.name || "Smara"}</strong>
+          {!settingsOpen && [currentAgent?.role, project?.label].filter(Boolean).length > 0 && <small>{[currentAgent?.role, project?.label].filter(Boolean).join(" · ")}</small>}
         </div>
         {!settingsOpen && <div className="topbar-status">
-          <span className="topbar-meta" title="The agent and model for this chat">{currentAgent ? currentAgent.name : "Agent"} · {activeProfile ? activeProfile.label : "No model"}</span>
           <button className="hosted-status" data-tone={hosted.tone} aria-pressed={panel === "hosted"} title="Open Hosted Smara" onClick={() => openPane("hosted")}><span className="status-dot" aria-hidden="true" />{hosted.label}</button>
         </div>}
         {!settingsOpen && <div className="workspace-actions">
@@ -1179,6 +1209,11 @@ export default function NativeApp() {
             <button aria-haspopup="menu" aria-expanded={morePanesOpen} onClick={() => setMorePanesOpen(!morePanesOpen)}>More</button>
             {morePanesOpen && <div className="tools-menu-list" role="menu">
               {(["browser", "tasks", "files"] as Pane[]).map(tab => <button key={tab} role="menuitem" disabled={reviewBusy || !workspace} onClick={() => { setMorePanesOpen(false); openPane(tab); }}>{({ browser: "Browser", tasks: "Tasks", files: "Files" } as Record<string, string>)[tab]}{panel === tab ? " ✓" : ""}</button>)}
+              {currentThread && <>
+                <button role="menuitem" disabled={!!threadActionBusy || navigationLocked} onClick={() => { setMorePanesOpen(false); void renameChat(currentThread); }}>Rename conversation</button>
+                <button role="menuitem" disabled={!!threadActionBusy || navigationLocked} onClick={() => { setMorePanesOpen(false); void archiveChat(currentThread, false); }}>Archive conversation</button>
+                <button role="menuitem" className="danger-action" disabled={!!threadActionBusy || navigationLocked} onClick={() => { setMorePanesOpen(false); void deleteChat(currentThread); }}>Delete conversation</button>
+              </>}
             </div>}
           </div>
         </div>}
@@ -1246,7 +1281,8 @@ export default function NativeApp() {
         <div className="native-transcript" aria-live="off">
         {busy && turnStartedAt && <p role="status">{waitingReason(items, approvals.length, activityClock, lastNativeEventRef.current)} · {Math.max(0, Math.floor((activityClock - turnStartedAt) / 1000))}s elapsed</p>}
         {!!workers.length && <section className="native-workers"><strong>Workers · {workers.filter(worker => worker.status === "completed").length}/{workers.length} complete · changes are not auto-merged</strong>{liveWorkers && <button disabled={connecting || loadingThread} title="Stops this chat's native runtime and all its workers; saved history is kept" onClick={() => void stopWorkers()}>Stop workers</button>}{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status}{worker.activity && <span> · {worker.activity}{worker.lastActivityAt && ` · ${Math.max(0, Math.floor((activityClock - worker.lastActivityAt) / 1000))}s ago`}</span>} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
-        {!items.length && <EmptyChat agent={currentAgent} projectLabel={project?.label || "Smara"} hasModel={!!profile} connecting={connecting} onPick={pickStarter} />}
+        {olderChats.length > 0 && earlierState !== "loaded" && <button className="text-button load-earlier" disabled={!connected || earlierState === "loading"} onClick={() => void loadEarlier()}>{earlierState === "loading" ? "Loading earlier conversations…" : `Show earlier conversations (${olderChats.length})`}</button>}
+        {!transcriptItems.length && <EmptyChat agent={currentAgent} projectLabel={project?.label || "Smara"} hasModel={!!profile} connecting={connecting} onPick={pickStarter} />}
         {windowed.hidden > 0 && <button className="text-button show-earlier" onClick={() => setVisibleLimit(widenWindow)}>Show earlier ({windowed.hidden.toLocaleString()})</button>}
         {groupTranscript(windowed.visible).map(segment => segment.type === "item"
           ? <TranscriptItem key={segment.item.id} item={segment.item} busy={busy} copied={copiedItemId === segment.item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} />
