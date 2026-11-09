@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 
-function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = true, terminalPlatformSupported = true, projectOptions, backgroundGoal = false } = {}) {
+function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = true, terminalPlatformSupported = true, projectOptions, backgroundGoal = false, agentRoster } = {}) {
   const slots = [], calls = [], goalCalls = [], effects = [], timers = new Set();
   let cursor = 0, dirty = true, tree, failResume = false, currentRpc;
   const setup = {
@@ -13,6 +13,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     profiles: [{ id: "one", label: "Offline one", model: "offline-one" }, { id: "two", label: "Offline two", model: "offline-two" }], credentials: [], search: { configured: false },
   };
   if (projectOptions) setup.preferences.projects[0].options = projectOptions;
+  if (agentRoster) setup.agents = agentRoster;
   const goalRecord = backgroundGoal && typeof backgroundGoal === "object" ? backgroundGoal : backgroundGoal ? {
     id: "fixturegoal", state: "running", lease: "synthetic-active-goal", updated: Date.now() / 1000, cycles: 1, requests: 1, token_estimate: 100,
     detail: "Synthetic task is working", session_id: "synthetic-goal-session", spec: { objective: "Synthetic goal", success_criteria: "Evidence", workspace: "C:/first", profile_id: "one", sandbox: "read-only", max_cycles: 8, max_requests: 30, max_token_estimate: 500000 },
@@ -84,14 +85,31 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
   const chatStatus = evaluate("../src/chatStatus.ts", () => assert.fail("Status formatting must have no side-effect imports"));
   const transcriptWindow = evaluate("../src/transcriptWindow.ts", () => assert.fail("Windowing must have no side-effect imports"));
   const settingsPolicy = evaluate("../src/nativeSettingsPolicy.ts", () => assert.fail("Settings policy must have no side-effect imports"));
+  const agentsModule = evaluate("../src/agents.ts", () => assert.fail("Agent helpers must have no side-effect imports"));
+  const toolCardsModule = evaluate("../src/toolCards.ts", () => assert.fail("Tool summaries must have no side-effect imports"));
+  const hostedStatusModule = evaluate("../src/hostedStatus.ts", () => assert.fail("Hosted status must have no side-effect imports"));
   function Markdown() {}
   function Voice() {}
+  const toolCard = evaluate("../src/ui/ToolCard.tsx", name => {
+    if (name === "react") return hooks;
+    if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
+    if (name.endsWith("NativeCommand")) return { default: Command, __esModule: true };
+    if (name.endsWith("toolCards")) return toolCardsModule;
+    assert.fail(`Unexpected import ${name}`);
+  });
   const transcriptItem = evaluate("../src/TranscriptItem.tsx", name => {
     if (name === "react") return hooks;
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
     if (name.endsWith("NativeMarkdown")) return { default: Markdown, __esModule: true };
     if (name.endsWith("NativeCommand")) return { default: Command, __esModule: true };
     if (name.endsWith("NativeVoice")) return { default: () => null, ReadAloud: Voice, __esModule: true };
+    if (name.endsWith("ui/ToolCard")) return toolCard;
+    assert.fail(`Unexpected import ${name}`);
+  });
+  const rosterComponent = evaluate("../src/ui/AgentRoster.tsx", name => {
+    if (name === "react") return hooks;
+    if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
+    if (name.endsWith("agents")) return agentsModule;
     assert.fail(`Unexpected import ${name}`);
   });
   const goal = evaluate("../src/goalApi.ts", n => n === "@tauri-apps/api/core" ? { invoke: async () => ({}) } : assert.fail(n));
@@ -105,6 +123,14 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
     if (name === "@tauri-apps/api/core") return { invoke: async () => ({ built: true, windowsTerminalBuild: terminalPlatformSupported }) };
     if (name.endsWith("TranscriptItem")) return transcriptItem;
+    if (name.endsWith("ui/AgentRoster")) return rosterComponent;
+    if (name.endsWith("ui/ToolCard")) return toolCard;
+    if (name.endsWith("ui/NativeFiles")) return { default: () => null, __esModule: true };
+    if (name.endsWith("ui/HostedPanel")) return { default: () => null, __esModule: true };
+    if (name.endsWith("NativeBrowser")) return { default: () => null, __esModule: true };
+    if (name.endsWith("/agents")) return agentsModule;
+    if (name.endsWith("toolCards")) return toolCardsModule;
+    if (name.endsWith("hostedStatus")) return hostedStatusModule;
     if (name.endsWith("transcriptWindow")) return transcriptWindow;
     if (name.endsWith("nativeSettingsPolicy")) return settingsPolicy;
     if (name.endsWith("NativeSettings")) return { default: Settings, __esModule: true };
@@ -151,7 +177,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     nodes().find(node => node.type === "textarea").props.onChange({ target: { value: message, style: {}, scrollHeight: 100 } });
     await flush();
   };
-  return { calls, goalCalls, flush, button, nodes, enter, tick: async () => { for (const callback of [...timers]) callback(); await flush(); }, contextPicker: () => nodes().find(node => node.type === ContextPicker)?.props, emit: message => currentRpc.receive(message), terminal: () => nodes().find(node => node.type === Terminal)?.props, changes: () => nodes().find(node => node.type === Changes)?.props, failResume: () => { failResume = true; }, settings: () => nodes().find(node => node.type === Settings).props, model: () => nodes().find(node => node.type === "select" && node.props["aria-label"] === "Model") };
+  return { calls, goalCalls, flush, button, nodes, text, enter, tick: async () => { for (const callback of [...timers]) callback(); await flush(); }, contextPicker: () => nodes().find(node => node.type === ContextPicker)?.props, emit: message => currentRpc.receive(message), terminal: () => nodes().find(node => node.type === Terminal)?.props, changes: () => nodes().find(node => node.type === Changes)?.props, failResume: () => { failResume = true; }, settings: () => nodes().find(node => node.type === Settings).props, model: () => nodes().find(node => node.type === "select" && node.props["aria-label"] === "Model") };
 }
 
 test("workers continue status polling after parent completion and have an explicit owning-runtime Stop", async () => {
@@ -345,6 +371,21 @@ test("closing Settings restores the same chat without replay", async () => {
   f.settings().onClose(); await f.flush();
   assert.equal(f.calls.filter(call => call.method === "thread/resume").length, 2);
   assert.equal(f.calls.some(call => call.method === "turn/start"), false);
+});
+
+test("the agent roster filters the chat list to the selected agent", async () => {
+  const roster = (id, name) => ({ id, name, role: "Role " + name, icon: "🤖", instructions: "", preset: true, folders: [], origins: [], terminal: false, memory_scope: "project", model_profile: "" });
+  const f = fixture({ agentRoster: { roster: [roster("kiran", "Kiran"), roster("rohan", "Rohan")], default: "kiran", assignments: { saved: "rohan" } } });
+  await f.flush();
+  const savedChat = () => f.nodes().some(node => node.type === "button" && f.text(node) === "Saved chat");
+  assert.equal(savedChat(), false, "the chat belongs to Rohan, so Kiran's list hides it");
+  // The roster is a component: the harness does not expand it, so drive its props the way a click would.
+  const rosterNode = () => f.nodes().find(node => Array.isArray(node.props?.roster) && typeof node.props?.onSelect === "function");
+  assert.equal(rosterNode().props.roster.length, 2);
+  assert.equal(rosterNode().props.selected, "kiran");
+  rosterNode().props.onSelect("rohan"); await f.flush();
+  assert.equal(savedChat(), true, "selecting Rohan lists the chat");
+  assert.equal(rosterNode().props.selected, "rohan");
 });
 
 test("opening Settings keeps the chat connected; only a save that needs a restart stops the runtime", async () => {

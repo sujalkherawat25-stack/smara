@@ -1,0 +1,91 @@
+/* Design tokens for the Desktop UI. Prefixed --smara- so they do not collide with the existing stylesheets,
+   which stay in place until every view has moved over. Light is the default; dark follows the system setting. */
+:root {
+  --smara-font: "Segoe UI", Inter, system-ui, -apple-system, sans-serif;
+  --smara-body: 14px;
+  --smara-meta: 12px;
+  --smara-space-1: 4px;
+  --smara-space-2: 8px;
+  --smara-space-3: 12px;
+  --smara-space-4: 16px;
+  --smara-radius: 8px;
+  --smara-accent: #0b6b4f;
+  --smara-bg: #f7f7f5;
+  --smara-surface: #ffffff;
+  --smara-ink: #1d1d1b;
+  --smara-muted: #6b6b66;
+  --smara-line: #e2e1dc;
+  --smara-ok: #0b6b4f;
+  --smara-warn: #a86400;
+  --smara-error: #b42318;
+  --smara-running: #2563eb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --smara-bg: #161614;
+    --smara-surface: #1f1f1c;
+    --smara-ink: #ecebe6;
+    --smara-muted: #9c9b94;
+    --smara-line: #33332f;
+    --smara-accent: #4fbf9a;
+    --smara-ok: #4fbf9a;
+    --smara-warn: #e0a040;
+    --smara-error: #ef7a70;
+    --smara-running: #7aa7ff;
+  }
+}
+
+:root[data-theme="dark"] {
+  --smara-bg: #161614;
+  --smara-surface: #1f1f1c;
+  --smara-ink: #ecebe6;
+  --smara-muted: #9c9b94;
+  --smara-line: #33332f;
+  --smara-accent: #4fbf9a;
+  --smara-ok: #4fbf9a;
+  --smara-warn: #e0a040;
+  --smara-error: #ef7a70;
+  --smara-running: #7aa7ff;
+}
+
+.smara-chip {
+  display: inline-flex; align-items: center; gap: var(--smara-space-1);
+  padding: 2px var(--smara-space-2); border-radius: 999px; border: 1px solid var(--smara-line);
+  font: var(--smara-meta)/1.4 var(--smara-font); color: var(--smara-muted); background: var(--smara-surface);
+}
+.smara-chip[data-tone="ok"] { color: var(--smara-ok); }
+.smara-chip[data-tone="warn"] { color: var(--smara-warn); }
+
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--smara-muted); display: inline-block; }
+.status-dot[data-state="working"] { background: var(--smara-running); animation: smara-pulse 1.2s ease-in-out infinite; }
+.status-dot[data-state="waiting"] { background: var(--smara-warn); }
+.status-dot[data-state="error"] { background: var(--smara-error); }
+@keyframes smara-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .status-dot[data-state="working"] { animation: none; } }
+
+.tool-card { border: 1px solid var(--smara-line); border-radius: var(--smara-radius); background: var(--smara-surface); margin: var(--smara-space-1) 0; font: var(--smara-body)/1.45 var(--smara-font); color: var(--smara-ink); }
+.tool-card[data-state="failed"] { border-color: var(--smara-error); }
+.tool-line { all: unset; box-sizing: border-box; display: flex; gap: var(--smara-space-2); align-items: baseline; width: 100%; padding: var(--smara-space-2) var(--smara-space-3); cursor: pointer; }
+.tool-line:focus-visible { outline: 2px solid var(--smara-accent); outline-offset: 2px; }
+.tool-icon { width: 1.2em; text-align: center; color: var(--smara-muted); }
+.tool-card[data-state="ok"] .tool-icon { color: var(--smara-ok); }
+.tool-card[data-state="failed"] .tool-icon { color: var(--smara-error); }
+.tool-card[data-state="running"] .tool-icon { color: var(--smara-running); }
+.tool-details { border-top: 1px solid var(--smara-line); padding: var(--smara-space-2) var(--smara-space-3); }
+.tool-output pre { max-height: 320px; overflow: auto; margin: var(--smara-space-1) 0; font-size: var(--smara-meta); }
+.tool-output-actions { display: flex; gap: var(--smara-space-2); align-items: center; font-size: var(--smara-meta); color: var(--smara-muted); }
+
+.tool-group { margin: var(--smara-space-1) 0; }
+.tool-group > summary { cursor: pointer; font: var(--smara-meta)/1.4 var(--smara-font); color: var(--smara-muted); padding: var(--smara-space-1) 0; }
+
+.agent-roster { display: grid; gap: var(--smara-space-1); padding: var(--smara-space-2) 0; }
+.agent-row { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 1.6em 1fr auto; gap: var(--smara-space-2); align-items: center; padding: var(--smara-space-2); border-radius: var(--smara-radius); cursor: pointer; font: var(--smara-body)/1.3 var(--smara-font); color: var(--smara-ink); }
+.agent-row[aria-current="true"] { background: var(--smara-surface); box-shadow: inset 0 0 0 1px var(--smara-line); }
+.agent-row:focus-visible { outline: 2px solid var(--smara-accent); outline-offset: 2px; }
+.agent-row small { display: block; color: var(--smara-muted); font-size: var(--smara-meta); }
+.agent-count { color: var(--smara-muted); font-size: var(--smara-meta); }
+.agent-form { display: grid; gap: var(--smara-space-2); padding: var(--smara-space-3); border: 1px solid var(--smara-line); border-radius: var(--smara-radius); background: var(--smara-surface); font: var(--smara-body)/1.4 var(--smara-font); color: var(--smara-ink); }
+.agent-form label { display: grid; gap: var(--smara-space-1); font-size: var(--smara-meta); color: var(--smara-muted); }
+
+.hosted-panel { font: var(--smara-body)/1.5 var(--smara-font); color: var(--smara-ink); display: grid; gap: var(--smara-space-2); padding: var(--smara-space-3); }

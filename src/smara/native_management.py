@@ -10,6 +10,7 @@ import re
 import sys
 import uuid
 from urllib.parse import urlsplit
+from . import native_agents
 from .native_profiles import load_profiles, protect, read_object, resolve_credential, resolve_profile_key, state_path, write_object
 from .native_provider import ChatEndpoint, probe_endpoint
 from .native_search import PROVIDERS, SearchError, probe_search, search_status
@@ -123,7 +124,8 @@ def bootstrap():
     computer = computer_selected(prefs["workspace"]) if prefs["workspace"] else None
     return {"preferences": prefs, "profiles": profiles, "credentials": credential_summaries(), "search": search_status(protected_only=True),
             "memory": memory_status(prefs["workspace"]), "skills_roots": skills_roots(prefs["workspace"]),
-            "computer": {"enabled": bool(computer), "expires": computer.get("expires") if computer else None}}
+            "computer": {"enabled": bool(computer), "expires": computer.get("expires") if computer else None},
+            "agents": native_agents.view(read_object(settings_path()))}
 
 
 def _test_model(request):
@@ -352,6 +354,8 @@ def manage(request):
             if context_window is not None:
                 clean["context_window"] = context_window
             saved["model_profiles"] = [{k: v for k, v in p.items() if k in PROFILE_FIELDS} for p in profiles if p.get("id") != identity] + [clean]
+        elif operation == "agents":
+            native_agents.apply(saved, prefs["projects"], request)
         else:
             raise ValueError("Unsupported native management operation; legacy execution is unavailable")
         if operation != "delete_credential" or name.upper() == "SYNTARUS_API_KEY":
