@@ -12,15 +12,15 @@ import NativeBrowser from "./NativeBrowser";
 const aliases: Record<string, string> = { tavily: "TAVILY_API_KEY", exa: "EXA_API_KEY", serper: "SERPER_API_KEY", brave: "BRAVE_SEARCH_API_KEY" };
 const emptyModel = { id: "", label: "", provider: "", base_url: "", model: "", api_key: "", auth_header: "authorization", context_window: "" as string | number | null };
 type Tab = "models" | "memory" | "browser" | "tools" | "email" | "background" | "telegram" | "help";
-const NAV: { id: Tab; label: string; hint: string }[] = [
-  { id: "models", label: "Models", hint: "Your AI providers" },
-  { id: "memory", label: "Memory", hint: "Syntarus" },
-  { id: "browser", label: "Browser & computer", hint: "Let Smara use sites and apps" },
-  { id: "tools", label: "Search & tools", hint: "Web search, project tools" },
-  { id: "email", label: "Email", hint: "Drafts and outreach" },
-  { id: "background", label: "Background", hint: "Schedules and goals" },
-  { id: "telegram", label: "Telegram", hint: "Chat from your phone" },
-  { id: "help", label: "Help & setup", hint: "Checks and privacy" },
+const NAV: { id: Tab; label: string }[] = [
+  { id: "models", label: "Models" },
+  { id: "memory", label: "Memory" },
+  { id: "browser", label: "Browser & computer" },
+  { id: "tools", label: "Search & tools" },
+  { id: "email", label: "Email" },
+  { id: "background", label: "Background" },
+  { id: "telegram", label: "Telegram" },
+  { id: "help", label: "Help & setup" },
 ];
 type SettingsProps = {
   initialTab?: "models" | "memory" | "tools" | "browser";
@@ -76,20 +76,21 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
   const memoryOn = !!setup.memory?.configured && !!setup.memory?.enabled;
   return <section className="native-settings">
     <aside className="settings-nav">
-      <button className="settings-back" disabled={pending || integrationPending} onClick={onClose}>← Back to chat</button>
-      <nav aria-label="Settings sections">{NAV.map(item => <button disabled={pending || integrationPending} key={item.id} className={tab === item.id ? "selected" : ""} onClick={() => choose(item.id)}><span>{item.label}</span><small>{item.id === "memory" ? (memoryOn ? "On" : "Not connected") : item.hint}</small></button>)}</nav>
+      <button className="settings-back" disabled={pending || integrationPending} onClick={onClose}>Back to chat</button>
+      <h2 className="settings-title">Settings</h2>
+      <nav aria-label="Settings sections">{NAV.map(item => <button disabled={pending || integrationPending} key={item.id} className={tab === item.id ? "selected" : ""} onClick={() => choose(item.id)}><span>{item.label}</span>{item.id === "memory" && <small>{memoryOn ? "On" : "Not connected"}</small>}</button>)}</nav>
       <small className="settings-version">Version {version}</small>
     </aside>
     <div className="settings-body">
       {locked && <p className="native-warning">Finishing session setup. Settings will be available shortly.</p>}
-      {error && <p role="alert" className="native-error">{error.replaceAll("Settings → Tools", "Settings → Search & tools")}</p>}{notice && <p role="status" className="settings-notice">{notice}</p>}
+      {error && <p role="alert" className="native-error">{error.replaceAll("Settings → Tools", "Search & tools")}</p>}{notice && <p role="status" className="settings-notice">{notice}</p>}
 
       {tab === "models" && <div className="set-page">
         <header><h2>Models</h2><p>The AI providers Smara can use. Pick the active one from the box next to the message field. Smara never silently swaps your model.</p></header>
         <div className="set-group">
           {!setup.profiles.length && <div className="set-row"><div><strong>No model yet</strong><small>Add your provider below to start chatting.</small></div></div>}
           {setup.profiles.map(profile => <div className="set-row" key={profile.id}><div><strong>{profile.label}{profile.id === setup.preferences.active_model && <span className="set-badge">Active</span>}</strong><small>{profile.model} · {profile.provider}</small></div><button disabled={disabled} onClick={() => edit(profile)}>Edit</button></div>)}
-          <div className="set-row"><button disabled={disabled} onClick={() => { setModel(emptyModel); setEditing(true); }}>＋ Add model</button></div>
+          <div className="set-row"><button disabled={disabled} onClick={() => { setModel(emptyModel); setEditing(true); }}>Add model</button></div>
         </div>
         {(editing || !setup.profiles.length) && <form className="set-group settings-form" onSubmit={event => { event.preventDefault(); const known = setup.profiles.map(p => p.id); const id = model.id || profileId(model.label, known); void save("save_model", { profile: modelPayload({ ...model, id }) }).then(() => setEditing(false)); }}>
           <div className="set-row stack"><strong>{setup.profiles.some(p => p.id === model.id) ? "Edit model" : "Add model"}</strong>
@@ -139,7 +140,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
           <button type="button" disabled={disabled} onClick={() => void save("select_search", { provider })}>Use this provider</button>
           <label>{aliases[provider]}<input type="password" autoComplete="off" disabled={disabled} value={secret} onChange={e => setSecret(e.target.value)} placeholder="Paste your search provider API key" /></label><button className="primary" disabled={disabled || !secret.trim()}>Save search key</button>
           <small>Saving the key also selects this provider. Keys are encrypted in Smara’s local credential store. Smara does not load project .env files. Search queries go only to the selected provider.</small>
-        </form><section className="settings-card"><h2>Search readiness</h2><p className={`readiness ${setup.search.configured ? "ready" : "attention"}`}>{setup.search.configured ? "● Credential readable" : "○ Needs configuration"}</p><p>{setup.search.provider || "Not selected"} · {setup.search.detail.replaceAll("Settings → Tools", "Settings → Search & tools")}</p><small>Local configuration check only—not a live search test.</small>
+        </form><section className="settings-card"><h2>Search readiness</h2><p className={`readiness ${setup.search.configured ? "ready" : "attention"}`}>{setup.search.configured ? "Credential readable" : "Needs configuration"}</p><p>{setup.search.provider || "Not selected"} · {setup.search.detail.replaceAll("Settings → Tools", "Search & tools")}</p><small>Local configuration check only—not a live search test.</small>
           <h3>Saved keys</h3>{setup.credentials.length ? setup.credentials.map(c => <div className="credential-row" key={c.name}><div><code>{c.name}</code><small>{c.provider} · protected on this computer</small></div><button disabled={disabled} onClick={() => { if (window.confirm(`Remove ${c.name}? Tools/models using it will stop working until you save a replacement.`)) void save("delete_credential", { name: c.name }); }}>Remove</button></div>) : <p>No keys saved.</p>}
           <button disabled={pending} onClick={() => void save("bootstrap", {})}>Refresh readiness</button>
         </section></div>
@@ -156,7 +157,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
             <ol><li>Add a chat-compatible model in <strong>Models</strong>, then choose it next to the message field.</li>
               <li>Connect <strong>Memory</strong> with your Syntarus key so Smara remembers you.</li>
               <li>Choose a trusted project folder from the sidebar. Avoid folders you do not trust.</li></ol>
-            <small>Use <strong>＋</strong> in the composer to add project files. Smara can read images and scanned PDFs with Sarvam after approval.</small></div>
+            <small>Use <strong>Attach</strong> in the composer to add project files. Smara can read images and scanned PDFs with Sarvam after approval.</small></div>
           <div className="set-row stack"><strong>Checks</strong>
             <small>Models: {setup.profiles.length ? `${setup.profiles.length} saved${activeModel ? ` · active: ${activeModel.label}` : " · choose one in the composer"}` : "none yet."} Web search: {setup.search.configured ? `${setup.search.provider} key readable locally.` : "no readable key."}</small>
             <small>Saved-key checks are local only. These tests are manual, send fixed minimal requests, and may incur provider charges; no chat history or project files are included.</small>
@@ -165,7 +166,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
         </section>
         <section className="set-group">
           <div className="set-row stack"><strong>Changes and commands</strong>
-            <small>Open <strong>Changes</strong> above the chat to inspect diffs. Stage and unstage affect the Git index; Revert changes working files. <strong>Last turn → Undo</strong> reverses supported file changes from the last run, not chat history; Revert and Undo keep a local recovery copy.</small>
+            <small>Open <strong>Changes</strong> above the chat to inspect diffs. Stage and unstage affect the Git index; Revert changes working files. <strong>Undo</strong> in <strong>Last turn</strong> reverses supported file changes from the last run, not chat history; Revert and Undo keep a local recovery copy.</small>
             <small><strong>Terminal</strong> starts PowerShell in the Windows MXC sandbox: writes stay inside the project and the network is off. Hosts without MXC fail closed; there is no weaker fallback.</small></div>
           <div className="set-row stack"><strong>Access and privacy</strong>
             <small><strong>Autonomous work:</strong> type <code>/goal</code> followed by the outcome. Goals pause at limits and need your acceptance before completion; Telegram controls the same goals.</small>

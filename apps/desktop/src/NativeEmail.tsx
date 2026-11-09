@@ -6,6 +6,7 @@ type Draft = { id: string; content_hash: string; state: string; detail: string; 
   draft: { company: string; to: string; subject: string; text: string; evidence: { url: string; claim: string; quote: string }[] } };
 type Status = { enabled: boolean; client_id: string; allowlist: string[]; daily_limit: number; connected: boolean; sender: string };
 type Props = { workspace: string; locked: boolean; onUpdate: (setup: NativeSetup) => void; onPendingChange: (pending: boolean) => void };
+const EMPTY_STATUS: Status = { enabled: false, client_id: "", allowlist: [], daily_limit: 5, connected: false, sender: "" };
 const call = <T,>(action: string, workspace: string, values: Record<string, unknown> = {}) =>
   invoke<T>("native_manage", { request: { operation: "outreach", outreach: { action, workspace, ...values } } });
 
@@ -19,9 +20,9 @@ export default function NativeEmail({ workspace, locked, onUpdate, onPendingChan
   useEffect(() => { setEditSubject(draft?.draft.subject || ""); setEditText(draft?.draft.text || ""); }, [draft?.id, draft?.content_hash]);
   const unsaved = !!draft && (editSubject !== draft.draft.subject || editText !== draft.draft.text);
   const refresh = async () => {
-    const value = await call<{ status: Status; drafts: Draft[] }>("list", workspace);
-    setStatus(value.status); setDrafts(value.drafts);
-    return value.status;
+    const value = await call<{ status?: Status; drafts?: Draft[] }>("list", workspace);
+    setStatus(value.status ?? EMPTY_STATUS); setDrafts(value.drafts ?? []);
+    return value.status ?? EMPTY_STATUS;
   };
   useEffect(() => { let active = true;
     void refresh().then(value => { if (active) { setEnabled(value.enabled); setClientId(value.client_id); setCohort(value.allowlist.join("\n")); setDaily(value.daily_limit); } }).catch(reason => { if (active) setError(String(reason)); });

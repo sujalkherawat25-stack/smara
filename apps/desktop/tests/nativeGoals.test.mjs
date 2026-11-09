@@ -52,7 +52,7 @@ test("a goal can only be accepted when its result is ready for review", async ()
 });
 
 test("goal creation captures criteria, starts read-only and carries a retry receipt", async () => {
-  const f = fixture(); await f.flush(); f.button("＋ New goal").props.onClick(); await f.flush();
+  const f = fixture(); await f.flush(); f.button("New goal").props.onClick(); await f.flush();
   const fields = f.nodes().filter(node => node.type === "textarea");
   fields[0].props.onChange({ target: { value: "Inspect fixture" } }); fields[1].props.onChange({ target: { value: "Show evidence" } }); await f.flush();
   f.nodes().find(node => node.type === "form").props.onSubmit({ preventDefault() {} }); await f.flush();
@@ -78,6 +78,6 @@ test("Deny sends only the selected goal and native request receipt", async () =>
 test("extending a selected goal starts from its saved cumulative limits", async () => {
   const f = fixture("paused"); await f.flush(); await f.select();
   assert.deepEqual(f.nodes().filter(node => node.type === "input" && node.props.type === "number").map(node => node.props.value), [12, 40, 750000]);
-  f.button("＋ New goal").props.onClick(); await f.flush();
+  f.button("New goal").props.onClick(); await f.flush();
   assert.deepEqual(f.nodes().filter(node => node.type === "input" && node.props.type === "number").map(node => node.props.value), [8, 30, 500000]);
 });

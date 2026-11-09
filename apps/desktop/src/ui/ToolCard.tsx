@@ -3,10 +3,11 @@ import type { ViewItem } from "../nativeView";
 import NativeCommand from "../NativeCommand";
 import { toolSummary } from "../toolCards";
 
-const ICONS: Record<string, string> = { running: "⟳", ok: "✓", failed: "✗", done: "•" };
+/** Status words shown on the card. Plain text, so the card reads the same in both themes. */
+const STATUS_LABEL: Record<string, string> = { running: "Running", ok: "Done", failed: "Failed", done: "Done" };
 const SHOW_LINES = 2000;
 
-/** One tool use as a single line. Click to see the command, its folder, exit code, and output. */
+/** One tool use as a single line with its status. Click to see the command, its folder, exit code, and output. */
 export function ToolCard({ item }: { item: ViewItem }) {
   const summary = toolSummary(item);
   // Failed rows open by default, so the reason is visible without a click.
@@ -18,8 +19,8 @@ export function ToolCard({ item }: { item: ViewItem }) {
   return (
     <div className="tool-card" data-state={summary.state}>
       <button className="tool-line" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span className="tool-icon" aria-hidden="true">{ICONS[summary.state]}</span>
-        <span>{summary.line}</span>
+        <span className="tool-text">{summary.line}</span>
+        <span className="tool-status" data-state={summary.state}>{STATUS_LABEL[summary.state]}</span>
       </button>
       {open && <div className="tool-details">
         {item.kind === "commandExecution"
@@ -43,7 +44,7 @@ export function ToolGroup({ items, running, children }: { items: ViewItem[]; run
   const failed = items.filter(item => toolSummary(item).state === "failed").length;
   return (
     <details className="tool-group" open={open} onToggle={event => setManual((event.target as HTMLDetailsElement).open)}>
-      <summary>{items.length} steps{running ? " · running…" : ""}{failed ? ` · ${failed} failed` : ""}</summary>
+      <summary>{items.length} steps{running ? " · running" : ""}{failed ? ` · ${failed} failed` : ""}</summary>
       {items.map(item => <div key={item.id}>{children(item)}</div>)}
     </details>
   );

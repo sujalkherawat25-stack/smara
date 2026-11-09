@@ -14,7 +14,7 @@ import uuid
 PRESETS = (
     {"id": "kiran", "name": "Kiran", "role": "Accounts", "icon": "📒", "preset": True,
      "instructions": "You help with the shop's accounts: Tally and Excel files, ledgers and reports. Show the totals you computed."},
-    {"id": "rohan", "name": "Rohan", "role": "Dues & reminders", "icon": "🔔", "preset": True,
+    {"id": "rohan", "name": "Rohan", "role": "Dues", "icon": "🔔", "preset": True,
      "instructions": "You work on dues and reminders. Nothing reaches a customer without the owner's approval."},
     {"id": "scout", "name": "Scout", "role": "Web tasks", "icon": "🧭", "preset": True,
      "instructions": "You do web tasks through the browser helper. Never type passwords, OTPs, PINs or card details."},

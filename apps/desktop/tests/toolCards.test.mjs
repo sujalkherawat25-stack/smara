@@ -16,19 +16,19 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
 
 test("a finished command reads as one line with its status and duration", () => {
   const summary = toolSummary({ id: "c1", kind: "commandExecution", text: "", command: "npm test", status: "completed", exitCode: 0, durationMs: 3200 });
-  assert.equal(summary.line, "Ran npm test · ✓ 3.2 s");
+  assert.equal(summary.line, "Ran npm test · 3.2 s");
   assert.equal(summary.state, "ok");
 });
 
 test("a failed command shows its exit code and stays a failed row", () => {
   const summary = toolSummary({ id: "c2", kind: "commandExecution", text: "", command: "pytest -q", status: "failed", exitCode: 1, durationMs: 740 });
-  assert.equal(summary.line, "Ran pytest -q · ✗ exit 1 740 ms");
+  assert.equal(summary.line, "Ran pytest -q · exit 1 · 740 ms");
   assert.equal(summary.state, "failed");
 });
 
 test("a running command says so, and no duration is shown before it finishes", () => {
   const summary = toolSummary({ id: "c3", kind: "commandExecution", text: "", command: "npm run build", status: "inProgress" });
-  assert.equal(summary.line, "Ran npm run build · running…");
+  assert.equal(summary.line, "Ran npm run build");
   assert.equal(summary.state, "running");
 });
 
@@ -67,4 +67,12 @@ test("a finished group is collapsed (not running) and a single tool row is not g
   ]));
   assert.equal(done[0].running, false);
   assert.equal(plain(groupTranscript([{ id: "solo", kind: "webSearch", text: "q" }]))[0].type, "item");
+});
+
+test("history dividers are neither tool steps nor grouped", () => {
+  const segments = plain(groupTranscript([
+    { id: "s", kind: "separator", text: "Earlier" },
+    { id: "a", kind: "commandExecution", text: "", command: "a", status: "completed", exitCode: 0 },
+  ]));
+  assert.deepEqual(segments.map(segment => segment.type), ["item", "item"]);
 });

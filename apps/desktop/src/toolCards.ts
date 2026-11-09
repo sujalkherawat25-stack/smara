@@ -9,7 +9,8 @@ export type TranscriptSegment =
 const MESSAGE_KINDS = new Set(["assistant", "user"]);
 
 export function isToolItem(item: ViewItem): boolean {
-  return !MESSAGE_KINDS.has(item.kind);
+  // Messages and history dividers are not tool steps.
+  return !MESSAGE_KINDS.has(item.kind) && item.kind !== "separator";
 }
 
 function firstLine(text: string, limit: number): string {
@@ -28,17 +29,15 @@ export function toolSummary(item: ViewItem): ToolSummary {
     const target = firstLine(item.command ?? "command", 80);
     const failed = item.status === "failed" || (item.exitCode !== undefined && item.exitCode !== 0);
     const state: ToolSummary["state"] = item.status === "inProgress" ? "running" : failed ? "failed" : item.exitCode === 0 ? "ok" : "done";
-    const mark = state === "running" ? "running…" : state === "failed" ? `✗ exit ${item.exitCode ?? "?"}` : state === "ok" ? "✓" : "done";
-    // "Ran npm test · ✓ 3.2 s": the verb and target, then the status and duration.
-    const tail = mark ? `${mark}${duration ? ` ${duration}` : ""}` : duration;
-    return { verb: "Ran", target, state, duration, line: [`Ran ${target}`, tail].filter(Boolean).join(" · ") };
+    // "Ran npm test · 3.2 s". The status (Running, Done, Failed) is shown as a label on the card, not in this line.
+    const exit = state === "failed" ? `exit ${item.exitCode ?? "?"}` : "";
+    return { verb: "Ran", target, state, duration, line: [`Ran ${target}`, exit, duration].filter(Boolean).join(" · ") };
   }
   const state: ToolSummary["state"] = item.status === "inProgress" ? "running" : item.status === "failed" ? "failed" : "done";
   const verbs: Record<string, string> = { fileChange: "Edited", webSearch: "Searched the web", browserStep: "Browsed", mcpToolCall: "Used a tool" };
   const verb = verbs[item.kind] ?? (item.kind.replace(/([A-Z])/g, " $1").trim() || "Tool");
   const target = firstLine(item.text, 80);
-  const label = state === "running" ? "running…" : state === "failed" ? "✗ failed" : "";
-  return { verb, target, state, duration, line: [verb, target, label, duration].filter(Boolean).join(" · ") };
+  return { verb, target, state, duration, line: [verb, target, duration].filter(Boolean).join(" · ") };
 }
 
 /**
