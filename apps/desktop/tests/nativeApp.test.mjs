@@ -42,7 +42,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     const module = { exports: {} };
     const source = readFileSync(new URL(path, import.meta.url), "utf8");
     const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-    vm.runInNewContext(code, { module, exports: module.exports, require, console, setTimeout: callback => { timers.add(callback); return callback; }, clearTimeout: timer => timers.delete(timer), setInterval: callback => { timers.add(callback); return callback; }, clearInterval: timer => timers.delete(timer), crypto: { randomUUID: () => "fixture-terminal-id" }, TextEncoder, TextDecoder, Uint8Array, btoa, atob, window: { addEventListener() {}, removeEventListener() {} }, navigator: { clipboard: { writeText: async () => {} } } });
+    vm.runInNewContext(code, { module, exports: module.exports, require, console, requestAnimationFrame: callback => { callback(); return 0; }, setTimeout: callback => { timers.add(callback); return callback; }, clearTimeout: timer => timers.delete(timer), setInterval: callback => { timers.add(callback); return callback; }, clearInterval: timer => timers.delete(timer), crypto: { randomUUID: () => "fixture-terminal-id" }, TextEncoder, TextDecoder, Uint8Array, btoa, atob, window: { addEventListener() {}, removeEventListener() {} }, navigator: { clipboard: { writeText: async () => {} } } });
     return module.exports;
   };
   class RpcOutcomeUnknown extends Error {}
@@ -107,6 +107,10 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     if (name.endsWith("transcriptWindow")) return transcriptWindow;
     assert.fail(`Unexpected import ${name}`);
   });
+  const emptyChat = evaluate("../src/ui/EmptyChat.tsx", name => {
+    if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
+    assert.fail(`Unexpected import ${name}`);
+  });
   const rosterComponent = evaluate("../src/ui/AgentRoster.tsx", name => {
     if (name === "react") return hooks;
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
@@ -125,6 +129,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     if (name === "@tauri-apps/api/core") return { invoke: async () => ({ built: true, windowsTerminalBuild: terminalPlatformSupported }) };
     if (name.endsWith("TranscriptItem")) return transcriptItem;
     if (name.endsWith("ui/AgentRoster")) return rosterComponent;
+    if (name.endsWith("ui/EmptyChat")) return emptyChat;
     if (name.endsWith("ui/ToolCard")) return toolCard;
     if (name.endsWith("ui/NativeFiles")) return { default: () => null, __esModule: true };
     if (name.endsWith("ui/HostedPanel")) return { default: () => null, __esModule: true };
@@ -413,6 +418,17 @@ test("a new chat runs with the Smara rules first, then the selected agent's inst
   assert.ok(withAgent.startsWith(plain), "the Smara rules come first, unchanged");
   assert.ok(withAgent.includes("Rohan rule: keep reminders polite."), "the selected agent's instructions are added");
   assert.ok(!plain.includes("Rohan rule"), "the default agent does not get another agent's instructions");
+});
+
+test("an empty chat names the agent and a starter prompt fills the composer without sending", async () => {
+  const agentRecord = (id, name) => ({ id, name, role: "Role " + name, icon: "📒", instructions: "", preset: true });
+  const f = fixture({ agentRoster: { roster: [agentRecord("kiran", "Kiran")], default: "kiran", assignments: {} } }); await f.flush();
+  const empty = () => f.nodes().find(node => typeof node.props?.onPick === "function" && node.props?.agent);
+  assert.ok(empty(), "the empty state is shown before a chat is open");
+  assert.equal(empty().props.agent.name, "Kiran");
+  empty().props.onPick("Who owes me the most this month?"); await f.flush();
+  assert.equal(f.nodes().find(node => node.type === "textarea").props.value, "Who owes me the most this month?");
+  assert.equal(f.calls.some(call => call.method === "turn/start"), false, "a starter fills the composer; it does not send");
 });
 
 test("chats that belong to other agents are counted, not silently hidden", async () => {

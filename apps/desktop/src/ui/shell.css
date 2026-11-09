@@ -1,0 +1,316 @@
+/*
+ * Smara Desktop shell. Loaded after native-shell.css and native-design.css, so it wins where they overlap.
+ * Principles: the conversation is the focus and the chrome recedes; one accent colour; few, clearly named
+ * controls; progressive disclosure (secondary actions appear on hover or focus); a centred reading column;
+ * a 4px spacing grid; visible focus for keyboard users. Colours come from tokens.css so light and dark both work.
+ */
+
+.native-app {
+  background: var(--smara-bg);
+  color: var(--smara-ink);
+  font: var(--smara-body) / 1.55 var(--smara-font);
+}
+.native-app button { font: inherit; }
+.native-app button:focus-visible,
+.native-app input:focus-visible,
+.native-app textarea:focus-visible,
+.native-app select:focus-visible,
+.native-app [tabindex]:focus-visible {
+  outline: 2px solid var(--smara-accent);
+  outline-offset: 2px;
+}
+.native-app small { color: var(--smara-muted); font-size: var(--smara-meta); }
+.native-app p { color: var(--smara-ink); opacity: 0.86; }
+
+/* ---------- Sidebar ---------- */
+.native-app .native-layout { display: flex; height: 100%; }
+.native-app .native-layout aside {
+  width: 264px;
+  flex-shrink: 0;
+  background: var(--smara-sidebar);
+  border-right: 1px solid var(--smara-line);
+  padding: var(--smara-space-3) var(--smara-space-3) var(--smara-space-2);
+  gap: var(--smara-space-1);
+}
+.native-app .native-layout aside .new-chat {
+  width: 100%;
+  margin: 0 0 var(--smara-space-2);
+  padding: 10px var(--smara-space-3);
+  border: none;
+  border-radius: 10px;
+  background: var(--smara-accent);
+  color: var(--smara-on-accent);
+  font-weight: 600;
+  text-align: left;
+}
+.native-app .native-layout aside .new-chat:hover:not(:disabled) { filter: brightness(1.06); background: var(--smara-accent); }
+.native-app .sidebar-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--smara-space-3) var(--smara-space-2) var(--smara-space-1);
+  color: var(--smara-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.native-app .sidebar-section-heading button {
+  width: 24px; height: 24px; padding: 0;
+  border: none; border-radius: 6px;
+  background: transparent; color: var(--smara-muted);
+  font-size: 16px; line-height: 1;
+}
+.native-app .sidebar-section-heading button:hover:not(:disabled) { background: var(--smara-hover); color: var(--smara-ink); }
+
+.native-app .project-button,
+.native-app .sidebar-thread-select {
+  border: none;
+  background: transparent;
+  color: var(--smara-ink);
+  text-align: left;
+  width: 100%;
+  padding: 8px var(--smara-space-2);
+  border-radius: 8px;
+  font-size: var(--smara-body);
+}
+.native-app .project-button:hover:not(:disabled),
+.native-app .sidebar-thread-select:hover:not(:disabled) { background: var(--smara-hover); }
+.native-app .project-button.selected,
+.native-app .sidebar-thread-select.selected { background: var(--smara-surface); box-shadow: inset 2px 0 0 var(--smara-accent); }
+.native-app .project-button span { margin-right: 8px; color: var(--smara-muted); }
+
+.native-app .sidebar-threads { display: flex; flex-direction: column; gap: 2px; }
+.native-app .sidebar-thread-row { display: flex; align-items: center; gap: 2px; }
+.native-app .sidebar-threads .sidebar-thread-select {
+  flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: transparent; border: none; color: var(--smara-ink);
+}
+.native-app .sidebar-threads .sidebar-thread-select:hover:not(:disabled) { background: var(--smara-hover); color: var(--smara-ink); }
+.native-app .sidebar-threads .sidebar-thread-select.selected { background: var(--smara-surface); color: var(--smara-ink); }
+.native-app .sidebar-threads .chat-menu-trigger {
+  flex: 0 0 28px; width: 28px; height: 28px; padding: 0;
+  border: none; border-radius: 6px; background: transparent;
+  color: var(--smara-muted); opacity: 0; font-size: 14px;
+}
+.native-app .sidebar-thread-row:hover .chat-menu-trigger,
+.native-app .sidebar-thread-row:focus-within .chat-menu-trigger,
+.native-app .chat-menu-trigger:focus-visible { opacity: 1; }
+.native-app .sidebar-thread-actions { display: grid; gap: 2px; margin: 2px 0 6px; padding: 6px; border-radius: 10px; background: var(--smara-surface); border: 1px solid var(--smara-line); }
+.native-app .sidebar-thread-actions button { width: 100%; padding: 6px 8px; border: none; border-radius: 6px; background: transparent; font-size: 12px; text-align: left; }
+.native-app .sidebar-thread-actions button:hover:not(:disabled) { background: var(--smara-hover); }
+.native-app .sidebar-thread-actions .danger-action { color: var(--smara-error); }
+.native-app .agent-hidden-hint { display: block; padding: var(--smara-space-2); color: var(--smara-muted); font-size: 12px; }
+.native-app .sidebar-bottom { border-top: 1px solid var(--smara-line); padding-top: var(--smara-space-2); margin-top: var(--smara-space-2); }
+.native-app .sidebar-bottom button {
+  width: 100%; border: none; border-radius: 8px; background: transparent;
+  color: var(--smara-muted); padding: 8px var(--smara-space-2); text-align: left;
+}
+.native-app .sidebar-bottom button:hover:not(:disabled) { background: var(--smara-hover); color: var(--smara-ink); }
+
+/* Agent roster: a quiet list. The edit control appears on the row that is hovered, focused or selected. */
+.native-app .agent-roster { display: flex; flex-direction: column; gap: 2px; padding: 0; }
+.native-app .agent-item { display: flex; align-items: center; gap: 4px; border-radius: 8px; }
+.native-app .agent-row {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: var(--smara-space-2);
+  padding: 8px var(--smara-space-2);
+  border: none; border-radius: 8px; background: transparent;
+  color: var(--smara-ink); text-align: left; font-size: var(--smara-body);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.native-app .agent-row > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.native-app .agent-row:hover:not(:disabled) { background: var(--smara-hover); }
+.native-app .agent-row[aria-current="true"] { background: var(--smara-surface); box-shadow: inset 2px 0 0 var(--smara-accent); }
+.native-app .agent-count { color: var(--smara-muted); font-size: 12px; }
+.native-app .agent-item > .text-button {
+  opacity: 0; padding: 4px 8px; margin-right: 2px;
+  color: var(--smara-muted); font-size: 12px; border-radius: 6px;
+}
+.native-app .agent-item:hover > .text-button,
+.native-app .agent-item:focus-within > .text-button,
+.native-app .agent-row[aria-current="true"] ~ .text-button { opacity: 1; }
+.native-app .agent-form {
+  display: grid; gap: var(--smara-space-2);
+  margin-top: var(--smara-space-2); padding: var(--smara-space-3);
+  border: 1px solid var(--smara-line); border-radius: 12px; background: var(--smara-surface);
+  font-size: 13px;
+}
+.native-app .agent-form label { display: grid; gap: 4px; color: var(--smara-muted); font-size: 12px; }
+.native-app .agent-form input,
+.native-app .agent-form textarea { color: var(--smara-ink); background: var(--smara-bg); border: 1px solid var(--smara-line); border-radius: 8px; padding: 8px 10px; }
+.native-app .agent-form fieldset { border: none; padding: 0; }
+
+/* ---------- Top bar ---------- */
+.native-app .native-topbar {
+  min-height: 52px;
+  padding: 0 var(--smara-space-4);
+  gap: var(--smara-space-3);
+  border-bottom: 1px solid var(--smara-line);
+  background: var(--smara-bg);
+}
+.native-app .topbar-title { display: flex; align-items: center; gap: var(--smara-space-2); min-width: 0; flex: 1; }
+.native-app .native-topbar strong { font-size: 14px; font-weight: 600; }
+.native-app .topbar-sep { color: var(--smara-muted); }
+.native-app .header-chat-title { color: var(--smara-muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.native-app .topbar-status { display: flex; align-items: center; gap: var(--smara-space-2); flex-shrink: 0; }
+.native-app .topbar-meta { color: var(--smara-muted); font-size: 12px; white-space: nowrap; }
+.native-app .hosted-status {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border: 1px solid var(--smara-line); border-radius: 999px;
+  background: transparent; color: var(--smara-muted); font-size: 12px; white-space: nowrap;
+}
+.native-app .hosted-status[data-tone="ok"] { color: var(--smara-ink); }
+.native-app .hosted-status[aria-pressed="true"] { background: var(--smara-surface); }
+.native-app .hosted-status .status-dot { width: 7px; height: 7px; }
+.native-app .hosted-status[data-tone="ok"] .status-dot { background: var(--smara-ok); }
+.native-app .hosted-status[data-tone="warn"] .status-dot { background: var(--smara-warn); }
+.native-app .hosted-status[data-tone="off"] .status-dot { background: var(--smara-muted); }
+
+.native-app .workspace-actions { display: flex; align-items: center; gap: 2px; }
+.native-app .workspace-actions > button {
+  padding: 6px 10px; border: none; border-radius: 8px; background: transparent;
+  color: var(--smara-muted); font-size: 13px;
+}
+.native-app .workspace-actions > button:hover:not(:disabled) { background: var(--smara-hover); color: var(--smara-ink); }
+.native-app .workspace-actions > button.selected,
+.native-app .workspace-actions > button[aria-pressed="true"] { background: var(--smara-surface); color: var(--smara-ink); }
+
+.native-app .tools-menu { position: relative; }
+.native-app .tools-menu > button {
+  padding: 6px 10px; border: none; border-radius: 8px; background: transparent;
+  color: var(--smara-muted); font-size: 13px;
+}
+.native-app .tools-menu > button:hover:not(:disabled) { background: var(--smara-hover); color: var(--smara-ink); }
+.native-app .tools-menu-list {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
+  display: grid; gap: 2px; min-width: 200px; padding: 6px;
+  border: 1px solid var(--smara-line); border-radius: 12px; background: var(--smara-surface); box-shadow: var(--smara-shadow);
+}
+.native-app .tools-menu-list button {
+  padding: 8px 10px; border: none; border-radius: 8px; background: transparent;
+  color: var(--smara-ink); font-size: 13px; text-align: left;
+}
+.native-app .tools-menu-list button:hover:not(:disabled) { background: var(--smara-hover); }
+
+/* ---------- Reading column ---------- */
+.native-app .native-work-area { background: var(--smara-bg); }
+.native-app .native-chat-area { background: var(--smara-bg); }
+.native-app .native-transcript {
+  display: flex; flex-direction: column;
+  padding: var(--smara-space-4) var(--smara-space-4) var(--smara-space-3);
+  gap: 0;
+}
+.native-app .native-transcript > * { width: min(760px, 100%); margin-left: auto; margin-right: auto; }
+.native-app .native-item { margin: 0 auto var(--smara-space-3); }
+.native-app .native-item .item-heading { opacity: 0; transition: opacity .15s; min-height: 22px; }
+.native-app .native-item:hover .item-heading,
+.native-app .native-item:focus-within .item-heading { opacity: 1; }
+.native-app .native-item .item-heading > div { display: flex; gap: 4px; justify-content: flex-end; }
+.native-app .native-item.assistant { line-height: 1.65; }
+.native-app .native-item.user { display: flex; flex-direction: column; align-items: flex-end; }
+.native-app .native-item.user pre {
+  max-width: 82%; margin: 0;
+  padding: 10px 14px; border-radius: 16px 16px 4px 16px;
+  background: var(--smara-surface); color: var(--smara-ink);
+  font: inherit; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.native-app .native-item.user .item-heading > div { justify-content: flex-end; }
+.native-app .text-button {
+  padding: 4px 8px; border: none; border-radius: 6px; background: transparent;
+  color: var(--smara-muted); font-size: 12px;
+}
+.native-app .text-button:hover:not(:disabled) { background: var(--smara-hover); color: var(--smara-ink); }
+.native-app .tool-card { max-width: 100%; }
+
+/* Empty state: say who you are talking to, and offer things to ask. */
+.native-app .empty-chat {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--smara-space-1);
+  margin: auto; padding: var(--smara-space-6, 48px) var(--smara-space-2);
+  text-align: center;
+}
+.native-app .empty-chat .empty-icon { font-size: 36px; line-height: 1; margin-bottom: var(--smara-space-2); }
+.native-app .empty-chat h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.native-app .empty-chat .empty-role { color: var(--smara-muted); font-size: 14px; }
+.native-app .empty-chat .empty-hint { color: var(--smara-muted); font-size: 13px; margin-top: var(--smara-space-1); }
+.native-app .starter-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--smara-space-2); width: min(640px, 100%); margin-top: var(--smara-space-4);
+}
+.native-app .starter {
+  padding: 12px 14px; border: 1px solid var(--smara-line); border-radius: 12px;
+  background: var(--smara-surface); color: var(--smara-ink);
+  font-size: 13px; line-height: 1.45; text-align: left;
+}
+.native-app .starter:hover:not(:disabled) { border-color: var(--smara-accent); }
+
+/* ---------- Composer ---------- */
+.native-app .native-layout footer { padding: var(--smara-space-2) var(--smara-space-4) var(--smara-space-4); background: var(--smara-bg); }
+.native-app .native-composer {
+  max-width: 760px; margin: 0 auto;
+  padding: 10px 12px;
+  border: 1px solid var(--smara-line); border-radius: 16px;
+  background: var(--smara-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  transition: border-color .15s, box-shadow .15s;
+}
+.native-app .native-composer:focus-within {
+  border-color: var(--smara-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--smara-accent) 22%, transparent);
+}
+.native-app .native-composer textarea {
+  width: 100%; border: none; background: transparent; padding: 6px 4px;
+  resize: none; color: var(--smara-ink); font: inherit; line-height: 1.5;
+}
+.native-app .native-composer textarea::placeholder { color: var(--smara-muted); }
+.native-app .native-composer button { border-radius: 10px; }
+.native-app .native-composer select {
+  background: transparent; border: 1px solid var(--smara-line); border-radius: 8px;
+  color: var(--smara-muted); font-size: 12px; padding: 4px 8px;
+}
+.native-app .native-composer .primary,
+.native-app .native-composer button[type="submit"] {
+  width: 34px; height: 34px; padding: 0;
+  border: none; border-radius: 999px;
+  background: var(--smara-accent); color: var(--smara-on-accent); font-weight: 700;
+}
+.native-app .native-composer button[type="submit"]:disabled { background: var(--smara-hover); color: var(--smara-muted); }
+
+/* ---------- Colours that the older stylesheets hard-code for dark mode only ---------- */
+.native-app button {
+  background: var(--smara-surface);
+  border: 1px solid var(--smara-line);
+  color: var(--smara-ink);
+}
+.native-app button:hover:not(:disabled) { background: var(--smara-hover); }
+.native-app button.selected { background: var(--smara-hover); border-color: var(--smara-line); }
+.native-app input,
+.native-app select,
+.native-app textarea { background: var(--smara-bg); border-color: var(--smara-line); color: var(--smara-ink); }
+.native-app pre,
+.native-app .native-markdown p,
+.native-app .native-markdown li { color: var(--smara-ink); }
+.native-app .sidebar-threads button,
+.native-app .project-button,
+.native-app .native-topbar strong,
+.native-app .project-icon { color: var(--smara-ink); opacity: 1; }
+.native-app .native-item.user { background: var(--smara-surface); border-color: var(--smara-line); }
+.native-app .native-item details { background: var(--smara-surface); border-color: var(--smara-line); }
+.native-app .native-item summary { color: var(--smara-muted); }
+.native-app .command-card { background: var(--smara-surface); border-color: var(--smara-line); }
+.native-app .command-card pre { background: var(--smara-bg); color: var(--smara-ink); }
+.native-app .command-card summary small,
+.native-app .command-card .command-cwd { color: var(--smara-muted); }
+.native-app .command-state { background: var(--smara-hover); color: var(--smara-muted); }
+.native-app .command-card.failed .command-state,
+.native-app .command-card.denied .command-state { background: color-mix(in srgb, var(--smara-error) 18%, transparent); color: var(--smara-error); }
+.native-app .command-card.running .command-state { background: color-mix(in srgb, var(--smara-running) 18%, transparent); color: var(--smara-running); }
+.native-app .diff-hunk pre { background: var(--smara-bg); }
+.native-app .slash-command-menu { background: var(--smara-surface); border-color: var(--smara-line); box-shadow: var(--smara-shadow); }
+.native-app .slash-command-menu code { color: var(--smara-accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .native-app *, .native-app *::before, .native-app *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}

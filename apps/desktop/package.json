@@ -8,7 +8,8 @@
     "dev": "vite --port 1420",
     "build": "tsc && vite build --configLoader bundle",
     "preview": "vite preview --port 1420",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "preview:ui": "vite --config preview/vite.preview.config.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

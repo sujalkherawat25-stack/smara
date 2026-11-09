@@ -24,7 +24,7 @@ export function AgentRoster({ roster, counts, selected, disabled, onSelect, onSa
     <section className="agent-roster-section" aria-label="Agents">
       <div className="sidebar-section-heading"><span>Agents</span><button aria-label="New agent" disabled={disabled} onClick={startNew}>＋</button></div>
       <div className="agent-roster">
-        {roster.map(agent => <div key={agent.id}>
+        {roster.map(agent => <div className="agent-item" key={agent.id}>
           <button className="agent-row" aria-current={agent.id === selected ? "true" : undefined} disabled={disabled} onClick={() => onSelect(agent.id)}>
             <span aria-hidden="true">{agent.icon}</span>
             <span>{agent.role ? `${agent.role} · ${agent.name}` : agent.name}</span>

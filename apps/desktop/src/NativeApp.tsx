@@ -7,6 +7,7 @@ import { AgentRoster as AgentRosterList, type AgentDraft } from "./ui/AgentRoste
 import { ToolGroup } from "./ui/ToolCard";
 import NativeFiles from "./ui/NativeFiles";
 import HostedPanel from "./ui/HostedPanel";
+import { EmptyChat } from "./ui/EmptyChat";
 import NativeBrowser from "./NativeBrowser";
 import NativeGoals from "./NativeGoals";
 import { EMPTY_ROSTER, agentById, chatCounts, chatsForAgent, developerInstructionsFor, type AgentRoster as RosterData } from "./agents";
@@ -33,6 +34,7 @@ import type { LocalModelProfile } from "./types";
 import packageInfo from "../package.json";
 import "./native-shell.css";
 import "./native-design.css";
+import "./ui/shell.css";
 
 type Item = ViewItem;
 type Approval = { id: number | string; method: string; params: Record<string, unknown> };
@@ -128,6 +130,7 @@ export default function NativeApp() {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("Preparing project…");
   const [panel, setPanel] = useState<Pane | null>(null);
+  const [morePanesOpen, setMorePanesOpen] = useState(false);
   const [roster, setRoster] = useState<RosterData>(EMPTY_ROSTER);
   const [selectedAgent, setSelectedAgent] = useState("");
   const [helper, setHelper] = useState<HelperSnapshot>(undefined);
@@ -491,6 +494,11 @@ export default function NativeApp() {
       setCopiedItemId(item.id);
       setTimeout(() => setCopiedItemId(current => current === item.id ? "" : current), 1600);
     } catch { setError("Clipboard is unavailable"); }
+  };
+  /** A starter prompt fills the composer for the owner to review, then send. */
+  const pickStarter = (text: string) => {
+    setDraft(text);
+    requestAnimationFrame(() => composerRef.current?.focus());
   };
   const editMessage = (text: string) => {
     setDraft(text); setEditingPrompt(true);
@@ -1120,7 +1128,27 @@ export default function NativeApp() {
       {!agentThreads.length && <p>{loadingMore ? "Loading chats…" : showArchived ? "No archived conversations." : connecting ? "Loading chats…" : "Your chats appear here."}</p>}{nextCursor && <button disabled={navigationLocked || loadingMore || !connected} onClick={() => void loadOlder()}>{loadingMore ? "Loading…" : "Show more"}</button>}</div>
       <div className="sidebar-bottom"><button disabled={navigationLocked} className={settingsOpen ? "selected" : ""} onClick={() => void toggleSettings()}>⚙ Settings</button></div>
     </aside><main>
-      <header className="native-topbar"><span className="project-icon" aria-hidden="true">▱</span><strong title={workspace}>{settingsOpen ? "Settings" : project?.label || "Choose a project"}</strong>{!settingsOpen && threadId && <span className="header-chat-title">{threadLabel(threads.find(thread => thread.id === threadId) ?? { id: threadId })}</span>}{!settingsOpen && <span className="smara-chip" title="The agent this chat belongs to">{currentAgent ? `${currentAgent.icon} ${currentAgent.name}` : "Agent"}</span>}{!settingsOpen && <span className="smara-chip" title="Model for this chat">{activeProfile ? activeProfile.label : "No model"}</span>}{!settingsOpen && <span className="smara-chip" data-tone={hosted.tone} title="Hosted Smara connection">{hosted.label}</span>}{!settingsOpen && <div className="workspace-actions"><button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? " •" : ""}</button><button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy || goalWorking} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Terminal{terminalActive ? " •" : ""}</button>{(["browser", "tasks", "files", "hosted"] as Pane[]).map(tab => <button key={tab} aria-pressed={panel === tab} className={panel === tab ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => openPane(tab)}>{({ browser: "Browser", tasks: "Tasks", files: "Files", hosted: "Hosted" } as Record<string, string>)[tab]}</button>)}</div>}</header>
+      <header className="native-topbar">
+        <div className="topbar-title">
+          <span className="project-icon" aria-hidden="true">▱</span>
+          <strong title={workspace}>{settingsOpen ? "Settings" : project?.label || "Choose a project"}</strong>
+          {!settingsOpen && threadId && <><span className="topbar-sep" aria-hidden="true">/</span><span className="header-chat-title">{threadLabel(threads.find(thread => thread.id === threadId) ?? { id: threadId })}</span></>}
+        </div>
+        {!settingsOpen && <div className="topbar-status">
+          <span className="topbar-meta" title="The agent and model for this chat">{currentAgent ? `${currentAgent.icon} ${currentAgent.name}` : "Agent"} · {activeProfile ? activeProfile.label : "No model"}</span>
+          <button className="hosted-status" data-tone={hosted.tone} aria-pressed={panel === "hosted"} title="Open Hosted Smara" onClick={() => openPane("hosted")}><span className="status-dot" aria-hidden="true" />{hosted.label}</button>
+        </div>}
+        {!settingsOpen && <div className="workspace-actions">
+          <button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? " •" : ""}</button>
+          <button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy || goalWorking} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Terminal{terminalActive ? " •" : ""}</button>
+          <div className="tools-menu">
+            <button aria-haspopup="menu" aria-expanded={morePanesOpen} onClick={() => setMorePanesOpen(!morePanesOpen)}>More ▾</button>
+            {morePanesOpen && <div className="tools-menu-list" role="menu">
+              {(["browser", "tasks", "files"] as Pane[]).map(tab => <button key={tab} role="menuitem" disabled={reviewBusy || !workspace} onClick={() => { setMorePanesOpen(false); openPane(tab); }}>{({ browser: "Browser", tasks: "Tasks", files: "Files" } as Record<string, string>)[tab]}{panel === tab ? " ✓" : ""}</button>)}
+            </div>}
+          </div>
+        </div>}
+      </header>
       {setup?.computer?.enabled && <div className="native-warning" role="status">Experimental app control · after approval, bring the selected app forward within 10 seconds · 15-minute grant<button onClick={() => {
         void invoke("native_manage", { request: { operation: "computer_control", action: "stop", workspace } }).then(() => setSetup(current => current ? { ...current, computer: { enabled: false, expires: null } } : current)).catch(reason => setError(String(reason)));
       }}>Stop computer control</button></div>}
@@ -1183,7 +1211,7 @@ export default function NativeApp() {
       <div className="native-transcript" aria-live="off">
         {busy && turnStartedAt && <p role="status">{waitingReason(items, approvals.length, activityClock, lastNativeEventRef.current)} · {Math.max(0, Math.floor((activityClock - turnStartedAt) / 1000))}s elapsed</p>}
         {!!workers.length && <section className="native-workers"><strong>Workers · {workers.filter(worker => worker.status === "completed").length}/{workers.length} complete · changes are not auto-merged</strong>{liveWorkers && <button disabled={connecting || loadingThread} title="Stops this chat's native runtime and all its workers; saved history is kept" onClick={() => void stopWorkers()}>Stop workers</button>}{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status}{worker.activity && <span> · {worker.activity}{worker.lastActivityAt && ` · ${Math.max(0, Math.floor((activityClock - worker.lastActivityAt) / 1000))}s ago`}</span>} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
-        {!items.length && <div className="native-empty"><h1>{project?.label || "Smara"}</h1>{!profile ? <small className="empty-hint">Add a model in Settings to get started.</small> : <small className="empty-hint">{connecting ? "Preparing project…" : "Type a message below, or / for commands."}</small>}</div>}
+        {!items.length && <EmptyChat agent={currentAgent} projectLabel={project?.label || "Smara"} hasModel={!!profile} connecting={connecting} onPick={pickStarter} />}
         {windowed.hidden > 0 && <button className="text-button show-earlier" onClick={() => setVisibleLimit(widenWindow)}>Show earlier ({windowed.hidden.toLocaleString()})</button>}
         {groupTranscript(windowed.visible).map(segment => segment.type === "item"
           ? <TranscriptItem key={segment.item.id} item={segment.item} busy={busy} copied={copiedItemId === segment.item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} />
