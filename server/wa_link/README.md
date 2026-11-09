@@ -56,6 +56,7 @@ The sidecar calls the app back at `WA_LINK_CALLBACK_URL` (`/state` with the encr
 | `WA_LINK_PORT` | sidecar | Default 8090. |
 | `WA_LINK_SEND_GAP_MS` | sidecar | Minimum gap between sends from one device. Default 3000. |
 | `WA_LINK_URL` | app | Where the sidecar is. Empty = the link is off. |
+| `REMINDER_SEND_MODE` | app | Set to `smara` for the pilot. Server-wide. In `own` mode (main's default) the owner sends each reminder from their own WhatsApp and the SIM is not used for customer messages. |
 | `WA_LINK_DAILY_CAP` | app | Messages per shop per IST day, customers included. Default 40. |
 | `WA_LINK_SEND_GAP_S` | app | Pause between two sends from one shop's SIM. Default 6. |
 
