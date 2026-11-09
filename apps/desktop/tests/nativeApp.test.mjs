@@ -285,7 +285,8 @@ test("Changes is readable during work but writes and navigation remain locked", 
   assert.equal(f.changes().locked, true);
   assert.equal(f.button("New chat").props.disabled, true);
   f.emit({ method: "turn/diff/updated", params: { threadId: "new", diff: "synthetic diff" } });
-  await f.flush(); assert.ok(f.button("Changes •"));
+  await f.flush(); assert.ok(f.button("Changes"));
+  assert.ok(f.nodes().some(node => node.props?.className === "signal-dot"), "the Changes button shows a dot while there are changes");
 });
 
 test("a user Git action synchronously blocks sending or changing project", async () => {

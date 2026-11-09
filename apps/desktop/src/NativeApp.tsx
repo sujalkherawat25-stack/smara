@@ -1138,6 +1138,8 @@ export default function NativeApp() {
     try {
       await client.request("thread/name/set", { threadId: thread.id, name: name.trim().slice(0, 120) });
       setThreads(current => current.map(item => item.id === thread.id ? { ...item, name: name.trim().slice(0, 120) } : item));
+      // A rename in the open conversation leaves a quiet line in the chat, like a chat app's system message.
+      if (thread.id === threadId) setItems(current => [...current, { id: `renamed-${Date.now()}`, kind: "separator", text: `Renamed to ${name.trim().slice(0, 120)}` }]);
       setThreadMenu("");
     } catch (reason) { setError(String(reason)); }
     finally { setThreadActionBusy(""); }
@@ -1213,12 +1215,12 @@ export default function NativeApp() {
           <button className="hosted-status" data-tone={hosted.tone} aria-pressed={panel === "hosted"} title="Open Hosted Smara" onClick={() => openPane("hosted")}><span className="status-dot" aria-hidden="true" />{hosted.label}</button>
         </div>}
         {!settingsOpen && <div className="workspace-actions">
-          <button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? " •" : ""}</button>
-          <button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy || goalWorking} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Terminal{terminalActive ? " •" : ""}</button>
+          <button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? <span className="signal-dot" aria-hidden="true" /> : null}</button>
+          <button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy || goalWorking} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Terminal{terminalActive ? <span className="signal-dot" aria-hidden="true" /> : null}</button>
           <div className="tools-menu">
             <button aria-haspopup="menu" aria-expanded={morePanesOpen} onClick={() => setMorePanesOpen(!morePanesOpen)}>More</button>
             {morePanesOpen && <div className="tools-menu-list" role="menu">
-              {(["browser", "tasks", "files"] as Pane[]).map(tab => <button key={tab} role="menuitem" disabled={reviewBusy || !workspace} onClick={() => { setMorePanesOpen(false); openPane(tab); }}>{({ browser: "Browser", tasks: "Tasks", files: "Files" } as Record<string, string>)[tab]}{panel === tab ? " ✓" : ""}</button>)}
+              {(["browser", "tasks", "files"] as Pane[]).map(tab => <button key={tab} role="menuitem" disabled={reviewBusy || !workspace} onClick={() => { setMorePanesOpen(false); openPane(tab); }}>{({ browser: "Browser", tasks: "Tasks", files: "Files" } as Record<string, string>)[tab]}{panel === tab ? <small className="menu-current">open</small> : null}</button>)}
               {currentThread && <>
                 <button role="menuitem" disabled={!!threadActionBusy || navigationLocked} onClick={() => { setMorePanesOpen(false); void renameChat(currentThread); }}>Rename conversation</button>
                 <button role="menuitem" disabled={!!threadActionBusy || navigationLocked} onClick={() => { setMorePanesOpen(false); void archiveChat(currentThread, false); }}>Archive conversation</button>
@@ -1232,7 +1234,7 @@ export default function NativeApp() {
         void invoke("native_manage", { request: { operation: "computer_control", action: "stop", workspace } }).then(() => setSetup(current => current ? { ...current, computer: { enabled: false, expires: null } } : current)).catch(reason => setError(String(reason)));
       }}>Stop computer control</button></div>}
       {built === false && <div className="native-warning">Native runtime is missing. Build scripts/build-smara-native.ps1; no old-engine fallback is used.</div>}
-      {error && <div role="alert" className="native-error">{error}{!settingsOpen && !connected && (!busy || uncertain) && <button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Retry setup</button>}<button aria-label="Dismiss error" onClick={() => setError("")}>×</button></div>}
+      {error && <div role="alert" className="native-error">{error}{!settingsOpen && !connected && (!busy || uncertain) && <button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Retry setup</button>}<button aria-label="Dismiss error" onClick={() => setError("")}>Dismiss</button></div>}
       {settingsOpen && setup ? <NativeSettings initialTab={settingsTab} setup={setup} locked={busy || connecting || loadingThread} call={settingsCall} onUpdate={updateSetup} onClose={() => void closeSettings()} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : <>
       <div className={`native-work-area ${panel ? "with-panel" : ""}`}>
       <div className="native-chat-area">
@@ -1315,7 +1317,7 @@ export default function NativeApp() {
         <div ref={bottom} />
       </div>
       <footer><form className="native-composer" onSubmit={event => { event.preventDefault(); void send(); }}>
-        {!!contextFiles.length && <div className="composer-files">{contextFiles.map(file => <span key={file.path}><button type="button" title={file.path} onClick={() => setPreviewPath(file.path)}>{file.name}</button><button type="button" aria-label={`Remove ${file.name}`} disabled={navigationLocked} onClick={() => setContextFiles(current => current.filter(item => item.path !== file.path))}>×</button></span>)}</div>}
+        {!!contextFiles.length && <div className="composer-files">{contextFiles.map(file => <span key={file.path}><button type="button" title={file.path} onClick={() => setPreviewPath(file.path)}>{file.name}</button><button type="button" aria-label={`Remove ${file.name}`} disabled={navigationLocked} onClick={() => setContextFiles(current => current.filter(item => item.path !== file.path))}>Remove</button></span>)}</div>}
         {editingPrompt && <div className="composer-edit-notice">Sending this edited text adds a follow-up; the original stays in chat history. <button type="button" onClick={() => { setEditingPrompt(false); setDraft(""); }}>Cancel edit</button></div>}
         {slashOptions.length > 0 && <div className="slash-command-menu" role="listbox" aria-label="Smara commands">{slashOptions.map((option, index) => <button type="button" role="option" aria-selected={index === slashSelection} key={option.command} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setSlashSelection(index)} onClick={() => chooseSlashCommand(option.command)}><code>{option.command}</code><span><strong>{option.label}</strong><small>{option.description}</small></span><kbd>↵</kbd></button>)}</div>}
         <textarea ref={composerRef} aria-label="Message Smara" rows={2} placeholder={`Message ${currentAgent?.name ?? "Smara"} (/ for commands)`} value={draft} onChange={event => { setDraft(event.target.value); setSlashSelection(0); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 260)}px`; }} onKeyDown={event => {

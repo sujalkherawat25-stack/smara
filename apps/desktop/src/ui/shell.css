@@ -435,3 +435,106 @@
 /* Tool steps: the summary line is plain text; the browser's default triangle is hidden. */
 .native-app .tool-group > summary { list-style: none; }
 .native-app .tool-group > summary::-webkit-details-marker { display: none; }
+
+/* Header marks: a dot for "has changes", and the word "open" in the More menu. */
+.native-app .signal-dot { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--smara-accent); vertical-align: middle; }
+.native-app .menu-current { margin-left: 8px; color: var(--smara-muted); font-size: 11px; }
+
+/* ---------- Settings: the chat's tokens, one card style, plain words ---------- */
+.native-app .native-settings { display: grid; grid-template-columns: 232px minmax(0, 1fr); background: var(--smara-bg); overflow: hidden; }
+.native-app .native-settings .settings-nav { display: flex; flex-direction: column; gap: 2px; padding: var(--smara-space-4) var(--smara-space-3); background: var(--smara-sidebar); border-right: 1px solid var(--smara-line); overflow-y: auto; }
+.native-app .native-settings .settings-back { align-self: flex-start; padding: 4px 6px; border: 0; background: transparent; color: var(--smara-muted); font-size: 13px; }
+.native-app .native-settings .settings-back:hover:not(:disabled) { background: transparent; color: var(--smara-ink); }
+.native-app .native-settings .settings-title { margin: var(--smara-space-3) 6px var(--smara-space-2); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--smara-ink); }
+.native-app .native-settings .settings-nav nav { display: flex; flex-direction: column; gap: 2px; }
+.native-app .native-settings .settings-nav nav button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--smara-ink); font-size: 14px; font-weight: 500; text-align: left; }
+.native-app .native-settings .settings-nav nav button small { color: var(--smara-muted); font-size: 12px; font-weight: 400; }
+.native-app .native-settings .settings-nav nav button:hover:not(:disabled) { background: var(--smara-hover); color: var(--smara-ink); }
+.native-app .native-settings .settings-nav nav button.selected { color: var(--smara-ink); }
+.native-app .native-settings .settings-nav nav button.selected { background: var(--smara-surface); box-shadow: inset 0 0 0 1px var(--smara-line); font-weight: 600; }
+.native-app .native-settings .settings-version { margin-top: auto; padding: 0 10px; color: var(--smara-muted); font-size: 11px; }
+.native-app .native-settings .settings-body { min-width: 0; overflow-y: auto; padding: 28px clamp(20px, 4vw, 48px) 48px; }
+.native-app .native-settings .settings-body > * { max-width: 760px; margin-left: auto; margin-right: auto; }
+.native-app .native-settings .native-error, .native-app .native-settings .native-warning, .native-app .native-settings .settings-notice { margin: 0 auto var(--smara-space-3); border-radius: 10px; padding: 10px 14px; font-size: 13px; line-height: 1.5; color: var(--smara-ink) !important; }
+.native-app .native-settings .settings-notice { background: color-mix(in srgb, var(--smara-ok) 12%, var(--smara-surface)); border: 1px solid color-mix(in srgb, var(--smara-ok) 35%, transparent); }
+.native-app .native-settings .native-error { background: color-mix(in srgb, var(--smara-error) 10%, var(--smara-surface)); border: 1px solid color-mix(in srgb, var(--smara-error) 35%, transparent); }
+.native-app .native-settings .native-warning { background: color-mix(in srgb, var(--smara-warn) 12%, var(--smara-surface)); border: 1px solid color-mix(in srgb, var(--smara-warn) 35%, transparent); }
+
+.native-app .native-settings .set-page { display: flex; flex-direction: column; gap: var(--smara-space-4); }
+.native-app .native-settings .set-page > header h2 { margin: 0 0 4px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; color: var(--smara-ink); }
+.native-app .native-settings .set-page > header p { margin: 0; color: var(--smara-muted); font-size: 13px; line-height: 1.55; }
+.native-app .native-settings .set-footnote { color: var(--smara-muted); font-size: 12px; line-height: 1.5; padding: 0 2px; }
+.native-app .native-settings .settings-grid { display: flex; flex-direction: column; gap: var(--smara-space-4); }
+
+.native-app .native-settings .set-group,
+.native-app .native-settings .settings-card { background: var(--smara-surface); border: 1px solid var(--smara-line); border-radius: 12px; box-shadow: none; overflow: hidden; margin: 0; }
+.native-app .native-settings .settings-card { padding: var(--smara-space-4); }
+.native-app .native-settings .set-group { display: flex; flex-direction: column; }
+.native-app .native-settings .set-row { display: flex; align-items: center; justify-content: space-between; gap: var(--smara-space-4); padding: 14px 16px; border-top: 1px solid var(--smara-line); }
+.native-app .native-settings .set-group > :first-child { border-top: 0; }
+.native-app .native-settings .set-row.stack { flex-direction: column; align-items: stretch; gap: var(--smara-space-2); }
+.native-app .native-settings .set-row > div:first-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.native-app .native-settings .set-row > strong, .native-app .native-settings .set-row > div > strong { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--smara-ink); }
+.native-app .native-settings .set-row small, .native-app .native-settings .settings-card small { display: block; color: var(--smara-muted); font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.native-app .native-settings .settings-card h2 { margin: 0 0 6px; font-size: 15px; font-weight: 600; color: var(--smara-ink); }
+.native-app .native-settings .settings-card h3 { margin: 16px 0 6px; font-size: 13px; font-weight: 600; color: var(--smara-ink); }
+.native-app .native-settings .settings-card > p { margin: 0 0 8px; color: var(--smara-muted); font-size: 13px; line-height: 1.55; }
+.native-app .native-settings .settings-form, .native-app .native-settings .set-group.settings-form { gap: var(--smara-space-3); }
+.native-app .native-settings .set-advanced > summary { padding: 14px 16px; color: var(--smara-ink); font-size: 14px; font-weight: 600; list-style: none; }
+.native-app .native-settings .set-advanced > summary::before { content: none; }
+.native-app .native-settings .set-advanced > summary::-webkit-details-marker { display: none; }
+.native-app .native-settings .set-advanced[open] > summary { border-bottom: 1px solid var(--smara-line); }
+
+/* Form fields: one height, one radius, one focus ring. */
+.native-app .native-settings label { display: flex; flex-direction: column; gap: 6px; color: var(--smara-muted); font-size: 13px; }
+.native-app .native-settings label:has(> input[type="checkbox"]) { flex-direction: row; align-items: center; gap: 10px; color: var(--smara-ink); }
+.native-app .native-settings input:not([type="checkbox"]), .native-app .native-settings select, .native-app .native-settings textarea { width: 100%; min-height: 34px; padding: 6px 10px; border: 1px solid var(--smara-line); border-radius: 8px; background: var(--smara-bg); color: var(--smara-ink); font: 14px/1.4 var(--smara-font); }
+.native-app .native-settings textarea { min-height: 84px; resize: vertical; line-height: 1.5; }
+.native-app .native-settings input:focus, .native-app .native-settings select:focus, .native-app .native-settings textarea:focus { outline: none; border-color: var(--smara-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--smara-accent) 22%, transparent); }
+.native-app .native-settings input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--smara-accent); }
+.native-app .native-settings details summary { cursor: pointer; color: var(--smara-ink); font-size: 13px; font-weight: 600; }
+.native-app .native-settings code { font: 12px/1.4 ui-monospace, Consolas, monospace; color: var(--smara-ink); background: var(--smara-hover); padding: 1px 6px; border-radius: 5px; }
+.native-app .native-settings .endpoint { font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+
+/* Buttons: secondary by default, accent for the one thing to do, red text for removing things. */
+.native-app .native-settings button { min-height: 32px; padding: 6px 12px; border-radius: 8px; font-size: 13px; }
+.native-app .native-settings .primary { background: var(--smara-accent); border-color: var(--smara-accent); color: var(--smara-on-accent); font-weight: 600; }
+.native-app .native-settings .primary:hover:not(:disabled) { background: var(--smara-accent); filter: brightness(1.06); }
+.native-app .native-settings .danger-action { background: var(--smara-surface); color: var(--smara-error); border-color: color-mix(in srgb, var(--smara-error) 40%, transparent); }
+.native-app .native-settings .set-actions, .native-app .native-settings .settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.native-app .native-settings .set-badge { padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--smara-accent) 14%, transparent); color: var(--smara-accent); font-size: 11px; font-weight: 600; }
+.native-app .native-settings .set-state.ok { color: var(--smara-ok); }
+.native-app .native-settings .set-state.attention { color: var(--smara-warn); }
+.native-app .native-settings .set-switch span { background: var(--smara-line); }
+.native-app .native-settings .set-switch input:checked + span { background: var(--smara-accent); }
+
+/* Status words with a colour, never a symbol. */
+.native-app .native-settings .readiness { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+.native-app .native-settings .readiness.ready { color: var(--smara-ok); }
+.native-app .native-settings .readiness.attention { color: var(--smara-warn); }
+.native-app .native-settings .status-tag { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; background: var(--smara-hover); color: var(--smara-muted); font-size: 12px; font-weight: 600; }
+.native-app .native-settings .status-tag.ready { background: color-mix(in srgb, var(--smara-ok) 16%, transparent); color: var(--smara-ok); }
+.native-app .native-settings .status-tag.attention { background: color-mix(in srgb, var(--smara-warn) 16%, transparent); color: var(--smara-warn); }
+.native-app .native-settings .telegram-status-list { display: flex; flex-direction: column; }
+.native-app .native-settings .status-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--smara-line); font-size: 13px; color: var(--smara-muted); }
+.native-app .native-settings .status-item:first-child { border-top: 0; }
+.native-app .native-settings .telegram-pairing-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--smara-line); }
+.native-app .native-settings .pairing-code-banner { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--smara-line); border-radius: 10px; background: var(--smara-bg); }
+.native-app .native-settings .pairing-code-banner p { margin: 0 0 8px; color: var(--smara-muted); font-size: 13px; }
+.native-app .native-settings .pairing-code-tag { font: 600 15px/1.4 ui-monospace, Consolas, monospace; color: var(--smara-ink); }
+.native-app .native-settings .telegram-guide ol { margin: 0; padding-left: 20px; color: var(--smara-ink); font-size: 13px; line-height: 1.7; }
+
+/* Browser helper: one status card, then a plain activity list. */
+.native-app .native-settings .browser-status { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--smara-line); border-radius: 10px; background: var(--smara-bg); }
+.native-app .native-settings .browser-status strong { display: block; font-size: 14px; color: var(--smara-ink); }
+.native-app .native-settings .browser-light { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; background: var(--smara-muted); }
+.native-app .native-settings .browser-online .browser-light { background: var(--smara-ok); }
+.native-app .native-settings .browser-paused .browser-light, .native-app .native-settings .browser-problem .browser-light { background: var(--smara-warn); }
+.native-app .native-settings .browser-big-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.native-app .native-settings .browser-feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.native-app .native-settings .browser-step { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-top: 1px solid var(--smara-line); }
+.native-app .native-settings .browser-step:first-child { border-top: 0; }
+.native-app .native-settings .browser-step > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.native-app .native-settings .browser-step strong { font-size: 13px; font-weight: 500; color: var(--smara-ink); overflow-wrap: anywhere; }
+.native-app .native-settings .browser-step-state { flex: 0 0 auto; padding: 1px 8px; border-radius: 999px; background: var(--smara-hover); color: var(--smara-ok); font-size: 11px; font-weight: 600; }
+.native-app .native-settings .browser-step-error .browser-step-state { color: var(--smara-error); }

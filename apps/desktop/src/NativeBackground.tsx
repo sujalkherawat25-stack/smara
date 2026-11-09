@@ -7,7 +7,10 @@ export default function NativeBackground({ workspace, profile, locked, onPending
   const [prompt, setPrompt] = useState(""), [name, setName] = useState(""), [interval, setInterval] = useState(3600), [maximum, setMaximum] = useState(10);
   const request = async (action = "status", values: Record<string, unknown> = {}) => {
     if (busy.current) return; busy.current = true; setPending(true); onPendingChange(true); setError("");
-    try { setStatus(await invoke<Status>("native_manage", { request: { operation: "background", action, workspace, ...values } })); }
+    try {
+      const value = await invoke<Partial<Status>>("native_manage", { request: { operation: "background", action, workspace, ...values } });
+      setStatus({ startup: value.startup ?? false, service: value.service ?? {}, schedules: value.schedules ?? [] });
+    }
     catch (reason) { setError(String(reason)); } finally { busy.current = false; setPending(false); onPendingChange(false); }
   };
   useEffect(() => { void request(); }, [workspace]);

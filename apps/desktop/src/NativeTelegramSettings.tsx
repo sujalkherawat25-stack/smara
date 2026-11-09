@@ -57,11 +57,11 @@ export default function NativeTelegramSettings({ workspace, profile, locked, onS
       <div className="telegram-status-list">
         <div className="status-item">
           <span>Bot token:</span>
-          <strong className={status?.configured ? "status-tag ready" : "status-tag attention"}>{status?.configured ? "● Saved" : "○ Missing"}</strong>
+          <strong className={status?.configured ? "status-tag ready" : "status-tag attention"}>{status?.configured ? "Saved" : "Missing"}</strong>
         </div>
         <div className="status-item">
           <span>Chat pairing:</span>
-          <strong className={status?.paired ? "status-tag ready" : "status-tag attention"}>{status?.paired ? "● Paired" : "○ Not paired"}</strong>
+          <strong className={status?.paired ? "status-tag ready" : "status-tag attention"}>{status?.paired ? "Paired" : "Not paired"}</strong>
         </div>
         <div className="status-item">
           <span>Background service:</span>

@@ -9,7 +9,7 @@ export const SITE_GRANT_MS = 15 * 60_000;
 
 const ERROR_WORDS = /crash|disconnected|unpaired|failed|no brave|stopped:|error|could not/i;
 /** bridge.log lines look like "2026-11-05 01:50:56 message". */
-export function parseLog(lines: string[]): LogRow[] {
+export function parseLog(lines: string[] = []): LogRow[] {
   return lines.map((line, index) => {
     const match = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) (.*)$/.exec(line);
     const message = (match ? match[3] : line).trim();
