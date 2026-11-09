@@ -10,7 +10,7 @@ import HostedPanel from "./ui/HostedPanel";
 import { EmptyChat } from "./ui/EmptyChat";
 import NativeBrowser from "./NativeBrowser";
 import NativeGoals from "./NativeGoals";
-import { EMPTY_ROSTER, agentById, agentNameProblem, chatsForAgent, chatsNewestFirst, developerInstructionsFor, threadTime, type AgentRecord, type AgentRoster as RosterData } from "./agents";
+import { EMPTY_ROSTER, agentById, agentNameProblem, chatsForAgent, chatsNewestFirst, developerInstructionsFor, threadTime, agentTone, contactTime, type AgentRecord, type AgentRoster as RosterData } from "./agents";
 import { groupTranscript } from "./toolCards";
 import { hostedStatus, type HelperSnapshot } from "./hostedStatus";
 import { invoke } from "@tauri-apps/api/core";
@@ -107,6 +107,7 @@ export default function NativeApp() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [chatSort, setChatSort] = useState<ChatSort>("recent");
   const [showArchived, setShowArchived] = useState(false);
+  const [agentQuery, setAgentQuery] = useState("");
   const [threadMenu, setThreadMenu] = useState("");
   const [threadActionBusy, setThreadActionBusy] = useState("");
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -1030,6 +1031,10 @@ export default function NativeApp() {
   const windowed = visibleWindow(transcriptItems, visibleLimit);
   const agentThreads = chatsForAgent(threads, roster, selectedAgent || roster.default);
   const currentAgent = agentById(roster, selectedAgent || roster.default);
+  const avatarInitial = currentAgent?.name.charAt(0) || "S";
+  const avatarTone = currentAgent ? agentTone(currentAgent) : "teal";
+  const agentSearch = agentQuery.trim().toLowerCase();
+  const shownAgents = agentSearch ? roster.roster.filter(agent => `${agent.name} ${agent.role}`.toLowerCase().includes(agentSearch)) : roster.roster;
   const activeProfile = setup?.profiles.find(item => item.id === profile);
   const hosted = hostedStatus(helper);
   // Stable callbacks, so memoised rows are not re-rendered just because the parent did.
@@ -1155,7 +1160,10 @@ export default function NativeApp() {
   }, [built, workspace, profile, settingsOpen]);
   return <div className="native-app">
     <div className={`native-layout${settingsOpen ? " settings-mode" : ""}`}><aside>
-      <button className="new-chat" disabled={navigationLocked} onClick={newConversation}>New chat</button>
+      <div className="sidebar-top">
+        <input className="agent-search" type="search" aria-label="Search agents" placeholder="Search agents" value={agentQuery} onChange={event => setAgentQuery(event.target.value)} />
+        <button className="new-chat" disabled={navigationLocked} onClick={newConversation}>New chat</button>
+      </div>
       {showArchived ? <div className="contact-list" aria-label="Archived conversations">
         {threads.map(thread => <div className="contact-item" key={thread.id}>
           <button className="contact" disabled={navigationLocked || !connected} onClick={() => { setSettingsOpen(false); void selectThread(thread.id); }}>
@@ -1166,20 +1174,21 @@ export default function NativeApp() {
         </div>)}
         {!threads.length && <p className="sidebar-empty">{loadingMore ? "Loading…" : "No archived conversations."}</p>}
       </div> : <div className="contact-list" aria-label="Agents">
-        {roster.roster.map(agent => {
+        {shownAgents.map(agent => {
           const latest = chatsNewestFirst(threads, roster, agent.id)[0];
           const selected = agent.id === activeAgentId;
           return <div className="contact-item" key={agent.id}>
             <button className="contact" aria-current={selected ? "true" : undefined} disabled={navigationLocked} onClick={() => openAgent(agent.id)}>
-              <span className="avatar" aria-hidden="true">{agent.name.charAt(0)}</span>
+              <span className="avatar" data-tone={agentTone(agent)} aria-hidden="true">{agent.name.charAt(0)}</span>
               <span className="contact-text">
-                <span className="contact-name">{agent.name}</span>
-                <span className="contact-preview">{latest ? threadLabel(latest) : (agent.role || "No conversations yet")}</span>
+                <span className="contact-line"><span className="contact-name">{agent.name}</span>{latest && <time className="contact-time">{contactTime(threadTime(latest), Date.now())}</time>}</span>
+                <span className="contact-preview">{selected && busy ? "Working…" : latest ? threadLabel(latest) : (agent.role || "No conversations yet")}</span>
               </span>
             </button>
             <button className="text-button contact-edit" aria-label={`Edit ${agent.name}`} disabled={navigationLocked} onClick={() => editAgent(agent)}>Edit</button>
           </div>;
         })}
+        {!!roster.roster.length && !shownAgents.length && <p className="sidebar-empty">No agent matches "{agentQuery.trim()}".</p>}
         {!roster.roster.length && <p className="sidebar-empty">Agents appear here once Smara is ready.</p>}
       </div>}
       <div className="sidebar-footer">
@@ -1196,6 +1205,7 @@ export default function NativeApp() {
     </aside><main>
       <header className="native-topbar">
         <div className="topbar-title">
+          {!settingsOpen && currentAgent && <span className="avatar sm" data-tone={avatarTone} aria-hidden="true">{avatarInitial}</span>}
           <strong title={settingsOpen ? "Settings" : currentAgent?.name}>{settingsOpen ? "Settings" : currentAgent?.name || "Smara"}</strong>
           {!settingsOpen && [currentAgent?.role, project?.label].filter(Boolean).length > 0 && <small>{[currentAgent?.role, project?.label].filter(Boolean).join(" · ")}</small>}
         </div>
@@ -1277,16 +1287,15 @@ export default function NativeApp() {
       </section>}
       {goalInThisConversation && currentGoal && <NativeOutcome goal={currentGoal} onPreviewFile={setPreviewPath} />}
       {uncertain && <div className="native-warning"><button onClick={() => void checkStatus()}>Check response status</button><button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Recover chat</button> The request may have been accepted. Your message will not be resent automatically.</div>}
-      {agentDraft && <div className="agent-form-panel"><AgentForm draft={agentDraft} problem={agentProblem} disabled={navigationLocked} onChange={patch => setAgentDraft(current => current ? { ...current, ...patch } : current)} onSubmit={() => void submitAgent()} onCancel={() => setAgentDraft(null)} /></div>}
+      {agentDraft && <div className="agent-form-panel" role="dialog" aria-modal="true" aria-label={agentDraft.id ? "Edit agent" : "New agent"}><AgentForm draft={agentDraft} problem={agentProblem} disabled={navigationLocked} onChange={patch => setAgentDraft(current => current ? { ...current, ...patch } : current)} onSubmit={() => void submitAgent()} onCancel={() => setAgentDraft(null)} /></div>}
         <div className="native-transcript" aria-live="off">
-        {busy && turnStartedAt && <p role="status">{waitingReason(items, approvals.length, activityClock, lastNativeEventRef.current)} · {Math.max(0, Math.floor((activityClock - turnStartedAt) / 1000))}s elapsed</p>}
         {!!workers.length && <section className="native-workers"><strong>Workers · {workers.filter(worker => worker.status === "completed").length}/{workers.length} complete · changes are not auto-merged</strong>{liveWorkers && <button disabled={connecting || loadingThread} title="Stops this chat's native runtime and all its workers; saved history is kept" onClick={() => void stopWorkers()}>Stop workers</button>}{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status}{worker.activity && <span> · {worker.activity}{worker.lastActivityAt && ` · ${Math.max(0, Math.floor((activityClock - worker.lastActivityAt) / 1000))}s ago`}</span>} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
         {olderChats.length > 0 && earlierState !== "loaded" && <button className="text-button load-earlier" disabled={!connected || earlierState === "loading"} onClick={() => void loadEarlier()}>{earlierState === "loading" ? "Loading earlier conversations…" : `Show earlier conversations (${olderChats.length})`}</button>}
         {!transcriptItems.length && <EmptyChat agent={currentAgent} projectLabel={project?.label || "Smara"} hasModel={!!profile} connecting={connecting} onPick={pickStarter} />}
         {windowed.hidden > 0 && <button className="text-button show-earlier" onClick={() => setVisibleLimit(widenWindow)}>Show earlier ({windowed.hidden.toLocaleString()})</button>}
         {groupTranscript(windowed.visible).map(segment => segment.type === "item"
-          ? <TranscriptItem key={segment.item.id} item={segment.item} busy={busy} copied={copiedItemId === segment.item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} />
-          : <ToolGroup key={segment.key} items={segment.items} running={segment.running}>{item => <TranscriptItem item={item} busy={busy} copied={copiedItemId === item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} />}</ToolGroup>)}
+          ? <TranscriptItem key={segment.item.id} item={segment.item} busy={busy} copied={copiedItemId === segment.item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} agentInitial={avatarInitial} agentTone={avatarTone} />
+          : <ToolGroup key={segment.key} items={segment.items} running={segment.running}>{item => <TranscriptItem item={item} busy={busy} copied={copiedItemId === item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} agentInitial={avatarInitial} agentTone={avatarTone} />}</ToolGroup>)}
         {approvals.map(approval => <section className="native-approval" key={approval.id}>
           {approval.params.threadId !== undefined && approval.params.threadId !== threadId && <p>Worker / other native conversation: {String(approval.params.threadId)}. This request is not auto-approved.</p>}
           {!approvalRelevant(approval) && <p>This request belongs to a different conversation. No permission can be granted from this chat.{typeof approval.params.threadId === "string" && threads.some(thread => thread.id === approval.params.threadId) && <button disabled={busy || connecting || loadingThread} onClick={() => void selectThread(String(approval.params.threadId))}>Open requesting conversation</button>}</p>}
@@ -1302,13 +1311,14 @@ export default function NativeApp() {
               : <><p>This specialized request cannot be approved here; no automatic grant.</p>{approval.method === "mcpServer/elicitation/request" && <button onClick={() => void decide(approval, false)}>Deny request</button>}</>}
           </>}
         </section>)}
+        {busy && turnStartedAt && <div className="working-line"><span className="avatar" data-tone={avatarTone} aria-hidden="true">{avatarInitial}</span><p role="status"><span className="working-dots" aria-hidden="true"><i /><i /><i /></span>{waitingReason(items, approvals.length, activityClock, lastNativeEventRef.current)} · {Math.max(0, Math.floor((activityClock - turnStartedAt) / 1000))}s elapsed</p></div>}
         <div ref={bottom} />
       </div>
       <footer><form className="native-composer" onSubmit={event => { event.preventDefault(); void send(); }}>
         {!!contextFiles.length && <div className="composer-files">{contextFiles.map(file => <span key={file.path}><button type="button" title={file.path} onClick={() => setPreviewPath(file.path)}>{file.name}</button><button type="button" aria-label={`Remove ${file.name}`} disabled={navigationLocked} onClick={() => setContextFiles(current => current.filter(item => item.path !== file.path))}>×</button></span>)}</div>}
         {editingPrompt && <div className="composer-edit-notice">Sending this edited text adds a follow-up; the original stays in chat history. <button type="button" onClick={() => { setEditingPrompt(false); setDraft(""); }}>Cancel edit</button></div>}
         {slashOptions.length > 0 && <div className="slash-command-menu" role="listbox" aria-label="Smara commands">{slashOptions.map((option, index) => <button type="button" role="option" aria-selected={index === slashSelection} key={option.command} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setSlashSelection(index)} onClick={() => chooseSlashCommand(option.command)}><code>{option.command}</code><span><strong>{option.label}</strong><small>{option.description}</small></span><kbd>↵</kbd></button>)}</div>}
-        <textarea ref={composerRef} aria-label="Message Smara" rows={2} placeholder="Message… (/ for commands)" value={draft} onChange={event => { setDraft(event.target.value); setSlashSelection(0); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 260)}px`; }} onKeyDown={event => {
+        <textarea ref={composerRef} aria-label="Message Smara" rows={2} placeholder={`Message ${currentAgent?.name ?? "Smara"} (/ for commands)`} value={draft} onChange={event => { setDraft(event.target.value); setSlashSelection(0); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 260)}px`; }} onKeyDown={event => {
           if (slashOptions.length && !event.shiftKey && !event.nativeEvent.isComposing) {
             if (event.key === "ArrowDown") { event.preventDefault(); setSlashSelection(value => (value + 1) % slashOptions.length); return; }
             if (event.key === "ArrowUp") { event.preventDefault(); setSlashSelection(value => (value + slashOptions.length - 1) % slashOptions.length); return; }

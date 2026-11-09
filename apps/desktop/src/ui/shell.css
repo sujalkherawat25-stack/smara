@@ -33,17 +33,18 @@
   gap: var(--smara-space-1);
 }
 .native-app .native-layout aside .new-chat {
-  width: 100%;
-  margin: 0 0 var(--smara-space-2);
-  padding: 10px var(--smara-space-3);
-  border: none;
-  border-radius: 10px;
-  background: var(--smara-accent);
-  color: var(--smara-on-accent);
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 7px var(--smara-space-3);
+  border: 1px solid var(--smara-line);
+  border-radius: 999px;
+  background: var(--smara-surface);
+  color: var(--smara-ink);
+  font-size: 13px;
   font-weight: 600;
-  text-align: left;
+  text-align: center;
 }
-.native-app .native-layout aside .new-chat:hover:not(:disabled) { filter: brightness(1.06); background: var(--smara-accent); }
+.native-app .native-layout aside .new-chat:hover:not(:disabled) { background: var(--smara-hover); }
 .native-app .sidebar-section-heading {
   display: flex;
   justify-content: space-between;
@@ -170,8 +171,9 @@
 .native-app .agent-chats .agent-hidden-hint { padding: 6px 2px 2px; }
 .native-app .agent-chats p { font-size: 12px; color: var(--smara-muted); padding: 6px 2px; }
 .native-app .agent-form-actions { display: flex; gap: var(--smara-space-2); }
-.native-app .agent-form-panel { width: min(640px, calc(100% - 32px)); margin: var(--smara-space-4) auto 0; }
-.native-app .agent-form-panel .agent-form { margin: 0; box-shadow: var(--smara-shadow); }
+.native-app .agent-form-panel { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: var(--smara-space-4); background: var(--smara-scrim); }
+.native-app .agent-form-panel .agent-form { width: min(460px, 100%); margin: 0; box-shadow: var(--smara-shadow); }
+.native-app .agent-form h2 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
 .native-app .native-layout aside { overflow-y: auto; }
 .native-app .sidebar-section-heading .text-button { white-space: nowrap; font-size: 12px; padding: 2px 6px; }
 .native-app .composer-toolbar button { font-size: 12px; padding: 5px 9px; white-space: nowrap; border-radius: 8px; }
@@ -243,14 +245,6 @@
 .native-app .native-item:hover .item-heading,
 .native-app .native-item:focus-within .item-heading { opacity: 1; }
 .native-app .native-item .item-heading > div { display: flex; gap: 4px; justify-content: flex-end; }
-.native-app .native-item.assistant { line-height: 1.65; }
-.native-app .native-item.user { display: flex; flex-direction: column; align-items: flex-end; }
-.native-app .native-item.user pre {
-  max-width: 82%; margin: 0;
-  padding: 10px 14px; border-radius: 16px 16px 4px 16px;
-  background: var(--smara-surface); color: var(--smara-ink);
-  font: inherit; white-space: pre-wrap; overflow-wrap: anywhere;
-}
 .native-app .native-item.user .item-heading > div { justify-content: flex-end; }
 .native-app .text-button {
   padding: 4px 8px; border: none; border-radius: 6px; background: transparent;
@@ -333,7 +327,6 @@
 .native-app .project-button,
 .native-app .native-topbar strong,
 .native-app .project-icon { color: var(--smara-ink); opacity: 1; }
-.native-app .native-item.user { background: var(--smara-surface); border-color: var(--smara-line); }
 .native-app .native-item details { background: var(--smara-surface); border-color: var(--smara-line); }
 .native-app .native-item summary { color: var(--smara-muted); }
 .native-app .command-card { background: var(--smara-surface); border-color: var(--smara-line); }
@@ -370,7 +363,6 @@
   background: var(--smara-hover); color: var(--smara-ink);
   font-size: 16px; font-weight: 600;
 }
-.native-app .contact[aria-current="true"] .avatar { background: var(--smara-accent); color: var(--smara-on-accent); }
 .native-app .contact-text { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px; }
 .native-app .contact-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .native-app .contact-preview { font-size: 12px; color: var(--smara-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -394,3 +386,52 @@
 .native-app .history-separator { display: flex; align-items: center; gap: var(--smara-space-3); margin: var(--smara-space-4) auto; color: var(--smara-muted); font-size: 12px; }
 .native-app .history-separator::before, .native-app .history-separator::after { content: ""; flex: 1; height: 1px; background: var(--smara-line); }
 .native-app .load-earlier { display: block; margin: 0 auto var(--smara-space-3); }
+
+/* ---------- Chat: your messages on the right in a light bubble, replies on the left beside the agent's avatar ---------- */
+.native-app .native-item.user {
+  display: flex; flex-direction: column; align-items: flex-end;
+  max-width: var(--column); padding: 0; border: 0; border-radius: 0; background: none;
+}
+.native-app .native-item.user .message-main { width: 100%; display: flex; flex-direction: column; align-items: flex-end; }
+.native-app .native-item.user pre {
+  max-width: 78%; margin: 0;
+  padding: 10px 14px; border: 0; border-radius: 18px 18px 4px 18px;
+  background: var(--smara-user-bubble); color: var(--smara-user-ink);
+  font: inherit; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.native-app .native-item.assistant { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: var(--smara-space-2); align-items: start; line-height: 1.65; }
+.native-app .native-item .message-main { min-width: 0; }
+.native-app .native-item .message-avatar.avatar { width: 28px; height: 28px; flex-basis: 28px; font-size: 12px; margin-top: 2px; }
+.native-app .native-item .message-bubble {
+  padding: 12px 16px; border: 1px solid var(--smara-line);
+  border-radius: 4px 14px 14px 14px; background: var(--smara-agent-bubble);
+}
+
+/* Agent avatars: one colour per agent, with the initial in white. */
+.native-app .avatar[data-tone="teal"] { background: var(--smara-tone-teal); color: #fff; }
+.native-app .avatar[data-tone="amber"] { background: var(--smara-tone-amber); color: #fff; }
+.native-app .avatar[data-tone="blue"] { background: var(--smara-tone-blue); color: #fff; }
+.native-app .avatar[data-tone="violet"] { background: var(--smara-tone-violet); color: #fff; }
+.native-app .avatar.sm { width: 26px; height: 26px; flex-basis: 26px; font-size: 12px; }
+.native-app .topbar-title { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+
+/* Sidebar: search, then one row per agent with its time and last line. */
+.native-app .sidebar-top { display: flex; flex-direction: column; align-items: stretch; gap: var(--smara-space-2); margin: 0 0 var(--smara-space-2); }
+.native-app .agent-search { width: 100%; min-width: 0; padding: 7px 12px; border-radius: 999px; font-size: 13px; }
+.native-app .contact-line { display: flex; align-items: baseline; gap: var(--smara-space-2); min-width: 0; }
+.native-app .contact-line .contact-name { flex: 1; min-width: 0; }
+.native-app .contact-time { flex: 0 0 auto; font-size: 11px; color: var(--smara-muted); }
+
+/* While the agent works: its avatar, the status in words, and three dots that pulse. */
+.native-app .working-line { display: flex; align-items: center; gap: var(--smara-space-2); width: min(760px, 100%); margin: 4px auto 14px; color: var(--smara-muted); font-size: 13px; }
+.native-app .working-line p { margin: 0; display: flex; align-items: center; gap: var(--smara-space-2); }
+.native-app .working-dots { display: inline-flex; gap: 3px; }
+.native-app .working-dots i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: smara-dot 1.2s ease-in-out infinite; }
+.native-app .working-dots i:nth-child(2) { animation-delay: .15s; }
+.native-app .working-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes smara-dot { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .native-app .working-dots i { animation: none; opacity: .6; } }
+
+/* Tool steps: the summary line is plain text; the browser's default triangle is hidden. */
+.native-app .tool-group > summary { list-style: none; }
+.native-app .tool-group > summary::-webkit-details-marker { display: none; }

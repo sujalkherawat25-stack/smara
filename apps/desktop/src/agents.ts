@@ -61,3 +61,27 @@ export function threadTime(thread: { updatedAt?: string | number }): number {
 export function chatsNewestFirst<T extends { id: string; updatedAt?: string | number }>(chats: T[], roster: AgentRoster, agentId: string): T[] {
   return chatsForAgent(chats, roster, agentId).slice().sort((a, b) => threadTime(b) - threadTime(a));
 }
+
+const BUILT_IN_TONE = new Map<string, string>([["kiran", "teal"], ["rohan", "amber"], ["scout", "blue"], ["nisha", "violet"]]);
+const TONES = ["teal", "amber", "blue", "violet"];
+
+/** The avatar colour for an agent, one of the palette in tokens.css. Built-in agents keep their colour everywhere. */
+export function agentTone(agent: { id: string }): string {
+  const fixed = BUILT_IN_TONE.get(agent.id);
+  if (fixed) return fixed;
+  let hash = 0;
+  for (const char of agent.id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return TONES[hash % TONES.length];
+}
+
+/** A chat-list time: the clock time today, "Yesterday", or a short date. Empty when there is no time. */
+export function contactTime(ms: number, now: number): string {
+  if (!ms) return "";
+  const when = new Date(ms);
+  const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (sameDay(when, new Date(now))) return when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (sameDay(when, yesterday)) return "Yesterday";
+  return when.toLocaleDateString([], { day: "numeric", month: "short" });
+}

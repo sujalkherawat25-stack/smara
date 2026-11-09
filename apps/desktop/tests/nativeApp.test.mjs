@@ -221,7 +221,7 @@ test("malformed and duplicate-ID questions cannot crash chat or submit an answer
     const f = fixture(); await f.flush(); await f.enter("Synthetic task");
     f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} }); await f.flush();
     f.emit({ id: 9, method: "item/tool/requestUserInput", params: { threadId: "new", questions } }); await f.flush();
-    assert.equal(f.nodes().some(node => node.type === "input"), false);
+    assert.equal(f.nodes().some(node => node.type === "input" && node.props["aria-label"] !== "Search agents"), false, "no question field is shown (the agent search box is not one)");
     assert.equal(f.calls.some(call => call.method === "respond"), false);
     assert.equal(f.button("Stop response").props.disabled, false);
   }

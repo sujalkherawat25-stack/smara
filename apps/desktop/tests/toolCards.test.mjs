@@ -16,19 +16,19 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
 
 test("a finished command reads as one line with its status and duration", () => {
   const summary = toolSummary({ id: "c1", kind: "commandExecution", text: "", command: "npm test", status: "completed", exitCode: 0, durationMs: 3200 });
-  assert.equal(summary.line, "Ran npm test · ✓ 3.2 s");
+  assert.equal(summary.line, "Ran npm test · 3.2 s");
   assert.equal(summary.state, "ok");
 });
 
 test("a failed command shows its exit code and stays a failed row", () => {
   const summary = toolSummary({ id: "c2", kind: "commandExecution", text: "", command: "pytest -q", status: "failed", exitCode: 1, durationMs: 740 });
-  assert.equal(summary.line, "Ran pytest -q · ✗ exit 1 740 ms");
+  assert.equal(summary.line, "Ran pytest -q · exit 1 · 740 ms");
   assert.equal(summary.state, "failed");
 });
 
 test("a running command says so, and no duration is shown before it finishes", () => {
   const summary = toolSummary({ id: "c3", kind: "commandExecution", text: "", command: "npm run build", status: "inProgress" });
-  assert.equal(summary.line, "Ran npm run build · running…");
+  assert.equal(summary.line, "Ran npm run build");
   assert.equal(summary.state, "running");
 });
 

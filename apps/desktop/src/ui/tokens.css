@@ -23,6 +23,16 @@
   --smara-hover: #e8e7e2;
   --smara-on-accent: #ffffff;
   --smara-shadow: 0 6px 24px rgba(20, 20, 18, 0.12);
+  /* Chat bubbles: your message is light with dark text; a reply is a quiet card. */
+  --smara-user-bubble: #e7e5dd;
+  --smara-user-ink: #1d1d1b;
+  --smara-agent-bubble: #ffffff;
+  --smara-scrim: rgba(20, 20, 18, 0.32);
+  /* Agent avatar colours. White text sits on each one with enough contrast. */
+  --smara-tone-teal: #2f9a7e;
+  --smara-tone-amber: #b87418;
+  --smara-tone-blue: #3f72d0;
+  --smara-tone-violet: #7d5fcf;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -41,6 +51,9 @@
     --smara-hover: #262622;
     --smara-on-accent: #0f1f19;
     --smara-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+    --smara-user-bubble: #e9e8e2;
+    --smara-agent-bubble: #242420;
+    --smara-scrim: rgba(0, 0, 0, 0.55);
   }
 }
 
@@ -59,6 +72,9 @@
   --smara-hover: #262622;
   --smara-on-accent: #0f1f19;
   --smara-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  --smara-user-bubble: #e9e8e2;
+  --smara-agent-bubble: #242420;
+  --smara-scrim: rgba(0, 0, 0, 0.55);
 }
 
 .smara-chip {
@@ -78,12 +94,14 @@
 
 .tool-card { border: 1px solid var(--smara-line); border-radius: var(--smara-radius); background: var(--smara-surface); margin: var(--smara-space-1) 0; font: var(--smara-body)/1.45 var(--smara-font); color: var(--smara-ink); }
 .tool-card[data-state="failed"] { border-color: var(--smara-error); }
-.tool-line { all: unset; box-sizing: border-box; display: flex; gap: var(--smara-space-2); align-items: baseline; width: 100%; padding: var(--smara-space-2) var(--smara-space-3); cursor: pointer; }
+.tool-line { all: unset; box-sizing: border-box; display: flex; gap: var(--smara-space-3); align-items: center; justify-content: space-between; width: 100%; padding: var(--smara-space-2) var(--smara-space-3); cursor: pointer; }
 .tool-line:focus-visible { outline: 2px solid var(--smara-accent); outline-offset: 2px; }
-.tool-icon { width: 1.2em; text-align: center; color: var(--smara-muted); }
-.tool-card[data-state="ok"] .tool-icon { color: var(--smara-ok); }
-.tool-card[data-state="failed"] .tool-icon { color: var(--smara-error); }
-.tool-card[data-state="running"] .tool-icon { color: var(--smara-running); }
+.tool-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The status is a word in a small pill, not a symbol: Running, Done or Failed. */
+.tool-status { flex: 0 0 auto; padding: 1px 8px; border-radius: 999px; background: var(--smara-hover); color: var(--smara-muted); font: 600 11px/1.5 var(--smara-font); }
+.tool-status[data-state="ok"], .tool-status[data-state="done"] { color: var(--smara-ok); }
+.tool-status[data-state="running"] { color: var(--smara-running); }
+.tool-status[data-state="failed"] { color: var(--smara-error); }
 .tool-details { border-top: 1px solid var(--smara-line); padding: var(--smara-space-2) var(--smara-space-3); }
 .tool-output pre { max-height: 320px; overflow: auto; margin: var(--smara-space-1) 0; font-size: var(--smara-meta); }
 .tool-output-actions { display: flex; gap: var(--smara-space-2); align-items: center; font-size: var(--smara-meta); color: var(--smara-muted); }
