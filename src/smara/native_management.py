@@ -355,7 +355,7 @@ def manage(request):
                 clean["context_window"] = context_window
             saved["model_profiles"] = [{k: v for k, v in p.items() if k in PROFILE_FIELDS} for p in profiles if p.get("id") != identity] + [clean]
         elif operation == "agents":
-            native_agents.apply(saved, prefs["projects"], request)
+            native_agents.apply(saved, request)
         else:
             raise ValueError("Unsupported native management operation; legacy execution is unavailable")
         if operation != "delete_credential" or name.upper() == "SYNTARUS_API_KEY":

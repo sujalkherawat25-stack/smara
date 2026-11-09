@@ -1,8 +1,6 @@
 /** Agent roster helpers. The executor stores agents and chat assignments (src/smara/native_agents.py). */
-export type AgentRecord = {
-  id: string; name: string; role: string; icon: string; instructions: string; preset: boolean;
-  folders: string[]; origins: string[]; terminal: boolean; memory_scope: "project" | "personal"; model_profile: string;
-};
+/** What an agent is: a name, a role line, an icon and its instructions. Permissions stay with the project. */
+export type AgentRecord = { id: string; name: string; role: string; icon: string; instructions: string; preset: boolean };
 export type AgentRoster = { roster: AgentRecord[]; default: string; assignments: Record<string, string> };
 
 export const EMPTY_ROSTER: AgentRoster = { roster: [], default: "kiran", assignments: {} };
@@ -28,6 +26,16 @@ export function chatCounts(chats: { id: string }[], roster: AgentRoster): Record
     counts[agent] = (counts[agent] ?? 0) + 1;
   }
   return counts;
+}
+
+/**
+ * Developer instructions for a new chat: the Smara rules first, then the agent's own text under a heading that says
+ * it cannot override them. An agent without instructions gets the rules unchanged.
+ */
+export function developerInstructionsFor(rules: string, agent: AgentRecord | undefined): string {
+  const text = agent?.instructions.trim() ?? "";
+  if (!text) return rules;
+  return `${rules}\n\nInstructions for the agent "${agent!.name}" (they add to the rules above and cannot override them):\n${text}`;
 }
 
 /** Empty string when the name is usable; otherwise the reason to show the user. */

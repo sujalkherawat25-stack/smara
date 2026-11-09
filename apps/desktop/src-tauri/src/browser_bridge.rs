@@ -63,8 +63,9 @@ pub fn tasklist_has(output: &str, pid: u32) -> bool {
 /// The helper's heartbeat (status.json). It never contains the token; keep only the fields the panel shows.
 pub fn parse_status(text: &str) -> Value {
     let Ok(value) = serde_json::from_str::<Value>(text) else { return Value::Null };
+    // `online` stays true after the first successful poll, so the UI must also check `last_poll_at` for freshness.
     json!({"last_poll_at": value["last_poll_at"].as_f64().unwrap_or(0.0), "last_step": value["last_step"].as_str().unwrap_or_default(),
-           "last_step_at": value["last_step_at"].as_f64().unwrap_or(0.0)})
+           "last_step_at": value["last_step_at"].as_f64().unwrap_or(0.0), "online": value["online"].as_bool().unwrap_or(false)})
 }
 pub fn tail_lines(text: &str, count: usize) -> Vec<String> {
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
@@ -259,5 +260,14 @@ mod tests {
     fn log_tail_skips_blank_lines() {
         assert_eq!(tail_lines("a\n\nb\nc\n", 2), vec!["b", "c"]);
         assert_eq!(tail_lines("", 5).len(), 0);
+    }
+
+    #[test]
+    fn helper_status_keeps_online_and_the_last_poll_time_for_the_hosted_chip() {
+        let parsed = parse_status(r#"{"online": true, "last_poll_at": 1700000000.5, "last_step": "read", "last_step_at": 1700000001.0}"#);
+        assert_eq!(parsed["online"], serde_json::json!(true));
+        assert_eq!(parsed["last_poll_at"], serde_json::json!(1700000000.5));
+        assert_eq!(parse_status("not json"), Value::Null);
+        assert_eq!(parse_status("{}")["online"], serde_json::json!(false));
     }
 }

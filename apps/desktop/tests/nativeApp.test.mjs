@@ -391,6 +391,38 @@ test("the agent roster filters the chat list to the selected agent", async () =>
   assert.equal(rosterNode().props.selected, "rohan");
 });
 
+test("a new chat runs with the Smara rules first, then the selected agent's instructions", async () => {
+  const agentRecord = (id, name, instructions) => ({ id, name, role: "Role " + name, icon: "🤖", instructions, preset: true });
+  const f = fixture({ agentRoster: { roster: [agentRecord("kiran", "Kiran", ""), agentRecord("rohan", "Rohan", "Rohan rule: keep reminders polite.")], default: "kiran", assignments: {} } });
+  await f.flush();
+  const submit = async (text) => {
+    await f.enter(text);
+    f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} });
+    await f.flush();
+    f.emit({ method: "turn/completed", params: { threadId: "new", turn: { id: "running", status: "completed" } } }); await f.flush();
+  };
+  const starts = () => f.calls.filter(call => call.method === "thread/start");
+  f.button("＋ New chat").props.onClick(); await f.flush();
+  await submit("First question");
+  const plain = starts().at(-1).params.developerInstructions;
+  const rosterNode = () => f.nodes().find(node => Array.isArray(node.props?.roster) && typeof node.props?.onSelect === "function");
+  rosterNode().props.onSelect("rohan"); await f.flush();
+  f.button("＋ New chat").props.onClick(); await f.flush();
+  await submit("Second question");
+  const withAgent = starts().at(-1).params.developerInstructions;
+  assert.ok(withAgent.startsWith(plain), "the Smara rules come first, unchanged");
+  assert.ok(withAgent.includes("Rohan rule: keep reminders polite."), "the selected agent's instructions are added");
+  assert.ok(!plain.includes("Rohan rule"), "the default agent does not get another agent's instructions");
+});
+
+test("chats that belong to other agents are counted, not silently hidden", async () => {
+  const agentRecord = (id, name) => ({ id, name, role: "Role " + name, icon: "🤖", instructions: "", preset: true });
+  const f = fixture({ agentRoster: { roster: [agentRecord("kiran", "Kiran"), agentRecord("rohan", "Rohan")], default: "kiran", assignments: { saved: "rohan" } } });
+  await f.flush();
+  const hint = () => f.nodes().find(node => node.type === "small" && node.props.className === "agent-hidden-hint");
+  assert.equal(f.text(hint()), "1 chat in other agents");
+});
+
 test("opening Settings keeps the chat connected; only a save that needs a restart stops the runtime", async () => {
   const f = fixture(); await f.flush();
   await f.button("Saved chat").props.onClick(); await f.flush();

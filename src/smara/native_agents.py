@@ -1,30 +1,31 @@
-"""Agent roster for Smara Desktop: named assistants, each with its own instructions, folders, browser sites and chats.
+"""Agent roster for Smara Desktop: named assistants with their own instructions, and their own chats.
 
-Stored in native-settings.json under `agents` (saved records and presets the user edited) and `thread_agents`
-(chat id -> agent id). Nothing here runs an agent or grants access: project folders and browser sites must still
-pass the project's own checks, and the runtime still asks before every tool action.
+An agent's instructions are added to a new chat's developer instructions, after the Smara rules, so the agent text
+cannot override them. Agents do not carry permissions in this version: folders, browser sites, terminal use and
+model choice stay with the project and the runtime settings, and every tool action still asks first.
+
+Stored in native-settings.json under `agents` (records the user saved, presets included) and `thread_agents`
+(chat id -> agent id).
 """
 from __future__ import annotations
-import os
 import re
 import uuid
-from .native_profiles import load_profiles
 
 PRESETS = (
-    {"id": "kiran", "name": "Kiran", "role": "Accounts", "icon": "📒", "preset": True, "terminal": False, "memory_scope": "project",
+    {"id": "kiran", "name": "Kiran", "role": "Accounts", "icon": "📒", "preset": True,
      "instructions": "You help with the shop's accounts: Tally and Excel files, ledgers and reports. Show the totals you computed."},
-    {"id": "rohan", "name": "Rohan", "role": "Dues & reminders", "icon": "🔔", "preset": True, "terminal": False, "memory_scope": "project",
+    {"id": "rohan", "name": "Rohan", "role": "Dues & reminders", "icon": "🔔", "preset": True,
      "instructions": "You work on dues and reminders. Nothing reaches a customer without the owner's approval."},
-    {"id": "scout", "name": "Scout", "role": "Web tasks", "icon": "🧭", "preset": True, "terminal": False, "memory_scope": "personal",
-     "instructions": "You do web tasks on this PC through the browser helper. Never type passwords, OTPs, PINs or card details."},
-    {"id": "nisha", "name": "Nisha", "role": "Documents", "icon": "📄", "preset": True, "terminal": False, "memory_scope": "project",
+    {"id": "scout", "name": "Scout", "role": "Web tasks", "icon": "🧭", "preset": True,
+     "instructions": "You do web tasks through the browser helper. Never type passwords, OTPs, PINs or card details."},
+    {"id": "nisha", "name": "Nisha", "role": "Documents", "icon": "📄", "preset": True,
      "instructions": "You read and prepare documents in the chosen folder: PDFs, Word files and spreadsheets."},
 )
 DEFAULT_AGENT = "kiran"
 MAX_THREAD_ASSIGNMENTS = 5000
 AGENT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")
 THREAD_ID = re.compile(r"[A-Za-z0-9_.:-]{1,160}")
-FIELDS = {"id", "name", "role", "icon", "instructions", "preset", "folders", "origins", "terminal", "memory_scope", "model_profile"}
+FIELDS = {"id", "name", "role", "icon", "instructions", "preset"}
 
 
 def _text(value, limit: int, field: str) -> str:
@@ -36,30 +37,8 @@ def _text(value, limit: int, field: str) -> str:
     return text
 
 
-def _folders(value, projects) -> list[str]:
-    if not isinstance(value, list) or len(value) > 20:
-        raise ValueError("Folders must be a list of up to 20 project folders")
-    known = {os.path.normcase(p["workspace"]): p["workspace"] for p in projects}
-    chosen = []
-    for item in value:
-        key = os.path.normcase(str(item))
-        if key not in known:
-            raise ValueError("An agent can only use folders that are already projects")
-        chosen.append(known[key])
-    return list(dict.fromkeys(chosen))
-
-
-def _origins(value) -> list[str]:
-    if not isinstance(value, list) or len(value) > 50 or not all(isinstance(item, str) for item in value):
-        raise ValueError("Sites must be a list of up to 50 public origins")
-    if value:
-        from .native_browser import configured_origins
-        configured_origins(value)
-    return list(dict.fromkeys(value))
-
-
-def clean_agent(agent, projects, profiles) -> dict:
-    """Validated record for one agent. Unknown fields are dropped, never copied."""
+def clean_agent(agent) -> dict:
+    """Validated record for one agent. Unknown fields are refused, never stored."""
     if not isinstance(agent, dict) or set(agent) - FIELDS:
         raise ValueError("Invalid agent")
     identity = str(agent.get("id") or "").strip().lower()
@@ -68,20 +47,10 @@ def clean_agent(agent, projects, profiles) -> dict:
     name = _text(agent.get("name"), 40, "Name")
     if not name:
         raise ValueError("Give the agent a name")
-    scope = agent.get("memory_scope", "project")
-    if scope not in ("project", "personal"):
-        raise ValueError("Memory must be project or personal")
-    if type(agent.get("terminal", False)) is not bool:
-        raise ValueError("Terminal must be on or off")
-    model = _text(agent.get("model_profile", ""), 48, "Model")
-    if model and not any(profile.get("id") == model for profile in profiles):
-        raise ValueError("Choose a configured model for this agent")
     return {"id": identity, "name": name, "role": _text(agent.get("role", ""), 60, "Role"),
             "icon": _text(agent.get("icon", "🤖"), 8, "Icon") or "🤖",
             "instructions": _text(agent.get("instructions", ""), 1500, "Instructions"),
-            "preset": bool(agent.get("preset", False)), "folders": _folders(agent.get("folders", []), projects),
-            "origins": _origins(agent.get("origins", [])), "terminal": agent.get("terminal", False),
-            "memory_scope": scope, "model_profile": model}
+            "preset": bool(agent.get("preset", False))}
 
 
 def roster(saved: dict) -> list[dict]:
@@ -89,9 +58,9 @@ def roster(saved: dict) -> list[dict]:
     edited = {item["id"]: item for item in saved.get("agents", []) if isinstance(item, dict) and isinstance(item.get("id"), str)}
     result = []
     for preset in PRESETS:
-        base = {**preset, "folders": [], "origins": [], "model_profile": ""}
-        result.append({**base, **{k: v for k, v in edited.get(preset["id"], {}).items() if k in FIELDS}, "preset": True})
-    custom = [item for item in saved.get("agents", []) if isinstance(item, dict) and not any(item.get("id") == p["id"] for p in PRESETS)]
+        result.append({**preset, **{k: v for k, v in edited.get(preset["id"], {}).items() if k in FIELDS}, "preset": True})
+    preset_ids = {p["id"] for p in PRESETS}
+    custom = [item for item in saved.get("agents", []) if isinstance(item, dict) and item.get("id") not in preset_ids]
     result.extend({**{k: v for k, v in item.items() if k in FIELDS}, "preset": False} for item in custom)
     return result
 
@@ -101,9 +70,8 @@ def view(saved: dict) -> dict:
     return {"roster": roster(saved), "default": DEFAULT_AGENT, "assignments": assignments}
 
 
-def apply(saved: dict, projects: list, request: dict) -> None:
+def apply(saved: dict, request: dict) -> None:
     """Mutates `saved` for one `agents` request. The caller writes the file."""
-    profiles, _, _ = load_profiles()
     action = request.get("action")
     if action == "save":
         agent = request.get("agent")
@@ -114,7 +82,7 @@ def apply(saved: dict, projects: list, request: dict) -> None:
             base = re.sub(r"[^a-z0-9]+", "-", str(agent.get("name") or "").lower()).strip("-")[:30] or "agent"
             identity = f"{base}-{uuid.uuid4().hex[:6]}"
             agent = {**agent, "id": identity}
-        clean = clean_agent(agent, projects, profiles)
+        clean = clean_agent(agent)
         if clean["preset"] and clean["id"] not in {p["id"] for p in PRESETS}:
             raise ValueError("Only the built-in agents can be presets")
         saved["agents"] = [item for item in saved.get("agents", []) if isinstance(item, dict) and item.get("id") != clean["id"]] + [clean]
