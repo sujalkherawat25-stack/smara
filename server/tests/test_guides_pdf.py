@@ -25,8 +25,8 @@ def owner_text(text: str) -> InboundMessage:
 
 def test_export_guide_is_short_and_covers_tally_and_busy():
     assert len(EXPORT_GUIDE) <= 900
-    for needle in ("Tally Prime", "Gateway of Tally", "Outstandings > Receivables", "Alt+E", "Tally ERP 9",
-                   "Busy", "Bill-wise Receivable", "Customer name", "Phone", "Invoice no", "Amount"):
+    for needle in ("Tally Prime", "Gateway of Tally", "Display More Reports > Outstandings > Receivables", "Alt+E",
+                   "Tally ERP 9", "Busy", "Bills Receivable", "Customer name", "Phone", "Invoice no", "Amount"):
         assert needle in EXPORT_GUIDE, needle
 
 
