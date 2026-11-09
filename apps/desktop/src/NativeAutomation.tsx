@@ -9,7 +9,8 @@ export default function NativeAutomation({ workspace, locked, onPendingChange, o
     if (busy.current) return; busy.current = true; setPending(true); onPendingChange(true); setError("");
     try {
       const result = await invoke<Browser | Computer>("native_manage", { request: { operation, action, workspace, ...values } });
-      if (operation === "browser_control") setBrowser(result as Browser); else { setComputer(result as Computer); if (onSelectionChange) await onSelectionChange(); }
+      if (operation === "browser_control") { const value = result as Partial<Browser>; setBrowser({ options: value.options ?? { visible: false, transfers: false, max_actions: 50, seconds: 600 }, sessions: value.sessions ?? [] }); }
+      else { setComputer(result as Computer); if (onSelectionChange) await onSelectionChange(); }
     } catch (reason) { setError(String(reason)); } finally { busy.current = false; setPending(false); onPendingChange(false); }
   };
   useEffect(() => { void request("browser_control"); }, [workspace]);
@@ -31,7 +32,7 @@ export default function NativeAutomation({ workspace, locked, onPendingChange, o
     {computer && <><small>{computer.detail}</small><p>{computer.selected ? `Selected: ${computer.selected.target.title}` : "No app selected"}</p>
       <button disabled={pending} onClick={() => void request("computer_control", "stop")}>Stop computer control</button>
       <button disabled={disabled || pending} onClick={() => { if (window.confirm("Let Smara control any app window (Tally, Excel, Notepad...) for 30 minutes? Approved observations may send on-screen text to your model. Routine clicks and typing run without asking; send, submit, pay and delete steps still ask you.")) void request("computer_control", "grant_desktop", { minutes: 30 }); }}>Grant any app for 30 minutes</button>
-      {computer.targets.map(item => <button key={item.id} disabled={disabled} onClick={() => { if (window.confirm(`Select ${item.title}? Approved observations may send this app's text to your model. Screenshots stay local unless separately viewed/analyzed. Critical steps still ask you. Return to chat to use the new tools.`)) void request("computer_control", "select", { id: item.id }); }}>{item.title || item.exe}</button>)}</>}
+      {(computer.targets ?? []).map(item => <button key={item.id} disabled={disabled} onClick={() => { if (window.confirm(`Select ${item.title}? Approved observations may send this app's text to your model. Screenshots stay local unless separately viewed/analyzed. Critical steps still ask you. Return to chat to use the new tools.`)) void request("computer_control", "select", { id: item.id }); }}>{item.title || item.exe}</button>)}</>}
     <small>These app tools are not a Windows sandbox or certification of general computer-use safety. Never claim visual review unless a vision-capable model actually reviewed the image.</small>
   </section>;
 }

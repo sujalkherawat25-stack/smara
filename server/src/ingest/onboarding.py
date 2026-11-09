@@ -115,6 +115,18 @@ async def _continue(app, msg, sess: dict, text: str) -> None:
     await create_shop(app, msg.sender, sess["shop_name"], upi, sess["invite_code"], msg.number_id)
 
 
+def welcome_done(name: str) -> str:
+    """First message to a new shop. The export/sample line tells the owner how to get their list out of Tally/Busy."""
+    return (
+        f"Swagat hai, {name}! Aapka Smara ready hai.\n\n"
+        "Ab aap ye kar sakte hain:\n"
+        "1) Apni outstanding list (Excel/CSV ya Tally file) yahin bhej dijiye. Main customers aur baaki rakam padh lunga.\n"
+        "Tally/Busy se list kaise nikalein? 'export' likhiye. Sample file chahiye? 'sample' likhiye.\n"
+        "2) Poochiye: 'Ravi ka kitna baaki hai?' ya voice note bhejiye.\n"
+        "3) 'Ravi ka statement PDF bhejo'.\n\n"
+        "Customers ko koi bhi message aapke tap ke bina nahi jata. Madad ke liye kabhi bhi 'help' likhiye.")
+
+
 async def create_shop(app, phone: str, name: str, upi: str | None, code: str | None, number_id: str | None = None) -> None:
     pool = app.state.pool
     async with pool.connection() as conn:
@@ -131,11 +143,5 @@ async def create_shop(app, phone: str, name: str, upi: str | None, code: str | N
     t = await tenants.create(pool, name=name, owner_phone=normalize_phone(phone), upi_vpa=upi, upi_name=name if upi else None)
     async with pool.connection() as conn:
         await conn.execute("UPDATE tenants SET joined_with_code = %s WHERE id = %s", (code, t.id))
-    await _send(app, phone, (
-        f"Swagat hai, {name}! Aapka Smara ready hai.\n\n"
-        "Ab aap ye kar sakte hain:\n"
-        "1) Apni outstanding list (Excel/CSV ya Tally file) yahin bhej dijiye. Main customers aur baaki rakam padh lunga.\n"
-        "2) Poochiye: 'Ravi ka kitna baaki hai?' ya voice note bhejiye.\n"
-        "3) 'Ravi ka statement PDF bhejo'.\n\n"
-        "Customers ko koi bhi message aapke tap ke bina nahi jata. Madad ke liye kabhi bhi 'help' likhiye."), number_id)
+    await _send(app, phone, welcome_done(name), number_id)
     log.info("new shop %s joined via %s", t.id, code or "open sign-up")

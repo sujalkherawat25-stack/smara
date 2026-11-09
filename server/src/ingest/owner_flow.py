@@ -8,6 +8,9 @@ from src.ingest.box_commands import decide_browser_task, handle_text
 from src.ingest.importer import import_rows
 from src.ingest.media import clean_phone_caption, download_media, media_token, read_image, transcribe
 from src.ingest.payload import InboundMessage
+from src.ingest.customer_number import add_number, parse_number_command
+from src.ingest.reopen import parse_reopen_command, reopen_invoice
+from src.ingest.guides import EXPORT_GUIDE
 from src.ingest.telegram import link_message, unlink
 from src.ingest.sheet_mapper import SheetRow, map_sheet, parse_amount_paise, parse_date, parse_phone
 from src.agent_loop import resume, start_session
@@ -20,7 +23,9 @@ from src.tenants import Tenant
 
 log = logging.getLogger(__name__)
 HELP = ("Commands: digest, telegram (link Telegram), gstin <no>, quotes <product>, browse <task>. Send me your outstanding sheet (.xlsx/.csv), a photo of a bill with the customer's "
-        "number as caption, or say 'digest'.")
+        "number as caption, or say 'digest'.\nTally/Busy se list kaise nikalein: 'export'. Sample file: 'sample'.")
+EXPORT_CMDS = ("export", "tally export", "kaise bheju", "export guide")
+SAMPLE_CMDS = ("sample", "sample file")
 
 
 async def handle_owner(app, tenant: Tenant, msg: InboundMessage) -> None:
@@ -43,7 +48,7 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
                                   "invoice_ref": r["invoice_ref"], "ledger_updated": r["approved"]},
                          background=getattr(app.state, "agent_background", True))
             return f"{'Approved' if r['approved'] else 'Rejected'}: invoice {r['invoice_ref']}."
-        if action in ("send", "snooze", "paid"):
+        if action in ("send", "own", "snooze", "paid"):
             return await decide_reminder(app, tenant_id, ref, action, datetime.now(timezone.utc)) \
                 or "That reminder was already handled."
         if action in ("ag_ok", "ag_no", "ag_site"):
@@ -107,6 +112,20 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         link = await new_link(app.state.pool, app.state.settings, tenant_id)
         return ("Apna WhatsApp Business number Smara se jodne ke liye ye link kholiye (24 ghante, ek baar):\n"
                 f"{link}\n\nAapke customers ko message aapke apne number se jayenge. Kuch bhi bina aapke tap ke nahi jata.")
+    reopen_ref = parse_reopen_command(msg.text)
+    if reopen_ref:
+        reply = await reopen_invoice(app.state.pool, tenant_id, reopen_ref)
+        if reply:
+            return reply
+    number_cmd = parse_number_command(msg.text)
+    if number_cmd:
+        reply = await add_number(app.state.pool, tenant_id, *number_cmd)
+        if reply:
+            return reply
+    if cmd in EXPORT_CMDS:
+        return EXPORT_GUIDE
+    if cmd in SAMPLE_CMDS:
+        return await _send_sample(app, tenant_id, msg.channel)
     if msg.text.strip().lower() == "telegram":
         return await link_message(app, tenant_id)
     if msg.text.strip().lower() == "telegram off":
@@ -134,6 +153,21 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         await wa_link.disconnect(app, tenant_id)
         return "The SIM link is disconnected. Customer messages are paused until you send 'connect whatsapp' again."
     return HELP
+
+
+async def _send_sample(app, tenant_id: str, channel: str) -> str | None:
+    """Send the fake sample outstanding list as a file. None means it was sent (no text reply needed)."""
+    from src import tenants
+    from src.ingest.guides import SAMPLE_CAPTION, SAMPLE_NAME, XLSX_MIME, sample_sheet_bytes
+    from src.loop.owner_channel import send_document_to_owner
+    data = sample_sheet_bytes()
+    if data is None:
+        return "Sample file abhi mere paas nahi hai. Apni Excel file bhejiye, ya 'export' likhiye."
+    tenant = await tenants.by_id(app.state.pool, tenant_id)
+    how = await send_document_to_owner(app, tenant, data, SAMPLE_NAME, XLSX_MIME, SAMPLE_CAPTION, reply_channel=channel)
+    if how == "window_closed":
+        return "Sample file bhejne ke liye pehle koi message likhiye, phir 'sample' bhejiye."
+    return None
 
 
 async def _agent(app, tenant_id: str, msg: InboundMessage) -> None:

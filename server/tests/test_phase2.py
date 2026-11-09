@@ -19,10 +19,11 @@ TALLY = (
 
 def test_tally_sheet_mapping():
     rows, skipped = map_sheet("out.csv", TALLY)
-    assert [r.invoice_ref for r in rows] == ["INV-101", "INV-103"]
+    assert [r.invoice_ref for r in rows] == ["INV-101", "INV-102", "INV-103"]
     assert rows[0].amount_paise == 12_500_050 and rows[0].phone == "919876543210"
     assert rows[0].due_date == date(2026, 11, 4)  # bill date + 30d fallback
-    assert len(skipped) == 1 and "Sharma" in skipped[0]
+    assert rows[1].party == "Sharma Store" and rows[1].phone == ""   # no number: kept, never messaged
+    assert not skipped
 
 
 def test_vyapar_style_headers_and_missing_header():

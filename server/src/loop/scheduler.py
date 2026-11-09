@@ -6,7 +6,7 @@ from src import clock, tenants
 from src.bridge.outbox import drain
 from src.loop import wa_link
 from src.loop.digest import build_digest
-from src.loop.reminders import claim_due, draft_reminder, release_claim, reminder_card, state_card
+from src.loop.reminders import claim_due, draft_reminder, release_claim, reminder_card, stale_sync_note, state_card
 from src.loop.owner_channel import flush_held, send_to_owner
 from src.loop.tasks import run_due
 from src.loop.whatsapp import text_message
@@ -47,7 +47,13 @@ async def tick(app, now: datetime) -> int:
         if getattr(getattr(app.state, "llm", None), "enabled", False) and await _agent_reminder(app, t, o):
             sent += 1
             continue
-        card = reminder_card(t.owner_phone, o, draft_reminder(o, t.upi, app.state.settings.public_base_url), await state_card(app.state.continuum, o))
+        context = await state_card(app.state.continuum, o)
+        if o.get("source") == "TALLY":
+            note = await stale_sync_note(pool, str(o["tenant_id"]), now)
+            if note:
+                context = f"{context}\n{note}" if context and "No relevant state" not in context else note
+        card = reminder_card(t.owner_phone, o, draft_reminder(o, t.upi, app.state.settings.public_base_url),
+                             context, mode=app.state.settings.reminder_send_mode)
         try:
             await send_to_owner(app, t, card, kind="owner_reminder_card", obligation_id=o["id"])
         except Exception:

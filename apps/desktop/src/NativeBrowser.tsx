@@ -79,8 +79,8 @@ export default function NativeBrowser({ locked }: { locked: boolean }) {
         </div>
         <div className="browser-big-controls">
           {state.running
-            ? <><button className={state.paused ? "primary" : "browser-pause"} disabled={busy} onClick={() => void run("pause", () => bridgePause(!state.paused))}>{state.paused ? "▶ Resume Smara" : "⏸ Pause Smara"}</button>
-              <button className="danger-action" disabled={busy} onClick={() => void run("stop", bridgeStop, "Stopped. Smara cannot use your browser until you turn it on again.")}>■ Stop</button></>
+            ? <><button className={state.paused ? "primary" : "browser-pause"} disabled={busy} onClick={() => void run("pause", () => bridgePause(!state.paused))}>{state.paused ? "Resume Smara" : "Pause Smara"}</button>
+              <button className="danger-action" disabled={busy} onClick={() => void run("stop", bridgeStop, "Stopped. Smara cannot use your browser until you turn it on again.")}>Stop</button></>
             : <button className="primary" disabled={busy || missing.length > 0} onClick={() => void run("start", bridgeEnsure, "Turned on.")}>Turn on</button>}
         </div>
         <small>Pause refuses every step at once; the blue banner on each page also has a Stop button for that page.</small>
@@ -100,7 +100,7 @@ export default function NativeBrowser({ locked }: { locked: boolean }) {
       <p><small>Clicks and typing are approved in WhatsApp or Telegram. Pre-approved sites last 15 minutes; anything that pays, sends, submits, deletes or logs in always asks again.</small></p>
       {!rows.length ? <p>Nothing yet. What the helper does appears here.</p>
         : <ol className="browser-feed" aria-live="polite">{rows.map(row => <li key={row.id} className={`browser-step browser-step-${row.level === "error" ? "error" : "ok"}`}>
-          <span className="browser-step-icon" aria-hidden="true">{row.level === "error" ? "✕" : "✓"}</span>
+          <span className="browser-step-state">{row.level === "error" ? "Problem" : "Done"}</span>
           <div><strong>{friendlyLog(row.message)}</strong>{row.time && <small>{row.time}</small>}</div>
         </li>)}</ol>}
     </section>

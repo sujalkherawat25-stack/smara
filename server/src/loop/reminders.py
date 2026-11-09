@@ -9,7 +9,7 @@ from src.bridge.outbox import enqueue_standalone
 from src.loop import wa_link
 from src.loop.outbound import record
 from src.loop.upi import pay_url, rupees, upi_text
-from src.loop.whatsapp import from_shop, reminder_params, template_message, text_message
+from src.loop.whatsapp import from_shop, own_whatsapp_link, reminder_params, template_message, text_message
 
 log = logging.getLogger(__name__)
 MAX_ATTEMPTS = 4
@@ -52,12 +52,13 @@ async def claim_due(pool, now: datetime, limit: int = 20) -> list[dict]:
                       WHERE state IN ('ACTIVE', 'DISPATCHED', 'SNOOZED')
                         AND next_followup_at <= %s AND attempt_count < %s
                         AND NOT EXISTS (SELECT 1 FROM parties x WHERE x.id = obligations.party_id AND x.opted_out_at IS NOT NULL)
+                        AND EXISTS (SELECT 1 FROM parties x WHERE x.id = obligations.party_id AND x.whatsapp_phone IS NOT NULL)
                       ORDER BY next_followup_at LIMIT %s FOR UPDATE SKIP LOCKED)
                    UPDATE obligations o SET state = 'WAITING_OWNER_APPROVAL'
                      FROM due, parties p
                     WHERE o.id = due.id AND p.id = o.party_id
                 RETURNING o.id, o.tenant_id, o.party_id, o.invoice_ref, o.amount_paise, o.due_date,
-                          o.attempt_count, p.canonical_name, due.prev""",
+                          o.attempt_count, o.source, p.canonical_name, due.prev""",
                 (now, MAX_ATTEMPTS, limit),
             )
             rows = await cur.fetchall()
@@ -88,18 +89,35 @@ async def release_claim(pool, o: dict, now: datetime) -> None:
         await _event(conn, o["id"], "WAITING_OWNER_APPROVAL", o["prev"], "SYSTEM_CRON")
 
 
-def reminder_card(to: str, o: dict, draft: str, context: str) -> dict:
+def reminder_card(to: str, o: dict, draft: str, context: str, mode: str = "smara") -> dict:
     body = f"Send this to {o['canonical_name']}?\n\n\"{draft}\""
     if context and "No relevant state" not in context:
         body += f"\n\nContext: {context}"
     oid = str(o["id"])
     btn = lambda k, t: {"type": "reply", "reply": {"id": f"{k}:{oid}", "title": t}}
+    # own: the owner sends it from their own WhatsApp (wa.me link). Reply buttons are capped at three.
+    first = btn("own", "Send myself") if mode == "own" else btn("send", "Send")
     return {"messaging_product": "whatsapp", "to": to, "type": "interactive", "interactive": {
         "type": "button", "body": {"text": body[:1024]},
-        "action": {"buttons": [btn("send", "Send"), btn("snooze", "Snooze 3 days"), btn("paid", "Mark paid")]}}}
+        "action": {"buttons": [first, btn("snooze", "Snooze 3 days"), btn("paid", "Mark paid")]}}}
 
 
 WINDOW = timedelta(hours=24)
+STALE_SYNC = timedelta(hours=24)
+
+
+async def stale_sync_note(pool, tenant_id: str, now: datetime) -> str:
+    """A warning when the Tally snapshot is old: a bill may already be paid. Empty when the sync is recent."""
+    async with pool.connection() as conn:
+        row = await (await conn.execute(
+            "SELECT max(created_at) AS last FROM tally_syncs WHERE tenant_id = %s", (tenant_id,))).fetchone()
+    last = row["last"] if row else None
+    if last is None:
+        return "Note: Tally se abhi tak sync nahi hua; ye bill pehle hi chuk gaya ho sakta hai."
+    if now - last > STALE_SYNC:
+        hours = int((now - last).total_seconds() // 3600)
+        return f"Note: Tally se last sync {hours} ghante pehle hua. Ye bill shayad pehle hi chuk gaya ho."
+    return ""
 
 
 def _debtor_payload(o: dict, tenant, settings, now: datetime) -> dict:
@@ -114,7 +132,8 @@ def _debtor_payload(o: dict, tenant, settings, now: datetime) -> dict:
 async def decide_reminder(app, tenant_id: str, obligation_id: str, action: str, now: datetime) -> str | None:
     """Owner tap on a reminder card. Returns a reply for the owner, None if stale."""
     pool, s = app.state.pool, app.state.settings
-    if action == "send" and clock.is_quiet(s, now):
+    sends = action in ("send", "own")          # both release a reminder to the customer, so both obey the same gates
+    if sends and clock.is_quiet(s, now):
         return (f"Abhi raat ka samay hai ({s.quiet_start_hour}:00-{s.quiet_end_hour}:00 IST); customers ko is waqt message nahi "
                 f"bhejte. Subah {s.quiet_end_hour}:00 ke baad Send dabayein.")
     async with pool.connection() as conn:
@@ -127,18 +146,31 @@ async def decide_reminder(app, tenant_id: str, obligation_id: str, action: str, 
             o = await cur.fetchone()
             if o is None:
                 return None
-            if action == "send" and o["opted_out_at"]:
+            if action == "send" and not o["whatsapp_phone"]:
+                return (f"{o['canonical_name']} ka WhatsApp number saved nahi hai, isliye Smara se message nahi ja sakta. "
+                        "Number bhejiye (jaise: " + o['canonical_name'] + " 98xxxxxxxx), ya 'Send myself' se apne WhatsApp se bhejiye.")
+            if sends and o["opted_out_at"]:
                 await conn.execute("UPDATE obligations SET state = 'SNOOZED', next_followup_at = %s WHERE id = %s",
                                    (now + timedelta(days=30), obligation_id))
                 return (f"{o['canonical_name']} ne WhatsApp updates band karne ko kaha tha (STOP), isliye message nahi bheja. "
                         "Aap unhe call kar sakte hain.")
-            to, nxt = {"send": ("DISPATCHED", now + RETRY_AFTER), "snooze": ("SNOOZED", now + SNOOZE),
-                       "paid": ("PAID", None)}[action]
+            to, nxt = {"send": ("DISPATCHED", now + RETRY_AFTER), "own": ("DISPATCHED", now + RETRY_AFTER),
+                       "snooze": ("SNOOZED", now + SNOOZE), "paid": ("PAID", None)}[action]
             await conn.execute(
                 """UPDATE obligations SET state = %s, next_followup_at = %s,
                           attempt_count = attempt_count + %s WHERE id = %s""",
-                (to, nxt, int(action == "send"), obligation_id))
+                (to, nxt, int(sends), obligation_id))
             await _event(conn, o["id"], o["state"], to, "OWNER")
+    if action == "own":
+        tenant = await tenants.by_id(pool, tenant_id)
+        draft = draft_reminder(o, tenant.upi, s.public_base_url)     # no shop prefix: it comes from the owner's own number
+        await _record_sent(app, o, tenant_id)
+        if not o["whatsapp_phone"]:
+            return (f"{o['canonical_name']} ka WhatsApp number saved nahi hai, isliye link nahi bana. "
+                    f"Ye message copy karke bhejiye:\n\n{draft}")
+        link = own_whatsapp_link(o["whatsapp_phone"], draft)
+        return (f"{o['canonical_name']} ko apne WhatsApp se bhejiye (message pehle se likha hai, bas Send dabaiye):\n{link}\n\n"
+                "Bhejne ke baad agar payment aaye to 'paid' bataiye.")
     if action != "send":
         return f"Okay, {o['invoice_ref']} {'marked paid' if action == 'paid' else 'snoozed 3 days'}."
     try:

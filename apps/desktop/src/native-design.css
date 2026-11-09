@@ -97,6 +97,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline
 .native-app .settings-nav button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .native-app .settings-nav button.selected { background: var(--bg-select); color: var(--text); }
 .native-app .settings-nav .settings-back { flex-direction: row; align-items: center; color: var(--text); font-weight: 500; padding: 8px 12px; }
+.native-app .settings-title { font-size: 18px; font-weight: 600; letter-spacing: -.01em; margin: 10px 12px 8px; color: var(--text); }
 .settings-version { margin-top: auto; padding: 0 12px; color: var(--text-dim); }
 .settings-body { min-width: 0; overflow-y: auto; padding: 28px clamp(20px, 5vw, 64px) 64px; }
 .settings-body > * { max-width: 760px; margin-left: auto; margin-right: auto; }
@@ -108,7 +109,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 14px 18px; border-top: 1px solid var(--line); }
 .set-group > .set-row:first-child, .set-group > summary + .set-row { border-top: 0; }
 .set-row.stack { flex-direction: column; align-items: stretch; gap: 10px; }
-.set-row strong { font-size: 14.5px; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.set-row > strong, .set-row > div > strong { font-size: 14.5px; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.set-row small strong, .set-row ol strong, .set-row ul strong { font-size: inherit; font-weight: 600; color: var(--text-soft); }
 .set-row small { display: block; color: var(--text-dim); line-height: 1.55; overflow-wrap: anywhere; }
 .set-row > div:first-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .set-row label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-soft); }

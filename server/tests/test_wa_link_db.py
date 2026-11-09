@@ -77,7 +77,7 @@ async def env(monkeypatch):
     app = FastAPI()
     app.state.pool = pool
     app.state.settings = Settings(wa_link_url=SIDECAR, wa_link_token=TOKEN, wa_link_daily_cap=40, wa_link_send_gap_s=0.0,
-                                  public_base_url="https://smara.test/munim")
+                                  public_base_url="https://smara.test/munim", reminder_send_mode="smara")
     app.state.wa = FakeWA()
     app.state.tg = None
     app.state.llm = SimpleNamespace(enabled=False)
@@ -216,6 +216,16 @@ async def test_the_agent_path_sends_the_approved_text_through_the_link(env):
                                                       "obligation_id": env.oid})
     assert res["sent"] is True and "shop's own WhatsApp link" in res["via"]
     assert sent_to_debtor(env)[0]["text"].endswith("Namaste Ravi ji, INV-1 pending."), "the approved text, as approved"
+
+
+async def test_in_own_mode_smara_sends_nothing_to_the_customer_even_with_a_sim_linked(env):
+    """REMINDER_SEND_MODE=own (the default): the owner sends from their own WhatsApp; the SIM is not used."""
+    await pair_and_link(env, auth=auth_json())
+    env.app.state.settings = dataclasses.replace(env.app.state.settings, reminder_send_mode="own")
+    ctx = SessionCtx(id="s2", tenant_id=env.tid, trust="TRUSTED")
+    res = await deliver_message(env.app, ctx, env.t, {"to": env.pid, "text": "hello", "obligation_id": env.oid})
+    assert res["sent"] is False and res["via"] == "owner_own_whatsapp"
+    assert sent_to_debtor(env) == []
 
 
 async def test_quiet_hours_stop_a_proactive_message_on_the_sim(env, monkeypatch):

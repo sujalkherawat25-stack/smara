@@ -57,7 +57,7 @@ class FakeContinuum:
 
 def make_app(pool, **settings):
     return SimpleNamespace(state=SimpleNamespace(
-        pool=pool, settings=Settings(**settings), wa=FakeWA(), tg=FakeTG(), continuum=FakeContinuum(), bg=set(),
+        pool=pool, settings=Settings(**{"reminder_send_mode": "smara", **settings}), wa=FakeWA(), tg=FakeTG(), continuum=FakeContinuum(), bg=set(),
         llm=SimpleNamespace(enabled=False)))
 
 

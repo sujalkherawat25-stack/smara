@@ -1,8 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { TranscriptItem } from "./TranscriptItem";
+import { INITIAL_WINDOW, visibleWindow, widenWindow } from "./transcriptWindow";
+import { runtimeRestartNeeded } from "./nativeSettingsPolicy";
+import "./ui/tokens.css";
+import { AgentForm, type AgentDraft } from "./ui/AgentRoster";
+import { ToolGroup } from "./ui/ToolCard";
+import NativeFiles from "./ui/NativeFiles";
+import HostedPanel from "./ui/HostedPanel";
+import { EmptyChat } from "./ui/EmptyChat";
+import NativeBrowser from "./NativeBrowser";
+import NativeGoals from "./NativeGoals";
+import { EMPTY_ROSTER, agentById, agentNameProblem, chatsForAgent, chatsNewestFirst, developerInstructionsFor, threadTime, agentTone, contactTime, type AgentRecord, type AgentRoster as RosterData } from "./agents";
+import { groupTranscript } from "./toolCards";
+import { hostedStatus, type HelperSnapshot } from "./hostedStatus";
 import { invoke } from "@tauri-apps/api/core";
 import NativeSettings from "./NativeSettings";
 import { memoryShouldBeOn } from "./NativeMemorySettings";
-import NativeVoice, { ReadAloud } from "./NativeVoice";
+import NativeVoice from "./NativeVoice";
 import { goalLabel, goalRequest, type Goal, type GoalList } from "./goalApi";
 import NativeMarkdown from "./NativeMarkdown";
 import NativeFilePreview from "./NativeFilePreview";
@@ -10,7 +24,6 @@ import NativeContextPicker from "./NativeContextPicker";
 import { contextMessage, type ContextFile } from "./nativeContext";
 import NativeTerminal from "./NativeTerminal";
 import NativeChanges, { reviewRequest } from "./NativeChanges";
-import NativeCommand from "./NativeCommand";
 import NativeOutcome from "./NativeOutcome";
 import { requestQuestions, waitingReason } from "./chatStatus";
 import { nativeSettings, sameWorkspace, type NativeSetup } from "./nativeApi";
@@ -21,6 +34,7 @@ import type { LocalModelProfile } from "./types";
 import packageInfo from "../package.json";
 import "./native-shell.css";
 import "./native-design.css";
+import "./ui/shell.css";
 
 type Item = ViewItem;
 type Approval = { id: number | string; method: string; params: Record<string, unknown> };
@@ -54,6 +68,10 @@ function terminalError(reason: unknown): string {
   }
   return message;
 }
+
+/** Right-pane tabs. The last one opened is saved in localStorage (for the next session's first open). */
+type Pane = "changes" | "terminal" | "browser" | "tasks" | "files" | "hosted";
+const PANE_KEY = "smara.lastPane";
 
 const NATIVE_DEVELOPER_INSTRUCTIONS = [
   "You are Smara. Be honest about tool outcomes. Do not claim tests passed without evidence. Ask before external writes, payments, publishing, or messaging people.",
@@ -89,6 +107,7 @@ export default function NativeApp() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [chatSort, setChatSort] = useState<ChatSort>("recent");
   const [showArchived, setShowArchived] = useState(false);
+  const [agentQuery, setAgentQuery] = useState("");
   const [threadMenu, setThreadMenu] = useState("");
   const [threadActionBusy, setThreadActionBusy] = useState("");
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -111,7 +130,15 @@ export default function NativeApp() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [status, setStatus] = useState("Preparing project…");
-  const [panel, setPanel] = useState<"changes" | "terminal" | null>(null);
+  const [panel, setPanel] = useState<Pane | null>(null);
+  const [morePanesOpen, setMorePanesOpen] = useState(false);
+  const [projectOpen, setProjectOpen] = useState(false);
+  // Earlier conversations of the open agent, shown above the current one as one history.
+  const [earlier, setEarlier] = useState<Item[]>([]);
+  const [earlierState, setEarlierState] = useState<"none" | "loading" | "loaded">("none");
+  const [roster, setRoster] = useState<RosterData>(EMPTY_ROSTER);
+  const [selectedAgent, setSelectedAgent] = useState("");
+  const [helper, setHelper] = useState<HelperSnapshot>(undefined);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [terminalSession, setTerminalSession] = useState<TerminalSession | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
@@ -121,6 +148,81 @@ export default function NativeApp() {
   const [canContinueTurn, setCanContinueTurn] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [copiedItemId, setCopiedItemId] = useState("");
+  // How many of the newest transcript rows are rendered. Long chats show the latest 60 and reveal earlier rows on demand.
+  const [visibleLimit, setVisibleLimit] = useState(INITIAL_WINDOW);
+  useEffect(() => { setVisibleLimit(INITIAL_WINDOW); }, [threadId]);
+  useEffect(() => { setEarlier([]); setEarlierState("none"); }, [threadId]);
+  // Helper status for the hosted chip and panel. Read on start and every 30 s; the helper itself is never touched here.
+  useEffect(() => {
+    const load = () => { void invoke<HelperSnapshot>("bridge_state").then(value => setHelper(value)).catch(() => setHelper(null)); };
+    load();
+    const timer = setInterval(load, 30000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    try { if (panel) localStorage.setItem(PANE_KEY, panel); } catch { /* storage may be blocked */ }
+  }, [panel]);
+  // Every path that loads settings (startup, saves, project switches) goes through `setup`, so the roster follows it.
+  useEffect(() => {
+    if (!setup?.agents) return;
+    setRoster(setup.agents);
+    setSelectedAgent(current => current || setup.agents!.default);
+  }, [setup]);
+  /** Tag a new chat with the agent that was selected when it was started. Failure leaves the chat in the default agent. */
+  const assignChat = (chatId: string) => {
+    const agent = selectedAgent || roster.default;
+    void nativeSettings("agents", { action: "assign", thread_id: chatId, agent_id: agent })
+      .then(value => { if (value.agents) setRoster(value.agents); })
+      .catch(() => { /* The chat stays in the default agent. */ });
+  };
+  const [agentDraft, setAgentDraft] = useState<AgentDraft | null>(null);
+  const [agentProblem, setAgentProblem] = useState("");
+  const activeAgentId = selectedAgent || roster.default;
+  const currentThread = threads.find(thread => thread.id === threadId);
+  /** The active agent's conversations other than the open one, newest first. */
+  const olderChats = chatsNewestFirst(threads, roster, activeAgentId).filter(chat => chat.id !== threadId);
+  /** Opening an agent shows its most recent conversation, the way a chat app opens a contact. */
+  const openAgent = (id: string) => {
+    setSelectedAgent(id); setAgentDraft(null); setSettingsOpen(false);
+    const latest = chatsNewestFirst(threads, roster, id)[0];
+    if (latest) { if (latest.id !== threadId) void selectThread(latest.id); }
+    else newConversation();
+  };
+  /** Adds the agent's earlier conversations above the open one, oldest first, each under a dated divider. */
+  const loadEarlier = async () => {
+    const client = clientRef.current;
+    if (!client || !connected || olderChats.length === 0) return;
+    setEarlierState("loading");
+    try {
+      const history: Item[] = [];
+      for (const chat of [...olderChats].reverse()) {
+        const read = await client.request<{ thread: { id: string; turns?: NativeTurn[] } }>("thread/read", { threadId: chat.id, includeTurns: true });
+        history.push({ id: `history-${chat.id}`, kind: "separator", text: `${threadLabel(chat)} · ${new Date(threadTime(chat)).toLocaleDateString()}` });
+        for (const turn of read.thread.turns ?? []) for (const entry of turn.items) history.push(displayItem(entry));
+      }
+      setEarlier(history); setEarlierState("loaded");
+    } catch (reason) { setError(String(reason)); setEarlierState("none"); }
+  };
+  const startNewAgent = () => { setAgentProblem(""); setAgentDraft({ name: "", role: "", icon: "", instructions: "", preset: false }); };
+  const editAgent = (agent: AgentRecord) => { setAgentProblem(""); setAgentDraft({ id: agent.id, name: agent.name, role: agent.role, icon: agent.icon, instructions: agent.instructions, preset: agent.preset }); };
+  const selectAgent = (id: string) => { setSelectedAgent(id); setAgentDraft(null); };
+  const submitAgent = async () => {
+    if (!agentDraft) return;
+    const message = agentNameProblem(agentDraft.name);
+    if (message) { setAgentProblem(message); return; }
+    setAgentProblem("");
+    try { await saveAgent({ ...agentDraft, name: agentDraft.name.trim() }); setAgentDraft(null); }
+    catch (reason) { setAgentProblem(String(reason)); }
+  };
+  /** Developer instructions for a new chat: the Smara rules, then the selected agent's own instructions. */
+  const newChatInstructions = () => developerInstructionsFor(NATIVE_DEVELOPER_INSTRUCTIONS, agentById(roster, selectedAgent || roster.default));
+  const saveAgent = async (draft: AgentDraft) => {
+    const value = await nativeSettings("agents", { action: "save", agent: {
+      ...(draft.id ? { id: draft.id } : {}), name: draft.name, role: draft.role, icon: draft.icon, instructions: draft.instructions, preset: draft.preset,
+    } });
+    if (value.agents) { setRoster(value.agents); setSelectedAgent(current => current || value.agents!.default); }
+  };
+  const openPane = (next: Pane) => setPanel(current => current === next ? null : next);
   const [slashSelection, setSlashSelection] = useState(0);
   const threadRef = useRef("");
   const clientRef = useRef<NativeRpc | null>(null);
@@ -345,9 +447,9 @@ export default function NativeApp() {
         const client = clientRef.current;
         if (!client) throw new Error("The native chat session is not ready.");
         const result = await client.request<{ thread: Thread }>("thread/start", {
-          cwd: workspace, approvalPolicy: "on-request", sandbox: "workspace-write", developerInstructions: NATIVE_DEVELOPER_INSTRUCTIONS,
+          cwd: workspace, approvalPolicy: "on-request", sandbox: "workspace-write", developerInstructions: newChatInstructions(),
         });
-        threadRef.current = result.thread.id;
+        threadRef.current = result.thread.id; assignChat(result.thread.id);
         setThreadId(result.thread.id);
         setThreads(current => [result.thread, ...current.filter(thread => thread.id !== result.thread.id)]);
         void client.request("thread/name/set", { threadId: result.thread.id, name: prompt.slice(0, 72) }).catch(() => {});
@@ -437,6 +539,11 @@ export default function NativeApp() {
       setCopiedItemId(item.id);
       setTimeout(() => setCopiedItemId(current => current === item.id ? "" : current), 1600);
     } catch { setError("Clipboard is unavailable"); }
+  };
+  /** A starter prompt fills the composer for the owner to review, then send. */
+  const pickStarter = (text: string) => {
+    setDraft(text);
+    requestAnimationFrame(() => composerRef.current?.focus());
   };
   const editMessage = (text: string) => {
     setDraft(text); setEditingPrompt(true);
@@ -611,6 +718,7 @@ export default function NativeApp() {
       clientRef.current = client;
       await client.connect(workspace, profile, toolsEnabled, workersEnabled, browserOrigins.split(/\s+/).filter(Boolean));
       setConnected(true); setStatus("Ready");
+      startedOptions.current = optionsKey(toolsEnabled, workersEnabled, browserOrigins);
       const list = await client.request<{ data: Thread[]; nextCursor?: string | null }>("thread/list", threadListOptions(workspace, chatSort, showArchived));
       setThreads(list.data); setNextCursor(list.nextCursor ?? null);
       if (restoreId) {
@@ -744,8 +852,8 @@ export default function NativeApp() {
     try {
       let id = threadRef.current;
       if (!id) {
-        const result = await clientRef.current!.request<{ thread: Thread }>("thread/start", { cwd: workspace, approvalPolicy: "on-request", sandbox: "workspace-write", developerInstructions: NATIVE_DEVELOPER_INSTRUCTIONS });
-        id = result.thread.id; threadRef.current = id; setThreadId(id);
+        const result = await clientRef.current!.request<{ thread: Thread }>("thread/start", { cwd: workspace, approvalPolicy: "on-request", sandbox: "workspace-write", developerInstructions: newChatInstructions() });
+        id = result.thread.id; threadRef.current = id; setThreadId(id); assignChat(id);
         setThreads(current => [result.thread, ...current]);
       }
       const text = contextMessage(textToSend, filesToSend);
@@ -839,10 +947,13 @@ export default function NativeApp() {
       setStatus("Working");
     } catch (reason) { setError(String(reason)); }
   };
-  const disconnect = async (preserveConversation = false) => {
+  /** The tool, worker and site options the live runtime was started with. Only a new start can change them. */
+  const startedOptions = useRef("");
+  const optionsKey = (tools: boolean, workers: boolean, origins: string) => JSON.stringify([tools, workers, origins.split(/\s+/).filter(Boolean)]);
+  const disconnect = async (preserveConversation = false, reason = "Updating project…") => {
     if (lifecycleRef.current) return false;
     restoreThreadRef.current = preserveConversation ? threadRef.current || restoreThreadRef.current : "";
-    lifecycleRef.current = true; setConnecting(true); setStatus("Updating project…");
+    lifecycleRef.current = true; setConnecting(true); setStatus(reason);
     try {
       await clientRef.current?.stop(); setStatus("Ready");
       return true;
@@ -878,6 +989,7 @@ export default function NativeApp() {
   }, [setup?.memory?.configured, setup?.memory?.enabled]);
   const updateSetup = (value: NativeSetup) => {
     setSetup(value); setProfiles(value.profiles);
+    if (value.agents) { setRoster(value.agents); setSelectedAgent(current => current || value.agents!.default); }
     if (!value.profiles.some(model => model.id === profile)) setProfile("");
   };
   const newConversation = () => {
@@ -915,13 +1027,46 @@ export default function NativeApp() {
   };
   const project = setup?.preferences.projects.find(p => sameWorkspace(p.workspace, workspace));
   const navigationLocked = busy || connecting || loadingThread || settingsSaving || reviewBusy || goalPending || approvals.length > 0 || workers.some(workerOutstanding);
+  const transcriptItems: Item[] = [...earlier, ...items];
+  const windowed = visibleWindow(transcriptItems, visibleLimit);
+  const agentThreads = chatsForAgent(threads, roster, selectedAgent || roster.default);
+  const currentAgent = agentById(roster, selectedAgent || roster.default);
+  const avatarInitial = currentAgent?.name.charAt(0) || "S";
+  const avatarTone = currentAgent ? agentTone(currentAgent) : "teal";
+  const agentSearch = agentQuery.trim().toLowerCase();
+  const shownAgents = agentSearch ? roster.roster.filter(agent => `${agent.name} ${agent.role}`.toLowerCase().includes(agentSearch)) : roster.roster;
+  const activeProfile = setup?.profiles.find(item => item.id === profile);
+  const hosted = hostedStatus(helper);
+  // Stable callbacks, so memoised rows are not re-rendered just because the parent did.
+  const copyRef = useRef(copyMessage); copyRef.current = copyMessage;
+  const editRef = useRef(editMessage); editRef.current = editMessage;
+  const stableCopy = useCallback((item: Item) => { void copyRef.current(item); }, []);
+  const stableEdit = useCallback((text: string) => editRef.current(text), []);
+  const stablePreview = useCallback((path: string) => setPreviewPath(path), []);
   const toggleSettings = async (section: "models" | "memory" | "tools" | "browser" = "models") => {
     if (navigationLocked || lifecycleRef.current || settingsPendingRef.current) return;
     if (settingsOpen) { setSettingsOpen(false); return; }
-    // Pause the idle transport internally so credentials can be edited safely.
-    // The selected conversation is restored, never resent, on return to chat.
-    if (connected && !await disconnect(true)) return;
+    // Opening Settings no longer stops the chat runtime (that wait used to freeze the window). Only a change
+    // that needs a restart stops it, and only at save time: see settingsCall.
     setSettingsTab(section); setSettingsOpen(true);
+  };
+  /** Settings saves run while the chat stays connected. A change to the running model or its key stops the runtime first. */
+  const settingsCall = async (operation: string, values: Record<string, unknown>) => {
+    const active = setup?.profiles.find(item => item.id === profile);
+    const running = connected && active ? { profileId: active.id, credentialName: active.credential_name } : null;
+    if (runtimeRestartNeeded(operation, values, running)) {
+      if (!await disconnect(true, "Restarting Smara…")) throw new Error("Could not stop the chat runtime, so this change was not saved. Try again.");
+    }
+    return nativeSettings(operation, values);
+  };
+  /** Closing Settings: if the tool, worker or site options differ from what the runtime started with, restart now.
+   *  The chat accepts no input until the restart finishes, so the next message runs with what the panel shows. */
+  const closeSettings = async () => {
+    if (settingsPendingRef.current) return;
+    setSettingsOpen(false);
+    if (connected && startedOptions.current && optionsKey(toolsEnabled, workersEnabled, browserOrigins) !== startedOptions.current) {
+      if (await disconnect(true, "Restarting Smara…")) await connect();
+    }
   };
   const goalInThisConversation = !!currentGoal && (!currentGoal.spec?.origin_thread_id || currentGoal.spec?.origin_thread_id === threadId);
   const goalInAnotherConversation = !!currentGoal?.spec?.origin_thread_id
@@ -993,6 +1138,8 @@ export default function NativeApp() {
     try {
       await client.request("thread/name/set", { threadId: thread.id, name: name.trim().slice(0, 120) });
       setThreads(current => current.map(item => item.id === thread.id ? { ...item, name: name.trim().slice(0, 120) } : item));
+      // A rename in the open conversation leaves a quiet line in the chat, like a chat app's system message.
+      if (thread.id === threadId) setItems(current => [...current, { id: `renamed-${Date.now()}`, kind: "separator", text: `Renamed to ${name.trim().slice(0, 120)}` }]);
       setThreadMenu("");
     } catch (reason) { setError(String(reason)); }
     finally { setThreadActionBusy(""); }
@@ -1007,35 +1154,88 @@ export default function NativeApp() {
     return () => window.removeEventListener("keydown", shortcut);
   }, [navigationLocked, settingsOpen, connected]);
   useEffect(() => {
-    if (built === true && workspace && profile && !settingsOpen) void connect();
+    // Closing Settings must not restart a runtime that is already connected: closeSettings restarts it only when
+    // the tool, worker or site options changed. Connect here only when nothing is connected yet.
+    if (built === true && workspace && profile && !settingsOpen && !connected) void connect();
     // Context changes prepare a new transport, not a turn. Crashes/timeouts do
     // not trigger a retry loop or automatically repeat user work.
   }, [built, workspace, profile, settingsOpen]);
   return <div className="native-app">
     <div className={`native-layout${settingsOpen ? " settings-mode" : ""}`}><aside>
-      <button className="new-chat" disabled={navigationLocked} onClick={newConversation}>＋ New chat</button>
-      <div className="sidebar-section-heading"><span>Projects</span><button aria-label="Add project" disabled={navigationLocked} onClick={() => setAddingProject(!addingProject)}>＋</button></div>
-      {setup?.preferences.projects.map(p => <button className={`project-button ${sameWorkspace(p.workspace, workspace) ? "selected" : ""}`} key={p.workspace} title={p.workspace} disabled={navigationLocked} onClick={() => { if (!sameWorkspace(p.workspace, workspace)) void switchProject(p.workspace); else setSettingsOpen(false); }}><span>▱</span>{p.label}</button>)}
-      {(!setup?.preferences.projects.length || addingProject) && <form className="project-form" onSubmit={event => { event.preventDefault(); void switchProject(projectPath, true); }}><label>Project name<input aria-label="Project name" value={projectName} disabled={navigationLocked} placeholder="Optional name" onChange={e => setProjectName(e.target.value)} /></label><label>Local folder<input aria-label="Project folder" required value={projectPath} disabled={navigationLocked} placeholder="C:\\path\\to\\your-project" onChange={e => setProjectPath(e.target.value)} /></label><small>Adding a folder makes it available as a project. Native sandboxing still applies.</small><button disabled={navigationLocked || !projectPath.trim()}>Add project</button></form>}
-      <div className="sidebar-section-heading chat-list-heading"><span>{showArchived ? "Archived" : "Chats"}</span><select aria-label="Sort conversations" value={chatSort} disabled={!connected || loadingMore} onChange={event => { const value = event.target.value as ChatSort; setChatSort(value); void refreshChats(value, showArchived); }}><option value="recent">Recent</option><option value="oldest">Oldest</option></select><button aria-label={showArchived ? "Show active chats" : "Show archived chats"} title={showArchived ? "Active chats" : "Archived chats"} disabled={!connected || loadingMore} onClick={() => { const value = !showArchived; setShowArchived(value); void refreshChats(chatSort, value); }}>{showArchived ? "↩" : "▱"}</button></div>
-      <div className="sidebar-threads">{threads.map(thread => <div className="sidebar-thread-row" key={thread.id}>
-        <button className={`sidebar-thread-select ${thread.id === threadId ? "selected" : ""}`} title={thread.name || thread.preview || "New conversation"} disabled={navigationLocked || !connected} onClick={() => { setSettingsOpen(false); setThreadMenu(""); void selectThread(thread.id); }}>{threadLabel(thread)}</button>
-        <button className="chat-menu-trigger" aria-label={`Actions for ${threadLabel(thread)}`} title="Conversation actions" disabled={!connected || !!threadActionBusy || navigationLocked} onClick={() => setThreadMenu(current => current === thread.id ? "" : thread.id)}>⋯</button>
-        {threadMenu === thread.id && <div className="sidebar-thread-actions">
-          <button disabled={!!threadActionBusy || navigationLocked} onClick={() => void renameChat(thread)}>Rename</button>
-          {showArchived ? <><button disabled={!!threadActionBusy || navigationLocked} onClick={() => void archiveChat(thread, true)}>Restore</button><button className="danger-action" disabled={!!threadActionBusy || navigationLocked} onClick={() => void deleteChat(thread)}>Delete permanently…</button></> : <button disabled={!!threadActionBusy || navigationLocked} onClick={() => void archiveChat(thread, false)}>Archive</button>}
+      <div className="sidebar-top">
+        <input className="agent-search" type="search" aria-label="Search agents" placeholder="Search agents" value={agentQuery} onChange={event => setAgentQuery(event.target.value)} />
+        <button className="new-chat" disabled={navigationLocked} onClick={newConversation}>New chat</button>
+      </div>
+      {showArchived ? <div className="contact-list" aria-label="Archived conversations">
+        {threads.map(thread => <div className="contact-item" key={thread.id}>
+          <button className="contact" disabled={navigationLocked || !connected} onClick={() => { setSettingsOpen(false); void selectThread(thread.id); }}>
+            <span className="avatar" aria-hidden="true">{threadLabel(thread).charAt(0).toUpperCase()}</span>
+            <span className="contact-text"><span className="contact-name">{threadLabel(thread)}</span><span className="contact-preview">Archived</span></span>
+          </button>
+          <button className="text-button contact-edit" disabled={!!threadActionBusy || navigationLocked} onClick={() => void archiveChat(thread, true)}>Restore</button>
+        </div>)}
+        {!threads.length && <p className="sidebar-empty">{loadingMore ? "Loading…" : "No archived conversations."}</p>}
+      </div> : <div className="contact-list" aria-label="Agents">
+        {shownAgents.map(agent => {
+          const latest = chatsNewestFirst(threads, roster, agent.id)[0];
+          const selected = agent.id === activeAgentId;
+          return <div className="contact-item" key={agent.id}>
+            <button className="contact" aria-current={selected ? "true" : undefined} disabled={navigationLocked} onClick={() => openAgent(agent.id)}>
+              <span className="avatar" data-tone={agentTone(agent)} aria-hidden="true">{agent.name.charAt(0)}</span>
+              <span className="contact-text">
+                <span className="contact-line"><span className="contact-name">{agent.name}</span>{latest && <time className="contact-time">{contactTime(threadTime(latest), Date.now())}</time>}</span>
+                <span className="contact-preview">{selected && busy ? "Working…" : latest ? threadLabel(latest) : (agent.role || "No conversations yet")}</span>
+              </span>
+            </button>
+            <button className="text-button contact-edit" aria-label={`Edit ${agent.name}`} disabled={navigationLocked} onClick={() => editAgent(agent)}>Edit</button>
+          </div>;
+        })}
+        {!!roster.roster.length && !shownAgents.length && <p className="sidebar-empty">No agent matches "{agentQuery.trim()}".</p>}
+        {!roster.roster.length && <p className="sidebar-empty">Agents appear here once Smara is ready.</p>}
+      </div>}
+      <div className="sidebar-footer">
+        {!showArchived && <button className="text-button" disabled={navigationLocked} onClick={startNewAgent}>New agent</button>}
+        <button className="text-button" disabled={!connected || loadingMore} onClick={() => { const value = !showArchived; setShowArchived(value); void refreshChats(chatSort, value); }}>{showArchived ? "Back to agents" : "Archived chats"}</button>
+        <button className="text-button" aria-expanded={projectOpen} onClick={() => setProjectOpen(!projectOpen)}>Project: {project?.label || "None"}</button>
+        {projectOpen && <div className="project-list">
+          <button className="text-button" disabled={navigationLocked} onClick={() => setAddingProject(!addingProject)}>Add project</button>
+          {setup?.preferences.projects.map(p => <button className={`project-button ${sameWorkspace(p.workspace, workspace) ? "selected" : ""}`} key={p.workspace} title={p.workspace} disabled={navigationLocked} onClick={() => { if (!sameWorkspace(p.workspace, workspace)) void switchProject(p.workspace); else setSettingsOpen(false); }}>{p.label}</button>)}
+          {(!setup?.preferences.projects.length || addingProject) && <form className="project-form" onSubmit={event => { event.preventDefault(); void switchProject(projectPath, true); }}><label>Project name<input aria-label="Project name" value={projectName} disabled={navigationLocked} placeholder="Optional name" onChange={e => setProjectName(e.target.value)} /></label><label>Local folder<input aria-label="Project folder" required value={projectPath} disabled={navigationLocked} placeholder="C:\\path\\to\\your-project" onChange={e => setProjectPath(e.target.value)} /></label><small>Adding a folder makes it available as a project. Native sandboxing still applies.</small><button disabled={navigationLocked || !projectPath.trim()}>Add project</button></form>}
         </div>}
-      </div>)}
-      {!threads.length && <p>{loadingMore ? "Loading chats…" : showArchived ? "No archived conversations." : connecting ? "Loading chats…" : "Your chats appear here."}</p>}{nextCursor && <button disabled={navigationLocked || loadingMore || !connected} onClick={() => void loadOlder()}>{loadingMore ? "Loading…" : "Show more"}</button>}</div>
-      <div className="sidebar-bottom"><button disabled={navigationLocked} className={settingsOpen ? "selected" : ""} onClick={() => void toggleSettings()}>⚙ Settings</button></div>
+        <button className={`settings-button${settingsOpen ? " selected" : ""}`} disabled={navigationLocked} onClick={() => void toggleSettings()}>Settings</button>
+      </div>
     </aside><main>
-      <header className="native-topbar"><span className="project-icon" aria-hidden="true">▱</span><strong title={workspace}>{settingsOpen ? "Settings" : project?.label || "Choose a project"}</strong>{!settingsOpen && threadId && <span className="header-chat-title">{threadLabel(threads.find(thread => thread.id === threadId) ?? { id: threadId })}</span>}{!settingsOpen && <div className="workspace-actions"><button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? " •" : ""}</button><button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy || goalWorking} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Terminal{terminalActive ? " •" : ""}</button></div>}</header>
+      <header className="native-topbar">
+        <div className="topbar-title">
+          {!settingsOpen && currentAgent && <span className="avatar sm" data-tone={avatarTone} aria-hidden="true">{avatarInitial}</span>}
+          <strong title={settingsOpen ? "Settings" : currentAgent?.name}>{settingsOpen ? "Settings" : currentAgent?.name || "Smara"}</strong>
+          {!settingsOpen && [currentAgent?.role, project?.label].filter(Boolean).length > 0 && <small>{[currentAgent?.role, project?.label].filter(Boolean).join(" · ")}</small>}
+        </div>
+        {!settingsOpen && <div className="topbar-status">
+          <button className="hosted-status" data-tone={hosted.tone} aria-pressed={panel === "hosted"} title="Open Hosted Smara" onClick={() => openPane("hosted")}><span className="status-dot" aria-hidden="true" />{hosted.label}</button>
+        </div>}
+        {!settingsOpen && <div className="workspace-actions">
+          <button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? <span className="signal-dot" aria-hidden="true" /> : null}</button>
+          <button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy || goalWorking} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Terminal{terminalActive ? <span className="signal-dot" aria-hidden="true" /> : null}</button>
+          <div className="tools-menu">
+            <button aria-haspopup="menu" aria-expanded={morePanesOpen} onClick={() => setMorePanesOpen(!morePanesOpen)}>More</button>
+            {morePanesOpen && <div className="tools-menu-list" role="menu">
+              {(["browser", "tasks", "files"] as Pane[]).map(tab => <button key={tab} role="menuitem" disabled={reviewBusy || !workspace} onClick={() => { setMorePanesOpen(false); openPane(tab); }}>{({ browser: "Browser", tasks: "Tasks", files: "Files" } as Record<string, string>)[tab]}{panel === tab ? <small className="menu-current">open</small> : null}</button>)}
+              {currentThread && <>
+                <button role="menuitem" disabled={!!threadActionBusy || navigationLocked} onClick={() => { setMorePanesOpen(false); void renameChat(currentThread); }}>Rename conversation</button>
+                <button role="menuitem" disabled={!!threadActionBusy || navigationLocked} onClick={() => { setMorePanesOpen(false); void archiveChat(currentThread, false); }}>Archive conversation</button>
+                <button role="menuitem" className="danger-action" disabled={!!threadActionBusy || navigationLocked} onClick={() => { setMorePanesOpen(false); void deleteChat(currentThread); }}>Delete conversation</button>
+              </>}
+            </div>}
+          </div>
+        </div>}
+      </header>
       {setup?.computer?.enabled && <div className="native-warning" role="status">Experimental app control · after approval, bring the selected app forward within 10 seconds · 15-minute grant<button onClick={() => {
         void invoke("native_manage", { request: { operation: "computer_control", action: "stop", workspace } }).then(() => setSetup(current => current ? { ...current, computer: { enabled: false, expires: null } } : current)).catch(reason => setError(String(reason)));
       }}>Stop computer control</button></div>}
       {built === false && <div className="native-warning">Native runtime is missing. Build scripts/build-smara-native.ps1; no old-engine fallback is used.</div>}
-      {error && <div role="alert" className="native-error">{error}{!settingsOpen && !connected && (!busy || uncertain) && <button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Retry setup</button>}<button aria-label="Dismiss error" onClick={() => setError("")}>×</button></div>}
-      {settingsOpen && setup ? <NativeSettings initialTab={settingsTab} setup={setup} locked={connected || connecting} onUpdate={updateSetup} onClose={() => { if (!settingsPendingRef.current) setSettingsOpen(false); }} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : <>
+      {error && <div role="alert" className="native-error">{error}{!settingsOpen && !connected && (!busy || uncertain) && <button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Retry setup</button>}<button aria-label="Dismiss error" onClick={() => setError("")}>Dismiss</button></div>}
+      {settingsOpen && setup ? <NativeSettings initialTab={settingsTab} setup={setup} locked={busy || connecting || loadingThread} call={settingsCall} onUpdate={updateSetup} onClose={() => void closeSettings()} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : <>
       <div className={`native-work-area ${panel ? "with-panel" : ""}`}>
       <div className="native-chat-area">
       {goalInAnotherConversation && <div className="goal-other-chat" role="status"><span><strong>Background goal {goalLabel(currentGoal!.state).toLowerCase()}</strong><small>Chat and project activity are paused while it works.</small></span><button disabled={connecting || loadingThread} onClick={() => void openGoalConversation()}>Open task chat</button></div>}
@@ -1089,18 +1289,15 @@ export default function NativeApp() {
       </section>}
       {goalInThisConversation && currentGoal && <NativeOutcome goal={currentGoal} onPreviewFile={setPreviewPath} />}
       {uncertain && <div className="native-warning"><button onClick={() => void checkStatus()}>Check response status</button><button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Recover chat</button> The request may have been accepted. Your message will not be resent automatically.</div>}
-      <div className="native-transcript" aria-live="off">
-        {busy && turnStartedAt && <p role="status">{waitingReason(items, approvals.length, activityClock, lastNativeEventRef.current)} · {Math.max(0, Math.floor((activityClock - turnStartedAt) / 1000))}s elapsed</p>}
+      {agentDraft && <div className="agent-form-panel" role="dialog" aria-modal="true" aria-label={agentDraft.id ? "Edit agent" : "New agent"}><AgentForm draft={agentDraft} problem={agentProblem} disabled={navigationLocked} onChange={patch => setAgentDraft(current => current ? { ...current, ...patch } : current)} onSubmit={() => void submitAgent()} onCancel={() => setAgentDraft(null)} /></div>}
+        <div className="native-transcript" aria-live="off">
         {!!workers.length && <section className="native-workers"><strong>Workers · {workers.filter(worker => worker.status === "completed").length}/{workers.length} complete · changes are not auto-merged</strong>{liveWorkers && <button disabled={connecting || loadingThread} title="Stops this chat's native runtime and all its workers; saved history is kept" onClick={() => void stopWorkers()}>Stop workers</button>}{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status}{worker.activity && <span> · {worker.activity}{worker.lastActivityAt && ` · ${Math.max(0, Math.floor((activityClock - worker.lastActivityAt) / 1000))}s ago`}</span>} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
-        {!items.length && <div className="native-empty"><h1>{project?.label || "Smara"}</h1>{!profile ? <small className="empty-hint">Add a model in Settings to get started.</small> : <small className="empty-hint">{connecting ? "Preparing project…" : "Type a message below, or / for commands."}</small>}</div>}
-        {items.map(item => <article key={item.id} className={`native-item ${item.kind}`}>
-          <div className="item-heading">{item.kind !== "assistant" && item.kind !== "user" && <small>{item.kind} {item.status && `· ${item.status}`}</small>}<div>
-            {item.kind === "assistant" && <ReadAloud text={item.text} disabled={busy} />}
-            {(item.kind === "assistant" || item.kind === "user") && <button className="text-button" title={item.kind === "assistant" ? "Copy response" : "Copy your message"} aria-label={item.kind === "assistant" ? "Copy response" : "Copy your message"} onClick={() => void copyMessage(item)}>{copiedItemId === item.id ? "✓ Copied" : item.kind === "assistant" ? "Copy response" : "Copy"}</button>}
-            {item.kind === "user" && !busy && <button className="text-button" title="Load this text into the composer; sending creates a new follow-up" onClick={() => editMessage(item.text)}>Edit</button>}
-          </div></div>
-          {item.kind === "assistant" ? <NativeMarkdown text={item.text} onPreviewFile={setPreviewPath} /> : item.kind === "user" ? <pre>{item.text}</pre> : item.kind === "commandExecution" ? <NativeCommand item={item} /> : <details open={item.status === "inProgress" || item.status === "failed"}><summary>Tool details · {item.text.length.toLocaleString()} characters</summary><pre>{item.text}</pre></details>}
-        </article>)}
+        {olderChats.length > 0 && earlierState !== "loaded" && <button className="text-button load-earlier" disabled={!connected || earlierState === "loading"} onClick={() => void loadEarlier()}>{earlierState === "loading" ? "Loading earlier conversations…" : `Show earlier conversations (${olderChats.length})`}</button>}
+        {!transcriptItems.length && <EmptyChat agent={currentAgent} projectLabel={project?.label || "Smara"} hasModel={!!profile} connecting={connecting} onPick={pickStarter} />}
+        {windowed.hidden > 0 && <button className="text-button show-earlier" onClick={() => setVisibleLimit(widenWindow)}>Show earlier ({windowed.hidden.toLocaleString()})</button>}
+        {groupTranscript(windowed.visible).map(segment => segment.type === "item"
+          ? <TranscriptItem key={segment.item.id} item={segment.item} busy={busy} copied={copiedItemId === segment.item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} agentInitial={avatarInitial} agentTone={avatarTone} />
+          : <ToolGroup key={segment.key} items={segment.items} running={segment.running}>{item => <TranscriptItem item={item} busy={busy} copied={copiedItemId === item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} agentInitial={avatarInitial} agentTone={avatarTone} />}</ToolGroup>)}
         {approvals.map(approval => <section className="native-approval" key={approval.id}>
           {approval.params.threadId !== undefined && approval.params.threadId !== threadId && <p>Worker / other native conversation: {String(approval.params.threadId)}. This request is not auto-approved.</p>}
           {!approvalRelevant(approval) && <p>This request belongs to a different conversation. No permission can be granted from this chat.{typeof approval.params.threadId === "string" && threads.some(thread => thread.id === approval.params.threadId) && <button disabled={busy || connecting || loadingThread} onClick={() => void selectThread(String(approval.params.threadId))}>Open requesting conversation</button>}</p>}
@@ -1116,13 +1313,14 @@ export default function NativeApp() {
               : <><p>This specialized request cannot be approved here; no automatic grant.</p>{approval.method === "mcpServer/elicitation/request" && <button onClick={() => void decide(approval, false)}>Deny request</button>}</>}
           </>}
         </section>)}
+        {busy && turnStartedAt && <div className="working-line"><span className="avatar" data-tone={avatarTone} aria-hidden="true">{avatarInitial}</span><p role="status"><span className="working-dots" aria-hidden="true"><i /><i /><i /></span>{waitingReason(items, approvals.length, activityClock, lastNativeEventRef.current)} · {Math.max(0, Math.floor((activityClock - turnStartedAt) / 1000))}s elapsed</p></div>}
         <div ref={bottom} />
       </div>
       <footer><form className="native-composer" onSubmit={event => { event.preventDefault(); void send(); }}>
-        {!!contextFiles.length && <div className="composer-files">{contextFiles.map(file => <span key={file.path}><button type="button" title={file.path} onClick={() => setPreviewPath(file.path)}>{file.name}</button><button type="button" aria-label={`Remove ${file.name}`} disabled={navigationLocked} onClick={() => setContextFiles(current => current.filter(item => item.path !== file.path))}>×</button></span>)}</div>}
+        {!!contextFiles.length && <div className="composer-files">{contextFiles.map(file => <span key={file.path}><button type="button" title={file.path} onClick={() => setPreviewPath(file.path)}>{file.name}</button><button type="button" aria-label={`Remove ${file.name}`} disabled={navigationLocked} onClick={() => setContextFiles(current => current.filter(item => item.path !== file.path))}>Remove</button></span>)}</div>}
         {editingPrompt && <div className="composer-edit-notice">Sending this edited text adds a follow-up; the original stays in chat history. <button type="button" onClick={() => { setEditingPrompt(false); setDraft(""); }}>Cancel edit</button></div>}
         {slashOptions.length > 0 && <div className="slash-command-menu" role="listbox" aria-label="Smara commands">{slashOptions.map((option, index) => <button type="button" role="option" aria-selected={index === slashSelection} key={option.command} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setSlashSelection(index)} onClick={() => chooseSlashCommand(option.command)}><code>{option.command}</code><span><strong>{option.label}</strong><small>{option.description}</small></span><kbd>↵</kbd></button>)}</div>}
-        <textarea ref={composerRef} aria-label="Message Smara" rows={2} placeholder="Message… (/ for commands)" value={draft} onChange={event => { setDraft(event.target.value); setSlashSelection(0); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 260)}px`; }} onKeyDown={event => {
+        <textarea ref={composerRef} aria-label="Message Smara" rows={2} placeholder={`Message ${currentAgent?.name ?? "Smara"} (/ for commands)`} value={draft} onChange={event => { setDraft(event.target.value); setSlashSelection(0); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 260)}px`; }} onKeyDown={event => {
           if (slashOptions.length && !event.shiftKey && !event.nativeEvent.isComposing) {
             if (event.key === "ArrowDown") { event.preventDefault(); setSlashSelection(value => (value + 1) % slashOptions.length); return; }
             if (event.key === "ArrowUp") { event.preventDefault(); setSlashSelection(value => (value + slashOptions.length - 1) % slashOptions.length); return; }
@@ -1131,14 +1329,18 @@ export default function NativeApp() {
           }
           if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
         }} />
-        <div className="composer-toolbar"><div className="composer-context"><button type="button" aria-label="Add project files" title="Add project files" disabled={navigationLocked || !workspace} onClick={() => setContextOpen(true)}>＋</button><NativeVoice key={workspace + threadId} disabled={navigationLocked} onTranscript={text => setDraft(current => current ? current + "\n" + text : text)} /><small>{connecting ? "Preparing project…" : ""}</small></div><div className="composer-actions">
+        <div className="composer-toolbar"><div className="composer-context"><button type="button" aria-label="Add project files" title="Add project files" disabled={navigationLocked || !workspace} onClick={() => setContextOpen(true)}>Attach</button><NativeVoice key={workspace + threadId} disabled={navigationLocked} onTranscript={text => setDraft(current => current ? current + "\n" + text : text)} /><small>{connecting ? "Preparing project…" : ""}</small></div><div className="composer-actions">
           {canContinueTurn && !busy && <button type="button" className="continue-button" disabled={goalWorking || connecting || loadingThread} title="Start a fresh turn in this conversation; previous tools will not replay" onClick={() => void send("Continue from where you left off. First inspect the current state and completed tool results so you do not repeat actions.")}>Continue</button>}
           <select aria-label="Model" title="Choose a model" value={profile} disabled={navigationLocked} onChange={event => void selectModel(event.target.value)}><option value="" disabled>Choose model</option>{profiles.map(model => <option value={model.id} key={model.id}>{model.label}</option>)}</select>
-          <button className={busy ? "stop-button" : "primary"} aria-label={busy ? "Stop response" : "Send message"} title={busy ? "Stop response" : "Send message"} type={busy ? "button" : "submit"} disabled={reviewBusy || connecting || loadingThread || goalPending || (busy ? !turnId : workers.some(workerOutstanding) || (goalWorking && !/^\/goal(?:\s|$)/i.test(draft.trim())) || !profile || built !== true || !draft.trim() || approvals.length > 0)} onClick={busy ? () => void stopTurn() : undefined}>{busy ? "■" : "↑"}</button>
+          <button className={busy ? "stop-button" : "primary"} aria-label={busy ? "Stop response" : "Send message"} title={busy ? "Stop response" : "Send message"} type={busy ? "button" : "submit"} disabled={reviewBusy || connecting || loadingThread || goalPending || (busy ? !turnId : workers.some(workerOutstanding) || (goalWorking && !/^\/goal(?:\s|$)/i.test(draft.trim())) || !profile || built !== true || !draft.trim() || approvals.length > 0)} onClick={busy ? () => void stopTurn() : undefined}>{busy ? "Stop" : "Send"}</button>
         </div></div>
       </form><div className="composer-status"><small role="status">{reviewBusy ? "Saving local review…" : busy || uncertain || loadingThread || (status !== "Ready" && status !== "completed") ? status : ""}</small></div></footer>
       </div>
       {panel === "changes" && <NativeChanges key={workspace + threadId} workspace={workspace} threadId={threadId} locked={navigationLocked || terminalActive || goalWorking} revision={reviewRevision} notice={reviewNotice} onBusyChange={reviewPending} onPreviewFile={setPreviewPath} onClose={() => setPanel(null)} />}
+      {panel === "browser" && <NativeBrowser locked={navigationLocked} />}
+      {panel === "tasks" && <NativeGoals workspace={workspace} profile={profile} locked={navigationLocked} onClose={() => setPanel(null)} onPreview={setPreviewPath} />}
+      {panel === "files" && <NativeFiles workspace={workspace} onPreview={setPreviewPath} />}
+      {panel === "hosted" && <HostedPanel snapshot={helper} locked={navigationLocked} />}
       {panel === "terminal" && <NativeTerminal workspace={workspace} connected={connected} session={terminalSession} interactiveSupported={terminalPlatformSupported} onConnect={() => { void connect(); }} onStart={() => startTerminal()} onInput={value => { void writeTerminal(value); }} onInterrupt={interruptTerminal} onStop={() => { void stopTerminal(); }} onResize={resizeTerminal} onClear={() => setTerminalSession(current => current ? { ...current, output: "", truncated: false } : current)} onClose={() => setPanel(null)} />}
       </div>
       </>}

@@ -5,7 +5,10 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 
-function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = true, terminalPlatformSupported = true, projectOptions, backgroundGoal = false } = {}) {
+const contact = (f, name) => f.nodes().find(node => node.type === "button" && node.props.className === "contact" && f.text(node).includes(name));
+const openProjects = async (f) => { f.nodes().find(node => node.type === "button" && f.text(node).startsWith("Project:")).props.onClick(); await f.flush(); };
+
+function fixture({ olderChats = [], startupFailure = false, unknownTurn = false, sandboxReady = true, terminalPlatformSupported = true, projectOptions, backgroundGoal = false, agentRoster } = {}) {
   const slots = [], calls = [], goalCalls = [], effects = [], timers = new Set();
   let cursor = 0, dirty = true, tree, failResume = false, currentRpc;
   const setup = {
@@ -13,6 +16,11 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     profiles: [{ id: "one", label: "Offline one", model: "offline-one" }, { id: "two", label: "Offline two", model: "offline-two" }], credentials: [], search: { configured: false },
   };
   if (projectOptions) setup.preferences.projects[0].options = projectOptions;
+  // The executor always sends the four built-in agents; the harness defaults to two so tests can select between them.
+  setup.agents = agentRoster ?? { roster: [
+    { id: "kiran", name: "Kiran", role: "Accounts", icon: "", instructions: "", preset: true },
+    { id: "rohan", name: "Rohan", role: "Dues", icon: "", instructions: "", preset: true },
+  ], default: "kiran", assignments: {} };
   const goalRecord = backgroundGoal && typeof backgroundGoal === "object" ? backgroundGoal : backgroundGoal ? {
     id: "fixturegoal", state: "running", lease: "synthetic-active-goal", updated: Date.now() / 1000, cycles: 1, requests: 1, token_estimate: 100,
     detail: "Synthetic task is working", session_id: "synthetic-goal-session", spec: { objective: "Synthetic goal", success_criteria: "Evidence", workspace: "C:/first", profile_id: "one", sandbox: "read-only", max_cycles: 8, max_requests: 30, max_token_estimate: 500000 },
@@ -25,6 +33,9 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
       return [slots[index], value => { const next = typeof value === "function" ? value(slots[index]) : value; if (!Object.is(next, slots[index])) { slots[index] = next; dirty = true; } }];
     },
     useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
+    // Callbacks and memo only matter for re-render cost; the harness re-runs the render, so identity is not needed here.
+    useCallback(callback) { cursor++; return callback; },
+    memo(component) { return component; },
     useEffect(effect, deps) {
       const index = cursor++, previous = slots[index];
       if (!previous || !deps || deps.some((value, i) => !Object.is(value, previous.deps[i]))) {
@@ -38,7 +49,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     const module = { exports: {} };
     const source = readFileSync(new URL(path, import.meta.url), "utf8");
     const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-    vm.runInNewContext(code, { module, exports: module.exports, require, setTimeout: callback => { timers.add(callback); return callback; }, clearTimeout: timer => timers.delete(timer), setInterval: callback => { timers.add(callback); return callback; }, clearInterval: timer => timers.delete(timer), crypto: { randomUUID: () => "fixture-terminal-id" }, TextEncoder, TextDecoder, Uint8Array, btoa, atob, window: { addEventListener() {}, removeEventListener() {} }, navigator: { clipboard: { writeText: async () => {} } } });
+    vm.runInNewContext(code, { module, exports: module.exports, require, console, requestAnimationFrame: callback => { callback(); return 0; }, setTimeout: callback => { timers.add(callback); return callback; }, clearTimeout: timer => timers.delete(timer), setInterval: callback => { timers.add(callback); return callback; }, clearInterval: timer => timers.delete(timer), crypto: { randomUUID: () => "fixture-terminal-id" }, TextEncoder, TextDecoder, Uint8Array, btoa, atob, window: { addEventListener() {}, removeEventListener() {} }, navigator: { clipboard: { writeText: async () => {} } } });
     return module.exports;
   };
   class RpcOutcomeUnknown extends Error {}
@@ -55,7 +66,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     async request(method, params) {
       calls.push({ method, params: JSON.parse(JSON.stringify(params)) });
       const thread = { id: "saved", cwd: failResume ? "C:/wrong-project" : setup.preferences.workspace, turns: [{ id: "turn", status: "interrupted", items: [{ id: "user", type: "userMessage", content: [{ type: "text", text: "Synthetic saved question" }] }] }] };
-      if (method === "thread/list") return { data: [{ id: "saved", preview: "Saved chat" }] };
+      if (method === "thread/list") return { data: [{ id: "saved", preview: "Saved chat", updatedAt: 2_000_000_000 }, ...olderChats] };
       if (method === "thread/read" || method === "thread/resume") return { thread };
       if (method === "thread/start") return { thread: { id: "new" } };
       if (method === "windowsSandbox/readiness") return { status: sandboxReady ? "ready" : "notConfigured" };
@@ -79,6 +90,40 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
   const context = evaluate("../src/nativeContext.ts", () => assert.fail("Context formatting must have no side-effect imports"));
   const terminalProtocol = evaluate("../src/terminalProtocol.ts", () => assert.fail("Terminal protocol must have no side-effect imports"));
   const chatStatus = evaluate("../src/chatStatus.ts", () => assert.fail("Status formatting must have no side-effect imports"));
+  const transcriptWindow = evaluate("../src/transcriptWindow.ts", () => assert.fail("Windowing must have no side-effect imports"));
+  const settingsPolicy = evaluate("../src/nativeSettingsPolicy.ts", () => assert.fail("Settings policy must have no side-effect imports"));
+  const agentsModule = evaluate("../src/agents.ts", () => assert.fail("Agent helpers must have no side-effect imports"));
+  const toolCardsModule = evaluate("../src/toolCards.ts", () => assert.fail("Tool summaries must have no side-effect imports"));
+  const hostedStatusModule = evaluate("../src/hostedStatus.ts", () => assert.fail("Hosted status must have no side-effect imports"));
+  function Markdown() {}
+  function Voice() {}
+  const toolCard = evaluate("../src/ui/ToolCard.tsx", name => {
+    if (name === "react") return hooks;
+    if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
+    if (name.endsWith("NativeCommand")) return { default: Command, __esModule: true };
+    if (name.endsWith("toolCards")) return toolCardsModule;
+    assert.fail(`Unexpected import ${name}`);
+  });
+  const transcriptItem = evaluate("../src/TranscriptItem.tsx", name => {
+    if (name === "react") return hooks;
+    if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
+    if (name.endsWith("NativeMarkdown")) return { default: Markdown, __esModule: true };
+    if (name.endsWith("NativeCommand")) return { default: Command, __esModule: true };
+    if (name.endsWith("NativeVoice")) return { default: () => null, ReadAloud: Voice, __esModule: true };
+    if (name.endsWith("ui/ToolCard")) return toolCard;
+    if (name.endsWith("transcriptWindow")) return transcriptWindow;
+    assert.fail(`Unexpected import ${name}`);
+  });
+  const emptyChat = evaluate("../src/ui/EmptyChat.tsx", name => {
+    if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
+    assert.fail(`Unexpected import ${name}`);
+  });
+  const rosterComponent = evaluate("../src/ui/AgentRoster.tsx", name => {
+    if (name === "react") return hooks;
+    if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
+    if (name.endsWith("agents")) return agentsModule;
+    assert.fail(`Unexpected import ${name}`);
+  });
   const goal = evaluate("../src/goalApi.ts", n => n === "@tauri-apps/api/core" ? { invoke: async () => ({}) } : assert.fail(n));
   function Settings() {}
   function Changes() {}
@@ -89,6 +134,18 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     if (name === "react") return hooks;
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
     if (name === "@tauri-apps/api/core") return { invoke: async () => ({ built: true, windowsTerminalBuild: terminalPlatformSupported }) };
+    if (name.endsWith("TranscriptItem")) return transcriptItem;
+    if (name.endsWith("ui/AgentRoster")) return rosterComponent;
+    if (name.endsWith("ui/EmptyChat")) return emptyChat;
+    if (name.endsWith("ui/ToolCard")) return toolCard;
+    if (name.endsWith("ui/NativeFiles")) return { default: () => null, __esModule: true };
+    if (name.endsWith("ui/HostedPanel")) return { default: () => null, __esModule: true };
+    if (name.endsWith("NativeBrowser")) return { default: () => null, __esModule: true };
+    if (name.endsWith("/agents")) return agentsModule;
+    if (name.endsWith("toolCards")) return toolCardsModule;
+    if (name.endsWith("hostedStatus")) return hostedStatusModule;
+    if (name.endsWith("transcriptWindow")) return transcriptWindow;
+    if (name.endsWith("nativeSettingsPolicy")) return settingsPolicy;
     if (name.endsWith("NativeSettings")) return { default: Settings, __esModule: true };
     if (name.endsWith("NativeMemorySettings")) return { default: () => null, memoryShouldBeOn: () => false, __esModule: true };
     if (name.endsWith("NativeGoals")) return { default: () => null, __esModule: true };
@@ -133,7 +190,7 @@ function fixture({ startupFailure = false, unknownTurn = false, sandboxReady = t
     nodes().find(node => node.type === "textarea").props.onChange({ target: { value: message, style: {}, scrollHeight: 100 } });
     await flush();
   };
-  return { calls, goalCalls, flush, button, nodes, enter, tick: async () => { for (const callback of [...timers]) callback(); await flush(); }, contextPicker: () => nodes().find(node => node.type === ContextPicker)?.props, emit: message => currentRpc.receive(message), terminal: () => nodes().find(node => node.type === Terminal)?.props, changes: () => nodes().find(node => node.type === Changes)?.props, failResume: () => { failResume = true; }, settings: () => nodes().find(node => node.type === Settings).props, model: () => nodes().find(node => node.type === "select" && node.props["aria-label"] === "Model") };
+  return { calls, goalCalls, flush, button, nodes, text, enter, tick: async () => { for (const callback of [...timers]) callback(); await flush(); }, contextPicker: () => nodes().find(node => node.type === ContextPicker)?.props, emit: message => currentRpc.receive(message), terminal: () => nodes().find(node => node.type === Terminal)?.props, changes: () => nodes().find(node => node.type === Changes)?.props, failResume: () => { failResume = true; }, settings: () => nodes().find(node => node.type === Settings).props, model: () => nodes().find(node => node.type === "select" && node.props["aria-label"] === "Model") };
 }
 
 test("workers continue status polling after parent completion and have an explicit owning-runtime Stop", async () => {
@@ -144,10 +201,10 @@ test("workers continue status polling after parent completion and have an explic
   const before = f.calls.filter(call => call.method === "thread/turns/list").length;
   await f.tick();
   assert.ok(f.calls.filter(call => call.method === "thread/turns/list").length > before);
-  assert.equal(f.button("＋ New chat").props.disabled, true);
+  assert.equal(f.button("New chat").props.disabled, true);
   f.button("Stop workers").props.onClick(); await f.flush();
   assert.ok(f.calls.some(call => call.method === "stop"));
-  assert.equal(f.button("＋ New chat").props.disabled, false);
+  assert.equal(f.button("New chat").props.disabled, false);
   assert.equal(f.nodes().some(node => node.type === "button" && node.props.children === "Stop workers"), false);
 });
 
@@ -164,7 +221,7 @@ test("malformed and duplicate-ID questions cannot crash chat or submit an answer
     const f = fixture(); await f.flush(); await f.enter("Synthetic task");
     f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} }); await f.flush();
     f.emit({ id: 9, method: "item/tool/requestUserInput", params: { threadId: "new", questions } }); await f.flush();
-    assert.equal(f.nodes().some(node => node.type === "input"), false);
+    assert.equal(f.nodes().some(node => node.type === "input" && node.props["aria-label"] !== "Search agents"), false, "no question field is shown (the agent search box is not one)");
     assert.equal(f.calls.some(call => call.method === "respond"), false);
     assert.equal(f.button("Stop response").props.disabled, false);
   }
@@ -226,9 +283,10 @@ test("Changes is readable during work but writes and navigation remain locked", 
   f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} });
   await f.flush(); f.button("Changes").props.onClick(); await f.flush();
   assert.equal(f.changes().locked, true);
-  assert.equal(f.button("＋ New chat").props.disabled, true);
+  assert.equal(f.button("New chat").props.disabled, true);
   f.emit({ method: "turn/diff/updated", params: { threadId: "new", diff: "synthetic diff" } });
-  await f.flush(); assert.ok(f.button("Changes •"));
+  await f.flush(); assert.ok(f.button("Changes"));
+  assert.ok(f.nodes().some(node => node.props?.className === "signal-dot"), "the Changes button shows a dot while there are changes");
 });
 
 test("a user Git action synchronously blocks sending or changing project", async () => {
@@ -238,7 +296,7 @@ test("a user Git action synchronously blocks sending or changing project", async
   f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} });
   await f.flush();
   assert.equal(f.calls.some(call => call.method === "turn/start"), false);
-  assert.equal(f.button("＋ New chat").props.disabled, true);
+  assert.equal(f.button("New chat").props.disabled, true);
   assert.equal(f.model().props.disabled, true);
   assert.equal(f.nodes().find(node => node.type === "textarea").props.value, "Keep this draft");
   f.changes().onBusyChange(false); await f.flush();
@@ -263,7 +321,7 @@ test("saved project choices are restored without leaking to another project", as
   const first = f.calls.find(call => call.method === "connect");
   assert.equal(first.readers, true); assert.equal(first.workers, true);
   assert.deepEqual(first.origins, ["https://docs.python.org"]);
-  await f.nodes().find(node => node.type === "button" && node.props.title === "C:/second").props.onClick(); await f.flush();
+  await openProjects(f); await f.nodes().find(node => node.type === "button" && node.props.title === "C:/second").props.onClick(); await f.flush();
   assert.equal(f.calls.filter(call => call.method === "connect").at(-1).workers, false);
   await f.nodes().find(node => node.type === "button" && node.props.title === "C:/first").props.onClick(); await f.flush();
   assert.equal(f.calls.filter(call => call.method === "connect").at(-1).workers, true);
@@ -290,7 +348,7 @@ test("uncertain send preserves file context and project switches preserve separa
   f.button("Add project files").props.onClick(); await f.flush();
   f.contextPicker().onAttach([{ name: "notes.txt", path: "notes.txt", directory: false, size: 4 }]);
   f.contextPicker().onClose(); await f.flush();
-  await f.nodes().find(node => node.type === "button" && node.props.title === "C:/second").props.onClick(); await f.flush();
+  await openProjects(f); await f.nodes().find(node => node.type === "button" && node.props.title === "C:/second").props.onClick(); await f.flush();
   assert.equal(f.nodes().some(node => node.props?.["aria-label"] === "Remove notes.txt"), false);
   await f.nodes().find(node => node.type === "button" && node.props.title === "C:/first").props.onClick(); await f.flush();
   assert.ok(f.button("Remove notes.txt"));
@@ -319,19 +377,121 @@ test("setup help documents scope and gates provider checks behind confirmation",
   assert.match(settings, /Full desktop\/computer control and unattended company operations are not enabled/);
 });
 
-test("settings pause the idle runtime and restore the same chat without replay", async () => {
+test("closing Settings keeps the same chat connected, without a restart or a replay", async () => {
   const f = fixture(); await f.flush();
-  await f.button("Saved chat").props.onClick(); await f.flush();
-  await f.button("⚙ Settings").props.onClick(); await f.flush();
+  await contact(f, "Kiran").props.onClick(); await f.flush();
+  await f.button("Settings").props.onClick(); await f.flush();
   assert.equal(f.settings().locked, false);
+  const stops = f.calls.filter(call => call.method === "stop").length;
   f.settings().onClose(); await f.flush();
-  assert.equal(f.calls.filter(call => call.method === "thread/resume").length, 2);
+  assert.equal(f.calls.filter(call => call.method === "stop").length, stops, "closing alone must not stop the runtime");
+  assert.equal(f.calls.filter(call => call.method === "thread/resume").length, 1, "the chat was not reloaded");
   assert.equal(f.calls.some(call => call.method === "turn/start"), false);
+});
+
+test("each agent shows its latest conversation, and opening an agent resumes it", async () => {
+  const agentRecord = (id, name) => ({ id, name, role: "Role " + name, icon: "", instructions: "", preset: true });
+  const f = fixture({ agentRoster: { roster: [agentRecord("kiran", "Kiran"), agentRecord("rohan", "Rohan")], default: "kiran", assignments: { saved: "rohan" } } });
+  await f.flush();
+  assert.equal(f.text(contact(f, "Rohan")).includes("Saved chat"), true, "Rohan's row previews its conversation");
+  assert.equal(f.text(contact(f, "Kiran")).includes("Saved chat"), false, "Kiran has no conversation yet");
+  contact(f, "Rohan").props.onClick(); await f.flush();
+  assert.equal(contact(f, "Rohan").props["aria-current"], "true");
+  assert.ok(f.calls.some(call => call.method === "thread/resume" && call.params.threadId === "saved"), "opening Rohan resumes its latest conversation");
+});
+
+test("a new chat runs with the Smara rules first, then the selected agent's instructions", async () => {
+  const agentRecord = (id, name, instructions) => ({ id, name, role: "Role " + name, icon: "🤖", instructions, preset: true });
+  const f = fixture({ agentRoster: { roster: [agentRecord("kiran", "Kiran", ""), agentRecord("rohan", "Rohan", "Rohan rule: keep reminders polite.")], default: "kiran", assignments: {} } });
+  await f.flush();
+  const submit = async (text) => {
+    await f.enter(text);
+    f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} });
+    await f.flush();
+    f.emit({ method: "turn/completed", params: { threadId: "new", turn: { id: "running", status: "completed" } } }); await f.flush();
+  };
+  const starts = () => f.calls.filter(call => call.method === "thread/start");
+  f.button("New chat").props.onClick(); await f.flush();
+  await submit("First question");
+  const plain = starts().at(-1).params.developerInstructions;
+  f.nodes().find(node => node.type === "button" && node.props.className === "contact" && f.text(node).includes("Rohan")).props.onClick(); await f.flush();
+  f.button("New chat").props.onClick(); await f.flush();
+  await submit("Second question");
+  const withAgent = starts().at(-1).params.developerInstructions;
+  assert.ok(withAgent.startsWith(plain), "the Smara rules come first, unchanged");
+  assert.ok(withAgent.includes("Rohan rule: keep reminders polite."), "the selected agent's instructions are added");
+  assert.ok(!plain.includes("Rohan rule"), "the default agent does not get another agent's instructions");
+});
+
+test("an empty chat names the agent and a starter prompt fills the composer without sending", async () => {
+  const agentRecord = (id, name) => ({ id, name, role: "Role " + name, icon: "📒", instructions: "", preset: true });
+  const f = fixture({ agentRoster: { roster: [agentRecord("kiran", "Kiran")], default: "kiran", assignments: {} } }); await f.flush();
+  const empty = () => f.nodes().find(node => typeof node.props?.onPick === "function" && node.props?.agent);
+  assert.ok(empty(), "the empty state is shown before a chat is open");
+  assert.equal(empty().props.agent.name, "Kiran");
+  empty().props.onPick("Who owes me the most this month?"); await f.flush();
+  assert.equal(f.nodes().find(node => node.type === "textarea").props.value, "Who owes me the most this month?");
+  assert.equal(f.calls.some(call => call.method === "turn/start"), false, "a starter fills the composer; it does not send");
+});
+
+test("earlier conversations load above the open one, under a dated divider", async () => {
+  const f = fixture({ olderChats: [{ id: "older", preview: "Older question", updatedAt: 1_000_000_000 }] });
+  await f.flush();
+  contact(f, "Kiran").props.onClick(); await f.flush();
+  f.button("Show earlier conversations (1)").props.onClick(); await f.flush();
+  const divider = f.nodes().find(node => node.props?.item?.kind === "separator");
+  assert.ok(divider, "a divider marks the start of the earlier conversation");
+  assert.match(divider.props.item.text, /Older question|older/);
+  assert.equal(f.nodes().some(node => node.type === "button" && f.text(node).startsWith("Show earlier conversations")), false, "loaded once");
+});
+
+test("opening Settings keeps the chat connected; only a save that needs a restart stops the runtime", async () => {
+  const f = fixture(); await f.flush();
+  await contact(f, "Kiran").props.onClick(); await f.flush();
+  const stops = () => f.calls.filter(call => call.method === "stop").length;
+  const before = stops();
+  await f.button("Settings").props.onClick(); await f.flush();
+  assert.equal(stops(), before, "opening Settings must not stop the runtime");
+  await f.settings().call("save_memory", { secret: "", memory: { enabled: true, scope: "personal", user_id: "u" } }); await f.flush();
+  assert.equal(stops(), before, "a memory save must not stop the runtime");
+  await f.settings().call("save_model", { profile: { id: "one", label: "Offline one", model: "offline-one" } }); await f.flush();
+  assert.equal(stops(), before + 1, "saving the running model stops the runtime first");
+});
+
+test("closing Settings restarts the runtime only when tool, worker or site options changed", async () => {
+  const f = fixture(); await f.flush();
+  await contact(f, "Kiran").props.onClick(); await f.flush();
+  const count = method => f.calls.filter(call => call.method === method).length;
+  await f.button("Settings").props.onClick(); await f.flush();
+  const stops = count("stop"), connects = count("connect");
+  f.settings().onClose(); await f.flush();
+  assert.equal(count("stop"), stops, "unchanged options must not restart the runtime");
+  assert.equal(count("connect"), connects);
+  await f.button("Settings").props.onClick(); await f.flush();
+  f.settings().onToolsChange(false); await f.flush();
+  f.settings().onClose(); await f.flush();
+  // connect() also issues a stop of its own (a no-op on a client that already stopped), so assert "at least one more".
+  assert.ok(count("stop") > stops, "a changed tool option stops the runtime");
+  assert.equal(count("connect"), connects + 1, "and starts it again with the new option");
+  assert.equal(f.calls.filter(call => call.method === "connect").at(-1).readers, false);
+  // Parallel workers are part of the same start options.
+  const connectsBeforeWorkers = count("connect");
+  await f.button("Settings").props.onClick(); await f.flush();
+  f.settings().onWorkersChange(true); await f.flush();
+  f.settings().onClose(); await f.flush();
+  assert.equal(count("connect"), connectsBeforeWorkers + 1, "a changed worker option restarts the runtime");
+  assert.equal(f.calls.filter(call => call.method === "connect").at(-1).workers, true);
+  // Browser sites are part of the same start options: changing them restarts too.
+  await f.button("Settings").props.onClick(); await f.flush();
+  f.settings().onOriginsChange("https://example.com"); await f.flush();
+  f.settings().onClose(); await f.flush();
+  assert.ok(count("stop") > stops + 1, "a changed site list stops the runtime");
+  assert.deepEqual(f.calls.filter(call => call.method === "connect").at(-1).origins, ["https://example.com"]);
 });
 
 test("composer model selection restarts the idle context and preserves history and draft", async () => {
   const f = fixture(); await f.flush();
-  await f.button("Saved chat").props.onClick(); await f.flush();
+  await contact(f, "Kiran").props.onClick(); await f.flush();
   await f.enter("My unsubmitted draft");
   await f.model().props.onChange({ target: { value: "two" } }); await f.flush();
   assert.equal(f.calls.filter(call => call.method === "connect").at(-1).profile, "two");
@@ -344,22 +504,24 @@ test("composer model selection restarts the idle context and preserves history a
 
 test("leaving settings waits for configuration writes instead of starting stale setup", async () => {
   const f = fixture(); await f.flush();
-  await f.button("⚙ Settings").props.onClick(); await f.flush();
+  await f.button("Settings").props.onClick(); await f.flush();
   f.settings().onPendingChange(true); await f.flush();
-  assert.equal(f.button("＋ New chat").props.disabled, true);
-  f.settings().onClose(); f.button("＋ New chat").props.onClick(); await f.flush();
+  assert.equal(f.button("New chat").props.disabled, true);
+  f.settings().onClose(); f.button("New chat").props.onClick(); await f.flush();
   assert.ok(f.settings());
   assert.equal(f.calls.filter(call => call.method === "connect").length, 1);
   f.settings().onPendingChange(false); await f.flush();
   f.settings().onClose(); await f.flush();
-  assert.equal(f.calls.filter(call => call.method === "connect").length, 2);
+  // The chat is already connected with the settings it was saved under, so closing does not start it again.
+  assert.equal(f.calls.filter(call => call.method === "connect").length, 1);
 });
 
 test("project changes never restore a different project's thread or carry optional permissions", async () => {
   const f = fixture(); await f.flush();
-  await f.button("Saved chat").props.onClick(); await f.flush();
-  await f.button("⚙ Settings").props.onClick(); await f.flush();
+  await contact(f, "Kiran").props.onClick(); await f.flush();
+  await f.button("Settings").props.onClick(); await f.flush();
   f.settings().onToolsChange(true); f.settings().onWorkersChange(true); f.settings().onOriginsChange("https://example.com"); await f.flush();
+  await openProjects(f);
   const project = f.nodes().find(node => node.type === "button" && node.props.title === "C:/second");
   await project.props.onClick(); await f.flush();
   const last = f.calls.filter(call => call.method === "connect").at(-1);
@@ -387,9 +549,10 @@ test("an unknown turn remains locked and cannot be automatically resent", async 
 
 test("failed history restoration cannot silently send a reply into a new chat", async () => {
   const f = fixture(); await f.flush();
-  await f.button("Saved chat").props.onClick(); await f.flush();
-  await f.button("⚙ Settings").props.onClick(); await f.flush();
-  f.failResume(); f.settings().onClose(); await f.flush(); await f.enter("Reply to saved history");
+  await contact(f, "Kiran").props.onClick(); await f.flush();
+  await f.button("Settings").props.onClick(); await f.flush();
+  // Closing restarts only when an option changed, so change one: the restart reloads the saved chat, and that reload fails.
+  f.failResume(); f.settings().onToolsChange(false); await f.flush(); f.settings().onClose(); await f.flush(); await f.enter("Reply to saved history");
   f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} }); await f.flush();
   assert.equal(f.calls.some(call => call.method === "thread/start" || call.method === "turn/start"), false);
 });

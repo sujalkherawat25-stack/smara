@@ -2,16 +2,53 @@
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Stdio};
+use std::process::{Child, Stdio};
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::{HashMap, HashSet};
 use tauri::{AppHandle, Emitter};
 
 struct NativeSession {
     process: Child,
-    input: Option<ChildStdin>,
+    /// Writes go through a dedicated writer thread, so native_send never blocks on the runtime's pipe.
+    input: Option<Sender<String>>,
     generation: String,
     activity: Arc<Mutex<ReviewActivity>>,
+    /// The model profile and its key the runtime was started with; a change to either needs a restart.
+    profile_id: String,
+    credential_name: String,
+}
+
+/// Owns the runtime's stdin. Lines queue here in order; dropping every sender ends the thread, which drops stdin,
+/// which the runtime reads as end-of-input and shuts down.
+fn spawn_writer<W: Write + Send + 'static>(mut output: W) -> Sender<String> {
+    let (tx, rx) = mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        for line in rx {
+            if writeln!(output, "{line}").and_then(|_| output.flush()).is_err() { break; }
+        }
+    });
+    tx
+}
+
+/// Whether a settings operation changes what the running runtime was started with. The UI calls this rule
+/// too (src/nativeSettingsPolicy.ts); keep the two in step.
+pub fn needs_runtime_restart(operation: &str, request: &Value, running: Option<(&str, &str)>) -> bool {
+    let Some((active_profile, active_credential)) = running else { return false };
+    match operation {
+        "select_model" | "select_project" | "save_project_options" => true,
+        "save_model" => request["profile"]["id"].as_str() == Some(active_profile),
+        "save_credential" | "delete_credential" => request["name"].as_str() == Some(active_credential),
+        _ => false,
+    }
+}
+
+/// Profile and key of the live runtime, if one is running.
+pub fn running_profile() -> Option<(String, String)> {
+    let mut lock = session().lock().ok()?;
+    let running = lock.as_mut()?;
+    if running.process.try_wait().ok()?.is_some() { return None; }
+    Some((running.profile_id.clone(), running.credential_name.clone()))
 }
 
 #[derive(Default)]
@@ -211,17 +248,21 @@ pub fn native_status() -> Value {
 }
 
 fn start_session(app: AppHandle, workspace: String, profile_id: String, tools_enabled: Option<bool>, workers_enabled: Option<bool>, browser_origins: Option<Vec<String>>) -> Result<Value, String> {
-    let mut lock = session().lock().map_err(|_| "Native session lock failed")?;
-    if let Some(running) = lock.as_mut() {
-        if running.process.try_wait().map_err(|_| "Cannot inspect native process")?.is_none() {
-            return Err("Stop the current native runtime before changing workspace or model.".into());
+    {
+        let mut lock = session().lock().map_err(|_| "Native session lock failed")?;
+        if let Some(running) = lock.as_mut() {
+            if running.process.try_wait().map_err(|_| "Cannot inspect native process")?.is_none() {
+                return Err("Stop the current native runtime before changing workspace or model.".into());
+            }
+            // Reap a crashed transport before reconnecting; do not strand the UI
+            // behind an already-exited global session.
+            *lock = None;
         }
-        // Reap a crashed transport before reconnecting; do not strand the UI
-        // behind an already-exited global session.
-        *lock = None;
     }
+    // Setup below (settings, key lookup, process start) runs without the session lock, so native_send
+    // and native_stop never queue behind it. The install at the end re-checks for a racing start.
     let native_binary = binary()?;
-    let connection = super::current_connection()?;
+    let connection = super::current_connection()?;   // cached snapshot, not a fresh settings read
     let root = super::selected_workspace_dir(&workspace, &connection.allowed_roots)?
         .ok_or("Choose an existing workspace folder")?;
     let mut matches = super::stored_local_model_profiles()?.into_iter()
@@ -269,7 +310,17 @@ fn start_session(app: AppHandle, workspace: String, profile_id: String, tools_en
         let _ = app.emit("native-runtime-event", json!({"generation": event_generation, "message": {"method": "smara/runtimeStopped"}}));
     });
     std::thread::spawn(move || { for _line in BufReader::new(errors).lines() {} });
-    *lock = Some(NativeSession { process, input: Some(input), generation: generation.clone(), activity });
+    let writer = spawn_writer(input);
+    let mut lock = session().lock().map_err(|_| "Native session lock failed")?;
+    if let Some(running) = lock.as_mut() {
+        if running.process.try_wait().map_err(|_| "Cannot inspect native process")?.is_none() {
+            // Another start won the race while this one was spawning: keep the live runtime, stop this one.
+            let _ = process.kill(); let _ = process.wait();
+            return Err("Stop the current native runtime before changing workspace or model.".into());
+        }
+    }
+    *lock = Some(NativeSession { process, input: Some(writer), generation: generation.clone(), activity,
+        profile_id: profile.id.clone(), credential_name: profile.credential_name.clone() });
     Ok(json!({"generation": generation, "sourceOwned": true}))
 }
 
@@ -280,9 +331,12 @@ pub async fn native_start(app: AppHandle, workspace: String, profile_id: String,
         .await.map_err(|_| "Native startup worker failed".to_owned())?
 }
 
+/// Validates and enqueues one RPC line. It never starts a process or reads settings from disk on the send path:
+/// terminal requests use the cached project snapshot, and the runtime's stdin is written by its writer thread.
 #[tauri::command]
-pub fn native_send(generation: String, message: Value) -> Result<(), String> {
+pub async fn native_send(generation: String, message: Value) -> Result<(), String> {
     if !message.is_object() { return Err("RPC message must be an object".into()); }
+    let snapshot = if message["method"] == "command/exec" { Some(super::cached_snapshot_or_refresh()?) } else { None };
     let mut lock = session().lock().map_err(|_| "Native session lock failed")?;
     let running = lock.as_mut().ok_or("Native runtime is not connected")?;
     if running.generation != generation { return Err("Stale native runtime generation".into()); }
@@ -290,15 +344,15 @@ pub fn native_send(generation: String, message: Value) -> Result<(), String> {
         return Err("Native process exited; reconnect before sending work".into());
     }
     let mut activity = running.activity.lock().map_err(|_| "Native activity lock failed")?;
-    let project_root = if message["method"] == "command/exec" {
-        let connection = super::current_connection()?;
-        Some(super::selected_workspace_dir(&connection.active_workspace, &connection.allowed_roots)?
-            .ok_or("Choose a project before starting a terminal")?)
-    } else { None };
+    let project_root = match &snapshot {
+        Some(snap) => Some(super::selected_workspace_dir(&snap.connection.active_workspace, &snap.connection.allowed_roots)?
+            .ok_or("Choose a project before starting a terminal")?),
+        None => None,
+    };
     validate_terminal_message(&message, &activity, project_root.as_deref())?;
-    let input = running.input.as_mut().ok_or("Native runtime is stopping")?;
+    let input = running.input.as_ref().ok_or("Native runtime is stopping")?;
     activity.request(&message);
-    writeln!(input, "{message}").and_then(|_| input.flush()).map_err(|_| "Cannot send native RPC message".into())
+    input.send(message.to_string()).map_err(|_| "Cannot send native RPC message".into())
 }
 
 fn stop_session(expected_generation: Option<&str>) -> Result<(), String> {
@@ -312,12 +366,14 @@ fn stop_session(expected_generation: Option<&str>) -> Result<(), String> {
     // session on an inspection/kill failure would make cleanup retry a no-op
     // while permitting a second runtime to be started.
     if let Some(running) = lock.as_mut() {
-        if let Some(mut input) = running.input.take() {
-            let _ = writeln!(input, "{{\"method\":\"smara/shutdown\"}}");
-            let _ = input.flush();
+        if let Some(input) = running.input.take() {
+            // The writer sends the shutdown line, then drops stdin (EOF) once the queue drains.
+            let _ = input.send("{\"method\":\"smara/shutdown\"}".to_owned());
+            drop(input);
         }
-        // Allow the native EOF cleanup (bounded to 45s by the bootstrap) to
-        // finish before killing its transport process.
+        // Allow the native EOF cleanup (bounded to 45s by the bootstrap) to finish before killing its transport
+        // process. Stopping sooner could leave workers or Windows-sandbox cleanup unfinished. This wait runs on
+        // a blocking worker (native_stop), and the UI stays locked while a restart is in progress.
         for _ in 0..550 {
             if running.process.try_wait().map_err(|_| "Cannot inspect stopping process")?.is_some() {
                 *lock = None;
@@ -325,11 +381,23 @@ fn stop_session(expected_generation: Option<&str>) -> Result<(), String> {
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
+        let pid = running.process.id();
         running.process.kill().map_err(|_| "Could not stop native transport")?;
         running.process.wait().map_err(|_| "Could not reap native transport")?;
+        log_line(&format!("native runtime pid {pid} did not exit within 55 s; killed it"));
         *lock = None;
     }
     Ok(())
+}
+
+/// Appends one diagnostic line to the Desktop log. Only ids and timings go here, never keys or message text.
+fn log_line(message: &str) {
+    let folder = super::state_path().parent().map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let _ = std::fs::create_dir_all(&folder);
+    let path = folder.join("smara-desktop-runtime.log");
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{} {message}", chrono::Utc::now().to_rfc3339());
+    }
 }
 
 #[tauri::command]
@@ -482,5 +550,56 @@ mod review_tests {
         active.windows_sandbox_ready = false;
         assert!(validate_terminal_message(&message, &active, Some(std::path::Path::new(root))).is_err());
         assert!(active.terminal_processes.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod transport_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[derive(Clone)]
+    struct Sink { bytes: Arc<Mutex<Vec<u8>>>, delay: Duration }
+    impl Write for Sink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if !self.delay.is_zero() { std::thread::sleep(self.delay); }
+            self.bytes.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+    }
+
+    #[test]
+    fn writer_keeps_lines_in_order_and_enqueue_never_waits_for_the_pipe() {
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        // Each write takes 20 ms, like a busy pipe. Enqueueing 20 lines must still return at once.
+        let tx = spawn_writer(Sink { bytes: bytes.clone(), delay: Duration::from_millis(20) });
+        let started = Instant::now();
+        for i in 0..20 { tx.send(format!("{{\"id\":{i}}}")).unwrap(); }
+        assert!(started.elapsed() < Duration::from_millis(50), "enqueue waited for the pipe: {:?}", started.elapsed());
+        drop(tx);
+        let expected: String = (0..20).map(|i| format!("{{\"id\":{i}}}\n")).collect();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while bytes.lock().unwrap().len() < expected.len() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(String::from_utf8(bytes.lock().unwrap().clone()).unwrap(), expected);
+    }
+
+    #[test]
+    fn only_model_project_and_option_changes_or_the_active_key_restart_the_runtime() {
+        let running = Some(("local:glm", "GLM_KEY"));
+        let req = |value: Value| value;
+        assert!(needs_runtime_restart("select_model", &req(json!({"id": "local:other"})), running));
+        assert!(needs_runtime_restart("select_project", &req(json!({})), running));
+        assert!(needs_runtime_restart("save_project_options", &req(json!({})), running));
+        assert!(needs_runtime_restart("save_model", &req(json!({"profile": {"id": "local:glm"}})), running));
+        assert!(!needs_runtime_restart("save_model", &req(json!({"profile": {"id": "local:other"}})), running));
+        assert!(needs_runtime_restart("save_credential", &req(json!({"name": "GLM_KEY"})), running));
+        assert!(!needs_runtime_restart("save_credential", &req(json!({"name": "TAVILY_API_KEY"})), running));
+        for op in ["save_memory", "select_search", "test_model", "test_search", "save_outreach", "add_project"] {
+            assert!(!needs_runtime_restart(op, &req(json!({})), running), "{op} must not restart");
+        }
+        assert!(!needs_runtime_restart("select_model", &req(json!({})), None), "nothing to restart when idle");
     }
 }

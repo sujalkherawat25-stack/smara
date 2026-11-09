@@ -38,7 +38,8 @@ async def lifespan(app: FastAPI):
     app.state.wa_link = SidecarClient(s.wa_link_url, s.wa_link_token) if s.wa_link_url and s.wa_link_token else None
     app.state.llm = LLM(s.llm_base_url, s.llm_api_key, s.llm_model, s.llm_reasoning_model,
                         agent_model=s.llm_agent_model, max_concurrency=s.llm_max_concurrency,
-                        agent_rpm=s.llm_agent_rpm, fallback_model=s.llm_fallback_model)
+                        agent_rpm=s.llm_agent_rpm, fallback_model=s.llm_fallback_model,
+                        api_keys=s.llm_keys())
     app.state.bg = set()
     app.state.browsers = BrowserRouter(app.state.pool, BrowserSessions())   # the owner's own device first, else the server browser
     app.state.sandbox = Sandbox(s.sandbox_jobs_dir, s.sandbox_mode)

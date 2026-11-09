@@ -168,8 +168,8 @@ def map_sheet(filename: str, data: bytes, known_phones: dict[str, str] | None = 
         due = parse_date(get("due"))
         if due is None and (billed := parse_date(get("bill_date"))):
             due = billed + timedelta(days=DEFAULT_CREDIT_DAYS)
-        if not phone or due is None:
-            skipped.append(f"row {n} ({party}): missing {'phone' if not phone else 'due date'}")
+        if due is None:                       # a customer without a number is still kept; it is just never messaged
+            skipped.append(f"row {n} ({party}): missing due date")
             continue
         ref = str(get("invoice") or "").strip() or f"{party[:12]}-{due.isoformat()}-{amount}"
         gstin = str(get("gstin") or "").strip().upper() or None
