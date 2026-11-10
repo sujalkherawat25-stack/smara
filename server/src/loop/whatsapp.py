@@ -59,7 +59,8 @@ def shop_choice_message(to: str, options: list[dict], routing_id: str) -> dict:
 
 
 def text_message(to: str, text: str) -> dict:
-    return {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
+    from src.loop.wa_format import to_whatsapp   # WhatsApp shows Markdown as raw symbols; convert it here
+    return {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": to_whatsapp(text)}}
 
 
 def own_whatsapp_link(phone: str, text: str) -> str:

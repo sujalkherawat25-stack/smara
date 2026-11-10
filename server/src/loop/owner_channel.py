@@ -58,11 +58,14 @@ def pick_channel(app, tenant, now: datetime, reply_channel: str | None = None) -
 
 
 def wa_to_telegram(payload: dict, chat_id: int) -> dict:
+    """Telegram gets the same text as WhatsApp, with the marks turned into Telegram's HTML."""
+    from src.loop.wa_format import to_telegram_html
     if payload.get("type") == "interactive":
         it = payload["interactive"]
         rows = [[{"text": b["reply"]["title"], "callback_data": b["reply"]["id"]}] for b in it["action"]["buttons"]]
-        return {"chat_id": chat_id, "text": it["body"]["text"][:4096], "reply_markup": {"inline_keyboard": rows}}
-    return {"chat_id": chat_id, "text": (payload.get("text") or {}).get("body", "")[:4096]}
+        return {"chat_id": chat_id, "text": to_telegram_html(it["body"]["text"]), "parse_mode": "HTML",
+                "reply_markup": {"inline_keyboard": rows}}
+    return {"chat_id": chat_id, "text": to_telegram_html((payload.get("text") or {}).get("body", "")), "parse_mode": "HTML"}
 
 
 async def send_to_owner(app, tenant, payload: dict, *, kind: str, obligation_id=None, adjustment_id=None,

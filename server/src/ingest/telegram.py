@@ -118,7 +118,8 @@ async def handle_update(app, upd: dict) -> None:
     if not m or (m.get("chat") or {}).get("type") != "private":
         return
     chat_id, text = m["chat"]["id"], (m.get("text") or "").strip()
-    reply = lambda t: tg.send({"chat_id": chat_id, "text": t})
+    from src.loop.wa_format import to_telegram_html
+    reply = lambda t: tg.send({"chat_id": chat_id, "text": to_telegram_html(t), "parse_mode": "HTML"})
     if text.startswith("/start"):
         code = text.partition(" ")[2].strip()
         await reply(await _link(pool, code, chat_id) if code else NOT_LINKED)
