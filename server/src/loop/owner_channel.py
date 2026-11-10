@@ -25,6 +25,25 @@ def window_open(tenant, now: datetime) -> bool:
     return bool(last) and now - last < WINDOW
 
 
+def uses_link(app, tenant, reply_channel: str | None) -> bool:
+    """The owner wrote on the shop's WhatsApp link (or it was their last channel): answer on that link, not the
+    official number. Only when the link service is configured."""
+    if getattr(app.state, "wa_link", None) is None:
+        return False
+    if reply_channel is not None:
+        return reply_channel == "wa_link"
+    return tenant.owner_last_channel == "wa_link"
+
+
+def wa_link_text(payload: dict) -> str:
+    """The link sends plain text. Buttons become their titles, so the owner can answer by typing one."""
+    if payload.get("type") == "interactive":
+        it = payload["interactive"]
+        titles = [b["reply"]["title"] for b in it["action"]["buttons"]]
+        return f"{it['body']['text']}\n\nReply with one of: {' / '.join(titles)}"[:4000]
+    return str((payload.get("text") or {}).get("body", ""))[:4000]
+
+
 def pick_channel(app, tenant, now: datetime, reply_channel: str | None = None) -> str:
     """Where an owner-bound message goes. A reply stays on the channel the owner wrote on. Anything else
     (approvals, reminders, files the agent started) follows the owner's last-used channel. If WhatsApp is the
@@ -62,6 +81,17 @@ async def send_to_owner(app, tenant, payload: dict, *, kind: str, obligation_id=
     if pick_channel(app, tenant, now, reply_channel) == "telegram":
         await tg.send(wa_to_telegram(payload, tenant.telegram_chat_id))
         return "telegram"
+    if uses_link(app, tenant, reply_channel):
+        from src.loop.wa_link import SidecarError, client as link_client
+        try:
+            msg_id = await link_client(app).send(str(tenant.id), tenant.owner_phone, wa_link_text(payload))
+        except SidecarError:
+            log.warning("owner message not sent on the WhatsApp link; falling back to the official number")
+        else:
+            if msg_id:
+                await record(pool, msg_id, tenant_id=tenant.id, kind=kind, to_phone=tenant.owner_phone,
+                             obligation_id=obligation_id, adjustment_id=adjustment_id, agent_session_id=agent_session_id)
+            return "wa_link"
     if reply_channel is None and s.wa_owner_template and not window_open(tenant, now) \
             and kind in (*CARD_KINDS, "owner_digest"):
         if kind in CARD_KINDS:
