@@ -125,7 +125,7 @@ export class SessionManager {
       this.scheduleFlush(s);
     });
     sock.ev.on("connection.update", (update) => this.onConnection(s, sock, update));
-    sock.ev.on("messages.upsert", (update) => this.onMessages(s, update));
+    sock.ev.on("messages.upsert", (update) => this.onMessages(s, update).catch((err) => this.log("warn", `inbound handling failed: ${err?.name || "error"}`)));
   }
 
   onConnection(s, sock, { connection, lastDisconnect, qr }) {
@@ -170,11 +170,26 @@ export class SessionManager {
     }, delay).unref?.();
   }
 
-  onMessages(s, { messages = [], type }) {
+  async onMessages(s, { messages = [], type }) {
+    // Diagnostics: counts and address shapes only, never message text or full numbers.
+    this.log("info", `messages event type=${type} count=${messages.length}`);
     if (type !== "notify") return; // history sync and other bulk types are not customer messages
     for (const m of messages) {
-      const jid = [m.key?.remoteJid, m.key?.remoteJidAlt].find((j) => typeof j === "string" && j.endsWith("@s.whatsapp.net"));
-      if (m.key?.fromMe || !m.key?.id || !jid) continue;
+      let jid = [m.key?.remoteJid, m.key?.remoteJidAlt].find((j) => typeof j === "string" && j.endsWith("@s.whatsapp.net"));
+      // Newer WhatsApp addresses many senders by an anonymous @lid id. Baileys maps it back to the phone number.
+      if (!jid && !m.key?.fromMe && typeof m.key?.remoteJid === "string" && m.key.remoteJid.endsWith("@lid")) {
+        try {
+          const pn = await s.sock?.signalRepository?.lidMapping?.getPNForLID(m.key.remoteJid);
+          if (typeof pn === "string" && pn.endsWith("@s.whatsapp.net")) jid = pn;
+        } catch {
+          // no mapping yet: the message is skipped below and counted
+        }
+      }
+      if (m.key?.fromMe || !m.key?.id || !jid) {
+        const suffix = (j) => (typeof j === "string" ? j.split("@")[1] || "none" : "none");
+        this.log("info", `message skipped fromMe=${!!m.key?.fromMe} hasId=${!!m.key?.id} remote=${suffix(m.key?.remoteJid)} alt=${suffix(m.key?.remoteJidAlt)}`);
+        continue;
+      }
       const { kind, text } = extractContent(m.message || {});
       this.enqueue(s, "inbound", {
         tenant_id: s.key,
