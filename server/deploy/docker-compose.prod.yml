@@ -46,6 +46,8 @@ services:
     volumes:
       - munim_jobs:/jobs
       - munim_browser:/data/browser-profiles
+      # Files the owner sends (kept 7 days). A named volume keeps them across releases.
+      - munim_owner_files:/app/data/owner-files
     ports:
       - "127.0.0.1:8090:8080"
     depends_on:
@@ -121,3 +123,4 @@ volumes:
   munim_pgdata:
   munim_jobs:
   munim_browser:
+  munim_owner_files:
