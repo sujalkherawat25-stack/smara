@@ -173,6 +173,20 @@ test("a message sent from a LID address is matched by its phone-number address",
   assert.equal(h.last("inbound").text, "paid 500");
 });
 
+test("a LID sender with no phone-number address is mapped through Baileys, and an unknown one is skipped", async () => {
+  const h = harness();
+  await h.manager.start(KEY);
+  const sock = h.sockets[0];
+  sock.signalRepository = { lidMapping: { getPNForLID: async (lid) => (lid === "555000111@lid" ? "919000000003:0@s.whatsapp.net" : null) } };
+  sock.emit("messages.upsert", { type: "notify", messages: [
+    { key: { id: "M1", remoteJid: "555000111@lid", fromMe: false }, message: { conversation: "paid" } },
+    { key: { id: "M2", remoteJid: "999000999@lid", fromMe: false }, message: { conversation: "unknown" } },
+  ] });
+  await h.settle();
+  const inbound = h.calls.filter((c) => c.path === "inbound").map((c) => c.body);
+  assert.deepEqual(inbound, [{ tenant_id: KEY, wamid: "wl:M1", sender: "919000000003", kind: "text", text: "paid", ts: 0 }]);
+});
+
 test("content extraction keeps text and captions, and labels media without downloading it", () => {
   assert.deepEqual(extractContent({ conversation: "hi" }), { kind: "text", text: "hi" });
   assert.deepEqual(extractContent({ extendedTextMessage: { text: "yo" } }), { kind: "text", text: "yo" });
