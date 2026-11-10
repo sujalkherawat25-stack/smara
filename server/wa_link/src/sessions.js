@@ -1,6 +1,7 @@
 // One Baileys socket per shop (tenant). Pairing shows a QR; once linked, the device keeps running until WhatsApp
 // logs it out. Every state change is reported to the Smara app, which owns the database and the encryption.
-import makeWASocket, { Browsers, DisconnectReason, makeCacheableSignalKeyStore } from "@whiskeysockets/baileys";
+import { randomUUID } from "node:crypto";
+import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, makeCacheableSignalKeyStore } from "@whiskeysockets/baileys";
 import QRCode from "qrcode";
 import { Pacer } from "./pacer.js";
 import { freshState, makeKeyStore, parseState, serializeState } from "./state.js";
@@ -16,6 +17,9 @@ const FLUSH_DELAY_MS = 1500;
 const RECONNECT_BASE_MS = 2000;
 const RECONNECT_MAX_MS = 60_000;
 const PAIRING_TIMEOUT_MS = 10 * 60_000;   // an unscanned QR is abandoned after ten minutes, not retried forever
+export const MAX_MEDIA_BYTES = 20 * 1024 * 1024;   // the same cap the app applies to every file the owner sends
+const MEDIA_TTL_MS = 15 * 60_000;         // a received file is held this long for the app to fetch it, then forgotten
+const MAX_HELD_MEDIA = 50;                // per shop; the oldest is dropped first
 
 // The digits of a WhatsApp id such as "919812345678:12@s.whatsapp.net".
 export function phoneOf(jid = "") {
@@ -29,17 +33,32 @@ function unwrap(message) {
   return message;
 }
 
-// What a customer sent, as the app needs it: text (or a caption) and a coarse kind. Media is not downloaded.
+function toNumber(v) {
+  if (typeof v === "number") return v;
+  if (v && typeof v.toNumber === "function") return v.toNumber();   // a protobuf Long
+  return Number(v) || 0;
+}
+
+// What was sent, as the app needs it: text (or a caption) and a coarse kind. A file or voice note also carries its
+// type, name and size (`media`); the bytes are not downloaded here, only when the app asks for them.
 export function extractContent(raw = {}) {
   const m = unwrap(raw);
   if (m.conversation) return { kind: "text", text: m.conversation };
   if (m.extendedTextMessage) return { kind: "text", text: m.extendedTextMessage.text || "" };
-  if (m.imageMessage) return { kind: "image", text: m.imageMessage.caption || "" };
-  if (m.videoMessage) return { kind: "video", text: m.videoMessage.caption || "" };
-  if (m.documentMessage) return { kind: "document", text: m.documentMessage.caption || "" };
-  if (m.audioMessage) return { kind: "audio", text: "" };
+  if (m.imageMessage) return mediaContent("image", m.imageMessage, m.imageMessage.caption || "");
+  if (m.videoMessage) return mediaContent("video", m.videoMessage, m.videoMessage.caption || "");
+  if (m.documentMessage) return mediaContent("document", m.documentMessage, m.documentMessage.caption || "", m.documentMessage.fileName);
+  if (m.audioMessage) return mediaContent("audio", m.audioMessage, "");
   if (m.stickerMessage) return { kind: "sticker", text: "" };
   return { kind: "other", text: "" };
+}
+
+function mediaContent(kind, part, text, fileName = "") {
+  return {
+    kind,
+    text,
+    media: { mime: String(part.mimetype || "").slice(0, 120), filename: String(fileName || "").slice(0, 255), size: toNumber(part.fileLength) },
+  };
 }
 
 class Session {
@@ -59,6 +78,7 @@ class Session {
     this.flushTimer = null;
     this.chain = Promise.resolve(); // every call to the app runs here, in order, one at a time
     this.pacer = new Pacer({ gapMs: sendGapMs });
+    this.media = new Map();         // ref -> { message, expires }: files received, held until fetched or expired
   }
 }
 
@@ -67,6 +87,7 @@ export class SessionManager {
     callback,
     logger,
     makeSocket = (cfg) => makeWASocket(cfg),
+    downloadMedia = null,
     sendGapMs = 3000,
     flushDelayMs = FLUSH_DELAY_MS,
     reconnectBaseMs = RECONNECT_BASE_MS,
@@ -74,6 +95,11 @@ export class SessionManager {
     log = () => {},
   }) {
     Object.assign(this, { callback, logger, makeSocket, sendGapMs, flushDelayMs, reconnectBaseMs, pairingTimeoutMs, log });
+    // Fetches the bytes of one held message. Baileys decrypts it; the socket can refresh an expired media URL.
+    this.downloadMedia = downloadMedia ?? ((message, sock) => downloadMediaMessage(message, "buffer", {}, {
+      logger,
+      reuploadRequest: (msg) => sock.updateMediaMessage(msg),
+    }));
     this.sessions = new Map();
   }
 
@@ -190,16 +216,40 @@ export class SessionManager {
         this.log("info", `message skipped fromMe=${!!m.key?.fromMe} hasId=${!!m.key?.id} remote=${suffix(m.key?.remoteJid)} alt=${suffix(m.key?.remoteJidAlt)}`);
         continue;
       }
-      const { kind, text } = extractContent(m.message || {});
-      this.enqueue(s, "inbound", {
+      const { kind, text, media } = extractContent(m.message || {});
+      const body = {
         tenant_id: s.key,
         wamid: `wl:${m.key.id}`,
         sender: phoneOf(jid),
         kind,
         text: text.slice(0, 4000),
         ts: Number(m.messageTimestamp) || 0,
-      });
+      };
+      if (media) body.media = this.holdMedia(s, m, media);
+      this.enqueue(s, "inbound", body);
     }
+  }
+
+  // Keeps the received message so the app can fetch its file. Too large to hold: no ref, and the app refuses it by size.
+  holdMedia(s, message, media) {
+    if (media.size > MAX_MEDIA_BYTES) return { ...media, ref: null };
+    const now = Date.now();
+    for (const [ref, held] of s.media) if (held.expires < now) s.media.delete(ref);
+    while (s.media.size >= MAX_HELD_MEDIA) s.media.delete(s.media.keys().next().value);
+    const ref = randomUUID();
+    s.media.set(ref, { message, expires: now + MEDIA_TTL_MS });
+    return { ...media, ref };
+  }
+
+  // The bytes of one file the owner sent on this SIM. Handed over once; a file that is unknown or expired is a 404.
+  async media(key, ref) {
+    const s = this.sessions.get(key);
+    const held = s?.media.get(ref);
+    s?.media.delete(ref);
+    if (!held || held.expires < Date.now()) throw new HttpError(404, "no such file");
+    const data = await this.downloadMedia(held.message, s?.sock);
+    if (data.length > MAX_MEDIA_BYTES) throw new HttpError(413, "file too large");
+    return data;
   }
 
   // One text message to one number. Serialised and paced by the session's pacer; the caller must not retry on

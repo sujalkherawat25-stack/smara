@@ -128,16 +128,25 @@ async def handle_update(app, upd: dict) -> None:
     if tenant is None:
         await reply(NOT_LINKED)
         return
-    kind, media_id, filename = "text", None, ""
+    kind, media_id, filename, mime, size = "text", None, "", "", 0
     if doc := m.get("document"):
         kind, media_id, filename = "document", doc["file_id"], doc.get("file_name", "")
+        mime, size = doc.get("mime_type", ""), doc.get("file_size", 0)
     elif photos := m.get("photo"):
         kind, media_id = "image", photos[-1]["file_id"]      # largest size is last
+        size = photos[-1].get("file_size", 0)
     elif voice := m.get("voice"):
-        kind, media_id = "audio", voice["file_id"]
+        kind, media_id, mime, size = "audio", voice["file_id"], voice.get("mime_type", "audio/ogg"), voice.get("file_size", 0)
+    elif video := m.get("video"):
+        kind, media_id, filename = "video", video["file_id"], video.get("file_name", "")
+        mime, size = video.get("mime_type", ""), video.get("file_size", 0)
+    elif audio := m.get("audio"):                             # a music or audio file, not a voice note: a file
+        kind, media_id, filename = "document", audio["file_id"], audio.get("file_name", "")
+        mime, size = audio.get("mime_type", ""), audio.get("file_size", 0)
     await _owner(app, tenant, InboundMessage(
         wamid=f"tg:{chat_id}:{m['message_id']}", sender=tenant.owner_phone, kind=kind, text=text,
-        media_id=media_id, filename=filename, caption=m.get("caption", ""), channel="telegram", chat_id=chat_id))
+        media_id=media_id, filename=filename, caption=m.get("caption", ""), channel="telegram", chat_id=chat_id,
+        mime=mime, size=int(size or 0)))
 
 
 async def _owner(app, tenant, msg: InboundMessage) -> None:

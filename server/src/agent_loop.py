@@ -11,6 +11,7 @@ handled deterministically (never by the model) and resumes from that call.
 import asyncio
 import json
 import re
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 import logging
@@ -45,6 +46,71 @@ def _spawn(app, coro) -> None:
     task = asyncio.create_task(coro)
     app.state.bg.add(task)
     task.add_done_callback(app.state.bg.discard)
+
+
+def _live(app) -> Counter:
+    """Runs working in this process right now, per session. An owner message joins only these. A RUNNING row left
+    behind by a restart has no run behind it, so a message attached to it would never be read. A count, not a flag:
+    a finishing run and the continuation that starts on the same session can overlap, and each must hold its own mark."""
+    if not hasattr(app.state, "live_runs"):
+        app.state.live_runs = Counter()
+    return app.state.live_runs
+
+
+def _mark(app, sid: str, on: bool) -> None:
+    counts = _live(app)
+    if on:
+        counts[sid] += 1
+    else:
+        counts[sid] -= 1
+        if counts[sid] <= 0:
+            del counts[sid]
+
+
+async def attach_to_running(app, tenant_id: str, content: str, files=()) -> bool:
+    """An owner message while a run is working on a task joins that run: it is read at the run's next step, and no
+    second run starts. False when no run is live for this shop; the caller then starts a session as a normal message."""
+    live = list(_live(app))
+    if not live:
+        return False
+    item = json.dumps([{"content": content, "files": list(files)}])
+    async with app.state.pool.connection() as conn:
+        row = await (await conn.execute(
+            """UPDATE agent_sessions SET inbox = inbox || %s::jsonb
+                WHERE id = (SELECT id FROM agent_sessions WHERE status = 'RUNNING' AND trust = 'TRUSTED'
+                            AND tenant_id = %s AND id::text = ANY(%s::text[]) ORDER BY created_at DESC LIMIT 1)
+                  AND status = 'RUNNING'
+                RETURNING id""", (item, tenant_id, live))).fetchone()
+    return row is not None
+
+
+async def _drain(pool, sid: str) -> list[dict]:
+    """Take and clear the owner messages waiting for a session. Their files become part of that session."""
+    async with pool.connection() as conn:
+        row = await (await conn.execute("SELECT inbox FROM agent_sessions WHERE id = %s FOR UPDATE", (sid,))).fetchone()
+        items = (row or {}).get("inbox") or []
+        if items:
+            files = [f for it in items for f in it.get("files", [])]
+            await conn.execute("UPDATE agent_sessions SET inbox = '[]'::jsonb, files = files || %s::text[] WHERE id = %s",
+                               (files, sid))
+    return items
+
+
+async def _take_inbox(app, row, messages: list) -> None:
+    """Put the owner messages that arrived during the last step into the conversation, where the model reads them next."""
+    for it in await _drain(app.state.pool, str(row["id"])):
+        messages.append({"role": "user", "content": f"[sent while you were working]\n{it['content']}"})
+        row["files"] = [*row["files"], *it.get("files", [])]
+
+
+async def _finish_unless_inbox(pool, sid: str, messages: list, steps: int) -> bool:
+    """Mark the run DONE, unless an owner message arrived during the last step. Returns False then: the run goes on."""
+    async with pool.connection() as conn:
+        row = await (await conn.execute(
+            """UPDATE agent_sessions SET status = 'DONE', messages = %s::jsonb, steps = %s, updated_at = now()
+                WHERE id = %s AND jsonb_array_length(inbox) = 0 RETURNING id""",
+            (json.dumps(messages, default=str), steps, sid))).fetchone()
+    return row is not None
 
 
 def active_grants(row) -> tuple[str, ...]:
@@ -136,8 +202,16 @@ async def start_session(app, *, tenant, trust: str, trigger: str, content: str, 
                 (tenant.id, trust, trigger, party_id, channel, list(files), json.dumps([system, user])))
             row = await cur.fetchone()
     sid = str(row["id"])
-    job = run(app, sid, fallback=fallback)
-    _spawn(app, job) if background else await job
+    _mark(app, sid, True)               # from now on an owner message joins this run (attach_to_running); run() unmarks
+    started = False
+    try:
+        job = run(app, sid, fallback=fallback)
+        started = True
+        _spawn(app, job) if background else await job
+    except BaseException:
+        if not started:
+            _mark(app, sid, False)
+        raise
     return sid
 
 
@@ -165,6 +239,14 @@ def owes_file(messages: list[dict]) -> bool:
 
 
 async def run(app, sid: str, fallback=None) -> None:
+    """One run of a session (see _run). The caller marked the session live (start_session, resume); this unmarks it."""
+    try:
+        await _run(app, sid, fallback=fallback)
+    finally:
+        _mark(app, sid, False)
+
+
+async def _run(app, sid: str, fallback=None) -> None:
     pool = app.state.pool
     async with pool.connection() as conn:
         row = await (await conn.execute("SELECT * FROM agent_sessions WHERE id = %s AND status = 'RUNNING'", (sid,))).fetchone()
@@ -177,6 +259,7 @@ async def run(app, sid: str, fallback=None) -> None:
         if messages and messages[0]["role"] == "system":      # never carry a stale date/ledger/instructions into a new turn
             messages[0] = {"role": "system", "content": await build_system(app, tenant, row["trust"], str(row["id"]))}
         while budget < MAX_STEPS:
+            await _take_inbox(app, row, messages)          # owner messages sent during the last step are read now
             messages = compact(messages)
             try:
                 msg = await app.state.llm.chat(messages, tools.TOOLS, allow_fallback=not heavy(messages))
@@ -205,7 +288,10 @@ async def run(app, sid: str, fallback=None) -> None:
                                  "then confirm. Do this even if you sent a similar file earlier."})
                 continue
             if not calls:
-                await _save(pool, sid, messages, status="DONE", steps=steps)
+                if not await _finish_unless_inbox(pool, sid, messages, steps):
+                    await _save(pool, sid, messages, steps=steps)     # an owner message came in during this step: read it next
+                    await _finish(app, row, msg.get("content") or "")  # what it said so far still reaches the owner
+                    continue
                 await _finish(app, row, msg.get("content") or "")
                 if row["trust"] == "TRUSTED":          # keep what is worth remembering, without slowing the reply
                     _spawn(app, memory_pass.remember_from_turn(app, str(row["tenant_id"]), sid, list(messages)))
@@ -221,6 +307,7 @@ async def run(app, sid: str, fallback=None) -> None:
                 return await _save(pool, sid, messages, steps=steps)
             await _save(pool, sid, messages, steps=steps)
         # Out of budget: never go silent. Ask the model for an honest status instead of a dead end.
+        await _take_inbox(app, row, messages)              # what the owner sent meanwhile is in the status it writes
         messages.append({"role": "user", "content": "[system note] Step budget reached. Without calling any tool, tell the owner "
                          "briefly what you finished, what is left, and what you need from them to continue."})
         summary = ((await app.state.llm.chat(messages, [])).get("content") or "").strip()
@@ -230,10 +317,14 @@ async def run(app, sid: str, fallback=None) -> None:
     except Exception:
         log.exception("agent session %s failed", sid)
         await _save(pool, sid, messages, status="FAILED", steps=steps)
+        unread = await _drain(pool, sid)          # owner messages that arrived and were never read: say so, never silence
         if fallback and steps <= 1:
             await fallback()   # e.g. the deterministic debtor path, so a claim is never lost
         elif row["trust"] == "TRUSTED":
-            await _finish(app, row, "Sorry, I could not finish that right now. Please try again in a minute.")
+            text = "Sorry, I could not finish that right now. Please try again in a minute."
+            if unread:
+                text += " Your message sent while I was working was not read; please send it again."
+            await _finish(app, row, text)
     # The browser page is NOT closed when a turn ends: the owner's next message in this conversation ("now open her chat")
     # continues on the same page. Idle pages are closed by the browser manager after a while.
 
@@ -322,19 +413,28 @@ async def resume(app, tenant_id: str, *, sid: str | None = None, adjustment_id: 
                  WHERE {where} AND tenant_id = %s AND status = 'WAITING_APPROVAL' RETURNING *""", (arg, tenant_id))).fetchone()
     if row is None:
         return False
-    p, messages = row["pending"], row["messages"]
-    ctx, tenant = _ctx(row, p["call_id"], getattr(app.state, "browsers", None)), await tenants.by_id(app.state.pool, tenant_id)
-    if outcome is not None:          # propose_ledger_adjustment: the ledger path already applied the decision
-        result = outcome
-    elif approved and pre_tool_use(ctx, p["name"], p["args"], tools.TOOL_NAMES).verdict in ("approve", "allow"):
-        result = await actions.execute_approved(app, ctx, tenant, p["name"], p["args"])
-    else:
-        await actions.on_rejected(app, ctx, p["name"], p["args"])
-        result = {"error": "the owner rejected this action"}
-    messages.append({"role": "tool", "tool_call_id": p["call_id"], "content": tools.bounded(result)})
-    if await _process(app, row, messages, p.get("remaining") or []):
+    p, messages, sid = row["pending"], row["messages"], str(row["id"])
+    _mark(app, sid, True)               # from now until the run has the session, an owner message joins it
+    started = False
+    try:
+        ctx, tenant = _ctx(row, p["call_id"], getattr(app.state, "browsers", None)), await tenants.by_id(app.state.pool, tenant_id)
+        if outcome is not None:          # propose_ledger_adjustment: the ledger path already applied the decision
+            result = outcome
+        elif approved and pre_tool_use(ctx, p["name"], p["args"], tools.TOOL_NAMES).verdict in ("approve", "allow"):
+            result = await actions.execute_approved(app, ctx, tenant, p["name"], p["args"])
+        else:
+            await actions.on_rejected(app, ctx, p["name"], p["args"])
+            result = {"error": "the owner rejected this action"}
+        messages.append({"role": "tool", "tool_call_id": p["call_id"], "content": tools.bounded(result)})
+        if await _process(app, row, messages, p.get("remaining") or []):
+            _mark(app, sid, False)      # waiting on the owner again: not running
+            return True
+        await _save(app.state.pool, ctx.id, messages, pending=None)
+        job = run(app, ctx.id)          # run() unmarks when it ends
+        started = True
+        _spawn(app, job) if background else await job
         return True
-    await _save(app.state.pool, ctx.id, messages, pending=None)
-    job = run(app, ctx.id)
-    _spawn(app, job) if background else await job
-    return True
+    except BaseException:
+        if not started:
+            _mark(app, sid, False)
+        raise

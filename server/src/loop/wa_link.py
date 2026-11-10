@@ -14,6 +14,7 @@ Credentials never touch disk or logs: the sidecar holds them in memory and the a
 """
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime, time as dtime, timedelta, timezone
 
@@ -24,6 +25,7 @@ from src.config import normalize_phone
 
 log = logging.getLogger(__name__)
 AUTH_SECRET = "wa_link_auth"
+_MEDIA_REF = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
 PROACTIVE, REPLY = "proactive", "reply"
 STATUSES = ("pairing", "connected", "reconnecting", "disconnected", "logged_out")
 DETAIL = {
@@ -83,6 +85,18 @@ class SidecarClient:
     async def disconnect(self, tenant_id: str) -> dict:
         return await self._call("POST", f"/sessions/{tenant_id}/disconnect")
 
+    async def media(self, tenant_id: str, ref: str) -> bytes:
+        """One file the owner sent on the SIM. The sidecar keeps it a few minutes and hands it over once."""
+        if not _MEDIA_REF.fullmatch(ref or ""):
+            raise SidecarError("bad file reference")
+        try:
+            res = await self._http.get(f"/sessions/{tenant_id}/media/{ref}", timeout=httpx.Timeout(120.0))
+        except httpx.HTTPError as e:
+            raise SidecarError("the WhatsApp link service is unreachable") from e
+        if res.status_code >= 400:
+            raise SidecarError(f"the WhatsApp link service answered {res.status_code}")
+        return res.content
+
     async def aclose(self) -> None:
         await self._http.aclose()
 
@@ -96,6 +110,11 @@ def client(app) -> SidecarClient:
 
 def configured(app) -> bool:
     return getattr(app.state, "wa_link", None) is not None
+
+
+async def media(app, tenant_id: str, ref: str) -> bytes:
+    """A file the owner sent on the shop's SIM, fetched from the sidecar. Raises SidecarError if it is no longer there."""
+    return await client(app).media(tenant_id, ref)
 
 
 # ---------------------------------------------------------------- database

@@ -24,10 +24,12 @@ OPEN_STATES = ("ACTIVE", "WAITING_OWNER_APPROVAL", "DISPATCHED", "DISPUTED", "SN
 async def _evidence(app, msg: InboundMessage) -> str:
     """Text, or the voice transcript / screenshot OCR appended to the raw placeholder."""
     text, s = msg.evidence_text, app.state.settings
+    if msg.channel == "wa_link":            # a customer on a shop's SIM: the bytes stay on the sidecar, as before
+        return text
     try:
         if msg.kind == "audio" and msg.media_id:
             audio, mime = await download_media(await media_token(app, msg.number_id), msg.media_id)
-            if spoken := await transcribe(s.sarvam_api_key, audio, mime):
+            if spoken := await transcribe(s.sarvam_api_key, audio, mime, url=s.sarvam_stt_url):
                 return f"{text} Transcript: {spoken}"
         elif msg.kind == "image" and msg.media_id:
             img, mime = await download_media(await media_token(app, msg.number_id), msg.media_id)

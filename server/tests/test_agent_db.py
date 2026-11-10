@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import re
 from datetime import date, datetime, timedelta, timezone
 from itertools import count
 from types import SimpleNamespace
@@ -94,7 +95,7 @@ class FakeContinuum:
 
 
 @pytest.fixture
-async def env():
+async def env(tmp_path):
     if not URL:
         pytest.skip("TEST_DATABASE_URL not set")
     pool = await open_pool(URL)
@@ -107,7 +108,8 @@ async def env():
     await import_rows(pool, other.id, [SheetRow("Secret", "919111111111", "SECRET-9", 99_900_000, date(2027, 1, 1))])
     async with pool.connection() as c:
         o = await (await c.execute("SELECT o.id, o.party_id FROM obligations o WHERE invoice_ref = 'INV-1'")).fetchone()
-    app = SimpleNamespace(state=SimpleNamespace(pool=pool, settings=Settings(reminder_send_mode="smara"), wa=FakeWA(), tg=None, bg=set(),
+    app = SimpleNamespace(state=SimpleNamespace(pool=pool, settings=Settings(reminder_send_mode="smara", owner_files_dir=str(tmp_path / "owner-files")),
+                                                wa=FakeWA(), tg=None, bg=set(),
                                                 continuum=FakeContinuum(), browsers=FakeBrowsers(), llm=ScriptLLM(),
                                                 agent_background=False))
     yield SimpleNamespace(app=app, pool=pool, t=t, other=other, oid=str(o["id"]), pid=str(o["party_id"]))
@@ -276,14 +278,27 @@ async def test_browser_read_runs_but_click_waits_for_owner(env):
 
 # ---------------------------------------------------------------- import with self-verification
 
+def attached_ref(messages) -> str:
+    """The file ref of the owner's attachment: owner files are downloaded on arrival and kept as local refs."""
+    for m in reversed(messages):
+        if m["role"] == "user" and "file_ref=" in str(m["content"]):
+            return re.search(r"file_ref=(local:[^;\]\s]+)", m["content"]).group(1)
+    raise AssertionError("no attachment")
+
+
+def owner_file_bytes(monkeypatch, data: bytes, mime: str):
+    from src.ingest import owner_flow
+
+    async def fake_fetch(app, msg):
+        return data, mime
+    monkeypatch.setattr(owner_flow, "fetch_media", fake_fetch)
+
+
 async def test_import_reports_totals_for_the_agent_to_verify(env, monkeypatch):
     csv = b"Party Name,Mobile Number,Invoice No,Due Date,Balance\nAsha,9811122233,V-1,15/11/2026,500\nBina,9811122234,V-2,16/11/2026,250\n"
-    async def fake_fetch(app, ref, ctx=None):
-        return csv, "text/csv", "out.csv"
-    monkeypatch.setattr(actions, "_fetch", fake_fetch)
-    ref = "whatsapp:MEDIA1:out.csv"
-    llm = env.app.state.llm = ScriptLLM(call("inspect_and_import_file", file_ref=ref, mode="inspect"),
-                                        call("inspect_and_import_file", file_ref=ref, mode="import"),
+    owner_file_bytes(monkeypatch, csv, "text/csv")
+    llm = env.app.state.llm = ScriptLLM(lambda m: call("inspect_and_import_file", file_ref=attached_ref(m), mode="inspect"),
+                                        lambda m: call("inspect_and_import_file", file_ref=attached_ref(m), mode="import"),
                                         lambda m: say("Imported 2 invoices, Rs 750, totals verified."))
     await dispatch(env.app, InboundMessage(wamid="w11", sender=OWNER, kind="document", media_id="MEDIA1", filename="out.csv"))
     assert llm.last_tool_result(1)["sheet_total_rupees"] == 750
@@ -317,20 +332,15 @@ async def test_agent_converts_tally_xml_in_sandbox_and_verifies_import(env, monk
     from src.box.sandbox import Sandbox
     env.app.state.sandbox = Sandbox(str(tmp_path), "local")
     xml = (Path(__file__).parent / "fixtures" / "tally_daybook.xml").read_bytes()
-    real_fetch = actions._fetch
-
-    async def fetch(app, ref, ctx=None):
-        return (xml, "text/xml", "daybook.xml") if ref.startswith("whatsapp:") else await real_fetch(app, ref)
-    monkeypatch.setattr(actions, "_fetch", fetch)
+    owner_file_bytes(monkeypatch, xml, "text/xml")
     code = ("import munim_helpers as mh\nfrom datetime import timedelta\n"
             "phones = {l['name']: l['mobile'] for l in mh.tally_ledgers('in/daybook.xml')}\n"
             "sales = [v for v in mh.tally_vouchers('in/daybook.xml') if v['type'] == 'Sales']\n"
             "rows = [dict(party=v['party'], phone=phones.get(v['party'], ''), invoice=v['number'],\n"
             "             due_date=v['date'] + timedelta(days=v['credit_days'] or 30), amount=v['amount']) for v in sales]\n"
             "mh.to_rows_csv(rows)\nRESULT = {'invoices': len(rows), 'total': sum(r['amount'] for r in rows)}")
-    ref = "whatsapp:MX:daybook.xml"
     llm = env.app.state.llm = ScriptLLM(
-        call("run_python", code=code, file_refs=[ref]),
+        lambda m: call("run_python", code=code, file_refs=[attached_ref(m)]),
         lambda m: call("inspect_and_import_file", file_ref=json.loads(m[-1]["content"])["output_file_refs"][0], mode="import"),
         lambda m: say("Imported 2 Tally invoices, Rs 16,500.50, totals verified."))
     await dispatch(env.app, InboundMessage(wamid="t1", sender=OWNER, kind="document", media_id="MX", filename="daybook.xml"))

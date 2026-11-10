@@ -187,13 +187,66 @@ test("a LID sender with no phone-number address is mapped through Baileys, and a
   assert.deepEqual(inbound, [{ tenant_id: KEY, wamid: "wl:M1", sender: "919000000003", kind: "text", text: "paid", ts: 0 }]);
 });
 
-test("content extraction keeps text and captions, and labels media without downloading it", () => {
+test("content extraction keeps text and captions, and describes media without downloading it", () => {
   assert.deepEqual(extractContent({ conversation: "hi" }), { kind: "text", text: "hi" });
   assert.deepEqual(extractContent({ extendedTextMessage: { text: "yo" } }), { kind: "text", text: "yo" });
-  assert.deepEqual(extractContent({ imageMessage: { caption: "bill" } }), { kind: "image", text: "bill" });
-  assert.deepEqual(extractContent({ audioMessage: {} }), { kind: "audio", text: "" });
+  assert.deepEqual(extractContent({ imageMessage: { caption: "bill", mimetype: "image/jpeg", fileLength: 1000 } }),
+    { kind: "image", text: "bill", media: { mime: "image/jpeg", filename: "", size: 1000 } });
+  assert.deepEqual(extractContent({ audioMessage: {} }), { kind: "audio", text: "", media: { mime: "", filename: "", size: 0 } });
+  assert.deepEqual(extractContent({ documentMessage: { fileName: "ledger.xlsx", mimetype: "application/vnd.ms-excel",
+    fileLength: { toNumber: () => 2048 } } }).media, { mime: "application/vnd.ms-excel", filename: "ledger.xlsx", size: 2048 });
   assert.deepEqual(extractContent({ ephemeralMessage: { message: { conversation: "wrapped" } } }), { kind: "text", text: "wrapped" });
+  assert.deepEqual(extractContent({ stickerMessage: {} }), { kind: "sticker", text: "" });
   assert.deepEqual(extractContent({ reactionMessage: {} }), { kind: "other", text: "" });
+});
+
+test("a voice note is held in the sidecar: the app gets a ref, and the bytes come only when it asks, once", async () => {
+  const fetched = [];
+  const h = harness({ downloadMedia: async (message) => { fetched.push(message.key.id); return Buffer.from("OGG-BYTES"); } });
+  await h.manager.start(KEY);
+  h.sockets[0].emit("messages.upsert", { type: "notify", messages: [
+    { key: { id: "V1", remoteJid: "919000000001@s.whatsapp.net", fromMe: false },
+      message: { audioMessage: { mimetype: "audio/ogg; codecs=opus", fileLength: 4000 } }, messageTimestamp: 1 }] });
+  await h.settle();
+  const body = h.last("inbound");
+  assert.equal(body.kind, "audio");
+  assert.match(body.media.ref, /^[0-9a-f-]{36}$/i);
+  assert.equal(body.media.size, 4000);
+  assert.deepEqual(fetched, [], "nothing is downloaded until the app asks");
+  assert.equal((await h.manager.media(KEY, body.media.ref)).toString(), "OGG-BYTES");
+  assert.deepEqual(fetched, ["V1"]);
+  await assert.rejects(h.manager.media(KEY, body.media.ref), (e) => e.status === 404, "a file is handed over once");
+});
+
+test("a file over 20 MB is not held: the app is told its size and gets no ref", async () => {
+  const h = harness({ downloadMedia: async () => { throw new Error("must not download"); } });
+  await h.manager.start(KEY);
+  h.sockets[0].emit("messages.upsert", { type: "notify", messages: [
+    { key: { id: "D1", remoteJid: "919000000001@s.whatsapp.net", fromMe: false },
+      message: { documentMessage: { fileName: "huge.pdf", mimetype: "application/pdf", fileLength: 25 * 1024 * 1024 } } }] });
+  await h.settle();
+  const body = h.last("inbound");
+  assert.equal(body.media.ref, null);
+  assert.equal(body.media.size, 25 * 1024 * 1024);
+  await assert.rejects(h.manager.media(KEY, "00000000-0000-4000-8000-000000000000"), (e) => e.status === 404);
+});
+
+test("a held file past its time is forgotten, and a download larger than the limit is refused", async () => {
+  const h = harness({ downloadMedia: async () => Buffer.alloc(21 * 1024 * 1024) });
+  await h.manager.start(KEY);
+  h.sockets[0].emit("messages.upsert", { type: "notify", messages: [
+    { key: { id: "E1", remoteJid: "919000000001@s.whatsapp.net", fromMe: false },
+      message: { videoMessage: { mimetype: "video/mp4", fileLength: 100 } } }] });
+  await h.settle();
+  const ref = h.last("inbound").media.ref;
+  h.manager.sessions.get(KEY).media.get(ref).expires = 0;
+  await assert.rejects(h.manager.media(KEY, ref), (e) => e.status === 404, "expired");
+  h.sockets[0].emit("messages.upsert", { type: "notify", messages: [
+    { key: { id: "E2", remoteJid: "919000000001@s.whatsapp.net", fromMe: false },
+      message: { videoMessage: { mimetype: "video/mp4", fileLength: 100 } } }] });
+  await h.settle();
+  const big = h.last("inbound").media.ref;
+  await assert.rejects(h.manager.media(KEY, big), (e) => e.status === 413, "a download over the limit is refused");
 });
 
 test("phone numbers are read from WhatsApp ids", () => {
