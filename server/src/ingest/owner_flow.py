@@ -1,19 +1,22 @@
-"""Thread A: owner messages are trusted. Buttons, sheet/bill uploads, digest requests."""
+"""Thread A: owner messages are trusted. Buttons, sheet/bill uploads, digest requests, voice notes and files."""
+import asyncio
 from src import clock
 import logging
+from dataclasses import replace
 from datetime import date, datetime, timezone
 
 from src.bridge.coordinator import decide_adjustment
 from src.ingest.box_commands import decide_browser_task, handle_text
 from src.ingest.importer import import_rows
-from src.ingest.media import clean_phone_caption, download_media, media_token, read_image, transcribe
+from src.ingest.media import MediaError, clean_phone_caption, download_media, media_token, read_image, transcribe
+from src.ingest import owner_files
 from src.ingest.payload import InboundMessage
 from src.ingest.customer_number import add_number, parse_number_command
 from src.ingest.reopen import parse_reopen_command, reopen_invoice
 from src.ingest.guides import EXPORT_GUIDE
 from src.ingest.telegram import link_message, unlink
 from src.ingest.sheet_mapper import SheetRow, map_sheet, parse_amount_paise, parse_date, parse_phone
-from src.agent_loop import resume, start_session
+from src.agent_loop import attach_to_running, resume, start_session
 from src.loop import wa_link
 from src.loop.digest import build_digest
 from src.loop.reminders import decide_reminder
@@ -26,6 +29,12 @@ HELP = ("Commands: digest, telegram (link Telegram), gstin <no>, quotes <product
         "number as caption, or say 'digest'.\nTally/Busy se list kaise nikalein: 'export'. Sample file: 'sample'.")
 EXPORT_CMDS = ("export", "tally export", "kaise bheju", "export guide")
 SAMPLE_CMDS = ("sample", "sample file")
+FILE_KINDS = ("document", "image", "video", "sticker")
+VOICE_OFF = "Voice notes are not enabled on Smara yet. Please type your message instead."
+VOICE_FAILED = "I could not turn that voice note into text right now. Please type it, or send it again."
+VOICE_UNCLEAR = "Voice note samajh nahi aaya. Kripya type karke bhejiye ya dobara bolkar bhejiye."
+FILE_FAILED = "I could not download that file. Please send it again."
+DEFAULT_MIME = {"image": "image/jpeg", "audio": "audio/ogg", "video": "video/mp4"}
 
 
 async def handle_owner(app, tenant: Tenant, msg: InboundMessage) -> None:
@@ -36,6 +45,13 @@ async def handle_owner(app, tenant: Tenant, msg: InboundMessage) -> None:
 
 
 async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
+    if msg.size > owner_files.MAX_BYTES:            # a file or voice note over the limit: said plainly, nothing is kept
+        return owner_files.too_large_text(msg.size)
+    if msg.kind == "audio" and msg.media_id:        # a voice note is read as if the owner had typed it
+        spoken, reply = await _transcribe(app, msg)
+        if reply:
+            return reply
+        msg = replace(msg, kind="text", text=spoken)
     if msg.button_id and ":" in msg.button_id:
         action, ref = msg.button_id.split(":", 1)
         if action in ("approve", "reject"):
@@ -170,26 +186,50 @@ async def _send_sample(app, tenant_id: str, channel: str) -> str | None:
     return None
 
 
-async def _agent(app, tenant_id: str, msg: InboundMessage) -> None:
-    """Owner's free text or file starts (or continues) a trusted agent session; it replies itself."""
+async def _transcribe(app, msg: InboundMessage) -> tuple[str, str | None]:
+    """The spoken words, or ('', the reply to send) when the voice note cannot be used. Off until a Sarvam key is set."""
+    s = app.state.settings
+    if not s.sarvam_api_key:
+        return "", VOICE_OFF
+    try:
+        data, mime = await fetch_media(app, msg)
+    except MediaError as e:
+        return "", str(e)
+    except Exception:
+        log.exception("owner voice note download failed")
+        return "", VOICE_FAILED
+    try:
+        spoken = (await transcribe(s.sarvam_api_key, data, mime or "audio/ogg", url=s.sarvam_stt_url)).strip()
+    except Exception:
+        log.exception("owner voice transcription failed")
+        return "", VOICE_FAILED
+    return (spoken, None) if spoken else ("", VOICE_UNCLEAR)
+
+
+async def _agent(app, tenant_id: str, msg: InboundMessage) -> str | None:
+    """Owner's free text or file starts (or continues) a trusted agent session; it replies itself.
+    A message that arrives while a run is working on a task joins that run instead, and is read at its next step."""
     from src import tenants
 
     files, content = (), msg.text or ""
-    if msg.kind == "audio" and msg.media_id:               # voice note: transcribe, then treat as text
-        spoken = ""
+    if msg.media_id and msg.kind in FILE_KINDS:
         try:
-            data, mime = await fetch_media(app, msg)
-            spoken = await transcribe(app.state.settings.sarvam_api_key, data, mime)
+            data, _ = await fetch_media(app, msg)
+        except MediaError as e:
+            return str(e)
         except Exception:
-            log.exception("owner voice transcription failed")
-        if not spoken.strip():
-            return "Voice note samajh nahi aaya. Kripya type karke bhejiye ya dobara bolkar bhejiye."
-        content = f"[voice note, transcribed] {spoken.strip()}"
-    elif msg.media_id and msg.kind in ("document", "image", "video", "sticker"):
-        ref = f"{msg.channel}:{msg.media_id}:{file_name(msg)}"
+            log.exception("owner file download failed")
+            return FILE_FAILED
+        try:
+            ref = await asyncio.to_thread(owner_files.save, app.state.settings.owner_files_dir, tenant_id, file_name(msg), data)
+        except OSError:
+            log.exception("could not keep an owner file")
+            return FILE_FAILED
         files = (ref,)
         content = f"{content}\n[The owner attached a file: file_ref={ref}; caption: {msg.caption or '-'}]".strip()
     if not content:
+        return None
+    if await attach_to_running(app, tenant_id, content, files):
         return None
     tenant = await tenants.by_id(app.state.pool, tenant_id)
     await start_session(app, tenant=tenant, trust="TRUSTED", trigger="owner_message", content=content,
@@ -212,16 +252,29 @@ def file_name(msg: InboundMessage) -> str:
 
 
 async def fetch_media(app, msg: InboundMessage) -> tuple[bytes, str]:
+    """An owner's file or voice note, from whichever channel it came by. Refused above the 20 MB limit on every channel."""
+    limit = owner_files.MAX_BYTES
+    if msg.size > limit:
+        raise MediaError(owner_files.too_large_text(msg.size))
+    mime = msg.mime or DEFAULT_MIME.get(msg.kind, "application/octet-stream")
     if msg.channel == "telegram":
-        mime = "image/jpeg" if msg.kind == "image" else "application/octet-stream"
-        return await app.state.tg.download(msg.media_id), mime
-    return await download_media(await media_token(app, msg.number_id), msg.media_id)
+        data = await app.state.tg.download(msg.media_id)          # Telegram itself refuses files over 20 MB
+    elif msg.channel == "wa_link":
+        data = await wa_link.media(app, msg.link_tenant_id, msg.media_id)
+    else:
+        return await download_media(await media_token(app, msg.number_id), msg.media_id, max_bytes=limit)
+    if len(data) > limit:
+        raise MediaError(owner_files.too_large_text(len(data)))
+    return data, mime
 
 
 async def _sheet(app, tenant_id: str, msg: InboundMessage) -> str:
     if not msg.filename.lower().endswith((".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".txt")):
         return "I can read .xlsx, .xls or .csv sheets. Please export your outstanding report in one of those."
-    data, _ = await fetch_media(app, msg)
+    try:
+        data, _ = await fetch_media(app, msg)
+    except MediaError as e:
+        return str(e)
     async with app.state.pool.connection() as conn:       # customers already on file supply missing mobile numbers
         known = {r["canonical_name"]: r["whatsapp_phone"] for r in await (await conn.execute(
             "SELECT canonical_name, whatsapp_phone FROM parties WHERE tenant_id = %s", (tenant_id,))).fetchall()}
@@ -234,7 +287,10 @@ async def _sheet(app, tenant_id: str, msg: InboundMessage) -> str:
 
 
 async def _bill(app, tenant_id: str, msg: InboundMessage) -> str:
-    data, mime = await fetch_media(app, msg)
+    try:
+        data, mime = await fetch_media(app, msg)
+    except MediaError as e:
+        return str(e)
     ocr = await read_image(app.state.llm, data, mime)
     if not ocr:
         return "Bill reading is not configured yet. Please send the sheet instead."

@@ -76,7 +76,8 @@ async def read_attachment(app, ctx: SessionCtx, args: dict) -> dict:
                 return {**base, "kind": "image", "error": "photo reading is not configured on this server"}
             return {**base, "kind": "image", "read": await read_image_text(app.state.llm, data, mime)}
         if mime.startswith("audio/") or name.endswith((".ogg", ".mp3", ".m4a", ".wav", ".opus")):
-            spoken = await transcribe(app.state.settings.sarvam_api_key, data, mime or "audio/ogg")
+            spoken = await transcribe(app.state.settings.sarvam_api_key, data, mime or "audio/ogg",
+                                      url=app.state.settings.sarvam_stt_url)
             return {**base, "kind": "audio", **_cap(spoken), **({} if spoken else {"note": "could not transcribe this audio"})}
         if mime.startswith("video/") or name.endswith((".mp4", ".mov", ".3gp", ".mkv")):
             return {**base, "kind": "video", "note": "videos cannot be watched; ask the owner what it shows or for a photo or the document itself"}

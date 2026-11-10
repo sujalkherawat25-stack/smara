@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { HttpError } from "./sessions.js";
 
 const KEY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const REF_RE = KEY_RE;   // a media ref is a random UUID made by the sidecar
 const TO_RE = /^\d{8,15}$/;
 const TEXT_MAX = 4000;
 
@@ -48,6 +49,14 @@ export function makeHandler({ manager, token, maxBodyBytes = 8 * 1024 * 1024, lo
       const action = parts[2] || "";
 
       if (req.method === "GET" && !action) return reply(200, await manager.status(key));
+
+      if (req.method === "GET" && action === "media") {       // one file the owner sent on this SIM; handed over once
+        const ref = parts[3] || "";
+        if (!REF_RE.test(ref)) return reply(404, { error: "not found" });
+        const data = await manager.media(key, ref);
+        res.writeHead(200, { "content-type": "application/octet-stream", "cache-control": "no-store", "content-length": data.length });
+        return res.end(data);
+      }
 
       if (req.method === "POST" && action === "pair") {
         const body = await readJson(req, maxBodyBytes);

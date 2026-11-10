@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from src import tenants
 from src.config import normalize_phone
 from src.ingest.dispatch import dispatch
-from src.ingest.payload import InboundMessage
+from src.ingest.payload import MEDIA_KINDS, InboundMessage
 from src.loop import wa_link
 
 log = logging.getLogger(__name__)
@@ -171,6 +171,14 @@ class StatusBody(BaseModel):
     phone: str = Field(default="", max_length=20)
 
 
+class MediaBody(BaseModel):
+    """A file or voice note on the SIM. The bytes stay in the sidecar until the app asks for them (loop/wa_link.media)."""
+    ref: str | None = Field(default=None, max_length=64)     # None: too large to hold, so it is refused by size
+    mime: str = Field(default="", max_length=120)
+    filename: str = Field(default="", max_length=255)
+    size: int = Field(default=0, ge=0, le=10**10)
+
+
 class InboundBody(BaseModel):
     tenant_id: str = Field(min_length=36, max_length=36)
     wamid: str = Field(min_length=3, max_length=120)
@@ -178,6 +186,7 @@ class InboundBody(BaseModel):
     kind: str = Field(default="text", max_length=20)
     text: str = Field(default="", max_length=4000)
     ts: int = 0
+    media: MediaBody | None = None
 
 
 async def _known_tenant(request: Request, tenant_id: str):
@@ -220,7 +229,12 @@ async def internal_inbound(body: InboundBody, request: Request):
     sender = normalize_phone(body.sender)
     if not sender:
         raise HTTPException(status_code=400, detail="no sender")
-    msg = InboundMessage(wamid=body.wamid, sender=sender, kind=body.kind or "text", text=body.text,
-                         channel="wa_link", link_tenant_id=str(tenant.id))
+    if body.media is not None and body.kind in MEDIA_KINDS:        # a file or voice note: its caption is the text
+        msg = InboundMessage(wamid=body.wamid, sender=sender, kind=body.kind, caption=body.text, media_id=body.media.ref,
+                             mime=body.media.mime, filename=body.media.filename, size=body.media.size,
+                             channel="wa_link", link_tenant_id=str(tenant.id))
+    else:
+        msg = InboundMessage(wamid=body.wamid, sender=sender, kind=body.kind or "text", text=body.text,
+                             channel="wa_link", link_tenant_id=str(tenant.id))
     await dispatch(request.app, msg)     # on an error this raises: the sidecar retries, and dispatch allows a redelivery
     return {"ok": True}

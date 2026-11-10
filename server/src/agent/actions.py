@@ -6,6 +6,7 @@ and puts the owner's Approve/Reject card up; the session then suspends.
 arguments that were frozen in the session when the card was shown.
 """
 import json
+import mimetypes
 import re
 from datetime import date, datetime, timedelta, timezone
 
@@ -13,8 +14,9 @@ from src import clock
 from src.agent.policy import SessionCtx, target_words
 from src.agent.tools import party_in_tenant
 from src.bridge.coordinator import submit_debtor_claim
+from src.ingest import owner_files
 from src.ingest.importer import close_invoices, import_rows, open_refs
-from src.ingest.media import download_media, read_image
+from src.ingest.media import MediaError, download_media, read_image
 from src import tenants
 from src.ingest.media import media_token
 from src.ingest.sheet_mapper import SheetRow, map_sheet
@@ -30,6 +32,11 @@ async def _fetch(app, file_ref: str, ctx: SessionCtx | None = None) -> tuple[byt
     channel, media_id, filename = (file_ref.split(":", 2) + ["", ""])[:3]
     if channel == "sandbox":
         return app.state.sandbox.read_output(media_id, filename), "application/octet-stream", filename
+    if channel == "local":                       # a file the owner sent, kept on this server for 7 days (ingest/owner_files.py)
+        if ctx is None:
+            raise MediaError("this file can only be read inside a conversation")
+        data = owner_files.read(app.state.settings.owner_files_dir, ctx.tenant_id, media_id)
+        return data, mimetypes.guess_type(filename)[0] or "application/octet-stream", filename
     if channel == "telegram":
         return await app.state.tg.download(media_id), "application/octet-stream", filename
     number_id = ""

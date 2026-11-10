@@ -43,6 +43,7 @@ needs `Authorization: Bearer <WA_LINK_TOKEN>`.
 | `POST /sessions/{shop}/pair` | Body `{auth}`. `auth: null` starts a new pairing (the QR appears on the status). A stored auth string resumes a linked device. |
 | `POST /sessions/{shop}/send` | Body `{to, text}`: one message to one number (digits only, 8-15), 1-4000 characters. |
 | `POST /sessions/{shop}/disconnect` | Stops the device and keeps its credentials for a later resume. |
+| `GET /sessions/{shop}/media/{ref}` | The bytes of one file or voice note the owner sent on this SIM. `ref` comes from the inbound event's `media` (a random UUID). It is held 15 minutes, handed over once, and refused above 20 MB. Downloaded only when the app asks. |
 
 The sidecar calls the app back at `WA_LINK_CALLBACK_URL` (`/state` with the encrypted-at-rest credentials, `/status`,
 `/inbound`). It retries transient failures and never retries a send.

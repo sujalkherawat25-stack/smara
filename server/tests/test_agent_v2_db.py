@@ -347,19 +347,25 @@ async def test_sandbox_xlsx_helper_makes_a_real_workbook(env, tmp_path):
 # ------------------------------------------------------------------ voice notes, GSTIN, payment requests
 
 async def test_owner_voice_note_is_transcribed_and_answered(env, monkeypatch):
+    import dataclasses
     from src.ingest import owner_flow
     async def fake_fetch(app, msg):
         return b"ogg-bytes", "audio/ogg"
-    async def fake_stt(key, audio, mime):
+    async def fake_stt(key, audio, mime, **kw):
         assert audio == b"ogg-bytes" and mime == "audio/ogg"
         return "Ravi Kirana ka kitna baaki hai"
     monkeypatch.setattr(owner_flow, "fetch_media", fake_fetch)
     monkeypatch.setattr(owner_flow, "transcribe", fake_stt)
+    # voice notes are off until a Sarvam key is set: the owner is told, and the model is not asked
+    env.app.state.settings = dataclasses.replace(env.app.state.settings, sarvam_api_key="")
     llm = env.app.state.llm = ScriptLLM(say("Rs 10,000"))
+    await dispatch(env.app, InboundMessage(wamid="v0", sender=OWNER, kind="audio", media_id="A0"))
+    assert "not enabled" in env.app.state.wa.sent[-1]["text"]["body"] and llm.seen == []
+    env.app.state.settings = dataclasses.replace(env.app.state.settings, sarvam_api_key="test-key")
     await dispatch(env.app, InboundMessage(wamid="v1", sender=OWNER, kind="audio", media_id="A1"))
-    assert "[voice note, transcribed] Ravi Kirana ka kitna baaki hai" in llm.seen[0][-1]["content"]
+    assert [m for m in llm.seen[0] if m["role"] == "user"][-1]["content"] == "Ravi Kirana ka kitna baaki hai"
     assert env.app.state.wa.sent[-1]["text"]["body"] == "Rs 10,000"
-    async def silent(key, audio, mime):
+    async def silent(key, audio, mime, **kw):
         return ""
     monkeypatch.setattr(owner_flow, "transcribe", silent)
     await dispatch(env.app, InboundMessage(wamid="v2", sender=OWNER, kind="audio", media_id="A2"))

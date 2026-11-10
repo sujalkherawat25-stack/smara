@@ -39,6 +39,25 @@ test("health is open; everything else needs the bearer token", async () => {
   });
 });
 
+test("the media route hands over a held file's bytes only with the token, and only for a well-formed ref", async () => {
+  const REF = "0b65d7d2-acc1-4842-8c1a-6460b692982b";
+  const manager = fakeManager({
+    media: async (key, ref) => {
+      if (key !== KEY || ref !== REF) throw new HttpError(404, "no such file");
+      return Buffer.from("PDF-BYTES");
+    },
+  });
+  await withServer(manager, async (base) => {
+    assert.equal((await fetch(`${base}/sessions/${KEY}/media/${REF}`)).status, 401);
+    const ok = await fetch(`${base}/sessions/${KEY}/media/${REF}`, { headers: AUTH });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.headers.get("content-type"), "application/octet-stream");
+    assert.equal(await ok.text(), "PDF-BYTES");
+    assert.equal((await fetch(`${base}/sessions/${KEY}/media/not-a-ref`, { headers: AUTH })).status, 404);
+    assert.equal((await fetch(`${base}/sessions/${KEY}/media/00000000-0000-4000-8000-000000000000`, { headers: AUTH })).status, 404);
+  });
+});
+
 test("unknown routes and malformed shop keys are 404", async () => {
   await withServer(fakeManager(), async (base) => {
     assert.equal((await fetch(`${base}/sessions/not-a-key`, { headers: AUTH })).status, 404);

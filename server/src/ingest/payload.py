@@ -24,6 +24,7 @@ class InboundMessage:
     reply_to: str = ""          # the message of ours they replied to (WhatsApp context.id), if any
     mime: str = ""             # media type as WhatsApp reports it
     link_tenant_id: str = ""    # channel "wa_link": the shop whose own SIM received it (server/wa_link)
+    size: int = 0              # bytes the channel reported for a file or voice note (0 = not known until downloaded)
 
     @property
     def evidence_text(self) -> str:

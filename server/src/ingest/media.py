@@ -67,14 +67,14 @@ async def download_media(access_token: str, media_id: str, client: httpx.AsyncCl
 
 
 async def transcribe(api_key: str, audio: bytes, mime: str = "audio/ogg",
-                     client: httpx.AsyncClient | None = None) -> str:
-    """Hinglish-capable STT. Returns '' when no key is configured."""
+                     client: httpx.AsyncClient | None = None, url: str = SARVAM_STT) -> str:
+    """Hinglish-capable STT. Returns '' when no key is configured. The key is sent in a header and never logged."""
     if not api_key:
         return ""
     http = client or httpx.AsyncClient(timeout=60)
     try:
         resp = await http.post(
-            SARVAM_STT, headers={"api-subscription-key": api_key},
+            url or SARVAM_STT, headers={"api-subscription-key": api_key},
             files={"file": ("voice.ogg", audio, mime)},
             data={"model": "saarika:v2.5", "language_code": "unknown"},
         )
