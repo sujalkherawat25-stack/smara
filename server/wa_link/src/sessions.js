@@ -171,10 +171,16 @@ export class SessionManager {
   }
 
   onMessages(s, { messages = [], type }) {
+    // Diagnostics: counts and address shapes only, never message text or full numbers.
+    this.log("info", `messages event type=${type} count=${messages.length}`);
     if (type !== "notify") return; // history sync and other bulk types are not customer messages
     for (const m of messages) {
       const jid = [m.key?.remoteJid, m.key?.remoteJidAlt].find((j) => typeof j === "string" && j.endsWith("@s.whatsapp.net"));
-      if (m.key?.fromMe || !m.key?.id || !jid) continue;
+      if (m.key?.fromMe || !m.key?.id || !jid) {
+        const suffix = (j) => (typeof j === "string" ? j.split("@")[1] || "none" : "none");
+        this.log("info", `message skipped fromMe=${!!m.key?.fromMe} hasId=${!!m.key?.id} remote=${suffix(m.key?.remoteJid)} alt=${suffix(m.key?.remoteJidAlt)}`);
+        continue;
+      }
       const { kind, text } = extractContent(m.message || {});
       this.enqueue(s, "inbound", {
         tenant_id: s.key,
