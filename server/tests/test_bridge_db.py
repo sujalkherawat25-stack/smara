@@ -15,7 +15,7 @@ from src.bridge.device_api import router as device_router
 from src.ingest.dispatch import dispatch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
-import munim_bridge  # noqa: E402
+import smara_bridge  # noqa: E402
 
 
 def api(env):
@@ -33,7 +33,7 @@ async def pair(env, http):
 
 
 async def fake_bridge(http, token, results: dict | None = None, rounds=3):
-    """What munim_bridge does: poll, run the command, post the result."""
+    """What smara_bridge does: poll, run the command, post the result."""
     h = {"Authorization": f"Bearer {token}"}
     for _ in range(rounds):
         job = (await http.post("/bridge/poll", params={"wait": 3}, headers=h)).json()
@@ -210,20 +210,20 @@ async def test_grants_expire(env):
 # ---------------------------------------------------------------- the bridge program's own checks (real Chromium)
 
 def test_bridge_blocks_private_networks_and_odd_schemes():
-    assert munim_bridge.url_allowed("file:///etc/passwd")
-    assert "hand_off_to_owner" in munim_bridge.url_allowed("upi://pay?pa=shop@bank&am=100")
-    assert munim_bridge.url_allowed("http://127.0.0.1:8000/admin")
-    assert munim_bridge.url_allowed("http://192.168.1.1/")
-    assert munim_bridge.url_allowed("http://169.254.169.254/latest")
-    assert munim_bridge.url_allowed("http://127.0.0.1/", allow_private=True) is None
-    assert munim_bridge.url_allowed("https://93.184.216.34/") is None
+    assert smara_bridge.url_allowed("file:///etc/passwd")
+    assert "hand_off_to_owner" in smara_bridge.url_allowed("upi://pay?pa=shop@bank&am=100")
+    assert smara_bridge.url_allowed("http://127.0.0.1:8000/admin")
+    assert smara_bridge.url_allowed("http://192.168.1.1/")
+    assert smara_bridge.url_allowed("http://169.254.169.254/latest")
+    assert smara_bridge.url_allowed("http://127.0.0.1/", allow_private=True) is None
+    assert smara_bridge.url_allowed("https://93.184.216.34/") is None
 
 
 BRIDGE_PROBE = r"""
 import asyncio, json, sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
-import munim_bridge
+import smara_bridge
 from playwright.async_api import async_playwright
 
 import re
@@ -235,7 +235,7 @@ async def R(mb, page, role, name):
 
 async def main():
     out = {}
-    mb = munim_bridge
+    mb = smara_bridge
     page_file = Path(sys.argv[2]) / "login.html"
     page_file.write_text("<html><body><input id='user' name='user'><input id='pw' type='password' name='pw'>"
                          "<input id='code' name='code' autocomplete='one-time-code'><button id='go'>Next</button></body></html>")
@@ -265,7 +265,7 @@ asyncio.run(main())
 def test_bridge_never_types_into_password_fields_and_honours_the_stop_button(tmp_path):
     """Real Chromium in its own process (Playwright needs a different event loop than the database tests)."""
     import subprocess
-    done = subprocess.run([sys.executable, "-c", BRIDGE_PROBE, str(Path(munim_bridge.__file__).parent), str(tmp_path)],
+    done = subprocess.run([sys.executable, "-c", BRIDGE_PROBE, str(Path(smara_bridge.__file__).parent), str(tmp_path)],
                           capture_output=True, text=True, timeout=120)
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["fill_ok"] and out["user_value"] == "ravi"
@@ -390,7 +390,7 @@ NEW_ACTIONS_PROBE = r"""
 import asyncio, json, sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
-import munim_bridge
+import smara_bridge
 from playwright.async_api import async_playwright
 
 import re
@@ -402,7 +402,7 @@ async def R(mb, page, role, name):
 
 async def main():
     out = {}
-    mb = munim_bridge
+    mb = smara_bridge
     d = Path(sys.argv[2])
     (d / "a.html").write_text("<html><body style='height:4000px'><a href='b.html'>next</a>"
         "<select id='s' name='s'><option value='x'>X</option><option value='y'>Y</option></select><p style='margin-top:3000px'>bottom text</p></body></html>")
@@ -433,7 +433,7 @@ asyncio.run(main())
 
 def test_bridge_scroll_select_back_wait_and_owner_needed_signals(tmp_path):
     import subprocess
-    done = subprocess.run([sys.executable, "-c", NEW_ACTIONS_PROBE, str(Path(munim_bridge.__file__).parent), str(tmp_path)],
+    done = subprocess.run([sys.executable, "-c", NEW_ACTIONS_PROBE, str(Path(smara_bridge.__file__).parent), str(tmp_path)],
                           capture_output=True, text=True, timeout=120)
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["scrolled"] and out["selected"] == "y" and out["back"]
@@ -480,25 +480,25 @@ async def test_an_offline_paired_pc_is_explained_to_the_agent_not_re_paired(env)
 
 
 def test_activity_lines_never_include_typed_values():
-    line = munim_bridge.describe_step({"action": "fill", "selector": "#qty", "value": "secret 1234"},
+    line = smara_bridge.describe_step({"action": "fill", "selector": "#qty", "value": "secret 1234"},
                                       {"url": "https://example.com/x", "title": "Cart"})
     assert "secret" not in line and "example.com" in line and "fill #qty" in line
-    assert "error" in munim_bridge.describe_step({"action": "navigate", "url": "https://a.com"}, {"error": "blocked"})
+    assert "error" in smara_bridge.describe_step({"action": "navigate", "url": "https://a.com"}, {"error": "blocked"})
 
 
 def test_pause_and_resume_commands_use_a_flag_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(munim_bridge, "HOME", tmp_path)
-    monkeypatch.setattr(munim_bridge, "PAUSE", tmp_path / "paused")
-    monkeypatch.setattr(sys, "argv", ["munim-bridge", "pause"])
-    assert munim_bridge.main() == 0 and (tmp_path / "paused").exists()
-    monkeypatch.setattr(sys, "argv", ["munim-bridge", "resume"])
-    assert munim_bridge.main() == 0 and not (tmp_path / "paused").exists()
+    monkeypatch.setattr(smara_bridge, "HOME", tmp_path)
+    monkeypatch.setattr(smara_bridge, "PAUSE", tmp_path / "paused")
+    monkeypatch.setattr(sys, "argv", ["smara-bridge", "pause"])
+    assert smara_bridge.main() == 0 and (tmp_path / "paused").exists()
+    monkeypatch.setattr(sys, "argv", ["smara-bridge", "resume"])
+    assert smara_bridge.main() == 0 and not (tmp_path / "paused").exists()
 
 
 SEND_PROBE = r"""
 import asyncio, json, sys
 sys.path.insert(0, sys.argv[1])
-import munim_bridge as mb
+import smara_bridge as mb
 from playwright.async_api import async_playwright
 SENT = "<script>window.sent=[]</script>"
 LINKEDIN_LIKE = SENT + '''<form onsubmit="return false"><div contenteditable=true role=textbox><p><br></p></div>
@@ -532,7 +532,7 @@ def test_enter_in_a_message_box_really_sends_and_says_so_when_it_did_not(tmp_pat
     """LinkedIn adds a new line on Enter and needs its Send button (which has no aria-label and stays disabled until
     real input events arrive); chat apps send on Enter; and when nothing sends, the agent must hear NOT sent."""
     import subprocess
-    done = subprocess.run([sys.executable, "-c", SEND_PROBE, str(Path(munim_bridge.__file__).parent)],
+    done = subprocess.run([sys.executable, "-c", SEND_PROBE, str(Path(smara_bridge.__file__).parent)],
                           capture_output=True, text=True, timeout=120)
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["linkedin"] == {"via": "send button", "error": "", "sent": ["hi manvi"]}        # exactly once
@@ -543,7 +543,7 @@ def test_enter_in_a_message_box_really_sends_and_says_so_when_it_did_not(tmp_pat
 RECOVERY_PROBE = r"""
 import asyncio, json, sys
 sys.path.insert(0, sys.argv[1])
-import munim_bridge as mb
+import smara_bridge as mb
 from playwright.async_api import async_playwright
 
 import re
@@ -599,7 +599,7 @@ asyncio.run(main())
 
 def test_the_bridge_never_accepts_never_guesses_presses_once_and_never_types_secrets(tmp_path):
     import subprocess
-    done = subprocess.run([sys.executable, "-c", RECOVERY_PROBE, str(Path(munim_bridge.__file__).parent)],
+    done = subprocess.run([sys.executable, "-c", RECOVERY_PROBE, str(Path(smara_bridge.__file__).parent)],
                           capture_output=True, text=True, timeout=180)
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["consent_choice"] == "reject" and out["went"] == 1          # privacy choice, then the real click
@@ -614,7 +614,7 @@ def test_the_bridge_never_accepts_never_guesses_presses_once_and_never_types_sec
 HUMAN_PROBE = r'''
 import asyncio, json, re, sys, tempfile, time
 sys.path.insert(0, sys.argv[1])
-import munim_bridge as mb
+import smara_bridge as mb
 from playwright.async_api import async_playwright
 
 LOGGER = """<script>window.ev={move:0,wheel:0,key:0,untrusted:0,down:0};
@@ -686,7 +686,7 @@ def test_the_bridge_moves_the_real_pointer_types_like_a_person_and_reports_click
     """Refs survive a re-render, the pointer travels before it presses, keys are real key events, scrolling is the
     wheel, and a click that changed nothing says so (the Flipkart loop: three 'ok' clicks, same page)."""
     import subprocess
-    done = subprocess.run([sys.executable, "-c", HUMAN_PROBE, str(Path(munim_bridge.__file__).parent)],
+    done = subprocess.run([sys.executable, "-c", HUMAN_PROBE, str(Path(smara_bridge.__file__).parent)],
                           capture_output=True, text=True, timeout=240)
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert all(out.values()), [k for k, v in out.items() if not v]
@@ -715,7 +715,7 @@ SEARCH_ENTER_PROBE = r"""
 import asyncio, json, sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
-import munim_bridge
+import smara_bridge
 from playwright.async_api import async_playwright
 
 async def main():
@@ -726,8 +726,8 @@ async def main():
         browser = await p.chromium.launch()
         page = await browser.new_page()
         await page.goto(f.as_uri())
-        await munim_bridge.handle(page, {"action": "fill", "selector": "Search", "value": "veg pizza"}, allow_private=True)
-        r = await munim_bridge.handle(page, {"action": "press", "value": "Enter"}, allow_private=True)
+        await smara_bridge.handle(page, {"action": "fill", "selector": "Search", "value": "veg pizza"}, allow_private=True)
+        r = await smara_bridge.handle(page, {"action": "press", "value": "Enter"}, allow_private=True)
         print(json.dumps({"error": r.get("error", ""), "results": await page.text_content("#r")}))
         await browser.close()
 
@@ -737,7 +737,7 @@ asyncio.run(main())
 
 def test_enter_in_a_search_box_just_searches_and_is_not_reported_as_unsent(tmp_path):
     import subprocess
-    done = subprocess.run([sys.executable, "-c", SEARCH_ENTER_PROBE, str(Path(munim_bridge.__file__).parent), str(tmp_path)],
+    done = subprocess.run([sys.executable, "-c", SEARCH_ENTER_PROBE, str(Path(smara_bridge.__file__).parent), str(tmp_path)],
                           capture_output=True, text=True, timeout=120)
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["error"] == "" and out["results"] == "results for veg pizza"
@@ -745,14 +745,14 @@ def test_enter_in_a_search_box_just_searches_and_is_not_reported_as_unsent(tmp_p
 
 def test_a_rupee_sign_in_a_log_line_never_stops_the_helper(monkeypatch, tmp_path):
     import io
-    monkeypatch.setattr(munim_bridge, "HOME", tmp_path)
-    monkeypatch.setattr(munim_bridge, "LOG", tmp_path / "bridge.log")
+    monkeypatch.setattr(smara_bridge, "HOME", tmp_path)
+    monkeypatch.setattr(smara_bridge, "LOG", tmp_path / "bridge.log")
 
     class Cp1252Console(io.TextIOWrapper):
         pass
     console = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
     monkeypatch.setattr(sys, "stdout", console)
-    munim_bridge.log("step click text=₹389 TOTAL on blinkit.com: ok")                   # used to raise UnicodeEncodeError
+    smara_bridge.log("step click text=₹389 TOTAL on blinkit.com: ok")                   # used to raise UnicodeEncodeError
     assert "₹389" in (tmp_path / "bridge.log").read_text(encoding="utf-8")
 
 

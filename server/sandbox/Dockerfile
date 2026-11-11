@@ -6,6 +6,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends libpango-1.0-0 
 RUN pip install --no-cache-dir "pandas>=2.2,<4" "openpyxl>=3.1,<4" "xlrd>=2.0,<3" "numpy>=1.26,<3" "reportlab>=4.2,<5" "pypdf>=5,<7" \
         "weasyprint>=62,<70" "python-docx>=1.1,<2"
 WORKDIR /srv
-COPY sandbox/runner.py sandbox/munim_helpers.py sandbox/munim_docs.py ./
+COPY sandbox/runner.py sandbox/smara_helpers.py sandbox/smara_docs.py ./
 ENV SANDBOX_JOBS=/jobs PYTHONDONTWRITEBYTECODE=1
 CMD ["python", "-u", "runner.py"]

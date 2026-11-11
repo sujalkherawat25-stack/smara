@@ -40,7 +40,7 @@ async def main() -> None:
     ap.add_argument("--owner", required=True, help="owner WhatsApp number")
     ap.add_argument("--debtor", required=True, help="debtor WhatsApp number")
     ap.add_argument("--vpa", default="demoshop@upi")
-    ap.add_argument("--db", default=os.environ.get("DATABASE_URL", "postgresql://munim:munim@localhost:5433/munim"))
+    ap.add_argument("--db", default=os.environ.get("DATABASE_URL", "postgresql://smara:smara@localhost:5433/smara"))
     args = ap.parse_args()
     owner, debtor = normalize_phone(args.owner), normalize_phone(args.debtor)
     if owner == debtor:

@@ -1,0 +1,2 @@
+# Smara watchdog: every minute, host python3, alerts to OPS_ALERT_PHONE / Telegram (see docs/PILOT_RUNBOOK.md)
+* * * * * ubuntu /usr/bin/python3 /home/ubuntu/smara/scripts/watchdog.py >> /var/log/smara-watchdog.log 2>&1

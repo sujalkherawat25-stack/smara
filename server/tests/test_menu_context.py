@@ -11,7 +11,7 @@ import pytest
 from playwright.async_api import async_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
-import munim_bridge as mb  # noqa: E402
+import smara_bridge as mb  # noqa: E402
 
 DISHES = ["Margherita Pizza", "Paneer Tikka Pizza", "Pepperoni Pizza", "Veg Supreme Pizza", "Corn Pizza",
           "Farmhouse Pizza", "Chicken Tikka Pizza", "Cheese Burst Pizza", "BBQ Chicken Pizza", "Mushroom Pizza",

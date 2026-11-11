@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "smara-server"
 version = "0.0.1"
-description = "Smara Digital Munim - WhatsApp-native MSME collections agent"
+description = "Smara - WhatsApp-native MSME collections agent"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<1",

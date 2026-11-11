@@ -10,7 +10,7 @@ import pytest
 from playwright.async_api import async_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
-import munim_bridge as mb  # noqa: E402
+import smara_bridge as mb  # noqa: E402
 
 PAGE = """<html><head><meta charset="utf-8"></head><body><h2>Checkout</h2>
 <button id="next">Next</button><button>Item one</button><button>Item two</button><button>Item three</button>

@@ -14,7 +14,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "sandbox"))
-import munim_docs  # noqa: E402
+import smara_docs  # noqa: E402
 
 from src import tenants  # noqa: E402
 from src.agent import documents as D  # noqa: E402
@@ -34,7 +34,7 @@ CASES = {0: "₹0.00", 5: "₹5.00", 999.5: "₹999.50", 1000: "₹1,000.00", 12
 
 @pytest.mark.parametrize("value,text", CASES.items())
 def test_indian_grouping(value, text):
-    assert inr(value) == text and munim_docs.inr(value) == text      # the server and the sandbox must agree
+    assert inr(value) == text and smara_docs.inr(value) == text      # the server and the sandbox must agree
 
 
 def test_no_decimals_and_no_symbol():
@@ -52,7 +52,7 @@ SPEC = {"title": "Statement", "subtitle": "<b>Ravi & Sons</b>", "shop": {"name":
 
 
 def test_html_is_escaped_and_complete():
-    html = munim_docs.build_html(SPEC)
+    html = smara_docs.build_html(SPEC)
     assert "<script>" not in html and "&lt;script&gt;" in html and "&lt;b&gt;Ravi" in html
     assert "₹1,000.00" in html and "A-1" in html and "line1<br>line2" in html
     assert html.count("<i style=") == 1                      # the zero bar draws nothing
@@ -61,7 +61,7 @@ def test_html_is_escaped_and_complete():
 
 def test_unknown_block_types_are_dropped_by_render(tmp_path):
     out = tmp_path / "x.docx"
-    munim_docs.render(SPEC, str(out), "docx")
+    smara_docs.render(SPEC, str(out), "docx")
     from docx import Document
     text = "\n".join(p.text for p in Document(str(out)).paragraphs) + "\n".join(c.text for t in Document(str(out)).tables for r in t.rows for c in r.cells)
     assert "dropped" not in text and "A-1" in text and "₹1,000.00" in text and "Ravi & Sons" not in text.replace("<b>Ravi & Sons</b>", "")
@@ -70,7 +70,7 @@ def test_unknown_block_types_are_dropped_by_render(tmp_path):
 @pytest.mark.skipif(importlib.util.find_spec("weasyprint") is None, reason="WeasyPrint (needs pango) is only in the sandbox image")
 def test_pdf_has_text_and_page_numbers(tmp_path):
     out = tmp_path / "x.pdf"
-    res = munim_docs.render({**SPEC, "blocks": SPEC["blocks"] * 40}, str(out), "pdf")
+    res = smara_docs.render({**SPEC, "blocks": SPEC["blocks"] * 40}, str(out), "pdf")
     from pypdf import PdfReader
     text = PdfReader(str(out)).pages[0].extract_text()
     assert res["pages"] > 1 and "A-1" in text and "Page 1 of" in text

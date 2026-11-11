@@ -8,10 +8,10 @@ Not legal advice: have the privacy and consent wording reviewed before real cust
 - [ ] WhatsApp number: a real number on the WhatsApp Business account with an approved display name. The Meta test number
       only messages up to 5 pre-registered recipients, so it cannot reach real customers.
 - [ ] Templates approved by Meta (`smara_payment_reminder`, `smara_owner_waiting`); set `WA_REMINDER_TEMPLATE`
-      and `WA_OWNER_TEMPLATE` in the server `.env` and restart `munim_app`.
+      and `WA_OWNER_TEMPLATE` in the server `.env` and restart `smara_app`.
 - [ ] Business verification started (raises the daily limit above 250 customers).
 - [ ] Dedicated model key with enough requests per minute (the shared test key allows about 10 per minute).
-      To add capacity, put every key in `LLM_API_KEYS=key1,key2,...` in the server `.env` and restart `munim_app`
+      To add capacity, put every key in `LLM_API_KEYS=key1,key2,...` in the server `.env` and restart `smara_app`
       (each key adds about 10 calls per minute; keys are never logged, the logs say `key#1`, `key#2`).
 - [ ] `OPS_ALERT_PHONE` set so the watchdog can reach you (see section 4).
 - [ ] The shop owner has read and agreed to the consent text (section 5).
@@ -19,7 +19,7 @@ Not legal advice: have the privacy and consent wording reviewed before real cust
 ## 2. Onboarding steps
 
 1. Create the shop:
-   `docker exec munim_app python scripts/add_tenant.py --name "Ravi Traders" --owner 919811100001 --vpa ravi@upi`
+   `docker exec smara_app python scripts/add_tenant.py --name "Ravi Traders" --owner 919811100001 --vpa ravi@upi`
 2. The owner messages the Smara number from that phone. Anything from an unknown number is treated as a customer,
    so the owner must write first from the registered number.
 3. Owner sends their outstanding sheet (Excel/CSV) or Tally export. Smara imports it and reports the sheet total
@@ -32,7 +32,7 @@ Not legal advice: have the privacy and consent wording reviewed before real cust
 ## 3. Daily checks (2 minutes)
 
 ```
-docker exec munim_app python scripts/usage_report.py 7        # tokens per shop, fallback share
+docker exec smara_app python scripts/usage_report.py 7        # tokens per shop, fallback share
 curl -s localhost:8090/healthz                                 # outbox dead = 0, failed sessions low
 ```
 
@@ -46,7 +46,7 @@ means the proxy route was lost), `/healthz`, dead Continuum writes, failed sessi
 It messages `OPS_ALERT_PHONE` once per incident, every 6 hours while it lasts, and once on recovery. WhatsApp only
 delivers free text to a number that wrote to the business in the last 24 hours, so message the Smara number once a
 day from the ops phone, or set `TELEGRAM_BOT_TOKEN` and `OPS_TELEGRAM_CHAT_ID` for alerts that always arrive.
-Install on the server: `sudo cp deploy/munim-watchdog.cron /etc/cron.d/munim-watchdog`.
+Install on the server: `sudo cp deploy/smara-watchdog.cron /etc/cron.d/smara-watchdog`.
 
 ## 5. Privacy and consent (starting points)
 
@@ -59,11 +59,11 @@ Tell the shop owner plainly, before they upload anything:
 - How long: until the shop leaves; nightly backups are kept 7 days.
 - Their rights: see their data and have it deleted on request.
 
-Export a shop's data: `docker exec munim_app python scripts/tenant_data.py export --tenant "Ravi Traders"`
+Export a shop's data: `docker exec smara_app python scripts/tenant_data.py export --tenant "Ravi Traders"`
 Erase (dry run first, then for real):
 ```
-docker exec munim_app python scripts/tenant_data.py erase --tenant "Ravi Traders"
-docker exec munim_app python scripts/tenant_data.py erase --tenant "Ravi Traders" --execute --confirm "Ravi Traders"
+docker exec smara_app python scripts/tenant_data.py erase --tenant "Ravi Traders"
+docker exec smara_app python scripts/tenant_data.py erase --tenant "Ravi Traders" --execute --confirm "Ravi Traders"
 ```
 Erase removes the shop's database rows and its Continuum memory scopes. Tell the shop that nightly backups
 age out within 7 days.

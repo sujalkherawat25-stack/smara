@@ -77,7 +77,7 @@ async def env(monkeypatch):
     app = FastAPI()
     app.state.pool = pool
     app.state.settings = Settings(wa_link_url=SIDECAR, wa_link_token=TOKEN, wa_link_daily_cap=40, wa_link_send_gap_s=0.0,
-                                  public_base_url="https://smara.test/munim", reminder_send_mode="smara")
+                                  public_base_url="https://smara.test/smara", reminder_send_mode="smara")
     app.state.wa = FakeWA()
     app.state.tg = None
     app.state.llm = SimpleNamespace(enabled=False)
@@ -137,7 +137,7 @@ async def test_connect_whatsapp_gives_the_owner_the_sim_pairing_link(env):
     env.app.state.llm.enabled = False
     await dispatch(env.app, owner("c1", "connect whatsapp"))
     text = env.cloud.sent[-1]["text"]["body"]
-    assert "https://smara.test/munim/connect/wa-link?t=" in text
+    assert "https://smara.test/smara/connect/wa-link?t=" in text
     assert "Meta" not in text
 
 

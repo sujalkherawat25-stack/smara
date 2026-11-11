@@ -1,4 +1,4 @@
-"""Helpers available inside the sandbox as `import munim_helpers as mh`.
+"""Helpers available inside the sandbox as `import smara_helpers as mh`.
 
 Built for messy Indian accounting exports: Tally Prime XML, Excel/CSV reports
 with title rows above the header, Indian digit grouping, Dr/Cr suffixes and

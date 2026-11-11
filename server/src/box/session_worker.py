@@ -2,7 +2,7 @@
 one JSON result per stdout line. The page persists between steps, so the agent
 can observe -> act -> observe. Same SSRF guard as the one-shot tools.
 
-It runs the very same engine as the owner's PC helper (bridge/munim_bridge.py):
+It runs the very same engine as the owner's PC helper (bridge/smara_bridge.py):
 numbered refs for every control, actions by ref, and a report of what each step
 changed. One way of seeing and acting, wherever the browser is.
 
@@ -18,7 +18,7 @@ from src.box.guard import check_url
 from src.box.tools import browser_page
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bridge"))
-import munim_bridge as engine  # noqa: E402  (the shared browser engine)
+import smara_bridge as engine  # noqa: E402  (the shared browser engine)
 
 
 async def handle(page, cmd: dict) -> dict:

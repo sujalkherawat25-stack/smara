@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
-mb = pytest.importorskip("munim_bridge")
+mb = pytest.importorskip("smara_bridge")
 playwright = pytest.importorskip("playwright.async_api")
 
 SHOP = """<!doctype html><html><head><title>Demo Shop - Wireless Earphones</title>

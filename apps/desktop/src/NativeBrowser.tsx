@@ -70,7 +70,7 @@ export default function NativeBrowser({ locked }: { locked: boolean }) {
       }}>
         <label>Server<input disabled={busy} value={server} onChange={event => setServer(event.target.value)} /></label>
         <label>Pairing code<input disabled={busy} autoComplete="off" placeholder="ABCD-EFGH" value={code} onChange={event => setCode(event.target.value)} /></label>
-        <small>In WhatsApp or Telegram, send <strong>pair browser</strong> to Smara and paste the code here. The pairing is kept in <code>~/.munim-bridge/config.json</code>, which the helper reads.</small>
+        <small>In WhatsApp or Telegram, send <strong>pair browser</strong> to Smara and paste the code here. The pairing is kept in <code>~/.smara-bridge/config.json</code>, which the helper reads.</small>
         <button className="primary" disabled={busy || !code.trim() || missing.includes("python") || missing.includes("modules")}>{pending === "pair" ? "Pairing…" : "Pair this PC"}</button>
       </form> : <>
         <div className={`browser-status browser-${status}`} role="status">

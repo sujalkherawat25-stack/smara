@@ -53,7 +53,7 @@ The sidecar calls the app back at `WA_LINK_CALLBACK_URL` (`/state` with the encr
 | Variable | Where | Meaning |
 |---|---|---|
 | `WA_LINK_TOKEN` or `WA_LINK_TOKEN_FILE` | sidecar and app | Shared secret, at least 32 characters. Use the file form in production (a Docker secret). |
-| `WA_LINK_CALLBACK_URL` | sidecar | The app's internal base URL, e.g. `http://munim_app:8080/internal/wa-link`. |
+| `WA_LINK_CALLBACK_URL` | sidecar | The app's internal base URL, e.g. `http://smara_app:8080/internal/wa-link`. |
 | `WA_LINK_PORT` | sidecar | Default 8090. |
 | `WA_LINK_SEND_GAP_MS` | sidecar | Minimum gap between sends from one device. Default 3000. |
 | `WA_LINK_URL` | app | Where the sidecar is. Empty = the link is off. |
@@ -68,7 +68,7 @@ give the same value to both containers.
 
 ```bash
 cd server
-docker compose -f deploy/docker-compose.prod.yml build munim_wa_link   # production
+docker compose -f deploy/docker-compose.prod.yml build smara_wa_link   # production
 npm ci && npm test                                                     # here, in server/wa_link
 ```
 

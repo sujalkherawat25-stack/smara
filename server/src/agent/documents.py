@@ -1,6 +1,6 @@
 """make_document: print-quality PDF / Word documents whose numbers come from the ledger, not from the model.
 
-The server reads the database, builds a plain JSON spec (see sandbox/munim_docs.py) and the isolated sandbox renders it.
+The server reads the database, builds a plain JSON spec (see sandbox/smara_docs.py) and the isolated sandbox renders it.
 The model only chooses which document to make and, for a letter or a custom report, supplies the words.
 """
 import json
@@ -19,11 +19,11 @@ MAX_BLOCKS, MAX_ROWS, MAX_COLS, MAX_TEXT = 60, 500, 12, 3000
 BLOCK_TYPES = frozenset({"heading", "paragraph", "table", "stats", "keyvalues", "bar_chart", "note"})
 AGING = (("Not yet due", None, 0), ("1–30 days", 1, 30), ("31–60 days", 31, 60), ("61–90 days", 61, 90), ("Over 90 days", 91, 10 ** 6))
 
-RENDER = '''import json, munim_docs
+RENDER = '''import json, smara_docs
 spec = json.load(open("in/spec.json", encoding="utf-8"))
 fmt = spec.pop("_format")
 name = spec.pop("_filename")
-RESULT = munim_docs.render(spec, "out/" + name, fmt)
+RESULT = smara_docs.render(spec, "out/" + name, fmt)
 '''
 
 

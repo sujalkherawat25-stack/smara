@@ -1,6 +1,6 @@
-"""Run inside the app image against a live munim_sandbox container (container mode).
+"""Run inside the app image against a live smara_sandbox container (container mode).
 
-    docker run --rm -v <jobs-volume>:/jobs -e SANDBOX_MODE=container smara-munim python tests/sandbox_escape_probe.py
+    docker run --rm -v <jobs-volume>:/jobs -e SANDBOX_MODE=container smara python tests/sandbox_escape_probe.py
 
 Each probe is code an attacker-controlled prompt could make the agent run. A probe
 passes when the sandbox prevents it. Exit code 1 if any isolation guarantee fails.

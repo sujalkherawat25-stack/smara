@@ -1,10 +1,10 @@
 """Smara Browser Bridge: lets Smara use YOUR browser (Brave, Chrome or Edge) on your own PC.
 
     pip install playwright httpx
-    python munim_bridge.py pair --server https://ai.syntarus.com/munim --code ABCD-EFGH     (code from 'pair browser' in chat)
-    python munim_bridge.py run                      # opens Brave/Chrome/Edge with a dedicated profile, visible to you
-    python munim_bridge.py run --attach http://127.0.0.1:9222    # drive a browser you started with --remote-debugging-port=9222
-    python munim_bridge.py status | unpair
+    python smara_bridge.py pair --server https://ai.syntarus.com/smara --code ABCD-EFGH     (code from 'pair browser' in chat)
+    python smara_bridge.py run                      # opens Brave/Chrome/Edge with a dedicated profile, visible to you
+    python smara_bridge.py run --attach http://127.0.0.1:9222    # drive a browser you started with --remote-debugging-port=9222
+    python smara_bridge.py status | unpair
 
 How it stays safe:
 - It only connects OUT to your Smara server; nothing on your PC is exposed.
@@ -21,6 +21,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import socket
 import sys
 from pathlib import Path
@@ -28,7 +29,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-HOME = Path(os.environ.get("MUNIM_BRIDGE_HOME", Path.home() / ".munim-bridge"))
+HOME = Path(os.environ.get("SMARA_BRIDGE_HOME", Path.home() / ".smara-bridge"))
 CONFIG = HOME / "config.json"
 BANNER_JS = """() => {
   if (window.__smaraBanner) return;
@@ -1102,7 +1103,7 @@ def cmd_pair(a) -> int:
         return 1
     d = r.json()
     save_config({"server": a.server.rstrip("/"), "token": d["device_token"], "shop": d["shop"]})
-    print(f"Paired with {d['shop']}. Now run: python munim_bridge.py run")
+    print(f"Paired with {d['shop']}. Now run: python smara_bridge.py run")
     return 0
 
 
@@ -1288,7 +1289,7 @@ async def run(a) -> int:
     from playwright.async_api import async_playwright
     cfg = load_config()
     if not cfg.get("token"):
-        log("Not paired yet. Send 'pair browser' to Smara in WhatsApp, then run: python munim_bridge.py pair --code ...")
+        log("Not paired yet. Send 'pair browser' to Smara in WhatsApp, then run: python smara_bridge.py pair --code ...")
         return 1
     headers = {"Authorization": f"Bearer {cfg['token']}"}
     HOME.mkdir(parents=True, exist_ok=True)
@@ -1511,7 +1512,7 @@ def cmd_install_startup() -> int:
     """Windows: start the helper (no window) every time you sign in. The browser only appears when Smara needs it.
     Uses your own per-user 'Run' list, so no administrator rights are needed."""
     if platform.system() != "Windows":
-        print("Auto-start is set up for Windows only for now. On macOS/Linux add 'python munim_bridge.py run' to your login items.")
+        print("Auto-start is set up for Windows only for now. On macOS/Linux add 'python smara_bridge.py run' to your login items.")
         return 1
     import winreg
     run_line = " ".join(f'"{x}"' for x in startup_command())
@@ -1555,11 +1556,26 @@ def cmd_stop() -> int:
     return 0
 
 
+DEFAULT_HOME = Path.home() / ".smara-bridge"
+OLD_HOME = Path.home() / ".munim-bridge"   # the pairing folder before the rename to Smara
+
+
+def carry_over_old_home() -> None:
+    """Carry the pairing over from the old folder, once, so a paired PC stays paired. Only the default folder moves;
+    the old folder gets a marker so a later unpair cannot bring the pairing back."""
+    if HOME != DEFAULT_HOME or not OLD_HOME.is_dir() or (OLD_HOME / "MOVED_TO_SMARA").exists():
+        return
+    if not HOME.exists():
+        shutil.copytree(OLD_HOME, HOME)
+    (OLD_HOME / "MOVED_TO_SMARA").write_text("Copied to ~/.smara-bridge. Smara no longer uses this folder.\n", encoding="utf-8")
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(prog="munim-bridge")
+    carry_over_old_home()
+    ap = argparse.ArgumentParser(prog="smara-bridge")
     sub = ap.add_subparsers(dest="cmd", required=True)
     pp = sub.add_parser("pair")
-    pp.add_argument("--server", default="https://ai.syntarus.com/munim")
+    pp.add_argument("--server", default="https://ai.syntarus.com/smara")
     pp.add_argument("--code", required=True)
     pp.add_argument("--name", default="")
     rp = sub.add_parser("run")

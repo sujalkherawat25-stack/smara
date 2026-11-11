@@ -1,6 +1,6 @@
 """Point a Telegram bot at this server's webhook (run on the server, or anywhere with the .env).
 
-    python scripts/telegram_setup.py --url https://ai.syntarus.com/munim/telegram/webhook
+    python scripts/telegram_setup.py --url https://ai.syntarus.com/smara/telegram/webhook
 
 Reads TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET from .env (creates and
 prints a new secret line if missing — add it to .env and restart the app).

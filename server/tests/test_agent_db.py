@@ -333,7 +333,7 @@ async def test_agent_converts_tally_xml_in_sandbox_and_verifies_import(env, monk
     env.app.state.sandbox = Sandbox(str(tmp_path), "local")
     xml = (Path(__file__).parent / "fixtures" / "tally_daybook.xml").read_bytes()
     owner_file_bytes(monkeypatch, xml, "text/xml")
-    code = ("import munim_helpers as mh\nfrom datetime import timedelta\n"
+    code = ("import smara_helpers as mh\nfrom datetime import timedelta\n"
             "phones = {l['name']: l['mobile'] for l in mh.tally_ledgers('in/daybook.xml')}\n"
             "sales = [v for v in mh.tally_vouchers('in/daybook.xml') if v['type'] == 'Sales']\n"
             "rows = [dict(party=v['party'], phone=phones.get(v['party'], ''), invoice=v['number'],\n"

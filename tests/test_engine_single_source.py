@@ -6,12 +6,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_the_desktop_engine_is_the_hosted_engine_file():
-    hosted = ROOT / "server" / "bridge" / "munim_bridge.py"
-    desktop = ROOT / "src" / "smara" / "munim_bridge.py"
-    assert desktop.read_bytes() == hosted.read_bytes(), "copy server/bridge/munim_bridge.py to src/smara/munim_bridge.py"
+    hosted = ROOT / "server" / "bridge" / "smara_bridge.py"
+    desktop = ROOT / "src" / "smara" / "smara_bridge.py"
+    assert desktop.read_bytes() == hosted.read_bytes(), "copy server/bridge/smara_bridge.py to src/smara/smara_bridge.py"
 
 
 def test_the_bundled_pc_helper_is_the_hosted_engine_file():
-    hosted = ROOT / "server" / "bridge" / "munim_bridge.py"
-    bundled = ROOT / "apps" / "desktop" / "src-tauri" / "resources" / "browser" / "munim_bridge.py"
-    assert bundled.read_bytes() == hosted.read_bytes(), "copy server/bridge/munim_bridge.py to the Desktop resources"
+    hosted = ROOT / "server" / "bridge" / "smara_bridge.py"
+    bundled = ROOT / "apps" / "desktop" / "src-tauri" / "resources" / "browser" / "smara_bridge.py"
+    assert bundled.read_bytes() == hosted.read_bytes(), "copy server/bridge/smara_bridge.py to the Desktop resources"

@@ -116,7 +116,7 @@ TOOLS = [
     _fn("run_python", "Run Python in an isolated sandbox (no network, 60 s) for Tally/Excel/CSV work. "
         "Attached files are at ./in/<filename>; write output files to ./out/ (they come back as file_refs you "
         "can pass to inspect_and_import_file); set RESULT = <json-able> for structured output. pandas, openpyxl "
-        "and `import munim_helpers as mh` are available: mh.read_table(path) finds the real header row; "
+        "and `import smara_helpers as mh` are available: mh.read_table(path) finds the real header row; "
         "mh.parse_amount('1,25,000.50 Dr'); mh.parse_date('05-10-2026'|'20261005'|excel serial); mh.phone(v); "
         "Tally Prime XML: mh.tally_receivables(xml_path) gives sales invoices WITH phones (from ledger masters) "
         "and due dates (credit period) ready for mh.to_rows_csv; mh.tally_vouchers / mh.tally_ledgers for the raw data; "
@@ -172,8 +172,8 @@ async def query_ledger_sql(app, ctx: SessionCtx, args: dict) -> dict:
         async with app.state.pool.connection() as conn:
             async with conn.transaction():
                 await conn.execute("SET TRANSACTION READ ONLY")
-                await conn.execute("SET LOCAL ROLE munim_agent_ro")
-                await conn.execute("SELECT set_config('munim.tenant_id', %s, true)", (ctx.tenant_id,))
+                await conn.execute("SET LOCAL ROLE smara_agent_ro")
+                await conn.execute("SELECT set_config('smara.tenant_id', %s, true)", (ctx.tenant_id,))
                 await conn.execute("SET LOCAL statement_timeout = '3000'")
                 await conn.execute("SET LOCAL TIME ZONE 'Asia/Kolkata'")   # current_date = the shop's today
                 cur = await conn.execute(sql)

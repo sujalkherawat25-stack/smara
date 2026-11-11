@@ -1,29 +1,54 @@
 //! Smara Browser Bridge, driven by Desktop.
 //!
-//! The helper (`munim_bridge.py`, bundled unchanged) is a detached background program that starts with Windows,
-//! restarts itself after crashes and keeps its pairing in `~/.munim-bridge/config.json`. That file is the single source
+//! The helper (`smara_bridge.py`, bundled unchanged) is a detached background program that starts with Windows,
+//! restarts itself after crashes and keeps its pairing in `~/.smara-bridge/config.json`. That file is the single source
 //! of truth for the device token. Desktop never shows a terminal: it calls the helper's own commands (`ensure`,
 //! `pair`, `install-startup`, `stop`, `unpair`) and reads its pid file and log to show status.
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-const DEFAULT_SERVER: &str = "https://ai.syntarus.com/munim";
+const DEFAULT_SERVER: &str = "https://ai.syntarus.com/smara";
 const RUN_VALUE: &str = "Smara Browser Bridge";
 const LOG_LINES: usize = 80;
 
 fn home() -> PathBuf {
-    if let Some(path) = std::env::var_os("MUNIM_BRIDGE_HOME") { return PathBuf::from(path); }
-    PathBuf::from(std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).unwrap_or_default()).join(".munim-bridge")
+    if let Some(path) = std::env::var_os("SMARA_BRIDGE_HOME") { return PathBuf::from(path); }
+    let base = PathBuf::from(std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).unwrap_or_default());
+    #[cfg(not(test))]
+    {
+        carry_over_old_home(&base);
+    }
+    base.join(".smara-bridge")
+}
+/// Before the rename the pairing lived in `~/.munim-bridge`. Copy it once so a paired PC stays paired, then leave a
+/// marker in the old folder so a later unpair cannot bring the pairing back. Tests never touch the real folder.
+#[cfg(not(test))]
+fn carry_over_old_home(base: &std::path::Path) {
+    let old = base.join(".munim-bridge");
+    let new = base.join(".smara-bridge");
+    if !old.is_dir() || old.join("MOVED_TO_SMARA").exists() { return; }
+    if !new.exists() { let _ = copy_dir(&old, &new); }
+    let _ = std::fs::write(old.join("MOVED_TO_SMARA"), "Copied to ~/.smara-bridge. Smara no longer uses this folder.\n");
+}
+#[cfg(not(test))]
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() { copy_dir(&entry.path(), &target)?; } else { std::fs::copy(entry.path(), target)?; }
+    }
+    Ok(())
 }
 fn hide(command: &mut Command) {
     #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
     #[cfg(not(windows))] { let _ = command; }
 }
 fn bridge_script() -> Option<PathBuf> {
-    let installed = std::env::current_exe().ok()?.parent()?.join("resources/browser/munim_bridge.py");
+    let installed = std::env::current_exe().ok()?.parent()?.join("resources/browser/smara_bridge.py");
     if installed.is_file() { return Some(installed); }
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/browser/munim_bridge.py");
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/browser/smara_bridge.py");
     dev.is_file().then_some(dev)
 }
 fn python() -> Command {
@@ -37,7 +62,7 @@ fn python() -> Command {
 // ---- pure helpers (unit-tested) ---------------------------------------------------------------------------
 pub fn normalize_server(raw: &str) -> Result<String, String> {
     let value = raw.trim().trim_end_matches('/');
-    let (scheme, rest) = value.split_once("://").ok_or("Enter the full server address, for example https://ai.syntarus.com/munim")?;
+    let (scheme, rest) = value.split_once("://").ok_or("Enter the full server address, for example https://ai.syntarus.com/smara")?;
     let host = rest.split(['/', ':']).next().unwrap_or_default().to_ascii_lowercase();
     if host.is_empty() || rest.contains(['@', ' ', '?', '#']) { return Err("That server address is not valid".into()); }
     let local = host == "localhost" || host == "127.0.0.1";
@@ -216,7 +241,7 @@ mod tests {
     use super::*;
     #[test]
     fn server_must_be_https_or_local_http() {
-        assert_eq!(normalize_server(" https://ai.syntarus.com/munim/ ").unwrap(), "https://ai.syntarus.com/munim");
+        assert_eq!(normalize_server(" https://ai.syntarus.com/smara/ ").unwrap(), "https://ai.syntarus.com/smara");
         assert!(normalize_server("http://example.com").is_err());
         assert!(normalize_server("http://localhost:8000").is_ok());
         assert!(normalize_server("https://user@evil.com").is_err());
@@ -229,7 +254,7 @@ mod tests {
     }
     #[test]
     fn existing_pairing_is_read_without_exposing_the_token() {
-        assert_eq!(parse_config(r#"{"server":"https://x/munim","token":"secret","shop":"Demo Shop"}"#), Some(("https://x/munim".into(), "Demo Shop".into(), true)));
+        assert_eq!(parse_config(r#"{"server":"https://x/smara","token":"secret","shop":"Demo Shop"}"#), Some(("https://x/smara".into(), "Demo Shop".into(), true)));
         assert_eq!(parse_config(r#"{"server":"https://x"}"#).map(|c| c.2), Some(false));
         assert_eq!(parse_config("not json"), None);
     }
@@ -249,11 +274,11 @@ mod tests {
     }
     #[test]
     fn startup_entry_is_compared_with_the_bundled_script() {
-        let out = "\nHKEY_CURRENT_USER\\Software\\X\\Run\n    Smara Browser Bridge    REG_SZ    \"C:\\Python314\\pythonw.exe\" \"C:\\Users\\sujal\\smara-munim\\bridge\\munim_bridge.py\" \"run\"\n";
+        let out = "\nHKEY_CURRENT_USER\\Software\\X\\Run\n    Smara Browser Bridge    REG_SZ    \"C:\\Python314\\pythonw.exe\" \"C:\\Users\\sujal\\smara\\bridge\\smara_bridge.py\" \"run\"\n";
         let cmd = parse_run_value(out).unwrap();
-        assert!(startup_uses(&cmd, std::path::Path::new(r"C:\Users\sujal\smara-munim\bridge\munim_bridge.py")));
-        assert!(!startup_uses(&cmd, std::path::Path::new(r"C:\Users\sujal\AppData\Local\Smara Desktop\resources\browser\munim_bridge.py")));
-        assert!(startup_uses(&cmd.to_uppercase(), std::path::Path::new("c:/users/sujal/smara-munim/bridge/munim_bridge.py")));
+        assert!(startup_uses(&cmd, std::path::Path::new(r"C:\Users\sujal\smara\bridge\smara_bridge.py")));
+        assert!(!startup_uses(&cmd, std::path::Path::new(r"C:\Users\sujal\AppData\Local\Smara Desktop\resources\browser\smara_bridge.py")));
+        assert!(startup_uses(&cmd.to_uppercase(), std::path::Path::new("c:/users/sujal/smara/bridge/smara_bridge.py")));
         assert_eq!(parse_run_value("ERROR: not found"), None);
     }
     #[test]

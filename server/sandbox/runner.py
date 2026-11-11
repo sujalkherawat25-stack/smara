@@ -1,6 +1,6 @@
 """Sandbox runner: executes the agent's Python on uploaded files, in isolation.
 
-Production runs this in its own container (`munim_sandbox`): no network, read-only
+Production runs this in its own container (`smara_sandbox`): no network, read-only
 root, tmpfs /tmp, memory/CPU/pid limits. Jobs arrive as directories in the shared
 /jobs volume (root-only, 0700). Each job is copied into a private tmp dir owned by
 `nobody` and run as `nobody` with rlimits and a wall-clock timeout, so a job can
@@ -60,7 +60,7 @@ def execute(job_dir: Path, *, isolate: bool = True) -> dict:
         shutil.copytree(job_dir / "in", work / "in")
         (work / "out").mkdir()
         shutil.copy(job_dir / "code.py", work / "user_code.py")
-        for helper in ("munim_helpers.py", "munim_docs.py"):
+        for helper in ("smara_helpers.py", "smara_docs.py"):
             if (HERE / helper).exists():
                 shutil.copy(HERE / helper, work / helper)
         (work / "_run.py").write_text(WRAPPER, encoding="utf-8")

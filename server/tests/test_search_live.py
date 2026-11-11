@@ -14,7 +14,7 @@ from playwright.async_api import async_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import munim_bridge as mb  # noqa: E402
+import smara_bridge as mb  # noqa: E402
 from src.agent import web  # noqa: E402
 from src.agent.policy import SessionCtx  # noqa: E402
 

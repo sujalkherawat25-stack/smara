@@ -203,7 +203,7 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         # The browser tool Codex users plug in: Microsoft's Playwright MCP, one plain tool per action.
         from .native_browser import configured_origins, ANY_PUBLIC_SITE
         from .native_playwright import settings as playwright_settings
-        from .munim_bridge import find_browser
+        from .smara_bridge import find_browser
         settings.update(playwright_settings(npx, configured_origins(browser_origins), ANY_PUBLIC_SITE, workspace.resolve(),
                                             (home / "playwright-profile").resolve(), find_browser("auto")))
     elif browser_origins:

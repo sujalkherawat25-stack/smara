@@ -92,7 +92,7 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         return (f"Browser pairing code: {code}\n(valid 1 hour, works once)\n\n"
                 "On your PC open Smara Desktop > Settings > Browser, paste the code and press Pair. That is all: after this it "
                 "starts by itself whenever the PC is on, and I will use your own browser (your logins stay on your PC).\n\n"
-                f"No Smara Desktop? Run once: python munim_bridge.py pair --code {code} && python munim_bridge.py install-startup\n"
+                f"No Smara Desktop? Run once: python smara_bridge.py pair --code {code} && python smara_bridge.py install-startup\n"
                 "Send 'unpair browser' to disconnect.")
     if cmd in ("unpair browser", "disconnect browser"):
         from src.bridge.device import revoke_all

@@ -1,6 +1,6 @@
 """End-to-end agent harness: real model, real loop/policy/sandbox, scratch Postgres.
 
-    python -m evals.agent_harness --db postgresql://munim:munim@localhost:5433/munim_eval --model glm5.3
+    python -m evals.agent_harness --db postgresql://smara:smara@localhost:5433/smara_eval --model glm5.3
 
 Each task seeds a fresh ledger, fires one event, and is scored from ledger state,
 sessions and outbound messages, never from what the model claims. WhatsApp and
@@ -423,7 +423,7 @@ async def main() -> None:
     ap.add_argument("--model", required=True)
     ap.add_argument("--only", default="")
     ap.add_argument("--json", default="")
-    ap.add_argument("--sandbox", default="local", help="local, or container (use the live munim_sandbox via --jobs)")
+    ap.add_argument("--sandbox", default="local", help="local, or container (use the live smara_sandbox via --jobs)")
     ap.add_argument("--jobs", default="")
     a = ap.parse_args()
     pool = await open_pool(a.db)

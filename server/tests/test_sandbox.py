@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sandbox"))
-import munim_helpers as mh  # noqa: E402
+import smara_helpers as mh  # noqa: E402
 
 from src.box.sandbox import Sandbox, safe_name  # noqa: E402
 

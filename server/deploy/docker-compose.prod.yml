@@ -1,34 +1,34 @@
 # Production stack on the Oracle host, next to MemoryOS.
 #   docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d --build
-# Caddy routes https://ai.syntarus.com/smara/* (and the older /munim/* alias) -> 127.0.0.1:8090 (prefix stripped).
-name: munim
+# Caddy routes https://ai.syntarus.com/smara/* (and the older /munim/* alias for old Desktop builds) -> 127.0.0.1:8090 (prefix stripped).
+name: smara
 
 services:
-  munim_postgres:
+  smara_postgres:
     image: postgres:16-alpine
-    container_name: munim_postgres
+    container_name: smara_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: munim
-      POSTGRES_PASSWORD: ${MUNIM_DB_PASSWORD:?set MUNIM_DB_PASSWORD in .env}
-      POSTGRES_DB: munim
+      POSTGRES_USER: smara
+      POSTGRES_PASSWORD: ${SMARA_DB_PASSWORD:?set SMARA_DB_PASSWORD in .env}
+      POSTGRES_DB: smara
     volumes:
-      - munim_pgdata:/var/lib/postgresql/data
+      - smara_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U munim"]
+      test: ["CMD-SHELL", "pg_isready -U smara"]
       interval: 10s
       timeout: 5s
       retries: 10
-    networks: [munim]
+    networks: [smara]
 
-  munim_app:
+  smara_app:
     build: ..
-    image: smara-munim:${MUNIM_VERSION:-local}
-    container_name: munim_app
+    image: smara-app:${SMARA_VERSION:-local}
+    container_name: smara_app
     restart: unless-stopped
     env_file: ../.env
     environment:
-      DATABASE_URL: postgresql://munim:${MUNIM_DB_PASSWORD}@munim_postgres:5432/munim
+      DATABASE_URL: postgresql://smara:${SMARA_DB_PASSWORD}@smara_postgres:5432/smara
       # Continuum over the docker network, no public round trip
       CONTINUUM_URL: http://memoryos_backend:8000/v1
       PUBLIC_BASE_URL: https://ai.syntarus.com/smara
@@ -37,7 +37,7 @@ services:
       VAULT_MASTER_KEY_FILE: /run/secrets/vault_master_key
       # A shop's own SIM through the Baileys sidecar (unofficial). Switched OFF: WhatsApp restricted the linked
       # device on 2026-11-11, so the owner's messages use Telegram. To switch it back on, set this to
-      # http://munim_wa_link:8090 and start the sidecar with COMPOSE_PROFILES=wa-link (see release.sh).
+      # http://smara_wa_link:8090 and start the sidecar with COMPOSE_PROFILES=wa-link (see release.sh).
       WA_LINK_URL: ""
       WA_LINK_TOKEN_FILE: /run/secrets/wa_link_token
       # Each shop's server browser keeps its cookies here between chats (like a person's own browser profile)
@@ -46,33 +46,33 @@ services:
       - vault_master_key
       - wa_link_token
     volumes:
-      - munim_jobs:/jobs
-      - munim_browser:/data/browser-profiles
+      - smara_jobs:/jobs
+      - smara_browser:/data/browser-profiles
       # Files the owner sends (kept 7 days). A named volume keeps them across releases.
-      - munim_owner_files:/app/data/owner-files
+      - smara_owner_files:/app/data/owner-files
     ports:
       - "127.0.0.1:8090:8080"
     depends_on:
-      munim_postgres:
+      smara_postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
-    networks: [munim, munim_link, memoryos_default]
+    networks: [smara, smara_link, memoryos_default]
 
   # Baileys sidecar for shops' own WhatsApp numbers (unofficial; see server/wa_link/README.md). It is reachable only
-  # from munim_app on munim_link: no published port, no database access, no files written, credentials in memory only.
-  munim_wa_link:
+  # from smara_app on smara_link: no published port, no database access, no files written, credentials in memory only.
+  smara_wa_link:
     profiles: ["wa-link"]     # off by default; release.sh starts it only when COMPOSE_PROFILES=wa-link
     build:
       context: ../wa_link
-    image: smara-wa-link:${MUNIM_VERSION:-local}
-    container_name: munim_wa_link
+    image: smara-wa-link:${SMARA_VERSION:-local}
+    container_name: smara_wa_link
     restart: unless-stopped
     environment:
-      WA_LINK_CALLBACK_URL: http://munim_app:8080/internal/wa-link
+      WA_LINK_CALLBACK_URL: http://smara_app:8080/internal/wa-link
       WA_LINK_TOKEN_FILE: /run/secrets/wa_link_token
     secrets:
       - wa_link_token
@@ -84,23 +84,23 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    networks: [munim_link]
+    networks: [smara_link]
 
   # Runs the agent's Python on uploaded files. No network at all, read-only root,
   # tmpfs scratch, capped memory/CPU/pids; jobs run as `nobody` (see sandbox/runner.py).
-  munim_sandbox:
+  smara_sandbox:
     build:
       context: ..
       dockerfile: sandbox/Dockerfile
-    image: smara-munim-sandbox:${MUNIM_VERSION:-local}
-    container_name: munim_sandbox
+    image: smara-sandbox:${SMARA_VERSION:-local}
+    container_name: smara_sandbox
     restart: unless-stopped
     network_mode: none
     read_only: true
     tmpfs:
       - /tmp:size=512m,mode=1777
     volumes:
-      - munim_jobs:/jobs
+      - smara_jobs:/jobs
     mem_limit: 2g
     cpus: 1.5
     pids_limit: 256
@@ -110,8 +110,8 @@ services:
       - no-new-privileges:true
 
 networks:
-  munim: {}
-  munim_link: {}
+  smara: {}
+  smara_link: {}
   memoryos_default:
     external: true
 
@@ -122,8 +122,13 @@ secrets:
   wa_link_token:
     file: ../secrets/wa_link_token
 
+# Named volumes keep their exact names (no project prefix). The rename copied the data from the old munim_munim_* volumes.
 volumes:
-  munim_pgdata:
-  munim_jobs:
-  munim_browser:
-  munim_owner_files:
+  smara_pgdata:
+    name: smara_pgdata
+  smara_jobs:
+    name: smara_jobs
+  smara_browser:
+    name: smara_browser
+  smara_owner_files:
+    name: smara_owner_files

@@ -1,8 +1,8 @@
 """Vault administration.
 
     python scripts/vault_admin.py new-key            # print a fresh master key (put it in the server's secret file)
-    docker exec munim_app python scripts/vault_admin.py status
-    docker exec munim_app python scripts/vault_admin.py rotate   # after setting the new key as VAULT_MASTER_KEY(_FILE)
+    docker exec smara_app python scripts/vault_admin.py status
+    docker exec smara_app python scripts/vault_admin.py rotate   # after setting the new key as VAULT_MASTER_KEY(_FILE)
                                                                   # and the old one as VAULT_MASTER_KEY_OLD
 """
 import asyncio
