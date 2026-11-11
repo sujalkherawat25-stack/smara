@@ -66,6 +66,26 @@ async def test_revoking_disconnects_the_device(env):
         assert (await http.post("/bridge/poll", params={"wait": 0}, headers={"Authorization": f"Bearer {token}"})).status_code == 401
 
 
+async def test_the_overview_is_the_paired_shops_numbers_only(env):
+    async with api(env) as http:
+        assert (await http.get("/bridge/overview")).status_code == 401
+        assert (await http.get("/bridge/overview", headers={"Authorization": "Bearer nope"})).status_code == 401
+        token, _ = await pair(env, http)
+        async with env.pool.connection() as c:
+            await c.execute("update tenants set telegram_chat_id = 555, owner_last_channel = 'telegram' where id = %s", (env.t.id,))
+            await c.execute("insert into tally_syncs (tenant_id, receivables) values (%s, 1)", (env.t.id,))
+        r = await http.get("/bridge/overview", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+        o = r.json()
+        assert o["shop"] == "Shop" and o["device"] == "Sujal PC"
+        assert o["dues"] == {"open": 1, "open_paise": 1_000_000, "overdue": 1, "overdue_paise": 1_000_000}   # not the other shop's 99,900,000
+        assert o["channels"] == {"telegram_linked": False, "whatsapp_window_open": False, "last_used": "telegram"}   # no bot on this server
+        assert o["waiting_for_owner"] == 0 and o["payables"] == {"open": 0, "open_paise": 0} and o["tally_last_sync_at"]
+        assert "Ravi" not in r.text and "SECRET" not in r.text                 # totals only, no customer names
+        await device.revoke_all(env.pool, env.t.id)
+        assert (await http.get("/bridge/overview", headers={"Authorization": f"Bearer {token}"})).status_code == 401
+
+
 async def test_a_device_only_sees_its_own_shops_jobs(env):
     from src import tenants
     other = await tenants.create(env.pool, name="Other", owner_phone="919000000077")

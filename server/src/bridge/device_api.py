@@ -62,6 +62,17 @@ async def result(body: ResultBody, request: Request, authorization: str | None =
     return {"ok": True}
 
 
+@router.get("/overview")
+async def overview(request: Request, authorization: str | None = Header(default=None)):
+    """The paired shop's numbers for Smara Desktop: dues, what waits for the owner, channels, last Tally sync."""
+    from src.bridge.overview import shop_overview
+    dev = await _device(request, authorization)
+    data = await shop_overview(request.app, str(dev["tenant_id"]))
+    if data is None:
+        raise HTTPException(status_code=404, detail="this shop no longer exists")
+    return {**data, "device": dev["name"]}
+
+
 @router.post("/sync/tally")
 async def sync_tally(body: SyncBody, request: Request, authorization: str | None = Header(default=None)):
     """The Desktop app posts the shop's open receivables and payables from Tally; nothing is sent to anyone by this."""

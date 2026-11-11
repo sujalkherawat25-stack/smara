@@ -5,6 +5,8 @@ Not legal advice: have the privacy and consent wording reviewed before real cust
 
 ## 1. Before a shop goes live (checklist)
 
+- [ ] Telegram bot working (`/healthz` shows `channels.telegram.bot: true`). Owners can run on Telegram alone;
+      WhatsApp is needed only to message a shop's customers from Smara's number.
 - [ ] WhatsApp number: a real number on the WhatsApp Business account with an approved display name. The Meta test number
       only messages up to 5 pre-registered recipients, so it cannot reach real customers.
 - [ ] Templates approved by Meta (`smara_payment_reminder`, `smara_owner_waiting`); set `WA_REMINDER_TEMPLATE`
@@ -13,20 +15,37 @@ Not legal advice: have the privacy and consent wording reviewed before real cust
 - [ ] Dedicated model key with enough requests per minute (the shared test key allows about 10 per minute).
       To add capacity, put every key in `LLM_API_KEYS=key1,key2,...` in the server `.env` and restart `smara_app`
       (each key adds about 10 calls per minute; keys are never logged, the logs say `key#1`, `key#2`).
-- [ ] `OPS_ALERT_PHONE` set so the watchdog can reach you (see section 4).
+- [ ] `OPS_TELEGRAM_CHAT_ID` set (and `TELEGRAM_BOT_TOKEN`) so the watchdog and the app can reach you (see section 4).
 - [ ] The shop owner has read and agreed to the consent text (section 5).
 
 ## 2. Onboarding steps
 
-1. Create the shop:
+There are two ways in. Both end with the same shop, known by the owner's phone number, so the owner can use
+Telegram and WhatsApp side by side.
+
+**A. Telegram first (works even while the WhatsApp number is not available):**
+
+1. Create an invite: `docker exec smara_app python scripts/invites.py create --label "Ravi Traders"`.
+   It prints the code and a Telegram link (`https://t.me/<bot>?start=<code>`).
+2. Send the owner the link. They open it, press **Share my phone number** (Telegram confirms the number is theirs),
+   then answer two questions: shop name and UPI ID (or `skip`). The shop is created and you get an ops alert.
+   A number that already has a shop is refused here, on purpose: that owner links Telegram from WhatsApp instead.
+
+**B. WhatsApp:**
+
+1. Give the owner the invite code; they send `JOIN <code>` to the Smara WhatsApp number. Or create the shop by hand:
    `docker exec smara_app python scripts/add_tenant.py --name "Ravi Traders" --owner 919811100001 --vpa ravi@upi`
 2. The owner messages the Smara number from that phone. Anything from an unknown number is treated as a customer,
    so the owner must write first from the registered number.
-3. Owner sends their outstanding sheet (Excel/CSV) or Tally export. Smara imports it and reports the sheet total
+3. Owner links Telegram: sends `telegram` and opens the link.
+
+**Then, on either channel:**
+
+1. Owner sends their outstanding sheet (Excel/CSV) or Tally export. Smara imports it and reports the sheet total
    against the ledger total. **Check both numbers with the owner before enabling reminders.**
-4. Owner links Telegram (optional): sends `telegram`.
-5. Owner pairs their PC browser (optional): sends `pair browser`.
-6. First week: read the shop's sessions daily (section 3) and turn every wrong answer into a regression task in
+2. Owner pairs their PC (optional, needed for Tally sync and browser tasks): sends `pair browser`, then pastes the
+   code into Smara Desktop. The Desktop "Hosted" panel then shows the same dues and approvals count as the chat.
+3. First week: read the shop's sessions daily (section 3) and turn every wrong answer into a regression task in
    `evals/agent_harness.py`.
 
 ## 3. Daily checks (2 minutes)

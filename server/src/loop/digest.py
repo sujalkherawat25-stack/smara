@@ -46,6 +46,8 @@ async def build_digest(pool, tenant_id: str, today: date) -> str:
         lines.append("\nSupplier payments (tax deduction at risk if paid late, Section 43B(h)):")
         lines += [f"- PAST DEADLINE: {b['supplier']} {b['bill_ref']} {rupees(b['amount_paise'])} (was due {b['due']})" for b in late[:5]]
         lines += [f"- Pay by {b['due']}: {b['supplier']} {b['bill_ref']} {rupees(b['amount_paise'])}" for b in soon[:5]]
+    if today.weekday() == 0:            # Monday: what last week's follow-up brought in
+        lines += await weekly_result(pool, tenant_id)
     waiting = agg["waiting"] + pending_adj
     if waiting:
         lines.append(f"\n{waiting} item(s) waiting for your approval above.")
@@ -55,3 +57,28 @@ async def build_digest(pool, tenant_id: str, today: date) -> str:
         lines.append("\nNumber chahiye (reminder ke liye): " + ", ".join(no_number)
                      + ". Likh dijiye, jaise: 'Ravi Traders 98xxxxxxxx'.")
     return "\n".join(lines)
+
+
+async def weekly_result(pool, tenant_id: str) -> list[str]:
+    """The last 7 days in rupees: invoices that were paid, how much of that came after a reminder, reminders sent and
+    promises recorded. Empty when nothing happened, so a quiet shop is not shown a row of zeros."""
+    async with pool.connection() as conn:
+        paid = await (await conn.execute(
+            """SELECT count(*) AS n, coalesce(sum(o.amount_paise), 0) AS amt,
+                      coalesce(sum(o.amount_paise) FILTER (WHERE o.attempt_count > 0), 0) AS after_reminder
+                 FROM obligations o
+                WHERE o.tenant_id = %s AND o.state = 'PAID'
+                  AND EXISTS (SELECT 1 FROM obligation_events e WHERE e.obligation_id = o.id AND e.to_state = 'PAID'
+                                 AND e.created_at > now() - interval '7 days')""", (tenant_id,))).fetchone()
+        work = await (await conn.execute(
+            """SELECT (SELECT count(*) FROM obligation_events e JOIN obligations o ON o.id = e.obligation_id
+                        WHERE o.tenant_id = %(t)s AND e.to_state = 'DISPATCHED' AND e.created_at > now() - interval '7 days') AS reminders,
+                      (SELECT count(*) FROM proposed_adjustments a JOIN obligations o ON o.id = a.obligation_id
+                        WHERE o.tenant_id = %(t)s AND a.adjustment_type = 'PROMISE_DATE_CHANGE'
+                          AND a.created_at > now() - interval '7 days') AS promises""", {"t": tenant_id})).fetchone()
+    if not (paid["n"] or work["reminders"] or work["promises"]):
+        return []
+    line = f"\nLast 7 days: {paid['n']} invoice(s) paid, {rupees(paid['amt'])}"
+    if paid["after_reminder"]:
+        line += f" ({rupees(paid['after_reminder'])} of it after a reminder)"
+    return [f"{line}. {work['reminders']} reminder(s) sent, {work['promises']} promise(s) recorded."]

@@ -37,6 +37,10 @@ done
 if [ "$(docker inspect -f '{{.State.Health.Status}}' smara_app)" != healthy ]; then
   echo "app did not become healthy; keeping old images for rollback (previous: ${PREVIOUS:-none})" >&2; exit 1
 fi
+# Record the running version in .env, so a plain `docker compose up` later (a restart, a password change) uses this
+# image instead of building a "local" one or picking an older tag.
+if grep -q '^SMARA_VERSION=' .env; then sed -i "s/^SMARA_VERSION=.*/SMARA_VERSION=$VERSION/" .env
+else printf '\nSMARA_VERSION=%s\n' "$VERSION" >> .env; fi
 # prune: keep this version and the previous one
 for repo in smara-app smara-sandbox; do
   # grep -v exits 1 when nothing is left to delete; that is not a failure here (pipefail is on)

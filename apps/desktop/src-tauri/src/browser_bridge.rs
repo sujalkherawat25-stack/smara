@@ -92,6 +92,24 @@ pub fn parse_status(text: &str) -> Value {
     json!({"last_poll_at": value["last_poll_at"].as_f64().unwrap_or(0.0), "last_step": value["last_step"].as_str().unwrap_or_default(),
            "last_step_at": value["last_step_at"].as_f64().unwrap_or(0.0), "online": value["online"].as_bool().unwrap_or(false)})
 }
+/// The paired shop's numbers the helper saved (overview.json). Only the fields the Hosted panel shows are kept.
+pub fn parse_overview(text: &str) -> Value {
+    let Ok(v) = serde_json::from_str::<Value>(text) else { return Value::Null };
+    if !v.is_object() { return Value::Null; }
+    let n = |x: &Value| x.as_i64().unwrap_or(0);
+    json!({
+        "shop": v["shop"].as_str().unwrap_or_default(),
+        "dues": {"open": n(&v["dues"]["open"]), "open_paise": n(&v["dues"]["open_paise"]),
+                 "overdue": n(&v["dues"]["overdue"]), "overdue_paise": n(&v["dues"]["overdue_paise"])},
+        "payables": {"open": n(&v["payables"]["open"]), "open_paise": n(&v["payables"]["open_paise"])},
+        "waiting_for_owner": n(&v["waiting_for_owner"]),
+        "channels": {"telegram_linked": v["channels"]["telegram_linked"].as_bool().unwrap_or(false),
+                     "whatsapp_window_open": v["channels"]["whatsapp_window_open"].as_bool().unwrap_or(false),
+                     "last_used": v["channels"]["last_used"].as_str().unwrap_or_default()},
+        "tally_last_sync_at": v["tally_last_sync_at"].as_str(),
+        "fetched_at": v["fetched_at"].as_f64().unwrap_or(0.0),
+    })
+}
 pub fn tail_lines(text: &str, count: usize) -> Vec<String> {
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     lines[lines.len().saturating_sub(count)..].iter().map(|l| (*l).to_owned()).collect()
@@ -139,6 +157,7 @@ fn snapshot() -> Value {
         "shop": config.as_ref().map(|c| c.1.clone()).unwrap_or_default(), "running": paired && helper_pid().is_some(),
         "startup": startup_registered(), "log": log, "paused": home().join("paused").exists(),
         "status": std::fs::read_to_string(home().join("status.json")).map(|t| parse_status(&t)).unwrap_or(Value::Null),
+        "overview": if paired { std::fs::read_to_string(home().join("overview.json")).map(|t| parse_overview(&t)).unwrap_or(Value::Null) } else { Value::Null },
         "now": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0), "default_server": DEFAULT_SERVER,
     })
 }
@@ -280,6 +299,19 @@ mod tests {
         assert!(!startup_uses(&cmd, std::path::Path::new(r"C:\Users\sujal\AppData\Local\Smara Desktop\resources\browser\smara_bridge.py")));
         assert!(startup_uses(&cmd.to_uppercase(), std::path::Path::new("c:/users/sujal/smara/bridge/smara_bridge.py")));
         assert_eq!(parse_run_value("ERROR: not found"), None);
+    }
+    #[test]
+    fn overview_keeps_only_the_numbers_the_panel_shows() {
+        let o = parse_overview(r#"{"shop":"Demo","dues":{"open":3,"open_paise":250000,"overdue":1,"overdue_paise":100000},"payables":{"open":2,"open_paise":5000},
+            "waiting_for_owner":2,"channels":{"telegram_linked":true,"whatsapp_window_open":false,"last_used":"telegram"},
+            "tally_last_sync_at":"2026-11-11T02:00:00+00:00","fetched_at":1700000000.0,"token":"x","device":"PC"}"#);
+        assert_eq!(o["dues"]["overdue_paise"], 100000);
+        assert_eq!(o["waiting_for_owner"], 2);
+        assert_eq!(o["channels"]["telegram_linked"], serde_json::json!(true));
+        assert_eq!(o["tally_last_sync_at"], "2026-11-11T02:00:00+00:00");
+        assert!(o.get("token").is_none() && o.get("device").is_none());
+        assert!(parse_overview("garbage").is_null() && parse_overview("[]").is_null());
+        assert!(parse_overview("{}")["tally_last_sync_at"].is_null());
     }
     #[test]
     fn log_tail_skips_blank_lines() {

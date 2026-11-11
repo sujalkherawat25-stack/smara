@@ -171,7 +171,7 @@ async def test_telegram_link_route_and_buttons(pool):
     await tgmod.handle_update(app, {"message": {"message_id": 2, "chat": {"id": 777, "type": "private"}, "text": f"/start {code}"}})
     assert "expired" in app.state.tg.sent[-1]["text"]                    # single use
     await tgmod.handle_update(app, {"message": {"message_id": 3, "chat": {"id": 777, "type": "private"}, "text": "digest"}})
-    assert "send the word telegram" in app.state.tg.sent[-1]["text"]     # stranger gets nothing
+    assert "invite" in app.state.tg.sent[-1]["text"].lower()             # stranger: no shop data, only how to join
 
     wa_before = len(app.state.wa.sent)
     await tick(app, NOW)                                                 # owner card now goes to Telegram

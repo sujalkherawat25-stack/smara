@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import NativeBrowser from "../NativeBrowser";
 import { hostedStatus, type HelperSnapshot } from "../hostedStatus";
 import { channelLines, healthUrl, type ChannelHealth } from "../channelStatus";
+import { overviewLines } from "../shopOverview";
 
 /** How often the owner channels are re-read from the server's public health page. */
 const CHANNEL_REFRESH_MS = 60_000;
@@ -11,6 +12,7 @@ export default function HostedPanel({ snapshot, locked }: { snapshot: HelperSnap
   const status = hostedStatus(snapshot);
   const last = snapshot?.status?.last_poll_at;
   const server = snapshot?.server;
+  const shopLines = overviewLines(snapshot?.overview, snapshot?.now ?? Date.now() / 1000);
   const [health, setHealth] = useState<ChannelHealth>(undefined);
   useEffect(() => {
     let stopped = false;
@@ -36,6 +38,13 @@ export default function HostedPanel({ snapshot, locked }: { snapshot: HelperSnap
       {snapshot?.shop && <div>Shop: <strong>{snapshot.shop}</strong></div>}
       {snapshot?.server && <div>Server: <code>{snapshot.server}</code></div>}
       {last !== undefined && <div>Last poll: {new Date(last * 1000).toLocaleTimeString()}</div>}
+      {shopLines.length > 0 && (
+        <div className="hosted-channels" aria-label="Your shop on Smara">
+          {shopLines.map((line) => (
+            <span key={line.label} className="smara-chip" data-tone={line.tone}>{line.label}</span>
+          ))}
+        </div>
+      )}
       <div className="hosted-channels" aria-label="Owner channels">
         {channelLines(health).map((line) => (
           <span key={line.label} className="smara-chip" data-tone={line.tone}>{line.label}</span>

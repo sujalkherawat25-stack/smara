@@ -119,3 +119,17 @@ async def test_failed_owner_card_releases_obligation_for_retry(app):
     app.state.wa = FakeWA()
     assert await tick(app, NOW + timedelta(minutes=11)) == 1  # retried and delivered
     assert (await state(app, oid))["state"] == "WAITING_OWNER_APPROVAL"
+
+
+async def test_mondays_digest_adds_what_last_week_brought_in(app):
+    from src.loop.digest import weekly_result
+    oid = await seed(app)
+    assert await weekly_result(app.state.pool, app.state.tenant) == []      # a quiet week shows nothing
+    async with app.state.pool.connection() as c:
+        await c.execute("UPDATE obligations SET state = 'PAID', attempt_count = 1 WHERE id = %s", (oid,))
+        await c.execute("""INSERT INTO obligation_events (obligation_id, from_state, to_state, actor)
+                           VALUES (%s, 'ACTIVE', 'DISPATCHED', 'OWNER'), (%s, 'DISPATCHED', 'PAID', 'OWNER')""", (oid, oid))
+    monday = await build_digest(app.state.pool, app.state.tenant, date(2026, 11, 9))
+    assert "Last 7 days: 1 invoice(s) paid," in monday and "after a reminder" in monday
+    assert "1 reminder(s) sent, 0 promise(s) recorded." in monday
+    assert "Last 7 days" not in await build_digest(app.state.pool, app.state.tenant, date(2026, 11, 10))

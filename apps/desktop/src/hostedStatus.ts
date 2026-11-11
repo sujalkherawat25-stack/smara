@@ -3,9 +3,12 @@
  * `running` only means the helper process is alive. The helper keeps `online` true after its first successful
  * poll and never clears it, so "connected" also needs a recent `last_poll_at` (status.json, epoch seconds).
  */
+import type { ShopOverview } from "./shopOverview";
+
 export type HelperSnapshot = {
   paired?: boolean; running?: boolean; paused?: boolean; shop?: string; server?: string;
   now?: number; status?: { last_poll_at?: number; online?: boolean } | null;
+  overview?: ShopOverview;
 } | null | undefined;
 
 /** A successful poll this recent counts as connected. */

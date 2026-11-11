@@ -25,7 +25,7 @@ from src.loop.whatsapp import text_message
 from src.tenants import Tenant
 
 log = logging.getLogger(__name__)
-HELP = ("Commands: digest, telegram (link Telegram), gstin <no>, quotes <product>, browse <task>. Send me your outstanding sheet (.xlsx/.csv), a photo of a bill with the customer's "
+HELP = ("Commands: digest, telegram (link Telegram), pair browser (connect your PC and Tally), gstin <no>, quotes <product>, browse <task>. Send me your outstanding sheet (.xlsx/.csv), a photo of a bill with the customer's "
         "number as caption, or say 'digest'.\nTally/Busy se list kaise nikalein: 'export'. Sample file: 'sample'.")
 EXPORT_CMDS = ("export", "tally export", "kaise bheju", "export guide")
 SAMPLE_CMDS = ("sample", "sample file")
