@@ -40,7 +40,7 @@ class Settings:
     # Approved template that tells the owner "N items waiting" when their 24h window is closed
     wa_owner_template: str = ""
     telegram_bot_token: str = ""
-    # Python sandbox: container (prod, isolated munim_sandbox), local (dev/tests only), off
+    # Python sandbox: container (prod, isolated smara_sandbox), local (dev/tests only), off
     sandbox_mode: str = "local"
     sandbox_jobs_dir: str = "./data/sandbox-jobs"
     telegram_webhook_secret: str = ""

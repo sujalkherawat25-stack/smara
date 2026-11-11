@@ -1,6 +1,6 @@
 """Per-shop model usage and estimated cost.
 
-    docker exec munim_app python scripts/usage_report.py [days=30] [rupees_per_million_tokens=0]
+    docker exec smara_app python scripts/usage_report.py [days=30] [rupees_per_million_tokens=0]
 
 Cost is only an estimate: pass your provider's blended price per 1M tokens (in rupees).
 """

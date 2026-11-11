@@ -97,7 +97,7 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
       ],
     } as T;
     case "bridge_state": return {
-      paired: true, running: true, paused: false, shop: "Demo Shop", server: "https://ai.syntarus.com/munim",
+      paired: true, running: true, paused: false, shop: "Demo Shop", server: "https://ai.syntarus.com/smara",
       now: nowSeconds(), status: { online: true, last_poll_at: nowSeconds() - 8 },
     } as T;
     default: return {} as T;

@@ -75,11 +75,11 @@ test("ensure runs automatically only for a paired, stopped helper with nothing m
 });
 
 test("pairing input is validated before anything is sent", () => {
-  assert.equal(v.validatePairInput("https://ai.syntarus.com/munim", "abcd-efgh"), "");
+  assert.equal(v.validatePairInput("https://ai.syntarus.com/smara", "abcd-efgh"), "");
   assert.equal(v.validatePairInput("http://localhost:8000", "ABCD EFGH"), "");
   assert.match(v.validatePairInput("http://evil.example", "ABCD-EFGH"), /https/);
   assert.match(v.validatePairInput("ai.syntarus.com", "ABCD-EFGH"), /full server address/);
-  assert.match(v.validatePairInput("https://ai.syntarus.com/munim", "123"), /pairing code/);
+  assert.match(v.validatePairInput("https://ai.syntarus.com/smara", "123"), /pairing code/);
 });
 
 test("approval cards: first answer wins and the site grant lasts 15 minutes", () => {

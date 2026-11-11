@@ -27,7 +27,7 @@ async def main() -> None:
     ap.add_argument("--vpa")
     ap.add_argument("--upi-name")
     ap.add_argument("--number-id")
-    ap.add_argument("--db", default=os.environ.get("DATABASE_URL", "postgresql://munim:munim@localhost:5433/munim"))
+    ap.add_argument("--db", default=os.environ.get("DATABASE_URL", "postgresql://smara:smara@localhost:5433/smara"))
     a = ap.parse_args()
     pool = await open_pool(a.db)
     await migrate(pool)

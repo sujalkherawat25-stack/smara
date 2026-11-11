@@ -51,7 +51,7 @@ async def tally_rows(app, filename: str, data: bytes, known: dict) -> tuple[list
     """A Tally Prime XML export's sales invoices. The file is read in the sandbox by the same helper the agent uses
     (it cleans Tally's bad characters), so the XML never gets parsed here."""
     name = re.sub(r"[^A-Za-z0-9._-]", "_", filename)[:80] or "daybook.xml"
-    code = (f"import munim_helpers as mh\n"
+    code = (f"import smara_helpers as mh\n"
             f"rows = mh.tally_receivables('in/{name}')\n"
             "RESULT = [{'party': r['party'], 'phone': r['phone'], 'invoice': r['invoice'],\n"
             "           'due': r['due_date'].isoformat() if r['due_date'] else None, 'rupees': float(r['amount'])} for r in rows]\n")

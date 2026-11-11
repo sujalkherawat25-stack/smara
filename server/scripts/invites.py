@@ -1,10 +1,10 @@
 """Invite codes, the waitlist and open data requests for the public Smara number.
 
-    docker exec munim_app python scripts/invites.py create --label "Ramesh Hardware" [--uses 1] [--days 14] [--prefix BSW]
-    docker exec munim_app python scripts/invites.py list
-    docker exec munim_app python scripts/invites.py revoke BSW-7Q2K
-    docker exec munim_app python scripts/invites.py waitlist          # people who wrote without a code
-    docker exec munim_app python scripts/invites.py requests          # shops that asked to delete their data
+    docker exec smara_app python scripts/invites.py create --label "Ramesh Hardware" [--uses 1] [--days 14] [--prefix BSW]
+    docker exec smara_app python scripts/invites.py list
+    docker exec smara_app python scripts/invites.py revoke BSW-7Q2K
+    docker exec smara_app python scripts/invites.py waitlist          # people who wrote without a code
+    docker exec smara_app python scripts/invites.py requests          # shops that asked to delete their data
 
 Give the owner the code; they send "JOIN BSW-7Q2K" to the Smara WhatsApp number.
 """

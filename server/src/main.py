@@ -81,7 +81,9 @@ STALE_OUTBOX_S = 1800
 
 @app.get("/healthz")
 async def healthz(response: Response):
-    """200 when Postgres answers and Continuum delivery is keeping up; else 503 (for an uptime monitor)."""
+    """200 when Postgres answers and Continuum delivery is keeping up; else 503 (for an uptime monitor).
+    Counts and flags only, so the desktop app may read it from its own origin (channel status)."""
+    response.headers["Access-Control-Allow-Origin"] = "*"
     try:
         ob = await outbox_stats(app.state.pool)
     except Exception:
@@ -103,7 +105,18 @@ async def healthz(response: Response):
             "agent_model": st.llm.agent_model if getattr(st, "llm", None) and st.llm.enabled else None,
             "llm": getattr(getattr(st, "llm", None), "stats", None),
             "vault": _vault_ready(),
-            "wa_link": await _wa_link_summary()}
+            "wa_link": await _wa_link_summary(),
+            "channels": await _channels_summary(st)}
+
+
+async def _channels_summary(st) -> dict:
+    """Which owner channels are set up. Flags and counts only: no names, numbers or tokens."""
+    async with st.pool.connection() as conn:
+        linked = (await (await conn.execute(
+            "SELECT count(*) AS n FROM tenants WHERE telegram_chat_id IS NOT NULL")).fetchone())["n"]
+    return {"telegram": {"bot": getattr(st, "tg", None) is not None, "owners_linked": linked},
+            "whatsapp_link": {"enabled": getattr(st, "wa_link", None) is not None},
+            "whatsapp_official": {"configured": getattr(st, "wa", None) is not None}}
 
 
 async def _wa_link_summary() -> dict:
@@ -122,7 +135,7 @@ async def _continuum_probe() -> dict:
         started = time.monotonic()
         try:
             r = await app.state.continuum._http.post("/memories/search",
-                                                     json={"user_id": "munim_health", "query": "ping", "top_k": 1})
+                                                     json={"user_id": "smara_health", "query": "ping", "top_k": 1})
             _probe.update(ok=r.status_code == 200)
         except Exception:
             _probe.update(ok=False)

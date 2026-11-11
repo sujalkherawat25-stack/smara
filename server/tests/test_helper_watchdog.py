@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
-import munim_bridge as mb  # noqa: E402
+import smara_bridge as mb  # noqa: E402
 
 
 @pytest.fixture
@@ -60,7 +60,7 @@ def test_current_watchdog_is_left_alone(windows):
 
 def test_watchdog_for_an_old_install_path_is_replaced(windows):
     calls, state = windows
-    state["xml"] = r"<Task>C:\Users\x\smara-munim\bridge\munim_bridge.py ensure</Task>"
+    state["xml"] = r"<Task>C:\Users\x\smara\bridge\smara_bridge.py ensure</Task>"
     assert mb.watchdog_state() == "stale"
     assert mb.ensure_watchdog() == "registered"
 

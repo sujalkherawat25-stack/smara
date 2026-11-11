@@ -1,8 +1,8 @@
 """Continuum burst test: many shops writing memory at once, then all of it must come back.
 
-    docker exec munim_app python scripts/continuum_load.py [shops=20] [facts_per_shop=3]
+    docker exec smara_app python scripts/continuum_load.py [shops=20] [facts_per_shop=3]
 
-Writes under throwaway `munim-load-*` scopes, checks accept latency/errors, that every fact becomes
+Writes under throwaway `smara-load-*` scopes, checks accept latency/errors, that every fact becomes
 resolvable (eventual consistency window), that scopes do not leak into each other, then deletes everything.
 """
 import asyncio
@@ -18,7 +18,7 @@ import httpx
 async def main(shops: int, facts: int) -> int:
     base, key = os.environ["CONTINUUM_URL"], os.environ["CONTINUUM_API_KEY"]
     run = uuid4().hex[:6]
-    scopes = {f"munim-load-{run}-{i}": f"LOADX{run.upper()}{i:03d}" for i in range(shops)}
+    scopes = {f"smara-load-{run}-{i}": f"LOADX{run.upper()}{i:03d}" for i in range(shops)}
     lat, codes = [], []
     async with httpx.AsyncClient(base_url=base, headers={"Authorization": f"Bearer {key}"}, timeout=60,
                                  limits=httpx.Limits(max_connections=50)) as h:

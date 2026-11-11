@@ -2,9 +2,9 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: munim
-      POSTGRES_PASSWORD: munim
-      POSTGRES_DB: munim
+      POSTGRES_USER: smara
+      POSTGRES_PASSWORD: smara
+      POSTGRES_DB: smara
     ports:
       - "5433:5432"
   app:
@@ -12,7 +12,7 @@ services:
     profiles: ["app"]
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://munim:munim@postgres:5432/munim
+      DATABASE_URL: postgresql://smara:smara@postgres:5432/smara
       WA_LINK_URL: http://wa-link:8090          # the shop's own SIM link (server/wa_link); needs WA_LINK_TOKEN in .env
     depends_on:
       - postgres

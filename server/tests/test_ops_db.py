@@ -186,6 +186,10 @@ async def test_healthz_flags_dead_outbox(app):
     first = await healthz(r)
     assert first["ok"] is True and r.status_code == 200
     assert set(first["ops"]) == {"tasks_pending", "cards_held", "failed_sessions_1h", "quiet_hours_now"}
+    # the owner channels: flags and counts only, so the public page shows no names, numbers or tokens
+    assert set(first["channels"]) == {"telegram", "whatsapp_link", "whatsapp_official"}
+    assert isinstance(first["channels"]["telegram"]["owners_linked"], int)
+    assert set(first["channels"]["telegram"]) == {"bot", "owners_linked"}
     async with app.state.pool.connection() as c:
         await c.execute("INSERT INTO continuum_outbox (user_id, source_id, text, trusted, status) "
                         "VALUES ('u','s1','t',false,'DEAD')")

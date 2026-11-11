@@ -13,7 +13,7 @@ from src.ingest import connect
 from src.ingest.dispatch import dispatch
 from src.loop.whatsapp import WhatsAppClient
 
-META = dict(meta_app_id="111", meta_es_config_id="222", wa_app_secret="app-secret", public_base_url="https://smara.test/munim")
+META = dict(meta_app_id="111", meta_es_config_id="222", wa_app_secret="app-secret", public_base_url="https://smara.test/smara")
 
 
 @pytest.fixture
@@ -61,7 +61,7 @@ async def test_owner_gets_a_one_time_link_only_when_meta_is_set_up(env):
     env.app.state.settings = Settings(**META)
     await dispatch(env.app, owner("c2", "connect whatsapp"))
     body = env.app.state.wa.sent[-1]["text"]["body"]
-    assert "https://smara.test/munim/connect?t=" in body
+    assert "https://smara.test/smara/connect?t=" in body
 
 
 async def test_the_page_shows_the_shop_and_refuses_bad_links(env):

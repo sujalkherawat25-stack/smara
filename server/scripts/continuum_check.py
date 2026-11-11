@@ -1,9 +1,9 @@
 """Live Continuum round trip with a throwaway scope: write -> ingest -> resolve -> delete.
 
-    docker exec munim_app python scripts/continuum_check.py
+    docker exec smara_app python scripts/continuum_check.py
 
 Uses CONTINUUM_URL / CONTINUUM_API_KEY from the environment. Writes only under a
-`munim-probe-*` user id and deletes it at the end. Exit code 1 if any step fails.
+`smara-probe-*` user id and deletes it at the end. Exit code 1 if any step fails.
 """
 import asyncio
 import os
@@ -18,7 +18,7 @@ MARKER = "INV-PROBE-" + uuid4().hex[:6].upper()
 
 async def main() -> int:
     base, key = os.environ["CONTINUUM_URL"], os.environ["CONTINUUM_API_KEY"]
-    scope = f"munim-probe-{uuid4().hex[:10]}"
+    scope = f"smara-probe-{uuid4().hex[:10]}"
     failures = 0
 
     def step(name: str, ok: bool, detail: str = "") -> None:
@@ -48,7 +48,7 @@ async def main() -> int:
         step("answer carries the promise", "15" in found and "Nov" in found, found[:90].replace("\n", " "))
         s = await h.post("/memories/search", json={"user_id": scope, "query": MARKER, "top_k": 3})
         step("search returns it", s.status_code == 200 and bool(s.json().get("results")), f"{s.status_code}")
-        iso = await h.post("/memories/resolve", json={"user_id": f"munim-probe-other-{uuid4().hex[:6]}", "query": MARKER})
+        iso = await h.post("/memories/resolve", json={"user_id": f"smara-probe-other-{uuid4().hex[:6]}", "query": MARKER})
         leak = MARKER in str(iso.json()) if iso.status_code == 200 else False
         step("other scope cannot see it", not leak)
         d = await h.delete("/memories", params={"user_id": scope})

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""External watchdog for Smara Munim. Runs on the HOST (stdlib only), every minute from cron.
+"""External watchdog for Smara. Runs on the HOST (stdlib only), every minute from cron.
 
     python3 scripts/watchdog.py            # check, alert on change, exit 0 even when something is down
 
@@ -9,7 +9,7 @@ It checks what a customer or Meta would actually hit, not just the container:
   - /healthz: database, Continuum, sandbox, no dead Continuum writes, no burst of failed agent sessions
   - disk space on /
 Alerts go to OPS_ALERT_PHONE on WhatsApp (and Telegram when configured) once per incident, again every 6 hours
-while it lasts, and once when it recovers. State lives in /var/lib/munim-watchdog (or $WATCHDOG_STATE).
+while it lasts, and once when it recovers. State lives in /var/lib/smara-watchdog (or $WATCHDOG_STATE).
 """
 import json
 import os
@@ -21,10 +21,10 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-ENV_FILE = Path(os.environ.get("MUNIM_ENV", "/home/ubuntu/smara-munim/.env"))
-STATE = Path(os.environ.get("WATCHDOG_STATE", "/var/lib/munim-watchdog/state.json"))
-PUBLIC = os.environ.get("MUNIM_PUBLIC", "https://ai.syntarus.com/munim")
-LOCAL = os.environ.get("MUNIM_LOCAL", "http://127.0.0.1:8090")
+ENV_FILE = Path(os.environ.get("SMARA_ENV", "/home/ubuntu/smara/.env"))
+STATE = Path(os.environ.get("WATCHDOG_STATE", "/var/lib/smara-watchdog/state.json"))
+PUBLIC = os.environ.get("SMARA_PUBLIC", "https://ai.syntarus.com/smara")
+LOCAL = os.environ.get("SMARA_LOCAL", "http://127.0.0.1:8090")
 REALERT_S = 6 * 3600
 DISK_MAX_PCT = 85
 FAILED_SESSIONS_MAX = 5

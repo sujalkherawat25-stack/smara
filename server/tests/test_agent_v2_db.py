@@ -286,7 +286,7 @@ async def _agent_makes_pdf(env, tmp_path, window_open=True):
     if window_open:
         async with env.pool.connection() as c:
             await c.execute("update tenants set owner_last_inbound_at = now() where id = %s", (env.t.id,))
-    code = ("import munim_helpers as mh\nmh.statement_pdf('out/statement.pdf', shop='Shop', party='Ravi Kirana', "
+    code = ("import smara_helpers as mh\nmh.statement_pdf('out/statement.pdf', shop='Shop', party='Ravi Kirana', "
             "rows=[dict(invoice='INV-1', date='2026-10-01', due_date='2026-11-01', amount=10000, paid=2500)])\n"
             "RESULT = {'balance': 7500.0}")
     return code
@@ -335,7 +335,7 @@ async def test_file_is_not_sent_when_the_whatsapp_window_is_closed_and_telegram_
 
 async def test_sandbox_xlsx_helper_makes_a_real_workbook(env, tmp_path):
     sb = env.app.state.sandbox = Sandbox(str(tmp_path), "local")
-    res = await sb.run("import pandas as pd, munim_helpers as mh\n"
+    res = await sb.run("import pandas as pd, smara_helpers as mh\n"
                        "mh.write_xlsx({'Overdue': pd.DataFrame({'party': ['Ravi'], 'rupees': [12500.5]})}, 'out/r.xlsx')\n", {})
     assert res["exit_code"] == 0 and res["outputs"] == ["r.xlsx"]
     import io
@@ -378,10 +378,10 @@ async def test_gstin_and_payment_request_tools(env):
     ctx = SessionCtx("s", env.t.id, "TRUSTED")
     assert (await check_gstin(env.app, ctx, {"gstin": "27AAPFU0939F1ZV"}))["valid"] is True
     assert "checksum" in (await check_gstin(env.app, ctx, {"gstin": "27AAPFU0939F1ZX"}))["reason"]
-    env.app.state.settings = Settings(public_base_url="https://ai.example/munim")
+    env.app.state.settings = Settings(public_base_url="https://ai.example/smara")
     r = await build_payment_request(env.app, ctx, {"obligation_id": env.oid})
     assert r["amount_rupees"] == 10000.0 and "Pay ₹10,000 to shop@upi (UPI). Ref: INV-1" in r["text"]
-    assert r["link"].startswith("https://ai.example/munim/pay?pa=shop@upi") and "am=10000.00" in r["link"]
+    assert r["link"].startswith("https://ai.example/smara/pay?pa=shop@upi") and "am=10000.00" in r["link"]
     assert "unknown" in (await build_payment_request(env.app, SessionCtx("s", env.other.id, "TRUSTED"), {"obligation_id": env.oid}))["error"]
 
 

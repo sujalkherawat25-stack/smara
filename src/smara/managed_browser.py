@@ -1,7 +1,7 @@
-"""The owned browser for Smara Desktop chat: the same engine the WhatsApp agent uses (munim_bridge).
+"""The owned browser for Smara Desktop chat: the same engine the WhatsApp agent uses (smara_bridge).
 
 Playwright runs on a private asyncio loop in its own thread; the synchronous methods here wrap it, so the MCP server
-stays synchronous. Pages are read and acted on through munim_bridge: numbered visible controls with names that say what
+stays synchronous. Pages are read and acted on through smara_bridge: numbered visible controls with names that say what
 they are for, a report of what each step changed, dialogs first, real pointer clicks, and no typing into secret fields.
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import munim_bridge as mb
+from . import smara_bridge as mb
 
 
 class BrowserUnavailable(RuntimeError):

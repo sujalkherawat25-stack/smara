@@ -1,4 +1,4 @@
-/** Presentation logic for the Browser panel. No imports: unit-tested directly. The helper (munim_bridge.py) owns the pairing and the browser. */
+/** Presentation logic for the Browser panel. No imports: unit-tested directly. The helper (smara_bridge.py) owns the pairing and the browser. */
 export type Heartbeat = { last_poll_at: number; last_step: string; last_step_at: number } | null;
 export type BridgeState = { paired: boolean; server: string; shop: string; running: boolean; startup: boolean; paused: boolean; log: string[]; default_server: string; status: Heartbeat; now: number };
 export type Components = { python: boolean; modules: boolean; browsers: { brave: boolean; chrome: boolean; edge: boolean } };
@@ -85,7 +85,7 @@ export function shouldEnsure(state: Pick<BridgeState, "paired" | "running">, mis
 export function validatePairInput(server: string, code: string): string {
   const value = server.trim().replace(/\/+$/, "");
   const match = /^(https?):\/\/([^/:@\s?#]+)/i.exec(value);
-  if (!match) return "Enter the full server address, for example https://ai.syntarus.com/munim";
+  if (!match) return "Enter the full server address, for example https://ai.syntarus.com/smara";
   const local = ["localhost", "127.0.0.1"].includes(match[2].toLowerCase());
   if (match[1].toLowerCase() === "http" && !local) return "The server address must start with https://";
   if (code.replace(/[^a-z0-9]/gi, "").length !== 8) return "The pairing code looks like ABCD-EFGH. Send “pair browser” to Smara in chat to get one.";

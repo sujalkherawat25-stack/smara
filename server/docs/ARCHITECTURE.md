@@ -11,7 +11,7 @@
 | Persona | Today | With Smara |
 | --- | --- | --- |
 | **Owner** (kirana, distributor, trader, small manufacturer) | Chases payments by hand, re-types data between Tally and Excel, misses GST dates | Approves cards on WhatsApp/Telegram; gets a morning digest; asks questions in Hinglish |
-| **Munim / accountant** (in-house or CA office) | Exports, reconciles and reports manually | Reviews what agents prepared; fixes exceptions only |
+| **Accountant** (in-house or CA office) | Exports, reconciles and reports manually | Reviews what agents prepared; fixes exceptions only |
 | **Counterparty** (debtor, vendor) | Gets ad-hoc calls and messages | Gets polite, consistent reminders with a payment instruction; can reply with excuses or proof |
 
 ### What the owner experiences
@@ -126,20 +126,20 @@ owner taps Approve (deterministic code, never the model) → re-check policy →
 
 ```
 Caddy (TLS) ── /syntarus-api/* ──► memoryos_backend :8000   (Continuum, existing)
-            └─ /smara/*        ──► munim_app 127.0.0.1:8090  (this repo)
-munim_app ──► munim_postgres (internal only)
-munim_app ──► memoryos_backend:8000/v1 over the docker network (no public hop)
+            └─ /smara/*        ──► smara_app 127.0.0.1:8090  (this repo)
+smara_app ──► smara_postgres (internal only)
+smara_app ──► memoryos_backend:8000/v1 over the docker network (no public hop)
 ```
 
-- Separate Postgres container and volume from MemoryOS; nightly `pg_dump` into `/var/backups/munim`.
-- Webhook: `https://ai.syntarus.com/smara/webhook`; pay links: `https://ai.syntarus.com/smara/pay` (`/munim/*` stays as an alias for older Desktop builds).
+- Separate Postgres container and volume from MemoryOS; nightly `pg_dump` into `/var/backups/smara`.
+- Webhook: `https://ai.syntarus.com/smara/webhook`; pay links: `https://ai.syntarus.com/smara/pay` (`/smara/*` stays as an alias for older Desktop builds).
 - Later: own subdomain (`business.syntarus.com`), blue/green deploys from CI images.
 
 ## 6. Roadmap
 
 | Phase | Outcome | Key work |
 | --- | --- | --- |
-| **A. Hosted launch** (now) | Munim runs 24/7 on Oracle with a fixed webhook | Compose stack, Caddy route, backups, health |
+| **A. Hosted launch** (now) | Smara runs 24/7 on Oracle with a fixed webhook | Compose stack, Caddy route, backups, health |
 | **B. Pilot-ready** | One real shop uses it daily | Permanent token, real number, owner-alert + reminder templates, delivery-status handling, Telegram owner channel, verify token rotation |
 | **C. Ledger sync** | No manual exports | Desktop bridge (from Smara Desktop) + Tally XML connector; Khatabook/Vyapar import |
 | **D. Money in** | Cash matched automatically | Bank statement + UTR reconciliation agent, payment requests via UPI links |

@@ -1,6 +1,6 @@
 """Load + reliability test: many shops talking to the agent at once.
 
-    python -m evals.load_test --db postgresql://.../munim_eval_1 --shops 40 --msgs 3 --mode mock
+    python -m evals.load_test --db postgresql://.../smara_eval_1 --shops 40 --msgs 3 --mode mock
     python -m evals.load_test --db ... --shops 6 --msgs 2 --mode real --model gemma4   (uses LLM_BASE_URL/LLM_API_KEY)
 
 mock: the real LLM client (retries, pacing, fallback) talks to a fake provider that injects latency, 429s and 5xx.

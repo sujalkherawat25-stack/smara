@@ -1,6 +1,6 @@
-# Smara Munim
+# Smara
 
-WhatsApp-native collections agent ("Digital Munim") for Indian MSMEs. The owner chats on WhatsApp; the agent tracks who owes what, drafts reminders, and handles debtor excuses. No web UI.
+WhatsApp-native collections agent for Indian MSMEs. The owner chats on WhatsApp; the agent tracks who owes what, drafts reminders, and handles debtor excuses. No web UI.
 
 - **Postgres** is the source of truth for *what* and *when*: obligations, due dates, schedules, approval state.
 - **Continuum** (MemoryOS) holds *why* and *proof*: the evidence behind each decision, queried per party.
@@ -44,11 +44,11 @@ Two-phone demo: `python scripts/seed_demo.py --owner <phone> --debtor <phone>`.
 ## Tests
 
 ```bash
-TEST_DATABASE_URL=postgresql://munim:munim@localhost:5433/munim_test python -m pytest
+TEST_DATABASE_URL=postgresql://smara:smara@localhost:5433/smara_test python -m pytest
 python -m evals.run_claims --show     # add --llm to score the model path
 ```
 
-DB tests are skipped when `TEST_DATABASE_URL` is unset and they drop the `public` schema, so use a scratch database (`createdb munim_test`), never your dev one.
+DB tests are skipped when `TEST_DATABASE_URL` is unset and they drop the `public` schema, so use a scratch database (`createdb smara_test`), never your dev one.
 
 ## What the hosted agent can do
 
@@ -82,14 +82,14 @@ injection, UTR proof, chatter, gated reminder, mark-paid, cron with memory, tena
 scored from ledger state and outbound messages, never from the model's own claims.
 
 ```bash
-python -m evals.agent_harness --db postgresql://munim:munim@localhost:5433/munim_eval --model glm5.3
+python -m evals.agent_harness --db postgresql://smara:smara@localhost:5433/smara_eval --model glm5.3
 ```
 
 ## Python sandbox
 
-`run_python` executes the agent's code on attached files in the `munim_sandbox` container: no network,
+`run_python` executes the agent's code on attached files in the `smara_sandbox` container: no network,
 read-only root, tmpfs scratch, 2 GB / 1.5 CPU / 256 pids, each job as `nobody` with CPU, memory and file
-limits, and job directories private to root. `sandbox/munim_helpers.py` parses Tally XML, finds real header
+limits, and job directories private to root. `sandbox/smara_helpers.py` parses Tally XML, finds real header
 rows in Excel reports, and reads Indian amounts and dates. Output files become file refs the verifying
 importer can load. Set `SANDBOX_MODE=local` for development only (no isolation).
 `scripts/continuum_check.py` does a live Continuum round trip (write, ingest, resolve, isolation, delete) on a throwaway scope.

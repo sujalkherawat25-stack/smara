@@ -1,7 +1,7 @@
 """App-side client for the Python sandbox (see sandbox/runner.py).
 
 mode=container: write a job into the shared /jobs volume and wait for the
-isolated munim_sandbox container to answer. mode=local: run the same runner in
+isolated smara_sandbox container to answer. mode=local: run the same runner in
 a subprocess on this machine (development and tests only; no isolation).
 """
 import asyncio

@@ -13,21 +13,21 @@ from src.agent.tools import TOOL_NAMES
 from src.ingest.dispatch import dispatch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
-import munim_bridge  # noqa: E402
+import smara_bridge  # noqa: E402
 
 
 @pytest.fixture
 def shared(tmp_path, monkeypatch):
-    monkeypatch.setattr(munim_bridge, "SHARED_DIR", tmp_path / "Shared")
+    monkeypatch.setattr(smara_bridge, "SHARED_DIR", tmp_path / "Shared")
     return tmp_path / "Shared"
 
 
 # ------------------------------------------------------------ the helper's folder tool
 
 def test_write_then_list_then_read(shared):
-    assert munim_bridge.run_tool({"tool": "files", "action": "write", "path": "bills/oct.csv", "text": "a,b\n1,2\n"})["bytes"] == 8
-    assert munim_bridge.run_tool({"tool": "files", "action": "list", "path": ""})["entries"] == [{"name": "bills/", "bytes": None}]
-    assert munim_bridge.run_tool({"tool": "files", "action": "read", "path": "bills/oct.csv"})["text"] == "a,b\n1,2\n"
+    assert smara_bridge.run_tool({"tool": "files", "action": "write", "path": "bills/oct.csv", "text": "a,b\n1,2\n"})["bytes"] == 8
+    assert smara_bridge.run_tool({"tool": "files", "action": "list", "path": ""})["entries"] == [{"name": "bills/", "bytes": None}]
+    assert smara_bridge.run_tool({"tool": "files", "action": "read", "path": "bills/oct.csv"})["text"] == "a,b\n1,2\n"
 
 
 def test_nothing_outside_the_shared_folder_can_be_touched(shared):
@@ -35,22 +35,22 @@ def test_nothing_outside_the_shared_folder_can_be_touched(shared):
     outside.write_text("private")
     for path in ("../secret.txt", "..\\secret.txt", "a/../../secret.txt", str(outside), "C:\\Windows\\win.ini"):
         for action in ("read", "write", "list"):
-            out = munim_bridge.run_tool({"tool": "files", "action": action, "path": path, "text": "x"})
+            out = smara_bridge.run_tool({"tool": "files", "action": action, "path": path, "text": "x"})
             assert out.get("error"), (path, action, out)
     assert outside.read_text() == "private"
 
 
 def test_a_file_is_never_replaced_unless_asked_and_binary_is_refused(shared):
-    munim_bridge.run_tool({"tool": "files", "action": "write", "path": "n.txt", "text": "one"})
-    assert "already exists" in munim_bridge.run_tool({"tool": "files", "action": "write", "path": "n.txt", "text": "two"})["error"]
+    smara_bridge.run_tool({"tool": "files", "action": "write", "path": "n.txt", "text": "one"})
+    assert "already exists" in smara_bridge.run_tool({"tool": "files", "action": "write", "path": "n.txt", "text": "two"})["error"]
     assert (shared / "n.txt").read_text() == "one"
-    assert munim_bridge.run_tool({"tool": "files", "action": "write", "path": "n.txt", "text": "two", "overwrite": True})["bytes"] == 3
+    assert smara_bridge.run_tool({"tool": "files", "action": "write", "path": "n.txt", "text": "two", "overwrite": True})["bytes"] == 3
     (shared / "pic.bin").write_bytes(b"\x89PNG\x00\x01")
-    assert "binary" in munim_bridge.run_tool({"tool": "files", "action": "read", "path": "pic.bin"})["error"]
+    assert "binary" in smara_bridge.run_tool({"tool": "files", "action": "read", "path": "pic.bin"})["error"]
 
 
 def test_an_unknown_tool_is_an_error_not_a_crash(shared):
-    assert "no tool" in munim_bridge.run_tool({"tool": "shell", "cmd": "dir"})["error"]
+    assert "no tool" in smara_bridge.run_tool({"tool": "shell", "cmd": "dir"})["error"]
 
 
 # ------------------------------------------------------------ policy
@@ -75,7 +75,7 @@ async def helper_loop(http, token, stop: asyncio.Event):
     while not stop.is_set():
         job = (await http.post("/bridge/poll", params={"wait": 1}, headers=h)).json()
         if job:
-            await http.post("/bridge/result", json={"job_id": job["job_id"], "result": munim_bridge.run_tool(job["command"])}, headers=h)
+            await http.post("/bridge/result", json={"job_id": job["job_id"], "result": smara_bridge.run_tool(job["command"])}, headers=h)
 
 
 async def test_whatsapp_turn_reaches_the_pc_folder_and_a_write_waits_for_the_tap(env, shared):
