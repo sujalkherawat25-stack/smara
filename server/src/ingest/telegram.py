@@ -1,8 +1,9 @@
 """Telegram owner channel (owners only; counterparties stay on WhatsApp).
 
-Linking is started from WhatsApp, where the owner is authenticated by phone:
+An existing shop links Telegram from WhatsApp, where the owner is authenticated by phone:
 the owner sends 'telegram', gets a one-hour, single-use t.me link, and opening
-it binds that private chat to the tenant. Every update must carry the webhook
+it binds that private chat to the tenant. A new owner can also sign up here
+directly with an invite code (see telegram_onboarding.py). Every update must carry the webhook
 secret Telegram was given at setWebhook time.
 """
 import hmac
@@ -18,7 +19,6 @@ from src.ingest.payload import InboundMessage
 log = logging.getLogger(__name__)
 router = APIRouter()
 API = "https://api.telegram.org"
-NOT_LINKED = "To connect this Telegram to your shop, send the word telegram to Smara on WhatsApp and open the link it sends."
 
 
 class TelegramClient:
@@ -90,6 +90,13 @@ async def _link(pool, code: str, chat_id: int) -> str:
         else "That link has expired or was already used. Send 'telegram' on WhatsApp for a new one."
 
 
+async def _is_link_code(pool, code: str) -> bool:
+    """True if this /start code is a shop's Telegram link code (used or expired ones included, so they get the right reply)."""
+    from src.ingest.onboarding import _code_from, _valid_invite
+    invite = _code_from(f"join {code}")
+    return not (invite and await _valid_invite(pool, invite))
+
+
 @router.post("/telegram/webhook")
 async def webhook(request: Request):
     secret = request.app.state.settings.telegram_webhook_secret
@@ -120,13 +127,19 @@ async def handle_update(app, upd: dict) -> None:
     chat_id, text = m["chat"]["id"], (m.get("text") or "").strip()
     from src.loop.wa_format import to_telegram_html
     reply = lambda t: tg.send({"chat_id": chat_id, "text": to_telegram_html(t), "parse_mode": "HTML"})
+    from src.ingest import telegram_onboarding
+    tenant = await tenants.by_telegram_chat(pool, chat_id)
     if text.startswith("/start"):
         code = text.partition(" ")[2].strip()
-        await reply(await _link(pool, code, chat_id) if code else NOT_LINKED)
+        if tenant:
+            await reply(f"This Telegram is linked to {tenant.name}. Just write to me here.")
+        elif code and await _is_link_code(pool, code):
+            await reply(await _link(pool, code, chat_id))
+        else:                                   # an invite link (t.me/<bot>?start=<invite code>), or a bare /start
+            await telegram_onboarding.handle(app, m, chat_id, f"join {code}" if code else "")
         return
-    tenant = await tenants.by_telegram_chat(pool, chat_id)
     if tenant is None:
-        await reply(NOT_LINKED)
+        await telegram_onboarding.handle(app, m, chat_id, text)   # a new owner signing up, or the waitlist
         return
     kind, media_id, filename, mime, size = "text", None, "", "", 0
     if doc := m.get("document"):
@@ -156,6 +169,15 @@ async def _owner(app, tenant, msg: InboundMessage) -> None:
 
     if not await _claim(app.state.pool, msg.wamid):
         return
+    from src import limits
+    from src.loop.owner_channel import send_to_owner
+    from src.loop.whatsapp import text_message
+
     await tenants.touch_owner_inbound(app.state.pool, tenant.id, "telegram")   # approvals now follow the owner here
-    await handle_owner(app, tenant, msg)
+    if not msg.button_id:                       # the same daily limits as on WhatsApp; button taps are never limited
+        await limits.record(app.state.pool, tenant.id, limits.kind_of(msg))
+    if (stop := await limits.check(app, tenant, msg)):
+        await send_to_owner(app, tenant, text_message(tenant.owner_phone, stop), kind="owner_text", reply_channel="telegram")
+    else:
+        await handle_owner(app, tenant, msg)
     await resend_undelivered(app, tenant, channel="telegram")

@@ -1126,6 +1126,9 @@ LOG = HOME / "bridge.log"
 STATUS = HOME / "status.json"       # heartbeat for Smara Desktop: last successful poll, last step, paused
 PAUSE = HOME / "paused"             # present = paused (Smara Desktop's Pause button creates/deletes it)
 PID = HOME / "bridge.pid"
+OVERVIEW = HOME / "overview.json"   # the paired shop's numbers for Smara Desktop: dues, approvals waiting, channels
+OVERVIEW_EVERY_S = 60
+_overview_at = 0.0
 TASK_NAME = "Smara Browser Bridge"
 
 
@@ -1311,6 +1314,7 @@ async def run(a) -> int:
                 await asyncio.sleep(3)
                 continue
             write_status(last_poll_at=time.time(), online=True, paused=PAUSE.exists())
+            await maybe_overview(http)
             await maybe_tally_sync(cfg)
             if not job:
                 await br.idle_check(a.idle_minutes)
@@ -1346,6 +1350,22 @@ async def run(a) -> int:
             log(describe_step(job["command"], where))
             write_status(last_step_at=time.time(), last_step=describe_step(job["command"], where))
             await http.post("/bridge/result", json={"job_id": job["job_id"], "result": result})
+
+
+async def maybe_overview(http) -> None:
+    """Refresh the shop numbers Smara Desktop shows, at most once a minute. Totals only, never the token.
+    Best effort: an older server (404) or a network error leaves the last copy as it is."""
+    global _overview_at
+    import time
+    if time.time() - _overview_at < OVERVIEW_EVERY_S:
+        return
+    _overview_at = time.time()
+    try:
+        r = await http.get("/bridge/overview", timeout=10)
+        if r.status_code == 200:
+            OVERVIEW.write_text(json.dumps({**r.json(), "fetched_at": time.time()}), encoding="utf-8")
+    except (httpx.HTTPError, ValueError, OSError):
+        pass
 
 
 async def maybe_tally_sync(cfg: dict) -> None:
@@ -1616,6 +1636,7 @@ def main() -> int:
         return 0
     if a.cmd == "unpair":
         CONFIG.unlink(missing_ok=True)
+        OVERVIEW.unlink(missing_ok=True)
         print("Forgot this pairing. (Send 'unpair browser' in chat to revoke it on the server too.)")
         return 0
     if a.cmd == "pause":

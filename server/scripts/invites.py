@@ -6,7 +6,8 @@
     docker exec smara_app python scripts/invites.py waitlist          # people who wrote without a code
     docker exec smara_app python scripts/invites.py requests          # shops that asked to delete their data
 
-Give the owner the code; they send "JOIN BSW-7Q2K" to the Smara WhatsApp number.
+Give the owner the code; they send "JOIN BSW-7Q2K" to the Smara WhatsApp number, or open the Telegram link that
+`create` prints (t.me/<bot>?start=<code>) and sign up there.
 """
 import argparse
 import os
@@ -19,6 +20,20 @@ from psycopg.rows import dict_row
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.ingest.onboarding import new_code  # noqa: E402
+
+
+def _bot_username() -> str:
+    """The Telegram bot's name, for the invite link. Empty if there is no bot or Telegram does not answer."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        return ""
+    try:
+        import json
+        import urllib.request
+        with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/getMe", timeout=10) as r:
+            return json.load(r)["result"]["username"]
+    except Exception:
+        return ""
 
 
 def main() -> int:
@@ -41,6 +56,9 @@ def main() -> int:
             conn.execute("INSERT INTO invite_codes (code, label, max_uses, expires_at) VALUES (%s, %s, %s, %s)",
                          (code, a.label, a.uses, datetime.now(timezone.utc) + timedelta(days=a.days)))
             print(f"{code}   ({a.label or 'no label'}, {a.uses} use(s), {a.days} days)\nTell them to send:  JOIN {code}")
+            bot = _bot_username()
+            if bot:
+                print(f"Or on Telegram, send them this link:  https://t.me/{bot}?start={code}")
         elif a.cmd == "list":
             for r_ in conn.execute("SELECT * FROM invite_codes ORDER BY created_at DESC LIMIT 50").fetchall():
                 state = "revoked" if r_["revoked_at"] else f"{r_['uses']}/{r_['max_uses']} used"

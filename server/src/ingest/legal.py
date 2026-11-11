@@ -11,7 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 router = APIRouter()
-CONTACT = "Message 'delete my data' to Smara on WhatsApp"
+CONTACT = "Message 'delete my data' to Smara on WhatsApp or Telegram"
 EMAIL = "hello@syntarus.com"
 UPDATED = "November 2026"
 
@@ -41,16 +41,16 @@ def _shell(request: Request, title: str, content: str, heading: bool = True) -> 
     h1 = f"<h1>{html.escape(title)}</h1>" if heading else ""
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)}</title>
-<meta name="description" content="Smara is a WhatsApp assistant for Indian businesses. It helps you follow up on invoices your own customers have not paid and keeps track of what you owe, with every message approved by you first.">
+<meta name="description" content="Smara is an assistant on WhatsApp and Telegram for Indian businesses. It helps you follow up on invoices your own customers have not paid and keeps track of what you owe, with every message approved by you first.">
 {STYLE}</head><body><main>{nav}{h1}{content}
 <p class="muted">Smara is a product of Syntarus. Questions: <a href="mailto:{EMAIL}">{EMAIL}</a>. Last updated {UPDATED}.</p></main></body></html>""")
 
 
 @router.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return _shell(request, "Smara: your payments and back-office assistant on WhatsApp", f"""
+    return _shell(request, "Smara: your payments and back-office assistant on WhatsApp and Telegram", f"""
 <div class="hero"><h1>Smara</h1>
-<p>An assistant on WhatsApp that helps Indian businesses follow up on invoices their own customers have not paid, and keep track of the bills they owe.
+<p>An assistant on WhatsApp and Telegram that helps Indian businesses follow up on invoices their own customers have not paid, and keep track of the bills they owe.
 It works from your own records, and nothing goes out to your customers until you approve it.</p>
 <a class="btn" href="mailto:{EMAIL}?subject=Smara%20early%20access">Ask for early access</a></div>
 <h2>What Smara does</h2>
@@ -67,7 +67,7 @@ It works from your own records, and nothing goes out to your customers until you
 people on behalf of a third party, and does not send threats or pressure. Reminders are about a specific invoice that your own customer has with you,
 and go only to customers who have given you their number and agreed to hear from you on WhatsApp.</p>
 <h2>How it works</h2>
-<ol><li>Message Smara on WhatsApp and share your dues: a file, a photo, or a connection to Tally.</li>
+<ol><li>Message Smara on WhatsApp or Telegram and share your dues: a file, a photo, or a connection to Tally.</li>
 <li>Smara shows you the totals and who is overdue, and drafts the reminders.</li>
 <li>You approve what goes out. Customers can reply STOP at any time and will not be messaged again by your business.</li></ol>
 <h2>Who it is for</h2>
@@ -81,13 +81,13 @@ write to <a href="mailto:{EMAIL}?subject=Smara%20early%20access">{EMAIL}</a>. Yo
 @router.get("/privacy", response_class=HTMLResponse)
 async def privacy(request: Request):
     return _shell(request, "Smara Privacy Policy", """
-<p>Smara is an assistant for businesses in India that works on WhatsApp. It helps a business follow up on invoices its own customers have not
+<p>Smara is an assistant for businesses in India that works on WhatsApp and Telegram. It helps a business follow up on invoices its own customers have not
 paid, and keep track of what it owes. It is not a debt collection service. This page says what we keep and why.</p>
 <h2>Who is responsible for what</h2>
 <p>The business that uses Smara decides which customer and supplier details to share, and is responsible to its own customers for that.
 Syntarus runs Smara for the business and handles that information only to provide the service.</p>
 <h2>What we collect</h2>
-<ul><li><strong>From the business owner:</strong> the shop name, WhatsApp number, UPI ID (if given), and the messages, voice notes, photos and files
+<ul><li><strong>From the business owner:</strong> the shop name, phone number, UPI ID (if given), the Telegram account they chat with Smara from (if they use Telegram), and the messages, voice notes, photos and files
 they send Smara (for example an outstanding-dues sheet, a Tally export, a PDF or a bill photo), and what Smara replies.</li>
 <li><strong>From Smara Desktop, only if the owner turns it on:</strong> the open bills the business is owed and the open bills it has to pay, and the
 names and phone numbers of those parties as saved in Tally. We do not copy the rest of the Tally company file, and we never receive Tally passwords.
@@ -103,7 +103,8 @@ they have agreed to hear from the business on WhatsApp. A customer can reply STO
 <li>We do not use customer details for anything other than the business's own messages: no marketing, no sharing between businesses.</li></ul>
 <h2>Who processes it</h2>
 <p>Our server in India; an AI model provider (Sarvam), which reads message text and the text of files and photos, and turns voice notes into text,
-to answer; Syntarus's own memory service, which keeps notes and promises; and WhatsApp (Meta), which delivers messages and files.
+to answer; Syntarus's own memory service, which keeps notes and promises; WhatsApp (Meta), which delivers messages and files; and Telegram, which delivers messages and files when the owner
+chats with Smara there. Customers of a business are only ever messaged on WhatsApp.
 We do not sell data or use it for advertising.</p>
 <h2>How long</h2>
 <p>Until the business leaves Smara or asks us to delete it. Nightly backups are kept for 7 days.</p>
@@ -141,7 +142,7 @@ Smara is not a financial, legal or tax adviser.</p>
 async def data_deletion(request: Request):
     return _shell(request, "Delete your Smara data", """
 <p>To delete your business data from Smara:</p>
-<ol><li>Open WhatsApp and message Smara: <strong>delete my data</strong>.</li>
+<ol><li>Open WhatsApp or Telegram and message Smara: <strong>delete my data</strong>.</li>
 <li>Smara records your request and confirms it. We delete your shop, your customer list, dues, messages and saved notes within 7 days,
 and then tell you it is done.</li>
 <li>Backups made before that are removed automatically within 7 days.</li></ol>
