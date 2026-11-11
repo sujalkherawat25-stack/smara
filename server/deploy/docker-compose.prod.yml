@@ -35,8 +35,10 @@ services:
       SANDBOX_MODE: container
       SANDBOX_JOBS_DIR: /jobs
       VAULT_MASTER_KEY_FILE: /run/secrets/vault_master_key
-      # A shop's own SIM through the Baileys sidecar (unofficial). Empty WA_LINK_URL = not used.
-      WA_LINK_URL: http://munim_wa_link:8090
+      # A shop's own SIM through the Baileys sidecar (unofficial). Switched OFF: WhatsApp restricted the linked
+      # device on 2026-11-11, so the owner's messages use Telegram. To switch it back on, set this to
+      # http://munim_wa_link:8090 and start the sidecar with COMPOSE_PROFILES=wa-link (see release.sh).
+      WA_LINK_URL: ""
       WA_LINK_TOKEN_FILE: /run/secrets/wa_link_token
       # Each shop's server browser keeps its cookies here between chats (like a person's own browser profile)
       BROWSER_PROFILE_ROOT: /data/browser-profiles
@@ -63,6 +65,7 @@ services:
   # Baileys sidecar for shops' own WhatsApp numbers (unofficial; see server/wa_link/README.md). It is reachable only
   # from munim_app on munim_link: no published port, no database access, no files written, credentials in memory only.
   munim_wa_link:
+    profiles: ["wa-link"]     # off by default; release.sh starts it only when COMPOSE_PROFILES=wa-link
     build:
       context: ../wa_link
     image: smara-wa-link:${MUNIM_VERSION:-local}

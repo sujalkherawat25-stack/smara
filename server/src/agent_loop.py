@@ -347,7 +347,10 @@ async def _run(app, sid: str, fallback=None) -> None:
             text = "Sorry, I could not finish that right now. Please try again in a minute."
             if unread:
                 text += " Your message sent while I was working was not read; please send it again."
-            await _finish(app, row, text)
+            try:
+                await _finish(app, row, text)
+            except Exception:   # the channel itself may be down: log it, do not crash the run task
+                log.exception("could not tell the owner that session %s failed", sid)
     finally:
         if ticker is not None:
             ticker.cancel()

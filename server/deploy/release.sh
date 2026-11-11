@@ -17,7 +17,9 @@ if [ ! -s secrets/vault_master_key ]; then
 fi
 PREVIOUS=$(docker inspect -f '{{.Config.Image}}' munim_app 2>/dev/null | cut -d: -f2 || true)
 export MUNIM_VERSION=$VERSION
-docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d --build munim_sandbox munim_wa_link munim_app
+# The WhatsApp link sidecar is off unless COMPOSE_PROFILES=wa-link is set (see the compose file).
+if [ "${COMPOSE_PROFILES:-}" = "wa-link" ]; then WA_SVC=munim_wa_link; else WA_SVC=; fi
+docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d --build munim_sandbox $WA_SVC munim_app
 for i in $(seq 1 60); do
   [ "$(docker inspect -f '{{.State.Health.Status}}' munim_app 2>/dev/null)" = healthy ] && break; sleep 3
 done
