@@ -11,8 +11,11 @@ from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+import httpx
+
 from src import clock
 from src.loop.outbound import record
+from src.ops_alert import ops_alert
 from src.loop.whatsapp import document_message, owner_approval_card, template_message
 
 log = logging.getLogger(__name__)
@@ -52,6 +55,20 @@ def wa_link_text(payload: dict) -> str:
         titles = [b["reply"]["title"] for b in it["action"]["buttons"]]
         return f"{it['body']['text']}\n\nReply with one of: {' / '.join(titles)}"[:4000]
     return str((payload.get("text") or {}).get("body", ""))[:4000]
+
+
+async def _official_send(app, what: str, call):
+    """Runs one official WhatsApp call. When Meta refuses it with 401 or 403 the number or token needs attention:
+    the Smara team hears about it (at most once an hour), and the error still goes on to the agent run as before."""
+    try:
+        return await call()
+    except httpx.HTTPStatusError as err:
+        code = err.response.status_code
+        if code in (401, 403):
+            await ops_alert(app, f"wa-official-{code}",
+                            f"Smara: the official WhatsApp number refused {what} (HTTP {code}). Check the access token "
+                            "and the number registration. Owners with Telegram linked still get messages there.")
+        raise
 
 
 def link_on(app) -> bool:
@@ -124,8 +141,8 @@ async def send_to_owner(app, tenant, payload: dict, *, kind: str, obligation_id=
                          agent_session_id=agent_session_id, payload=payload if kind == "owner_note" else None)
         await nudge(app, tenant)
         return "held"
-    msg_id = await app.state.wa.send({**payload, "to": tenant.owner_phone},
-                                     number_id=number_id)   # owners hear from Smara's own number, never from their shop's
+    msg_id = await _official_send(app, "a message",   # owners hear from Smara's own number, never from their shop's
+                                  lambda: app.state.wa.send({**payload, "to": tenant.owner_phone}, number_id=number_id))
     if msg_id:
         await record(pool, msg_id, tenant_id=tenant.id, kind=kind, to_phone=tenant.owner_phone,
                      obligation_id=obligation_id, adjustment_id=adjustment_id, agent_session_id=agent_session_id)
@@ -152,9 +169,9 @@ async def send_document_to_owner(app, tenant, data: bytes, filename: str, mime: 
         return "telegram"
     if not window_open(tenant, datetime.now(timezone.utc)):
         return "window_closed"
-    media_id = await app.state.wa.upload_media(data, mime, filename, number_id=None)
-    msg_id = await app.state.wa.send(document_message(tenant.owner_phone, media_id, filename, caption),
-                                     number_id=None)
+    media_id = await _official_send(app, "a file", lambda: app.state.wa.upload_media(data, mime, filename, number_id=None))
+    msg_id = await _official_send(app, "a file", lambda: app.state.wa.send(
+        document_message(tenant.owner_phone, media_id, filename, caption), number_id=None))
     if msg_id:
         await record(app.state.pool, msg_id, tenant_id=tenant.id, kind="owner_document", to_phone=tenant.owner_phone)
     return "whatsapp"
