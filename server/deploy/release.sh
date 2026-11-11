@@ -5,8 +5,18 @@
 # prunes old release images and build cache so the disk does not fill up (each app
 # image is ~2 GB). The running image and the previous one are always kept for rollback.
 set -euo pipefail
+# The tarball below replaces this file while it runs. bash then reads the new file from the old byte offset and can run
+# the wrong lines (on 2026-11-11 that started the WhatsApp sidecar). So the script runs from a private copy in /tmp.
+if [ -z "${RELEASE_COPY:-}" ]; then
+  export RELEASE_ROOT="${RELEASE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+  copy=$(mktemp)
+  cp "$0" "$copy"
+  export RELEASE_COPY=1
+  exec bash "$copy" "$@"
+fi
+trap 'rm -f "$0"' EXIT
 TARBALL=$1; VERSION=$2
-cd "$(dirname "$0")/.."
+cd "$RELEASE_ROOT"
 sudo BACKUP_ROOT=/var/backups/munim bash deploy/backup.sh
 tar xzf "$TARBALL" && rm -f "$TARBALL"
 # Vault master key: created once, kept outside the release tree's tracked files. Back it up offline: without it the
