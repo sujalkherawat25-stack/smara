@@ -54,14 +54,24 @@ def wa_link_text(payload: dict) -> str:
     return str((payload.get("text") or {}).get("body", ""))[:4000]
 
 
+def link_on(app) -> bool:
+    """The shop's WhatsApp link is switched on (WA_LINK_URL is set)."""
+    return getattr(app.state, "wa_link", None) is not None
+
+
 def pick_channel(app, tenant, now: datetime, reply_channel: str | None = None) -> str:
     """Where an owner-bound message goes. A reply stays on the channel the owner wrote on. Anything else
     (approvals, reminders, files the agent started) follows the owner's last-used channel. If WhatsApp is the
-    preferred one but its 24h window is closed and Telegram is linked, Telegram carries it instead of holding it."""
+    preferred one but its 24h window is closed and Telegram is linked, Telegram carries it instead of holding it.
+    A switched-off WhatsApp link is never picked: its messages go to Telegram when the owner has it linked."""
     tg_ok = bool(getattr(app.state, "tg", None) and tenant.telegram_chat_id)
+    link_off = not link_on(app)
     if reply_channel:
-        return "telegram" if reply_channel == "telegram" and tg_ok else "whatsapp"
+        wants_telegram = reply_channel == "telegram" or (reply_channel == "wa_link" and link_off)
+        return "telegram" if wants_telegram and tg_ok else "whatsapp"
     last = tenant.owner_last_channel or ("telegram" if tg_ok else "whatsapp")
+    if last == "wa_link" and link_off:
+        last = "telegram" if tg_ok else "whatsapp"
     if tg_ok and (last == "telegram" or not window_open(tenant, now)):
         return "telegram"
     return "whatsapp"

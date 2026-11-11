@@ -5,6 +5,7 @@ import io
 import shutil
 import sys
 import wave
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import httpx
@@ -127,6 +128,36 @@ async def test_a_file_for_an_owner_on_the_link_goes_over_the_link(monkeypatch):
                                                        "Ravi", reply_channel="wa_link")
     assert where == "wa_link"
     assert link.files == [("919000000001", "statement.pdf", "application/pdf", "Ravi", b"%PDF-1")]
+
+
+def _app_with(link=None, tg=None):
+    return SimpleNamespace(state=SimpleNamespace(wa_link=link, pool=None, tg=tg, wa=None))
+
+
+def test_with_the_link_switched_off_its_messages_go_to_telegram_not_the_official_number():
+    now = datetime.now(timezone.utc)
+    tenant = SimpleNamespace(id="t1", owner_phone="919000000001", telegram_chat_id=42,
+                             owner_last_channel="wa_link", owner_last_inbound_at=now)
+    tg = object()
+    assert owner_channel.pick_channel(_app_with(tg=tg), tenant, now) == "telegram"
+    assert owner_channel.pick_channel(_app_with(tg=tg), tenant, now, "wa_link") == "telegram"
+    # with the link switched on, its messages still stay on the link path (uses_link decides before this)
+    assert owner_channel.pick_channel(_app_with(link=object(), tg=tg), tenant, now) == "whatsapp"
+
+
+async def test_a_file_goes_to_telegram_when_the_link_is_switched_off(monkeypatch):
+    monkeypatch.setattr(owner_channel, "record", _record)
+    sent = []
+
+    class _Tg:
+        async def send_document(self, chat_id, data, filename, caption):
+            sent.append((chat_id, filename))
+
+    app = _app_with(tg=_Tg())
+    tenant = SimpleNamespace(id="t1", owner_phone="919000000001", telegram_chat_id=42, owner_last_channel="wa_link",
+                             owner_last_inbound_at=datetime.now(timezone.utc))
+    where = await owner_channel.send_document_to_owner(app, tenant, b"%PDF-1", "statement.pdf", "application/pdf", "Ravi")
+    assert where == "telegram" and sent == [(42, "statement.pdf")]
 
 
 async def test_a_run_on_the_link_sends_its_file_there_even_if_telegram_was_used_last(monkeypatch):
