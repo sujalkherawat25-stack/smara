@@ -39,7 +39,8 @@ if [ "$(docker inspect -f '{{.State.Health.Status}}' smara_app)" != healthy ]; t
 fi
 # prune: keep this version and the previous one
 for repo in smara-app smara-sandbox; do
-  docker images --format '{{.Tag}}' "$repo" | grep -vxE "$VERSION|${PREVIOUS:-none}" | while read -r tag; do
+  # grep -v exits 1 when nothing is left to delete; that is not a failure here (pipefail is on)
+  { docker images --format '{{.Tag}}' "$repo" | grep -vxE "$VERSION|${PREVIOUS:-none}" || true; } | while read -r tag; do
     docker rmi "$repo:$tag" >/dev/null 2>&1 || true
   done
 done
