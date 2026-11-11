@@ -14,6 +14,14 @@ def reminder_mode(raw: str) -> str:
     return value if value in ("own", "smara") else "own"
 
 
+def _chat_id(raw: str) -> int | None:
+    """A Telegram chat id (a number, possibly negative for groups). Blank or not a number means not set."""
+    try:
+        return int((raw or "").strip())
+    except ValueError:
+        return None
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str = ""
@@ -44,6 +52,8 @@ class Settings:
     sandbox_mode: str = "local"
     sandbox_jobs_dir: str = "./data/sandbox-jobs"
     telegram_webhook_secret: str = ""
+    # The Smara team's Telegram chat: ops alerts (owner messages that cannot be sent). None = log only.
+    ops_telegram_chat_id: int | None = None
     # Public https origin of this server; enables tappable pay links in reminders
     public_base_url: str = ""
     # OpenAI-compatible chat endpoint; fast model by default, reasoning model on escalation
@@ -120,6 +130,7 @@ def load_settings() -> Settings:
         sandbox_mode=env.get("SANDBOX_MODE", "local"),
         sandbox_jobs_dir=env.get("SANDBOX_JOBS_DIR", "./data/sandbox-jobs"),
         telegram_webhook_secret=env.get("TELEGRAM_WEBHOOK_SECRET", ""),
+        ops_telegram_chat_id=_chat_id(env.get("OPS_TELEGRAM_CHAT_ID", "")),
         public_base_url=env.get("PUBLIC_BASE_URL", ""),
         llm_base_url=env.get("LLM_BASE_URL", ""),
         llm_api_key=env.get("LLM_API_KEY", ""),
