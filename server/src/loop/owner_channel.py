@@ -7,6 +7,7 @@
 Builders produce WhatsApp payloads; Telegram gets a translation of the same card.
 """
 import logging
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -17,6 +18,15 @@ from src.loop.whatsapp import document_message, owner_approval_card, template_me
 log = logging.getLogger(__name__)
 WINDOW = timedelta(hours=24)
 # Things the owner did not ask for just now: held at night / when the WhatsApp window is closed.
+# The channel the owner wrote on, for the agent run that is working now (set by agent_loop). Sends in that run
+# answer there unless a caller names a channel.
+CURRENT_REPLY_CHANNEL: ContextVar[str | None] = ContextVar("current_reply_channel", default=None)
+
+
+def effective_reply(explicit: str | None) -> str | None:
+    return explicit if explicit is not None else CURRENT_REPLY_CHANNEL.get()
+
+
 CARD_KINDS = ("owner_reminder_card", "owner_claim_card", "owner_agent_card", "owner_note")
 
 
@@ -71,7 +81,8 @@ def wa_to_telegram(payload: dict, chat_id: int) -> dict:
 async def send_to_owner(app, tenant, payload: dict, *, kind: str, obligation_id=None, adjustment_id=None,
                         reply_channel: str | None = None, number_id: str | None = None,
                         agent_session_id=None) -> str:
-    """Returns the channel used: 'telegram', 'whatsapp' or 'held'."""
+    """Returns the channel used: 'telegram', 'whatsapp', 'wa_link' or 'held'."""
+    reply_channel = effective_reply(reply_channel)
     pool, s, now = app.state.pool, app.state.settings, datetime.now(timezone.utc)
     tg = getattr(app.state, "tg", None)
     if reply_channel is None and kind in CARD_KINDS and clock.is_quiet(s):
@@ -114,7 +125,18 @@ async def send_to_owner(app, tenant, payload: dict, *, kind: str, obligation_id=
 async def send_document_to_owner(app, tenant, data: bytes, filename: str, mime: str, caption: str,
                                  reply_channel: str | None = None) -> str:
     """Send a file to the owner: Telegram if linked, else WhatsApp (needs the 24h window).
-    Returns 'telegram', 'whatsapp' or 'window_closed'."""
+    Returns 'telegram', 'wa_link', 'whatsapp' or 'window_closed'."""
+    reply_channel = effective_reply(reply_channel)
+    if uses_link(app, tenant, reply_channel):
+        from src.loop.wa_link import SidecarError, client as link_client
+        try:
+            msg_id = await link_client(app).send_file(str(tenant.id), tenant.owner_phone, filename, mime, caption, data)
+        except SidecarError:
+            log.warning("file not sent on the WhatsApp link; trying the other channels")
+        else:
+            if msg_id:
+                await record(app.state.pool, msg_id, tenant_id=tenant.id, kind="owner_document", to_phone=tenant.owner_phone)
+            return "wa_link"
     if pick_channel(app, tenant, datetime.now(timezone.utc), reply_channel) == "telegram":
         await app.state.tg.send_document(tenant.telegram_chat_id, data, filename, caption)
         return "telegram"

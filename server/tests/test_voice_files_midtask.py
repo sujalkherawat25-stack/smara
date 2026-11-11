@@ -459,3 +459,14 @@ async def _rows(pool, sql, *a):
     async with pool.connection() as c:
         for r in await (await c.execute(sql, a)).fetchall():
             yield r
+
+
+@pytest.fixture(autouse=True)
+def _stub_wav_conversion(monkeypatch):
+    """The real conversion runs ffmpeg, which is in the app image. These tests check the speech call, not ffmpeg."""
+    from src.ingest import media as _media
+
+    async def _passthrough(audio: bytes) -> bytes:
+        return audio
+
+    monkeypatch.setattr(_media, "to_wav", _passthrough)

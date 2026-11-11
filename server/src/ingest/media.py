@@ -4,6 +4,7 @@ External-API shapes here (Graph media fetch, Sarvam /speech-to-text, OpenAI-styl
 image_url parts) follow the vendors' public docs but are not yet exercised live.
 """
 import asyncio
+import logging
 import base64
 import re
 
@@ -15,6 +16,9 @@ GRAPH = "https://graph.facebook.com/v20.0"
 SARVAM_STT = "https://api.sarvam.ai/speech-to-text"
 MAX_MEDIA_BYTES = 100 * 1024 * 1024      # WhatsApp itself accepts at most 100 MB per document
 ATTEMPTS = 3
+
+
+log = logging.getLogger(__name__)
 
 
 class MediaError(Exception):
@@ -66,18 +70,37 @@ async def download_media(access_token: str, media_id: str, client: httpx.AsyncCl
             await http.aclose()
 
 
+async def to_wav(audio: bytes) -> bytes:
+    """16 kHz mono WAV. WhatsApp and Telegram send voice notes as Ogg/Opus, which the speech service refuses."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-loglevel", "error", "-i", "pipe:0", "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1",
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        out, _ = await proc.communicate(audio)
+    except OSError:
+        log.warning("voice note not converted: ffmpeg is not installed")
+        raise MediaError("I could not read that voice note. Please send it again or type it.")
+    if proc.returncode != 0 or not out:
+        log.warning("voice note not converted (ffmpeg exit %s)", proc.returncode)
+        raise MediaError("I could not read that voice note. Please send it again or type it.")
+    return out
+
+
 async def transcribe(api_key: str, audio: bytes, mime: str = "audio/ogg",
                      client: httpx.AsyncClient | None = None, url: str = SARVAM_STT) -> str:
     """Hinglish-capable STT. Returns '' when no key is configured. The key is sent in a header and never logged."""
     if not api_key:
         return ""
+    wav = await to_wav(audio)
     http = client or httpx.AsyncClient(timeout=60)
     try:
         resp = await http.post(
             url or SARVAM_STT, headers={"api-subscription-key": api_key},
-            files={"file": ("voice.ogg", audio, mime)},
+            files={"file": ("voice.wav", wav, "audio/wav")},
             data={"model": "saarika:v2.5", "language_code": "unknown"},
         )
+        if resp.status_code >= 400:
+            log.warning("speech service answered %s: %s", resp.status_code, resp.text[:200])
         resp.raise_for_status()
         return resp.json().get("transcript", "")
     finally:

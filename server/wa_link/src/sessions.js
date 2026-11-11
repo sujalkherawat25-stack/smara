@@ -264,6 +264,20 @@ export class SessionManager {
     });
   }
 
+  // One file to one number, with the same pacing and single-attempt rule as send(). An image goes as an image.
+  async sendFile(key, to, { data, mime, filename, caption }) {
+    const s = this.sessions.get(key);
+    if (!s || s.status !== "connected" || !s.sock) throw new HttpError(409, "not connected");
+    return s.pacer.run(async () => {
+      if (!s.sock || s.status !== "connected") throw new HttpError(409, "not connected");
+      const content = String(mime || "").startsWith("image/")
+        ? { image: data, caption: caption || undefined }
+        : { document: data, mimetype: mime || "application/octet-stream", fileName: filename, caption: caption || undefined };
+      const sent = await s.sock.sendMessage(`${to}@s.whatsapp.net`, content);
+      return sent?.key?.id || "";
+    });
+  }
+
   async disconnect(key) {
     const s = this.sessions.get(key);
     if (!s) return { status: "absent", phone: "" };

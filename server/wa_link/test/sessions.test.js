@@ -263,3 +263,24 @@ test("the auth state is held in memory: key updates are flushed to the app, not 
   const state = parseState(h.last("state").auth);
   assert.ok(state.keys["pre-key"][9]);
 });
+
+test("a file goes as a document, and an image goes as an image, to one number", async () => {
+  const h = harness();
+  await h.manager.start(KEY);
+  h.sockets[0].emit("connection.update", { connection: "open" });
+  const pdf = Buffer.from("%PDF-1.4 test");
+  await h.manager.sendFile(KEY, "919000000001", { data: pdf, mime: "application/pdf", filename: "statement.pdf", caption: "Ravi" });
+  await h.manager.sendFile(KEY, "919000000001", { data: Buffer.from([1, 2, 3]), mime: "image/jpeg", filename: "bill.jpg", caption: "" });
+  const [doc, img] = h.sockets[0].sent;
+  assert.equal(doc.jid, "919000000001@s.whatsapp.net");
+  assert.deepEqual(doc.content, { document: pdf, mimetype: "application/pdf", fileName: "statement.pdf", caption: "Ravi" });
+  assert.equal(img.content.image.length, 3);
+  assert.equal(img.content.document, undefined);
+});
+
+test("no file is sent unless the session is connected", async () => {
+  const h = harness();
+  await h.manager.start(KEY);
+  await assert.rejects(h.manager.sendFile(KEY, "919000000001", { data: Buffer.from("x"), mime: "application/pdf", filename: "a.pdf" }),
+    (e) => e instanceof HttpError && e.status === 409);
+});

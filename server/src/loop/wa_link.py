@@ -13,6 +13,7 @@ and STOP checks. It still needs a connected link and still counts toward the cap
 Credentials never touch disk or logs: the sidecar holds them in memory and the app stores them encrypted in the vault.
 """
 import asyncio
+import base64
 import logging
 import re
 import time
@@ -80,6 +81,13 @@ class SidecarClient:
 
     async def send(self, tenant_id: str, to: str, text: str) -> str:
         res = await self._call("POST", f"/sessions/{tenant_id}/send", {"to": to, "text": text})
+        return str(res.get("message_id") or "")
+
+    async def send_file(self, tenant_id: str, to: str, filename: str, mime: str, caption: str, data: bytes) -> str:
+        # One file to one number. Like send(), never retried: a retry after a timeout could send it twice.
+        body = {"to": to, "filename": filename, "mime": mime, "caption": (caption or "")[:4000],
+                "data_b64": base64.b64encode(data).decode()}
+        res = await self._call("POST", f"/sessions/{tenant_id}/send-file", body)
         return str(res.get("message_id") or "")
 
     async def disconnect(self, tenant_id: str) -> dict:
