@@ -7,7 +7,7 @@ ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 # so a code-only release rebuilds in seconds instead of re-downloading ~1 GB.
 COPY pyproject.toml ./
 # libatomic1: the Playwright driver needs it on the current python:3.12-slim base; without it the build fails.
-RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 ffmpeg && rm -rf /var/lib/apt/lists/* \
  && python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))" > /tmp/req.txt \
  && pip install -r /tmp/req.txt \
  && playwright install --with-deps chromium

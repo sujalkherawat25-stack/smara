@@ -120,3 +120,26 @@ test("pair passes the stored auth through, and rejects a non-string", async () =
     assert.equal(bad.status, 400);
   });
 });
+
+test("send-file checks the recipient and the size, and keeps the file name inside one folder", async () => {
+  let sent = 0;
+  let got = null;
+  const manager = fakeManager({
+    sendFile: async (key, to, file) => { sent++; got = { to, ...file }; return "F-1"; },
+  });
+  await withServer(manager, async (base) => {
+    const post = (body) => fetch(`${base}/sessions/${KEY}/send-file`, { method: "POST", headers: AUTH, body: JSON.stringify(body) });
+    const ok = await post({ to: "919000000001", filename: "../../etc/statement.pdf", mime: "application/pdf",
+      caption: "Ravi", data_b64: Buffer.from("%PDF-1").toString("base64") });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), { message_id: "F-1" });
+    assert.equal(got.filename.includes("/"), false);
+    assert.equal(got.mime, "application/pdf");
+    assert.equal(Buffer.from(got.data).toString(), "%PDF-1");
+    assert.equal((await post({ to: "+91 98", data_b64: "eA==" })).status, 400);
+    assert.equal((await post({ to: "919000000001", data_b64: "" })).status, 400);
+    const tooBig = Buffer.alloc(20 * 1024 * 1024 + 1).toString("base64");
+    assert.equal((await post({ to: "919000000001", data_b64: tooBig })).status, 400);
+    assert.equal(sent, 1, "only the valid file reached the manager");
+  });
+});

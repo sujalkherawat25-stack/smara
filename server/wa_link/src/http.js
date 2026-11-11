@@ -6,6 +6,8 @@ const KEY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const REF_RE = KEY_RE;   // a media ref is a random UUID made by the sidecar
 const TO_RE = /^\d{8,15}$/;
 const TEXT_MAX = 4000;
+const FILE_MAX = 20 * 1024 * 1024;          // the owner's limit: 20 MB
+const FILE_BODY_MAX = 28 * 1024 * 1024;     // base64 adds a third, plus the JSON around it
 
 async function readJson(req, limit) {
   const chunks = [];
@@ -63,6 +65,26 @@ export function makeHandler({ manager, token, maxBodyBytes = 8 * 1024 * 1024, lo
         const auth = body.auth ?? null;
         if (auth !== null && typeof auth !== "string") throw new HttpError(400, "auth must be a string");
         return reply(200, await manager.start(key, auth));
+      }
+
+      if (req.method === "POST" && action === "send-file") {
+        const body = await readJson(req, FILE_BODY_MAX);
+        if (typeof body.to !== "string" || !TO_RE.test(body.to)) throw new HttpError(400, "to must be digits only");
+        if (typeof body.data_b64 !== "string" || !body.data_b64) throw new HttpError(400, "data_b64 is required");
+        const data = Buffer.from(body.data_b64, "base64");
+        if (data.length === 0 || data.length > FILE_MAX) throw new HttpError(400, "file must be 1 byte to 20 MB");
+        const filename = String(body.filename || "file").replace(/[\\/\0]/g, "_").slice(0, 200);
+        const mime = String(body.mime || "application/octet-stream").slice(0, 100);
+        const caption = typeof body.caption === "string" ? body.caption.slice(0, TEXT_MAX) : "";
+        let messageId;
+        try {
+          messageId = await manager.sendFile(key, body.to, { data, mime, filename, caption });
+        } catch (err) {
+          if (err instanceof HttpError) throw err;
+          log("warn", "file send failed");   // no reason echoed: it can carry message or account details
+          throw new HttpError(502, "send failed");
+        }
+        return reply(200, { message_id: messageId });
       }
 
       if (req.method === "POST" && action === "send") {

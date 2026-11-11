@@ -23,10 +23,14 @@ from src.agent.context import compact
 from src.agent.policy import SessionCtx, approval_text, pre_tool_use
 from src.agent.prompt import build_system
 from src.loop.llm import RateLimited
-from src.loop.owner_channel import send_to_owner
+from src.loop.owner_channel import CURRENT_REPLY_CHANNEL, send_to_owner
 from src.loop.whatsapp import text_message
 
 log = logging.getLogger(__name__)
+
+PROGRESS_FIRST_S = 25      # a task that runs this long gets a note, so the owner does not think it is stuck
+PROGRESS_EVERY_S = 40
+PROGRESS_MAX = 5
 RATE_RETRY_S = 25         # the model is busy (rate limited): wait and try the same step again
 RATE_RETRIES = 4
 MAX_STEPS = 40          # model calls per turn (each owner message / resume gets a fresh budget)
@@ -246,6 +250,21 @@ async def run(app, sid: str, fallback=None) -> None:
         _mark(app, sid, False)
 
 
+async def _progress(app, row, tenant) -> None:
+    """Tells the owner a long task is still going. Only for messages the owner sent, on the channel they used."""
+    try:
+        await asyncio.sleep(PROGRESS_FIRST_S)
+        for _ in range(PROGRESS_MAX):
+            await send_to_owner(app, tenant, text_message(tenant.owner_phone,
+                "Still working on it. I'll send the answer as soon as it's ready."),
+                kind="owner_text", reply_channel=row["channel"])
+            await asyncio.sleep(PROGRESS_EVERY_S)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("progress note failed")
+
+
 async def _run(app, sid: str, fallback=None) -> None:
     pool = app.state.pool
     async with pool.connection() as conn:
@@ -254,8 +273,12 @@ async def _run(app, sid: str, fallback=None) -> None:
         return
     messages, steps, suspended, empties = row["messages"], row["steps"], False, 0
     budget, seen, nudged, busy = 0, {}, False, 0
+    ticker = None
     try:
         tenant = await tenants.by_id(pool, str(row["tenant_id"]))
+        if row["trigger"] == "owner_message":
+            CURRENT_REPLY_CHANNEL.set(row["channel"])      # the sends in this run answer on the owner's channel
+            ticker = asyncio.create_task(_progress(app, row, tenant))
         if messages and messages[0]["role"] == "system":      # never carry a stale date/ledger/instructions into a new turn
             messages[0] = {"role": "system", "content": await build_system(app, tenant, row["trust"], str(row["id"]))}
         while budget < MAX_STEPS:
@@ -325,6 +348,9 @@ async def _run(app, sid: str, fallback=None) -> None:
             if unread:
                 text += " Your message sent while I was working was not read; please send it again."
             await _finish(app, row, text)
+    finally:
+        if ticker is not None:
+            ticker.cancel()
     # The browser page is NOT closed when a turn ends: the owner's next message in this conversation ("now open her chat")
     # continues on the same page. Idle pages are closed by the browser manager after a while.
 
