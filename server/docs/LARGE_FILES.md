@@ -23,3 +23,11 @@ Everything matched to the paisa, and a second import changed nothing, except:
 Parsing is fast (0.3 s for 20,000 CSV rows, 1.8 s for a 30,000-row workbook, 1.6 s and 212 MB peak for a 20.8 MB Tally
 file). Importing costs about 4 ms a row in one transaction: 20,000 rows take about 80 s and the 20.8 MB Tally file
 (32,913 invoices) about 2 minutes. A typical shop's file is far smaller.
+
+## Size limits and the last run
+
+A 20.8 MB CSV (221,923 invoices, 27,733 customers) imports exactly on a PC: 909 s, 4.1 ms a row, evenly, and again in 646 s.
+On the production server the same file had not finished after 30 minutes and held the database at 95% CPU, so it was stopped;
+the cause there is not known. Two cheap changes were made on the way and are measured: an index on customer name per shop
+(migration 024) and a per-import cache so each customer is looked up once. On a 60,000-row CSV that took the import from
+231 s to 127 s and the repeat import from 176 s to 73 s, with every number still exact.
