@@ -99,17 +99,63 @@ async def recent(pool, tenant_id: str, exclude_session: str | None = None) -> st
     return "\n".join(reversed(lines))
 
 
-async def search(pool, tenant_id: str, query: str, days: int = 90, limit: int = 8) -> list[dict]:
-    """Messages whose words match the query. Every word counts, so a few matching words beat one; newest first on a tie.
-    Plain substring matching on purpose: Hinglish spellings vary, and one shop's log is small."""
+def _terms(query: str) -> list[str]:
+    """The words of a question worth looking for: no punctuation, no filler, no repeats, at most six."""
     words = []
     for w in query.replace("\n", " ").split():
         w = "".join(ch for ch in w if ch.isalnum())
         if len(w) >= 2 and w.lower() not in FILLER and w.lower() not in (x.lower() for x in words):
             words.append(w)
+    return words[:6]
+
+
+RELATED_LINES = 5
+RELATED_CHARS = 2500
+RELATED_DAYS = 90
+
+
+async def related(pool, tenant_id: str, query: str, exclude_session: str | None = None) -> str:
+    """Older messages that look like they are about what the owner just wrote, found for them: the agent used to answer
+    questions about the owner's own rules from general knowledge without ever searching. Only messages older than the
+    recent list in the prompt, only those that share at least two words with the message (one when it has a single
+    word worth looking for), best matches first and then oldest first as in the recent list."""
+    words = _terms(query)
+    if not words:
+        return ""
+    async with pool.connection() as conn:
+        rows = await (await conn.execute(
+            """WITH recent AS (SELECT created_at FROM chat_messages
+                                WHERE tenant_id = %(t)s AND created_at > now() - make_interval(days => %(rd)s)
+                                  AND (%(x)s::uuid IS NULL OR session_id IS DISTINCT FROM %(x)s::uuid)
+                                ORDER BY created_at DESC, id DESC LIMIT %(lines)s),
+                    edge AS (SELECT min(created_at) AS at FROM recent)
+               SELECT * FROM (
+                 SELECT m.created_at, m.channel, m.role, m.content,
+                        (SELECT count(*) FROM unnest(%(p)s::text[]) AS pat WHERE m.content ILIKE pat) AS hits
+                   FROM chat_messages m, edge
+                  WHERE m.tenant_id = %(t)s AND m.created_at > now() - make_interval(days => %(d)s)
+                    AND (edge.at IS NULL OR m.created_at < edge.at)
+                    AND (%(x)s::uuid IS NULL OR m.session_id IS DISTINCT FROM %(x)s::uuid)) q
+                WHERE hits >= %(need)s ORDER BY hits DESC, created_at DESC LIMIT %(n)s""",
+            {"t": tenant_id, "rd": RECENT_DAYS, "lines": RECENT_LINES, "x": exclude_session, "d": RELATED_DAYS,
+             "p": [f"%{w}%" for w in words], "need": 1 if len(words) == 1 else 2, "n": RELATED_LINES})).fetchall()
+    lines, used = [], 0
+    for r in sorted(rows, key=lambda r: r["created_at"]):
+        line = f"[{_when(r['created_at'])} {CHANNEL_NAMES.get(r['channel'], r['channel'])}] {_who(r['role'])}: {_clip(r['content'], LINE_CHARS)}"
+        if used + len(line) > RELATED_CHARS and lines:
+            break
+        lines.append(line)
+        used += len(line)
+    return "\n".join(lines)
+
+
+async def search(pool, tenant_id: str, query: str, days: int = 90, limit: int = 8) -> list[dict]:
+    """Messages whose words match the query. Every word counts, so a few matching words beat one; newest first on a tie.
+    Plain substring matching on purpose: Hinglish spellings vary, and one shop's log is small."""
+    words = _terms(query)
     if not words:
         return []
-    patterns = [f"%{w}%" for w in words[:6]]
+    patterns = [f"%{w}%" for w in words]
     async with pool.connection() as conn:
         rows = await (await conn.execute(
             """SELECT created_at, channel, role, content,

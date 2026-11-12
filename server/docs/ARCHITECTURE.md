@@ -115,21 +115,25 @@ owner taps Approve (deterministic code, never the model) → re-check policy →
 
 ## 3b. Memory: what is kept where
 
-Smara forgets when one store is asked to do everything. Three stores, each with one job:
+Smara forgets when one store is asked to do everything. Four stores, each with one job:
 
 | Store | Holds | Read how | Why here |
 | --- | --- | --- | --- |
 | **Postgres ledger** | Money, dates, states, approvals | `query_ledger_sql`, digest | Exact and auditable; the model never decides a number |
-| **Conversation log** (`chat_messages`) | Every owner message and every Smara reply, with channel and time | Last ~40 lines in every prompt; `search_chat_history` for older | Verbatim, instant, and not dependent on another service. WhatsApp and Telegram cannot return history, so Smara keeps its own |
-| **Continuum** | Distilled durable facts: customer habits, promises, disputes, the owner's standing rules | Looked up on every owner message (shop notes + each customer named), plus `resolve_continuum_memory` | Source-backed and searchable by meaning; survives any number of conversations |
+| **Conversation log** (`chat_messages`) | Every owner message and every Smara reply, with channel and time | Last ~40 lines in every prompt, the older lines that match the question found automatically, and `search_chat_history` | Verbatim, instant, and not dependent on another service. WhatsApp and Telegram cannot return history, so Smara keeps its own |
+| **Standing facts** (`shop_facts`) | The latest value of each thing that stays true until it changes: a reminder rule, a credit limit, an address, who does what, per shop or per customer | Always in the prompt (the shop's, plus those of the customers the message names) | A new value for a topic **replaces** the old one. Continuum cannot do this: tested on the live service, it returns the old rule beside the new one in every wording |
+| **Continuum** | Distilled durable facts: customer habits, promises, disputes, anything the agent chose to save | Looked up on every owner message (shop notes + each customer named), plus `resolve_continuum_memory` | Source-backed and searchable by meaning; survives any number of conversations |
 
-How a turn is assembled (`agent/prompt.py`): the ledger snapshot, the owner's standing rules, the recent conversation, and
-a Continuum lookup for what the owner just wrote. A lookup that fails is retried once, then the agent is told it failed
-and must say so rather than guess; `/healthz` counts lookups and failures under `memory`.
+How a turn is assembled (`agent/prompt.py`): the ledger snapshot, what the owner has told you (standing facts), the owner's
+standing rules from Continuum, the recent conversation, older related messages, and a Continuum lookup for what the owner
+just wrote. A lookup that fails is retried once, then the agent is told it failed and must say so rather than guess;
+`/healthz` counts lookups and failures under `memory`.
 
 Facts get into Continuum from the agent's own `write_continuum_evidence` calls and from a per-turn pass that reads only the
-owner's words (`agent/memory_pass.py`). Continuum does not order facts or supersede old ones, so cards are shown
-oldest-first with the date each fact was noted, and the prompt says the later date is the newer decision.
+owner's words (`agent/memory_pass.py`). The pass keeps who pays whom, copies the owner's own words next to each fact, and
+gives a topic to anything that can change. A fact with a topic also goes to `shop_facts`, replacing the earlier value of
+that topic; the earlier wording is remembered so the copy Continuum still holds is left out of the prompt. Continuum cards
+that remain are shown oldest-first with the date each fact was noted, and the prompt says the last one listed is the newest.
 
 ## 4. Security model
 
