@@ -51,7 +51,7 @@ async def tick(app, now: datetime) -> int:
         t = known[tid]
         if t is None:
             continue
-        if await wa_link.paused(pool, tid):    # the shop's own number is down: ask nothing until it is back
+        if await wa_link.paused(pool, tid, app=app):    # the shop's own number is down: ask nothing until it is back
             await release_claim(pool, o, now)
             continue
         if getattr(getattr(app.state, "llm", None), "enabled", False) and await _agent_reminder(app, t, o):

@@ -224,7 +224,7 @@ async def decide_reminder(app, tenant_id: str, obligation_id: str, action: str, 
         return f"Okay, {o['invoice_ref']} {'marked paid' if action == 'paid' else 'snoozed 3 days'}."
     try:
         tenant = await tenants.by_id(pool, tenant_id)
-        if await wa_link.uses_link(pool, tenant_id):      # the shop's own SIM (server/wa_link): the approved text, once
+        if await wa_link.uses_link(pool, tenant_id, app=app):      # the shop's own SIM (server/wa_link): the approved text, once
             msg_id = await wa_link.send_text(app, tenant, o["whatsapp_phone"],
                                              from_shop(tenant, draft_reminder(o, tenant.upi, s.public_base_url)),
                                              purpose=wa_link.PROACTIVE, kind="debtor_reminder", obligation_id=o["id"])
