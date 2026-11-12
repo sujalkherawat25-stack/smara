@@ -56,25 +56,29 @@ def decode_text(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def read_tables(filename: str, data: bytes) -> list[list[list]]:
-    """Every sheet of a workbook, or the single table of a text file, as lists of rows."""
+def read_named_tables(filename: str, data: bytes) -> list[tuple[str, list[list]]]:
+    """Every sheet of a workbook, or the single table of a text file, as (sheet name, rows)."""
     name = filename.lower()
     if name.endswith((".xlsx", ".xlsm")):
         from openpyxl import load_workbook
         wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
-        return [[list(r) for r in ws.iter_rows(values_only=True)] for ws in wb.worksheets]
+        return [(ws.title, [list(r) for r in ws.iter_rows(values_only=True)]) for ws in wb.worksheets]
     if name.endswith(".xls"):
         try:
             import xlrd
         except ImportError:
             raise ValueError("old .xls files are not supported here; save the sheet as .xlsx or .csv and send it again") from None
         book = xlrd.open_workbook(file_contents=data)
-        return [[[c.value if c.ctype != xlrd.XL_CELL_DATE else xlrd.xldate.xldate_as_datetime(c.value, book.datemode)
-                  for c in sh.row(i)] for i in range(sh.nrows)] for sh in book.sheets()]
+        return [(sh.name, [[c.value if c.ctype != xlrd.XL_CELL_DATE else xlrd.xldate.xldate_as_datetime(c.value, book.datemode)
+                            for c in sh.row(i)] for i in range(sh.nrows)]) for sh in book.sheets()]
     text = decode_text(data)
     sample = "\n".join(text.splitlines()[:20])
     delimiter = max(",;\t|", key=sample.count) if sample.strip() else ","
-    return [[r for r in csv.reader(io.StringIO(text), delimiter=delimiter)]]
+    return [("", [r for r in csv.reader(io.StringIO(text), delimiter=delimiter)])]
+
+
+def read_tables(filename: str, data: bytes) -> list[list[list]]:
+    return [rows for _, rows in read_named_tables(filename, data)]
 
 
 def read_table(filename: str, data: bytes) -> list[list]:
@@ -136,42 +140,108 @@ def _find_header(table: list[list]):
     return None
 
 
-def map_sheet(filename: str, data: bytes, known_phones: dict[str, str] | None = None) -> tuple[list[SheetRow], list[str]]:
-    """Returns (rows, skipped_reasons). Header row = first of top 15 with party and amount. Every sheet is tried;
-    known_phones (customer name lower-cased -> number) fills a missing mobile column from customers already on file."""
-    try:
-        tables = read_tables(filename, data)
-    except ValueError as e:
-        return [], [str(e)]
-    except Exception:
-        return [], ["the file could not be opened; it may be damaged or password protected"]
-    found = next(((t, *h) for t in tables if (h := _find_header(t))), None)
-    if found is None:
-        seen = next((r for t in tables for r in t[:15] if sum(1 for c in r if c not in (None, "")) >= 2), None)
-        hint = f" The columns I can see: {', '.join(str(c) for c in seen if c not in (None, ''))[:200]}." if seen else ""
-        return [], ["could not find a header row with a party/customer column and an amount/pending column." + hint]
-    table, i, cols = found
-    known = {k.strip().lower(): v for k, v in (known_phones or {}).items()}
+TOTAL_WORDS = ("total", "grand total", "totals", "sub total", "subtotal", "sub-total")
 
+
+def _map_table(table: list[list], i: int, cols: dict[str, int], known: dict[str, str], label: str) -> tuple[list[SheetRow], list[str]]:
+    """The rows under the header at table[i]. `label` ("" for a single-table file) says which sheet a skipped row is on."""
     rows: list[SheetRow] = []
     skipped: list[str] = []
+    where = f"sheet {label!r} " if label else ""
     for n, r in enumerate(table[i + 1:], start=i + 2):
         get = lambda f: r[cols[f]] if f in cols and cols[f] < len(r) else None
         party = str(get("party") or "").strip()
+        if party.lower() in TOTAL_WORDS:           # the sheet's own total line is not a customer
+            continue
         amount = parse_amount_paise(get("amount"))
         if not party or amount is None:
-            is_total = any(str(c or "").strip().lower() in ("total", "grand total", "totals") for c in r)
+            is_total = any(str(c or "").strip().lower() in TOTAL_WORDS for c in r)
             if any(c not in (None, "") for c in r) and not is_total:
-                skipped.append(f"row {n}: no party/amount")
+                skipped.append(f"{where}row {n}: no party/amount")
             continue
         phone = parse_phone(get("phone")) or parse_phone(known.get(party.lower()))
         due = parse_date(get("due"))
         if due is None and (billed := parse_date(get("bill_date"))):
             due = billed + timedelta(days=DEFAULT_CREDIT_DAYS)
         if due is None:                       # a customer without a number is still kept; it is just never messaged
-            skipped.append(f"row {n} ({party}): missing due date")
+            skipped.append(f"{where}row {n} ({party}): missing due date")
             continue
         ref = str(get("invoice") or "").strip() or f"{party[:12]}-{due.isoformat()}-{amount}"
         gstin = str(get("gstin") or "").strip().upper() or None
         rows.append(SheetRow(party, phone, ref, amount, due, gstin))
+    return rows, skipped
+
+
+def _one_ledger_row_per_invoice(rows: list[SheetRow]) -> tuple[list[SheetRow], list[str]]:
+    """An invoice number is the ledger's key, so two different invoices sharing a number would overwrite each other.
+    The same invoice listed twice (same number, customer, amount and due date) counts once; a different invoice that
+    reuses a number (two branches that each start at 1001) is kept, with -2, -3 added to its number."""
+    seen: dict[str, list[SheetRow]] = {}
+    taken = {r.invoice_ref for r in rows}
+    out: list[SheetRow] = []
+    repeated = renumbered = 0
+    example = ""
+    for r in rows:
+        same = seen.setdefault(r.invoice_ref, [])
+        if not same:
+            same.append(r)
+            out.append(r)
+            continue
+        if any((x.party.lower(), x.amount_paise, x.due_date) == (r.party.lower(), r.amount_paise, r.due_date) for x in same):
+            repeated += 1
+            continue
+        k = len(same) + 1
+        while f"{r.invoice_ref}-{k}" in taken:
+            k += 1
+        new_ref = f"{r.invoice_ref}-{k}"
+        taken.add(new_ref)
+        same.append(r)
+        out.append(SheetRow(r.party, r.phone, new_ref, r.amount_paise, r.due_date, r.gstin))
+        renumbered += 1
+        example = example or r.invoice_ref
+    notes = []
+    if repeated:
+        notes.append(f"{repeated} repeated rows (same invoice number, customer, amount and due date) were counted once")
+    if renumbered:
+        notes.append(f"{renumbered} invoices reused a number already in the file (for example {example}); all were kept, "
+                     "with -2, -3 added to the number, so please check them")
+    return out, notes
+
+
+def map_sheet_detail(filename: str, data: bytes, known_phones: dict[str, str] | None = None):
+    """Returns (rows, skipped_reasons, sheets). Every sheet with a header row (a party/customer column and an amount/pending
+    column, in the top 15 rows) is read; sheets[i] = {"sheet": name, "rows": how many invoices came from it}.
+    known_phones (customer name lower-cased -> number) fills a missing mobile column from customers already on file."""
+    try:
+        named = read_named_tables(filename, data)
+    except ValueError as e:
+        return [], [str(e)], []
+    except Exception:
+        return [], ["the file could not be opened; it may be damaged or password protected"], []
+    found = [(name, t, *h) for name, t in named if (h := _find_header(t))]
+    if not found:
+        tables = [t for _, t in named]
+        seen = next((r for t in tables for r in t[:15] if sum(1 for c in r if c not in (None, "")) >= 2), None)
+        hint = f" The columns I can see: {', '.join(str(c) for c in seen if c not in (None, ''))[:200]}." if seen else ""
+        return [], ["could not find a header row with a party/customer column and an amount/pending column." + hint], []
+    known = {k.strip().lower(): v for k, v in (known_phones or {}).items()}
+    rows: list[SheetRow] = []
+    skipped: list[str] = []
+    sheets: list[dict] = []
+    for name, table, i, cols in found:
+        got, why = _map_table(table, i, cols, known, name if len(found) > 1 else "")
+        rows += got
+        skipped += why
+        sheets.append({"sheet": name, "rows": len(got)})
+    read = {name for name, *_ in found}
+    for name, t in named:                      # a sheet with data that is not a receivables list is said out loud, never dropped quietly
+        if name not in read and sum(1 for r in t if any(c not in (None, "") for c in r)) >= 3:
+            skipped.append(f"sheet {name!r} has data but no party/customer and amount columns, so it was not read")
+    rows, notes = _one_ledger_row_per_invoice(rows)
+    return rows, skipped + notes, sheets
+
+
+def map_sheet(filename: str, data: bytes, known_phones: dict[str, str] | None = None) -> tuple[list[SheetRow], list[str]]:
+    """Returns (rows, skipped_reasons) for every sheet of the file; map_sheet_detail also says how many came from each."""
+    rows, skipped, _ = map_sheet_detail(filename, data, known_phones)
     return rows, skipped

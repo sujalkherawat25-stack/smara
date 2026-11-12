@@ -68,3 +68,48 @@ def test_unreadable_files_explain_themselves():
     assert rows == [] and "could not be opened" in why[0]
     rows, why = map_sheet("c.csv", b"Name,Colour\nA,red\n")
     assert "columns I can see: Name, Colour" in why[0]
+
+
+HEADER = ["Party", "Mobile", "Invoice", "Due Date", "Amount"]
+
+
+def test_every_sheet_with_a_header_is_read_and_counted():
+    data = xlsx([HEADER, ["A", "9812345671", "A1", "01-10-2026", 100], ["Total", None, None, None, 100]],
+                [HEADER, ["B", "9812345672", "B1", "01-10-2026", 200], ["B", "9812345672", "B2", "02-10-2026", 50]],
+                [["Notes"], ["x"]],
+                [HEADER, ["C", "9812345673", "C1", "01-10-2026", 300]])
+    from src.ingest.sheet_mapper import map_sheet_detail
+    rows, skipped, sheets = map_sheet_detail("m.xlsx", data)
+    assert sorted(r.invoice_ref for r in rows) == ["A1", "B1", "B2", "C1"]
+    assert sum(r.amount_paise for r in rows) == 65000
+    assert [s["rows"] for s in sheets] == [1, 2, 1] and not skipped          # the total line and the one-line notes sheet are not noise
+
+
+def test_a_sheet_with_data_but_no_receivables_columns_is_said_out_loud():
+    data = xlsx([HEADER, ["A", "9812345671", "A1", "01-10-2026", 100]],
+                [["Item", "Qty", "Rate"], ["nuts", 1, 2], ["bolts", 3, 4], ["screws", 5, 6]])
+    rows, skipped = map_sheet("m.xlsx", data)
+    assert len(rows) == 1 and any("not read" in s and "S1" in s for s in skipped)
+
+
+def test_total_lines_are_not_reported_as_skipped_rows():
+    csv = HEAD + ROW + "Grand Total,,,,5000\n"
+    rows, skipped = map_sheet("t.csv", csv.encode())
+    assert len(rows) == 1 and skipped == []
+
+
+def test_the_same_invoice_twice_counts_once_and_a_reused_number_is_kept_apart():
+    data = xlsx([HEADER, ["A", "9812345671", "1001", "01-10-2026", 100]],
+                [HEADER, ["A", "9812345671", "1001", "01-10-2026", 100],        # the same invoice again (a summary sheet)
+                 ["B", "9812345672", "1001", "01-10-2026", 250]])               # another branch's invoice with the same number
+    rows, skipped = map_sheet("m.xlsx", data)
+    assert sorted((r.invoice_ref, r.amount_paise) for r in rows) == [("1001", 10000), ("1001-2", 25000)]
+    assert any("counted once" in s for s in skipped) and any("reused a number" in s for s in skipped)
+    again, _ = map_sheet("m.xlsx", data)                                         # re-sending the file gives the same numbers
+    assert [(r.invoice_ref, r.amount_paise) for r in again] == [(r.invoice_ref, r.amount_paise) for r in rows]
+
+
+def test_a_single_table_file_has_one_sheet_and_no_sheet_prefix_in_reasons():
+    from src.ingest.sheet_mapper import map_sheet_detail
+    rows, skipped, sheets = map_sheet_detail("t.csv", (HEAD + ROW + "Meena,,S2,,\n").encode())
+    assert len(rows) == 1 and len(sheets) == 1 and skipped == ["row 3: no party/amount"]

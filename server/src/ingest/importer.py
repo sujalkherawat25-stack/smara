@@ -1,6 +1,6 @@
 """Owner-trusted import of mapped sheet rows into parties/obligations (Thread A)."""
 import logging
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from psycopg_pool import AsyncConnectionPool
 
@@ -11,10 +11,10 @@ from src.ingest.sheet_mapper import SheetRow
 log = logging.getLogger(__name__)
 
 
-def _followup(row: SheetRow) -> datetime:
+def _followup(row: SheetRow, now: datetime | None = None) -> datetime:
     """First reminder on the due date; overdue rows are due immediately."""
     due = datetime.combine(row.due_date, time.min, tzinfo=timezone.utc)
-    return max(due, datetime.now(timezone.utc))
+    return max(due, now or datetime.now(timezone.utc))
 
 
 async def _party_id(conn, tenant_id: str, r: SheetRow):
@@ -50,11 +50,27 @@ async def _party_id(conn, tenant_id: str, r: SheetRow):
     return (await cur.fetchone())["id"]
 
 
+PACE_PER_DAY = 30      # first reminders an import may make due on one day; every one becomes a card the owner must answer
+
+
+def paced_followups(rows: list[SheetRow], now: datetime | None = None) -> tuple[dict[int, datetime], int]:
+    """When each row's first reminder falls due. A row due in the future keeps its due date. Rows already due go out
+    PACE_PER_DAY a day, largest amount first, so a first import of thousands of old invoices asks the owner about the
+    biggest dues today and the rest over the following days, not all at once. Also returns how many days that takes."""
+    now = now or datetime.now(timezone.utc)
+    out = {i: _followup(r, now) for i, r in enumerate(rows)}
+    late = sorted((i for i, r in enumerate(rows) if out[i] <= now), key=lambda i: (-rows[i].amount_paise, rows[i].invoice_ref))
+    for rank, i in enumerate(late):
+        out[i] = now + timedelta(days=rank // PACE_PER_DAY)
+    return out, -(-len(late) // PACE_PER_DAY)
+
+
 async def import_rows(pool: AsyncConnectionPool, tenant_id: str, rows: list[SheetRow], source: str = "SHEET") -> dict:
     created = updated = 0
+    when, days = paced_followups(rows)
     async with pool.connection() as conn:
         async with conn.transaction():
-            for r in rows:
+            for idx, r in enumerate(rows):
                 party_id = await _party_id(conn, tenant_id, r)
                 cur = await conn.execute(
                     """INSERT INTO obligations
@@ -65,7 +81,7 @@ async def import_rows(pool: AsyncConnectionPool, tenant_id: str, rows: list[Shee
                              source = CASE WHEN EXCLUDED.source = 'TALLY' THEN 'TALLY' ELSE obligations.source END
                        WHERE obligations.state <> 'PAID'
                        RETURNING id, (xmax = 0) AS inserted""",
-                    (tenant_id, party_id, r.invoice_ref, r.amount_paise, r.due_date, _followup(r), source))
+                    (tenant_id, party_id, r.invoice_ref, r.amount_paise, r.due_date, when[idx], source))
                 row = await cur.fetchone()
                 if row and row["inserted"]:
                     created += 1
@@ -76,7 +92,10 @@ async def import_rows(pool: AsyncConnectionPool, tenant_id: str, rows: list[Shee
                     )
                 elif row:
                     updated += 1
-    return {"created": created, "updated": updated}
+    result = {"created": created, "updated": updated}
+    if days > 1:
+        result["first_reminders_over_days"] = days      # said to the owner: why the cards arrive over several days
+    return result
 
 
 async def open_refs(pool: AsyncConnectionPool, tenant_id: str, source: str | None) -> list[dict]:

@@ -19,7 +19,7 @@ from src.ingest.importer import close_invoices, import_rows, open_refs
 from src.ingest.media import MediaError, download_media, read_image
 from src import tenants
 from src.ingest.media import media_token
-from src.ingest.sheet_mapper import SheetRow, map_sheet
+from src.ingest.sheet_mapper import SheetRow, map_sheet_detail
 from src.loop import wa_link
 from src.loop.outbound import record
 from src.loop.owner_channel import send_to_owner
@@ -78,12 +78,14 @@ async def inspect_and_import_file(app, ctx: SessionCtx, args: dict) -> dict:
     async with app.state.pool.connection() as conn:           # customers already on file supply missing mobile numbers
         known = {r["canonical_name"]: r["whatsapp_phone"] for r in await (await conn.execute(
             "SELECT canonical_name, whatsapp_phone FROM parties WHERE tenant_id = %s", (ctx.tenant_id,))).fetchall()}
+    sheets: list[dict] = []
     if is_tally:
         rows, skipped = await tally_rows(app, filename, data, known)
     else:
-        rows, skipped = map_sheet(filename, data, known)
+        rows, skipped, sheets = map_sheet_detail(filename, data, known)
     total = sum(r.amount_paise for r in rows)
     preview = {"rows_found": len(rows), "sheet_total_rupees": total / 100, "skipped": skipped[:10],
+               **({"sheets_read": sheets} if len(sheets) > 1 else {}),
                "sample": [{"party": r.party, "invoice": r.invoice_ref, "rupees": r.amount_paise / 100,
                            "due": r.due_date.isoformat(), "phone": r.phone} for r in rows[:5]]}
     missing = []

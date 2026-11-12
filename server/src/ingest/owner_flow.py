@@ -16,7 +16,7 @@ from src.ingest.customer_number import add_number, parse_number_command
 from src.ingest.reopen import parse_reopen_command, reopen_invoice
 from src.ingest.guides import EXPORT_GUIDE
 from src.ingest.telegram import link_message, unlink
-from src.ingest.sheet_mapper import SheetRow, map_sheet, parse_amount_paise, parse_date, parse_phone
+from src.ingest.sheet_mapper import SheetRow, map_sheet_detail, parse_amount_paise, parse_date, parse_phone
 from src.agent_loop import attach_to_running, resume, start_session
 from src.loop import wa_link
 from src.loop.digest import build_digest
@@ -286,9 +286,13 @@ async def _sheet(app, tenant_id: str, msg: InboundMessage) -> str:
     async with app.state.pool.connection() as conn:       # customers already on file supply missing mobile numbers
         known = {r["canonical_name"]: r["whatsapp_phone"] for r in await (await conn.execute(
             "SELECT canonical_name, whatsapp_phone FROM parties WHERE tenant_id = %s", (tenant_id,))).fetchall()}
-    rows, skipped = map_sheet(msg.filename, data, known)
+    rows, skipped, sheets = map_sheet_detail(msg.filename, data, known)
     result = await import_rows(app.state.pool, tenant_id, rows) if rows else {"created": 0, "updated": 0}
     out = f"Imported {result['created']} new, {result['updated']} updated invoices."
+    if len(sheets) > 1:
+        out += "\nSheets read: " + ", ".join(f"{s['sheet']} ({s['rows']})" for s in sheets) + "."
+    if result.get("first_reminders_over_days"):
+        out += f"\nThat is a lot of overdue invoices, so I will ask you about the first reminders over {result['first_reminders_over_days']} days, biggest dues first."
     if skipped:
         out += f"\nSkipped {len(skipped)}: " + "; ".join(skipped[:5])
     return out
