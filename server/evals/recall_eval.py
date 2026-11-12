@@ -198,10 +198,13 @@ class Patch:
         drop = {"write_continuum_evidence"}
         if self.system == "b":
             self._set(chatlog, "recent", self._empty)
+            self._set(chatlog, "related", self._empty)
+            self._set(prompt, "owner_facts_block", self._empty)       # Continuum only: no stored facts either
             drop |= {"search_chat_history"}
         if self.system == "c":
             self._set(prompt, "standing_instructions", self._empty_standing)
             self._set(prompt, "relevant_memory", self._empty)
+            self._set(prompt, "owner_facts_block", self._empty)
             drop |= {"resolve_continuum_memory"}
         self._set(tools, "TOOLS", [t for t in tools.TOOLS if t["function"]["name"] not in drop])
         return self
