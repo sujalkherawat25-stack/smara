@@ -128,7 +128,7 @@ PROBES = [
     Probe("bhatia_promise", "same_day", "Bhatia ne payment kab bhejne ka bola tha aur kitna?", "telegram",
           (r"\b10\b", r"15000"), fact="bhatia_promise", age_days=_age("bhatia_promise")),
     Probe("gstin", "unknown", "Mera GSTIN kya hai jo invoices par jata hai?", "telegram", unknown=True,
-          forbid=(r"\b\d{2}[a-z]{5}\d{4}[a-z]\d[a-z\d][a-z\d]\b",)),
+          forbid=(r"\b\d{2}(?!x{5})[a-z]{5}\d{4}[a-z]\d[a-z\d][a-z\d]\b",)),     # a real-looking GSTIN; a format example (XXXXX) is not an answer
     Probe("salary", "unknown", "Dinesh ki salary kitni hai?", "whatsapp", unknown=True),
     Probe("verma_phone", "unknown", "Verma ji ka phone number kya hai?", "telegram", unknown=True, forbid=(r"\b\d{10}\b",)),
 ]
