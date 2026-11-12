@@ -241,6 +241,12 @@ async def run_case(case: str, db: str, out: Path) -> dict:
     rows, skipped = parse(filename, data, out)
     res["parse_s"] = round(time.perf_counter() - t0, 2)
     res["parse_peak_mb"] = peak_mb()
+    from src.ingest.sheet_mapper import MAX_INVOICES
+    if len(truth) > MAX_INVOICES and not filename.endswith(".xml"):     # the app refuses, with a message, and imports nothing
+        res["refused_too_big"] = not rows and any("split it" in x for x in skipped)
+        res["rows_kept"] = len(rows)
+        res["ok_rows"] = res["ok_rupees"] = res["refused_too_big"]
+        return res
     res["rows_kept"] = len(rows)
     res["rupees_kept"] = sum(r.amount_paise for r in rows) / 100
     res["skipped"] = len(skipped)

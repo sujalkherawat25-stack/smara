@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 DEFAULT_CREDIT_DAYS = 30
+MAX_INVOICES = 50_000   # one import is one transaction; past this the file is refused and the owner asked to split it
 
 # canonical field -> header synonyms (lowercased, punctuation stripped)
 SYNONYMS: dict[str, tuple[str, ...]] = {
@@ -238,6 +239,9 @@ def map_sheet_detail(filename: str, data: bytes, known_phones: dict[str, str] | 
         if name not in read and sum(1 for r in t if any(c not in (None, "") for c in r)) >= 3:
             skipped.append(f"sheet {name!r} has data but no party/customer and amount columns, so it was not read")
     rows, notes = _one_ledger_row_per_invoice(rows)
+    if len(rows) > MAX_INVOICES:
+        return [], [f"this file has {len(rows):,} invoices and the most I can import at once is {MAX_INVOICES:,}; "
+                    "please split it (by year or branch, for example) and send the parts one at a time"], sheets
     return rows, skipped + notes, sheets
 
 

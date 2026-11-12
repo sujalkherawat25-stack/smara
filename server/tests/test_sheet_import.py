@@ -113,3 +113,13 @@ def test_a_single_table_file_has_one_sheet_and_no_sheet_prefix_in_reasons():
     from src.ingest.sheet_mapper import map_sheet_detail
     rows, skipped, sheets = map_sheet_detail("t.csv", (HEAD + ROW + "Meena,,S2,,\n").encode())
     assert len(rows) == 1 and len(sheets) == 1 and skipped == ["row 3: no party/amount"]
+
+
+def test_a_file_over_the_invoice_limit_is_refused_with_a_message_and_imports_nothing(monkeypatch):
+    from src.ingest import sheet_mapper
+    monkeypatch.setattr(sheet_mapper, "MAX_INVOICES", 3)
+    csv_text = "Party,Mobile,Invoice,Amount,Due Date\n" + "".join(f"A{i},9876543210,INV{i},100,01-01-2026\n" for i in range(4))
+    rows, skipped, _ = sheet_mapper.map_sheet_detail("big.csv", csv_text.encode())
+    assert rows == [] and len(skipped) == 1 and "4 invoices" in skipped[0] and "split it" in skipped[0]
+    rows, skipped, _ = sheet_mapper.map_sheet_detail("ok.csv", csv_text.splitlines(True)[0:4] and "".join(csv_text.splitlines(True)[:4]).encode())
+    assert len(rows) == 3
