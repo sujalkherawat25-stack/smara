@@ -135,6 +135,9 @@ PROBES = [
 ]
 
 
+CHANGE_WORD = r"\b(phir|then|ab|now|baad|badal\w*|changed|updated?)\b"
+
+
 def normalise(text: str) -> str:
     t = re.sub(r"<[^>]+>", " ", text.lower())
     t = re.sub(r"(?<=\d),(?=\d)", "", t)
@@ -158,7 +161,14 @@ def score(probe: Probe, reply: str) -> dict:
         framed = (r"(pehle|earlier|previously|purana|purani|before that|was|tha|thi)\W+(?:\w+\W+){0,4}?(?:" + old + r")"
                   r"|(?:" + old + r")\W+(?:\w+\W+){0,3}?(?:tha|thi|was|purana|purani|old)"
                   r"|(?:" + old + r")\W+(?:nahi|not)\b")
-        if re.search(old, re.sub(framed, " ", t)):
+        cleaned = re.sub(framed, " ", t)
+        for m in re.finditer(old, cleaned):
+            # A history that leads up to the new value ("pehle Monday, phir Wednesday, ab Friday") ends on the answer: an old
+            # value counts as history when the new one follows soon after with a word that marks the change in between.
+            ahead = cleaned[m.end():m.end() + 80]
+            n = re.search(probe.expect[0], ahead)
+            if n and re.search(CHANGE_WORD, ahead[:n.start()]):
+                continue
             return {"ok": False, "why": "stale answer"}
     missing = [e for e in probe.expect if not re.search(e, t)]
     if missing:
