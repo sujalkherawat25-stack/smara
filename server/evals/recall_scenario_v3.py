@@ -99,7 +99,9 @@ PROBES = [
     Probe("dubey_day", "update", "Dubey Sweets ko reminder kaun se din bhejna hai?", "telegram", (r"thursday|guruvar|brihaspat",),
           stale=r"tuesday|mangal", fact="dubey_v2", age_days=_age("dubey_v2")),
     Probe("hegde_paid", "paid_off", "Hegde Steel ko abhi kuch dena hai kya?", "telegram", (r"\bnahi\b|\bno\b|de diye|chuka|paid|clear|settled",),
-          forbid=(r"20000[^.]{0,40}(dene hain|dena hai|baaki hai|pending|due)",), fact="paid_hegde", age_days=_age("paid_hegde")),
+          # still owing: 20,000 said as owed, unless the same breath says it was paid ("pehle 20,000 dene hain - wo chuka diya")
+          forbid=(r"20000(?![^.]{0,60}(?:chuka|de diye|paid|settled|clear))[^.]{0,40}(?:dene hain|dena hai|baaki hai|pending|due)",),
+          fact="paid_hegde", age_days=_age("paid_hegde")),
     Probe("eknath_discount", "received_terms", "Eknath Traders se humein kya discount milta hai aur kab?", "whatsapp",
           (r"2\s?%|\b2 percent|do percent", r"\b7 din|7 days|saat din"), fact="eknath_discount", age_days=_age("eknath_discount")),
     Probe("fernandes_bounce", "verbatim", "Fernandes Bakery ke cheque ka kya hua tha?", "telegram", (r"bounce|wapas|return|dishonou?r", r"15000"),

@@ -144,9 +144,66 @@ The only genuinely stale answer is setup b's.
   exception did not replace each other, and nothing was invented.
 - Still not shown: how any of this behaves with real conversations, many customers, a longer history, or a stronger model.
 
+## The money statements that were lost, and the third scenario (v3)
+
+**Cause.** The second scenario's money statements ("Khan Brothers owes me 80,000", "I owe Singh Traders 32,500", a cheque) were
+lost by the memory step. Replaying the 17 planted statements through its model call, one at a time, as the step builds the call:
+without the list of facts already on file, 16 were kept and 1 was empty (not a money statement); with the real, growing list
+(added in the earlier fix), 3 were lost, exactly those; run again, 1 was lost. So the loss was intermittent, it came from showing
+the model that list, and the old instruction to skip "amounts already in the ledger" gave it a reason. A model call that failed
+dropped the turn's facts with no visible sign.
+
+**Fix.** The instructions now say money counts (owed either way, a promised payment, a cheque, a settlement, a payment already
+made: who, how much, by when, direction), even when the assistant's reply repeats it; the list on file is shown only to reuse a
+topic and never excuses skipping a fact; the ledger clause covers only invoices from a sheet or the ledger. The same replay then
+kept 17 of 17 in two runs. Failures, empty results and facts written are counted under `memory.pass` on `/healthz`.
+
+Because v2's statements were used to diagnose this, v2 could not judge the fix. **v3** was written before the fix was released
+and not tuned against: a new shop; suppliers the owner owes are not in the ledger and customers who owe the owner match what was
+said (so the ledger cannot answer by mistake); a payable later paid off; a discount the shop receives; a bounced cheque; a
+changed rule; never-said questions.
+
+### Result of v3 (12 November, 16 questions x 2 repeats = 32 answers per setup)
+
+| Setup | As first scored | Re-scored (see below) |
+|---|---|---|
+| a: everything (live) | **100%** (32/32) | **100%** (32/32) |
+| b: Continuum only | 91% (29/32) | 94% (30/32) |
+| c: chat log + search only | 94% (30/32) | 94% (30/32) |
+
+- **The memory step stored all 13 planted statements**, including every money one (the payable to a supplier, Chopra's cheque,
+  the supplier paid off, the customer's promised cheque). In the second scenario it had lost 3 of 17.
+- Who pays whom, the supplier paid off, the changed rule, the discount the shop receives, the bounced cheque, and all
+  never-said questions were right in all three setups (one answer of setup b aside, see below).
+- **The one real difference: a customer's promised payment detail.** "How much is due from Chopra Cycles and how?" (the owner had
+  said: 41,000, on the 25th, by cheque). Setup a said so; setups b and c gave the ledger's Rs 41,000 and never mentioned the
+  cheque, in 4 of 4 answers. When the ledger already shows the customer, the ledger answer wins unless the stored fact is put
+  in front of the model.
+- **One scoring mistake, found after the run and fixed:** a correct answer of setup b to "do I still owe Hegde Steel anything?"
+  ("Nahi… aapne pehle bataya tha ki unhe Rs 20,000 dene hain, wo aapne chuka diya") was marked wrong because it names the old
+  debt on the way to saying it is paid. The pattern now ignores the old debt when the same breath says it was paid, and still
+  rejects "20,000 dene hain, abhi tak nahi diye" (tested). The stored replies were re-scored; no answer changed.
+- A payable that is paid off is two facts side by side (no topic, so nothing replaces anything); it was right every time because
+  the facts arrive in order. It would be sturdier with a topic per supplier: not changed here, since changing it now would be
+  tuning on v3.
+
+## Across the three scenarios
+
+| Setup | v1 (developed against) | v2 (untuned) | v3 (untuned) |
+|---|---|---|---|
+| a: everything (live) | 100% | 95% | **100%** |
+| b: Continuum only | 77% | 95% | 94% |
+| c: chat log + search only | 100% | 97% | 94% |
+
+All re-scored with the current scorer from the stored replies. Read it as: **the live setup is at 95 to 100% on the two tests it
+was not tuned for; chat log plus search alone is at 94 to 100% on all three; Continuum alone was at 77% on v1 and 94 to 95% on
+v2 and v3.** The single place where the full setup clearly beat both of the others was a stored promise about a customer already
+in the ledger (v3). It does not show that Continuum is unnecessary (this test has one shop and one owner), only that on this
+model and these facts it is not the deciding piece.
+
 ## Next
 
-1. Fix the memory pass so that what the owner says they owe is remembered (and keeps the direction), then write a third
-   scenario with a clean who-pays-whom question and run it. v2 must not be used to claim this fix works.
-2. Real conversations from the first shop (with the owner's permission).
+1. Real conversations from the first shop (with the owner's permission): the next honest test.
+2. A topic per supplier or customer for money owed, so a payment replaces the debt instead of sitting next to it. Then a fourth
+   scenario, since v3 would no longer be untuned for that.
 3. Re-run after each change to the memory code, on all scenarios.

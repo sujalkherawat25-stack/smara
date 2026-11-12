@@ -59,6 +59,9 @@ def test_who_pays_whom_and_a_paid_off_payable_are_scored_correctly():
     assert not v3.score(BY["gadre_amount"], "Gadre Packaging ko kuch dena nahi hai.")["ok"]
     assert v3.score(BY["hegde_paid"], "Nahi, Hegde Steel ko 20,000 de diye the, ab kuch baaki nahi.")["ok"]
     assert v3.score(BY["hegde_paid"], "Hegde Steel ko Rs 20,000 dene hain.")["why"] == "confused with another fact"
+    # a correct reply that mentions the old debt on the way to saying it is paid (a real answer, marked wrong by the first pattern)
+    assert v3.score(BY["hegde_paid"], "Nahi, Hegde Steel ke liye kuch baaki nahi hai. Aapne pehle bataya tha ki unhe Rs 20,000 dene hain - wo aapne chuka diya.")["ok"]
+    assert v3.score(BY["hegde_paid"], "Hegde Steel ko 20,000 dene hain, abhi tak nahi diye.")["why"] == "confused with another fact"
     assert v3.score(BY["hegde_paid"], "Haan, Hegde Steel ka Rs 20,000 baaki hai.")["why"] == "confused with another fact"
 
 
