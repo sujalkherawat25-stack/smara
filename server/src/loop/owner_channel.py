@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import httpx
 
-from src import clock
+from src import chatlog, clock
 from src.loop.outbound import record
 from src.ops_alert import ops_alert
 from src.loop.whatsapp import document_message, owner_approval_card, template_message
@@ -108,7 +108,18 @@ def wa_to_telegram(payload: dict, chat_id: int) -> dict:
 async def send_to_owner(app, tenant, payload: dict, *, kind: str, obligation_id=None, adjustment_id=None,
                         reply_channel: str | None = None, number_id: str | None = None,
                         agent_session_id=None) -> str:
-    """Returns the channel used: 'telegram', 'whatsapp', 'wa_link' or 'held'."""
+    """Returns the channel used: 'telegram', 'whatsapp', 'wa_link' or 'held'. What was delivered is also kept in the
+    conversation log (a held card is logged when it is finally sent)."""
+    channel = await _deliver(app, tenant, payload, kind=kind, obligation_id=obligation_id, adjustment_id=adjustment_id,
+                             reply_channel=reply_channel, number_id=number_id, agent_session_id=agent_session_id)
+    if channel != "held" and getattr(app.state, "pool", None) is not None:
+        await chatlog.record(app.state.pool, tenant.id, channel, "smara", chatlog.text_of(payload), kind=kind,
+                             session_id=str(agent_session_id) if agent_session_id else chatlog.CURRENT_SESSION_ID.get())
+    return channel
+
+
+async def _deliver(app, tenant, payload: dict, *, kind: str, obligation_id=None, adjustment_id=None,
+                   reply_channel: str | None = None, number_id: str | None = None, agent_session_id=None) -> str:
     reply_channel = effective_reply(reply_channel)
     pool, s, now = app.state.pool, app.state.settings, datetime.now(timezone.utc)
     tg = getattr(app.state, "tg", None)
@@ -152,7 +163,16 @@ async def send_to_owner(app, tenant, payload: dict, *, kind: str, obligation_id=
 async def send_document_to_owner(app, tenant, data: bytes, filename: str, mime: str, caption: str,
                                  reply_channel: str | None = None) -> str:
     """Send a file to the owner: Telegram if linked, else WhatsApp (needs the 24h window).
-    Returns 'telegram', 'wa_link', 'whatsapp' or 'window_closed'."""
+    Returns 'telegram', 'wa_link', 'whatsapp' or 'window_closed'. A sent file is noted in the conversation log."""
+    how = await _deliver_document(app, tenant, data, filename, mime, caption, reply_channel)
+    if how != "window_closed" and getattr(app.state, "pool", None) is not None:
+        await chatlog.record(app.state.pool, tenant.id, how, "smara", f"[sent file: {filename}] {caption}".strip(),
+                             kind="owner_document", session_id=chatlog.CURRENT_SESSION_ID.get())
+    return how
+
+
+async def _deliver_document(app, tenant, data: bytes, filename: str, mime: str, caption: str,
+                            reply_channel: str | None = None) -> str:
     reply_channel = effective_reply(reply_channel)
     if uses_link(app, tenant, reply_channel):
         from src.loop.wa_link import SidecarError, client as link_client

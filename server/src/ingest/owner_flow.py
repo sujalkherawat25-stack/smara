@@ -5,6 +5,7 @@ import logging
 from dataclasses import replace
 from datetime import date, datetime, timezone
 
+from src import chatlog
 from src.bridge.coordinator import decide_adjustment
 from src.ingest.box_commands import decide_browser_task, handle_text
 from src.ingest.importer import import_rows
@@ -47,11 +48,17 @@ async def handle_owner(app, tenant: Tenant, msg: InboundMessage) -> None:
 async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
     if msg.size > owner_files.MAX_BYTES:            # a file or voice note over the limit: said plainly, nothing is kept
         return owner_files.too_large_text(msg.size)
+    spoken_note = False
     if msg.kind == "audio" and msg.media_id:        # a voice note is read as if the owner had typed it
         spoken, reply = await _transcribe(app, msg)
         if reply:
             return reply
         msg = replace(msg, kind="text", text=spoken)
+        spoken_note = True
+    if not msg.button_id and getattr(app.state, "pool", None) is not None:   # what the owner said joins the log (taps do not)
+        said = msg.text or (f"[{msg.kind}: {msg.filename or msg.kind}] {msg.caption}".strip() if msg.media_id else "")
+        await chatlog.record(app.state.pool, tenant_id, msg.channel, "owner", said,
+                             kind="voice" if spoken_note else ("file" if msg.media_id else "text"), ref=msg.wamid)
     if msg.button_id and ":" in msg.button_id:
         action, ref = msg.button_id.split(":", 1)
         if action in ("approve", "reject"):
@@ -233,7 +240,8 @@ async def _agent(app, tenant_id: str, msg: InboundMessage) -> str | None:
         return None
     tenant = await tenants.by_id(app.state.pool, tenant_id)
     await start_session(app, tenant=tenant, trust="TRUSTED", trigger="owner_message", content=content,
-                        files=files, channel=msg.channel, background=getattr(app.state, "agent_background", True))
+                        files=files, channel=msg.channel, background=getattr(app.state, "agent_background", True),
+                        message_ref=msg.wamid)
     return None
 
 

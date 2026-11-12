@@ -17,11 +17,11 @@ from urllib.parse import urlparse
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-from src import clock, tenants
+from src import chatlog, clock, tenants
 from src.agent import actions, documents, extras, memory_pass, pc, reader, skills, tools, web
 from src.agent.context import compact
 from src.agent.policy import SessionCtx, approval_text, pre_tool_use
-from src.agent.prompt import build_system
+from src.agent.prompt import build_system, latest_owner_text
 from src.loop.llm import RateLimited
 from src.loop.owner_channel import CURRENT_REPLY_CHANNEL, send_to_owner
 from src.loop.whatsapp import text_message
@@ -38,6 +38,7 @@ BROWSER_RESULT_CHARS = 20000   # one page: what changed + every numbered control
 CONTINUE_WITHIN = timedelta(minutes=30)
 EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memory": tools.resolve_continuum_memory,
              "write_continuum_evidence": tools.write_continuum_evidence,
+             "search_chat_history": tools.search_chat_history,
              "inspect_and_import_file": actions.inspect_and_import_file, "read_attachment": reader.read_attachment, "make_document": documents.make_document, "load_skill": skills.load_skill, "run_python": actions.run_python,
              "get_current_time": extras.get_current_time, "schedule_followup": extras.schedule_followup,
              "list_followups": extras.list_followups, "cancel_followup": extras.cancel_followup,
@@ -183,7 +184,8 @@ async def _save(pool, sid, messages, *, status=None, pending=..., steps=None) ->
 
 
 async def start_session(app, *, tenant, trust: str, trigger: str, content: str, party_id=None, files=(),
-                        channel: str = "whatsapp", background: bool = True, fallback=None) -> str:
+                        channel: str = "whatsapp", background: bool = True, fallback=None,
+                        message_ref: str | None = None) -> str:
     pool, user = app.state.pool, {"role": "user", "content": content}
     row = None
     if trust == "TRUSTED":   # an owner's follow-up continues the recent conversation
@@ -206,6 +208,8 @@ async def start_session(app, *, tenant, trust: str, trigger: str, content: str, 
                 (tenant.id, trust, trigger, party_id, channel, list(files), json.dumps([system, user])))
             row = await cur.fetchone()
     sid = str(row["id"])
+    if message_ref:                     # the owner message that started this run: the run holds it, so the log must not repeat it
+        await chatlog.attach(pool, tenant.id, message_ref, sid)
     _mark(app, sid, True)               # from now on an owner message joins this run (attach_to_running); run() unmarks
     started = False
     try:
@@ -276,11 +280,13 @@ async def _run(app, sid: str, fallback=None) -> None:
     ticker = None
     try:
         tenant = await tenants.by_id(pool, str(row["tenant_id"]))
+        chatlog.CURRENT_SESSION_ID.set(sid)                # what Smara sends during this run is logged against it
         if row["trigger"] == "owner_message":
             CURRENT_REPLY_CHANNEL.set(row["channel"])      # the sends in this run answer on the owner's channel
             ticker = asyncio.create_task(_progress(app, row, tenant))
         if messages and messages[0]["role"] == "system":      # never carry a stale date/ledger/instructions into a new turn
-            messages[0] = {"role": "system", "content": await build_system(app, tenant, row["trust"], str(row["id"]))}
+            messages[0] = {"role": "system", "content": await build_system(app, tenant, row["trust"], str(row["id"]),
+                                                                          query=latest_owner_text(messages))}
         while budget < MAX_STEPS:
             await _take_inbox(app, row, messages)          # owner messages sent during the last step are read now
             messages = compact(messages)

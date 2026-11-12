@@ -10,7 +10,7 @@ so an assistant tool call is never separated from its tool results.
 """
 import json
 
-NOTE = "[Earlier conversation omitted to save space: {n} messages. Re-query tools if you need old details.]"
+NOTE = "[Earlier conversation omitted to save space: {n} messages. Use search_chat_history or the ledger tools if you need old details.]"
 
 
 def _clip(text: str, limit: int) -> str:
