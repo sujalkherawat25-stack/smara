@@ -89,6 +89,55 @@ async def release_claim(pool, o: dict, now: datetime) -> None:
         await _event(conn, o["id"], "WAITING_OWNER_APPROVAL", o["prev"], "SYSTEM_CRON")
 
 
+ASK_AGAIN_AFTER = timedelta(hours=48)      # an unanswered reminder card is sent again after this
+APPROVAL_EXPIRES = timedelta(days=3)        # an agent step the owner never answered is closed after this
+
+
+async def reopen_unanswered(pool, now: datetime) -> dict:
+    """Nothing may wait for the owner for ever.
+
+    A reminder card can be lost: sent before a restart, refused by WhatsApp, or sent to a channel the owner no longer
+    reads. Its invoice then sat in WAITING_OWNER_APPROVAL with no way out, so it was never reminded again. After
+    ASK_AGAIN_AFTER the invoice goes back to its previous state and the next tick asks the owner again. An invoice an
+    agent run is still waiting on is left alone. A tap on the old card still works while the new one waits, and the
+    first tap wins, so nothing is sent twice.
+
+    An agent step waiting for approval longer than APPROVAL_EXPIRES is closed (DONE, not FAILED, so it does not raise a
+    health alert): acting on a days-old approval would use a page or a ledger that has moved on. A late tap is answered
+    "already handled"."""
+    async with pool.connection() as conn:
+        async with conn.transaction():
+            rows = await (await conn.execute(
+                """WITH stuck AS (
+                     SELECT o.id, coalesce(
+                              (SELECT e.from_state FROM obligation_events e
+                                WHERE e.obligation_id = o.id AND e.to_state = 'WAITING_OWNER_APPROVAL'
+                                ORDER BY e.created_at DESC LIMIT 1), 'ACTIVE') AS prev
+                       FROM obligations o
+                      WHERE o.state = 'WAITING_OWNER_APPROVAL'
+                        AND coalesce((SELECT max(e.created_at) FROM obligation_events e
+                                       WHERE e.obligation_id = o.id AND e.to_state = 'WAITING_OWNER_APPROVAL'),
+                                     '-infinity') < %(cut)s
+                        AND NOT EXISTS (SELECT 1 FROM agent_sessions s
+                                         WHERE s.tenant_id = o.tenant_id AND s.status = 'WAITING_APPROVAL'
+                                           AND s.updated_at >= %(expired)s AND s.pending::text LIKE '%%' || o.id::text || '%%')
+                      FOR UPDATE OF o SKIP LOCKED)
+                   UPDATE obligations o
+                      SET state = CASE WHEN stuck.prev IN ('ACTIVE', 'DISPATCHED', 'SNOOZED') THEN stuck.prev ELSE 'ACTIVE' END,
+                          next_followup_at = %(now)s
+                     FROM stuck WHERE o.id = stuck.id
+                RETURNING o.id, o.state""",
+                {"cut": now - ASK_AGAIN_AFTER, "expired": now - APPROVAL_EXPIRES, "now": now})).fetchall()
+            for r in rows:
+                await _event(conn, r["id"], "WAITING_OWNER_APPROVAL", r["state"], "SYSTEM_CRON")
+            closed = (await conn.execute(
+                """UPDATE agent_sessions SET status = 'DONE', pending = NULL, updated_at = now()
+                    WHERE status = 'WAITING_APPROVAL' AND updated_at < %s""", (now - APPROVAL_EXPIRES,))).rowcount
+    if rows or closed:
+        log.info("asked again about %d unanswered reminder(s); closed %d expired approval(s)", len(rows), closed)
+    return {"reopened": len(rows), "expired": closed}
+
+
 def reminder_card(to: str, o: dict, draft: str, context: str, mode: str = "smara") -> dict:
     body = f"Send this to {o['canonical_name']}?\n\n\"{draft}\""
     if context and "No relevant state" not in context:

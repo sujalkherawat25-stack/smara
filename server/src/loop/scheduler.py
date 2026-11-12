@@ -7,7 +7,8 @@ from src.bridge.outbox import drain
 from src.ingest import owner_files
 from src.loop import wa_link
 from src.loop.digest import build_digest
-from src.loop.reminders import claim_due, draft_reminder, release_claim, reminder_card, stale_sync_note, state_card
+from src.loop.reminders import (claim_due, draft_reminder, release_claim, reminder_card, reopen_unanswered,
+                                stale_sync_note, state_card)
 from src.loop.owner_channel import flush_held, send_to_owner
 from src.loop.tasks import run_due
 from src.loop.whatsapp import text_message
@@ -39,6 +40,10 @@ async def tick(app, now: datetime) -> int:
         await run_due(app, now)
     except Exception:
         log.exception("held-card flush / scheduled tasks failed")
+    try:                                  # a lost or unanswered card must not park an invoice for ever
+        await reopen_unanswered(pool, now)
+    except Exception:
+        log.exception("unanswered-approval sweep failed")
     for o in await claim_due(pool, now):
         tid = str(o["tenant_id"])
         if tid not in known:
