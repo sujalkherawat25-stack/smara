@@ -292,7 +292,11 @@ async def _sheet(app, tenant_id: str, msg: InboundMessage) -> str:
     if len(sheets) > 1:
         out += "\nSheets read: " + ", ".join(f"{s['sheet']} ({s['rows']})" for s in sheets) + "."
     if result.get("first_reminders_over_days"):
-        out += f"\nThat is a lot of overdue invoices, so I will ask you about the first reminders over {result['first_reminders_over_days']} days, biggest dues first."
+        out += ("\nThat is a lot of overdue invoices, so I will ask you about the first reminders over "
+                f"{result['first_reminders_over_days']} days, biggest dues first.")
+    if result.get("not_scheduled"):
+        out += (f"\n{result['not_scheduled']} smaller or older invoices are saved in your list, but I have not scheduled "
+                "reminders for them yet.")
     if skipped:
         out += f"\nSkipped {len(skipped)}: " + "; ".join(skipped[:5])
     return out

@@ -7,7 +7,7 @@ import pytest
 
 from src import tenants
 from src.db import migrate, open_pool
-from src.ingest.importer import PACE_PER_DAY, import_rows, paced_followups
+from src.ingest.importer import HORIZON_DAYS, PACE_PER_DAY, import_rows, paced_followups
 from src.ingest.sheet_mapper import SheetRow
 
 URL = os.environ.get("TEST_DATABASE_URL")
@@ -21,17 +21,26 @@ def rows(n, due=date(2026, 9, 1)):
 def test_late_invoices_are_paced_largest_first_and_future_ones_keep_their_due_date():
     late = rows(70)
     future = [SheetRow("Later", "919800000001", "F-1", 5_00, date(2026, 12, 25))]
-    when, days_needed = paced_followups(late + future, NOW)
+    when, days_needed, held = paced_followups(late + future, NOW)
     days = [(when[i] - NOW).days for i in range(70)]
-    assert days_needed == 3
+    assert days_needed == 3 and held == 0
     assert [days.count(d) for d in (0, 1, 2)] == [PACE_PER_DAY, PACE_PER_DAY, 70 - 2 * PACE_PER_DAY]
     assert all(days[i] == 0 for i in range(40, 70))                  # the biggest amounts are the last rows: they go first
     assert when[70] == datetime(2026, 12, 25, tzinfo=timezone.utc)   # not yet due: untouched
 
 
 def test_a_small_import_is_unchanged():
-    when, days = paced_followups(rows(PACE_PER_DAY), NOW)
-    assert set(when.values()) == {NOW} and days == 1
+    when, days, held = paced_followups(rows(PACE_PER_DAY), NOW)
+    assert set(when.values()) == {NOW} and days == 1 and held == 0
+
+
+def test_a_huge_import_schedules_only_a_month_of_cards_and_says_how_many_are_left_out():
+    n = PACE_PER_DAY * HORIZON_DAYS + 250
+    when, days, held = paced_followups(rows(n), NOW)
+    assert days == HORIZON_DAYS and held == 250
+    assert sum(1 for t in when.values() if t is None) == 250
+    assert max(t for t in when.values() if t is not None) == NOW + timedelta(days=HORIZON_DAYS - 1)
+    assert [i for i, t in when.items() if t is None] == list(range(250))      # the smallest amounts are the ones left out
 
 
 @pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL not set")
