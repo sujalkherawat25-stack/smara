@@ -100,7 +100,53 @@ docker exec smara_app python -m evals.recall_eval --scenario v2 --repeats 2 --js
 The rule for using it: **run it, report what it shows, and do not tune the memory code against it.** If something is changed
 because of what it found, say so, and write a v3 before claiming the fix works.
 
+### Result of v2 (12 November, 19 questions x 2 repeats = 38 answers per setup)
+
+| Setup | As first scored | Re-scored (see below) |
+|---|---|---|
+| a: everything (live) | 92% (35/38) | **95%** (36/38) |
+| b: Continuum only | 95% (36/38) | 95% (36/38) |
+| c: chat log + search only | 92% (35/38) | **97%** (37/38) |
+
+| Kind of question | a | b | c |
+|---|---|---|---|
+| Rule changed three times, then again | 4/4 | 3/4 | 4/4 |
+| Shop-wide rule vs. one customer's exception | 2/2 | 2/2 | 2/2 |
+| Who pays whom | 2/4 | 3/4 | 3/4 |
+| Everything else asked (details, people, tone, old facts, cross-channel, same day) | all right | all right | all right |
+| Never said (4 questions) | 8/8 | 8/8 | 8/8 |
+
+**What changed in the scoring after seeing these results, and why.** Three of the four "stale answer" marks were wrong: the
+replies named Friday as the answer and then listed the history ("pehle Monday, phir Wednesday, ab Friday"), and the scorer read
+the old days in the history as a stale answer. The scorer now counts an old value as history when the new value follows it with
+a word that marks the change in between ("phir", "ab", "then"), and it still rejects every wrong answer the first scenario
+caught (tests use the real replies from both). The saved replies were re-scored with `--rescore`; no answer was asked for again.
+The only genuinely stale answer is setup b's.
+
+**What v2 found**
+1. **A payable the owner states is not remembered.** "Mujhe Singh Traders ko 32,500 dene hain, 5 tareekh tak" was never stored
+   by the memory pass (it kept only that customer's reminder exception), so nothing about the Rs 32,500 reached Continuum or the
+   facts table. This is a real gap in the memory pass, which was told to skip "amounts already in the ledger" and treats an owner's
+   payables as ledger matter although they are not in it. All three setups failed the question that asks about it.
+2. **That question is also flawed.** Singh Traders is in the scenario's ledger as a customer who owes Rs 4,100, so "will Singh
+   pay me?" is honestly answered from the ledger. It was left as written; a clean version belongs in a third scenario. The
+   other direction question (Khan Brothers) was answered correctly by all three.
+3. **Continuum alone once gave the old value** of the rule that had been changed three times. The two setups with the chat log
+   always gave the latest.
+
+**What to take from it**
+- All three setups are within noise of each other on v2 (95 to 97%). **The earlier result that Continuum alone is clearly weakest
+  (77% on v1) did not repeat (95% on v2).** v1 asked for exact details that Continuum lost (a cheque number, an address); v2's
+  facts are plain statements. The honest reading is that the difference depends on the kind of fact, and that this model, on
+  these tests, does well with any of the three once the prompt is built carefully.
+- The 100% on v1 was optimistic, as warned: on an untuned test the live setup is at 95%.
+- The fixes held: a rule changed three times was right in every run of setups a and c, a shop-wide rule and a customer's
+  exception did not replace each other, and nothing was invented.
+- Still not shown: how any of this behaves with real conversations, many customers, a longer history, or a stronger model.
+
 ## Next
 
-1. Run v2 and report it as it comes out. Then real conversations from the first shop (with the owner's permission).
-2. Re-run after each change to the memory code, on both scenarios.
+1. Fix the memory pass so that what the owner says they owe is remembered (and keeps the direction), then write a third
+   scenario with a clean who-pays-whom question and run it. v2 must not be used to claim this fix works.
+2. Real conversations from the first shop (with the owner's permission).
+3. Re-run after each change to the memory code, on all scenarios.

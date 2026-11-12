@@ -314,7 +314,8 @@ async def run_system(a, pool, llm, continuum, system: str) -> dict:
 
 
 def summarise(out: dict) -> str:
-    lines = ["# Recall evaluation", "", f"Model: `{out['model']}`. Scenario: {out.get('scenario', 'v1')}. Questions: {out['questions']} per setup, repeats: {out['repeats']}.", ""]
+    lines = ["# Recall evaluation", "", f"Model: `{out['model']}`. Scenario: {out.get('scenario', 'v1')}. Questions: {out['questions']} per setup, repeats: {out['repeats']}."
+             + (" Re-scored with the current scorer from the saved replies." if out.get("rescored") else ""), ""]
     lines += ["| Setup | Correct | Known facts | Unknown (does not invent) | Avg secs | Avg tokens |", "|---|---|---|---|---|---|"]
     for s in out["systems"]:
         r = s["results"]
@@ -353,6 +354,18 @@ def summarise(out: dict) -> str:
 SCENARIOS = {"v1": "evals.recall_scenario", "v2": "evals.recall_scenario_v2"}
 
 
+def rescore(out: dict) -> dict:
+    """The same replies judged by the current scorer. Used when the scorer itself was found to be wrong: the answers are not
+    asked for again, so nothing about how Smara answered can change."""
+    by = {p.id: p for p in rs.PROBES}
+    for s in out["systems"]:
+        for r in s["results"]:
+            verdict = rs.score(by[r["probe"]], r["reply"])
+            r["ok"], r["why"] = verdict["ok"], verdict["why"]
+    out["rescored"] = True
+    return out
+
+
 async def main() -> None:
     global rs
     ap = argparse.ArgumentParser()
@@ -365,8 +378,18 @@ async def main() -> None:
     ap.add_argument("--pause", type=float, default=4.0, help="seconds between questions, to leave the shared model key some room")
     ap.add_argument("--json", default="")
     ap.add_argument("--md", default="")
+    ap.add_argument("--rescore", default="", help="re-score the replies in a saved --json file with the current scorer; no model, no database")
     a = ap.parse_args()
     rs = importlib.import_module(SCENARIOS[a.scenario])
+    if a.rescore:
+        out = rescore(json.loads(Path(a.rescore).read_text(encoding="utf-8")))
+        if a.json:
+            Path(a.json).write_text(json.dumps(out, indent=1, ensure_ascii=False), encoding="utf-8")
+        text = summarise(out)
+        if a.md:
+            Path(a.md).write_text(text, encoding="utf-8")
+        print(text)
+        return
     url = check_db_url(eval_database_url(os.environ))
     pool = await open_pool(url)
     async with pool.connection() as c:

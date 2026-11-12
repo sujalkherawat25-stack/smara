@@ -103,3 +103,37 @@ def test_the_other_questions_accept_right_answers_and_refuse_vague_ones():
 def test_a_never_said_question_fails_when_the_reply_invents_an_answer(pid, bad):
     assert not v2.score(BY[pid], bad)["ok"]
     assert v2.score(BY[pid], "Mere paas ye jaankari nahi hai.")["ok"]
+
+
+def test_a_history_that_ends_on_the_new_value_is_right_and_one_that_ends_on_the_old_value_is_not():
+    """Real replies from the first run of this scenario: three correct answers were marked stale because they listed the
+    history ("pehle Monday, phir Wednesday, ab Friday"). The one genuinely stale answer is still caught."""
+    right = ["Rathore Agencies ko reminder sirf Friday ko bhejna hai, Wednesday nahi. (Aapne rule badla tha - pehle Monday, phir Wednesday, ab Friday.)",
+             "Rathore Agencies ko reminder Friday ko bhejna hai. Aapne 7 Nov ko rule badla tha - pehle Monday, phir Wednesday, aur ab Friday.",
+             "Ab Friday ko bhejna hai; pehle Monday tha, phir Wednesday kiya tha."]
+    wrong = ["Wednesday. Aapne pehle Monday bola tha, phir rule badal kar Wednesday kar diya - ab sirf Wednesday ko jayega.",
+             "Rathore Agencies ko sirf Wednesday ko bhejna hai.", "Monday ko bhejna hai, phir Wednesday ko."]
+    for reply in right:
+        assert v2.score(BY["rathore_day"], reply)["ok"], reply
+    for reply in wrong:
+        assert v2.score(BY["rathore_day"], reply)["why"] == "stale answer", reply
+
+
+def test_the_history_rule_does_not_let_through_the_wrong_answers_the_first_scenario_caught():
+    sharma = {p.id: p for p in v1.PROBES}["sharma_rule_now"]
+    for reply in ("Friday 13 Nov se bhej sakte hain. (Note: pehle Wednesday wala rule tha, baad me aapne Friday kar diya.)",
+                  "Friday se pehle nahi bhejna: ye latest instruction hai (pehle Wednesday bola tha, phir Friday)"):
+        assert v1.score(sharma, reply)["why"] == "stale answer", reply
+    assert v1.score(sharma, "Pehle Friday tha, ab Wednesday se")["ok"]
+
+
+def test_saved_replies_can_be_rescored_without_asking_again():
+    from evals import recall_eval as ev
+    ev.rs = v2
+    out = {"model": "m", "scenario": "v2", "repeats": 1, "questions": 1, "systems": [
+        {"system": "a", "label": "x", "setup_secs": 0, "results": [
+            {"probe": "rathore_day", "kind": "update", "age_days": 5, "ok": False, "why": "stale answer", "secs": 1, "tokens": 1,
+             "reply": "Friday ko bhejna hai (pehle Monday, phir Wednesday, ab Friday)."}]}]}
+    again = ev.rescore(out)
+    assert again["systems"][0]["results"][0]["ok"] is True and again["rescored"] is True
+    assert "Re-scored with the current scorer" in ev.summarise(again)
