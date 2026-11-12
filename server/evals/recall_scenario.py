@@ -13,6 +13,7 @@ import random
 import re
 from dataclasses import dataclass, field
 
+READY_QUERY = "Humara godown Plot 14 Industrial Area Banswara"      # a fact Continuum must be able to find before questions start
 CUSTOMERS = [("Ravi Kirana", "919876500001", 1_250_000), ("Sharma Store", "919876500002", 2_000_000),
              ("Gupta Traders", "919876500003", 4_500_000), ("Anand Stores", "919876500004", 840_000),
              ("Bhatia & Co", "919876500005", 1_525_050), ("Mishra Brothers", "919876500006", 310_000)]
@@ -155,7 +156,8 @@ def score(probe: Probe, reply: str) -> dict:
         # that frame X as the past are removed before looking for X.
         old = probe.stale
         framed = (r"(pehle|earlier|previously|purana|purani|before that|was|tha|thi)\W+(?:\w+\W+){0,4}?(?:" + old + r")"
-                  r"|(?:" + old + r")\W+(?:\w+\W+){0,3}?(?:tha|thi|was|purana|purani|old)")
+                  r"|(?:" + old + r")\W+(?:\w+\W+){0,3}?(?:tha|thi|was|purana|purani|old)"
+                  r"|(?:" + old + r")\W+(?:nahi|not)\b")
         if re.search(old, re.sub(framed, " ", t)):
             return {"ok": False, "why": "stale answer"}
     missing = [e for e in probe.expect if not re.search(e, t)]

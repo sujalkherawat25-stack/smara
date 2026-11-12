@@ -138,3 +138,19 @@ def test_the_runner_refuses_a_database_that_is_not_an_eval_database():
     with pytest.raises(SystemExit):
         ev.check_db_url("postgresql://smara:x@db:5432/smara")
     assert ev.check_db_url("postgresql://smara:x@db:5432/smara_eval") == "postgresql://smara:x@db:5432/smara_eval"
+
+
+async def test_the_runner_runs_the_second_scenario_too(pool, monkeypatch):
+    from evals import recall_scenario_v2 as v2
+    monkeypatch.setattr(ev, "rs", v2)
+    out = await ev.run_system(args(), pool, FakeLLM(), FakeContinuum(), "a")
+    assert [r["probe"] for r in out["results"]] == [p.id for p in v2.PROBES]
+    assert all(r["reply"] for r in out["results"])
+    assert out["facts_written"] == len(v2.FACTS) and out["turns"] == len(v2.history())
+    assert "Scenario: v2" in ev.summarise({"model": "fake", "scenario": "v2", "repeats": 1, "questions": len(v2.PROBES),
+                                          "systems": [out]})
+    assert "Scenario: v1" in ev.summarise({"model": "fake", "repeats": 1, "questions": 0, "systems": []})   # older reports have no name
+
+
+def test_the_scenario_flag_names_two_scenarios():
+    assert set(ev.SCENARIOS) == {"v1", "v2"}

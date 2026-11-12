@@ -80,8 +80,27 @@ c is 30/30 when re-scored.
   reply that concluded with the old rule counted as correct) and in one way after (a format example counted as an
   invented answer). All fixed with tests that use the real answers. Read the replies in the JSON output, not only the table.
 
+## The second scenario (v2), for checking without tuning
+
+`evals/recall_scenario_v2.py` was written after the three fixes and the memory code has not been changed to fit it: a new
+shop (Jain Medical, Patel Hardware, Rathore Agencies, Khan Brothers, Deshmukh & Sons, Singh Traders), 17 new facts, 19 questions
+(15 with a known answer, 4 about things never said). It is harder in the ways the first one was not:
+
+- a rule changed **three** times, with the customer named by a short name (so the topic has to be reused twice)
+- a shop-wide rule and **one customer's exception** to it, which must not replace each other
+- money owed **in both directions**, asked as yes/no questions so a flipped direction shows
+- a figure **corrected** a moment later ("galat bola")
+- people and routines (who keeps the keys, who delivers), a tone preference, a bank and the days it is visited
+- never-said questions that are close to things that were said (a person who was mentioned, a bank that was named)
+
+```
+docker exec smara_app python -m evals.recall_eval --scenario v2 --repeats 2 --json /tmp/recall_v2.json --md /tmp/recall_v2.md
+```
+
+The rule for using it: **run it, report what it shows, and do not tune the memory code against it.** If something is changed
+because of what it found, say so, and write a v3 before claiming the fix works.
+
 ## Next
 
-1. A second, untuned scenario and real conversations, as above.
-2. Rule questions where the model reuses the wrong topic name (a replacement depends on it): add such cases.
-3. Re-run after each change to the memory code.
+1. Run v2 and report it as it comes out. Then real conversations from the first shop (with the owner's permission).
+2. Re-run after each change to the memory code, on both scenarios.
