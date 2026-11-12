@@ -113,6 +113,24 @@ owner taps Approve (deterministic code, never the model) → re-check policy →
 | **Q&A** | Answers in Hinglish with evidence | Ledger + Continuum | none |
 | **Comms** | Drafts emails from Gmail | Gmail OAuth | Send (T2) |
 
+## 3b. Memory: what is kept where
+
+Smara forgets when one store is asked to do everything. Three stores, each with one job:
+
+| Store | Holds | Read how | Why here |
+| --- | --- | --- | --- |
+| **Postgres ledger** | Money, dates, states, approvals | `query_ledger_sql`, digest | Exact and auditable; the model never decides a number |
+| **Conversation log** (`chat_messages`) | Every owner message and every Smara reply, with channel and time | Last ~40 lines in every prompt; `search_chat_history` for older | Verbatim, instant, and not dependent on another service. WhatsApp and Telegram cannot return history, so Smara keeps its own |
+| **Continuum** | Distilled durable facts: customer habits, promises, disputes, the owner's standing rules | Looked up on every owner message (shop notes + each customer named), plus `resolve_continuum_memory` | Source-backed and searchable by meaning; survives any number of conversations |
+
+How a turn is assembled (`agent/prompt.py`): the ledger snapshot, the owner's standing rules, the recent conversation, and
+a Continuum lookup for what the owner just wrote. A lookup that fails is retried once, then the agent is told it failed
+and must say so rather than guess; `/healthz` counts lookups and failures under `memory`.
+
+Facts get into Continuum from the agent's own `write_continuum_evidence` calls and from a per-turn pass that reads only the
+owner's words (`agent/memory_pass.py`). Continuum does not order facts or supersede old ones, so cards are shown
+oldest-first with the date each fact was noted, and the prompt says the later date is the newer decision.
+
 ## 4. Security model
 
 - **Tenant isolation:** every row carries `tenant_id`; every query filters on it; tests assert foreign-tenant actions return nothing.

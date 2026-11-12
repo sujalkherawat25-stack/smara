@@ -10,6 +10,7 @@ from decimal import Decimal
 
 import psycopg
 
+from src import chatlog
 from src.agent.policy import SessionCtx
 from src.agent.prompt import forget_standing
 from src.bridge.continuum import scope_user
@@ -47,6 +48,11 @@ TOOLS = [
     _fn("resolve_continuum_memory", "Get the evidence-backed state card (promises, disputes, history) for a party. "
         "party_id='shop' reads the owner's shop-wide notes and standing instructions.",
         {"party_id": _S, "query": _S}, ["party_id", "query"]),
+    _fn("search_chat_history", "Search what the owner and you said in earlier conversations, on Telegram and WhatsApp (this shop only). "
+        "Use it when the owner refers to something from before that you cannot see, or before you say you do not remember. "
+        "Give a few distinctive words (a customer's name, an amount, a product); messages matching more of them come first. "
+        "Returns the matching messages with date, channel and who said them.",
+        {"query": _S, "days": {"type": "integer"}, "limit": {"type": "integer"}}, ["query"]),
     _fn("write_continuum_evidence", "Record a fact, promise or instruction in memory about a party. party_id='shop' "
         "stores shop-wide notes and standing instructions (e.g. 'never remind Sharma before Friday').",
         {"party_id": _S, "text": _S}, ["party_id", "text"]),
@@ -217,3 +223,17 @@ async def write_continuum_evidence(app, ctx: SessionCtx, args: dict) -> dict:
     await enqueue_standalone(app.state.pool, user_id=scope, source_id=sid, text=text,
                              trusted=ctx.trust != "UNTRUSTED", metadata={"actor": ctx.trust, "session": ctx.id})
     return {"queued": True, "trusted": ctx.trust != "UNTRUSTED", "source_id": sid}
+
+
+async def search_chat_history(app, ctx: SessionCtx, args: dict) -> dict:
+    query = str(args.get("query", "")).strip()[:200]
+    if len(query) < 3:
+        return {"error": "give a few words to look for"}
+    try:
+        days = max(1, min(int(args.get("days") or 90), 365))
+        limit = max(1, min(int(args.get("limit") or 8), 15))
+    except (TypeError, ValueError):
+        return {"error": "days and limit must be numbers"}
+    rows = await chatlog.search(app.state.pool, ctx.tenant_id, query, days, limit)
+    return {"matches": rows, "count": len(rows),
+            "note": "" if rows else f"nothing in the last {days} days matches; try other words, or the ledger and memory tools"}
