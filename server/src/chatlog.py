@@ -20,6 +20,10 @@ RECENT_DAYS = 30
 RECENT_LINES = 40
 RECENT_CHARS = 7000        # about 2,000 tokens in the prompt
 LINE_CHARS = 400
+# Words that appear in nearly every message and say nothing about which one is meant (Hinglish and English).
+FILLER = frozenset("ka ke ki ko se me mein hai hain tha thi the kya kaun kab kahan kitna kitne kitni kis kuch ye yeh wo woh aur ya "
+                   "to na ho hu hun mera meri mere humara hamara apna is us in on of or an at by if it as be do so and for "
+                   "you your what who when where which how can did was are has had".split())
 CHANNEL_NAMES = {"telegram": "Telegram", "whatsapp": "WhatsApp", "wa_link": "WhatsApp"}
 
 
@@ -101,7 +105,7 @@ async def search(pool, tenant_id: str, query: str, days: int = 90, limit: int = 
     words = []
     for w in query.replace("\n", " ").split():
         w = "".join(ch for ch in w if ch.isalnum())
-        if len(w) >= 3 and w.lower() not in (x.lower() for x in words):
+        if len(w) >= 2 and w.lower() not in FILLER and w.lower() not in (x.lower() for x in words):
             words.append(w)
     if not words:
         return []
