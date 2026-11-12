@@ -19,6 +19,7 @@ The model key is shared with the live app (about 10 agent calls a minute): run i
 """
 import argparse
 import asyncio
+import importlib
 import json
 import os
 import re
@@ -293,7 +294,7 @@ async def run_system(a, pool, llm, continuum, system: str) -> dict:
     if system == "b":
         info["facts_written"] = await teach_continuum_every_turn(app, tenant, turns, a.batch)
     if system in ("a", "b"):
-        info["searchable_after_s"] = await wait_until_searchable(app, tenant, "Humara godown Plot 14 Industrial Area Banswara")
+        info["searchable_after_s"] = await wait_until_searchable(app, tenant, rs.READY_QUERY)
     info["setup_secs"] = round(time.monotonic() - started)
     print(f"[{system}] ready ({info['setup_secs']}s; searchable after {info.get('searchable_after_s', 'n/a')}s)", flush=True)
     results = []
@@ -313,7 +314,7 @@ async def run_system(a, pool, llm, continuum, system: str) -> dict:
 
 
 def summarise(out: dict) -> str:
-    lines = ["# Recall evaluation", "", f"Model: `{out['model']}`. Questions: {out['questions']} per setup, repeats: {out['repeats']}.", ""]
+    lines = ["# Recall evaluation", "", f"Model: `{out['model']}`. Scenario: {out.get('scenario', 'v1')}. Questions: {out['questions']} per setup, repeats: {out['repeats']}.", ""]
     lines += ["| Setup | Correct | Known facts | Unknown (does not invent) | Avg secs | Avg tokens |", "|---|---|---|---|---|---|"]
     for s in out["systems"]:
         r = s["results"]
@@ -331,7 +332,7 @@ def summarise(out: dict) -> str:
             cells.append(f"{sum(x['ok'] for x in xs)}/{len(xs)}" if xs else "-")
         lines.append(f"| {k} | " + " | ".join(cells) + " |")
     lines += ["", "## By age of the fact", "", "| Age | " + " | ".join(s["system"] for s in out["systems"]) + " |", "|---|" + "---|" * len(out["systems"])]
-    for name, lo, hi in (("today", 0, 1), ("2 to 12 days", 1, 14), ("17 to 33 days", 14, 40), ("70 days", 40, 999)):
+    for name, lo, hi in (("today", 0, 1), ("2 to 12 days", 1, 14), ("14 to 39 days", 14, 40), ("40 days or more", 40, 999)):
         cells = []
         for s in out["systems"]:
             xs = [x for x in s["results"] if x["kind"] != "unknown" and lo <= x["age_days"] < hi]
@@ -349,8 +350,14 @@ def summarise(out: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+SCENARIOS = {"v1": "evals.recall_scenario", "v2": "evals.recall_scenario_v2"}
+
+
 async def main() -> None:
+    global rs
     ap = argparse.ArgumentParser()
+    ap.add_argument("--scenario", default="v1", choices=sorted(SCENARIOS),
+                    help="v1 is the history the memory code was developed against; v2 was written afterwards and not tuned for")
     ap.add_argument("--systems", default="a,b,c")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--only", default="", help="comma-separated probe ids")
@@ -359,6 +366,7 @@ async def main() -> None:
     ap.add_argument("--json", default="")
     ap.add_argument("--md", default="")
     a = ap.parse_args()
+    rs = importlib.import_module(SCENARIOS[a.scenario])
     url = check_db_url(eval_database_url(os.environ))
     pool = await open_pool(url)
     async with pool.connection() as c:
@@ -371,7 +379,7 @@ async def main() -> None:
     systems = []
     for s in a.systems.split(","):
         systems.append(await run_system(a, pool, llm, continuum, s.strip()))
-    out = {"model": model, "repeats": a.repeats, "questions": len([p for p in rs.PROBES if not a.only or p.id in a.only.split(",")]),
+    out = {"model": model, "scenario": a.scenario, "repeats": a.repeats, "questions": len([p for p in rs.PROBES if not a.only or p.id in a.only.split(",")]),
            "systems": systems}
     if a.json:
         Path(a.json).write_text(json.dumps(out, indent=1, ensure_ascii=False), encoding="utf-8")
