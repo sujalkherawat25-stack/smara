@@ -130,8 +130,10 @@ just wrote. A lookup that fails is retried once, then the agent is told it faile
 `/healthz` counts lookups and failures under `memory`.
 
 Facts get into Continuum from the agent's own `write_continuum_evidence` calls and from a per-turn pass that reads only the
-owner's words (`agent/memory_pass.py`). The pass keeps who pays whom, copies the owner's own words next to each fact, and
-gives a topic to anything that can change. A fact with a topic also goes to `shop_facts`, replacing the earlier value of
+owner's words (`agent/memory_pass.py`). The pass keeps who pays whom (money the owner owes, or is owed, counts as worth keeping), copies the owner's own
+words next to each fact, and gives a topic to anything that can change. It is shown the facts already on file only to
+reuse a topic; showing it that list once made the model skip money statements, so the instructions say never to. A model
+call that fails loses that turn's facts, so failures and empty results are counted under `memory.pass` on `/healthz`. A fact with a topic also goes to `shop_facts`, replacing the earlier value of
 that topic; the earlier wording is remembered so the copy Continuum still holds is left out of the prompt. Continuum cards
 that remain are shown oldest-first with the date each fact was noted, and the prompt says the last one listed is the newest.
 

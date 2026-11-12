@@ -153,4 +153,4 @@ async def test_the_runner_runs_the_second_scenario_too(pool, monkeypatch):
 
 
 def test_the_scenario_flag_names_two_scenarios():
-    assert set(ev.SCENARIOS) == {"v1", "v2"}
+    assert set(ev.SCENARIOS) == {"v1", "v2", "v3"}
