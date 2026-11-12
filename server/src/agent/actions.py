@@ -279,7 +279,7 @@ async def deliver_message(app, ctx: SessionCtx, tenant, args: dict) -> dict:
         if o and o["state"] == "WAITING_OWNER_APPROVAL":
             await _transition(pool, o["id"], "WAITING_OWNER_APPROVAL", "DISPATCHED", now + timedelta(days=3), 1)
         return {"sent": False, "via": "owner_own_whatsapp", "own_link": True, "note": note}
-    if await wa_link.uses_link(pool, ctx.tenant_id):   # the shop's own SIM: the approved text, once (no 24h window)
+    if await wa_link.uses_link(pool, ctx.tenant_id, app=app):   # the shop's own SIM: the approved text, once (no 24h window)
         try:
             msg_id = await wa_link.send_text(app, tenant, p["whatsapp_phone"], from_shop(tenant, str(args["text"])),
                                              purpose=wa_link.PROACTIVE, kind="debtor_reminder" if o else "customer_text",

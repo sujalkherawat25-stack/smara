@@ -133,17 +133,23 @@ async def link_row(pool, tenant_id: str) -> dict | None:
             "SELECT status, phone, detail, connected_at FROM wa_links WHERE tenant_id = %s", (tenant_id,))).fetchone()
 
 
-async def uses_link(pool, tenant_id: str) -> bool:
+async def uses_link(pool, tenant_id: str, *, app=None) -> bool:
     """A shop whose own number has been connected at least once sends its debtor messages through that number, and only
     that number: when the link is down the sends pause instead of falling back to the Cloud API. A shop that only
-    started a pairing and never finished it keeps the Cloud path."""
+    started a pairing and never finished it keeps the Cloud path.
+
+    With `app`, a server that has the link service switched off (no WA_LINK_URL) means no shop uses a link, whatever
+    its old link record says. Without this, a shop linked before the service was switched off had every reminder
+    paused for ever, silently."""
+    if app is not None and not configured(app):
+        return False
     async with pool.connection() as conn:
         return await (await conn.execute(
             "SELECT 1 FROM wa_links WHERE tenant_id = %s AND connected_at IS NOT NULL", (tenant_id,))).fetchone() is not None
 
 
-async def paused(pool, tenant_id: str) -> bool:
-    if not await uses_link(pool, tenant_id):
+async def paused(pool, tenant_id: str, *, app=None) -> bool:
+    if not await uses_link(pool, tenant_id, app=app):
         return False
     row = await link_row(pool, tenant_id)
     return row["status"] != "connected"

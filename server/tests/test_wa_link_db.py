@@ -374,3 +374,25 @@ async def test_the_same_sim_message_is_not_processed_twice(env):
     await callback(env, "inbound", body)
     acks = [m for m in sent_to_debtor(env) if "START" in m["text"]]
     assert len(acks) == 1
+
+
+async def test_with_the_link_service_switched_off_an_old_link_no_longer_pauses_reminders(env):
+    """Production on 12 Nov: the link was switched off server-wide, but the shop's old 'disconnected' record kept every
+    reminder paused, silently. With no link service, reminders are asked and sent the normal way again."""
+    await pair_and_link(env, auth=auth_json())
+    await callback(env, "status", {"tenant_id": env.tid, "status": "disconnected", "phone": ""})
+    assert await wa_link.paused(env.pool, env.tid, app=env.app)            # link service on: a down link pauses sends
+
+    link, env.app.state.wa_link = env.app.state.wa_link, None              # the server is restarted without WA_LINK_URL
+    try:
+        assert not await wa_link.paused(env.pool, env.tid, app=env.app)
+        assert not await wa_link.uses_link(env.pool, env.tid, app=env.app)
+        before = len(env.cloud.sent)
+        await tick(env.app, datetime.now(timezone.utc) + timedelta(days=30))
+        cards = [m for m in env.cloud.sent[before:] if m.get("to") == OWNER and m.get("type") == "interactive"]
+        assert len(cards) == 1, "the owner is asked about the due invoice again"
+        assert (await one(env.pool, "SELECT state FROM obligations WHERE id = %s", env.oid))["state"] == "WAITING_OWNER_APPROVAL"
+        reply = await decide_reminder(env.app, env.tid, env.oid, "send", datetime.now(timezone.utc))
+        assert "Sent to Ravi" in reply and sent_to_debtor(env) == []        # sent the normal way, not on the dead link
+    finally:
+        env.app.state.wa_link = link
