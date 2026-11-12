@@ -17,8 +17,19 @@ def _followup(row: SheetRow, now: datetime | None = None) -> datetime:
     return max(due, now or datetime.now(timezone.utc))
 
 
-async def _party_id(conn, tenant_id: str, r: SheetRow):
-    """A customer is identified by WhatsApp number. Without a number, by name (a number may come later)."""
+async def _party_id(conn, tenant_id: str, r: SheetRow, seen: dict | None = None):
+    """A customer is identified by WhatsApp number. Without a number, by name (a number may come later).
+    `seen` remembers the customers already resolved in this import: a sheet lists each customer many times."""
+    key = ("p", r.phone) if r.phone else ("n", r.party.lower())
+    if seen is not None and key in seen:
+        return seen[key]
+    found = await _resolve_party(conn, tenant_id, r)
+    if seen is not None:
+        seen[key] = found
+    return found
+
+
+async def _resolve_party(conn, tenant_id: str, r: SheetRow):
     if r.phone:
         # a customer first seen without a number gets this number when it arrives
         cur = await conn.execute(
@@ -74,10 +85,11 @@ def paced_followups(rows: list[SheetRow], now: datetime | None = None) -> tuple[
 async def import_rows(pool: AsyncConnectionPool, tenant_id: str, rows: list[SheetRow], source: str = "SHEET") -> dict:
     created = updated = 0
     when, days, held = paced_followups(rows)
+    seen: dict = {}
     async with pool.connection() as conn:
         async with conn.transaction():
             for idx, r in enumerate(rows):
-                party_id = await _party_id(conn, tenant_id, r)
+                party_id = await _party_id(conn, tenant_id, r, seen)
                 cur = await conn.execute(
                     """INSERT INTO obligations
                          (tenant_id, party_id, invoice_ref, amount_paise, due_date, next_followup_at, state, source)

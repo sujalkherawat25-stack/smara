@@ -157,6 +157,8 @@ def build(case: str):
         r = make_rows(1_000); return "dues.csv", r, csv_bytes(r)
     if case == "csv_20k":
         r = make_rows(20_000); return "dues.csv", r, csv_bytes(r)
+    if case == "csv_60k":
+        r = make_rows(60_000); return "dues.csv", r, csv_bytes(r)
     if case == "csv_cap":
         r, d = sized(lambda rows: csv_bytes(rows, style="tally"), 50_000, 400_000); return "tally_outstanding.csv", r, d
     if case == "csv_utf16":
@@ -180,7 +182,7 @@ def build(case: str):
     raise SystemExit(f"unknown case {case}")
 
 
-CASES = ["csv_1k", "csv_20k", "csv_cap", "csv_utf16", "csv_cp1252_semicolon", "xlsx_1k", "xlsx_20k", "xlsx_cap",
+CASES = ["csv_1k", "csv_20k", "csv_60k", "csv_cap", "csv_utf16", "csv_cp1252_semicolon", "xlsx_1k", "xlsx_20k", "xlsx_cap",
          "xlsx_multisheet_text_dates", "tally_xml_1k", "tally_xml_cap", "tally_xml_with_receipts"]
 
 
