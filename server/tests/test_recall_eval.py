@@ -55,6 +55,8 @@ def test_scoring_rewards_the_right_answer_and_catches_each_kind_of_wrong_one():
     assert rs.score(by["kumar_due"], "Rs 1,85,000, 15 tareekh tak")["ok"]
     assert rs.score(by["gstin"], "Aapka GSTIN mere paas nahi hai, bata dijiye.")["ok"]
     assert rs.score(by["gstin"], "Aapka GSTIN 08ABCDE1234F1Z5 hai.")["why"] == "invented an answer"
+    # saying it does not know and showing what a GSTIN looks like is not inventing one (a real run was marked wrong for this)
+    assert rs.score(by["gstin"], "Aapka GSTIN mere paas record nahi hai. Bhejiye (27XXXXX1234X1Z5 jaisa 15-character wala).")["ok"]
     assert not rs.score(by["salary"], "Dinesh ki salary Rs 18,000 hai.")["ok"]
     assert rs.score(by["verma_phone"], "Verma ji ka number 9812345678 hai.")["why"] == "invented an answer"
     assert rs.score(by["godown"], "")["why"] == "no reply"

@@ -25,56 +25,63 @@ Three setups, each with its own shop:
 
 | Setup | What Smara has |
 |---|---|
-| **a** (live now) | Conversation log in the prompt, `search_chat_history`, and a Continuum lookup on every message. Facts reach Continuum the way the app writes them (the per-turn memory pass) |
-| **b** | Continuum only. No chat history, no search. Every turn of the history is written to Continuum (3 turns per write) |
-| **c** | Conversation log and search only. No Continuum |
+| **a** (live now) | Conversation log in the prompt, older related messages found automatically, `search_chat_history`, the owner's current facts, and a Continuum lookup on every message. Facts reach Continuum and the facts table the way the app writes them (the per-turn memory pass) |
+| **b** | Continuum only. No chat history, no search, no stored facts. Every turn of the history is written to Continuum (3 turns per write) |
+| **c** | Conversation log, related-message search and `search_chat_history` only. No Continuum, no stored facts |
 
-## Result (15 questions, 2 repeats each = 30 answers per setup)
+## Results (15 questions, 2 repeats each = 30 answers per setup)
 
-| Setup | Correct | Known facts | Never said (does not invent) |
-|---|---|---|---|
-| a: log + search + Continuum | **93%** (28/30) | 92% (22/24) | 100% (6/6) |
-| c: log + search only | 87% (26/30) | 83% (20/24) | 100% (6/6) |
-| b: Continuum only | 67% (20/30) | 58% (14/24) | 100% (6/6) |
+| Setup | Before the three fixes | After |
+|---|---|---|
+| a: everything (live now) | 93% (28/30) | **100%** (30/30) |
+| c: chat log + search only | 87% (26/30) | 97% (29/30), see note |
+| b: Continuum only | 67% (20/30) | 77% (23/30) |
 
-| Kind of question | a | b | c |
-|---|---|---|---|
-| Exact detail (address, number, amount) | 9/10 | 6/10 | 9/10 |
-| Told on one channel, asked on the other | 4/4 | 2/4 | 4/4 |
-| Look-alike decoy (another customer's cheque) | 2/2 | 1/2 | 2/2 |
-| Standing rule | 2/2 | 1/2 | 1/2 |
-| Today (3 hours ago) | 2/2 | 1/2 | 2/2 |
-| 70 days ago | 2/2 | 2/2 | 2/2 |
-| **A rule that was changed** | **1/2** | **1/2** | **0/2** |
-| Never said | 6/6 | 6/6 | 6/6 |
+Note on c: its one miss is a scoring false alarm. Asked for the shop's GSTIN it answered "I do not have it" and showed what a
+GSTIN looks like (`27XXXXX1234X1Z5`), which the scorer mistook for an invented number. The scorer is fixed (and tested), so
+c is 30/30 when re-scored.
 
-## What it shows
+| Kind of question | a before | a after | b after | c after |
+|---|---|---|---|---|
+| Exact detail (address, number, amount) | 9/10 | 10/10 | 8/10 | 10/10 |
+| Told on one channel, asked on the other | 4/4 | 4/4 | 2/4 | 4/4 |
+| Look-alike decoy (another customer's cheque) | 2/2 | 2/2 | 1/2 | 2/2 |
+| Standing rule | 2/2 | 2/2 | 2/2 | 2/2 |
+| Today (3 hours ago) | 2/2 | 2/2 | 1/2 | 2/2 |
+| 70 days ago | 2/2 | 2/2 | 2/2 | 2/2 |
+| **A rule that was changed** | **1/2** | **2/2** | 1/2 | **2/2** |
+| Never said | 6/6 | 6/6 | 6/6 | 5/6 (see note) |
 
-1. **Use both stores.** The live setup beat either alone. Continuum alone lost exact details that the chat log kept
-   (an address, a cheque number, the count in a dispute, an amount and date).
-2. **Continuum earns its place on rules and preferences.** Without it (c), Smara answered "what time may reminders go out?"
-   from its built-in quiet hours and never searched the chat; it also read "who looks after Tally?" as a request to open
-   Tally. With the automatic Continuum lookup (a), the rule was already in front of it.
-3. **A rule that was changed is the weak spot in every setup.** "No reminders to Sharma before Friday" was later changed
-   to "before Wednesday". Setup a got it right once in two tries, b once in two, c never. When it is wrong, Smara states
-   the old rule as current.
-4. **Memory facts can come out wrong.** "Pay Kumar Steel Rs 1,85,000 by the 15th" was stored by the memory pass as
-   "Kumar Steel has to pay Rs 1,85,000", the wrong direction, and Smara once repeated it.
-5. **Nothing was invented.** All three setups said "I do not know" on every question about things never said.
+## What the three fixes were, and what they did
 
-## Limits of this result
+1. **A changed rule replaces the old one.** Continuum returns an old rule beside the new one whatever the wording (tested
+   on the live service), so the owner's standing facts also go to Postgres, one current row per topic. A new value
+   replaces the old, and the old wording is dropped from what Continuum returns. Changed-rule questions: 1/2 to 2/2.
+2. **Facts keep who pays whom and the owner's own words.** "Pay Kumar Steel Rs 1,85,000" had been stored as "Kumar Steel has to
+   pay"; it no longer is, and the exact words travel with the fact.
+3. **Questions about the owner's own rules look at memory first.** Older chat messages that share words with the question
+   are found automatically, and the prompt says the owner's rules, times, limits, people and addresses come from there, not
+   from built-in defaults. This lifted the chat-log-only setup (c) from 87% to 97 to 100%.
 
-- 15 questions on one invented history with one model. It is good at separating 93% from 67%; it cannot separate 93% from 87%.
+## What to take from it, and what not to
+
+- **Continuum alone is the weakest option** (77%). It loses exact details (an address, a cheque number, a count) and, with
+  two versions of a rule, cannot tell which is current. Keep the chat log and the stored facts beside it.
+- **On this test Continuum adds little on top of the chat log and stored facts**: a and c are level. That is a statement about
+  this test, which has one shop, one owner and no large customer base. It does not show that Continuum is not useful for
+  longer horizons, many customers, or finding related facts by meaning; it only means this test cannot tell.
+- **The scores are optimistic.** The three fixes were designed after seeing which of these questions failed, so 100% on the
+  same questions is not an independent result. Before relying on it: write a second set of facts and questions that nobody
+  has tuned against, and run it; then run real conversations from the first shop (with the owner's permission).
+- 15 questions on one invented history with one model. It separates 100% from 77%; it cannot separate 100% from 97%.
 - Everything was written to Continuum within minutes, so its own timestamps cannot show real ageing. Continuum's
-  conversation-ingestion settings were not tuned for setup b; a different ingestion setup might do better.
-- The evaluation's own scoring was wrong in its first run (two cases, fixed with tests that use the real answers). Read the replies
-  in the JSON output, not only the table.
+  conversation-ingestion settings were not tuned for setup b; a different setup might do better.
+- The evaluation's scoring was wrong in two ways in its first runs (a customer's own cheque number counted as a mix-up; a
+  reply that concluded with the old rule counted as correct) and in one way after (a format example counted as an
+  invented answer). All fixed with tests that use the real answers. Read the replies in the JSON output, not only the table.
 
-## What to do about it
+## Next
 
-1. **Changed rules:** make a new rule replace the old one when it is written, instead of relying on the model to pick the
-   last of two (Continuum has versioned slots; its cards currently say "unversioned").
-2. **Direction and detail:** have the memory pass keep who-pays-whom and store the owner's own words with each fact.
-3. **Rule-like questions:** always check memory for questions about rules, times and preferences, even when the agent
-   believes it already knows.
-4. Re-run this evaluation after each change, and add a real shop's conversations (with the owner's permission) once there is one.
+1. A second, untuned scenario and real conversations, as above.
+2. Rule questions where the model reuses the wrong topic name (a replacement depends on it): add such cases.
+3. Re-run after each change to the memory code.
