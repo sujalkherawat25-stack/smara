@@ -270,6 +270,7 @@ async def run_case(case: str, db: str, out: Path) -> dict:
         res["again_changed_ledger"] = (row2["n"], int(row2["s"]) / 100) != (row["n"], int(row["s"]) / 100)
         res["due_now_with_a_number"] = due["n"]
         res["first_reminders_over_days"] = r1.get("first_reminders_over_days", 1)
+        res["not_scheduled"] = r1.get("not_scheduled", 0)
         res["customers_in_file"] = len({r["party"] for r in truth})
         res["ok_rows"] = res["ledger_rows"] == res["invoices_in_file"]
         res["ok_rupees"] = abs(res["ledger_rupees"] - res["rupees_in_file"]) < 0.01

@@ -51,23 +51,29 @@ async def _party_id(conn, tenant_id: str, r: SheetRow):
 
 
 PACE_PER_DAY = 30      # first reminders an import may make due on one day; every one becomes a card the owner must answer
+HORIZON_DAYS = 30      # invoices that would come after this many days of cards are kept in the ledger with no reminder scheduled
 
 
-def paced_followups(rows: list[SheetRow], now: datetime | None = None) -> tuple[dict[int, datetime], int]:
+def paced_followups(rows: list[SheetRow], now: datetime | None = None) -> tuple[dict[int, datetime | None], int, int]:
     """When each row's first reminder falls due. A row due in the future keeps its due date. Rows already due go out
-    PACE_PER_DAY a day, largest amount first, so a first import of thousands of old invoices asks the owner about the
-    biggest dues today and the rest over the following days, not all at once. Also returns how many days that takes."""
+    PACE_PER_DAY a day, largest amount first, so a first import of old invoices asks the owner about the biggest dues
+    today and the rest over the following days, not all at once. Only HORIZON_DAYS of that is scheduled: a row past it
+    gets None (kept in the ledger, no reminder scheduled), because at 30 a day 18,000 overdue invoices would take
+    twenty months. Returns (when, days the scheduled cards span, rows left unscheduled)."""
     now = now or datetime.now(timezone.utc)
-    out = {i: _followup(r, now) for i, r in enumerate(rows)}
+    out: dict[int, datetime | None] = {i: _followup(r, now) for i, r in enumerate(rows)}
     late = sorted((i for i, r in enumerate(rows) if out[i] <= now), key=lambda i: (-rows[i].amount_paise, rows[i].invoice_ref))
-    for rank, i in enumerate(late):
+    kept = late[:PACE_PER_DAY * HORIZON_DAYS]
+    for rank, i in enumerate(kept):
         out[i] = now + timedelta(days=rank // PACE_PER_DAY)
-    return out, -(-len(late) // PACE_PER_DAY)
+    for i in late[len(kept):]:
+        out[i] = None
+    return out, -(-len(kept) // PACE_PER_DAY), len(late) - len(kept)
 
 
 async def import_rows(pool: AsyncConnectionPool, tenant_id: str, rows: list[SheetRow], source: str = "SHEET") -> dict:
     created = updated = 0
-    when, days = paced_followups(rows)
+    when, days, held = paced_followups(rows)
     async with pool.connection() as conn:
         async with conn.transaction():
             for idx, r in enumerate(rows):
@@ -95,6 +101,8 @@ async def import_rows(pool: AsyncConnectionPool, tenant_id: str, rows: list[Shee
     result = {"created": created, "updated": updated}
     if days > 1:
         result["first_reminders_over_days"] = days      # said to the owner: why the cards arrive over several days
+    if held:
+        result["not_scheduled"] = held                  # in the ledger, but no reminder is scheduled for them yet
     return result
 
 
