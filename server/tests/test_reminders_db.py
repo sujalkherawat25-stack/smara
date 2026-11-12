@@ -133,3 +133,39 @@ async def test_mondays_digest_adds_what_last_week_brought_in(app):
     assert "Last 7 days: 1 invoice(s) paid," in monday and "after a reminder" in monday
     assert "1 reminder(s) sent, 0 promise(s) recorded." in monday
     assert "Last 7 days" not in await build_digest(app.state.pool, app.state.tenant, date(2026, 11, 10))
+
+
+async def test_an_unanswered_card_is_asked_again_after_two_days_and_the_old_tap_still_works_once(app):
+    from src.loop.reminders import ASK_AGAIN_AFTER
+    oid = await seed(app)
+    assert await tick(app, NOW) == 1
+    assert await tick(app, NOW + timedelta(hours=47)) == 0          # still waiting: not asked twice too soon
+    later = NOW + ASK_AGAIN_AFTER + timedelta(minutes=5)
+    assert await tick(app, later) == 1                               # the lost card is sent again
+    assert len([m for m in app.state.wa.sent if m["to"] == "919000000001"]) == 2
+    assert (await state(app, oid)) == {"state": "WAITING_OWNER_APPROVAL", "attempt_count": 0}
+    assert "Sent to Ravi" in await decide_reminder(app, app.state.tenant, oid, "send", later)   # the first card's button
+    assert await decide_reminder(app, app.state.tenant, oid, "send", later) is None             # the second: already done
+    assert len([m for m in app.state.wa.sent if m["to"] == "919876543210"]) == 1
+
+
+async def test_an_invoice_an_agent_is_waiting_on_is_left_alone_until_that_approval_expires(app):
+    from src.loop.reminders import APPROVAL_EXPIRES, reopen_unanswered
+    oid = await seed(app)
+    async with app.state.pool.connection() as c:
+        await c.execute("UPDATE obligations SET state = 'WAITING_OWNER_APPROVAL' WHERE id = %s", (oid,))
+        await c.execute("""INSERT INTO obligation_events (obligation_id, from_state, to_state, actor, created_at)
+                           VALUES (%s, 'ACTIVE', 'WAITING_OWNER_APPROVAL', 'SYSTEM_CRON', now() - interval '3 days')""", (oid,))
+        sid = (await (await c.execute(
+            """INSERT INTO agent_sessions (tenant_id, trust, trigger, status, pending)
+               VALUES (%s, 'SYSTEM', 'cron_reminder', 'WAITING_APPROVAL', %s::jsonb) RETURNING id""",
+            (app.state.tenant, '{"name": "send_whatsapp_message", "args": {"obligation_id": "%s"}}' % oid))).fetchone())["id"]
+    now = datetime.now(timezone.utc)
+    assert await reopen_unanswered(app.state.pool, now) == {"reopened": 0, "expired": 0}
+    assert (await state(app, oid))["state"] == "WAITING_OWNER_APPROVAL"
+    gone = now + APPROVAL_EXPIRES + timedelta(minutes=1)
+    assert await reopen_unanswered(app.state.pool, gone) == {"reopened": 1, "expired": 1}
+    assert (await state(app, oid))["state"] == "ACTIVE"
+    async with app.state.pool.connection() as c:
+        row = await (await c.execute("SELECT status, pending FROM agent_sessions WHERE id = %s", (sid,))).fetchone()
+    assert row == {"status": "DONE", "pending": None}             # closed, not FAILED: no health alert
