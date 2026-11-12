@@ -1,6 +1,8 @@
 """The recall evaluation's own data and scoring are checked here without a model or a database."""
 import re
 
+import pytest
+
 from evals import recall_scenario as rs
 
 
@@ -56,3 +58,34 @@ def test_scoring_rewards_the_right_answer_and_catches_each_kind_of_wrong_one():
     assert not rs.score(by["salary"], "Dinesh ki salary Rs 18,000 hai.")["ok"]
     assert rs.score(by["verma_phone"], "Verma ji ka number 9812345678 hai.")["why"] == "invented an answer"
     assert rs.score(by["godown"], "")["why"] == "no reply"
+
+
+async def test_a_busy_continuum_is_waited_for_then_the_write_goes_through():
+    import httpx
+    from evals import recall_eval as ev
+
+    class Busy:
+        def __init__(self, failures, code=429):
+            self.failures, self.code, self.calls = failures, code, 0
+
+        async def write_evidence(self, **kw):
+            self.calls += 1
+            if self.calls <= self.failures:
+                req = httpx.Request("POST", "http://c/v1/memories")
+                raise httpx.HTTPStatusError("busy", request=req, response=httpx.Response(self.code, request=req, headers={"retry-after": "2"}))
+
+    waited = []
+
+    async def fake_sleep(s):
+        waited.append(s)
+    c = Busy(2)
+    await ev.write_with_retry(c, sleep=fake_sleep, user_id="u", source_id="s", text="t", trusted=True)
+    assert c.calls == 3 and waited == [2.0, 2.0]                         # honours Retry-After
+    stuck = Busy(99)
+    with pytest.raises(httpx.HTTPStatusError):
+        await ev.write_with_retry(stuck, tries=3, sleep=fake_sleep, user_id="u", source_id="s", text="t", trusted=True)
+    assert stuck.calls == 3
+    bad = Busy(1, code=400)
+    with pytest.raises(httpx.HTTPStatusError):
+        await ev.write_with_retry(bad, sleep=fake_sleep, user_id="u", source_id="s", text="t", trusted=True)
+    assert bad.calls == 1                                                # a real error is not retried

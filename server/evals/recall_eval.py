@@ -30,6 +30,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
+
 from evals import recall_scenario as rs
 from src import chatlog, tenants
 from src.agent import memory_pass, prompt, tools
@@ -137,6 +139,20 @@ async def teach_continuum_like_the_app(app, tenant, turns) -> int:
     return n
 
 
+WRITE_GAP_S = 1.0           # a pause between writes: Continuum rate-limits (it answered 429 after ~50 quick writes)
+
+
+async def write_with_retry(continuum, *, tries: int = 6, sleep=asyncio.sleep, **kw) -> None:
+    """One write to Continuum, waiting and trying again when it says it is busy (429) or briefly unavailable (502/503)."""
+    for attempt in range(tries):
+        try:
+            return await continuum.write_evidence(**kw)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code not in (429, 502, 503) or attempt == tries - 1:
+                raise
+            await sleep(float(e.response.headers.get("retry-after") or 0) or min(5 * 2 ** attempt, 60))
+
+
 async def teach_continuum_every_turn(app, tenant, turns, batch: int = 4) -> int:
     """System b: the whole conversation goes into Continuum, a few turns per write (Continuum extracts facts in the
     background, with the same model key as everything else, so one write per message would take a long time)."""
@@ -147,8 +163,9 @@ async def teach_continuum_every_turn(app, tenant, turns, batch: int = 4) -> int:
         text = "\n\n".join(
             f"[{(datetime.now(timezone.utc) - timedelta(days=t.days_ago)).strftime('%d %b %Y')}, {t.channel}] Owner: {t.owner}\nSmara: {t.smara}"
             for t in chunk)
-        await app.state.continuum.write_evidence(user_id=scope, source_id=make_source_id(tenant.id, f"chunk{start}", text)[:200],
-                                                 text=text, trusted=True, metadata={"actor": "owner", "via": "recall_eval"})
+        await write_with_retry(app.state.continuum, user_id=scope, source_id=make_source_id(tenant.id, f"chunk{start}", text)[:200],
+                               text=text, trusted=True, metadata={"actor": "owner", "via": "recall_eval"})
+        await asyncio.sleep(WRITE_GAP_S)
         writes += 1
         if writes % 10 == 0:
             print(f"[b] {writes} writes to Continuum", flush=True)
@@ -334,7 +351,7 @@ async def main() -> None:
     ap.add_argument("--systems", default="a,b,c")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--only", default="", help="comma-separated probe ids")
-    ap.add_argument("--batch", type=int, default=1, help="turns per write to Continuum for setup b")
+    ap.add_argument("--batch", type=int, default=3, help="turns per write to Continuum for setup b")
     ap.add_argument("--pause", type=float, default=4.0, help="seconds between questions, to leave the shared model key some room")
     ap.add_argument("--json", default="")
     ap.add_argument("--md", default="")
