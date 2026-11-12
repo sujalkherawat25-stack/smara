@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response
 
-from src.agent import prompt
+from src.agent import memory_pass, prompt
 from src.bridge.continuum import ContinuumClient
 from src.bridge.outbox import stats as outbox_stats
 from src.config import load_settings
@@ -106,7 +106,7 @@ async def healthz(response: Response):
             "agent_model": st.llm.agent_model if getattr(st, "llm", None) and st.llm.enabled else None,
             "llm": getattr(getattr(st, "llm", None), "stats", None),
             "vault": _vault_ready(),
-            "memory": prompt.memory_stats(),
+            "memory": {**prompt.memory_stats(), "pass": memory_pass.stats()},
             "wa_link": await _wa_link_summary(),
             "channels": await _channels_summary(st)}
 

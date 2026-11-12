@@ -351,7 +351,7 @@ def summarise(out: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-SCENARIOS = {"v1": "evals.recall_scenario", "v2": "evals.recall_scenario_v2"}
+SCENARIOS = {"v1": "evals.recall_scenario", "v2": "evals.recall_scenario_v2", "v3": "evals.recall_scenario_v3"}
 
 
 def rescore(out: dict) -> dict:
@@ -370,7 +370,7 @@ async def main() -> None:
     global rs
     ap = argparse.ArgumentParser()
     ap.add_argument("--scenario", default="v1", choices=sorted(SCENARIOS),
-                    help="v1 is the history the memory code was developed against; v2 was written afterwards and not tuned for")
+                    help="v1: developed against; v2: written afterwards, then used to find a bug; v3: written before the money fix and not tuned for")
     ap.add_argument("--systems", default="a,b,c")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--only", default="", help="comma-separated probe ids")

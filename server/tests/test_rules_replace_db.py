@@ -10,6 +10,7 @@ from src.agent.prompt import build_system
 @pytest.fixture(autouse=True)
 def _fresh_memory_state():
     prompt._memory_down_until = 0.0
+    memory_pass.STATS.update(runs=0, failed=0, empty=0, written=0)
     yield
     prompt._memory_down_until = 0.0
 
@@ -173,3 +174,36 @@ async def test_one_matching_word_is_not_enough_when_the_question_has_several(env
     assert await chatlog.related(env.pool, env.t.id, "Tally kaun dekhta hai?") == ""      # only "tally" matches
     system = await build_system(env.app, await tenants.by_id(env.pool, env.t.id), "TRUSTED", None, query="Tally kaun dekhta hai?")
     assert "Older messages that may be about" not in system
+
+
+# ---------------------------------------------------------------- money statements are kept, and losing facts is visible
+
+def test_the_instructions_say_that_money_owed_either_way_is_worth_keeping_and_that_the_list_on_file_never_excuses_skipping():
+    """Found by replaying a scenario through the real model: shown a list of facts already on file, it dropped statements such as
+    'Khan Brothers owes me 80,000' and 'I owe Singh 32,500' (3 of 17 in one run, 1 of 17 in the next)."""
+    text = memory_pass.SYSTEM
+    assert "Money counts" in text and "owe someone" in text and "someone owes them" in text and "in which direction" in text
+    assert "even when the assistant's reply repeats it" in text
+    assert "ONLY so you can reuse a topic" in text and "never skip a new fact because something similar is on file" in text
+    assert "amounts or dates already in the ledger" not in text                 # the clause that read as 'skip money'
+    assert "invoices and amounts that come from a sheet or the ledger" in text
+
+
+async def test_the_pass_counts_what_it_did_and_a_failed_model_call_is_logged_not_silent(env, caplog):
+    class Broken:
+        enabled = True
+
+        async def json(self, system, user, **kw):
+            raise TimeoutError("model timed out")
+    env.app.state.llm = Broken()
+    with caplog.at_level("WARNING"):
+        assert await memory_pass.remember_from_turn(env.app, env.t.id, "s1", turn("Mujhe Singh Traders ko 32,500 dene hain, 5 tareekh tak")) == 0
+    assert "lost this turn's facts" in caplog.text and "TimeoutError" in caplog.text
+    assert memory_pass.stats() == {"runs": 1, "failed": 1, "empty": 0, "written": 0}
+
+    env.app.state.llm = PassLLM([], [{"about": "customer", "customer": "Ravi", "topic": "", "fact": "Ravi will pay 5,000 on Monday.", "said": "Ravi Monday dega"}])
+    assert await memory_pass.remember_from_turn(env.app, env.t.id, "s2", turn("aaj mausam bahut accha hai yaar")) == 0
+    assert await memory_pass.remember_from_turn(env.app, env.t.id, "s3", turn("Ravi Monday ko 5,000 dega bola hai")) == 1
+    assert memory_pass.stats() == {"runs": 3, "failed": 1, "empty": 1, "written": 1}
+    assert await memory_pass.remember_from_turn(env.app, env.t.id, "s4", turn("hi")) == 0               # too short to look at: not a run
+    assert memory_pass.stats()["runs"] == 3

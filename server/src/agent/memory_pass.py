@@ -19,6 +19,13 @@ from src.bridge.outbox import enqueue_standalone
 
 log = logging.getLogger(__name__)
 MAX_FACTS = 5
+STATS = {"runs": 0, "failed": 0, "empty": 0, "written": 0}
+
+
+def stats() -> dict:
+    """Since this process started: turns the pass looked at, how many the model call failed on (those facts are lost), how many
+    it found nothing in, and how many facts it wrote. A high failed or empty share on money statements is worth a look."""
+    return dict(STATS)
 SAID_CHARS = 200
 SYSTEM = (
     "You decide what an Indian small-business back-office assistant should remember for months. You are given what the "
@@ -27,8 +34,11 @@ SYSTEM = (
     "\"topic\": \"...\", \"fact\": \"...\", \"said\": \"...\"}]}.\n"
     "Keep ONLY durable facts the owner stated: a customer's payment habits, promises, disputes or relationship; the owner's "
     "standing rules and preferences; business details (payment terms, GSTIN, bank or payment days, staff, working hours, addresses).\n"
-    "Do NOT keep: questions, one-off requests, greetings, amounts or dates already in the ledger, anything only the assistant "
-    "said, guesses. Never invent.\n"
+    "Money counts: keep what the owner says they owe someone, what someone owes them, a promised payment, a cheque that is "
+    "coming, a settlement or a part payment or a payment already made: who, how much, by when, and in which direction. Keep it "
+    "even when the assistant's reply repeats it, and even when it is a single amount.\n"
+    "Do NOT keep: questions, requests to show or do something, greetings, invoices and amounts that come from a sheet or the "
+    "ledger, anything only the assistant said, guesses. Never invent.\n"
     "fact: one self-contained sentence in English, about 25 words at most, naming the person or business. Keep WHO PAYS WHOM "
     "exactly: 'X ko ... dene hain' means the owner must pay X; 'X ne bola ... dega' means X will pay the owner.\n"
     "said: the owner's own words for it, copied exactly from what they wrote, 150 characters at most.\n"
@@ -36,7 +46,9 @@ SYSTEM = (
     "does what) give a short snake_case label such as reminder_rule, credit_limit, payment_habit, godown_address, tally_operator. "
     "If the owner is changing or repeating something already on file, use EXACTLY the topic it has there and write fact as the "
     "new full value (for example 'changed to ...'). Leave topic empty for a one-off thing such as a promise or a dispute, which "
-    "sits next to others instead of replacing them. If nothing qualifies return {\"facts\": []}."
+    "sits next to others instead of replacing them. The facts already on file are shown ONLY so you can reuse a topic: never "
+    "skip a new fact because something similar is on file, and never assume the owner's message is already known. "
+    "If nothing qualifies return {\"facts\": []}."
 )
 
 
@@ -90,12 +102,16 @@ async def remember_from_turn(app, tenant_id: str, session_id: str, messages: lis
     if len(owner_said.strip()) < 12:
         return 0
     pool = app.state.pool
+    STATS["runs"] += 1
     try:
         out = await ask(SYSTEM, f"Owner wrote:\n{owner_said}\n\nAssistant replied:\n{reply[:800]}\n\n{await _on_file(pool, tenant_id)}")
         found = [f for f in (out.get("facts") or []) if isinstance(f, dict) and str(f.get("fact", "")).strip()][:MAX_FACTS]
     except Exception:
-        log.info("memory pass skipped: model unavailable")
+        STATS["failed"] += 1
+        log.warning("memory pass lost this turn's facts: the model call failed", exc_info=True)
         return 0
+    if not found:
+        STATS["empty"] += 1
     written = 0
     for i, f in enumerate(found):
         text = re.sub(r"\s+", " ", str(f["fact"])).strip()[:300]
@@ -117,6 +133,7 @@ async def remember_from_turn(app, tenant_id: str, session_id: str, messages: lis
             written += 1
         except Exception:
             log.warning("memory pass could not queue a fact", exc_info=True)
+    STATS["written"] += written
     if written:
         forget_standing(tenant_id)
     return written
