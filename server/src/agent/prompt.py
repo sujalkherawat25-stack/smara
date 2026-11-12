@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 STANDING_TTL_S = 120
 _STANDING: dict[str, tuple[float, str]] = {}
 EMPTY_CARD = "No relevant state"
-CARD_FACT = re.compile(r"^\s*(?:\[[^\]]*\]\s*)+(?P<text>.*?)\s*\(source=[^)]*?valid_at=(?P<date>\d{4}-\d{2}-\d{2})[^)]*\)\s*$")
+CARD_FACT = re.compile(r"^\s*(?:\[[^\]]*\]\s*)+(?P<text>.*?)\s*\(source=[^)]*?valid_at=(?P<ts>(?P<date>\d{4}-\d{2}-\d{2})[^,)\s]*)[^)]*\)\s*$")
 
 
 def compact_card(card: str) -> str:
@@ -25,14 +25,14 @@ def compact_card(card: str) -> str:
     for line in card.splitlines():
         m = CARD_FACT.match(line)
         if m:
-            facts.append((m["date"], m["text"]))
+            facts.append((m["ts"], m["text"]))
     if not facts:
         return card.strip()
     seen, out = set(), []
-    for day, text in sorted(facts, key=lambda f: f[0]):
+    for ts, text in sorted(facts, key=lambda f: f[0]):        # by the full time, so two facts noted the same day keep their order
         if text not in seen:
             seen.add(text)
-            out.append(f"  \u2022 {text} (noted {day[8:10]}/{day[5:7]})")
+            out.append(f"  \u2022 {text} (noted {ts[8:10]}/{ts[5:7]})")
     return "\n".join(out)
 
 BASE = (
@@ -260,8 +260,8 @@ async def build_system(app, tenant, trust: str, session_id: str | None = None, q
             standing_instructions(app, tenant),
             relevant_memory(app, tenant, query) if (owner_run and query) else _nothing())
     if standing:
-        base += ("\nThe owner's standing instructions (from memory; follow them; where two disagree, the later date is "
-                 f"the newer decision):\n{standing}\n")
+        base += ("\nThe owner's standing instructions (from memory; follow them; listed oldest first, so where two "
+                 f"disagree the LAST one listed is the newer decision):\n{standing}\n")
     if owner_run:
         recent = await chatlog.recent(app.state.pool, tenant.id, session_id)
         if recent:

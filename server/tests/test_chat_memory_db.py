@@ -288,4 +288,21 @@ async def test_all_the_owners_standing_rules_reach_the_agent_not_just_the_first_
     system = llm.seen[0][0]["content"]
     for r in rules:
         assert r in system, f"lost: {r[:30]}"
-    assert "the later date is the newer decision" in system
+    assert "the LAST one listed is the newer decision" in system
+
+
+def test_two_facts_noted_the_same_day_keep_the_order_they_were_given_in():
+    """A rule changed minutes after it was set must still read as the newer one."""
+    def at(text, hhmm, n):
+        return (f"[UNVERSIONED EVIDENCE] [TRUSTED] {text} (source=mem_{n:04d}-aaaa, turn=turn:1, "
+                f"valid_at=2026-11-12T{hhmm}:00.000000+00:00)")
+    card = HEADER + "\n".join([at("Rule now: Wednesday.", "07:15", 2), at("Rule: Friday.", "07:02", 1)])    # relevance order, not time order
+    assert prompt.compact_card(card).splitlines() == ["  • Rule: Friday. (noted 12/11)", "  • Rule now: Wednesday. (noted 12/11)"]
+
+
+async def test_search_keeps_short_words_like_ca_and_drops_filler(env):
+    await say_in_past(env, 24 * 70, "owner", "Humare GST filing ke liye CA Mr. Verma hain, Udaipur mein")
+    await say_in_past(env, 24 * 3, "owner", "Aaj ka status batao")
+    found = await chatlog.search(env.pool, env.t.id, "Humara CA kaun hai?")
+    assert [m["text"] for m in found][0].startswith("Humare GST filing ke liye CA Mr. Verma")
+    assert await chatlog.search(env.pool, env.t.id, "ka ke hai kya") == []            # only filler words: nothing to look for
