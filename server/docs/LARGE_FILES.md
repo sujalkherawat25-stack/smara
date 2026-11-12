@@ -31,3 +31,9 @@ On the production server the same file had not finished after 30 minutes and hel
 the cause there is not known. Two cheap changes were made on the way and are measured: an index on customer name per shop
 (migration 024) and a per-import cache so each customer is looked up once. On a 60,000-row CSV that took the import from
 231 s to 127 s and the repeat import from 176 s to 73 s, with every number still exact.
+
+The limit-size CSV was run on the server again after those changes and still had not finished after 12 minutes, so it was
+stopped (the cause is still unknown). Instead of letting a file like that hang, a file with more than 50,000 invoices
+(`MAX_INVOICES`) is now refused after parsing, which takes 1 s for 60,000 rows and 5 s for the 222,000-row file. Nothing is
+imported, and the owner is told the count and asked to split the file by year or branch. The largest file imported exactly
+on the server is the 20.8 MB Tally file (32,913 invoices, about 2 minutes). The limit-size Excel case has not been run there.

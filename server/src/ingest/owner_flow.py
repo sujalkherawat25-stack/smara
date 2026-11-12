@@ -287,6 +287,8 @@ async def _sheet(app, tenant_id: str, msg: InboundMessage) -> str:
         known = {r["canonical_name"]: r["whatsapp_phone"] for r in await (await conn.execute(
             "SELECT canonical_name, whatsapp_phone FROM parties WHERE tenant_id = %s", (tenant_id,))).fetchall()}
     rows, skipped, sheets = map_sheet_detail(msg.filename, data, known)
+    if not rows and any("split it" in x for x in skipped):
+        return "Nothing imported: " + next(x for x in skipped if "split it" in x) + "."
     result = await import_rows(app.state.pool, tenant_id, rows) if rows else {"created": 0, "updated": 0}
     out = f"Imported {result['created']} new, {result['updated']} updated invoices."
     if len(sheets) > 1:
