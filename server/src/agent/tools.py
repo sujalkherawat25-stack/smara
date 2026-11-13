@@ -127,6 +127,13 @@ TOOLS = [
         "written until they tap Approve; do not tell them it is recorded until the result says recorded.",
         {"customer": _S, "rupees": {"type": "number"}, "credit_days": {"type": "integer"}, "invoice_ref": _S, "note": _S},
         ["customer", "rupees"]),
+    _fn("set_customer_phone", "Save the WhatsApp number of customers that are already in the ledger, when the OWNER gives it in chat "
+        "('Chopra Sons ka number 9811144444 hai', or a list of names and numbers). Give entries: [{customer, phone}]. The number "
+        "is saved at once; say exactly which customer and number you saved. A number that already belongs to another customer, "
+        "or is the owner's own, is refused: tell the owner. Reminders to the customer still need the owner's approval. A "
+        "customer who is not in the ledger is not created by this; say so. Never save a number as a memory note instead.",
+        {"entries": {"type": "array", "items": {"type": "object", "properties": {"customer": _S, "phone": _S},
+                                                 "required": ["customer", "phone"]}}}, ["entries"]),
     _fn("record_payment", "Record money the OWNER says a customer paid them (cash, UPI, cheque): 'Gupta ne 5000 cash diya'. Give the "
         "customer's name and rupees. The system applies it to their oldest open invoice first and works out what is left; give "
         "invoice_ref only if the owner named one. Use this, not propose_ledger_adjustment, when the owner reports the payment "

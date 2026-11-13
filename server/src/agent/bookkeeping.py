@@ -5,6 +5,7 @@ card shows exactly what will change. The arithmetic is done here, never by the m
 
   record_sale     a new invoice for a customer: amount, credit days, an invoice number (made up if the owner gave none).
   record_payment  money received from a customer. It goes to the oldest open invoice first, or to the one the owner names.
+  set_customer_phone  the WhatsApp number of customers already in the ledger (no card: see its docstring).
 
 `plan_*` checks the request against the ledger and returns what would change (or an error for the model). `apply_*` makes the
 change inside one transaction and re-checks it there, so a ledger that changed after the card was shown is refused, not
@@ -17,6 +18,7 @@ from datetime import datetime, time, timedelta, timezone
 from src import clock
 from src.bridge.continuum import scope_user
 from src.bridge.outbox import enqueue
+from src.ingest.sheet_mapper import parse_phone
 from src.loop.upi import rupees
 
 MAX_RUPEES = 100_000_000          # Rs 10 crore: an extra zero typed by mistake is refused, not recorded
@@ -220,3 +222,63 @@ async def apply_payment(pool, tenant_id: str, plan: dict) -> dict:
                 done.append({"invoice_ref": s["invoice_ref"], "paid_rupees": s["pay_paise"] / 100, "left_rupees": s["after_paise"] / 100})
     return {"recorded": True, "customer": plan["customer"], "received_rupees": plan["amount_paise"] / 100, "invoices": done,
             "still_owed_rupees": plan["still_owed_paise"] / 100}
+
+
+# ---- customers' phone numbers --------------------------------------------------------------------------------------------
+MAX_PHONE_ENTRIES = 50
+
+
+def _phone(raw) -> str:
+    """A WhatsApp number in the importer's own form (91 + 10 digits), or '' if it is not one. A leading 0 is dropped."""
+    digits = re.sub(r"\D", "", str(raw or "").removesuffix(".0"))
+    if len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    return parse_phone(digits)
+
+
+async def set_customer_phone(app, ctx, args: dict) -> dict:
+    """Set the WhatsApp number of customers already in the ledger, as the owner typed it in chat. Runs without a card: the owner
+    gave the number themselves, the answer shows what was saved, and every reminder to that number still waits for their tap.
+    Several customers can be given at once. A number that belongs to another customer, or is the owner's own, is refused."""
+    entries = args.get("entries")
+    if not isinstance(entries, list) or not 1 <= len(entries) <= MAX_PHONE_ENTRIES:
+        return {"error": f"entries must be a list of 1 to {MAX_PHONE_ENTRIES} items, each with a customer and a phone"}
+    from src import tenants
+    tenant = await tenants.by_id(app.state.pool, ctx.tenant_id)
+    own = re.sub(r"\D", "", tenant.owner_phone or "")
+    results, saved = [], 0
+    async with app.state.pool.connection() as conn:
+        for e in entries:
+            r = {"customer": str(e.get("customer") if isinstance(e, dict) else e)[:80]}
+            results.append(r)
+            if not isinstance(e, dict):
+                r["error"] = "each entry needs a customer and a phone"
+                continue
+            phone = _phone(e.get("phone"))
+            if not phone:
+                r["error"] = "not a valid mobile number (10 digits, or with the country code)"
+                continue
+            if own and phone == own:
+                r["error"] = "that is the owner's own number, not the customer's"
+                continue
+            party, err = await _customer(conn, ctx.tenant_id, e.get("customer"))
+            if err or not party:
+                r["error"] = err or "no customer by that name in the ledger"
+                continue
+            async with conn.transaction():
+                other = await (await conn.execute(
+                    "SELECT canonical_name FROM parties WHERE tenant_id = %s AND whatsapp_phone = %s AND id <> %s",
+                    (ctx.tenant_id, phone, party["id"]))).fetchone()
+                if other:
+                    r["error"] = f"{phone} already belongs to {other['canonical_name']}"
+                    continue
+                old = (await (await conn.execute("SELECT whatsapp_phone FROM parties WHERE id = %s AND tenant_id = %s FOR UPDATE",
+                                                 (party["id"], ctx.tenant_id))).fetchone())["whatsapp_phone"]
+                await conn.execute("UPDATE parties SET whatsapp_phone = %s WHERE id = %s AND tenant_id = %s",
+                                   (phone, party["id"], ctx.tenant_id))
+            r.update({"customer": party["canonical_name"], "phone": phone})
+            if old and old != phone:
+                r["replaced_number_ending"] = old[-4:]
+            saved += 1
+    return {"saved": saved, "results": results,
+            "note": "Reminders to these customers still wait for the owner's approval; the owner sees the number on each card."}

@@ -161,3 +161,61 @@ async def test_the_agent_reads_rupees_straight_from_the_ledger(env):
     await bookkeeping.apply_payment(env.pool, env.t.id, args["_plan"])      # the generated column follows the paise amount
     r = await query_ledger_sql(env.app, ctx, {"sql": "select amount_rupees from obligations where invoice_ref = 'A-501'"})
     assert float(r["rows"][0]["amount_rupees"]) == 199999.5
+
+
+# ------------------------------------------------------------------------------------------- customers' phone numbers
+
+async def phones(env, *entries, steps=None):
+    llm = env.app.state.llm = ScriptLLM(call("set_customer_phone", entries=list(entries)), steps or (lambda m: say("ok")))
+    await dispatch(env.app, owner(f"ph-{len(env.app.state.wa.sent)}", "numbers"))
+    return llm.last_tool_result(-1) if len(llm.seen) > 1 else None
+
+
+async def party_phone(env, name):
+    return (await one(env.pool, "select whatsapp_phone from parties where tenant_id = %s and canonical_name = %s", env.t.id, name))["whatsapp_phone"]
+
+
+async def test_the_owner_can_give_numbers_for_customers_without_one(env):
+    await import_rows(env.pool, env.t.id, [SheetRow("Chopra Sons", "", "C-1", 4_200_000, date(2026, 9, 11)),
+                                           SheetRow("Dutta Agencies", "", "D-1", 650_000, date(2026, 11, 19))])
+    assert await party_phone(env, "Chopra Sons") is None
+    r = await phones(env, {"customer": "chopra", "phone": "98111 44444"}, {"customer": "Dutta Agencies", "phone": "+91-98222-55555"},
+                     {"customer": "Chopra Sons", "phone": "0 9811144444"})
+    assert r["saved"] == 3 and [x.get("error") for x in r["results"]] == [None, None, None]
+    assert await party_phone(env, "Chopra Sons") == "919811144444" and await party_phone(env, "Dutta Agencies") == "919822255555"
+    assert r["results"][0]["customer"] == "Chopra Sons"
+
+
+async def test_a_number_that_is_not_valid_or_belongs_to_someone_else_is_refused(env):
+    await import_rows(env.pool, env.t.id, [SheetRow("Chopra Sons", "", "C-1", 100, date(2026, 9, 11))])
+    r = await phones(env, {"customer": "Chopra Sons", "phone": "12345"},                       # too short
+                     {"customer": "Chopra Sons", "phone": DEBTOR},                               # Ravi's number
+                     {"customer": "Chopra Sons", "phone": OWNER},                                # the owner's own
+                     {"customer": "Nobody At All", "phone": "9811144444"},
+                     {"customer": "Chopra Sons"})
+    assert r["saved"] == 0
+    errs = [x["error"] for x in r["results"]]
+    assert "not a valid" in errs[0] and "already belongs to Ravi" in errs[1] and "owner's own" in errs[2]
+    assert "no customer" in errs[3] and "not a valid" in errs[4]
+    assert await party_phone(env, "Chopra Sons") is None
+
+
+async def test_a_changed_number_replaces_the_old_one_and_says_so(env):
+    r = await phones(env, {"customer": "Ravi", "phone": "9811144444"})
+    assert r["saved"] == 1 and r["results"][0]["replaced_number_ending"] == DEBTOR[-4:]
+    assert await party_phone(env, "Ravi") == "919811144444"
+
+
+async def test_another_shops_customers_are_not_reachable_and_customer_sessions_cannot_use_it(env):
+    r = await phones(env, {"customer": "Secret", "phone": "9811144444"})
+    assert r["saved"] == 0 and "no customer" in r["results"][0]["error"]
+    assert (await one(env.pool, "select whatsapp_phone from parties where tenant_id = %s", env.other.id))["whatsapp_phone"] == "919111111111"
+    for trust in ("UNTRUSTED", "SYSTEM"):
+        d = pre_tool_use(SessionCtx("s", "t", trust, party_id="p"), "set_customer_phone", {"entries": []}, TOOL_NAMES)
+        assert d.verdict == "deny"
+    assert pre_tool_use(SessionCtx("s", "t", "TRUSTED"), "set_customer_phone", {"entries": []}, TOOL_NAMES).verdict == "allow"
+
+
+async def test_entries_must_be_a_sensible_list(env):
+    r = await phones(env)                                                                         # empty
+    assert "1 to 50" in r["error"]
