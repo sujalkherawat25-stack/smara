@@ -108,7 +108,7 @@ def tier_of(name: str, args: dict) -> str:
         return "T1" if args.get("to") == "owner" else "T2"
     if name == "pc_files":
         return "T2" if args.get("action") == "write" else "T0"
-    if name == "propose_ledger_adjustment":
+    if name in ("propose_ledger_adjustment", "record_sale", "record_payment"):
         return "T3"
     return "?"
 
@@ -148,6 +148,9 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
             return Decision("deny", tier, "only files attached to this conversation can be opened")
         if not isinstance(args.get("code"), str) or not args["code"].strip() or len(args["code"]) > 20_000:
             return Decision("deny", tier, "code must be a non-empty string under 20,000 characters")
+    if name in ("record_sale", "record_payment") and ctx.trust != "TRUSTED":
+        return Decision("deny", tier, "only a conversation with the owner can write to the books; a customer's message or a "
+                                      "scheduled job can only propose an adjustment")
     if name == "hand_off_to_owner" and ctx.trust != "TRUSTED":
         return Decision("deny", tier, "only a conversation with the owner can hand a step to them")
     if tier in ("T0", "T1"):
@@ -227,6 +230,10 @@ def approval_text(name: str, args: dict, page: dict | None = None, typed: str = 
         if args.get("new_due_date"):
             parts.append(f"pay by {args['new_due_date']}")
         return "Change this invoice? " + ", ".join(parts)
+    if name in ("record_sale", "record_payment"):
+        from src.agent.bookkeeping import card_text
+        plan = args.get("_plan")                 # worked out by the system in validate_gated, never by the model
+        return card_text(plan) if isinstance(plan, dict) else "Change the ledger?"
     if name == "pc_files":
         return (f"Save this file on your PC (Smara Shared folder)?\n\n{str(args.get('path') or '')[:120]}"
                 f"{' (replaces the existing file)' if args.get('overwrite') else ''}\n\n\"{str(args.get('text') or '')[:400]}\"")

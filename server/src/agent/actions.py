@@ -11,6 +11,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 
 from src import clock
+from src.agent import bookkeeping
 from src.agent.policy import SessionCtx, target_words
 from src.agent.tools import party_in_tenant
 from src.bridge.coordinator import submit_debtor_claim
@@ -189,6 +190,11 @@ async def validate_gated(app, ctx: SessionCtx, name: str, args: dict) -> str | N
                     return "new_due_date is in the past"
             except ValueError:
                 return "new_due_date must be YYYY-MM-DD"
+    elif name in ("record_sale", "record_payment"):
+        plan, err = await (bookkeeping.plan_sale if name == "record_sale" else bookkeeping.plan_payment)(pool, ctx.tenant_id, args)
+        if err:
+            return err
+        args["_plan"] = plan                     # overwrites anything the model sent: the card and the write use only this
     elif name == "browser_step" and not app.state.browsers.alive(ctx.id):
         return "no open page: call browser_step with action=navigate first"
     elif name == "browser_step" and args.get("action") == "fill" and SECRET_FIELD.search(
@@ -240,6 +246,15 @@ async def execute_approved(app, ctx: SessionCtx, tenant, name: str, args: dict) 
     if name == "hand_off_to_owner":
         page = await app.state.browsers.step(ctx.id, {"action": "read"}, tenant_id=ctx.tenant_id) if app.state.browsers.alive(ctx.id) else {}
         return {"owner_done": True, "note": "The owner says they finished their part. Check the page below and continue.", **page}
+    if name in ("record_sale", "record_payment"):
+        plan = args.get("_plan")
+        if not isinstance(plan, dict):
+            return {"error": "nothing was recorded: the request lost its details; ask the owner again"}
+        try:
+            return await (bookkeeping.apply_sale if name == "record_sale" else bookkeeping.apply_payment)(
+                app.state.pool, ctx.tenant_id, plan)
+        except bookkeeping.LedgerChanged as e:
+            return {"error": f"nothing was recorded: {e}. Look at the ledger again and ask the owner."}
     if name != "send_whatsapp_message":
         return {"error": f"{name} cannot be executed here"}
     s = app.state.settings
