@@ -45,3 +45,4 @@ vendor/codex/node_modules/
 !vendor/codex/codex-rs/secrets/**
 !vendor/codex/.vscode/
 !vendor/codex/.vscode/**
+server/demo_files/
