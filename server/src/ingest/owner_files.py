@@ -111,7 +111,8 @@ def _live_bytes(idx: dict) -> int:
 def _view(e: dict, now: datetime) -> dict:
     out = {"no": e["no"], "name": e["name"], "bytes": e["bytes"], "saved": _dt(e["saved"])}
     if e["deleted"]:
-        out["days_left"] = max(0, (RESTORE_WINDOW - (now - _dt(e["deleted"]))).days)
+        left = RESTORE_WINDOW - (now - _dt(e["deleted"]))
+        out["days_left"] = max(0, -(-int(left.total_seconds()) // 86400))     # part of a day counts as a day: 30 right after deleting
     return out
 
 

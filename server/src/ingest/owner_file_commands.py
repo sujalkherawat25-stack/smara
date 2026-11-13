@@ -22,6 +22,7 @@ _DELETED = ("deleted files", "deleted", "deleted list")
 _CONFIRM = re.compile(r"(?:yes|haan|ha)\s+(?:delete|hatao)\s+(?:file\s+)?#?(\d+)")
 _DELETE = re.compile(r"(?:delete|hatao)\s+(?:file\s+)?#?(\d+)")
 _RESTORE = re.compile(r"restore\s+(?:file\s+)?#?(\d+)")
+_PUNCT = re.compile(r"[,.!?;:'\"।]")
 
 
 def _mb(n: int) -> str:
@@ -97,7 +98,7 @@ def _parse(cmd: str):
 
 async def handle(app, tenant_id: str, text: str) -> str | None:
     """The reply to a file command, or None if the text is not one (the message then goes on as usual)."""
-    parsed = _parse(" ".join((text or "").lower().split()))
+    parsed = _parse(" ".join(_PUNCT.sub(" ", (text or "").lower()).split()))   # "Yes, delete 2." is the same as "yes delete 2"
     if parsed is None:
         return None
     what, no = parsed
