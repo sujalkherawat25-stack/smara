@@ -10,6 +10,7 @@ from src.bridge.coordinator import decide_adjustment
 from src.ingest.box_commands import decide_browser_task, handle_text
 from src.ingest.importer import import_rows
 from src.ingest.media import MediaError, clean_phone_caption, download_media, media_token, read_image, transcribe
+from src.ingest import owner_file_commands as file_commands
 from src.ingest import owner_files
 from src.ingest.payload import InboundMessage
 from src.ingest.customer_number import add_number, parse_number_command
@@ -135,6 +136,8 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         link = await new_link(app.state.pool, app.state.settings, tenant_id)
         return ("Apna WhatsApp Business number Smara se jodne ke liye ye link kholiye (24 ghante, ek baar):\n"
                 f"{link}\n\nAapke customers ko message aapke apne number se jayenge. Kuch bhi bina aapke tap ke nahi jata.")
+    if msg.kind == "text" and (reply := await file_commands.handle(app, tenant_id, msg.text or "")):
+        return reply
     reopen_ref = parse_reopen_command(msg.text)
     if reopen_ref:
         reply = await reopen_invoice(app.state.pool, tenant_id, reopen_ref)

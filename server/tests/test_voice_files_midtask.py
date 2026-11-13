@@ -164,11 +164,12 @@ def test_owner_files_are_kept_per_shop_under_a_random_name(tmp_path):
         owner_files.read(str(tmp_path), other, token)               # another shop cannot open it
     with pytest.raises(owner_files.StoredFileGone):
         owner_files.read(str(tmp_path), SHOP, "../../etc/passwd")    # a name is never a path
-    assert not [p for p in tmp_path.rglob("*") if p.is_file() and p.name != token], "the file name is never on disk"
+    assert not [p for p in tmp_path.rglob("*") if p.is_file() and p.name not in (token, "index.json")], \
+        "the file is stored under its token; only the index holds names"
 
 
 def test_files_are_kept_permanently_and_a_save_never_overwrites(tmp_path):
-    assert not hasattr(owner_files, "purge") and not hasattr(owner_files, "purge_due"), "no timer deletes owner files"
+    assert owner_files.purge(str(tmp_path), datetime.now(timezone.utc)) == 0, "a file the owner did not delete is never removed"
     old = owner_files.save(str(tmp_path), SHOP, "sales.csv", b"1")
     eight_days = time.time() - 8 * 86400
     os.utime(tmp_path / SHOP / old.split(":")[1], (eight_days, eight_days))
@@ -334,7 +335,7 @@ async def test_a_3_mb_sheet_is_kept_for_the_agent_and_its_tools_read_it(env, mon
     raw = [m for m in llm.seen[1] if m["role"] == "tool"][-1]["content"]
     assert '"kind": "text"' in raw and '"filename": "payments.csv"' in raw and f'"size_bytes": {len(body)}' in raw
     kept = list(env.files.rglob("*"))
-    kept_files = [p for p in kept if p.is_file()]
+    kept_files = [p for p in kept if p.is_file() and p.name != "index.json"]
     assert len(kept_files) == 1 and kept_files[0].stat().st_size == len(body)
     assert kept_files[0].name == ref.split(":")[1], "the file on disk is named by its token"
     session = await one(env.pool, "SELECT files FROM agent_sessions")
