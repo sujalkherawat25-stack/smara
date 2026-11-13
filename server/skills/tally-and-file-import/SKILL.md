@@ -16,9 +16,9 @@ description: Getting the owner's receivables and payables into Smara from Tally,
    - *missing phone*: the file has no mobile numbers. Customers already in Smara are matched by name automatically. For the rest, ask the owner for the numbers (one message listing the names) rather than guessing.
    - *missing due date*: Smara uses bill date + 30 days when there is only a bill date. If neither exists, ask the credit period.
    - *could not find a header row*: the message lists the columns it saw. Tell the owner which columns are needed (customer name, amount pending, and a due date or bill date; phone and invoice number help).
-3. **Show the owner the totals before importing**: number of invoices and the total rupees, and the three largest. Importing creates collection reminders, so a wrong sheet is expensive.
-4. `inspect_and_import_file(mode="import")` once they agree. Then read the result: `totals_match` must be true. If not, stop and investigate.
-5. Say what happened: new invoices, updated invoices, skipped and why.
+3. **Import in the same turn, without waiting for the owner to agree**: `inspect_and_import_file(mode="import")`. Nothing goes to a customer without the owner's approval, so importing is safe. Ask first only if nothing usable was found, if rows were skipped for a reason only the owner can answer, if the file has credit notes or negative amounts, or if it is a photo (confirm party, amount and date first).
+4. Read the result: `totals_match` must be true. If not, say so plainly and investigate before telling the owner it is done.
+5. Tell the owner what is now in the ledger: invoices and total, how much is overdue, the three biggest overdue customers, the customers with no WhatsApp number (by name), and what was skipped and why. Then check the total against their own number ("Tally shows 14.2 lakh outstanding; does that match?").
 
 ## Traps
 - **Totals rows and sub-totals** are skipped, but check the sheet total against the owner's own number ("Tally shows 14.2 lakh outstanding; does that match?").
