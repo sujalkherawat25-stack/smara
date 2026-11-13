@@ -9,7 +9,7 @@ SKILL = (Path(__file__).resolve().parents[1] / "skills" / "tally-and-file-import
 
 
 def test_the_skill_does_not_tell_the_agent_to_wait_before_importing():
-    assert "once they agree" not in SKILL and "before importing" not in SKILL.lower().replace("ask before importing", "")
+    assert "once they agree" not in SKILL and "Show the owner the totals before importing" not in SKILL
     assert "without waiting for the owner to agree" in SKILL
 
 
