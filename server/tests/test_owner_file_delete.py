@@ -91,3 +91,17 @@ def test_the_owner_lists_asks_deletes_and_restores_by_number(tmp_path):
     assert asyncio.run(cmds.handle(app, SHOP, "restore 1")) == "Restored #1 Sales_Mar.xlsx."
     assert asyncio.run(cmds.handle(app, SHOP, "delete 9")).startswith("There is no file #9")
     assert asyncio.run(cmds.handle(app, SHOP, "what is my balance")) is None
+
+
+def test_punctuation_around_a_command_does_not_stop_it_and_days_left_starts_at_30(tmp_path):
+    app = app_for(tmp_path)
+    owner_files.save(str(tmp_path), SHOP, "a.csv", b"x")
+    assert "yes delete 1" in asyncio.run(cmds.handle(app, SHOP, "Delete 1?"))
+    assert asyncio.run(cmds.handle(app, SHOP, "Yes, delete 1.")).startswith("Deleted #1 a.csv")
+    assert "(30 days left)" in asyncio.run(cmds.handle(app, SHOP, "deleted files!"))
+    assert asyncio.run(cmds.handle(app, SHOP, "restore #1.")) == "Restored #1 a.csv."
+    assert "#1 a.csv" in asyncio.run(cmds.handle(app, SHOP, "files?"))
+    assert asyncio.run(cmds.handle(app, SHOP, "delete 1 invoices.")) is None
+    owner_files.delete(str(tmp_path), SHOP, 1, T0)
+    assert owner_files.deleted_files(str(tmp_path), SHOP, T0)[0]["days_left"] == 30
+    assert owner_files.deleted_files(str(tmp_path), SHOP, T0 + timedelta(days=29, hours=1))[0]["days_left"] == 1
