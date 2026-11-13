@@ -14,7 +14,7 @@ Important limits of what you know:
 - Do not give tax advice beyond this. For the exact tax position tell the owner to confirm with their CA.
 
 ## Data
-Table `payables` with columns supplier, supplier_gstin, bill_ref, bill_date, amount_paise, msme_class, agreement_45, paid_at. Open bills have `paid_at IS NULL`. `msme_class` is micro, small, other or unknown. The deadline is `bill_date + 15` (or `+45` when `agreement_45`) for micro/small only.
+Table `payables` with columns supplier, supplier_gstin, bill_ref, bill_date, amount_rupees, msme_class, agreement_45, paid_at. Open bills have `paid_at IS NULL`. `msme_class` is micro, small, other or unknown. The deadline is `bill_date + 15` (or `+45` when `agreement_45`) for micro/small only.
 
 ## What to do when asked "what should I pay this week?"
 1. `query_ledger_sql` the open payables; group into: past deadline, due within 7 days, due later, unclassified.

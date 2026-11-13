@@ -8,9 +8,9 @@ description: Chasing overdue customer payments - who to chase first, what to say
 Goal: get the money in without damaging the relationship. You prepare; the owner decides. Nothing reaches a customer without the owner's tap.
 
 ## 1. Know the facts before you write anything
-1. `query_ledger_sql` for the customer's open invoices: `invoice_ref`, `amount_paise`, `due_date`, `state`, `attempt_count`. Days overdue = today - due_date (get today from `get_current_time`).
+1. `query_ledger_sql` for the customer's open invoices: `invoice_ref`, `amount_rupees`, `due_date`, `state`, `attempt_count`. Days overdue = today - due_date (get today from `get_current_time`).
 2. `resolve_continuum_memory` for that customer. A promise ("will pay Friday"), a dispute, or a note from the owner changes what you say.
-3. Never quote an amount that you did not read from the ledger. Amounts are paise; show rupees with Indian grouping (Rs 1,85,750).
+3. Never quote an amount that you did not read from the ledger. Amounts are already in rupees (`amount_rupees`): quote them as they are, never convert; show them with Indian grouping (Rs 1,85,750).
 
 ## 2. Who to chase first
 Rank by (amount x days overdue), not by amount alone. Skip customers who:
