@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from src import clock, tenants
 from src.bridge.outbox import drain
+from src.ingest import owner_files
 from src.loop import wa_link
 from src.loop.digest import build_digest
 from src.loop.reminders import (claim_due, draft_reminder, release_claim, reminder_card, reopen_unanswered,
@@ -28,6 +29,10 @@ async def tick(app, now: datetime) -> int:
         await wa_link.reconcile(app)      # a restarted sidecar: start the shops' own numbers again (also at night)
     except Exception:
         log.exception("link reconcile failed")
+    try:                                  # files the owner deleted are removed for good 30 days after that (restorable before)
+        await asyncio.to_thread(owner_files.purge_due, app.state.settings.owner_files_dir, now)
+    except Exception:
+        log.exception("owner file purge pass failed")
     if clock.is_quiet(app.state.settings, now):
         return 0          # nothing proactive at night: reminders wait, tasks wait, cards stay held
     try:
