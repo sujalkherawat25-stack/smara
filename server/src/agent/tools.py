@@ -119,6 +119,19 @@ TOOLS = [
          "new_amount_rupees": {"type": "number", "description": "only when the customer states the new total themselves"},
          "new_due_date": {"type": "string", "description": "YYYY-MM-DD"},
          "evidence": _S}, ["obligation_id", "kind", "evidence"]),
+    _fn("record_sale", "Write a NEW sale on credit (udhaar) into the ledger, when the OWNER says they sold or gave goods and the "
+        "customer will pay later ('Sharma ko 12000 ka maal diya, 15 din mein dega'). Give the customer's name as the owner said it, "
+        "rupees, and credit_days if they said when it is due (30 if they did not; say so). The system makes the invoice number "
+        "unless the owner gave one. It is not for money received: use record_payment. The owner sees a card and nothing is "
+        "written until they tap Approve; do not tell them it is recorded until the result says recorded.",
+        {"customer": _S, "rupees": {"type": "number"}, "credit_days": {"type": "integer"}, "invoice_ref": _S, "note": _S},
+        ["customer", "rupees"]),
+    _fn("record_payment", "Record money the OWNER says a customer paid them (cash, UPI, cheque): 'Gupta ne 5000 cash diya'. Give the "
+        "customer's name and rupees. The system applies it to their oldest open invoice first and works out what is left; give "
+        "invoice_ref only if the owner named one. Use this, not propose_ledger_adjustment, when the owner reports the payment "
+        "(propose_ledger_adjustment is for what a customer claims). The owner sees a card and nothing changes until they tap "
+        "Approve; do not say it is recorded until the result says recorded.",
+        {"customer": _S, "rupees": {"type": "number"}, "invoice_ref": _S, "note": _S}, ["customer", "rupees"]),
     _fn("run_python", "Run Python in an isolated sandbox (no network, 60 s) for Tally/Excel/CSV work. "
         "Attached files are at ./in/<filename>; write output files to ./out/ (they come back as file_refs you "
         "can pass to inspect_and_import_file); set RESULT = <json-able> for structured output. pandas, openpyxl "

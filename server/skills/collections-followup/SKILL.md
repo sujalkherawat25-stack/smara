@@ -38,6 +38,8 @@ The system allows at most 4 reminders per invoice. A reminder is never a threat:
 |---|---|
 | "Paid" / send a screenshot | Do not mark paid yourself. Read the UTR and amount, then `propose_ledger_adjustment` kind `UTR_PROOF` with the evidence. The owner confirms against the bank. |
 | "Paid half" | `PARTIAL_PAYMENT` with `paid_rupees`. The system works out the new balance. |
+| The OWNER says a customer paid them (cash, UPI, cheque) | `record_payment` with the customer and rupees. The system applies it to the oldest invoice first. Use this, not `propose_ledger_adjustment`, when the owner is the one reporting it. |
+| The OWNER says they sold on credit | `record_sale` with customer, rupees and credit days. |
 | "Will pay on 15th" | `PROMISE_DATE_CHANGE` with the date, `write_continuum_evidence`, and `schedule_followup` for the day after. |
 | "There is a discount / the goods were returned" | `DISCOUNT_CLAIM` or tell the owner it is a dispute. Never agree to anything on the owner's behalf. |
 | Angry or abusive | Do not reply. Tell the owner in one line and let them handle it. |
