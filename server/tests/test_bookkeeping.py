@@ -146,3 +146,18 @@ async def test_names_are_checked_against_this_shops_ledger_only(env):
     assert "already exists" in await actions.validate_gated(env.app, ctx, "record_sale", {"customer": "Ravi", "rupees": 10, "invoice_ref": "INV-1"})
     assert "letters, digits" in await actions.validate_gated(env.app, ctx, "record_sale", {"customer": "Ravi", "rupees": 10, "invoice_ref": "a b; drop"})
     assert await actions.validate_gated(env.app, ctx, "record_sale", {"customer": "Ravi", "rupees": 10, "credit_days": 9999}) is not None
+
+
+async def test_the_agent_reads_rupees_straight_from_the_ledger(env):
+    from src.agent.tools import LEDGER_SCHEMA, query_ledger_sql
+    assert "amount_rupees" in LEDGER_SCHEMA and "divide by 100" not in LEDGER_SCHEMA
+    await import_rows(env.pool, env.t.id, [SheetRow("Agarwal Agencies", "919811100006", "A-501", 22_000_000, date(2026, 9, 19))])
+    ctx = SessionCtx("s", env.t.id, "TRUSTED")
+    r = await query_ledger_sql(env.app, ctx, {"sql": "select invoice_ref, amount_rupees from obligations order by invoice_ref"})
+    assert [(x["invoice_ref"], float(x["amount_rupees"])) for x in r["rows"]] == [("A-501", 220000.0), ("INV-1", 10000.0)]
+    r = await query_ledger_sql(env.app, ctx, {"sql": "select sum(amount_rupees) s from obligations"})
+    assert float(r["rows"][0]["s"]) == 230000.0
+    await actions.validate_gated(env.app, ctx, "record_payment", args := {"customer": "Agarwal Agencies", "rupees": 20000.5})
+    await bookkeeping.apply_payment(env.pool, env.t.id, args["_plan"])      # the generated column follows the paise amount
+    r = await query_ledger_sql(env.app, ctx, {"sql": "select amount_rupees from obligations where invoice_ref = 'A-501'"})
+    assert float(r["rows"][0]["amount_rupees"]) == 199999.5

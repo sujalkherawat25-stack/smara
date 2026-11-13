@@ -21,13 +21,14 @@ _SQL = re.compile(r"^\s*(select|with)\b", re.I)
 LEDGER_SCHEMA = (
     "Tables (PostgreSQL, already limited to this shop): "
     "parties(id, canonical_name, aliases text[], whatsapp_phone, gstin, last_inbound_at); "
-    "obligations(id, party_id, invoice_ref, amount_paise bigint, due_date, next_followup_at, attempt_count, "
+    "obligations(id, party_id, invoice_ref, amount_rupees numeric, due_date, next_followup_at, attempt_count, "
     "state in DRAFT|ACTIVE|WAITING_OWNER_APPROVAL|DISPATCHED|DISPUTED|PAID|SNOOZED); "
-    "proposed_adjustments(id, obligation_id, adjustment_type, proposed_amount_paise, proposed_date, "
+    "proposed_adjustments(id, obligation_id, adjustment_type, proposed_amount_rupees numeric, proposed_date, "
     "raw_evidence_text, status PENDING|APPROVED|REJECTED, created_at); "
     "obligation_events(obligation_id, from_state, to_state, actor OWNER|DEBTOR|SYSTEM_CRON, created_at). "
-    "payables(supplier, supplier_gstin, bill_ref, bill_date, amount_paise, msme_class micro|small|other|unknown, agreement_45, paid_at; micro/small suppliers must be paid within 15 days of bill_date, or 45 with a written agreement, or the tax deduction is lost). "
-    "Money is in paise (divide by 100 for rupees)."
+    "payables(supplier, supplier_gstin, bill_ref, bill_date, amount_rupees numeric, msme_class micro|small|other|unknown, agreement_45, paid_at; micro/small suppliers must be paid within 15 days of bill_date, or 45 with a written agreement, or the tax deduction is lost). "
+    "Money columns are already in RUPEES (amount_rupees). Select and sum them as they are and quote the result; never divide or "
+    "multiply them. (The tables also keep amounts in paise, as amount_paise and proposed_amount_paise: do not use those.)"
 )
 
 
