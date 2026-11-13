@@ -13,7 +13,7 @@ description: Getting the owner's receivables and payables into Smara from Tally,
 ## Procedure for a file
 1. `inspect_and_import_file(mode="inspect")`. Look at `rows_found`, `sheet_total_rupees`, `skipped` and the `sample`.
 2. If rows were skipped, read the reasons:
-   - *missing phone*: the file has no mobile numbers. Customers already in Smara are matched by name automatically. For the rest, ask the owner for the numbers (one message listing the names) rather than guessing.
+   - *missing phone*: the file has no mobile numbers. Customers already in Smara are matched by name automatically. For the rest, ask the owner for the numbers (one message listing the names) rather than guessing. When they reply with numbers (one, or a list of names and numbers), save them with `set_customer_phone`; never keep a number only as a memory note.
    - *missing due date*: Smara uses bill date + 30 days when there is only a bill date. If neither exists, ask the credit period.
    - *could not find a header row*: the message lists the columns it saw. Tell the owner which columns are needed (customer name, amount pending, and a due date or bill date; phone and invoice number help).
 3. **Import in the same turn, without waiting for the owner to agree**: `inspect_and_import_file(mode="import")`. Nothing goes to a customer without the owner's approval, so importing is safe. Ask first only if nothing usable was found, if rows were skipped for a reason only the owner can answer, if the file has credit notes or negative amounts, or if it is a photo (confirm party, amount and date first).
