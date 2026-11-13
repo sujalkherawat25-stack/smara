@@ -92,7 +92,7 @@ def sensitive_step(args: dict, ctx=None) -> bool:
 def tier_of(name: str, args: dict) -> str:
     if name in ("query_ledger_sql", "resolve_continuum_memory", "run_python", "get_current_time", "check_gstin",
                 "build_payment_request", "list_followups", "web_search", "read_attachment", "make_document", "load_skill",
-                "search_chat_history"):
+                "search_chat_history", "gst_reconcile"):
         return "T0"
     if name in ("schedule_followup", "cancel_followup", "send_file_to_owner", "set_customer_phone"):
         return "T1"
@@ -139,6 +139,8 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
             return Decision("deny", tier, "only files attached to this conversation can be opened")
         if tier == "T1" and ctx.trust != "TRUSTED":
             return Decision("deny", tier, "only the owner's own uploads can be imported")
+    if name == "gst_reconcile" and any(args.get(k) not in ctx.files for k in ("books_file_ref", "gstr2b_file_ref")):
+        return Decision("deny", tier, "only files attached to this conversation can be opened")
     if name == "send_file_to_owner":
         if args.get("file_ref") not in ctx.files or not str(args.get("file_ref", "")).startswith("sandbox:"):
             return Decision("deny", tier, "only files you created with run_python in this conversation can be sent")

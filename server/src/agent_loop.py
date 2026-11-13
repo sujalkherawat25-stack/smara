@@ -18,7 +18,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from src import chatlog, clock, tenants
-from src.agent import actions, bookkeeping, documents, extras, memory_pass, pc, reader, skills, tools, web
+from src.agent import actions, bookkeeping, documents, extras, gst, memory_pass, pc, reader, skills, tools, web
 from src.agent.context import compact
 from src.agent.policy import SessionCtx, approval_text, pre_tool_use
 from src.agent.prompt import build_system, latest_owner_text
@@ -44,7 +44,8 @@ EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memo
              "list_followups": extras.list_followups, "cancel_followup": extras.cancel_followup,
              "check_gstin": extras.check_gstin, "build_payment_request": extras.build_payment_request,
              "send_file_to_owner": extras.send_file_to_owner, "web_search": web.web_search,
-             "pc_files": pc.pc_files, "set_customer_phone": bookkeeping.set_customer_phone}
+             "pc_files": pc.pc_files, "set_customer_phone": bookkeeping.set_customer_phone,
+             "gst_reconcile": gst.gst_reconcile}
 
 
 def _spawn(app, coro) -> None:

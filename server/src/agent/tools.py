@@ -120,7 +120,14 @@ TOOLS = [
          "new_amount_rupees": {"type": "number", "description": "only when the customer states the new total themselves"},
          "new_due_date": {"type": "string", "description": "YYYY-MM-DD"},
          "evidence": _S}, ["obligation_id", "kind", "evidence"]),
-    _fn("record_sale", "Write a NEW sale on credit (udhaar) into the ledger, when the OWNER says they sold or gave goods and the "
+    _fn("gst_reconcile", "Match the owner's purchase register against their GSTR-2B statement in ONE call, and make the PDF report. "
+        "Give the two attached files: books_file_ref (the purchase register from their books or Tally) and gstr2b_file_ref (the "
+        "GSTR-2B from the GST portal), as Excel or CSV. It finds each file's header row itself, matches supplier GSTIN (or name) "
+        "plus invoice number, and returns counts, the ITC at risk, the invoices missing from 2B, amount mismatches, invoices in 2B "
+        "but not in the books, possible typo matches and which suppliers to chase. Use this instead of writing code for a GST "
+        "reconciliation. Check counts_reconcile is true; if it returns an error, ask the owner for the files in a readable format.",
+        {"books_file_ref": _S, "gstr2b_file_ref": _S, "report": {"type": "boolean"}}, ["books_file_ref", "gstr2b_file_ref"]),
+    _fn("record_sale","Write a NEW sale on credit (udhaar) into the ledger, when the OWNER says they sold or gave goods and the "
         "customer will pay later ('Sharma ko 12000 ka maal diya, 15 din mein dega'). Give the customer's name as the owner said it, "
         "rupees, and credit_days if they said when it is due (30 if they did not; say so). The system makes the invoice number "
         "unless the owner gave one. It is not for money received: use record_payment. The owner sees a card and nothing is "

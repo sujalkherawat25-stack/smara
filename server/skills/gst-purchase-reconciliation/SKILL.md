@@ -13,7 +13,15 @@ GSTR-2B is the monthly statement on the GST portal listing the invoices that sup
 - You prepare a reconciliation; the CA or owner decides what to claim. Do not tell them to claim or reverse ITC; show the evidence and the options.
 - Do not message suppliers without the owner's approval (`send_whatsapp_message` asks for it).
 
-## Procedure
+## Fast path (use this first)
+Call `gst_reconcile(books_file_ref, gstr2b_file_ref)` with the two attached files. One call finds each file's header, matches on GSTIN (or supplier name) plus normalised invoice number, classifies every row, works out the ITC at risk and makes the PDF report. Then:
+1. Check `counts_reconcile` is true.
+2. `send_file_to_owner` with `report_file_ref`.
+3. Tell the owner, in a few lines: invoices in each file, matched, the ITC at risk, and the suppliers to chase (`chase_suppliers`, biggest first). Mention `possible_matches` (a different invoice number, same supplier and tax) as items for a person to confirm, never as matches.
+4. Offer one short message per supplier for the owner's approval.
+Do not write code for this and do not call `inspect_and_import_file` on a purchase register or a GSTR-2B: they are not receivables. Fall back to the manual procedure below only if `gst_reconcile` returns an error that the files cannot be read.
+
+## Manual procedure (fallback)
 1. `read_attachment` / `inspect_and_import_file` to see each file. Use `run_python` with pandas (`mh.read_table` finds the real header row) to load both.
 2. Normalise: GSTIN upper-case and trimmed; invoice number upper-case with spaces, slashes, leading zeros and punctuation removed; dates to ISO; amounts to numbers. `check_gstin` can validate a GSTIN's format.
 3. Match on **supplier GSTIN + normalised invoice number**. Then compare invoice date and the tax amounts (taxable value, IGST, CGST, SGST).
