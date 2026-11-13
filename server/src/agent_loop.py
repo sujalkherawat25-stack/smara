@@ -45,6 +45,7 @@ EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memo
              "check_gstin": extras.check_gstin, "build_payment_request": extras.build_payment_request,
              "send_file_to_owner": extras.send_file_to_owner, "web_search": web.web_search,
              "pc_files": pc.pc_files, "set_customer_phone": bookkeeping.set_customer_phone,
+             "find_customer": bookkeeping.find_customer,
              "gst_reconcile": gst.gst_reconcile}
 
 
