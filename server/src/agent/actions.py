@@ -32,7 +32,7 @@ async def _fetch(app, file_ref: str, ctx: SessionCtx | None = None) -> tuple[byt
     channel, media_id, filename = (file_ref.split(":", 2) + ["", ""])[:3]
     if channel == "sandbox":
         return app.state.sandbox.read_output(media_id, filename), "application/octet-stream", filename
-    if channel == "local":                       # a file the owner sent, kept on this server for 7 days (ingest/owner_files.py)
+    if channel == "local":                       # a file the owner sent, kept permanently in the shop's file space (ingest/owner_files.py)
         if ctx is None:
             raise MediaError("this file can only be read inside a conversation")
         data = owner_files.read(app.state.settings.owner_files_dir, ctx.tenant_id, media_id)

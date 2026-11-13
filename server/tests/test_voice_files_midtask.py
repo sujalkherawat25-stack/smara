@@ -167,17 +167,26 @@ def test_owner_files_are_kept_per_shop_under_a_random_name(tmp_path):
     assert not [p for p in tmp_path.rglob("*") if p.is_file() and p.name != token], "the file name is never on disk"
 
 
-def test_files_are_deleted_seven_days_after_they_arrive(tmp_path):
-    old = owner_files.save(str(tmp_path), SHOP, "old.csv", b"1")
-    new = owner_files.save(str(tmp_path), SHOP, "new.csv", b"2")
-    old_token = old.split(":")[1]
+def test_files_are_kept_permanently_and_a_save_never_overwrites(tmp_path):
+    assert not hasattr(owner_files, "purge") and not hasattr(owner_files, "purge_due"), "no timer deletes owner files"
+    old = owner_files.save(str(tmp_path), SHOP, "sales.csv", b"1")
     eight_days = time.time() - 8 * 86400
-    os.utime(tmp_path / SHOP / old_token, (eight_days, eight_days))
-    assert owner_files.purge(str(tmp_path), datetime.now(timezone.utc)) == 1
-    assert not (tmp_path / SHOP / old_token).exists()
-    assert (tmp_path / SHOP / new.split(":")[1]).exists(), "a file of six days is still kept"
-    with pytest.raises(owner_files.StoredFileGone):
-        owner_files.read(str(tmp_path), SHOP, old_token)
+    os.utime(tmp_path / SHOP / old.split(":")[1], (eight_days, eight_days))
+    again = owner_files.save(str(tmp_path), SHOP, "sales.csv", b"2")
+    assert again != old, "the same name saved again gets a new token, so nothing is overwritten"
+    assert owner_files.read(str(tmp_path), SHOP, old.split(":")[1]) == b"1", "an eight-day-old file is still kept"
+    assert owner_files.read(str(tmp_path), SHOP, again.split(":")[1]) == b"2"
+
+
+def test_a_shop_space_is_250_mb_and_a_save_past_it_is_refused_with_a_plain_message(tmp_path, monkeypatch):
+    assert owner_files.QUOTA_BYTES == 250 * 1024 * 1024
+    assert "250 MB" in owner_files.full_text()
+    monkeypatch.setattr(owner_files, "QUOTA_BYTES", 10)
+    owner_files.save(str(tmp_path), SHOP, "a.csv", b"123456")
+    with pytest.raises(owner_files.StorageFull):
+        owner_files.save(str(tmp_path), SHOP, "b.csv", b"123456")          # 12 bytes would be over 10
+    owner_files.save(str(tmp_path), "1c65d7d2-acc1-4842-8c1a-6460b692982a", "c.csv", b"123456")  # another shop has its own space
+    assert owner_files.used_bytes(str(tmp_path), SHOP) == 6
 
 
 def test_a_file_over_the_limit_is_refused_and_the_reply_says_the_limit(tmp_path):

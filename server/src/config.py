@@ -72,7 +72,7 @@ class Settings:
     # Sarvam speech-to-text for voice notes (owner and customers). Empty key = voice notes are off.
     sarvam_api_key: str = ""
     sarvam_stt_url: str = "https://api.sarvam.ai/speech-to-text"
-    # Files the owner sends (any type, up to 20 MB) are kept here for 7 days, one folder per shop, outside the database
+    # Files the owner sends (any type, up to 20 MB) are kept here permanently, one folder per shop (250 MB each), outside the database
     owner_files_dir: str = "./data/owner-files"
     tick_seconds: int = 60
     digest_hour_ist: int = 9
