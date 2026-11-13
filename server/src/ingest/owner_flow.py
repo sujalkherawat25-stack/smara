@@ -229,6 +229,8 @@ async def _agent(app, tenant_id: str, msg: InboundMessage) -> str | None:
             return FILE_FAILED
         try:
             ref = await asyncio.to_thread(owner_files.save, app.state.settings.owner_files_dir, tenant_id, file_name(msg), data)
+        except owner_files.StorageFull as e:
+            return str(e)
         except OSError:
             log.exception("could not keep an owner file")
             return FILE_FAILED
