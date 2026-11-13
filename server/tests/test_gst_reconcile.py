@@ -122,3 +122,28 @@ def test_only_attached_files_and_the_tool_is_read_only():
     assert pre_tool_use(SessionCtx("s", "t", "TRUSTED", files=("local:a:b.xlsx", "local:c:d.xlsx")), "gst_reconcile", ok, TOOL_NAMES).verdict == "allow"
     assert pre_tool_use(SessionCtx("s", "t", "TRUSTED", files=("local:a:b.xlsx",)), "gst_reconcile", ok, TOOL_NAMES).verdict == "deny"
     assert pre_tool_use(SessionCtx("s", "t", "UNTRUSTED", party_id="p", files=tuple(ok.values())), "gst_reconcile", ok, TOOL_NAMES).verdict == "deny"
+
+
+PAYABLES = xlsx([["Mehta Distributors"], ["Bills Payable as on today"], [], ["Date", "Ref. No.", "Party's Name", "Pending Amount", "Due on"],
+                 ["01-10-2026", "P-1", "Kumar Steel", "8,400.00 Cr", "31-10-2026"]])
+DUES = xlsx([["Mehta Distributors"], ["Bills Receivable as on today"], [], ["Date", "Ref. No.", "Party's Name", "Mobile", "Pending Amount", "Due on"],
+             ["01-10-2026", "B-11", "Anand Stores", "98100 11111", "8,400.00 Dr", "31-10-2026"]])
+
+
+def test_purchases_and_supplier_bills_are_recognised_but_customer_dues_are_not():
+    assert gst.not_receivables("purchase_register_oct.xlsx", BOOKS)["looks_like"] == "purchase register"
+    assert gst.not_receivables("GSTR2B_oct.xlsx", B2B)["looks_like"] == "GSTR-2B statement"
+    assert gst.not_receivables("bills.xlsx", PAYABLES)["looks_like"].startswith("supplier bills list")
+    assert gst.not_receivables("outstanding.xlsx", DUES) is None
+    assert gst.not_receivables("junk.xlsx", b"not a workbook") is None
+
+
+def test_the_import_tool_refuses_a_purchase_file_before_it_touches_the_ledger(monkeypatch):
+    from src.agent import actions
+
+    async def fetch(app, ref, ctx=None):
+        return BOOKS, "", "purchase_register_oct.xlsx"
+    monkeypatch.setattr(actions, "_fetch", fetch)
+    for mode in ("inspect", "import"):
+        r = asyncio.run(actions.inspect_and_import_file(SimpleNamespace(), SessionCtx("s", "t", "TRUSTED"), {"file_ref": "local:a:b.xlsx", "mode": mode}))
+        assert r["imported"] is False and r["looks_like"] == "purchase register" and "gst_reconcile" in r["next"]

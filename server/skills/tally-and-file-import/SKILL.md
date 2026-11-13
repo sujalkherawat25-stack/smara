@@ -21,6 +21,7 @@ description: Getting the owner's receivables and payables into Smara from Tally,
 5. Tell the owner what is now in the ledger: invoices and total, how much is overdue, the three biggest overdue customers, the customers with no WhatsApp number (by name), and what was skipped and why. Then check the total against their own number ("Tally shows 14.2 lakh outstanding; does that match?").
 
 ## Traps
+- **A purchase register, a GSTR-2B or a supplier bills list is not receivables.** The import tool refuses them (`imported: false`). Never import them by another route (for example by writing a CSV yourself). For GST files use `gst_reconcile`; supplier bills come from the Tally sync.
 - **Totals rows and sub-totals** are skipped, but check the sheet total against the owner's own number ("Tally shows 14.2 lakh outstanding; does that match?").
 - **Advance receipts and credit notes** appear as negative or credit amounts. They are not receivables. Mention them; do not import them as bills.
 - **Duplicate invoice numbers** across financial years can collide: the importer treats an invoice number as unique per shop. If the owner reuses numbers each year, ask which year the sheet covers.

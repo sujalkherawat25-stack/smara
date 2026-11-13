@@ -11,7 +11,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 
 from src import clock
-from src.agent import bookkeeping
+from src.agent import bookkeeping, gst
 from src.agent.policy import SessionCtx, target_words
 from src.agent.tools import party_in_tenant
 from src.bridge.coordinator import submit_debtor_claim
@@ -76,6 +76,8 @@ async def inspect_and_import_file(app, ctx: SessionCtx, args: dict) -> dict:
         if mime.startswith("image/"):
             return {"kind": "image", "ocr": await read_image(app.state.llm, data, mime)}
         return {"error": f"unsupported file {filename!r}; send .xlsx, .xls, .csv or a Tally Prime XML export"}
+    if not is_tally and (refused := gst.not_receivables(filename, data)):      # purchases and supplier bills are not customer dues
+        return refused
     async with app.state.pool.connection() as conn:           # customers already on file supply missing mobile numbers
         known = {r["canonical_name"]: r["whatsapp_phone"] for r in await (await conn.execute(
             "SELECT canonical_name, whatsapp_phone FROM parties WHERE tenant_id = %s", (ctx.tenant_id,))).fetchall()}

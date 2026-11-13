@@ -263,3 +263,31 @@ async def gst_reconcile(app, ctx, args: dict) -> dict:
         else:
             res["report_error"] = doc.get("error", "the report could not be made")
     return res
+
+
+# ---- files that are not receivables --------------------------------------------------------------------------------------
+_NOT_RECEIVABLES = (
+    ("GSTR-2B statement", r"gstr[\s-]*2[ab]|gstin of supplier|itc available"),
+    ("purchase register", r"purchase\s+(register|book|invoices?|bills?)"),
+    ("supplier bills list (money the shop owes)", r"bills?\s+payable|accounts?\s+payable|sundry\s+creditors|creditors?\s+outstanding|payables?\s+(as\s+on|list|report|ageing)"),
+)
+
+
+def not_receivables(filename: str, data: bytes) -> dict | None:
+    """A reply for the agent if this file is a purchase register, a GSTR-2B or a supplier bills list, which must never be imported as
+    money customers owe; None for anything else. Looks at the file name and the first rows of every sheet."""
+    try:
+        head = " ".join(str(c) for _, rows in read_named_tables(filename, data) for row in rows[:6] for c in row if c)
+    except Exception:
+        return None
+    text = f"{filename} {head}"
+    for kind, pattern in _NOT_RECEIVABLES:
+        if re.search(pattern, text, re.I):
+            if kind.startswith("supplier"):
+                nxt = ("Supplier bills are not entered from chat; they come from the Tally sync. Tell the owner that, and do not import or analyse this file as dues.")
+            else:
+                nxt = ("If the owner wants a GST reconciliation: make sure you have BOTH files (the purchase register and the GSTR-2B), asking for the "
+                       "missing one in a single line, then call gst_reconcile with both. Do not write code to read them. Never import them.")
+            return {"imported": False, "looks_like": kind, "error": f"This looks like a {kind}, not money your customers owe you, so it was not imported.",
+                    "next": nxt}
+    return None
