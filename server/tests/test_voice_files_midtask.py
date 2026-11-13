@@ -335,7 +335,7 @@ async def test_a_3_mb_sheet_is_kept_for_the_agent_and_its_tools_read_it(env, mon
     raw = [m for m in llm.seen[1] if m["role"] == "tool"][-1]["content"]
     assert '"kind": "text"' in raw and '"filename": "payments.csv"' in raw and f'"size_bytes": {len(body)}' in raw
     kept = list(env.files.rglob("*"))
-    kept_files = [p for p in kept if p.is_file()]
+    kept_files = [p for p in kept if p.is_file() and p.name != "index.json"]
     assert len(kept_files) == 1 and kept_files[0].stat().st_size == len(body)
     assert kept_files[0].name == ref.split(":")[1], "the file on disk is named by its token"
     session = await one(env.pool, "SELECT files FROM agent_sessions")

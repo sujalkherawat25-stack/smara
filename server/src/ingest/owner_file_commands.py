@@ -80,19 +80,35 @@ def _restore_text(base: str, tenant_id: str, no: int, now: datetime) -> str:
     return f"Restored #{no} {f['name']}."
 
 
+def _parse(cmd: str):
+    """(what, number) for a file command, or None. Nothing is read from the app until a command matches."""
+    if cmd in _LIST:
+        return "list", None
+    if cmd in _DELETED:
+        return "deleted", None
+    if m := _CONFIRM.fullmatch(cmd):
+        return "delete", int(m.group(1))
+    if m := _DELETE.fullmatch(cmd):
+        return "ask", int(m.group(1))
+    if m := _RESTORE.fullmatch(cmd):
+        return "restore", int(m.group(1))
+    return None
+
+
 async def handle(app, tenant_id: str, text: str) -> str | None:
     """The reply to a file command, or None if the text is not one (the message then goes on as usual)."""
-    cmd = " ".join((text or "").lower().split())
+    parsed = _parse(" ".join((text or "").lower().split()))
+    if parsed is None:
+        return None
+    what, no = parsed
     base = app.state.settings.owner_files_dir
     now = datetime.now(timezone.utc)
-    if cmd in _LIST:
+    if what == "list":
         return await asyncio.to_thread(_list_text, base, tenant_id, now)
-    if cmd in _DELETED:
+    if what == "deleted":
         return await asyncio.to_thread(_deleted_text, base, tenant_id, now)
-    if m := _CONFIRM.fullmatch(cmd):
-        return await asyncio.to_thread(_delete_text, base, tenant_id, int(m.group(1)), now)
-    if m := _DELETE.fullmatch(cmd):
-        return await asyncio.to_thread(_ask_text, base, tenant_id, int(m.group(1)), now)
-    if m := _RESTORE.fullmatch(cmd):
-        return await asyncio.to_thread(_restore_text, base, tenant_id, int(m.group(1)), now)
-    return None
+    if what == "delete":
+        return await asyncio.to_thread(_delete_text, base, tenant_id, no, now)
+    if what == "ask":
+        return await asyncio.to_thread(_ask_text, base, tenant_id, no, now)
+    return await asyncio.to_thread(_restore_text, base, tenant_id, no, now)
