@@ -33,7 +33,37 @@ class TelegramClient:
         return resp.json().get("result") or {}
 
     async def send(self, payload: dict) -> None:
-        await self._call("sendMessage", payload)
+        """sendMessage. If Telegram refuses the HTML (a tag it cannot parse), the same words go again as plain text, so a
+        formatting slip never loses the message. A 'too many requests' answer waits as asked (at most 5 s) and retries once."""
+        try:
+            await self._call("sendMessage", payload)
+            return
+        except httpx.HTTPStatusError as err:
+            code = err.response.status_code
+            if code == 429:
+                import asyncio
+                try:
+                    wait = int(((err.response.json() or {}).get("parameters") or {}).get("retry_after", 1))
+                except Exception:
+                    wait = 1
+                await asyncio.sleep(min(max(wait, 1), 5))
+                await self._call("sendMessage", payload)
+                return
+            if code != 400 or not payload.get("parse_mode"):
+                raise
+            log.warning("telegram refused the formatted text; sending it plain")
+        from src.loop.wa_format import html_to_plain
+        plain = {k: v for k, v in payload.items() if k != "parse_mode"}
+        plain["text"] = html_to_plain(payload.get("text", ""))
+        await self._call("sendMessage", plain)
+
+    async def typing(self, chat_id: int) -> None:
+        """Shows 'typing…' in the owner's chat for about five seconds."""
+        await self._call("sendChatAction", {"chat_id": chat_id, "action": "typing"})
+
+    async def set_commands(self, commands: list[tuple[str, str]]) -> None:
+        """The menu Telegram shows when the owner types '/'."""
+        await self._call("setMyCommands", {"commands": [{"command": c, "description": d} for c, d in commands]})
 
     async def send_document(self, chat_id: int, data: bytes, filename: str, caption: str = "") -> None:
         resp = await self._http.post(f"{self._bot}/sendDocument", data={"chat_id": chat_id, "caption": caption[:1000]},

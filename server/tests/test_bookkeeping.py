@@ -267,7 +267,7 @@ async def test_a_number_heard_in_a_voice_note_is_read_back_and_saved_only_after_
     assert r["saved"] == 0 and await party_phone(env, "Ravi") == DEBTOR
     await chatlog.record(env.pool, env.t.id, "whatsapp", "owner", "haan sahi hai", kind="voice", ref="v2")
     r = await bookkeeping.set_customer_phone(env.app, ctx, {"entries": [{"customer": "Ravi", "phone": "9811144445"}], "confirmed": True})
-    assert r["saved"] == 0 and r["results"][0]["needs_confirmation"]                                   # a different number is new
+    assert r["saved"] == 0 and "not the number in the voice note" in r["results"][0]["error"]   # a number nobody said
     r = await bookkeeping.set_customer_phone(env.app, ctx, {"entries": entries, "confirmed": True})
     assert r["saved"] == 1 and await party_phone(env, "Ravi") == "919811144444"
 
@@ -279,3 +279,36 @@ async def test_a_typed_number_is_saved_at_once_even_after_a_voice_note(env):
     r = await bookkeeping.set_customer_phone(env.app, SessionCtx("s", env.t.id, "TRUSTED"),
                                              {"entries": [{"customer": "Ravi", "phone": "9811144444"}]})
     assert r["saved"] == 1
+
+
+def test_digits_heard_in_a_voice_note_are_read_in_hindi_english_and_figures():
+    assert bookkeeping.heard_digits("चोपड़ा संस का नंबर नौ आठ एक एक चार चार चार चार चार है")[1] == ["981144444"]
+    assert bookkeeping.heard_digits("number 98111 44444 hai")[0] == "9811144444"
+    assert bookkeeping.heard_digits("nine eight double one one four four four four four")[1] == ["9811144444"]
+    assert bookkeeping.heard_digits("नंबर ९८१११४४४४४ है")[1] == ["9811144444"]
+
+
+async def test_a_digit_the_model_adds_to_a_heard_number_is_refused(env):
+    from src import chatlog
+    ctx = SessionCtx("s", env.t.id, "TRUSTED")
+    await chatlog.record(env.pool, env.t.id, "whatsapp", "owner", "रवि का नंबर नौ आठ एक एक चार चार चार चार चार है", kind="voice", ref="v9")
+    r = await bookkeeping.set_customer_phone(env.app, ctx, {"entries": [{"customer": "Ravi", "phone": "9811444444"}]})
+    assert r["saved"] == 0 and "981144444" in r["results"][0]["error"] and "needs_confirmation" not in r["results"][0]
+    assert await party_phone(env, "Ravi") == DEBTOR
+
+
+async def test_smara_itself_reads_a_heard_number_back_and_the_owners_tap_saves_it(env):
+    from src import chatlog
+    ctx = SessionCtx("s", env.t.id, "TRUSTED")
+    await chatlog.record(env.pool, env.t.id, "whatsapp", "owner", "Ravi ka number nau aath ek ek ek chaar chaar chaar chaar chaar", kind="voice", ref="vc1")
+    r = await bookkeeping.set_customer_phone(env.app, ctx, {"entries": [{"customer": "Ravi", "phone": "9811144444"}]})
+    assert r["saved"] == 0 and "Do NOT write the number again" in r["note"] and "_phone" not in r["results"][0]
+    card = env.app.state.wa.to(OWNER)[-1]["interactive"]
+    assert "*98111 44444*" in card["body"]["text"]
+    ok_id, no_id = [b["reply"]["id"] for b in card["action"]["buttons"]]
+    await dispatch(env.app, owner("tapno", button=no_id.replace(no_id.split(":")[1], "stale")))
+    assert "purana" in env.app.state.wa.sent[-1]["text"]["body"] and await party_phone(env, "Ravi") == DEBTOR
+    await dispatch(env.app, owner("tapok", button=ok_id))
+    assert await party_phone(env, "Ravi") == "919811144444" and "save ho gaya" in env.app.state.wa.sent[-1]["text"]["body"]
+    await dispatch(env.app, owner("tapok2", button=ok_id))                                # a second tap does nothing
+    assert "purana" in env.app.state.wa.sent[-1]["text"]["body"]

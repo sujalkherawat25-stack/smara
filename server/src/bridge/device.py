@@ -221,10 +221,16 @@ class BrowserRouter:
     """Picks the browser for each agent session: the owner's own device when their bridge is online,
     otherwise the server's browser (a hosted remote browser when BROWSER_CDP_URL is set)."""
 
-    def __init__(self, pool, server_browser, device_browser: DeviceBrowser | None = None):
+    def __init__(self, pool, server_browser, device_browser: DeviceBrowser | None = None, pc_allowed=None):
         self.server, self.device = server_browser, device_browser or DeviceBrowser(pool)
         self.pool = pool
         self._route: dict[str, object] = {}
+        self._pc_allowed = pc_allowed or (lambda tenant_id: True)   # shops not allowed a PC always use the server browser
+
+    async def _paired(self, tenant_id: str | None):
+        if not tenant_id or not self._pc_allowed(tenant_id):
+            return None
+        return await paired_device(self.pool, tenant_id)
 
     def _backend(self, sid: str):
         return self._route.get(sid)
@@ -246,7 +252,7 @@ class BrowserRouter:
         if b is not None and args.get("action") == "navigate" and tenant_id:
             # A new page is a fresh start: use the owner's PC if it came online (or the server if it went away) instead
             # of keeping whatever was picked when this chat first browsed.
-            paired = await paired_device(self.pool, tenant_id)
+            paired = await self._paired(tenant_id)
             on_device = bool(paired) if paired else False      # a paired PC is always the browser; the server only serves shops with none
             if on_device != (b is self.device):
                 await b.close(sid)
@@ -255,7 +261,7 @@ class BrowserRouter:
         if b is None:
             if args.get("action") != "navigate":
                 return {"error": "no open page: navigate first"}
-            paired = await paired_device(self.pool, tenant_id) if tenant_id else None
+            paired = await self._paired(tenant_id)
             if paired:
                 # The owner's PC is the browser. No silent fallback to the server's, which many sites block (and which would
                 # look like the PC's helper is broken): if the PC is away, say so and let the agent retry later.

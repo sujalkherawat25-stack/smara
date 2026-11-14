@@ -5,7 +5,7 @@ import logging
 from dataclasses import replace
 from datetime import date, datetime, timezone
 
-from src import chatlog
+from src import chatlog, prefs
 from src.bridge.coordinator import decide_adjustment
 from src.ingest.box_commands import decide_browser_task, handle_text
 from src.ingest.importer import import_rows
@@ -27,8 +27,13 @@ from src.loop.whatsapp import text_message
 from src.tenants import Tenant
 
 log = logging.getLogger(__name__)
-HELP = ("Commands: digest, telegram (link Telegram), pair browser (connect your PC and Tally), gstin <no>, quotes <product>, browse <task>. Send me your outstanding sheet (.xlsx/.csv), a photo of a bill with the customer's "
-        "number as caption, or say 'digest'.\nTally/Busy se list kaise nikalein: 'export'. Sample file: 'sample'.")
+HELP = ("Mujhse seedha baat kijiye, jaise kisi munim se: 'aaj kisko call karun?', 'Sharma ko 12000 udhaar diya', "
+        "'Gupta ne 5000 cash diya', 'Ravi ka statement PDF bhejo'. Voice note bhi chalega.\n\n"
+        "Kuch commands:\n• 'digest': aaj ka summary\n• 'style': jawab ki bhasha aur lambai\n• 'files': aapki bheji files\n"
+        "• 'export': Tally/Busy se list kaise nikalein\n• 'sample': ek sample file\n• 'telegram': Telegram jodein\n\n"
+        "Apni outstanding sheet (.xlsx/.csv) bhejiye, main import kar dunga.")
+PC_LATER = ("Apne PC ka browser jodna Smara Desktop ke saath aayega, jo abhi jaldi aa raha hai. Tab tak main Smara ke apne cloud "
+            "browser se websites dekhta hoon: bas bataiye kya dhoondhna ya check karna hai.")
 EXPORT_CMDS = ("export", "tally export", "kaise bheju", "export guide")
 SAMPLE_CMDS = ("sample", "sample file")
 FILE_KINDS = ("document", "image", "video", "sticker")
@@ -85,8 +90,24 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         if action in ("bt_approve", "bt_reject"):
             return await decide_browser_task(app, tenant_id, msg.sender, ref, action == "bt_approve", number_id=msg.number_id,
                                              channel=msg.channel)
+        if action == "pref":
+            return await _pref_button(app, tenant_id, ref)
+        if action in ("phone_ok", "phone_no"):          # the read-back card of a number heard in a voice note
+            from src.agent.bookkeeping import decide_phone_card
+            return await decide_phone_card(app, tenant_id, ref, action == "phone_ok")
         return None
+    if msg.kind == "text" and msg.text.strip().startswith("/"):     # Telegram's '/' menu: '/files' is 'files'
+        msg = replace(msg, text=msg.text.strip()[1:].split("@")[0] if " " not in msg.text.strip() else msg.text.strip()[1:])
     cmd = " ".join(msg.text.strip().lower().replace("'", "").split())
+    if msg.kind == "text" and (style := prefs.parse(msg.text)):
+        return await _style(app, tenant_id, msg, *style)
+    if cmd in ("help", "commands", "menu"):
+        return HELP
+    from src.config import pc_allowed
+    if len(cmd) <= 30 and (cmd in ("browser status", "browser") or any(
+            k in cmd for k in ("pair browser", "pair pc", "connect browser", "browser pair"))) and \
+            not pc_allowed(getattr(app.state, "settings", None), tenant_id):
+        return PC_LATER
     if len(cmd) <= 30 and "unpair" not in cmd and any(k in cmd for k in ("pair browser", "pair pc", "connect browser", "browser pair", "pair new browser")):
         from src.bridge.device import online_device, paired_device, start_pairing
         if "new" not in cmd:
@@ -156,6 +177,10 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         return await link_message(app, tenant_id)
     if msg.text.strip().lower() == "telegram off":
         return await unlink(app, tenant_id)
+    if cmd == "digest":                    # the morning summary on demand: built from the ledger, no model
+        digest = await build_digest(app.state.pool, tenant_id, clock.today())
+        line = await wa_link.health_line(app.state.pool, tenant_id)
+        return f"{line}\n\n{digest}" if line else digest
     if getattr(getattr(app.state, "llm", None), "enabled", False):
         return await _agent(app, tenant_id, msg)
     if msg.kind == "document":
@@ -179,6 +204,47 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         await wa_link.disconnect(app, tenant_id)
         return "The SIM link is disconnected. Customer messages are paused until you send 'connect whatsapp' again."
     return HELP
+
+
+def _buttons_card(to: str, body: str, buttons: list[tuple[str, str]]) -> dict:
+    return {"messaging_product": "whatsapp", "to": to, "type": "interactive", "interactive": {
+        "type": "button", "body": {"text": body[:1000]},
+        "action": {"buttons": [{"type": "reply", "reply": {"id": i, "title": t[:20]}} for i, t in buttons[:3]]}}}
+
+
+async def _style(app, tenant_id: str, msg: InboundMessage, what: str, value: str | None) -> str | None:
+    """The 'style' command: show the owner's reply setting with buttons, or change it."""
+    pool = app.state.pool
+    if what == "reset":
+        await prefs.put(pool, tenant_id, language="auto", length="normal", note="")
+        return "Reply setting wapas default par: bhasha Auto, lambai Normal, koi note nahi."
+    if what == "note":
+        if value and not prefs.is_valid_note(value):
+            return f"Note {prefs.NOTE_MAX} characters tak ka ho, bina link ke."
+        p = await prefs.put(pool, tenant_id, note=value or "")
+        return ("Theek hai, aage se dhyan rakhunga: " + p["note"]) if p["note"] else "Note hata diya."
+    if what == "set" and value:
+        word = prefs.ALIASES[value]
+        p = await prefs.put(pool, tenant_id, **({"length": word} if word in prefs.LENGTHS else {"language": word}))
+        return "Ho gaya. " + prefs.summary(p)
+    from src import tenants
+    tenant = await tenants.by_id(pool, tenant_id)
+    p = await prefs.get(pool, tenant_id)
+    lang_row, len_row = prefs.button_rows()
+    await send_to_owner(app, tenant, _buttons_card(tenant.owner_phone, f"{prefs.summary(p)}\n\nBhasha chuniye:", lang_row),
+                        kind="owner_text", reply_channel=msg.channel)
+    await send_to_owner(app, tenant, _buttons_card(tenant.owner_phone, "Jawab kitna lamba ho?", len_row),
+                        kind="owner_text", reply_channel=msg.channel)
+    return prefs.HELP
+
+
+async def _pref_button(app, tenant_id: str, ref: str) -> str:
+    kind, _, value = ref.partition(":")
+    try:
+        p = await prefs.put(app.state.pool, tenant_id, **({"language": value} if kind == "lang" else {"length": value}))
+    except ValueError:
+        return "Ye option ab nahi chalta. 'style' likhiye."
+    return "Ho gaya. " + prefs.summary(p)
 
 
 async def _send_sample(app, tenant_id: str, channel: str) -> str | None:

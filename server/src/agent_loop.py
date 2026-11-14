@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-from src import chatlog, clock, tenants
+from src import chatlog, clock, health_watch, prefs, tenants
 from src.agent import actions, bookkeeping, documents, extras, gst, memory_pass, pc, reader, skills, tools, web
 from src.agent.context import compact
 from src.agent.policy import SessionCtx, approval_text, pre_tool_use
@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 PROGRESS_FIRST_S = 25      # a task that runs this long gets a note, so the owner does not think it is stuck
 PROGRESS_EVERY_S = 40
 PROGRESS_MAX = 5
+TYPING_EVERY_S = 4.5        # Telegram shows 'typing…' for about 5 seconds per call
 RATE_RETRY_S = 25         # the model is busy (rate limited): wait and try the same step again
 RATE_RETRIES = 4
 MAX_STEPS = 40          # model calls per turn (each owner message / resume gets a fresh budget)
@@ -45,7 +46,7 @@ EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memo
              "check_gstin": extras.check_gstin, "build_payment_request": extras.build_payment_request,
              "send_file_to_owner": extras.send_file_to_owner, "web_search": web.web_search,
              "pc_files": pc.pc_files, "set_customer_phone": bookkeeping.set_customer_phone,
-             "find_customer": bookkeeping.find_customer,
+             "find_customer": bookkeeping.find_customer, "set_reply_style": prefs.set_reply_style,
              "gst_reconcile": gst.gst_reconcile}
 
 
@@ -287,7 +288,18 @@ async def run(app, sid: str, fallback=None) -> None:
 async def _progress(app, row, tenant) -> None:
     """Tells the owner a long task is still going. Only for messages the owner sent, on the channel they used."""
     try:
-        await asyncio.sleep(PROGRESS_FIRST_S)
+        tg = getattr(getattr(app, "state", None), "tg", None)
+        if row["channel"] == "telegram" and tg is not None and getattr(tenant, "telegram_chat_id", None):
+            waited = 0.0                  # 'typing…' in the owner's chat while the answer is being worked out (free, no tokens)
+            while waited < PROGRESS_FIRST_S:
+                try:
+                    await tg.typing(tenant.telegram_chat_id)
+                except Exception:
+                    log.info("typing indicator not shown")
+                await asyncio.sleep(TYPING_EVERY_S)
+                waited += TYPING_EVERY_S
+        else:
+            await asyncio.sleep(PROGRESS_FIRST_S)
         for _ in range(PROGRESS_MAX):
             await send_to_owner(app, tenant, text_message(tenant.owner_phone,
                 "Still working on it. I'll send the answer as soon as it's ready."),
@@ -439,7 +451,7 @@ async def _process(app, row, messages: list, calls: list) -> bool:
 async def _execute(app, ctx, tenant, name, args) -> dict:
     try:
         if name == "send_whatsapp_message":   # T1: to the owner only (T2 to customers is gated)
-            text = text_message(tenant.owner_phone, str(args.get("text", ""))[:3000])
+            text = text_message(tenant.owner_phone, str(args.get("text", ""))[:12000])
             # The owner just wrote: reply at once. A scheduled job messaging them unprompted is a held-able note.
             kind = "owner_note" if ctx.trust == "SYSTEM" else "owner_text"
             via = await send_to_owner(app, tenant, text, kind=kind)
@@ -448,13 +460,15 @@ async def _execute(app, ctx, tenant, name, args) -> dict:
             return await app.state.browsers.step(ctx.id, args, tenant_id=ctx.tenant_id)
         return await EXECUTORS[name](app, ctx, args)
     except Exception as e:
+        health_watch.tool_failed(name, e)            # counted for the hourly ops report (no tokens, no model)
+        log.warning("tool %s raised %s", name, type(e).__name__)
         return {"error": f"{type(e).__name__}: {str(e)[:300]}"}
 
 
 async def _finish(app, row, text: str) -> None:
     if row["trust"] == "TRUSTED" and text.strip():
         tenant = await tenants.by_id(app.state.pool, str(row["tenant_id"]))
-        await send_to_owner(app, tenant, text_message(tenant.owner_phone, text[:4000]), kind="owner_text",
+        await send_to_owner(app, tenant, text_message(tenant.owner_phone, text[:12000]), kind="owner_text",
                             reply_channel=row["channel"])
 
 
