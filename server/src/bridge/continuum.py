@@ -4,6 +4,9 @@ from typing import Any
 import httpx
 
 
+CAPTURE_CONTRACT = "agent_records_v1"     # Continuum: structured records an agent writes about third parties
+
+
 def make_source_id(tenant_id: str, wamid: str, body: str) -> str:
     """Deterministic SHA provenance id; a webhook retry yields the same id."""
     digest = hashlib.sha256(f"{tenant_id}|{wamid}|{body}".encode()).hexdigest()
@@ -44,6 +47,9 @@ class ContinuumClient:
                 "messages": [{"role": "user", "content": f"[{label}] {text}"}],
                 "source_id": source_id,
                 "ingestion_mode": "hybrid",
+                # Smara writes records about third parties (customers, invoices, promises), not facts about a chatting
+                # user: this keeps names, dates and changes as written and never files a debt under "User".
+                "capture_contract": CAPTURE_CONTRACT,
                 "metadata": meta,
             },
         )
