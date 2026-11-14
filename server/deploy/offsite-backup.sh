@@ -17,7 +17,7 @@ RCLONE=${RCLONE:-rclone}
 STATE_DIR=${STATE_DIR:-/var/lib/smara-offsite}
 umask 077
 mkdir -p "$STATE_DIR"
-WORK=$(mktemp -d /var/tmp/smara-offsite.XXXXXX)
+WORK=$(mktemp -d "${WORK_ROOT:-/var/tmp}/smara-offsite.XXXXXX")
 STEP=start
 
 env_get() { grep -E "^$1=" "$APP_ENV" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"\r' || true; }
