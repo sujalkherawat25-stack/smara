@@ -5,7 +5,7 @@ import dataclasses
 import html
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import httpx
@@ -17,6 +17,8 @@ from src.agent.policy import SessionCtx, pre_tool_use
 from src.agent.tools import TOOL_NAMES
 from src.config import Settings, pc_allowed
 from src.ingest.dispatch import dispatch
+from src.ingest.importer import import_rows
+from src.ingest.sheet_mapper import SheetRow
 from src.loop import owner_channel
 from src.loop.owner_channel import parts_of, wa_to_telegram
 from src.loop.wa_format import (CARD_CHARS, MAX_PARTS, PART_CHARS, TOO_LONG, html_to_plain, split_text, to_telegram_html,
@@ -253,3 +255,92 @@ async def test_the_agent_is_given_the_overdue_total_in_rupees(env):
     assert (_inr(45322500), _inr(100), _inr(150), _inr(12345678901)) == ("4,53,225", "1", "1.50", "12,34,56,789.01")
     line = await ledger_line(env.pool, env.t.id)
     assert "1 open invoices, Rs 10,000 outstanding" in line and "1 are overdue, Rs 10,000" in line
+    assert "Customers owing most past the due date" in line and "Ravi Rs 10,000 (1 bill, oldest" in line
+
+
+# ------------------------------------------------------------------------------------------------ load: model limits and mornings
+
+async def test_a_429_cuts_the_calls_allowed_at_once_and_successes_give_them_back():
+    from src.loop.llm import AdaptiveSlots
+    slots = AdaptiveSlots(10)
+    await slots.acquire()
+    await slots.release(limited=True)
+    assert slots.limit == pytest.approx(7.0) and slots.cuts == 1
+    await slots.acquire()
+    await slots.release(limited=True)                                  # within 1.5 s: the same signal, no second cut
+    assert slots.limit == pytest.approx(7.0) and slots.cuts == 1
+    for _ in range(40):
+        await slots.acquire()
+        await slots.release(ok=True)
+    assert slots.limit == 10.0                                          # back to the ceiling
+    small = AdaptiveSlots(3, floor=2)
+    for _ in range(3):
+        small._cut_at = float("-inf")
+        await small.acquire()
+        await small.release(limited=True)
+    assert small.limit == 2.0                                           # never below the floor
+
+
+async def test_a_refusing_provider_slows_the_calls_down_and_every_call_still_gets_through(monkeypatch):
+    import httpx
+    from src.loop.llm import LLM, AdaptiveSlots
+    monkeypatch.setattr(AdaptiveSlots, "CUT_GAP_S", 0.02)         # this mock answers in 20 ms; a real call takes seconds
+    live = {"now": 0, "peak": 0, "peak_after": 0, "n": 0}
+
+    async def handler(request):
+        live["n"] += 1
+        live["now"] += 1
+        live["peak"] = max(live["peak"], live["now"])
+        refuse = live["now"] > 4                                       # this provider takes 4 at a time
+        await asyncio.sleep(0.02)
+        live["now"] -= 1
+        if refuse:
+            return httpx.Response(429)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+    llm = LLM("https://llm.test", "k", "m", max_concurrency=16, max_backoff_s=0.01,
+              client=httpx.AsyncClient(base_url="https://llm.test", transport=httpx.MockTransport(handler)))
+    out = await asyncio.gather(*[llm.chat([], []) for _ in range(40)])
+    assert all(o["content"] == "ok" for o in out)
+    assert llm.stats["rate_limited"] > 0 and llm._slots.cuts >= 1          # it noticed the refusals and backed off
+    assert llm.stats["rate_limited"] < 40 * 2                              # and did not hammer: a refused call is not retried in a storm
+
+
+async def test_one_key_without_retry_after_is_not_frozen_for_twenty_seconds():
+    import time
+    import httpx
+    from src.loop.llm import LLM
+    calls = []
+
+    async def handler(request):
+        calls.append(1)
+        return httpx.Response(429) if len(calls) == 1 else httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+    llm = LLM("https://llm.test", "k", "m", max_backoff_s=0.01,
+              client=httpx.AsyncClient(base_url="https://llm.test", transport=httpx.MockTransport(handler)))
+    t0 = time.monotonic()
+    assert (await llm.chat([], []))["content"] == "ok"
+    assert time.monotonic() - t0 < 3 and llm._keys[0].cool_until <= time.monotonic()
+
+
+async def test_a_morning_with_many_due_reminders_never_waits_for_a_queue_of_agent_runs(env, monkeypatch):
+    from src import tenants as _t
+    from src.loop import scheduler
+    await import_rows(env.pool, env.t.id, [SheetRow(f"Cust {i}", f"91981112{i:04d}", f"M-{i}", 100_000 + i, date(2026, 10, 1))
+                                           for i in range(12)])
+    async with env.pool.connection() as c:
+        await c.execute("update obligations set next_followup_at = now() - interval '1 minute' where tenant_id = %s", (env.t.id,))
+    live = {"now": 0, "peak": 0, "drafts": 0}
+
+    async def slow_agent(app, tenant, o):
+        live["drafts"] += 1
+        live["now"] += 1
+        live["peak"] = max(live["peak"], live["now"])
+        await asyncio.sleep(0.05)
+        live["now"] -= 1
+        return True                                                       # as if the agent made its card
+    monkeypatch.setattr(scheduler, "_agent_reminder", slow_agent)
+    env.app.state.llm = ScriptLLM()                                       # enabled
+    sent = await scheduler.tick(env.app, datetime.now(timezone.utc) + timedelta(minutes=20))
+    assert sent == 13                                                      # the 12 new ones and the one from the fixture: all asked about
+    assert live["drafts"] == scheduler.AGENT_DRAFTS_PER_TICK and live["peak"] <= scheduler.DRAFTS_AT_ONCE
+    cards = [m for m in env.app.state.wa.to(OWNER) if m.get("type") == "interactive"]
+    assert len(cards) == 13 - scheduler.AGENT_DRAFTS_PER_TICK              # the rest got the ready-made card at once

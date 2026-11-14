@@ -154,14 +154,29 @@ ROLE = {
 
 
 async def ledger_line(pool, tenant_id: str) -> str:
+    """The ledger in a few lines at the start of every run: the totals, and the customers owing most past their due date.
+    Most owner questions ('summary', 'whom to call', 'how much overdue') are answered from this without a single query, which
+    is one model call instead of four or five (the provider's per-minute call quota is what limits how many shops can chat at once)."""
+    today = clock.today()
     async with pool.connection() as conn:
         snap = await (await conn.execute(
             """SELECT count(*) n, coalesce(sum(amount_paise), 0) s,
                       count(*) FILTER (WHERE due_date < %s) od,
                       coalesce(sum(amount_paise) FILTER (WHERE due_date < %s), 0) ods FROM obligations
-                WHERE tenant_id = %s AND state NOT IN ('PAID', 'DRAFT')""", (clock.today(), clock.today(), tenant_id))).fetchone()
-    return (f"Ledger right now: {snap['n']} open invoices, Rs {_inr(int(snap['s']))} outstanding in total; of these "
-            f"{snap['od']} are overdue, Rs {_inr(int(snap['ods']))}. (Use these totals as they are when asked for them.)")
+                WHERE tenant_id = %s AND state NOT IN ('PAID', 'DRAFT')""", (today, today, tenant_id))).fetchone()
+        top = await (await conn.execute(
+            """SELECT p.canonical_name, sum(o.amount_paise) paise, count(*) bills, max(%s::date - o.due_date) days
+                 FROM obligations o JOIN parties p ON p.id = o.party_id
+                WHERE o.tenant_id = %s AND o.state NOT IN ('PAID', 'DRAFT') AND o.due_date < %s
+                GROUP BY p.id, p.canonical_name ORDER BY sum(o.amount_paise) DESC, p.canonical_name LIMIT 5""",
+            (today, tenant_id, today))).fetchall()
+    out = (f"Ledger right now: {snap['n']} open invoices, Rs {_inr(int(snap['s']))} outstanding in total; of these "
+           f"{snap['od']} are overdue, Rs {_inr(int(snap['ods']))}. (Use these totals as they are when asked for them.)")
+    if top:
+        out += ("\nCustomers owing most past the due date (largest first; the full ledger is in the database): "
+                + "; ".join(f"{r['canonical_name']} Rs {_inr(int(r['paise']))} ({r['bills']} bill{'s' if r['bills'] != 1 else ''}, "
+                             f"oldest {int(r['days'])} days late)" for r in top) + ".")
+    return out
 
 
 def _inr(paise: int) -> str:

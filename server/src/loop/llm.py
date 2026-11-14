@@ -55,16 +55,51 @@ class Bucket:
                 self.tokens -= 1
 
 
-COOLDOWN_DEFAULT_S = 20.0
+COOLDOWN_DEFAULT_S = 3.0      # a 429 without Retry-After cools that key briefly, and only when another key can take over
+
+
+class AdaptiveSlots:
+    """How many model calls may be in flight at once. It starts at `ceiling` (LLM_MAX_CONCURRENCY). When the provider answers
+    429 the allowance drops by 30% (never below `floor`; refusals within CUT_GAP_S of each other count as one signal, so a burst
+    of refusals is one cut, not a collapse). Every success gives back a little, up to the ceiling. The service so finds the
+    provider's real limit by itself and backs off while it is crowded, instead of hammering it (a refused call costs a wait,
+    a retry and a share of the limit) or sitting at a fixed number that is wrong the day the plan or the neighbours change."""
+    CUT, GAIN, CUT_GAP_S = 0.7, 0.1, 1.5
+
+    def __init__(self, ceiling: int, floor: int = 2):
+        self.ceiling = max(1, int(ceiling))
+        self.floor = min(max(1, floor), self.ceiling)
+        self.limit = float(self.ceiling)
+        self.inflight = 0
+        self.cuts = 0
+        self._cut_at = float("-inf")
+        self._cond = asyncio.Condition()
+
+    async def acquire(self) -> None:
+        async with self._cond:
+            await self._cond.wait_for(lambda: self.inflight < int(self.limit))
+            self.inflight += 1
+
+    async def release(self, *, limited: bool = False, ok: bool = False) -> None:
+        async with self._cond:
+            self.inflight -= 1
+            now = time.monotonic()
+            if limited:
+                if now - self._cut_at >= self.CUT_GAP_S:
+                    self.limit, self._cut_at = max(float(self.floor), self.limit * self.CUT), now
+                    self.cuts += 1
+            elif ok:
+                self.limit = min(float(self.ceiling), self.limit + self.GAIN)
+            self._cond.notify_all()
 
 
 class _Key:
     """One provider API key with its own HTTP client and pacing bucket. Logs call it key#N, never the key itself."""
 
-    def __init__(self, n: int, http: httpx.AsyncClient, rpm: float):
+    def __init__(self, n: int, http: httpx.AsyncClient, rpm: float, burst: int = 4):
         self.name = f"key#{n}"
         self.http = http
-        self.bucket = Bucket(rpm) if rpm else None
+        self.bucket = Bucket(rpm, burst) if rpm else None
         self.cool_until = 0.0          # monotonic time before which this key is not used (after a 429)
         self.used_seq = 0              # picks go to the least recently used key when two are equally free
 
@@ -74,16 +109,21 @@ class LLM:
                  client: httpx.AsyncClient | None = None, agent_model: str = "",
                  max_retries: int = 8, max_backoff_s: float = 20.0, max_concurrency: int = 4,
                  agent_rpm: float = 0, fallback_model: str = "", max_wait_s: float = 90.0,
-                 fallback_after_s: float = 8.0, api_keys: list[str] | None = None):
+                 fallback_after_s: float = 8.0, api_keys: list[str] | None = None, agent_burst: int = 4,
+                 fallback_on_busy: bool = True):
         self.enabled = bool(base_url)
         self._model, self._reasoning = model, reasoning_model or model
         self.agent_model = agent_model or model     # the tool loop can run on a stronger model than extraction
         self.last_usage: dict = {}
         self.fallback_model, self.max_wait_s, self.fallback_after_s = fallback_model, max_wait_s, fallback_after_s
+        # A spare model on the SAME key shares the key's request quota (measured on the provider in use: both models together
+        # got no more calls per minute than one), so "the main model is busy, use the spare" only moves a call to a weaker
+        # model without making room. Set fallback_on_busy False to keep the spare for real failures (errors, timeouts, 429 storms).
+        self.fallback_on_busy = fallback_on_busy
         self.stats = {"calls": 0, "retries": 0, "fallbacks": 0, "rate_limited": 0}
         self.max_retries, self.max_backoff_s = max_retries, max_backoff_s
         # Bursts queue here instead of colliding with the provider's rate limit (shared with MemoryOS)
-        self._slots = asyncio.Semaphore(max_concurrency)
+        self._slots = AdaptiveSlots(max_concurrency)
         # A pool of keys: each key has its own rate budget, so N keys serve roughly N times the calls per minute.
         keys = [k.strip() for k in (api_keys or []) if k and k.strip()] or [api_key or ""]
         self._seq = 0
@@ -91,7 +131,7 @@ class LLM:
         for i, key in enumerate(keys, start=1):
             http = client or httpx.AsyncClient(
                 base_url=base_url, headers={"Authorization": f"Bearer {key}"}, timeout=90)
-            self._keys.append(_Key(i, http, agent_rpm))
+            self._keys.append(_Key(i, http, agent_rpm, agent_burst))
         if len(self._keys) > 1:
             log.info("LLM key pool: %d keys", len(self._keys))
 
@@ -120,18 +160,24 @@ class LLM:
             if paced and key.bucket:
                 await key.bucket.take()
             resp = None
+            await self._slots.acquire()
+            limited = ok = False
             try:
-                async with self._slots:
-                    resp = await key.http.post("/chat/completions", json=body)
+                resp = await key.http.post("/chat/completions", json=body)
+                limited, ok = resp.status_code == 429, resp.status_code < 400
             except (httpx.TimeoutException, httpx.TransportError):
                 if attempt == self.max_retries:
                     raise
+            finally:
+                await self._slots.release(limited=limited, ok=ok)
             if resp is not None and resp.status_code not in RETRY_STATUS:
                 resp.raise_for_status()
                 return resp.json()
             if resp is not None and resp.status_code == 429:
                 self.stats["rate_limited"] += 1
-                key.cool_until = time.monotonic() + _retry_after(resp, COOLDOWN_DEFAULT_S)
+                # Only a Retry-After the provider sent holds up a lone key; with several keys a short default cooldown moves
+                # the traffic to the others. The slot allowance above is what slows a single key down.
+                key.cool_until = time.monotonic() + _retry_after(resp, COOLDOWN_DEFAULT_S if len(self._keys) > 1 else 0.0)
                 log.warning("LLM 429 on %s; cooling it for %.0fs", key.name, key.cool_until - time.monotonic())
             if attempt == self.max_retries or time.monotonic() > deadline:
                 if resp is None:
@@ -168,7 +214,7 @@ class LLM:
             req.update(tools=tools, tool_choice="auto")
         fb = bool(self.fallback_model) and self.fallback_model != self.agent_model and allow_fallback
         if any(k.bucket for k in self._keys):
-            if fb and self._best_wait() > self.fallback_after_s / 2:
+            if fb and self.fallback_on_busy and self._best_wait() > self.fallback_after_s / 2:
                 self.stats["fallbacks"] += 1                    # the main model is busy: do not queue, use the spare one
                 body = await self._post({**req, "model": self.fallback_model})
                 return self._reply(body, self.fallback_model)
