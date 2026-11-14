@@ -488,3 +488,4 @@ def test_owes_card_only_when_a_card_was_claimed_and_not_made():
     assert owes_card(ask + [owner_draft], "Draft aapko bhej diya")                      # a draft to the owner is not a card
     assert not owes_card(ask + [to_customer], "Waiting for approval")
     assert not owes_card([{"role": "user", "content": "Gupta ka kitna baaki hai"}], "Shall I send a PDF?")
+    assert not owes_card([{"role": "user", "content": "one more thing: remind me tomorrow"}], "Noted: I will remind you tomorrow.")

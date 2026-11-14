@@ -248,7 +248,7 @@ def owes_file(messages: list[dict]) -> bool:
     return not any(m["role"] == "tool" and '"sent": true' in m["content"] and '"filename"' in m["content"] for m in messages[last:])
 
 
-_REMIND_ASK = re.compile(r"(remind|chase|tagada|vasooli|yaad dila|payment.{0,20}(bhej|maang)|bhej.{0,20}(reminder|msg|message))", re.I)
+_REMIND_ASK = re.compile(r"(remind(?!\s+me)(?!ers? for me)|chase|tagada|vasooli|payment.{0,20}(bhej|maang)|bhej.{0,20}(reminder|msg|message))", re.I)
 _NOT_POSSIBLE = re.compile(r"((phone|number|mobile).{0,40}(nahi|not |missing|no |nhi)|cannot|can't|can not|nahi bhej sakta|not in the ledger|"
                            r"ledger mein nahi|no customer|koi customer nahi|kaunsa|which one)", re.I)
 
