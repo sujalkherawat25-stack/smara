@@ -81,6 +81,8 @@ class Settings:
     llm_agent_model: str = ""
     llm_max_concurrency: int = 4
     llm_agent_rpm: float = 0
+    llm_agent_burst: int = 4           # calls allowed at once before the per-minute pace applies (the provider allows a burst)
+    llm_fallback_on_busy: bool = True  # False: the spare model is for real failures only (it shares the key's quota)
     brave_search_api_key: str = ""
     llm_fallback_model: str = ""
     # Sarvam speech-to-text for voice notes (owner and customers). Empty key = voice notes are off.
@@ -155,6 +157,8 @@ def load_settings() -> Settings:
         llm_agent_model=env.get("LLM_AGENT_MODEL", ""),
         llm_max_concurrency=int(env.get("LLM_MAX_CONCURRENCY", "4")),
         llm_agent_rpm=float(env.get("LLM_AGENT_RPM", "0")),
+        llm_agent_burst=int(env.get("LLM_AGENT_BURST", "4")),
+        llm_fallback_on_busy=env.get("LLM_FALLBACK_ON_BUSY", "1").strip().lower() not in ("0", "false", "no", "off"),
         brave_search_api_key=env.get("BRAVE_SEARCH_API_KEY", ""),
         llm_fallback_model=env.get("LLM_FALLBACK_MODEL", ""),
         sarvam_api_key=env.get("SARVAM_API_KEY", ""),

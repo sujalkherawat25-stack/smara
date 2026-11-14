@@ -15,6 +15,9 @@ from src.loop.whatsapp import text_message
 
 log = logging.getLogger(__name__)
 IST = timezone(timedelta(hours=5, minutes=30))
+CLAIM_PER_TICK = 50        # due invoices taken per scheduler tick (it ticks every minute)
+AGENT_DRAFTS_PER_TICK = 6  # of those, how many the agent drafts; the others get the ready-made card
+DRAFTS_AT_ONCE = 3         # agent drafts running at the same time
 
 
 async def tick(app, now: datetime) -> int:
@@ -48,34 +51,48 @@ async def tick(app, now: datetime) -> int:
         await reopen_unanswered(pool, now)
     except Exception:
         log.exception("unanswered-approval sweep failed")
-    for o in await claim_due(pool, now):
-        tid = str(o["tenant_id"])
-        if tid not in known:
-            known[tid] = await tenants.by_id(pool, tid)
-        t = known[tid]
-        if t is None:
-            continue
-        if await wa_link.paused(pool, tid, app=app):    # the shop's own number is down: ask nothing until it is back
-            await release_claim(pool, o, now)
-            continue
-        if getattr(getattr(app.state, "llm", None), "enabled", False) and await _agent_reminder(app, t, o):
-            sent += 1
-            continue
-        context = await state_card(app.state.continuum, o)
-        if o.get("source") == "TALLY":
-            note = await stale_sync_note(pool, str(o["tenant_id"]), now)
-            if note:
-                context = f"{context}\n{note}" if context and "No relevant state" not in context else note
-        card = reminder_card(t.owner_phone, o, draft_reminder(o, t.upi, app.state.settings.public_base_url),
-                             context, mode=app.state.settings.reminder_send_mode)
-        try:
-            await send_to_owner(app, t, card, kind="owner_reminder_card", obligation_id=o["id"])
-        except Exception:
-            log.exception("owner card send failed for obligation %s; will retry", o["id"])
-            await release_claim(pool, o, now)
-            continue
-        sent += 1
-    return sent
+    claimed = await claim_due(pool, now, limit=CLAIM_PER_TICK)
+    gate = asyncio.Semaphore(DRAFTS_AT_ONCE)
+    results = await asyncio.gather(*(_remind(app, pool, now, o, i < AGENT_DRAFTS_PER_TICK, gate, known)
+                                     for i, o in enumerate(claimed)), return_exceptions=True)
+    for r in results:
+        if isinstance(r, BaseException):
+            log.error("reminder step failed", exc_info=r)
+    return sum(1 for r in results if r is True)
+
+
+async def _remind(app, pool, now, o: dict, agent_draft: bool, gate: asyncio.Semaphore, known: dict) -> bool:
+    """One due invoice: ask the owner about it. At most AGENT_DRAFTS_PER_TICK of them per tick are drafted by the agent (it
+    reads memory for promises and disputes, 4-10 model calls each, a few at a time). The rest, and any the agent could not
+    draft, get the ready-made card at once: same amount, due date and UPI line, no model. So a morning with many shops'
+    reminders due costs seconds of waiting, not a queue of model calls that holds up everything else the scheduler does."""
+    tid = str(o["tenant_id"])
+    if tid not in known:
+        known[tid] = await tenants.by_id(pool, tid)
+    t = known[tid]
+    if t is None:
+        return False
+    if await wa_link.paused(pool, tid, app=app):    # the shop's own number is down: ask nothing until it is back
+        await release_claim(pool, o, now)
+        return False
+    if agent_draft and getattr(getattr(app.state, "llm", None), "enabled", False):
+        async with gate:
+            if await _agent_reminder(app, t, o):
+                return True
+    context = await state_card(app.state.continuum, o)
+    if o.get("source") == "TALLY":
+        note = await stale_sync_note(pool, str(o["tenant_id"]), now)
+        if note:
+            context = f"{context}\n{note}" if context and "No relevant state" not in context else note
+    card = reminder_card(t.owner_phone, o, draft_reminder(o, t.upi, app.state.settings.public_base_url),
+                         context, mode=app.state.settings.reminder_send_mode)
+    try:
+        await send_to_owner(app, t, card, kind="owner_reminder_card", obligation_id=o["id"])
+    except Exception:
+        log.exception("owner card send failed for obligation %s; will retry", o["id"])
+        await release_claim(pool, o, now)
+        return False
+    return True
 
 
 async def _agent_reminder(app, tenant, o: dict) -> bool:
@@ -134,10 +151,10 @@ async def run_forever(app) -> None:
     while True:
         try:
             now = datetime.now(timezone.utc)
-            await tick(app, now)
             local = now.astimezone(IST)
-            if digest_window_open(app.state.settings, now):
+            if digest_window_open(app.state.settings, now):      # quick and once a day: before the reminders, never behind them
                 await send_digests(app, local)
+            await tick(app, now)
         except Exception:
             log.exception("scheduler tick failed")
         await asyncio.sleep(app.state.settings.tick_seconds)
