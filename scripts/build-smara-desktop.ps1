@@ -141,6 +141,28 @@ try {
     Pop-Location
 }
 
+# Signing is optional for local builds. Release builds set SMARA_SIGN_THUMBPRINT (docs/WINDOWS_CODE_SIGNING.md).
+$signingThumbprint = ($env:SMARA_SIGN_THUMBPRINT -replace '\s', '')
+$tauriExtra = @()
+if ($signingThumbprint) {
+    $bundledExecutables = @(
+        (Join-Path $resourceDir 'smara-desktop.exe')
+        (Join-Path $resourceDir 'native\smara-native.exe')
+        (Join-Path $resourceDir 'native\codex-windows-sandbox-setup.exe')
+        (Join-Path $resourceDir 'native\codex-command-runner.exe')
+    )
+    # Bundled executors are signed before packaging, so the installed copies are trusted too.
+    & (Join-Path $PSScriptRoot 'sign-windows-files.ps1') -Files $bundledExecutables -Thumbprint $signingThumbprint
+    # Tauri signs the app executable and the installer itself when it gets the thumbprint.
+    $timestamp = if ($env:SMARA_SIGN_TIMESTAMP_URL) { $env:SMARA_SIGN_TIMESTAMP_URL } else { 'http://timestamp.digicert.com' }
+    $tauriSigning = @{ bundle = @{ windows = @{ certificateThumbprint = $signingThumbprint; digestAlgorithm = 'sha256'; timestampUrl = $timestamp } } }
+    $tauriSigningPath = Join-Path $env:TEMP 'smara-tauri-signing.json'
+    $tauriSigning | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $tauriSigningPath -Encoding utf8
+    $tauriExtra = @('--config', $tauriSigningPath)
+} else {
+    Write-Warning 'UNSIGNED build: SMARA_SIGN_THUMBPRINT is not set. Windows will show an unknown-publisher warning.'
+}
+
 Push-Location $appRoot
 try {
     npm ci
@@ -151,8 +173,13 @@ try {
     try { cargo check; Assert-NativeSuccess 'cargo check' } finally { Pop-Location }
     # NSIS is the supported beta distribution path on Windows. WiX/MSI is
     # optional and can fail on machines without a working light.exe install.
-    npm exec tauri build -- --bundles nsis
+    npm exec tauri build -- --bundles nsis $tauriExtra
     Assert-NativeSuccess 'Tauri package build'
+    if ($signingThumbprint) {
+        $installerBuilt = Get-ChildItem -Path (Join-Path $appRoot 'src-tauri\target\release\bundle\nsis') -Filter '*-setup.exe' |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        & (Join-Path $PSScriptRoot 'sign-windows-files.ps1') -Files @($installerBuilt.FullName) -Thumbprint $signingThumbprint -VerifyOnly
+    }
 } finally {
     Pop-Location
 }
