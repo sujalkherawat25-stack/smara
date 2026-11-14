@@ -18,7 +18,7 @@ from datetime import datetime, time, timedelta, timezone
 from src import clock
 from src.bridge.continuum import scope_user
 from src.bridge.outbox import enqueue
-from src.ingest.sheet_mapper import parse_phone
+from src.agent import names
 from src.loop.upi import rupees
 
 MAX_RUPEES = 100_000_000          # Rs 10 crore: an extra zero typed by mistake is refused, not recorded
@@ -59,9 +59,35 @@ async def _customer(conn, tenant_id: str, name) -> tuple[dict | None, str | None
     rows = exact or await (await conn.execute(
         "SELECT id, canonical_name FROM parties WHERE tenant_id = %s AND canonical_name ILIKE %s ESCAPE '\\' ORDER BY canonical_name LIMIT 6",
         (tenant_id, _like(name)))).fetchall()
+    if not rows:                                            # a spelling or hearing variant: Agrawal for Agarwal, Devanagari
+        allp = await (await conn.execute("SELECT id, canonical_name FROM parties WHERE tenant_id = %s LIMIT 5000",
+                                         (tenant_id,))).fetchall()
+        close = {n for n, _ in names.best(name, [p["canonical_name"] for p in allp])}
+        rows = [p for p in allp if p["canonical_name"] in close][:6]
     if len(rows) > 1:
         return None, "several customers match: " + "; ".join(r["canonical_name"] for r in rows) + ". Ask the owner which one."
     return (rows[0], None) if rows else (None, None)
+
+
+async def find_customer(app, ctx, args: dict) -> dict:
+    """Customers whose name is close to what the owner said or the voice note was heard as. Reads only."""
+    name = " ".join(str(args.get("name") or "").split())
+    if not name or len(name) > 120:
+        return {"error": "name must be 1 to 120 characters"}
+    async with app.state.pool.connection() as conn:
+        rows = await (await conn.execute("SELECT canonical_name, aliases FROM parties WHERE tenant_id = %s LIMIT 5000",
+                                         (ctx.tenant_id,))).fetchall()
+    scored = []
+    for r in rows:
+        s = max([names.score(name, r["canonical_name"])] + [names.score(name, a) for a in (r["aliases"] or [])])
+        if s >= 0.75:
+            scored.append((r["canonical_name"], round(s, 2)))
+    scored.sort(key=lambda t: (-t[1], t[0]))
+    out = [{"customer": n, "match": s} for n, s in scored[:6]]
+    if not out:
+        return {"found": 0, "note": "no customer in the ledger has a name like that; say so, do not guess"}
+    return {"found": len(out), "customers": out,
+            "note": "Use the customer's name exactly as listed. If more than one is listed and the best is not clearly ahead, ask the owner which."}
 
 
 async def _free_ref(conn, tenant_id: str, wanted) -> tuple[str | None, str | None]:
@@ -228,12 +254,34 @@ async def apply_payment(pool, tenant_id: str, plan: dict) -> dict:
 MAX_PHONE_ENTRIES = 50
 
 
+CONFIRM_TTL = timedelta(minutes=15)
+_pending: dict[tuple, tuple[datetime, int | None]] = {}      # (tenant, customer id, phone) -> (when shown, owner message id)
+
+
 def _phone(raw) -> str:
-    """A WhatsApp number in the importer's own form (91 + 10 digits), or '' if it is not one. A leading 0 is dropped."""
-    digits = re.sub(r"\D", "", str(raw or "").removesuffix(".0"))
-    if len(digits) == 11 and digits.startswith("0"):
+    """A WhatsApp number in the importer's own form (91 + 10 digits), or '' if it is not one. An Indian mobile has 10 digits
+    starting 6-9 (after an optional 0 or 91). Another country's number is accepted only with an explicit +."""
+    text = str(raw or "").strip().removesuffix(".0")
+    digits = re.sub(r"\D", "", text)
+    if text.startswith("+") and not digits.startswith("91"):
+        return digits if 8 <= len(digits) <= 15 and digits[0] != "0" else ""
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith("0"):
         digits = digits[1:]
-    return parse_phone(digits)
+    return "91" + digits if re.fullmatch(r"[6-9]\d{9}", digits) else ""
+
+
+def _spoken(phone: str) -> str:
+    """The number as digits in groups, for reading back."""
+    d = phone[2:] if phone.startswith("91") and len(phone) == 12 else phone
+    return " ".join([d[:5], d[5:]]) if len(d) == 10 else d
+
+
+async def _last_owner_message(conn, tenant_id: str) -> tuple[int | None, str | None]:
+    row = await (await conn.execute("SELECT id, kind FROM chat_messages WHERE tenant_id = %s AND role = 'owner' "
+                                    "ORDER BY id DESC LIMIT 1", (tenant_id,))).fetchone()
+    return (row["id"], row["kind"]) if row else (None, None)
 
 
 async def set_customer_phone(app, ctx, args: dict) -> dict:
@@ -248,6 +296,8 @@ async def set_customer_phone(app, ctx, args: dict) -> dict:
     own = re.sub(r"\D", "", tenant.owner_phone or "")
     results, saved = [], 0
     async with app.state.pool.connection() as conn:
+        msg_id, kind = await _last_owner_message(conn, ctx.tenant_id)
+        heard = kind == "voice"
         for e in entries:
             r = {"customer": str(e.get("customer") if isinstance(e, dict) else e)[:80]}
             results.append(r)
@@ -256,7 +306,8 @@ async def set_customer_phone(app, ctx, args: dict) -> dict:
                 continue
             phone = _phone(e.get("phone"))
             if not phone:
-                r["error"] = "not a valid mobile number (10 digits, or with the country code)"
+                r["error"] = ("not a valid Indian mobile number (10 digits starting 6, 7, 8 or 9). If it came from a voice note it was "
+                              "probably heard wrong: ask the owner to send it again or type it")
                 continue
             if own and phone == own:
                 r["error"] = "that is the owner's own number, not the customer's"
@@ -265,6 +316,13 @@ async def set_customer_phone(app, ctx, args: dict) -> dict:
             if err or not party:
                 r["error"] = err or "no customer by that name in the ledger"
                 continue
+            if heard:                      # a number heard in a voice note is read back first; saved only after the owner's next message
+                key, now = (ctx.tenant_id, str(party["id"]), phone), datetime.now(timezone.utc)
+                p = _pending.get(key)
+                if not (args.get("confirmed") is True and p and now - p[0] < CONFIRM_TTL and p[1] != msg_id):
+                    _pending[key] = (now, msg_id)
+                    r.update({"customer": party["canonical_name"], "needs_confirmation": True, "heard_number": _spoken(phone)})
+                    continue
             async with conn.transaction():
                 other = await (await conn.execute(
                     "SELECT canonical_name FROM parties WHERE tenant_id = %s AND whatsapp_phone = %s AND id <> %s",
@@ -276,9 +334,16 @@ async def set_customer_phone(app, ctx, args: dict) -> dict:
                                                  (party["id"], ctx.tenant_id))).fetchone())["whatsapp_phone"]
                 await conn.execute("UPDATE parties SET whatsapp_phone = %s WHERE id = %s AND tenant_id = %s",
                                    (phone, party["id"], ctx.tenant_id))
+            _pending.pop((ctx.tenant_id, str(party["id"]), phone), None)
             r.update({"customer": party["canonical_name"], "phone": phone})
             if old and old != phone:
                 r["replaced_number_ending"] = old[-4:]
             saved += 1
-    return {"saved": saved, "results": results,
-            "note": "Reminders to these customers still wait for the owner's approval; the owner sees the number on each card."}
+    out = {"saved": saved, "results": results,
+           "note": "Reminders to these customers still wait for the owner's approval; the owner sees the number on each card."}
+    if any(r.get("needs_confirmation") for r in results):
+        out["note"] = ("The number came from a voice note, so nothing is saved yet for the entries marked needs_confirmation. Read "
+                       "each heard_number back to the owner (customer and digits) and ask them to confirm or say it again. When they "
+                       "confirm in their next message, call set_customer_phone again with the same entries and confirmed: true. "
+                       "If they give a different number, use that one instead.")
+    return out

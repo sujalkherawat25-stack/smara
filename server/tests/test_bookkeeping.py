@@ -219,3 +219,63 @@ async def test_another_shops_customers_are_not_reachable_and_customer_sessions_c
 async def test_entries_must_be_a_sensible_list(env):
     r = await phones(env)                                                                         # empty
     assert "1 to 50" in r["error"]
+
+
+# ------------------------------------------------------------------- strict numbers, voice read-back, spelling variants
+
+@pytest.mark.parametrize("raw,want", [
+    ("9811144444", "919811144444"), ("98111 44444", "919811144444"), ("+91-98111-44444", "919811144444"),
+    ("919811144444", "919811144444"), ("09811144444", "919811144444"), ("9811144444.0", "919811144444"),
+    ("+44 7911 123456", "447911123456"),
+    ("98111444445", ""), ("981114444", ""), ("5811144444", ""), ("12345", ""), ("", ""), ("+0123456789", ""),
+    ("91981114444", ""), ("9198111444444", ""),
+])
+def test_only_real_indian_mobiles_are_accepted(raw, want):
+    assert bookkeeping._phone(raw) == want
+
+
+def test_spelling_and_script_variants_of_a_name_match():
+    from src.agent import names
+    ledger_names = ["Agarwal Agencies", "Gupta Traders", "Chopra Sons", "Dutta Agencies"]
+    for q, want in [("Agrawal", "Agarwal Agencies"), ("Aggarwal Agency", "Agarwal Agencies"), ("अग्रवाल", "Agarwal Agencies"),
+                    ("गुप्ता", "Gupta Traders"), ("Chopra", "Chopra Sons"), ("Dutta", "Dutta Agencies")]:
+        assert [n for n, _ in names.best(q, ledger_names)][:1] == [want], q
+    assert names.best("Kumar Brothers", ledger_names) == []
+
+
+async def test_a_customer_is_found_by_a_variant_spelling_and_the_lookup_tool_lists_close_names(env):
+    await import_rows(env.pool, env.t.id, [SheetRow("Agarwal Agencies", "", "A-1", 100, date(2026, 9, 11)),
+                                           SheetRow("Gupta Traders", "", "G-1", 100, date(2026, 9, 11))])
+    ctx = SessionCtx("s", env.t.id, "TRUSTED")
+    r = await bookkeeping.find_customer(env.app, ctx, {"name": "अग्रवाल"})
+    assert r["customers"][0]["customer"] == "Agarwal Agencies"
+    assert (await bookkeeping.find_customer(env.app, ctx, {"name": "Kumar"}))["found"] == 0
+    r = await phones(env, {"customer": "Agrawal", "phone": "9811144444"})
+    assert r["saved"] == 1 and r["results"][0]["customer"] == "Agarwal Agencies", r
+    assert pre_tool_use(SessionCtx("s", "t", "TRUSTED"), "find_customer", {"name": "x"}, TOOL_NAMES).verdict == "allow"
+
+
+async def test_a_number_heard_in_a_voice_note_is_read_back_and_saved_only_after_the_owner_confirms(env):
+    from src import chatlog
+    ctx = SessionCtx("s", env.t.id, "TRUSTED")
+    entries = [{"customer": "Ravi", "phone": "9811144444"}]
+    await chatlog.record(env.pool, env.t.id, "whatsapp", "owner", "Ravi ka number 9811144444", kind="voice", ref="v1")
+    r = await bookkeeping.set_customer_phone(env.app, ctx, {"entries": entries})
+    assert r["saved"] == 0 and r["results"][0]["needs_confirmation"] and r["results"][0]["heard_number"] == "98111 44444"
+    assert await party_phone(env, "Ravi") == DEBTOR
+    r = await bookkeeping.set_customer_phone(env.app, ctx, {"entries": entries, "confirmed": True})      # same message: refused
+    assert r["saved"] == 0 and await party_phone(env, "Ravi") == DEBTOR
+    await chatlog.record(env.pool, env.t.id, "whatsapp", "owner", "haan sahi hai", kind="voice", ref="v2")
+    r = await bookkeeping.set_customer_phone(env.app, ctx, {"entries": [{"customer": "Ravi", "phone": "9811144445"}], "confirmed": True})
+    assert r["saved"] == 0 and r["results"][0]["needs_confirmation"]                                   # a different number is new
+    r = await bookkeeping.set_customer_phone(env.app, ctx, {"entries": entries, "confirmed": True})
+    assert r["saved"] == 1 and await party_phone(env, "Ravi") == "919811144444"
+
+
+async def test_a_typed_number_is_saved_at_once_even_after_a_voice_note(env):
+    from src import chatlog
+    await chatlog.record(env.pool, env.t.id, "whatsapp", "owner", "voice", kind="voice", ref="v1")
+    await chatlog.record(env.pool, env.t.id, "whatsapp", "owner", "Ravi ka number 9811144444", kind="text", ref="t1")
+    r = await bookkeeping.set_customer_phone(env.app, SessionCtx("s", env.t.id, "TRUSTED"),
+                                             {"entries": [{"customer": "Ravi", "phone": "9811144444"}]})
+    assert r["saved"] == 1
