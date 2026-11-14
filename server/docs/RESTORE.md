@@ -5,71 +5,81 @@ Two copies of the database exist:
 | Copy | Where | When | Encrypted | Kept |
 |---|---|---|---|---|
 | Local dump | `/var/backups/smara` on the Oracle VM (`smara-backup` cron, 02:45 UTC) | nightly | no (root-only, mode 600) | 7 days |
-| **Off-server copy** | Cloudflare R2 bucket `smara-offsite-backups` (see below) | 21:15 UTC = 02:45 IST nightly | **yes, GPG** | 14 daily + 8 weekly |
+| **Off-server copy** | Owner's PC: `C:\Users\sujal\smara-offsite-archive\` (pulled daily) | 21:15 UTC on the server, pulled 09:00 IST | **yes, GPG** | 14 daily + 8 weekly |
 
-The local dump does not protect against losing the VM. The off-server copy does.
+The local dump does not protect against losing the VM. The off-server copy does, because it is on a different machine.
+This is the interim setup. An S3-compatible bucket (Backblaze B2 or Cloudflare R2) can replace the PC pull later: set `OFFSITE_MODE=rclone` in `/etc/smara-offsite/offsite.env` and run `rclone` with a root-only remote.
 
 ## What runs where
 
-- `/usr/local/bin/smara-offsite-backup.sh` (from `server/deploy/offsite-backup.sh`): dumps the DB, encrypts it to the backup **public** key, uploads it, verifies the size, prunes old copies, and sends a Telegram alert to the ops chat on failure.
-- `/etc/cron.d/smara-offsite-backup` (from `server/deploy/smara-offsite-backup.cron`): runs the script as root with `flock`.
-- `/etc/smara-offsite/offsite.env` (root-only): remote path and key fingerprint. Template: `server/deploy/offsite.env.example`.
-- `/root/.config/rclone/rclone.conf` (root-only): R2 credentials. Never in git.
-- `/var/log/smara-offsite-backup.log`: run log. Rotated weekly by `/etc/logrotate.d/smara-offsite-backup`.
-- `/var/lib/smara-offsite/last_success`: timestamp of the last successful run.
-- The **private** key is not on the server. It is kept offline by the owner.
+**Oracle VM (server)**
+- `/usr/local/bin/smara-offsite-backup.sh` (from `server/deploy/offsite-backup.sh`): dumps the DB read-only (`pg_dump` inside `smara_postgres`), gzips, encrypts to the backup **public** key, and leaves the file in `/home/ubuntu/smara-offsite-outbox/` with a SHA-256 sidecar. It keeps unpulled files for 30 days. It alerts the ops Telegram chat on failure.
+- `/etc/cron.d/smara-offsite-backup`: runs it nightly at 21:15 UTC (02:45 IST), under `flock`.
+- `/etc/smara-offsite/offsite.env` (root-only): key fingerprint and mode. Template: `server/deploy/offsite.env.example`.
+- `/etc/logrotate.d/smara-offsite-backup`; log: `/var/log/smara-offsite-backup.log`; last success: `/var/lib/smara-offsite/last_success`.
+- The server holds only the public key. It cannot decrypt the backups.
+
+**Owner's PC (this machine)**
+- `C:\Users\sujal\smara-offsite\pull-offsite.sh` (from `server/deploy/pc/pull-offsite.sh`): runs daily at 09:00 local through Windows Task Scheduler task `SmaraOffsitePull`. It downloads each waiting backup over the existing SSH key, checks the SHA-256 against the server's, moves it into the archive, and only then deletes the server copy. It keeps 14 daily and 8 weekly copies locally, and sends a Telegram alert on failure.
+- `C:\Users\sujal\smara-offsite-archive\`: the encrypted archive and `pull.log`.
+- The **private** key is kept offline by the owner. Do not leave it in the archive folder.
 
 ## Check that backups are landing
 
+On the server:
 ```bash
-sudo tail -20 /var/log/smara-offsite-backup.log
+sudo tail -5 /var/log/smara-offsite-backup.log
 sudo cat /var/lib/smara-offsite/last_success
 ```
 
-A line `ok smara_<stamp>.sql.gz.gpg size=...B remote=...B` means the copy was uploaded and its size matched.
+On the PC:
+```bash
+tail -5 "$HOME/smara-offsite-archive/pull.log"
+```
+A line `archived smara_<stamp>.sql.gz.gpg ... sha256=...` means the copy is in the archive and matches the server.
+
+Run the pull once by hand, if needed:
+```bash
+bash "$HOME/smara-offsite/pull-offsite.sh"
+```
 
 ## Restore the newest off-server copy (on a PC, never on the server)
 
-Prerequisites: `gpg`, `rclone` and Docker. The private key `smara-offsite-PRIVATE.asc` is imported into a dedicated keyring.
+Prerequisites: `gpg`, Docker, and the **private** key `smara-offsite-PRIVATE.asc` in a dedicated keyring.
 
-1. Install rclone and configure a remote named `r2` with the same R2 credentials (or use the R2 dashboard to download the file).
-2. List the copies and take the newest:
+1. Pick the newest archived file:
    ```bash
-   rclone lsf --format "tsp" r2:smara-offsite-backups/ | sort -r | head -5
+   ls -1 "$HOME/smara-offsite-archive" | grep '^smara_' | sort -r | head -3
    ```
-3. Download it to an empty folder:
+2. Import the private key into a dedicated keyring. Then run the restore check. It decrypts the file, starts a throwaway `postgres:16-alpine` container on `127.0.0.1:25433`, creates any roles the dump's GRANTs reference, restores, and prints the four row counts. It never touches `smara_postgres`.
    ```bash
-   mkdir -p ~/smara-restore && rclone copyto r2:smara-offsite-backups/smara_YYYYMMDD_HHMMSS.sql.gz.gpg ~/smara-restore/backup.sql.gz.gpg
-   ```
-4. Import the private key into a dedicated keyring and run the restore check. It decrypts, starts a throwaway `postgres:16-alpine` container on `127.0.0.1:25433`, restores, and prints row counts. It never touches `smara_postgres`.
-   ```bash
-   export GNUPGHOME=~/smara-restore/gnupg && mkdir -p -m 700 "$GNUPGHOME"
+   export GNUPGHOME="$HOME/smara-restore-gnupg" && mkdir -p -m 700 "$GNUPGHOME"
    gpg --batch --import /path/to/smara-offsite-PRIVATE.asc
-   bash server/deploy/restore-check.sh ~/smara-restore/backup.sql.gz.gpg
+   bash server/deploy/restore-check.sh "$HOME/smara-offsite-archive/smara_YYYYMMDD_HHMMSS.sql.gz.gpg"
    ```
-5. Compare the four counts (`tenants`, `parties`, `obligations`, `chat_messages`) with production:
+3. Compare `tenants`, `parties`, `obligations` and `chat_messages` with production:
    ```bash
-   sudo docker exec smara_postgres psql -U smara -d smara -tA -c "select count(*) from tenants"
+   ssh -i <key> ubuntu@140.245.251.13 "sudo docker exec smara_postgres psql -U smara -d smara -tA -c 'select count(*) from tenants'"
    ```
-   The dump was taken at 21:15 UTC, so production counts can be higher if messages arrived later. Compare against the time of the dump.
+   The counts can differ if data arrived after the dump. Compare against the dump time.
 
 ## Restore into production (disaster only)
 
-Do this only with the owner present. Stop the app first (`docker compose ... stop smara_app`), keep the damaged volume, restore into a new database, then point the app at it. Never overwrite `smara_pgdata` without a copy of it.
+Do this only with the owner present. Keep the damaged volume, restore into a new database, then point the app at it. Never overwrite `smara_pgdata` without a copy.
 
 ```bash
-# on the server, after the decrypted file is at /root/restore/db.sql.gz (never leave it there)
-gunzip -c /root/restore/db.sql.gz | docker exec -i smara_postgres psql -U smara -d postgres -c "create database smara_restored"
+# on the server, with the decrypted dump at /root/restore/db.sql.gz (delete it afterwards)
+docker exec smara_postgres psql -U smara -d postgres -c "create database smara_restored"
 gunzip -c /root/restore/db.sql.gz | docker exec -i smara_postgres psql -U smara -d smara_restored -v ON_ERROR_STOP=1
 ```
+Roles referenced by the dump's GRANTs (for example `smara_agent_ro`) must exist first; the restore check shows how.
 
 ## Key rotation
 
-1. Generate a new GPG key pair offline (`gpg --quick-gen-key "smara-offsite-backup" rsa4096 encrypt never`).
-2. Export only the **public** key and import it on the server (`gpg --import`), then set `GPG_RECIPIENT` in `/etc/smara-offsite/offsite.env` to the new fingerprint.
-3. Run `sudo /usr/local/bin/smara-offsite-backup.sh` once and confirm the new file restores with the new private key.
-4. Keep the old private key until the copies encrypted with it are pruned (14 days for daily, 8 Sundays for weekly), then destroy it.
+1. Generate a new GPG key pair offline: `gpg --quick-gen-key "smara-offsite-backup" rsa4096 encrypt never`.
+2. Import only the new **public** key on the server, set `GPG_RECIPIENT` in `/etc/smara-offsite/offsite.env`, and run `sudo /usr/local/bin/smara-offsite-backup.sh` once.
+3. Check that the new file restores with the new private key, then keep the old private key until the old copies are pruned (14 daily, 8 weekly), and then destroy it.
 
 ## Losing the private key
 
-Old copies become unreadable. This is why the private key must be stored in two offline places (for example a password manager and a USB drive kept elsewhere).
+Old copies become unreadable. Store the private key in two offline places, for example a password manager and a USB drive kept elsewhere.

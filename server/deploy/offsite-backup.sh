@@ -3,12 +3,17 @@
 #   dump (inside smara_postgres, read-only) -> gzip -> gpg encrypt to the PUBLIC key -> copy to R2 -> verify size -> retention.
 # Installed on the Oracle host as /usr/local/bin/smara-offsite-backup.sh, run by /etc/cron.d/smara-offsite-backup (root).
 # The server never holds a private key: old backups cannot be decrypted with server files alone. See server/docs/RESTORE.md.
-# Config (root-only, not in git): /etc/smara-offsite/offsite.env  -> OFFSITE_DEST, GPG_RECIPIENT, optional RCLONE_CONFIG.
+# Config (root-only, not in git): /etc/smara-offsite/offsite.env  -> GPG_RECIPIENT, OFFSITE_MODE, OFFSITE_DEST (rclone mode only).
+# OFFSITE_MODE=outbox (current): the encrypted file is left in OUTBOX_DIR for the PC pull job (server/deploy/pc/pull-offsite.sh) to fetch and verify.
+# OFFSITE_MODE=rclone (for an S3-compatible bucket such as B2 or R2): uploads with rclone and prunes the bucket here.
 # Alerts: TELEGRAM_BOT_TOKEN and OPS_TELEGRAM_CHAT_ID are read from the app .env; values are never printed.
 set -euo pipefail
 CONF=${OFFSITE_CONF:-/etc/smara-offsite/offsite.env}
 if [ -r "$CONF" ]; then . "$CONF"; fi
-: "${OFFSITE_DEST:?OFFSITE_DEST not set (rclone remote path, e.g. r2:smara-offsite-backups)}"
+OFFSITE_MODE=${OFFSITE_MODE:-outbox}
+OUTBOX_DIR=${OUTBOX_DIR:-/home/ubuntu/smara-offsite-outbox}
+OUTBOX_KEEP_DAYS=${OUTBOX_KEEP_DAYS:-30}
+if [ "$OFFSITE_MODE" = rclone ]; then : "${OFFSITE_DEST:?OFFSITE_DEST not set (rclone remote, e.g. b2:smara-offsite-backups)}"; fi
 : "${GPG_RECIPIENT:?GPG_RECIPIENT not set (fingerprint of the backup public key)}"
 APP_ENV=${APP_ENV:-/home/ubuntu/smara/.env}
 DAILY_KEEP=${DAILY_KEEP:-14}
@@ -52,6 +57,20 @@ STEP=encrypt
 gpg --batch --yes --trust-model always --recipient "$GPG_RECIPIENT" --output "$WORK/$name" --encrypt "$WORK/db.sql.gz"
 rm -f "$WORK/db.sql.gz"
 local_bytes=$(stat -c %s "$WORK/$name")
+
+if [ "$OFFSITE_MODE" = outbox ]; then
+  STEP=outbox
+  install -d -o ubuntu -g ubuntu -m 700 "$OUTBOX_DIR"
+  install -o ubuntu -g ubuntu -m 600 "$WORK/$name" "$OUTBOX_DIR/$name"
+  sha256sum "$WORK/$name" | awk '{print $1}' > "$WORK/sha"
+  install -o ubuntu -g ubuntu -m 600 "$WORK/sha" "$OUTBOX_DIR/$name.sha256"
+  [ "$(stat -c %s "$OUTBOX_DIR/$name")" = "$local_bytes" ] || { echo "outbox size mismatch"; exit 1; }
+  # Unpulled files older than OUTBOX_KEEP_DAYS are dropped; the PC archive is the long-term copy.
+  find "$OUTBOX_DIR" -name 'smara_*.sql.gz.gpg*' -mtime +"$OUTBOX_KEEP_DAYS" -print -delete | sed 's/^/[smara-offsite] pruned unpulled /' || true
+  echo "$stamp" > "$STATE_DIR/last_success"
+  echo "[smara-offsite] $(date -u +%FT%TZ) ok $name size=${local_bytes}B mode=outbox"
+  exit 0
+fi
 
 STEP=upload
 "$RCLONE" copyto --checksum "$WORK/$name" "$OFFSITE_DEST/$name"
