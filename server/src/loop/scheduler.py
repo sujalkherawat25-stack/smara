@@ -2,7 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from src import clock, tenants
+from src import clock, health_watch, tenants
 from src.bridge.outbox import drain
 from src.ingest import owner_files
 from src.loop import wa_link
@@ -33,6 +33,10 @@ async def tick(app, now: datetime) -> int:
         await asyncio.to_thread(owner_files.purge_due, app.state.settings.owner_files_dir, now)
     except Exception:
         log.exception("owner file purge pass failed")
+    try:                                  # the hourly error report to the Smara team (no tokens; holds itself at night)
+        await health_watch.report_due(app, now)
+    except Exception:
+        log.warning("health report pass failed")
     if clock.is_quiet(app.state.settings, now):
         return 0          # nothing proactive at night: reminders wait, tasks wait, cards stay held
     try:

@@ -14,6 +14,16 @@ def reminder_mode(raw: str) -> str:
     return value if value in ("own", "smara") else "own"
 
 
+def pc_allowed(settings, tenant_id) -> bool:
+    """True if this shop may use its paired PC for browsing and the PC folder (PC_BROWSER_TENANTS)."""
+    if settings is None:
+        return True                                   # no settings at all: a bare test app
+    raw = str(getattr(settings, "pc_browser_tenants", "") or "").strip()
+    if raw == "*":
+        return True
+    return str(tenant_id or "").lower() in {t.strip().lower() for t in raw.split(",") if t.strip()}
+
+
 def _chat_id(raw: str) -> int | None:
     """A Telegram chat id (a number, possibly negative for groups). Blank or not a number means not set."""
     try:
@@ -45,6 +55,10 @@ class Settings:
     # How a reminder reaches the customer after the owner taps Send: "own" = the owner sends it from their own
     # WhatsApp via a wa.me link (no template or shared-number dependency); "smara" = from Smara's number
     reminder_send_mode: str = "own"
+    # Shops that may use a PC browser and PC folder through a paired PC (comma-separated shop ids, or * for every shop).
+    # Until Smara Desktop is released, everyone else browses with Smara's cloud browser and is never asked to pair a PC.
+    # A bare Settings() (tests, local runs) allows every shop; production reads PC_BROWSER_TENANTS, where unset means none.
+    pc_browser_tenants: str = "*"
     # Approved template that tells the owner "N items waiting" when their 24h window is closed
     wa_owner_template: str = ""
     telegram_bot_token: str = ""
@@ -126,6 +140,7 @@ def load_settings() -> Settings:
         wa_reminder_params=env.get("WA_REMINDER_PARAMS", "customer,invoice,amount,due"),
         wa_owner_template=env.get("WA_OWNER_TEMPLATE", ""),
         reminder_send_mode=reminder_mode(env.get("REMINDER_SEND_MODE", "own")),
+        pc_browser_tenants=env.get("PC_BROWSER_TENANTS", ""),
         telegram_bot_token=env.get("TELEGRAM_BOT_TOKEN", ""),
         sandbox_mode=env.get("SANDBOX_MODE", "local"),
         sandbox_jobs_dir=env.get("SANDBOX_JOBS_DIR", "./data/sandbox-jobs"),

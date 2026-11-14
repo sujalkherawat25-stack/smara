@@ -94,7 +94,7 @@ def tier_of(name: str, args: dict) -> str:
                 "build_payment_request", "list_followups", "web_search", "read_attachment", "make_document", "load_skill",
                 "search_chat_history", "gst_reconcile", "find_customer"):
         return "T0"
-    if name in ("schedule_followup", "cancel_followup", "send_file_to_owner", "set_customer_phone"):
+    if name in ("schedule_followup", "cancel_followup", "send_file_to_owner", "set_customer_phone", "set_reply_style"):
         return "T1"
     if name == "inspect_and_import_file":
         return "T1" if args.get("mode") == "import" else "T0"
@@ -153,6 +153,8 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
     if name in ("record_sale", "record_payment") and ctx.trust != "TRUSTED":
         return Decision("deny", tier, "only a conversation with the owner can write to the books; a customer's message or a "
                                       "scheduled job can only propose an adjustment")
+    if name == "set_reply_style" and ctx.trust != "TRUSTED":
+        return Decision("deny", tier, "only the owner can change how Smara answers them")
     if name == "set_customer_phone" and ctx.trust != "TRUSTED":
         return Decision("deny", tier, "only the owner can give a customer's number; a customer's message or a scheduled job "
                                       "cannot change who a message is sent to")

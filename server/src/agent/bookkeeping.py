@@ -278,6 +278,46 @@ def _spoken(phone: str) -> str:
     return " ".join([d[:5], d[5:]]) if len(d) == 10 else d
 
 
+_DIGIT_WORDS = {
+    **{w: "0" for w in ("zero", "shunya", "sifar", "शून्य", "ज़ीरो", "जीरो", "सिफ़र")},
+    **{w: "1" for w in ("one", "ek", "एक")}, **{w: "2" for w in ("two", "do", "दो")},
+    **{w: "3" for w in ("three", "teen", "तीन")}, **{w: "4" for w in ("four", "char", "chaar", "चार")},
+    **{w: "5" for w in ("five", "paanch", "panch", "पांच", "पाँच")}, **{w: "6" for w in ("six", "chhe", "chhah", "छह", "छः", "छै")},
+    **{w: "7" for w in ("seven", "saat", "सात")}, **{w: "8" for w in ("eight", "aath", "आठ")},
+    **{w: "9" for w in ("nine", "nau", "नौ")},
+}
+_REPEAT = {"double": 2, "डबल": 2, "triple": 3, "ट्रिपल": 3}
+
+
+def heard_digits(text: str) -> tuple[str, list[str]]:
+    """The digits in what speech-to-text heard, in order: written digits (also Devanagari ०-९), spoken digit words in Hindi
+    or English, and 'double 4' / 'डबल चार'. Returns (all digits joined, the separate runs of digits said one after another)."""
+    text = str(text or "").translate(str.maketrans("०१२३४५६७८९", "0123456789")).lower()
+    runs, cur, repeat = [], "", 1
+    for tok in re.findall(r"[0-9]+|[^\s\d.,;:!?।()\"'+\-/]+", text):     # words by spaces: Hindi vowel signs are not \w
+        if tok in _REPEAT:
+            repeat = _REPEAT[tok]
+            continue
+        d = tok if tok.isdigit() else _DIGIT_WORDS.get(tok)
+        if d is None:
+            if cur:
+                runs.append(cur)
+            cur, repeat = "", 1
+            continue
+        cur += d * repeat if len(d) == 1 else d
+        repeat = 1
+    if cur:
+        runs.append(cur)
+    return "".join(runs), runs
+
+
+async def _recent_voice_text(conn, tenant_id: str) -> str:
+    rows = await (await conn.execute(
+        "SELECT content FROM chat_messages WHERE tenant_id = %s AND role = 'owner' AND kind = 'voice' "
+        "AND created_at > now() - interval '15 minutes' ORDER BY id DESC LIMIT 3", (tenant_id,))).fetchall()
+    return "\n".join(r["content"] for r in rows)
+
+
 async def _last_owner_message(conn, tenant_id: str) -> tuple[int | None, str | None]:
     row = await (await conn.execute("SELECT id, kind FROM chat_messages WHERE tenant_id = %s AND role = 'owner' "
                                     "ORDER BY id DESC LIMIT 1", (tenant_id,))).fetchone()
@@ -320,8 +360,16 @@ async def set_customer_phone(app, ctx, args: dict) -> dict:
                 key, now = (ctx.tenant_id, str(party["id"]), phone), datetime.now(timezone.utc)
                 p = _pending.get(key)
                 if not (args.get("confirmed") is True and p and now - p[0] < CONFIRM_TTL and p[1] != msg_id):
+                    national = phone[2:] if phone.startswith("91") and len(phone) == 12 else phone
+                    joined, runs = heard_digits(await _recent_voice_text(conn, ctx.tenant_id))
+                    if national not in joined and not any(national in run for run in runs):
+                        r["error"] = (f"{_spoken(phone)} is not the number in the voice note: the digits heard were "
+                                      f"{' '.join(runs) or 'none'}. Never add, drop or change a digit. Tell the owner exactly "
+                                      "what was heard and ask them to say the number again slowly, or type it")
+                        continue
                     _pending[key] = (now, msg_id)
-                    r.update({"customer": party["canonical_name"], "needs_confirmation": True, "heard_number": _spoken(phone)})
+                    r.update({"customer": party["canonical_name"], "needs_confirmation": True, "heard_number": _spoken(phone),
+                              "_party_id": str(party["id"]), "_phone": phone})
                     continue
             async with conn.transaction():
                 other = await (await conn.execute(
@@ -341,9 +389,75 @@ async def set_customer_phone(app, ctx, args: dict) -> dict:
             saved += 1
     out = {"saved": saved, "results": results,
            "note": "Reminders to these customers still wait for the owner's approval; the owner sees the number on each card."}
-    if any(r.get("needs_confirmation") for r in results):
-        out["note"] = ("The number came from a voice note, so nothing is saved yet for the entries marked needs_confirmation. Read "
-                       "each heard_number back to the owner (customer and digits) and ask them to confirm or say it again. When they "
-                       "confirm in their next message, call set_customer_phone again with the same entries and confirmed: true. "
-                       "If they give a different number, use that one instead.")
+    heard_rows = [r for r in results if r.get("needs_confirmation")]
+    if heard_rows:
+        sent = await _confirm_card(app, ctx, tenant, heard_rows)
+        out["note"] = (
+            "The number came from a voice note, so nothing is saved yet for the entries marked needs_confirmation. "
+            + ("Smara has sent the owner a card that shows the exact digits with 'Haan, save karo' and 'Nahi' buttons; their tap "
+               "saves it. Do NOT write the number again yourself; say in one short line that you have asked them to check it. "
+               if sent else
+               "Read each heard_number back to the owner exactly as given here, digit for digit, and ask them to confirm. ")
+            + "If they confirm by message instead, call set_customer_phone again with the same entries and confirmed: true. "
+              "If they give a different number, use that one.")
     return out
+
+
+PHONE_CARDS: dict[str, tuple[datetime, str, list[dict]]] = {}     # token -> (when, tenant, [{party_id, customer, phone}])
+
+
+async def _confirm_card(app, ctx, tenant, rows: list[dict]) -> bool:
+    """The read-back of a number heard in a voice note, written by Smara (not the model), with Yes/No buttons."""
+    import secrets
+    from src.loop.owner_channel import send_to_owner
+    token = secrets.token_urlsafe(8)
+    items = [{"party_id": r["_party_id"], "customer": r["customer"], "phone": r.pop("_phone")} for r in rows]
+    for r in rows:
+        r.pop("_party_id", None)
+    lines = "\n".join(f"• {i['customer']}: *{_spoken(i['phone'])}*" for i in items)
+    body = (f"Voice note mein ye number suna:\n{lines}\n\nSahi hai to save kar dun? Galat ho to 'Nahi' dabakar number "
+            "dobara boliye ya type kijiye.")
+    card = {"messaging_product": "whatsapp", "to": tenant.owner_phone, "type": "interactive", "interactive": {
+        "type": "button", "body": {"text": body[:1000]}, "action": {"buttons": [
+            {"type": "reply", "reply": {"id": f"phone_ok:{token}", "title": "Haan, save karo"}},
+            {"type": "reply", "reply": {"id": f"phone_no:{token}", "title": "Nahi"}}]}}}
+    PHONE_CARDS[token] = (datetime.now(timezone.utc), ctx.tenant_id, items)
+    try:
+        await send_to_owner(app, tenant, card, kind="owner_text")
+    except Exception:
+        PHONE_CARDS.pop(token, None)
+        return False
+    return True
+
+
+async def decide_phone_card(app, tenant_id: str, token: str, ok: bool) -> str:
+    """The owner tapped the confirmation card of a heard number."""
+    entry = PHONE_CARDS.pop(token, None)
+    if not entry or entry[1] != tenant_id or datetime.now(timezone.utc) - entry[0] > CONFIRM_TTL:
+        return "Ye card purana ho gaya. Number dobara bhejiye."
+    if not ok:
+        return "Theek hai, save nahi kiya. Number dobara boliye (dheere) ya type kar dijiye."
+    from src import tenants
+    tenant = await tenants.by_id(app.state.pool, tenant_id)
+    own = re.sub(r"\D", "", tenant.owner_phone or "")
+    done = []
+    async with app.state.pool.connection() as conn:
+        for i in entry[2]:
+            if own and i["phone"] == own:
+                done.append(f"• {i['customer']}: ye aapka apna number hai, save nahi kiya")
+                continue
+            err = await _save_phone(conn, tenant_id, i["party_id"], i["phone"])
+            done.append(f"• {i['customer']}: {err}" if err else f"• {i['customer']}: {_spoken(i['phone'])} save ho gaya")
+    return "\n".join(done)
+
+
+async def _save_phone(conn, tenant_id: str, party_id: str, phone: str) -> str | None:
+    """Save one number; the reason it was not saved, or None."""
+    async with conn.transaction():
+        other = await (await conn.execute(
+            "SELECT canonical_name FROM parties WHERE tenant_id = %s AND whatsapp_phone = %s AND id <> %s",
+            (tenant_id, phone, party_id))).fetchone()
+        if other:
+            return f"ye number pehle se {other['canonical_name']} ka hai, save nahi kiya"
+        await conn.execute("UPDATE parties SET whatsapp_phone = %s WHERE id = %s AND tenant_id = %s", (phone, party_id, tenant_id))
+    return None

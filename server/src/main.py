@@ -16,6 +16,8 @@ from src.ingest.telegram import TelegramClient
 from src.ingest.telegram import router as telegram_router
 from src.ingest.webhook import router
 from src.bridge.device import BrowserRouter
+from src.config import pc_allowed
+from src import health_watch
 from src.bridge.device_api import router as device_router
 from src.box.browser_session import BrowserSessions
 from src.box.sandbox import Sandbox
@@ -24,6 +26,19 @@ from src.loop.pay import router as pay_router
 from src.loop.scheduler import run_forever
 from src.loop.whatsapp import WhatsAppClient
 from src.loop.wa_link import SidecarClient
+
+
+TELEGRAM_MENU = [("help", "What Smara can do"), ("style", "Reply language and length"), ("digest", "Today's summary"),
+                 ("files", "Files you sent")]
+
+
+async def _telegram_menu(tg) -> None:
+    """The '/' menu in Telegram. Best effort: a failure only means the menu is missing."""
+    try:
+        await tg.set_commands(TELEGRAM_MENU)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).info("telegram command menu not set")
 
 
 @asynccontextmanager
@@ -42,9 +57,12 @@ async def lifespan(app: FastAPI):
                         agent_rpm=s.llm_agent_rpm, fallback_model=s.llm_fallback_model,
                         api_keys=s.llm_keys())
     app.state.bg = set()
-    app.state.browsers = BrowserRouter(app.state.pool, BrowserSessions())   # the owner's own device first, else the server browser
+    app.state.browsers = BrowserRouter(app.state.pool, BrowserSessions(), pc_allowed=lambda t: pc_allowed(s, t))   # the owner's own device first, else the server browser
     app.state.sandbox = Sandbox(s.sandbox_jobs_dir, s.sandbox_mode)
     app.state.tg = TelegramClient(s.telegram_bot_token) if s.telegram_bot_token else None
+    health_watch.install()                 # counts logged exceptions for the hourly ops report
+    if app.state.tg is not None:
+        app.state.bg.add(asyncio.create_task(_telegram_menu(app.state.tg)))
     ticker = asyncio.create_task(run_forever(app))
     yield
     ticker.cancel()

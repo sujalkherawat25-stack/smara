@@ -12,6 +12,9 @@ from src.agent.policy import SessionCtx
 
 async def _device_online(app, ctx: SessionCtx):
     from src.bridge.device import reachable_device
+    from src.config import pc_allowed
+    if not pc_allowed(app.state.settings, ctx.tenant_id):
+        return None
     try:
         return await reachable_device(app.state.pool, ctx.tenant_id)
     except Exception:
@@ -116,6 +119,11 @@ async def web_search(app, ctx: SessionCtx, args: dict) -> dict:
     finally:
         await browsers.close(sid)
     from src.bridge.device import offline_note, paired_device, reachable_device
+    from src.config import pc_allowed
+    if not pc_allowed(app.state.settings, ctx.tenant_id):
+        return {"error": f"search did not work: {last_error[:200]}.",
+                "next": "Smara's cloud browser could not read search results just now. Try other words, or open a site you "
+                        "know directly with browser_step navigate. Do not suggest pairing a PC or Smara Desktop."}
     try:
         if used_device:
             note = ("The owner's PC browser opened the search pages, but they returned no readable result links. "

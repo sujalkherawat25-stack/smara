@@ -6,6 +6,7 @@
   approved "N items waiting" template, and re-send held cards when the owner replies.
 Builders produce WhatsApp payloads; Telegram gets a translation of the same card.
 """
+import asyncio
 import logging
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
@@ -96,13 +97,41 @@ def pick_channel(app, tenant, now: datetime, reply_channel: str | None = None) -
 
 def wa_to_telegram(payload: dict, chat_id: int) -> dict:
     """Telegram gets the same text as WhatsApp, with the marks turned into Telegram's HTML."""
-    from src.loop.wa_format import to_telegram_html
+    from src.loop.wa_format import wa_to_html
     if payload.get("type") == "interactive":
         it = payload["interactive"]
         rows = [[{"text": b["reply"]["title"], "callback_data": b["reply"]["id"]}] for b in it["action"]["buttons"]]
-        return {"chat_id": chat_id, "text": to_telegram_html(it["body"]["text"]), "parse_mode": "HTML",
+        return {"chat_id": chat_id, "text": wa_to_html(it["body"]["text"]), "parse_mode": "HTML",
                 "reply_markup": {"inline_keyboard": rows}}
-    return {"chat_id": chat_id, "text": to_telegram_html((payload.get("text") or {}).get("body", "")), "parse_mode": "HTML"}
+    return {"chat_id": chat_id, "text": wa_to_html((payload.get("text") or {}).get("body", "")), "parse_mode": "HTML"}
+
+
+PART_GAP_S = 0.35        # between the parts of one long answer: keeps them in order and under Telegram's per-chat pace
+
+
+def parts_of(payload: dict) -> list[dict]:
+    """A long message as several chat-sized messages, in order. Text is cut at paragraph breaks; a card with buttons keeps
+    its buttons on the last part, whose text fits the card limit. A short message (the usual case) is returned as it is."""
+    from src.loop.wa_format import CARD_CHARS, PART_CHARS, split_text
+    if payload.get("type") == "interactive":
+        body = payload["interactive"]["body"]["text"]
+        if len(body) <= CARD_CHARS:
+            return [payload]
+        head = split_text(body, PART_CHARS, max_parts=6)
+        tail = split_text(head.pop(), CARD_CHARS, max_parts=6)
+        texts = head + tail[:-1]
+        card = {**payload, "interactive": {**payload["interactive"], "body": {"text": tail[-1]}}}
+        return [{**payload, "type": "text", "text": {"body": t}, "interactive": None} for t in texts][:4] + [card]
+    if payload.get("type") == "text":
+        body = (payload.get("text") or {}).get("body", "")
+        if len(body) <= PART_CHARS:
+            return [payload]
+        return [{**payload, "text": {**payload["text"], "body": t}} for t in split_text(body)]
+    return [payload]
+
+
+def _clean(part: dict) -> dict:
+    return {k: v for k, v in part.items() if v is not None}
 
 
 async def send_to_owner(app, tenant, payload: dict, *, kind: str, obligation_id=None, adjustment_id=None,
@@ -130,19 +159,26 @@ async def _deliver(app, tenant, payload: dict, *, kind: str, obligation_id=None,
                      status="held", obligation_id=obligation_id, adjustment_id=adjustment_id,
                      agent_session_id=agent_session_id, payload=payload if kind == "owner_note" else None)
         return "held"
+    parts = [_clean(p) for p in parts_of(payload)]
     if pick_channel(app, tenant, now, reply_channel) == "telegram":
-        await tg.send(wa_to_telegram(payload, tenant.telegram_chat_id))
+        for i, part in enumerate(parts):
+            if i:
+                await asyncio.sleep(PART_GAP_S)
+            await tg.send(wa_to_telegram(part, tenant.telegram_chat_id))
         return "telegram"
     if uses_link(app, tenant, reply_channel):
         from src.loop.wa_link import SidecarError, client as link_client
         try:
-            msg_id = await link_client(app).send(str(tenant.id), tenant.owner_phone, wa_link_text(payload))
+            for i, part in enumerate(parts):
+                if i:
+                    await asyncio.sleep(PART_GAP_S)
+                msg_id = await link_client(app).send(str(tenant.id), tenant.owner_phone, wa_link_text(part))
+                if msg_id:
+                    await record(pool, msg_id, tenant_id=tenant.id, kind=kind, to_phone=tenant.owner_phone,
+                                 obligation_id=obligation_id, adjustment_id=adjustment_id, agent_session_id=agent_session_id)
         except SidecarError:
             log.warning("owner message not sent on the WhatsApp link; falling back to the official number")
         else:
-            if msg_id:
-                await record(pool, msg_id, tenant_id=tenant.id, kind=kind, to_phone=tenant.owner_phone,
-                             obligation_id=obligation_id, adjustment_id=adjustment_id, agent_session_id=agent_session_id)
             return "wa_link"
     if reply_channel is None and s.wa_owner_template and not window_open(tenant, now) \
             and kind in (*CARD_KINDS, "owner_digest"):
@@ -152,11 +188,14 @@ async def _deliver(app, tenant, payload: dict, *, kind: str, obligation_id=None,
                          agent_session_id=agent_session_id, payload=payload if kind == "owner_note" else None)
         await nudge(app, tenant)
         return "held"
-    msg_id = await _official_send(app, "a message",   # owners hear from Smara's own number, never from their shop's
-                                  lambda: app.state.wa.send({**payload, "to": tenant.owner_phone}, number_id=number_id))
-    if msg_id:
-        await record(pool, msg_id, tenant_id=tenant.id, kind=kind, to_phone=tenant.owner_phone,
-                     obligation_id=obligation_id, adjustment_id=adjustment_id, agent_session_id=agent_session_id)
+    for i, part in enumerate(parts):   # owners hear from Smara's own number, never from their shop's
+        if i:
+            await asyncio.sleep(PART_GAP_S)
+        msg_id = await _official_send(app, "a message",
+                                      lambda part=part: app.state.wa.send({**part, "to": tenant.owner_phone}, number_id=number_id))
+        if msg_id:
+            await record(pool, msg_id, tenant_id=tenant.id, kind=kind, to_phone=tenant.owner_phone,
+                         obligation_id=obligation_id, adjustment_id=adjustment_id, agent_session_id=agent_session_id)
     return "whatsapp"
 
 

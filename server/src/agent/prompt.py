@@ -6,7 +6,7 @@ import time
 
 import re
 
-from src import chatlog, clock, facts as shop_facts
+from src import chatlog, clock, facts as shop_facts, prefs
 from src.agent import skills
 from src.bridge.continuum import scope_user
 
@@ -52,9 +52,18 @@ BASE = (
     "- After any import, proposal or file you create, verify by reading the result back (totals, rows) before answering. "
     "If a tool errors, read the error, fix the call and retry once or twice.\n"
     "- For Excel, CSV, Tally and PDF work, write Python with run_python on the attached files. Show the totals you computed.\n"
-    "- Your answers are read on WhatsApp, which does not render Markdown. Write plain text: no ** bold, no # headings, no "
-    "--- lines, no | tables. Use *single asterisks* for emphasis, short lines, and a bullet (•) for lists. Put the key "
-    "number first, in rupees with commas (₹12,500).\n"
+    "- How your answers look (they are read in a phone chat on WhatsApp or Telegram, which do not render Markdown):\n"
+    "  • The answer first, in the first line: the number, the name or yes/no. Then only what helps the owner act.\n"
+    "  • Plain text with short lines, one bullet (•) per item. When the owner asks for a full or complete list, give every row "
+    "(long answers are split into several messages for you); up to about 40 rows, beyond that send it as a PDF or Excel. "
+    "Otherwise show the most useful 7 or so and say how many more there are. "
+    "Never a table, # heading, --- line, **double asterisks** or a [text](link): write the link itself.\n"
+    "  • *Single asterisks* only around the one or two things that matter most (a total, a name). No _underscores_ for style.\n"
+    "  • Amounts in rupees with Indian grouping (₹1,85,750); dates as 12 Nov.\n"
+    "  • A blank line between separate parts. A long answer is split into several chat messages at those blank lines, so "
+    "keep each part complete on its own and never write 'see above'.\n"
+    "  • At most one question, at the end, and only if you need the answer. At most one emoji, and only if it helps.\n"
+    "  • Do not repeat the owner's question, do not explain what you are going to do, no 'Here is…' or 'I hope this helps'.\n"
     "- If an import result says open_in_smara_not_in_file > 0, tell the owner how many open bills are not in this file and name a few. "
     "Ask whether they are paid. Only if the owner says yes, import the same file again with close_missing=true. Never set it on your own.\n"
     "- Tally: an invoice that a newer Tally sync no longer lists is closed as paid automatically; the owner is told. "
@@ -106,7 +115,7 @@ BASE = (
     "fresh page when they tap Done. Never type passwords, OTPs or card details yourself. If a site blocks the server browser "
     "(network errors, access denied), do not keep retrying. If a result has pc_helper or next saying the owner's PC is already paired, "
     "follow it: never ask them to pair again or to type commands; tell them the PC just needs to be on and offer to retry "
-    "with schedule_followup. Only if they have never connected a PC, suggest Smara Desktop (Settings > Browser) or 'pair browser'.\n"
+    "with schedule_followup. {pc_hint}\n"
     "- The owner's PC also has a Smara Shared folder you can reach with pc_files (list, read a text file, save a new one after their tap). "
     "It is the only place on their PC you can touch. If it says no PC is paired or it is not connected, say so plainly.\n"
     "- How to drive the browser (the way the best browser agents work): every page result lists the controls as "
@@ -130,7 +139,9 @@ BASE = (
     "say it was sent. If it is there, never send it again. If you are unsure, say so and ask; a duplicate message to a real "
     "person is worse than a slow one. A step result with sent_via means the message really went out; an error saying it "
     "was NOT sent means it did not, so tell the owner plainly instead of claiming success.\n"
-    "- Be concise. Reply in the language the owner used (Hinglish is fine). Ask one clear question if something essential is missing.\n"
+    "- Be concise. Unless the owner's reply setting below says otherwise, reply in the language the owner used (Hinglish is "
+    "fine). When the owner asks you to answer in another language, shorter or longer, or gives a standing style wish, save it "
+    "with set_reply_style. Ask one clear question if something essential is missing.\n"
 )
 ROLE = {
     "TRUSTED": "You are talking to the owner.",
@@ -146,10 +157,23 @@ async def ledger_line(pool, tenant_id: str) -> str:
     async with pool.connection() as conn:
         snap = await (await conn.execute(
             """SELECT count(*) n, coalesce(sum(amount_paise), 0) s,
-                      count(*) FILTER (WHERE due_date < %s) od FROM obligations
-                WHERE tenant_id = %s AND state NOT IN ('PAID', 'DRAFT')""", (clock.today(), tenant_id))).fetchone()
-    return (f"Ledger right now: {snap['n']} open invoices ({snap['od']} overdue), "
-            f"Rs {int(snap['s']) / 100:,.2f} outstanding.")
+                      count(*) FILTER (WHERE due_date < %s) od,
+                      coalesce(sum(amount_paise) FILTER (WHERE due_date < %s), 0) ods FROM obligations
+                WHERE tenant_id = %s AND state NOT IN ('PAID', 'DRAFT')""", (clock.today(), clock.today(), tenant_id))).fetchone()
+    return (f"Ledger right now: {snap['n']} open invoices, Rs {_inr(int(snap['s']))} outstanding in total; of these "
+            f"{snap['od']} are overdue, Rs {_inr(int(snap['ods']))}. (Use these totals as they are when asked for them.)")
+
+
+def _inr(paise: int) -> str:
+    """Rupees with Indian grouping: 45322500 paise -> 4,53,225 (paise shown only when not zero)."""
+    rupees, p = divmod(abs(paise), 100)
+    s = str(rupees)
+    head, tail = s[:-3], s[-3:]
+    while len(head) > 2:
+        tail = head[-2:] + "," + tail
+        head = head[:-2]
+    out = (head + "," + tail) if head else tail
+    return ("-" if paise < 0 else "") + out + (f".{p:02d}" if p else "")
 
 
 async def standing_instructions(app, tenant) -> str:
@@ -299,7 +323,13 @@ def _clip(text: str, n: int) -> str:
 
 async def build_system(app, tenant, trust: str, session_id: str | None = None, query: str | None = None) -> str:
     """The run's instructions. `query` (the owner's latest message) switches on the memory lookup for that message."""
-    base = BASE.format(shop=tenant.name, now=clock.describe(), ledger=await ledger_line(app.state.pool, tenant.id))
+    from src.config import pc_allowed
+    pc_hint = ("Only if they have never connected a PC, suggest Smara Desktop (Settings > Browser) or 'pair browser'."
+               if pc_allowed(app.state.settings, tenant.id) else
+               "This shop has no PC browser: you browse with Smara's own cloud browser. Never suggest pairing a PC, Smara "
+               "Desktop or 'pair browser', and pc_files is not available here.")
+    base = BASE.format(shop=tenant.name, now=clock.describe(), ledger=await ledger_line(app.state.pool, tenant.id),
+                       pc_hint=pc_hint)
     owner_run = trust == "TRUSTED"
     standing, memory, told = "", "", ""
     parties: list[dict] = []
@@ -334,7 +364,13 @@ async def build_system(app, tenant, trust: str, session_id: str | None = None, q
     if trust != "UNTRUSTED" and (listing := skills.index()):
         base += ("\nSkills (call load_skill with the name BEFORE starting a task of that kind, then follow it; they hold the "
                  "detailed rules and checklists):\n" + listing + "\n")
-    return base + "\n" + ROLE[trust]
+    style = ""
+    if trust != "UNTRUSTED":       # last, so it is the freshest instruction the model reads before answering
+        try:
+            style = "\n\n" + prefs.prompt_block(await prefs.get(app.state.pool, tenant.id))
+        except Exception:
+            log.info("reply setting unavailable for %s", tenant.id)
+    return base + "\n" + ROLE[trust] + style
 
 
 async def _nothing() -> str:
