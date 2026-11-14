@@ -248,6 +248,30 @@ def owes_file(messages: list[dict]) -> bool:
     return not any(m["role"] == "tool" and '"sent": true' in m["content"] and '"filename"' in m["content"] for m in messages[last:])
 
 
+_REMIND_ASK = re.compile(r"(remind(?!\s+me)(?!ers? for me)|chase|tagada|vasooli|payment.{0,20}(bhej|maang)|bhej.{0,20}(reminder|msg|message))", re.I)
+_NOT_POSSIBLE = re.compile(r"((phone|number|mobile).{0,40}(nahi|not |missing|no |nhi)|cannot|can't|can not|nahi bhej sakta|not in the ledger|"
+                           r"ledger mein nahi|no customer|koi customer nahi|kaunsa|which one)", re.I)
+
+
+def _sent_to_customer(call: dict) -> bool:
+    if call["function"]["name"] != "send_whatsapp_message":
+        return False
+    try:
+        return json.loads(call["function"].get("arguments") or "{}").get("to") != "owner"
+    except ValueError:
+        return False
+
+
+def owes_card(messages: list[dict], reply: str) -> bool:
+    """True when the owner asked for a reminder/chase and this turn never made the send call to the CUSTOMER that creates the
+    approval card (a draft sent to the owner as plain text, or a reply asking "shall I send?", is not one), and the reply does
+    not give a reason it cannot be done. Nothing waits for the owner in that case."""
+    last = max((i for i, m in enumerate(messages) if m["role"] == "user" and not m["content"].startswith("[system note]")), default=-1)
+    if last < 0 or not _REMIND_ASK.search(messages[last]["content"]) or _NOT_POSSIBLE.search(reply or ""):
+        return False
+    return not any(_sent_to_customer(c) for m in messages[last:] for c in (m.get("tool_calls") or []))
+
+
 async def run(app, sid: str, fallback=None) -> None:
     """One run of a session (see _run). The caller marked the session live (start_session, resume); this unmarks it."""
     try:
@@ -278,7 +302,7 @@ async def _run(app, sid: str, fallback=None) -> None:
     if row is None:
         return
     messages, steps, suspended, empties = row["messages"], row["steps"], False, 0
-    budget, seen, nudged, busy = 0, {}, False, 0
+    budget, seen, nudged, card_nudged, busy = 0, {}, False, False, 0
     ticker = None
     try:
         tenant = await tenants.by_id(pool, str(row["tenant_id"]))
@@ -317,6 +341,13 @@ async def _run(app, sid: str, fallback=None) -> None:
                 messages.append({"role": "user", "content": "[system note] The owner asked for a file and you have not sent one in this "
                                  "turn. Create it with run_python (the file type they asked for) and send it with send_file_to_owner, "
                                  "then confirm. Do this even if you sent a similar file earlier."})
+                continue
+            if not calls and not card_nudged and row["trust"] == "TRUSTED" and owes_card(messages[:-1], msg.get("content") or ""):
+                card_nudged = True     # self-check: it described a reminder but made no card, so the owner would wait for nothing
+                messages.append({"role": "user", "content": "[system note] You said a reminder is ready or asked whether to send it, "
+                                 "but you did not call send_whatsapp_message to the CUSTOMER, so the owner has no approval card (a draft sent to the owner "
+                                 "is not one). Call send_whatsapp_message now with to set to the customer and the exact message (the owner's tap sends it). "
+                                 "If it cannot be sent (no phone number, unknown customer), say that plainly instead."})
                 continue
             if not calls:
                 if not await _finish_unless_inbox(pool, sid, messages, steps):
