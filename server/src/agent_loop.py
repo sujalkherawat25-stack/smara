@@ -248,7 +248,10 @@ def owes_file(messages: list[dict]) -> bool:
     return not any(m["role"] == "tool" and '"sent": true' in m["content"] and '"filename"' in m["content"] for m in messages[last:])
 
 
-_REMIND_ASK = re.compile(r"(remind(?!\s+me)(?!ers? for me)|chase|tagada|vasooli|payment.{0,20}(bhej|maang)|bhej.{0,20}(reminder|msg|message))", re.I)
+_REMIND_ASK = re.compile(r"(remind(?!\s+me)\w*\s+\w+|reminder.{0,30}(bhej|send|kar|de\b|do\b)|(bhej|send).{0,30}(reminder|msg|message)|"
+                         r"payment.{0,20}(maang|bhej)|रिमाइंडर.{0,30}(भेज|कर|दो)|"
+                         r"भेज.{0,30}(रिमाइंडर|मैसेज))", re.I)
+_QUESTION = re.compile(r"\?|\b(kaun|kaunsa|kisko|kiska|kis\b|who|which|what|kya)\b|कौन|किसको|क्या", re.I)   # "kisko chase karun?" asks; it does not order
 _NOT_POSSIBLE = re.compile(r"((phone|number|mobile).{0,40}(nahi|not |missing|no |nhi)|cannot|can't|can not|nahi bhej sakta|not in the ledger|"
                            r"ledger mein nahi|no customer|koi customer nahi|kaunsa|which one)", re.I)
 
@@ -267,7 +270,8 @@ def owes_card(messages: list[dict], reply: str) -> bool:
     approval card (a draft sent to the owner as plain text, or a reply asking "shall I send?", is not one), and the reply does
     not give a reason it cannot be done. Nothing waits for the owner in that case."""
     last = max((i for i, m in enumerate(messages) if m["role"] == "user" and not m["content"].startswith("[system note]")), default=-1)
-    if last < 0 or not _REMIND_ASK.search(messages[last]["content"]) or _NOT_POSSIBLE.search(reply or ""):
+    ask = messages[last]["content"] if last >= 0 else ""
+    if not _REMIND_ASK.search(ask) or _QUESTION.search(ask) or _NOT_POSSIBLE.search(reply or ""):
         return False
     return not any(_sent_to_customer(c) for m in messages[last:] for c in (m.get("tool_calls") or []))
 

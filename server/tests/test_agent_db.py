@@ -489,3 +489,13 @@ def test_owes_card_only_when_a_card_was_claimed_and_not_made():
     assert not owes_card(ask + [to_customer], "Waiting for approval")
     assert not owes_card([{"role": "user", "content": "Gupta ka kitna baaki hai"}], "Shall I send a PDF?")
     assert not owes_card([{"role": "user", "content": "one more thing: remind me tomorrow"}], "Noted: I will remind you tomorrow.")
+
+
+def test_a_question_about_whom_to_chase_is_not_an_order_to_send_a_reminder():
+    from src.agent_loop import owes_card
+    for text in ("Dono match karo: kaunsa ITC miss hai, aur kis supplier ko chase karun?", "Aaj kisko reminder bhejna chahiye?",
+                 "Who should I remind today?", "Ye GSTR-2B hai, chase list banao"):
+        assert not owes_card([{"role": "user", "content": text}], "Yeh rahi list."), text
+    for text in ("Gupta ko reminder bhejo", "Ravi ko payment ka reminder bhej do", "remind Ravi about the payment",
+                 "अग्रवाल एजेंसीज को पेमेंट का रिमाइंडर भेजो", "Gupta Traders ko payment ka reminder bhejo, UPI ke saath."):
+        assert owes_card([{"role": "user", "content": text}], "Draft ready."), text
