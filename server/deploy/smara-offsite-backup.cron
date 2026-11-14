@@ -1,0 +1,2 @@
+# Off-server backup of the Smara DB (see server/docs/RESTORE.md). 21:15 UTC = 02:45 IST, after the 02:45 UTC local dump.
+15 21 * * * root /usr/bin/flock -n /var/run/smara-offsite-backup.lock /usr/local/bin/smara-offsite-backup.sh >> /var/log/smara-offsite-backup.log 2>&1
