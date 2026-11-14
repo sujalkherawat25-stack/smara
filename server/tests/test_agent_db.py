@@ -461,3 +461,30 @@ def test_heavy_work_never_uses_the_fallback_model():
     assert heavy([sys_, user("import this\n[The owner attached a file: file_ref=whatsapp:M1:a.xlsx; caption: -]")])
     assert heavy([sys_, user("hi"), {"role": "assistant", "content": "", "tool_calls": [
         {"id": "1", "type": "function", "function": {"name": "run_python", "arguments": "{}"}}]}])
+
+
+async def test_a_reminder_described_but_never_made_gets_one_nudge_and_then_the_card(env):
+    text = "Namaste Ravi ji, INV-1 ka Rs 10,000 baaki hai."
+    async with env.pool.connection() as c:
+        await c.execute("update parties set last_inbound_at = now() where id = %s", (env.pid,))
+    llm = env.app.state.llm = ScriptLLM(say("Reminder ready hai, aapke approval ka intezaar hai."),
+                                        lambda m: call("send_whatsapp_message", to=env.pid, text=text), say("Sent."))
+    await dispatch(env.app, owner("rem1", "Ravi ko payment ka reminder bhejo"))
+    assert "no approval card" in llm.seen[1][-1]["content"]
+    assert env.app.state.wa.to(DEBTOR) == []                                          # still waits for the owner
+    assert text in env.app.state.wa.to(OWNER)[-1]["interactive"]["body"]["text"]        # the card exists now
+    llm2 = env.app.state.llm = ScriptLLM(say("Ravi ka Rs 10,000 baaki hai."))
+    await dispatch(env.app, owner("rem2", "Ravi ka kitna baaki hai?"))
+    assert len(llm2.seen) == 1                                                          # other questions are untouched
+
+
+def test_owes_card_only_when_a_card_was_claimed_and_not_made():
+    from src.agent_loop import owes_card
+    ask = [{"role": "user", "content": "Gupta ko reminder bhejo"}]
+    assert owes_card(ask, "Reminder ready hai, approval ka intezaar hai") and owes_card(ask, "Shall I send it?")
+    assert not owes_card(ask, "Gupta ka number nahi hai, isliye nahi bhej sakta")
+    owner_draft = {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "send_whatsapp_message", "arguments": '{"to": "owner"}'}}]}
+    to_customer = {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "send_whatsapp_message", "arguments": '{"to": "p1"}'}}]}
+    assert owes_card(ask + [owner_draft], "Draft aapko bhej diya")                      # a draft to the owner is not a card
+    assert not owes_card(ask + [to_customer], "Waiting for approval")
+    assert not owes_card([{"role": "user", "content": "Gupta ka kitna baaki hai"}], "Shall I send a PDF?")
