@@ -1,0 +1,57 @@
+name: uptime-monitor
+
+# Outside-the-server uptime check for Smara. Every 10 minutes GitHub requests the public health URL.
+# Two failed checks in a row -> one "DOWN" message to the ops Telegram chat; the next success -> one "back up" message.
+# Test: run it with workflow_dispatch and a deliberately wrong `url` (it uses its own test state, so production state is untouched).
+# Secrets (repo settings > Secrets and variables > Actions): TELEGRAM_BOT_TOKEN, OPS_TELEGRAM_CHAT_ID. Never printed.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Health URL to check. Empty = production (state kept as prod). Any value = test run (state kept separately; alerts are marked TEST)."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      INPUT_URL: ${{ github.event.inputs.url }}
+      PROD_URL: https://ai.syntarus.com/smara/healthz
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      OPS_TELEGRAM_CHAT_ID: ${{ secrets.OPS_TELEGRAM_CHAT_ID }}
+    steps:
+      - name: Choose target and state namespace
+        id: mode
+        run: |
+          if [ -n "$INPUT_URL" ]; then
+            echo "mode=test" >> "$GITHUB_OUTPUT"; echo "url=$INPUT_URL" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=prod" >> "$GITHUB_OUTPUT"; echo "url=$PROD_URL" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore previous state
+        uses: actions/cache@v4
+        with:
+          path: state
+          key: uptime-state-${{ steps.mode.outputs.mode }}-${{ github.run_id }}
+          restore-keys: |
+            uptime-state-${{ steps.mode.outputs.mode }}-
+
+      - name: Check health and alert on state change
+        env:
+          TARGET_URL: ${{ steps.mode.outputs.url }}
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: python3 .github/scripts/uptime_check.py
+
