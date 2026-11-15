@@ -28,8 +28,8 @@ def stats() -> dict:
     return dict(STATS)
 SAID_CHARS = 200
 SYSTEM = (
-    "You decide what an Indian small-business back-office assistant should remember for months. You are given what the "
-    "business owner wrote this turn, the assistant's reply, and the facts already on file. Output JSON "
+    "You decide what a personal and work assistant should remember for months. You are given what the "
+    "user wrote this turn, the assistant's reply, and the facts already on file. Output JSON "
     "{\"facts\": [{\"about\": \"shop\" or \"customer\", \"customer\": \"name exactly as the owner wrote it, or empty\", "
     "\"topic\": \"...\", \"fact\": \"...\", \"said\": \"...\"}]}.\n"
     "Keep ONLY durable facts the owner stated: a customer's payment habits, promises, disputes or relationship; the owner's "

@@ -132,6 +132,8 @@ async def send_digests(app, local: datetime) -> int:
             continue
         try:
             text = await build_digest(pool, t.id, local.date())
+            if not text:
+                continue
             await send_to_owner(app, t, text_message(t.owner_phone, text), kind="owner_digest")
             sent += 1
         except Exception:

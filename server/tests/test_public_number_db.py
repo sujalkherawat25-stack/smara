@@ -41,7 +41,7 @@ async def test_a_stranger_without_a_code_is_waitlisted_once_a_day_and_never_gets
 async def test_an_invite_code_walks_a_new_owner_through_sign_up_and_creates_the_shop(env):
     code = await make_code(env, label="Ramesh Hardware")
     await dispatch(env.app, text("j1", f"join {code.lower()}"))
-    assert "naam kya hai" in last(env)
+    assert "kis naam se" in last(env)
     await dispatch(env.app, text("j2", "Ramesh Hardware"))
     assert "UPI" in last(env)
     await dispatch(env.app, text("j3", "ramesh@upi"))
@@ -76,7 +76,7 @@ async def test_a_single_use_code_cannot_create_two_shops_and_bad_input_is_re_ask
 async def test_open_sign_up_lets_anyone_start_but_codes_still_count(env):
     env.app.state.settings = Settings(signup_mode="open")
     await dispatch(env.app, text("p1", "hello"))
-    assert "naam kya hai" in last(env)
+    assert "kis naam se" in last(env)
     await dispatch(env.app, text("p2", "Gupta Traders"))
     await dispatch(env.app, text("p3", "skip"))
     assert (await tenants.by_owner_phone(env.pool, NEW)).name == "Gupta Traders"
@@ -89,7 +89,7 @@ async def test_a_customer_of_a_shop_stays_a_customer_but_can_still_join_with_a_c
     await dispatch(env.app, text("c1", "ok ji, thank you"))
     assert not [m for m in env.app.state.wa.sent if m["to"] == NEW]                          # customer flow: no sign-up chat
     await dispatch(env.app, text("c2", f"JOIN {code}"))
-    assert "naam kya hai" in last(env)
+    assert "kis naam se" in last(env)
 
 
 # ---------------------------------------------------------------- limits

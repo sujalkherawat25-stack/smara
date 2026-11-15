@@ -29,8 +29,9 @@ from src.tenants import Tenant
 log = logging.getLogger(__name__)
 HELP = ("Mujhse seedha baat kijiye, jaise kisi munim se: 'aaj kisko call karun?', 'Sharma ko 12000 udhaar diya', "
         "'Gupta ne 5000 cash diya', 'Ravi ka statement PDF bhejo'. Voice note bhi chalega.\n\n"
-        "Sirf khata hi nahi: koi bhi file bhejiye (Excel, PDF, Word, photo), kuch bhi poochiye ya banwaiye (sheet, report, "
-        "GST check, website se jaankari). Jo kaam achha ho jaye, use 'skill' bana lunga.\n\n"
+        "Kaam ho ya personal: koi bhi file bhejiye (Excel, PDF, Word, photo), kuch bhi poochiye ya banwaiye (research, "
+        "likhna, sheet, report, website se jaankari). Business hai to khata, reminder aur GST bhi. Jo kaam achha ho jaye, "
+        "use 'skill' bana lunga.\n\n"
         "Kuch commands:\n• 'digest': aaj ka summary\n• 'style': jawab ki bhasha aur lambai\n• 'skills': aapki saved skills\n"
         "• 'files': aapki bheji files\n"
         "• 'export': Tally/Busy se list kaise nikalein\n• 'sample': ek sample file\n• 'telegram': Telegram jodein\n\n"

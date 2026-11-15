@@ -399,6 +399,28 @@ async def test_the_owner_lists_and_deletes_skills_in_chat_and_the_agent_can_save
 
 def test_the_prompt_no_longer_limits_smara_to_the_ledger():
     from src.agent.prompt import BASE
-    assert "not only a ledger tool" in BASE and "there is no fixed list of allowed tasks" in BASE
+    assert "anyone can use" in BASE and "there is no fixed list of allowed tasks" in BASE
     assert "are not kept in the ledger: say so" not in BASE
     assert "Skills never" in __import__("inspect").getsource(__import__("src.agent.prompt", fromlist=["x"]).build_system)
+
+
+# ------------------------------------------------------------------------------------------------ anyone can use it
+
+def test_the_instructions_do_not_limit_smara_to_businesses():
+    from src.agent.prompt import BASE
+    assert "anyone can use" in BASE and "knowledge" in BASE and "Do not assume they run a shop" in BASE
+    assert "small business in India" not in BASE and "back-office agent" not in BASE
+    from src.ingest import onboarding, telegram_onboarding as tgo
+    for text in (onboarding.WELCOME_ASK_SHOP, onboarding.INVITE_ONLY, tgo.ASK_PHONE, tgo.NOT_INVITED):
+        assert "business owners" not in text.replace("business owners, professionals", "") and "dukaan" not in text
+
+
+async def test_a_user_without_a_ledger_gets_no_invoice_talk_and_no_daily_digest(env):
+    from src.agent.prompt import ledger_line
+    from src.loop.digest import build_digest
+    async with env.pool.connection() as conn:
+        await conn.execute("TRUNCATE obligations CASCADE")
+    line = await ledger_line(env.pool, env.t.id)
+    assert "No ledger is set up" in line and "open invoices" not in line
+    from src import clock
+    assert await build_digest(env.pool, env.t.id, clock.today()) == ""

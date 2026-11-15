@@ -41,7 +41,7 @@ def _shell(request: Request, title: str, content: str, heading: bool = True) -> 
     h1 = f"<h1>{html.escape(title)}</h1>" if heading else ""
     return HTMLResponse(f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)}</title>
-<meta name="description" content="Smara is an assistant on WhatsApp and Telegram for Indian businesses. It helps you follow up on invoices your own customers have not paid and keeps track of what you owe, with every message approved by you first.">
+<meta name="description" content="Smara is an AI assistant on WhatsApp and Telegram for anyone who wants one: business owners, professionals and other knowledge workers. Business owners can also use it to follow up on unpaid invoices, with every message approved by them first.">
 {STYLE}</head><body><main>{nav}{h1}{content}
 <p class="muted">Smara is a product of Syntarus. Questions: <a href="mailto:{EMAIL}">{EMAIL}</a>. Last updated {UPDATED}.</p></main></body></html>""")
 
@@ -81,13 +81,13 @@ write to <a href="mailto:{EMAIL}?subject=Smara%20early%20access">{EMAIL}</a>. Yo
 @router.get("/privacy", response_class=HTMLResponse)
 async def privacy(request: Request):
     return _shell(request, "Smara Privacy Policy", """
-<p>Smara is an assistant for businesses in India that works on WhatsApp and Telegram. It helps a business follow up on invoices its own customers have not
-paid, and keep track of what it owes. It is not a debt collection service. This page says what we keep and why.</p>
+<p>Smara is an AI assistant that works on WhatsApp and Telegram. Anyone can use it, for work or personal tasks: business owners, professionals and other knowledge workers.
+Businesses can also use it to follow up on invoices their own customers have not paid, and to keep track of what they owe. It is not a debt collection service. This page says what we keep and why.</p>
 <h2>Who is responsible for what</h2>
 <p>The business that uses Smara decides which customer and supplier details to share, and is responsible to its own customers for that.
 Syntarus runs Smara for the business and handles that information only to provide the service.</p>
 <h2>What we collect</h2>
-<ul><li><strong>From the business owner:</strong> the shop name, phone number, UPI ID (if given), the Telegram account they chat with Smara from (if they use Telegram), and the messages, voice notes, photos and files
+<ul><li><strong>From the person using Smara:</strong> their name or business name, phone number, UPI ID (if given), the Telegram account they chat with Smara from (if they use Telegram), and the messages, voice notes, photos and files
 they send Smara (for example an outstanding-dues sheet, a Tally export, a PDF or a bill photo), and what Smara replies.</li>
 <li><strong>From Smara Desktop, only if the owner turns it on:</strong> the open bills the business is owed and the open bills it has to pay, and the
 names and phone numbers of those parties as saved in Tally. We do not copy the rest of the Tally company file, and we never receive Tally passwords.

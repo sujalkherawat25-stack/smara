@@ -22,13 +22,14 @@ JOIN_WORD = re.compile(r"^\s*(?:join|code|invite)\b[\s:\-]*([A-Za-z0-9\-]{4,14})
 UPI = re.compile(r"^[a-z0-9.\-_]{2,40}@[a-z][a-z0-9]{1,20}$", re.I)
 SKIP = {"skip", "nahi", "no", "none", "baad mein", "later", "-"}
 
-WELCOME_ASK_SHOP = ("Namaste! Main Smara hoon, aapke business ka digital saathi.\n\nShuru karne ke liye bataiye: "
-                    "aapki dukaan ya business ka naam kya hai?")
+WELCOME_ASK_SHOP = ("Namaste! Main Smara hoon, aapka AI saathi: kaam, padhai, business ya rozmarra ke sawal, sab mein madad.\n\n"
+                    "Shuru karne ke liye bataiye: main aapko kis naam se bulaun? (apna naam, ya business ho to uska naam)")
 ASK_UPI = ("Dhanyavaad! Ab apna UPI ID bhejiye (jaise ramesh@upi) taaki customers ko payment link ke saath bhej sakun. "
            "Abhi nahi dena ho to 'skip' likhiye.")
-INVITE_ONLY = ("Namaste! Main Smara hoon. Abhi Smara sirf invite wale business owners ke liye khula hai.\n\n"
-               "Agar aapke paas invite code hai to 'JOIN CODE' bhejiye. Nahi hai to apna naam aur business ka naam bhej dijiye, "
-               "hum aapko jaldi invite karenge.")
+INVITE_ONLY = ("Namaste! Main Smara hoon, ek AI assistant jo business owners, professionals aur kaam karne wale kisi bhi vyakti "
+               "ki madad karta hai. Abhi Smara sirf invite wale logon ke liye khula hai.\n\n"
+               "Agar aapke paas invite code hai to 'JOIN CODE' bhejiye. Nahi hai to apna naam bhej dijiye (business ho to uska "
+               "naam bhi), hum aapko jaldi invite karenge.")
 WAITLISTED = "Dhanyavaad, aapka naam list mein jod diya hai. Invite milte hi hum yahin message karenge."
 
 

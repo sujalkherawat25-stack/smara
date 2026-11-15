@@ -116,7 +116,7 @@ async def read_image(llm: LLM, image: bytes, mime: str) -> dict:
     return await llm.json(BILL_PROMPT, [{"type": "image_url", "image_url": {"url": url}}])
 
 
-READ_PROMPT = ("Read this image for a shop owner. Return JSON with keys: kind ('bill'|'invoice'|'cheque'|'statement'|'screenshot'|'photo'|'other'), "
+READ_PROMPT = ("Read this image for the user. Return JSON with keys: kind ('bill'|'invoice'|'cheque'|'statement'|'screenshot'|'photo'|'other'), "
                "text (all legible text, in reading order, any language), summary (one sentence). Never guess unreadable text.")
 
 

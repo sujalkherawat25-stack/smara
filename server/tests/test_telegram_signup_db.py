@@ -39,7 +39,7 @@ async def test_an_invite_link_signs_a_new_owner_up_on_telegram_and_whatsapp_then
     ask = last(app)
     assert ask["reply_markup"]["keyboard"][0][0]["request_contact"] is True
     await tgmod.handle_update(app, contact())
-    assert "naam kya hai" in last(app)["text"] and last(app)["reply_markup"] == {"remove_keyboard": True}
+    assert "kis naam se" in last(app)["text"] and last(app)["reply_markup"] == {"remove_keyboard": True}
     await tgmod.handle_update(app, msg("Ramesh Hardware"))
     assert "UPI" in last(app)["text"]
     await tgmod.handle_update(app, msg("ramesh@upi"))

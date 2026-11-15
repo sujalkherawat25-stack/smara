@@ -10,6 +10,7 @@ async def build_digest(pool, tenant_id: str, today: date) -> str:
     async with pool.connection() as conn:
         cur = await conn.execute(
             """SELECT
+                 count(*) AS total_n,
                  count(*) FILTER (WHERE state NOT IN ('PAID','DRAFT') AND due_date < %(d)s) AS od_n,
                  coalesce(sum(amount_paise) FILTER (WHERE state NOT IN ('PAID','DRAFT') AND due_date < %(d)s), 0) AS od_amt,
                  count(*) FILTER (WHERE state NOT IN ('PAID','DRAFT') AND due_date BETWEEN %(d)s AND %(d)s + 7) AS wk_n,
@@ -35,6 +36,8 @@ async def build_digest(pool, tenant_id: str, today: date) -> str:
                 ORDER BY due LIMIT 40""", (tenant_id,))
         bills = await cur.fetchall()
 
+    if not agg["total_n"] and not bills and not pending_adj:
+        return ""                  # no ledger at all (a personal user): no daily message about invoices
     lines = [f"Good morning. Overdue: {agg['od_n']} invoices, {rupees(agg['od_amt'])}.",
              f"Due in next 7 days: {agg['wk_n']} invoices, {rupees(agg['wk_amt'])}."]
     if top:

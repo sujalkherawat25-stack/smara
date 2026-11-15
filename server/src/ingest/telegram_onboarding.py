@@ -22,13 +22,16 @@ from src.ops_alert import ops_alert
 
 log = logging.getLogger(__name__)
 SHARE_BUTTON = "Share my phone number"
-ASK_PHONE = ("Namaste! Main Smara hoon, aapke business ka digital saathi.\n\nShuru karne ke liye neeche "
-             f"'{SHARE_BUTTON}' button dabaiye. Isi number se aapki shop pehchani jayegi, WhatsApp par bhi.")
+ASK_PHONE = ("Namaste! Main Smara hoon, aapka AI saathi: kaam, padhai, business ya rozmarra ke sawal, sab mein madad.\n\n"
+             f"Shuru karne ke liye neeche '{SHARE_BUTTON}' button dabaiye. Isi number se aapka account pehchana jayega, "
+             "WhatsApp par bhi.")
 PHONE_AGAIN = (f"Kripya neeche '{SHARE_BUTTON}' button dabaiye (number type mat kijiye). Rokna ho to 'cancel' likhiye.")
-NOT_INVITED = ("Namaste! Main Smara hoon. Abhi Smara sirf invite wale business owners ke liye khula hai.\n\n"
+NOT_INVITED = ("Namaste! Main Smara hoon, ek AI assistant jo business owners, professionals aur kaam karne wale kisi bhi vyakti "
+               "ki madad karta hai. Abhi Smara sirf invite wale logon ke liye khula hai.\n\n"
                "Invite code hai to yahin 'JOIN CODE' bhejiye. Pehle se WhatsApp par Smara use karte hain to wahan "
-               "'telegram' likhiye. Nahi to apna naam aur business ka naam bhej dijiye, hum aapko jaldi invite karenge.")
-ALREADY_A_SHOP = ("Is number par pehle se ek Smara shop hai. Usse is Telegram se jodne ke liye WhatsApp par Smara ko "
+               "'telegram' likhiye. Nahi to apna naam bhej dijiye (business ho to uska naam bhi), hum aapko jaldi invite "
+               "karenge.")
+ALREADY_A_SHOP = ("Is number par pehle se ek Smara account hai. Usse is Telegram se jodne ke liye WhatsApp par Smara ko "
                   "'telegram' bhejiye, ya hume likhiye: hello@syntarus.com")
 CANCELLED = "Theek hai, sign-up rok diya. Dobara shuru karne ke liye 'JOIN CODE' bhejiye."
 BAD_INVITE = "Ye invite code ab kaam nahi kar raha. Naya code mangwa lijiye."
