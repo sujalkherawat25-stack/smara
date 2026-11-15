@@ -27,10 +27,10 @@ ASK_PHONE = ("Namaste! Main Smara hoon, aapka AI saathi: kaam, padhai, business 
              "WhatsApp par bhi.")
 PHONE_AGAIN = (f"Kripya neeche '{SHARE_BUTTON}' button dabaiye (number type mat kijiye). Rokna ho to 'cancel' likhiye.")
 NOT_INVITED = ("Namaste! Main Smara hoon, ek AI assistant jo business owners, professionals aur kaam karne wale kisi bhi vyakti "
-               "ki madad karta hai. Abhi Smara sirf invite wale logon ke liye khula hai.\n\n"
-               "Invite code hai to yahin 'JOIN CODE' bhejiye. Pehle se WhatsApp par Smara use karte hain to wahan "
-               "'telegram' likhiye. Nahi to apna naam bhej dijiye (business ho to uska naam bhi), hum aapko jaldi invite "
-               "karenge.")
+               "ki madad karta hai.\n\nAbhi access invite se mil raha hai. Aap waitlist mein hain: access milte hi main yahin "
+               "message karunga.\n\nInvite code hai to yahin 'JOIN CODE' bhejiye. Pehle se WhatsApp par Smara use karte hain to "
+               "wahan 'telegram' likhiye.")
+STILL_WAITING = "Aap abhi waitlist mein hain. Access milte hi main yahin message karunga. Invite code ho to 'JOIN CODE' bhejiye."
 ALREADY_A_SHOP = ("Is number par pehle se ek Smara account hai. Usse is Telegram se jodne ke liye WhatsApp par Smara ko "
                   "'telegram' bhejiye, ya hume likhiye: hello@syntarus.com")
 CANCELLED = "Theek hai, sign-up rok diya. Dobara shuru karne ke liye 'JOIN CODE' bhejiye."
@@ -71,11 +71,17 @@ async def handle(app, m: dict, chat_id: int, text: str) -> None:
         return await _say(app, chat_id, ASK_PHONE, _SHARE_KEYS)
 
     async with pool.connection() as conn:           # kept for whoever decides who to invite
-        await conn.execute(
+        cur = await conn.execute(
             """INSERT INTO waitlist (phone, first_text, last_text) VALUES (%s, %s, %s)
-               ON CONFLICT (phone) DO UPDATE SET last_text = EXCLUDED.last_text, messages = waitlist.messages + 1""",
-            (key, text[:300], text[:300]))
-    await _say(app, chat_id, NOT_INVITED)
+               ON CONFLICT (phone) DO UPDATE SET last_text = EXCLUDED.last_text, messages = waitlist.messages + 1
+               RETURNING (xmax = 0) AS fresh""", (key, text[:300], text[:300]))
+        fresh = (await cur.fetchone())["fresh"]
+    if fresh:                                       # the first time: the full welcome, and the admins can invite with one tap
+        await _say(app, chat_id, NOT_INVITED)
+        from src.ingest import admin_tg
+        await admin_tg.tell_admins_about_waitlist(app, m, chat_id, text)
+    else:
+        await _say(app, chat_id, STILL_WAITING)
 
 
 async def _continue(app, m: dict, chat_id: int, sess: dict, text: str) -> None:

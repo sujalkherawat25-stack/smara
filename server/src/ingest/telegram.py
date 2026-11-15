@@ -157,7 +157,9 @@ async def handle_update(app, upd: dict) -> None:
     chat_id, text = m["chat"]["id"], (m.get("text") or "").strip()
     from src.loop.wa_format import to_telegram_html
     reply = lambda t: tg.send({"chat_id": chat_id, "text": to_telegram_html(t), "parse_mode": "HTML"})
-    from src.ingest import telegram_onboarding
+    from src.ingest import admin_tg, telegram_onboarding
+    if text.startswith("/") and await admin_tg.handle(app, chat_id, text):     # /invite, /waitlist ... from an admin
+        return
     tenant = await tenants.by_telegram_chat(pool, chat_id)
     if text.startswith("/start"):
         code = text.partition(" ")[2].strip()
