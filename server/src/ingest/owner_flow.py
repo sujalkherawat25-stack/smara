@@ -27,15 +27,17 @@ from src.loop.whatsapp import text_message
 from src.tenants import Tenant
 
 log = logging.getLogger(__name__)
-HELP = ("Mujhse seedha baat kijiye, jaise kisi munim se: 'aaj kisko call karun?', 'Sharma ko 12000 udhaar diya', "
-        "'Gupta ne 5000 cash diya', 'Ravi ka statement PDF bhejo'. Voice note bhi chalega.\n\n"
-        "Kaam ho ya personal: koi bhi file bhejiye (Excel, PDF, Word, photo), kuch bhi poochiye ya banwaiye (research, "
-        "likhna, sheet, report, website se jaankari). Business hai to khata, reminder aur GST bhi. Jo kaam achha ho jaye, "
-        "use 'skill' bana lunga.\n\n"
-        "Kuch commands:\n• 'digest': aaj ka summary\n• 'style': jawab ki bhasha aur lambai\n• 'skills': aapki saved skills\n"
-        "• 'files': aapki bheji files\n"
-        "• 'export': Tally/Busy se list kaise nikalein\n• 'sample': ek sample file\n• 'telegram': Telegram jodein\n\n"
-        "Apni outstanding sheet (.xlsx/.csv) bhejiye, main import kar dunga.")
+HELP = ("Just talk to me, in English, Hindi or Hinglish, by text or voice note. Some things people ask me:\n"
+        "• 'Draft a reply to this email', 'fix my CV', 'translate this into Hindi'\n"
+        "• Send any file (PDF, photo, Excel, Word) and say what you need from it\n"
+        "• 'Make an Excel sheet to track my expenses', 'plan my week', 'compare these two phones'\n"
+        "• 'Remind me on Friday at 5 to call Ravi'\n"
+        "• For a business: 'Ravi ka kitna baaki hai?', 'Gupta ne 5000 cash diya', payment reminders, GST\n\n"
+        "When something works well, I can save it as a skill so it is faster next time. I only act with your OK: nothing "
+        "is sent to anyone or changed until you approve it.\n\n"
+        "Commands:\n• 'digest': today's summary\n• 'style': language and length of my answers\n• 'skills': your saved skills\n"
+        "• 'files': files you sent me\n• 'export': how to get a list out of Tally or Busy\n• 'sample': a sample file\n"
+        "• 'telegram': connect Telegram (from WhatsApp)")
 PC_LATER = ("Apne PC ka browser jodna Smara Desktop ke saath aayega, jo abhi jaldi aa raha hai. Tab tak main Smara ke apne cloud "
             "browser se websites dekhta hoon: bas bataiye kya dhoondhna ya check karna hai.")
 EXPORT_CMDS = ("export", "tally export", "kaise bheju", "export guide")

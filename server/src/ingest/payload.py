@@ -24,6 +24,7 @@ class InboundMessage:
     reply_to: str = ""          # the message of ours they replied to (WhatsApp context.id), if any
     mime: str = ""             # media type as WhatsApp reports it
     link_tenant_id: str = ""    # channel "wa_link": the shop whose own SIM received it (server/wa_link)
+    profile_name: str = ""     # the name the sender's own profile shows (WhatsApp contacts, Telegram first name)
     size: int = 0              # bytes the channel reported for a file or voice note (0 = not known until downloaded)
 
     @property
@@ -49,6 +50,7 @@ def parse_messages(payload: dict) -> list[InboundMessage]:
         for change in entry.get("changes", []):
             value = change.get("value", {})
             number_id = (value.get("metadata") or {}).get("phone_number_id", "")
+            names = {c.get("wa_id", ""): ((c.get("profile") or {}).get("name") or "") for c in value.get("contacts", [])}
             for m in value.get("messages", []):
                 kind = m.get("type", "unknown")
                 msg = InboundMessage(
@@ -63,6 +65,7 @@ def parse_messages(payload: dict) -> list[InboundMessage]:
                     mime=(m.get(kind) or {}).get("mime_type", "") if kind in MEDIA_KINDS else "",
                     button_id=((m.get("interactive") or {}).get("button_reply") or {}).get("id"),
                     reply_to=(m.get("context") or {}).get("id", ""),
+                    profile_name=names.get(m.get("from", ""), ""),
                 )
                 if msg.wamid and msg.sender:
                     out.append(msg)

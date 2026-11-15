@@ -1,8 +1,8 @@
 """The public Smara number: how a stranger becomes a shop, and how an invite-only launch stays under control.
 
 A message from a number that is neither a shop owner nor a known customer used to be dropped. Now:
-  - "JOIN <code>" with a valid invite starts a short sign-up chat (shop name, optional UPI ID) and creates the shop;
-  - with SIGNUP_MODE=open any first message starts that chat;
+  - "JOIN <code>" with a valid invite creates the account at once (nothing is asked: the name WhatsApp shows is used);
+  - with SIGNUP_MODE=open any first message does the same;
   - otherwise the person is put on the waitlist with one polite reply (never more than one a day, so nobody can run up
     traffic or loop with us).
 Everything is plain WhatsApp text, in Hinglish.
@@ -19,18 +19,11 @@ log = logging.getLogger(__name__)
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 JOIN = re.compile(r"^\s*(?:join|code|invite|start)?\s*[:\-]?\s*([A-Za-z]{2,5}-?[A-Za-z0-9]{4,6})\s*$", re.I)
 JOIN_WORD = re.compile(r"^\s*(?:join|code|invite)\b[\s:\-]*([A-Za-z0-9\-]{4,14})\s*$", re.I)
-UPI = re.compile(r"^[a-z0-9.\-_]{2,40}@[a-z][a-z0-9]{1,20}$", re.I)
-SKIP = {"skip", "nahi", "no", "none", "baad mein", "later", "-"}
 
-WELCOME_ASK_SHOP = ("Namaste! Main Smara hoon, aapka AI saathi: kaam, padhai, business ya rozmarra ke sawal, sab mein madad.\n\n"
-                    "Shuru karne ke liye bataiye: main aapko kis naam se bulaun? (apna naam, ya business ho to uska naam)")
-ASK_UPI = ("Dhanyavaad! Ab apna UPI ID bhejiye (jaise ramesh@upi) taaki customers ko payment link ke saath bhej sakun. "
-           "Abhi nahi dena ho to 'skip' likhiye.")
-INVITE_ONLY = ("Namaste! Main Smara hoon, ek AI assistant jo business owners, professionals aur kaam karne wale kisi bhi vyakti "
-               "ki madad karta hai. Abhi Smara sirf invite wale logon ke liye khula hai.\n\n"
-               "Agar aapke paas invite code hai to 'JOIN CODE' bhejiye. Nahi hai to apna naam bhej dijiye (business ho to uska "
-               "naam bhi), hum aapko jaldi invite karenge.")
-WAITLISTED = "Dhanyavaad, aapka naam list mein jod diya hai. Invite milte hi hum yahin message karenge."
+INVITE_ONLY = ("Hi! I'm Smara, an AI assistant for anyone who works, studies or runs something: writing, research, files, "
+               "plans, reminders and more.\n\nAccess is by invite for now. You're on the waitlist, and I'll message you here "
+               "as soon as you're in.\n\nIf you have an invite code, send 'JOIN CODE'.")
+WAITLISTED = "You're on the waitlist. I'll message you here as soon as you have access."
 
 
 def new_code(prefix: str = "SMA") -> str:
@@ -60,25 +53,15 @@ async def handle_stranger(app, msg) -> None:
     async with pool.connection() as conn:
         sess = await (await conn.execute("SELECT * FROM onboarding_sessions WHERE phone = %s", (msg.sender,))).fetchone()
 
-    if sess and sess["state"] in ("ASK_SHOP", "ASK_UPI"):
-        return await _continue(app, msg, sess, text)
+    if sess and sess["state"] in ("ASK_SHOP", "ASK_UPI"):     # someone who was in the old question chat: let them straight in
+        return await create_shop(app, msg.sender, msg.profile_name, sess["invite_code"], msg.number_id)
 
     code = _code_from(text)
     invite = await _valid_invite(pool, code) if code else None
     if invite:
-        async with pool.connection() as conn:
-            await conn.execute(
-                """INSERT INTO onboarding_sessions (phone, state, invite_code) VALUES (%s, 'ASK_SHOP', %s)
-                   ON CONFLICT (phone) DO UPDATE SET state = 'ASK_SHOP', invite_code = EXCLUDED.invite_code, updated_at = now()""",
-                (msg.sender, invite["code"]))
-        return await _send(app, msg.sender, WELCOME_ASK_SHOP, msg.number_id)
-
+        return await create_shop(app, msg.sender, msg.profile_name, invite["code"], msg.number_id)
     if getattr(s, "signup_mode", "invite") == "open":
-        async with pool.connection() as conn:
-            await conn.execute(
-                """INSERT INTO onboarding_sessions (phone, state) VALUES (%s, 'ASK_SHOP')
-                   ON CONFLICT (phone) DO UPDATE SET state = 'ASK_SHOP', updated_at = now()""", (msg.sender,))
-        return await _send(app, msg.sender, WELCOME_ASK_SHOP, msg.number_id)
+        return await create_shop(app, msg.sender, msg.profile_name, None, msg.number_id)
 
     # invite-only: one reply a day, and everything they write is kept for whoever decides who to invite
     async with pool.connection() as conn:
@@ -96,39 +79,35 @@ async def handle_stranger(app, msg) -> None:
         log.info("waitlisted %s: invalid or used code", msg.sender[-4:])
 
 
-async def _continue(app, msg, sess: dict, text: str) -> None:
-    pool = app.state.pool
-    if sess["state"] == "ASK_SHOP":
-        name = re.sub(r"\s+", " ", text).strip()
-        if len(name) < 2 or len(name) > 60 or _code_from(name) and name.upper().replace(" ", "") == _code_from(name):
-            return await _send(app, msg.sender, "Business ka naam bhejiye (2 se 60 akshar), jaise 'Ramesh Hardware'.", msg.number_id)
-        async with pool.connection() as conn:
-            await conn.execute("UPDATE onboarding_sessions SET shop_name = %s, state = 'ASK_UPI', updated_at = now() WHERE phone = %s",
-                               (name, msg.sender))
-        return await _send(app, msg.sender, ASK_UPI, msg.number_id)
-
-    upi = None
-    t = text.strip().lower()
-    if t not in SKIP:
-        if not UPI.match(text.strip()):
-            return await _send(app, msg.sender, "UPI ID aise hota hai: naam@upi. Dobara bhejiye, ya 'skip' likhiye.", msg.number_id)
-        upi = text.strip().lower()
-    await create_shop(app, msg.sender, sess["shop_name"], upi, sess["invite_code"], msg.number_id)
+def display_name(raw: str | None) -> str:
+    """The name Telegram or WhatsApp already shows for the person (nothing is asked), cleaned up; 'Friend' if there is none."""
+    name = re.sub(r"\s+", " ", re.sub(r"[<>&\x00-\x1f]", "", raw or "")).strip()[:40]
+    return name or "Friend"
 
 
-def welcome_done(name: str) -> str:
-    """First message to a new shop. The export/sample line tells the owner how to get their list out of Tally/Busy."""
+def welcome_done(name: str | None = None) -> str:
+    """The first message to someone new. It asks for nothing: it says what Smara can do, how it stays safe, and opens
+    with one easy question so the person tells Smara about themselves in their own words."""
+    first = (name or "").split(" ")[0] if name and name != "Friend" else ""
+    hi = f"Hi {first}! " if first else "Hi! "
     return (
-        f"Swagat hai, {name}! Aapka Smara ready hai.\n\n"
-        "Ab aap ye kar sakte hain:\n"
-        "1) Apni outstanding list (Excel/CSV ya Tally file) yahin bhej dijiye. Main customers aur baaki rakam padh lunga.\n"
-        "Tally/Busy se list kaise nikalein? 'export' likhiye. Sample file chahiye? 'sample' likhiye.\n"
-        "2) Poochiye: 'Ravi ka kitna baaki hai?' ya voice note bhejiye.\n"
-        "3) 'Ravi ka statement PDF bhejo'.\n\n"
-        "Customers ko koi bhi message aapke tap ke bina nahi jata. Madad ke liye kabhi bhi 'help' likhiye.")
+        f"{hi}I'm Smara, an AI assistant. You can write to me like you would to a sharp colleague, in English, Hindi or "
+        "Hinglish, by text or voice note.\n\n"
+        "Here is some of what I can do:\n"
+        "• Write, fix and translate: emails, messages, reports, CVs, posts\n"
+        "• Read what you send: PDFs, photos, spreadsheets, voice notes\n"
+        "• Make files for you: Excel sheets, PDFs, Word documents, charts\n"
+        "• Research and plan: look things up on the web, compare options, make study or trip plans\n"
+        "• Remember things and remind you when it matters\n"
+        "• Keep a business running: customer dues, payment reminders, Tally or Excel lists ('export' shows how, 'sample' gives a sample file)\n"
+        "• Learn your routines: when something works well, I can save it as a skill and do it faster next time\n\n"
+        "I only act with your OK: nothing goes to anyone, and nothing changes in your records, until you approve it. "
+        "I never move money and I never need your passwords.\n\n"
+        "To start, tell me a little about yourself: what do you do, and what takes up most of your time these days? "
+        "I'll suggest where I can help.")
 
 
-async def create_shop(app, phone: str, name: str, upi: str | None, code: str | None, number_id: str | None = None) -> None:
+async def create_shop(app, phone: str, name: str | None, code: str | None, number_id: str | None = None) -> None:
     pool = app.state.pool
     async with pool.connection() as conn:
         async with conn.transaction():
@@ -139,10 +118,12 @@ async def create_shop(app, phone: str, name: str, upi: str | None, code: str | N
                 if ok is None:
                     await conn.execute("UPDATE onboarding_sessions SET state = 'DONE' WHERE phone = %s", (phone,))
                     return await _send(app, phone, "Ye invite code ab kaam nahi kar raha. Naya code mangwa lijiye.", number_id)
-            await conn.execute("UPDATE onboarding_sessions SET state = 'DONE', updated_at = now() WHERE phone = %s", (phone,))
+            await conn.execute("""INSERT INTO onboarding_sessions (phone, state, invite_code) VALUES (%s, 'DONE', %s)
+                                  ON CONFLICT (phone) DO UPDATE SET state = 'DONE', updated_at = now()""", (phone, code))
             await conn.execute("UPDATE waitlist SET invited_at = now() WHERE phone = %s", (phone,))
-    t = await tenants.create(pool, name=name, owner_phone=normalize_phone(phone), upi_vpa=upi, upi_name=name if upi else None)
+    name = display_name(name)
+    t = await tenants.create(pool, name=name, owner_phone=normalize_phone(phone))
     async with pool.connection() as conn:
         await conn.execute("UPDATE tenants SET joined_with_code = %s WHERE id = %s", (code, t.id))
     await _send(app, phone, welcome_done(name), number_id)
-    log.info("new shop %s joined via %s", t.id, code or "open sign-up")
+    log.info("new account %s joined via %s", t.id, code or "open sign-up")

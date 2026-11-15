@@ -171,6 +171,41 @@ ROLE = {
 }
 
 
+NEWCOMER_MESSAGES = 15       # an owner who has written fewer messages than this is still getting to know Smara
+
+
+async def owner_message_count(pool, tenant_id: str) -> int:
+    try:
+        async with pool.connection() as conn:
+            row = await (await conn.execute(
+                "SELECT count(*) AS n FROM chat_messages WHERE tenant_id = %s AND role = 'owner'", (tenant_id,))).fetchone()
+        return int(row["n"])
+    except Exception:
+        return NEWCOMER_MESSAGES          # if it cannot be counted, behave as with an established user
+
+
+def newcomer_block(n: int) -> str:
+    """For the first conversations: be curious, show what Smara can do for this person, ask for nothing."""
+    return (
+        f"\nThis person is new to you: they have written {n} message(s) so far. In these first conversations be curious and "
+        "warm, like a capable new assistant meeting someone:\n"
+        "- Get to know them in the normal flow of the chat: what they do (work, study, business, a project), what a usual "
+        "day or week looks like, where their time goes, and what they would like off their plate. Ask ONE light question at "
+        "a time, after you have answered what they asked. Never a form, never a list of questions.\n"
+        "- Ask for nothing they have not offered: no phone number, address, ID or bank details, no UPI ID, no passwords or OTPs. "
+        "Ask for a detail only when a task they asked for really needs it, and say why.\n"
+        "- When they tell you something lasting (their name, field, goals, tools, preferences, how they like answers), keep it with "
+        "write_continuum_evidence (party_id='shop') without making a fuss.\n"
+        "- Show, do not only tell, what you can do for THEM: after you learn something, offer one or two specific things that "
+        "fit (a draft, a summary of a file they have, a sheet, a plan, a reminder, a routine saved as a skill), using your tools "
+        "and your skills. If they ask what you can do, give a short, concrete list of five or six things in plain words, "
+        "matched to what you know about them, then ask which one they would like to try first.\n"
+        "- Be open about how you work when it is relevant: you act only with their OK (nothing is sent to anyone, no records "
+        "changed and no money moved until they approve), what they share stays in their own chat, and they can ask you to "
+        "forget something.\n"
+        "- If they only want a quick answer, give it and keep the curiosity to a single closing line.\n")
+
+
 async def ledger_line(pool, tenant_id: str) -> str:
     """The ledger in a few lines at the start of every run: the totals, and the customers owing most past their due date.
     Most owner questions ('summary', 'whom to call', 'how much overdue') are answered from this without a single query, which
@@ -408,6 +443,8 @@ async def build_system(app, tenant, trust: str, session_id: str | None = None, q
                  "they agree, call save_skill with the steps that WORKED, in order. If you loaded a skill and found a better "
                  "way or a step that no longer works, improve it the same way (same name) after the task. Skills never "
                  "replace an approval.\n")
+    if owner_run and (n := await owner_message_count(app.state.pool, tenant.id)) < NEWCOMER_MESSAGES:
+        base += newcomer_block(n)
     style = ""
     if trust != "UNTRUSTED":       # last, so it is the freshest instruction the model reads before answering
         try:

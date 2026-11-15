@@ -88,8 +88,8 @@ async def _invite(app, chat_id: int, rest: str) -> None:
         return await _reply(app, chat_id, f"Invite ready (ek istemaal, {CODE_DAYS} din):\n{link}\nYa unhe 'JOIN {code}' bhejne ko kahiye.")
     try:
         await app.state.tg.send({"chat_id": target, "disable_web_page_preview": True, "text": (
-            "Namaste! Main Smara hoon, ek AI assistant. Aapko access mil gaya hai. Shuru karne ke liye is link ko kholiye "
-            f"aur Start dabaiye:\n{link}")})
+            "Hi! I'm Smara, an AI assistant. You now have access. To begin, open this link and tap Start: "
+            f"\n{link}")})
     except httpx.HTTPError:
         return await _reply(app, chat_id, f"Code {code} ban gaya, lekin Telegram ne us user ko message nahi jaane diya "
                                           f"(unhone bot ko kabhi message nahi kiya, ya bot ko block kiya hai). Ye link unhe bhejiye:\n{link}")

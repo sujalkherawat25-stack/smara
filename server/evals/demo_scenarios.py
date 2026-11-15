@@ -525,7 +525,24 @@ async def c_personal_write(env):
     return len(last) >= 200 and not ctx and not refused, f"len={len(last)} business_context={ctx[:3]} refused={refused} reply={last[:120]!r}"
 
 
+async def ev_newcomer(env):
+    await _clear_ledger(env)
+    await dispatch(env.app, owner("Hi, I'm a final-year student. What can you actually help me with?", "nc1"))
+
+
+async def c_newcomer(env):
+    import re as _re
+    last = env.wa.last_owner_text()
+    low = last.lower()
+    can = sum(1 for w in ("write", "summar", "research", "plan", "remind", "excel", "pdf", "essay", "study", "notes", "resume", "cv") if w in low)
+    asks = _re.findall(r"(phone number|mobile number|upi|aadhaar|pan card|password|otp|shop name|business name|bank)", low)
+    ctx = _business_context(last)
+    return can >= 3 and "?" in last and not asks and not ctx and len(last) >= 200, \
+        f"capability_words={can} asks_for={asks} business_context={ctx[:2]} question={'?' in last} len={len(last)} reply={last[:200]!r}"
+
+
 TASKS += [
+    Task("newcomer_intro", ("custom", ev_newcomer), c_newcomer),
     Task("personal_study_plan", ("custom", ev_personal_plan), c_personal_plan),
     Task("personal_write_email", ("custom", ev_personal_email), c_personal_write),
 ]

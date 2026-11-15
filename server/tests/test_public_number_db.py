@@ -38,18 +38,14 @@ async def test_a_stranger_without_a_code_is_waitlisted_once_a_day_and_never_gets
     assert await tenants.by_owner_phone(env.pool, NEW) is None
 
 
-async def test_an_invite_code_walks_a_new_owner_through_sign_up_and_creates_the_shop(env):
+async def test_an_invite_code_creates_the_account_at_once_without_any_questions(env):
     code = await make_code(env, label="Ramesh Hardware")
-    await dispatch(env.app, text("j1", f"join {code.lower()}"))
-    assert "kis naam se" in last(env)
-    await dispatch(env.app, text("j2", "Ramesh Hardware"))
-    assert "UPI" in last(env)
-    await dispatch(env.app, text("j3", "ramesh@upi"))
+    msg = InboundMessage(wamid="j1", sender=NEW, kind="text", text=f"join {code.lower()}", profile_name="Ramesh")
+    await dispatch(env.app, msg)
     shop = await tenants.by_owner_phone(env.pool, NEW)
-    assert shop and shop.name == "Ramesh Hardware" and shop.upi_vpa == "ramesh@upi"
-    assert "Swagat hai" in last(env) and "Excel" in last(env)
-    code_row = await one(env.pool, "select uses from invite_codes where code = %s", code)
-    assert code_row["uses"] == 1
+    assert shop and shop.name == "Ramesh" and shop.upi_vpa is None                  # the name WhatsApp already shows
+    assert "I'm Smara" in last(env) and "tell me a little about yourself" in last(env)
+    assert (await one(env.pool, "select uses from invite_codes where code = %s", code))["uses"] == 1
     assert (await one(env.pool, "select joined_with_code c from tenants where owner_phone = %s", NEW))["c"] == code
     # now they are an owner: their next message goes to the assistant
     env.app.state.llm = ScriptLLM(say("Abhi koi dues nahi hain."))
@@ -57,29 +53,20 @@ async def test_an_invite_code_walks_a_new_owner_through_sign_up_and_creates_the_
     assert "dues" in last(env)
 
 
-async def test_a_single_use_code_cannot_create_two_shops_and_bad_input_is_re_asked(env):
+async def test_a_single_use_code_cannot_create_two_accounts_and_a_missing_profile_name_is_friend(env):
     code = await make_code(env)
     await dispatch(env.app, text("k1", f"JOIN {code}"))
-    await dispatch(env.app, text("k2", "x"))                                              # too short a name
-    assert "naam bhejiye" in last(env)
-    await dispatch(env.app, text("k3", "Sharma Store"))
-    await dispatch(env.app, text("k4", "not an upi id"))
-    assert "naam@upi" in last(env)
+    assert (await tenants.by_owner_phone(env.pool, NEW)).name == "Friend"
     other = "919822200888"
     await dispatch(env.app, text("o1", f"JOIN {code}", sender=other))                       # a second person tries the same code
-    await dispatch(env.app, text("o2", "Another Shop", sender=other))                         # (gets the waitlist reply, no chat)
-    assert await tenants.by_owner_phone(env.pool, other) is None
-    await dispatch(env.app, text("k5", "skip"))
-    assert (await tenants.by_owner_phone(env.pool, NEW)).upi_vpa is None
+    assert await tenants.by_owner_phone(env.pool, other) is None                              # gets the waitlist reply
 
 
-async def test_open_sign_up_lets_anyone_start_but_codes_still_count(env):
+async def test_open_sign_up_lets_anyone_in_without_questions(env):
     env.app.state.settings = Settings(signup_mode="open")
     await dispatch(env.app, text("p1", "hello"))
-    assert "kis naam se" in last(env)
-    await dispatch(env.app, text("p2", "Gupta Traders"))
-    await dispatch(env.app, text("p3", "skip"))
-    assert (await tenants.by_owner_phone(env.pool, NEW)).name == "Gupta Traders"
+    assert "I'm Smara" in last(env)
+    assert (await tenants.by_owner_phone(env.pool, NEW)).name == "Friend"
 
 
 async def test_a_customer_of_a_shop_stays_a_customer_but_can_still_join_with_a_code(env):
@@ -89,7 +76,7 @@ async def test_a_customer_of_a_shop_stays_a_customer_but_can_still_join_with_a_c
     await dispatch(env.app, text("c1", "ok ji, thank you"))
     assert not [m for m in env.app.state.wa.sent if m["to"] == NEW]                          # customer flow: no sign-up chat
     await dispatch(env.app, text("c2", f"JOIN {code}"))
-    assert "kis naam se" in last(env)
+    assert "I'm Smara" in last(env)
 
 
 # ---------------------------------------------------------------- limits

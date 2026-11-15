@@ -1,7 +1,9 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Response
+import hmac
+
+from fastapi import FastAPI, HTTPException, Request, Response
 
 from src.agent import memory_pass, prompt
 from src.bridge.continuum import ContinuumClient
@@ -128,6 +130,24 @@ async def healthz(response: Response):
             "memory": {**prompt.memory_stats(), "pass": memory_pass.stats()},
             "wa_link": await _wa_link_summary(),
             "channels": await _channels_summary(st)}
+
+
+@app.get("/internal/ops/summary")
+async def ops_summary_route(request: Request, days: int = 30):
+    """The Smara section of the private Syntarus dashboard. Needs OPS_DASHBOARD_TOKEN as a bearer token; off when unset."""
+    from src import ops_summary
+    token = request.app.state.settings.ops_dashboard_token
+    got = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=404)
+    if not got or not hmac.compare_digest(got.encode(), token.encode()):
+        raise HTTPException(status_code=401)
+    probe = Response()
+    health = await healthz(probe)
+    health = {"ok": bool(health.get("ok")), "db": health.get("db"), "sandbox": health.get("sandbox"),
+              "continuum": health.get("continuum"), "outbox": health.get("outbox"), "ops": health.get("ops"),
+              "agent_model": health.get("agent_model"), "channels": health.get("channels")}
+    return await ops_summary.build(request.app.state.pool, days, health)
 
 
 async def _channels_summary(st) -> dict:

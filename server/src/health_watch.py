@@ -62,6 +62,16 @@ def tool_failed(name: str, err: BaseException) -> None:
     _examples.setdefault(("tool",) + key, str(err)[:120])
 
 
+def snapshot() -> dict:
+    """What was counted since the last hourly report, for the operator dashboard: counts and short error names, no user data."""
+    rows = [{"kind": "error", "count": n, "where": name, "what": msg.replace("%s", "…"),
+             "example": _examples.get((name, msg, exc), exc)} for (name, msg, exc), n in _errors.most_common(MAX_LINES)]
+    rows += [{"kind": "tool", "count": n, "where": name, "what": f"tool raised {exc}",
+              "example": _examples.get(("tool", name, exc), "")} for (name, exc), n in _tools.most_common(MAX_LINES)]
+    return {"since": datetime.fromtimestamp(_since, clock.IST).isoformat(), "errors": sum(_errors.values()),
+            "tool_failures": sum(_tools.values()), "items": rows}
+
+
 def summary(now_wall: float | None = None) -> str:
     """The report text, or '' when nothing went wrong."""
     n_err, n_tool = sum(_errors.values()), sum(_tools.values())
