@@ -29,7 +29,7 @@ from src.loop.wa_link import SidecarClient
 
 
 TELEGRAM_MENU = [("help", "What Smara can do"), ("style", "Reply language and length"), ("digest", "Today's summary"),
-                 ("files", "Files you sent")]
+                 ("skills", "Your saved skills"), ("files", "Files you sent")]
 
 
 async def _telegram_menu(tg) -> None:

@@ -118,7 +118,7 @@ def test_prompt_lists_skills_but_not_for_customer_sessions():
     from src.agent import prompt
     assert "collections-followup" in skills.index()
     src = Path(prompt.__file__).read_text(encoding="utf-8")
-    assert 'trust != "UNTRUSTED" and (listing := skills.index())' in src
+    assert 'trust != "UNTRUSTED" and (listing := await skills.index_for(app.state.pool, tenant.id))' in src
 
 
 # ------------------------------------------------------------------------------------------ permissions

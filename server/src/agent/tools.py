@@ -82,6 +82,13 @@ TOOLS = [
          "title": _S, "subtitle": _S, "blocks": {"type": "array", "items": {"type": "object"}}}, ["kind"]),
     _fn("load_skill", "Load detailed step-by-step instructions for a kind of task (the list of skills is in your instructions). "
         "Load the matching skill BEFORE starting that task, then follow it.", {"name": _S}, ["name"]),
+    _fn("save_skill", "Save a workflow that WORKED as a skill of this shop, so next time it is done straight away. Call it only "
+        "when the owner agrees or asks ('skill bana lo', 'yaad rakho ye tareeka'), after a task that succeeded. Write it in "
+        "your own words: when to use it (description), then the steps that worked in order (including the fix you needed "
+        "after an error), what to ask the owner each time, and how to check the result. Never put passwords, OTPs, card "
+        "numbers or keys in it. The same name improves an existing skill. Only for the owner's own conversation.",
+        {"name": _S, "description": _S, "instructions": _S}, ["name", "description", "instructions"]),
+    _fn("delete_skill", "Delete one of this shop's own saved skills, when the owner asks.", {"name": _S}, ["name"]),
     _fn("read_attachment", "Read ANY file the owner attached: PDF, Word, PowerPoint, text, photo or scan (OCR), voice note, "
         "or a zip (lists what is inside). Returns the text so you can answer from it. For spreadsheets use inspect_and_import_file; "
         "for heavy processing use run_python.", {"file_ref": _S}, ["file_ref"]),

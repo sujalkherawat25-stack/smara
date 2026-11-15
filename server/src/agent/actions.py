@@ -75,7 +75,9 @@ async def inspect_and_import_file(app, ctx: SessionCtx, args: dict) -> dict:
     if not is_tally and not filename.lower().endswith((".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".txt")):
         if mime.startswith("image/"):
             return {"kind": "image", "ocr": await read_image(app.state.llm, data, mime)}
-        return {"error": f"unsupported file {filename!r}; send .xlsx, .xls, .csv or a Tally Prime XML export"}
+        return {"error": f"{filename!r} cannot be loaded into the ledger directly (that needs .xlsx, .xls, .csv or a Tally Prime XML export). "
+                         "It is still readable: use read_attachment for the text, or run_python to extract what is needed, and "
+                         "offer to build a sheet from it."}
     if not is_tally and (refused := gst.not_receivables(filename, data)):      # purchases and supplier bills are not customer dues
         return refused
     async with app.state.pool.connection() as conn:           # customers already on file supply missing mobile numbers

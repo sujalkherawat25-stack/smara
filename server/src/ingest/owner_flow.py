@@ -29,7 +29,10 @@ from src.tenants import Tenant
 log = logging.getLogger(__name__)
 HELP = ("Mujhse seedha baat kijiye, jaise kisi munim se: 'aaj kisko call karun?', 'Sharma ko 12000 udhaar diya', "
         "'Gupta ne 5000 cash diya', 'Ravi ka statement PDF bhejo'. Voice note bhi chalega.\n\n"
-        "Kuch commands:\n• 'digest': aaj ka summary\n• 'style': jawab ki bhasha aur lambai\n• 'files': aapki bheji files\n"
+        "Sirf khata hi nahi: koi bhi file bhejiye (Excel, PDF, Word, photo), kuch bhi poochiye ya banwaiye (sheet, report, "
+        "GST check, website se jaankari). Jo kaam achha ho jaye, use 'skill' bana lunga.\n\n"
+        "Kuch commands:\n• 'digest': aaj ka summary\n• 'style': jawab ki bhasha aur lambai\n• 'skills': aapki saved skills\n"
+        "• 'files': aapki bheji files\n"
         "• 'export': Tally/Busy se list kaise nikalein\n• 'sample': ek sample file\n• 'telegram': Telegram jodein\n\n"
         "Apni outstanding sheet (.xlsx/.csv) bhejiye, main import kar dunga.")
 PC_LATER = ("Apne PC ka browser jodna Smara Desktop ke saath aayega, jo abhi jaldi aa raha hai. Tab tak main Smara ke apne cloud "
@@ -103,6 +106,14 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         return await _style(app, tenant_id, msg, *style)
     if cmd in ("help", "commands", "menu"):
         return HELP
+    if msg.kind == "text" and (cmd in ("skills", "my skills", "skill", "meri skills") or cmd.startswith("skill delete ")):
+        from src.agent import skills
+        if cmd.startswith("skill delete "):
+            name = cmd[len("skill delete "):].strip()
+            async with app.state.pool.connection() as conn:
+                cur = await conn.execute("DELETE FROM owner_skills WHERE tenant_id = %s AND name = %s", (tenant_id, name))
+            return f"Skill '{name}' hata di." if cur.rowcount else f"'{name}' naam ki koi skill nahi mili. 'skills' bhej kar list dekhiye."
+        return skills.summary(await skills.own_skills(app.state.pool, tenant_id))
     from src.config import pc_allowed
     if len(cmd) <= 30 and (cmd in ("browser status", "browser") or any(
             k in cmd for k in ("pair browser", "pair pc", "connect browser", "browser pair"))) and \

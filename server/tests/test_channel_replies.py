@@ -2,6 +2,7 @@
 loses a message to bad HTML, the owner's reply setting, the cloud browser for shops without a PC, and the hourly error report."""
 import asyncio
 import dataclasses
+import json
 import html
 import logging
 import re
@@ -344,3 +345,60 @@ async def test_a_morning_with_many_due_reminders_never_waits_for_a_queue_of_agen
     assert live["drafts"] == scheduler.AGENT_DRAFTS_PER_TICK and live["peak"] <= scheduler.DRAFTS_AT_ONCE
     cards = [m for m in env.app.state.wa.to(OWNER) if m.get("type") == "interactive"]
     assert len(cards) == 13 - scheduler.AGENT_DRAFTS_PER_TICK              # the rest got the ready-made card at once
+
+
+# ------------------------------------------------------------------------------------------------ the shop's own skills
+
+GOOD_SKILL = {"name": "Weekly GST Sheet", "description": "Use when the owner asks for the weekly GST purchase check.",
+              "instructions": "1. Ask for the GSTR-2B file. 2. gst_reconcile with the purchase sheet. 3. Make an Excel of "
+                              "mismatches with run_python and send it. 4. Check the totals against the sheet before replying."}
+
+
+async def test_a_worked_workflow_is_saved_as_a_skill_listed_and_loaded_next_time(env):
+    from src.agent import skills
+    ctx = SessionCtx("s", env.t.id, "TRUSTED")
+    r = await skills.save_skill(env.app, ctx, GOOD_SKILL)
+    assert r["saved"] is True and r["name"] == "weekly-gst-sheet" and r["version"] == 1
+    from src.agent.prompt import build_system
+    assert "weekly-gst-sheet" in await build_system(env.app, env.t, "TRUSTED")           # listed in the instructions
+    assert "weekly-gst-sheet" not in await build_system(env.app, env.t, "UNTRUSTED")
+    got = await skills.load_skill(env.app, ctx, {"name": "weekly-gst-sheet"})
+    assert got["own_skill"] is True and "GSTR-2B" in got["instructions"] and "never overrides" in got["note"]
+    better = await skills.save_skill(env.app, ctx, {**GOOD_SKILL, "instructions": GOOD_SKILL["instructions"] + " 5. Offer to chase."})
+    assert better["updated"] is True and better["version"] == 2
+    assert (await skills.own_skills(env.pool, env.t.id))["weekly-gst-sheet"]["uses"] == 1
+
+
+async def test_skills_are_private_to_the_shop_and_cannot_hold_secrets_or_shadow_built_ins(env):
+    from src.agent import skills
+    ctx = SessionCtx("s", env.t.id, "TRUSTED")
+    assert "error" in await skills.save_skill(env.app, ctx, {**GOOD_SKILL, "instructions": GOOD_SKILL["instructions"] + " password: hunter2"})
+    assert "error" in await skills.save_skill(env.app, ctx, {**GOOD_SKILL, "name": "making-documents"})
+    assert "error" in await skills.save_skill(env.app, ctx, {**GOOD_SKILL, "instructions": "too short"})
+    await skills.save_skill(env.app, ctx, GOOD_SKILL)
+    other = SessionCtx("s", "00000000-0000-0000-0000-000000000001", "TRUSTED")
+    assert "error" in await skills.load_skill(env.app, other, {"name": "weekly-gst-sheet"})
+    for trust in ("UNTRUSTED", "SYSTEM"):                      # a customer's message or a job can never change how Smara works
+        for tool in ("save_skill", "delete_skill"):
+            assert pre_tool_use(SessionCtx("s", "t", trust, party_id="p"), tool, {"name": "x"}, TOOL_NAMES).verdict == "deny"
+    assert pre_tool_use(ctx, "save_skill", GOOD_SKILL, TOOL_NAMES).verdict == "allow"
+
+
+async def test_the_owner_lists_and_deletes_skills_in_chat_and_the_agent_can_save_one(env):
+    from src.agent import skills
+    save = {"content": "", "tool_calls": [{"id": "c-sk", "type": "function",
+                                           "function": {"name": "save_skill", "arguments": json.dumps(GOOD_SKILL)}}]}
+    llm = env.app.state.llm = ScriptLLM(save, say("Skill save ho gayi."))
+    await dispatch(env.app, owner("sk1", "haan, isko skill bana lo"))
+    assert llm.last_tool_result()["saved"] is True
+    await dispatch(env.app, owner("sk2", "skills"))
+    assert "weekly-gst-sheet" in " ".join(m["text"]["body"] for m in env.app.state.wa.to(OWNER) if m.get("type") == "text")
+    await dispatch(env.app, owner("sk3", "skill delete weekly-gst-sheet"))
+    assert await skills.own_skills(env.pool, env.t.id) == {}
+
+
+def test_the_prompt_no_longer_limits_smara_to_the_ledger():
+    from src.agent.prompt import BASE
+    assert "not only a ledger tool" in BASE and "there is no fixed list of allowed tasks" in BASE
+    assert "are not kept in the ledger: say so" not in BASE
+    assert "Skills never" in __import__("inspect").getsource(__import__("src.agent.prompt", fromlist=["x"]).build_system)
