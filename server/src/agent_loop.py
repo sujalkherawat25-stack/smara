@@ -40,7 +40,7 @@ CONTINUE_WITHIN = timedelta(minutes=30)
 EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memory": tools.resolve_continuum_memory,
              "write_continuum_evidence": tools.write_continuum_evidence,
              "search_chat_history": tools.search_chat_history,
-             "inspect_and_import_file": actions.inspect_and_import_file, "read_attachment": reader.read_attachment, "make_document": documents.make_document, "load_skill": skills.load_skill, "run_python": actions.run_python,
+             "inspect_and_import_file": actions.inspect_and_import_file, "read_attachment": reader.read_attachment, "make_document": documents.make_document, "load_skill": skills.load_skill, "save_skill": skills.save_skill, "delete_skill": skills.delete_skill,"run_python": actions.run_python,
              "get_current_time": extras.get_current_time, "schedule_followup": extras.schedule_followup,
              "list_followups": extras.list_followups, "cancel_followup": extras.cancel_followup,
              "check_gstin": extras.check_gstin, "build_payment_request": extras.build_payment_request,
