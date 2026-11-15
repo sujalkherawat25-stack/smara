@@ -40,7 +40,7 @@ async def test_an_admin_invite_with_a_telegram_id_sends_the_link_to_that_person(
     assert f"/invite {STRANGER}" in texts(app, ADMIN)[-1] and "Telegram id" in texts(app, ADMIN)[-1]   # the admin is told
     await tgmod.handle_update(app, msg(f"/invite {STRANGER}", ADMIN))
     sent = texts(app, STRANGER)[-1]
-    assert "https://t.me/smara_test_bot?start=SMA-" in sent and "access mil gaya" in sent
+    assert "https://t.me/smara_test_bot?start=SMA-" in sent and "You now have access" in sent
     assert (await one(pool, "select invited_at is not null as i from waitlist where phone = %s", f"tg:{STRANGER}"))["i"] is True
     assert "bhej diya" in texts(app, ADMIN)[-1]
 
@@ -49,11 +49,11 @@ async def test_a_stranger_hears_they_are_on_the_waitlist_once_in_full_and_then_b
     app = make_app(pool, admin_telegram_ids=(ADMIN,))
     await tgmod.handle_update(app, msg("hi", OTHER, first_name="Meera", username="meera_k"))
     first = texts(app, OTHER)[-1]
-    assert "waitlist mein hain" in first and "AI assistant" in first
+    assert "on the waitlist" in first and "AI assistant" in first
     note = texts(app, ADMIN)[-1]
     assert "Meera" in note and "@meera_k" in note and str(OTHER) in note
     await tgmod.handle_update(app, msg("hello again", OTHER))
-    assert texts(app, OTHER)[-1].startswith("Aap abhi waitlist mein hain") and len(texts(app, ADMIN)) == 1   # no second alert
+    assert texts(app, OTHER)[-1].startswith("You're still on the waitlist") and len(texts(app, ADMIN)) == 1   # no second alert
     await tgmod.handle_update(app, msg("/waitlist", ADMIN))
     assert str(OTHER) in texts(app, ADMIN)[-1] and "2 msg" in texts(app, ADMIN)[-1]
 

@@ -411,7 +411,7 @@ def test_the_instructions_do_not_limit_smara_to_businesses():
     assert "anyone can use" in BASE and "knowledge" in BASE and "Do not assume they run a shop" in BASE
     assert "small business in India" not in BASE and "back-office agent" not in BASE
     from src.ingest import onboarding, telegram_onboarding as tgo
-    for text in (onboarding.WELCOME_ASK_SHOP, onboarding.INVITE_ONLY, tgo.ASK_PHONE, tgo.NOT_INVITED):
+    for text in (onboarding.welcome_done('Asha'), onboarding.INVITE_ONLY, tgo.NOT_INVITED):
         assert "business owners" not in text.replace("business owners, professionals", "") and "dukaan" not in text
 
 

@@ -69,6 +69,8 @@ class Settings:
     # The Smara team's Telegram chat: ops alerts (owner messages that cannot be sent). None = log only.
     ops_telegram_chat_id: int | None = None
     admin_telegram_ids: tuple = ()      # Telegram ids that may use /invite, /waitlist ... (default: the ops chat)
+    # Shared secret the Syntarus operator dashboard sends to read the Smara numbers (empty = that endpoint is off)
+    ops_dashboard_token: str = ""
     # Public https origin of this server; enables tappable pay links in reminders
     public_base_url: str = ""
     # OpenAI-compatible chat endpoint; fast model by default, reasoning model on escalation
@@ -150,6 +152,7 @@ def load_settings() -> Settings:
         telegram_webhook_secret=env.get("TELEGRAM_WEBHOOK_SECRET", ""),
         ops_telegram_chat_id=_chat_id(env.get("OPS_TELEGRAM_CHAT_ID", "")),
         admin_telegram_ids=tuple(i for i in (_chat_id(x) for x in env.get("ADMIN_TELEGRAM_IDS", "").split(",")) if i is not None),
+        ops_dashboard_token=env.get("OPS_DASHBOARD_TOKEN", ""),
         public_base_url=env.get("PUBLIC_BASE_URL", ""),
         llm_base_url=env.get("LLM_BASE_URL", ""),
         llm_api_key=env.get("LLM_API_KEY", ""),

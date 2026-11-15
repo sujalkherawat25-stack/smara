@@ -87,7 +87,7 @@ Businesses can also use it to follow up on invoices their own customers have not
 <p>The business that uses Smara decides which customer and supplier details to share, and is responsible to its own customers for that.
 Syntarus runs Smara for the business and handles that information only to provide the service.</p>
 <h2>What we collect</h2>
-<ul><li><strong>From the person using Smara:</strong> their name or business name, phone number, UPI ID (if given), the Telegram account they chat with Smara from (if they use Telegram), and the messages, voice notes, photos and files
+<ul><li><strong>From the person using Smara:</strong> the name their chat app shows (Smara does not ask for a name, phone number or UPI ID; if they choose to share such details in a chat, they are kept as part of the conversation), the Telegram account they chat with Smara from (if they use Telegram), and the messages, voice notes, photos and files
 they send Smara (for example an outstanding-dues sheet, a Tally export, a PDF or a bill photo), and what Smara replies.</li>
 <li><strong>From Smara Desktop, only if the owner turns it on:</strong> the open bills the business is owed and the open bills it has to pay, and the
 names and phone numbers of those parties as saved in Tally. We do not copy the rest of the Tally company file, and we never receive Tally passwords.

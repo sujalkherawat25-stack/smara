@@ -73,9 +73,9 @@ def test_sample_sheet_is_in_assets_and_parses_with_the_owner_import_path():
 
 
 def test_welcome_message_has_the_export_and_sample_line():
-    text = welcome_done("Ramesh Hardware")
-    assert "Tally/Busy se list kaise nikalein? 'export' likhiye. Sample file chahiye? 'sample' likhiye." in text
-    assert len(text) < 1200
+    text = welcome_done("Ramesh")
+    assert "'export' shows how" in text and "'sample' gives a sample file" in text
+    assert len(text) < 1600
 
 
 # ---------- Fix 3: PDFs ----------
