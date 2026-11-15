@@ -25,7 +25,10 @@ Telegram and WhatsApp side by side.
 
 **A. Telegram first (works even while the WhatsApp number is not available):**
 
-1. Create an invite: `docker exec smara_app python scripts/invites.py create --label "Ravi Traders"`.
+0. Easiest: an admin (ADMIN_TELEGRAM_IDS, default the ops chat) sends the bot `/invite` (a link to forward) or
+   `/invite <telegram id>` (the bot sends the link itself). `/waitlist` shows who asked for access; the admins are also told
+   when someone new asks. `/invites` and `/revoke CODE` manage the codes.
+1. Or on the server: `docker exec smara_app python scripts/invites.py create --label "Ravi Traders"`.
    It prints the code and a Telegram link (`https://t.me/<bot>?start=<code>`).
 2. Send the owner the link. They open it, press **Share my phone number** (Telegram confirms the number is theirs),
    then answer two questions: shop name and UPI ID (or `skip`). The shop is created and you get an ops alert.

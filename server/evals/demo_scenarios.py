@@ -491,6 +491,46 @@ TASKS += [
 ]
 
 
+async def _clear_ledger(env):
+    async with env.pool.connection() as conn:       # a user who has never loaded any books
+        await conn.execute("TRUNCATE obligations, parties CASCADE")       # eval database only
+
+
+async def ev_personal_plan(env):
+    await _clear_ledger(env)
+    await dispatch(env.app, owner("Mujhe 4 hafte mein SQL seekhni hai, roz 1 ghanta. Ek simple weekly plan bana do.", "pp1"))
+
+
+async def ev_personal_email(env):
+    await _clear_ledger(env)
+    await dispatch(env.app, owner("Mere manager ko ek polite email likh do: main Friday ko chhutti par rahunga, kaam Thursday tak khatam kar dunga.", "pp2"))
+
+
+def _business_context(text):
+    import re as _re
+    return [text[max(0, m.start() - 30): m.end() + 30] for m in _re.finditer(r"(invoice|invoices|ledger|outstanding|overdue|udhaar|khata)", text.lower())]
+
+
+async def c_personal_plan(env):
+    last = env.wa.last_owner_text()
+    ctx = _business_context(last)
+    refused = any(w in last.lower() for w in ("cannot help", "can't help", "i can only", "sirf business", "nahi kar sakta"))
+    return len(last) >= 150 and not ctx and not refused, f"len={len(last)} business_context={ctx[:3]} refused={refused}"
+
+
+async def c_personal_write(env):
+    last = env.wa.last_owner_text()
+    ctx = _business_context(last)
+    refused = any(w in last.lower() for w in ("cannot help", "can't help", "i can only", "sirf business", "nahi kar sakta"))
+    return len(last) >= 200 and not ctx and not refused, f"len={len(last)} business_context={ctx[:3]} refused={refused} reply={last[:120]!r}"
+
+
+TASKS += [
+    Task("personal_study_plan", ("custom", ev_personal_plan), c_personal_plan),
+    Task("personal_write_email", ("custom", ev_personal_email), c_personal_write),
+]
+
+
 if __name__ == "__main__":
     h.TASKS[:] = TASKS
     h.seed = seed
