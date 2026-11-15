@@ -34,6 +34,9 @@ Do not write code for this and do not call `inspect_and_import_file` on a purcha
 5. Print totals for each class and the ITC amount at risk. Check that matched + each unmatched class equals the row counts of the two files. If not, find out why before reporting.
 6. Produce the output with `make_document` kind `custom` (blocks: stats, a table per class capped to the most important rows, a note stating the matching rule) and, for the full detail, an Excel via `mh.write_xlsx`. Send both with `send_file_to_owner`.
 
+## When the owner wants specific buckets (not the PDF)
+Do it in one `run_python` script. Match on supplier GSTIN + `mh.norm_invoice(invoice_no)`: an invoice that differs only in case, spaces, slashes or dashes IS the same bill. List those as "number written differently" and never as missing in 2B or missing in books. Buckets to produce when asked: missing in 2B; value mismatch (taxable differs by more than Rs 1); number written differently; in 2B not in books; the same supplier invoice booked twice (report the LATER voucher; use only the first booking for every other bucket); blocked credit (motor vehicle repairs, gifts, canteen and similar, section 17(5)); and every row where the 2B itself says ITC is not available (an "ITC available" / "ITC eligible" column with No, or a remark such as cancelled supplier). Read the 2B's own flag column: do not infer it. Check that every row of both files lands in exactly one bucket and say so.
+
 ## Chasing suppliers
 For "in books, not in 2B" group by supplier and offer one short message per supplier asking them to file or correct the listed invoices (numbers and dates). Offer it to the owner for approval. Do not threaten; keep it factual.
 

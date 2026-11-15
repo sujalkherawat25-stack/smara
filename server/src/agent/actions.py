@@ -161,7 +161,8 @@ async def validate_gated(app, ctx: SessionCtx, name: str, args: dict) -> str | N
     if name == "send_whatsapp_message":
         p = await party_in_tenant(pool, ctx.tenant_id, args.get("to"))
         if not p:
-            return "to must be 'owner' or a party_id of this shop"
+            return ("to must be 'owner' or a party_id of this shop: the `id` column of the parties table (query_ledger_sql: "
+                    "SELECT id, canonical_name FROM parties ...), not the customer's name or phone number")
         if p.get("opted_out_at"):
             return (f"{p['canonical_name']} replied STOP on {p['opted_out_at']:%d %b} and must not be messaged on WhatsApp. "
                     "Tell the owner; they can call the customer themselves.")

@@ -100,6 +100,22 @@ async def list_followups(app, ctx: SessionCtx, args: dict) -> dict:
                         for r in rows]}
 
 
+async def list_my_files(app, ctx: SessionCtx, args: dict) -> dict:
+    """The files this person has sent over time (they are kept, so an earlier file can be opened again), newest first."""
+    from datetime import datetime, timezone
+
+    from src.ingest import owner_files
+    rows = owner_files.agent_files(app.state.settings.owner_files_dir, ctx.tenant_id, datetime.now(timezone.utc))
+    needle = str(args.get("name_contains") or "").strip().lower()
+    if needle:
+        rows = [r for r in rows if needle in r["name"].lower()]
+    return {"files": [{"no": r["no"], "name": r["name"], "size_kb": round(r["bytes"] / 1024),
+                       "kept_on": r["saved"].astimezone(clock.IST).strftime("%d %b %Y %H:%M"), "file_ref": r["file_ref"]}
+                      for r in rows[:30]],
+            "note": "To open files in run_python pass their file_ref values in file_refs; each then appears as ./in/<name> (without file_refs ./in is empty). "
+                    "read_attachment takes the same file_ref. A file listed here still exists."}
+
+
 async def cancel_followup(app, ctx: SessionCtx, args: dict) -> dict:
     try:
         async with app.state.pool.connection() as conn:

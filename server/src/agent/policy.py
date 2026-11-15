@@ -89,10 +89,18 @@ def sensitive_step(args: dict, ctx=None) -> bool:
     return bool(OUTWARD_STEP.search(f"{words} {args.get('value', '')}"))
 
 
+def can_open(ref, ctx) -> bool:
+    """A file the agent may open: one attached to this conversation, or, in a conversation with the owner, one of the
+    owner's own kept files (local:<token>:<name>; the store itself only ever opens a shop's own, not-deleted files)."""
+    if ref in ctx.files:
+        return True
+    return ctx.trust == "TRUSTED" and isinstance(ref, str) and ref.startswith("local:") and ref.count(":") >= 2
+
+
 def tier_of(name: str, args: dict) -> str:
     if name in ("query_ledger_sql", "resolve_continuum_memory", "run_python", "get_current_time", "check_gstin",
                 "build_payment_request", "list_followups", "web_search", "read_attachment", "make_document", "load_skill",
-                "search_chat_history", "gst_reconcile", "find_customer"):
+                "search_chat_history", "gst_reconcile", "find_customer", "list_my_files"):
         return "T0"
     if name in ("schedule_followup", "cancel_followup", "send_file_to_owner", "set_customer_phone", "set_reply_style",
                 "save_skill", "delete_skill"):
@@ -133,10 +141,10 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
             return Decision("deny", tier, "only a conversation with the owner can reach the files on their PC")
         if args.get("action") not in ("list", "read", "write"):
             return Decision("deny", tier, "action must be list, read or write")
-    if name == "read_attachment" and args.get("file_ref") not in ctx.files:
+    if name == "read_attachment" and not can_open(args.get("file_ref"), ctx):
         return Decision("deny", tier, "only files attached to this conversation can be opened")
     if name == "inspect_and_import_file":
-        if args.get("file_ref") not in ctx.files:
+        if not can_open(args.get("file_ref"), ctx):
             return Decision("deny", tier, "only files attached to this conversation can be opened")
         if tier == "T1" and ctx.trust != "TRUSTED":
             return Decision("deny", tier, "only the owner's own uploads can be imported")
@@ -147,7 +155,7 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
             return Decision("deny", tier, "only files you created with run_python in this conversation can be sent")
     if name == "run_python":
         refs = args.get("file_refs") or []
-        if not isinstance(refs, list) or any(r not in ctx.files for r in refs):
+        if not isinstance(refs, list) or any(not can_open(r, ctx) for r in refs):
             return Decision("deny", tier, "only files attached to this conversation can be opened")
         if not isinstance(args.get("code"), str) or not args["code"].strip() or len(args["code"]) > 20_000:
             return Decision("deny", tier, "code must be a non-empty string under 20,000 characters")
