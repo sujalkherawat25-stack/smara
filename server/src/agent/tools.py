@@ -63,6 +63,10 @@ TOOLS = [
         "tools; outward actions still need approval.",
         {"instruction": _S, "at_ist": _S, "in_minutes": {"type": "integer"}}, ["instruction"]),
     _fn("list_followups", "List your pending scheduled follow-ups.", {}, []),
+    _fn("list_my_files", "List the files this person sent you earlier (they are kept; a file from yesterday or last week is still "
+        "here). Optionally filter by part of the name. Each entry has a file_ref you can pass to run_python (file_refs) or "
+        "read_attachment. Call this BEFORE you say you no longer have a file.",
+        {"name_contains": _S}, []),
     _fn("cancel_followup", "Cancel a pending follow-up by task_id.", {"task_id": _S}, ["task_id"]),
     _fn("check_gstin", "Validate a GSTIN's format and checksum (does not check live registration status).",
         {"gstin": _S}, ["gstin"]),
@@ -178,7 +182,19 @@ TOOLS = [
         "in the format the importer reads. For documents to send the owner: mh.statement_pdf('out/statement.pdf', shop=..., "
         "party=..., rows=[{invoice, date, due_date, amount, paid}], note=...) writes a customer account statement PDF and "
         "mh.write_xlsx({'Sheet': DataFrame}, 'out/report.xlsx') writes a formatted Excel file. Make the file type the "
-        "owner asked for (PDF means .pdf, Excel means .xlsx), not a CSV. Always print or RESULT the totals you computed so you can verify them.",
+        "owner asked for (PDF means .pdf, Excel means .xlsx), not a CSV. Always print or RESULT the totals you computed so you can verify them. "
+        "TO CHANGE A FILE THE OWNER SENT (add a column, fix values, a formula): edit THAT workbook in place, never rebuild it "
+        "with pandas or write_xlsx (that drops formulas, formatting and rows). mh.add_column(src, dst, source_header=..., "
+        "new_header=..., formula='={c}{r}*0.4') adds one column to every sheet that has the header (found per sheet, on any "
+        "row) and returns what it did and which sheets it skipped; for any other edit use openpyxl load_workbook(path) (NOT "
+        "data_only) and change only the cells asked. Then ALWAYS run mh.compare_workbooks(src, dst): it must say ok, and you "
+        "tell the owner in plain words what changed, what stayed the same and any sheet you could not change. "
+        "FOR BOOKS (what customers owe, receipts against invoices, TDS, GST bills) do NOT hand-write the matching: "
+        "mh.match_names(names, ledger_names) maps typed spellings to the ledger ('and'/'&', case, spaces, Agarwal/Agrawal) and lists "
+        "the unclear ones in 'review'; mh.fifo_apply(invoices, payments) applies lump-sum receipts oldest invoice first and returns "
+        "open balances and advances; mh.norm_invoice(no) compares invoice numbers ignoring punctuation and case; "
+        "mh.tds_194q(bills) does section 194Q on the part above Rs 50 lakh. Load the receivables-from-books skill first for such work. "
+        "Pass the file_refs of every file you open: without them ./in is empty.",
         {"code": _S, "file_refs": {"type": "array", "items": _S}}, ["code"]),
     _fn("pc_files", "Reach the Smara Shared folder on the owner's own PC (only that folder, only text files). action=list shows "
         "what is in it, read opens a text file, write saves a new text file there (the owner approves each write). Use it when the "
@@ -247,7 +263,7 @@ async def _memory_scope(app, ctx: SessionCtx, party_id) -> str | None:
 async def resolve_continuum_memory(app, ctx: SessionCtx, args: dict) -> dict:
     scope = await _memory_scope(app, ctx, args.get("party_id"))
     if scope is None:
-        return {"error": "unknown party_id for this shop (use 'shop' for shop-wide notes)"}
+        return {"error": "unknown party_id for this shop: pass the `id` of the customer from the parties table (query_ledger_sql: SELECT id, canonical_name FROM parties), not their name; 'shop' is for shop-wide notes"}
     try:
         res = await app.state.continuum.resolve(user_id=scope,
                                                 query=str(args.get("query", ""))[:500])
@@ -261,7 +277,7 @@ async def write_continuum_evidence(app, ctx: SessionCtx, args: dict) -> dict:
     party = str(args.get("party_id", ""))
     scope = await _memory_scope(app, ctx, party)
     if scope is None:
-        return {"error": "unknown party_id for this shop (use 'shop' for shop-wide notes)"}
+        return {"error": "unknown party_id for this shop: pass the `id` of the customer from the parties table (query_ledger_sql: SELECT id, canonical_name FROM parties), not their name; 'shop' is for shop-wide notes"}
     text = str(args.get("text", "")).strip()[:4000]
     if not text:
         return {"error": "text is empty"}

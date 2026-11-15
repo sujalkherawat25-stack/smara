@@ -525,6 +525,70 @@ async def c_personal_write(env):
     return len(last) >= 200 and not ctx and not refused, f"len={len(last)} business_context={ctx[:3]} refused={refused} reply={last[:120]!r}"
 
 
+def _bonus_workbook() -> bytes:
+    """A workbook shaped like a real agency file: header on row 1 in two sheets, on row 4 under blank rows in two others,
+    live formulas, dates, and one sheet that has no premium column at all."""
+    import datetime as _dt
+    import io as _io
+    from openpyxl import Workbook
+    wb = Workbook()
+    for i, (name, top) in enumerate((("Sheet1", 0), ("UPDATED", 0), ("UPTO 092027", 3), ("UPTO 102027", 3))):
+        ws = wb.active if i == 0 else wb.create_sheet(name)
+        ws.title = name
+        for _ in range(top):
+            ws.append([None])
+        ws.append(["Slno", "AgencyCod", "Agency Name", "Appnt.Date", "TotalPremium", "Livs", "Req lives"])
+        for n in range(1, 41 + i * 7):
+            r = ws.max_row + 1
+            ws.append([n, 2200000 + n, f"AGENT {n}", _dt.datetime(2000 + n % 20, 1 + n % 12, 1 + n % 27) if n % 3 else "31/08/1996",
+                       10000 * n + 57, n % 7, f"=(6-F{r})"])
+    notes = wb.create_sheet("NOTES")
+    notes.append(["Prepared by", "head office"])
+    buf = _io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+BONUS_ORIGINAL = _bonus_workbook()
+h.FILES["MX9"] = ("bonus112026.xlsx", BONUS_ORIGINAL)
+
+
+async def ev_edit_in_place(env):
+    await dispatch(env.app, owner("Is file mein har sheet ke end mein ek 'Bonus 40%' column add kar do (TotalPremium ka 40%). Baaki file waisi hi rehni chahiye.", "ed1", media="MX9"))
+
+
+async def c_edit_in_place(env):
+    import io as _io
+    from openpyxl import load_workbook
+    xl = [u for u in env.wa.uploads if u[0].lower().endswith(".xlsx")]
+    if not xl:
+        return False, f"no xlsx sent; reply={env.wa.last_owner_text()[:200]!r}"
+    a, b = load_workbook(_io.BytesIO(BONUS_ORIGINAL)), load_workbook(_io.BytesIO(xl[-1][2]))
+    problems = []
+    if a.sheetnames != b.sheetnames:
+        problems.append(f"sheets {a.sheetnames} -> {b.sheetnames}")
+    formulas_a = formulas_b = changed = lost = new_cols = 0
+    for ws in a.worksheets:
+        if ws.title not in b.sheetnames:
+            continue
+        wd = b[ws.title]
+        for row in ws.iter_rows():
+            for c in row:
+                if c.value is None:
+                    continue
+                nv = wd.cell(row=c.row, column=c.column).value
+                formulas_a += isinstance(c.value, str) and c.value.startswith("=")
+                formulas_b += isinstance(nv, str) and nv.startswith("=")
+                if nv is None:
+                    lost += 1
+                elif nv != c.value:
+                    changed += 1
+        if ws.title != "NOTES" and any(c.value == "Bonus 40%" for r in wd.iter_rows() for c in r):
+            new_cols += 1
+    ok = not problems and not changed and not lost and formulas_b >= formulas_a and new_cols == 4
+    return ok, f"problems={problems} changed={changed} lost={lost} formulas {formulas_a}->{formulas_b} sheets_with_new_column={new_cols}/4 reply={env.wa.last_owner_text()[:160]!r}"
+
+
 async def ev_newcomer(env):
     await _clear_ledger(env)
     await dispatch(env.app, owner("Hi, I'm a final-year student. What can you actually help me with?", "nc1"))
@@ -541,7 +605,24 @@ async def c_newcomer(env):
         f"capability_words={can} asks_for={asks} business_context={ctx[:2]} question={'?' in last} len={len(last)} reply={last[:200]!r}"
 
 
+async def ev_earlier_file(env):
+    await dispatch(env.app, owner("Ye file rakh lo.", "ef1", media="MX9"))
+    async with env.pool.connection() as conn:     # it comes back another day, as a new conversation, in a fresh sandbox
+        await conn.execute("UPDATE agent_sessions SET updated_at = now() - interval '2 days', created_at = now() - interval '2 days'")
+    await dispatch(env.app, owner("Wo bonus wali excel file abhi bhi hai? Usme TotalPremium ka total kitna hai Sheet1 mein?", "ef2"))
+
+
+async def c_earlier_file(env):
+    last = env.wa.last_owner_text()
+    gone = any(w in last.lower() for w in ("nahi hai", "sandbox clear", "dobara attach", "send it again", "dobara bhej"))
+    total = sum(10000 * n + 57 for n in range(1, 41))
+    got = str(total) in last.replace(",", "") or f"{total:,}" in last
+    return got and not gone, f"expected={total} found={got} said_gone={gone} reply={last[:200]!r}"
+
+
 TASKS += [
+    Task("edit_in_place", ("custom", ev_edit_in_place), c_edit_in_place),
+    Task("earlier_file", ("custom", ev_earlier_file), c_earlier_file),
     Task("newcomer_intro", ("custom", ev_newcomer), c_newcomer),
     Task("personal_study_plan", ("custom", ev_personal_plan), c_personal_plan),
     Task("personal_write_email", ("custom", ev_personal_email), c_personal_write),

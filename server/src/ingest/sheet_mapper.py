@@ -16,15 +16,19 @@ MAX_INVOICES = 50_000   # one import is one transaction; past this the file is r
 SYNONYMS: dict[str, tuple[str, ...]] = {
     "party": ("party", "party name", "customer", "customer name", "particulars", "ledger",
               "ledger name", "debtor", "account name", "name", "party s name", "partys name", "particular",
-              "customer s name", "पार्टी", "पार्टी का नाम", "ग्राहक", "नाम"),
+              "customer s name", "पार्टी", "पार्टी का नाम", "ग्राहक", "नाम",
+              "party ka naam", "customer ka naam", "naam", "grahak", "dukan", "dukaan", "shop name", "name of party",
+              "name of customer", "a c name", "buyer", "sundry debtors", "debtors", "નામ", "પાર્ટી"),
     "phone": ("mobile", "mobile no", "mobile number", "phone", "phone no", "contact",
               "contact no", "whatsapp", "whatsapp no", "mobile phone", "ledger mobile", "phone number", "mob", "mob no",
               "मोबाइल", "फोन", "फ़ोन"),
     "invoice": ("invoice", "invoice no", "invoice number", "bill no", "bill number",
-                "voucher no", "vch no", "ref no", "reference", "ref", "ref no", "bill ref", "बिल नं", "बिल नंबर"),
+                "voucher no", "vch no", "ref no", "reference", "ref", "ref no", "bill ref", "बिल नं", "बिल नंबर", "inv no", "inv", "invoice ref", "bill", "bil no", "bill no s"),
     "amount": ("pending", "pending amount", "outstanding", "outstanding amount", "balance",
                "due amount", "closing balance", "amount due", "amount", "debit", "pending amt", "balance amount",
-               "राशि", "बकाया"),
+               "राशि", "बकाया", "baki", "baaki", "baki rashi", "baaki rashi", "bakaya", "bakaya rashi", "rashi", "raqam",
+               "baki raqam", "o s", "os", "o s amount", "o s amt", "os amt", "net outstanding", "net balance", "balance due",
+               "amount pending", "receivable", "closing", "pending rs", "bal", "बाकी", "बाकी राशि", "बाकी रक्कम", "બાકી", "બાકી રકમ"),
     "due": ("due date", "due on", "due", "payment due", "देय तिथि", "due dt"),
     "bill_date": ("date", "invoice date", "bill date", "voucher date"),
     "gstin": ("gstin", "gst no", "gst number", "gstin uin"),
@@ -154,7 +158,11 @@ def _map_table(table: list[list], i: int, cols: dict[str, int], known: dict[str,
         party = str(get("party") or "").strip()
         if party.lower() in TOTAL_WORDS:           # the sheet's own total line is not a customer
             continue
-        amount = parse_amount_paise(get("amount"))
+        raw_amount = get("amount")
+        if party and re.search(r"(?i)[0-9)\s]cr\.?\s*$", str(raw_amount or "")):       # '9,999 Cr' on a debtors list: the customer is in credit
+            skipped.append(f"{where}row {n} ({party}): credit balance (Cr), not owed to the shop")
+            continue
+        amount = parse_amount_paise(raw_amount)
         if not party or amount is None:
             is_total = any(str(c or "").strip().lower() in TOTAL_WORDS for c in r)
             if any(c not in (None, "") for c in r) and not is_total:

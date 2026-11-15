@@ -187,3 +187,210 @@ def write_xlsx(sheets: dict, path="out/report.xlsx") -> str:
             for col in ws.columns:
                 ws.column_dimensions[col[0].column_letter].width = min(48, max(10, max(len(str(c.value or "")) for c in col) + 2))
     return str(path)
+
+
+# ---- changing a workbook the owner sent, without rebuilding it -------------------------------------------------------
+def _find_header(ws, text: str, max_rows: int = 30, max_cols: int = 80):
+    """(row, column) of the first cell in the top of the sheet whose text equals `text` (ignoring case and spaces)."""
+    want = re.sub(r"\s+", "", str(text)).lower()
+    for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, max_rows), max_col=min(ws.max_column, max_cols)):
+        for cell in row:
+            if cell.value is not None and re.sub(r"\s+", "", str(cell.value)).lower() == want:
+                return cell.row, cell.column
+    return None
+
+
+def add_column(src: str, dst: str, *, source_header: str, new_header: str, formula: str, sheets=None) -> list[dict]:
+    """Add ONE new column to a copy of the owner's own workbook and change nothing else.
+
+    The file is opened with openpyxl (formulas, formatting, widths and every row stay as they are). On each sheet the
+    header row is found by looking for `source_header` (it can be on a different row on every sheet). The new column goes
+    right after the last used header cell, with the header's look copied, and `formula` is written for each data row that
+    has a value under `source_header`; use {c} for that column's letter and {r} for the row, e.g. '={c}{r}*0.4'.
+    Returns one dict per sheet: sheet, header_row, column, rows_filled, or skipped with the reason. A sheet where the
+    header is not found is left untouched and reported, never dropped. Tell the owner about every skipped sheet."""
+    from copy import copy
+
+    from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
+    wb = load_workbook(src)
+    report = []
+    for ws in wb.worksheets:
+        if sheets and ws.title not in sheets:
+            report.append({"sheet": ws.title, "skipped": "not in the list of sheets to change"})
+            continue
+        found = _find_header(ws, source_header)
+        if not found:
+            report.append({"sheet": ws.title, "skipped": f"no '{source_header}' header in the first rows", "rows": ws.max_row})
+            continue
+        hrow, scol = found
+        last = max((c.column for c in ws[hrow] if c.value is not None), default=scol)
+        ncol = last + 1
+        head_src = ws.cell(row=hrow, column=last)
+        head = ws.cell(row=hrow, column=ncol, value=new_header)
+        if head_src.has_style:
+            head._style = copy(head_src._style)
+        ws.column_dimensions[get_column_letter(ncol)].width = max(12, len(new_header) + 4)
+        letter, filled = get_column_letter(scol), 0
+        for r in range(hrow + 1, ws.max_row + 1):
+            v = ws.cell(row=r, column=scol).value
+            if v is None or (isinstance(v, str) and not v.strip()):
+                continue
+            cell = ws.cell(row=r, column=ncol, value=formula.format(c=letter, r=r))
+            src_cell = ws.cell(row=r, column=scol)
+            if src_cell.has_style:
+                cell._style = copy(src_cell._style)
+            filled += 1
+        report.append({"sheet": ws.title, "header_row": hrow, "column": get_column_letter(ncol), "rows_filled": filled})
+    if not any("rows_filled" in x for x in report):
+        raise ValueError(f"'{source_header}' was not found on any sheet: {report}")
+    Path(dst).parent.mkdir(parents=True, exist_ok=True)
+    wb.save(dst)
+    return report
+
+
+def compare_workbooks(src: str, dst: str, max_examples: int = 5) -> dict:
+    """Compare the owner's original workbook with the edited copy, cell by cell (formulas count as they are written).
+    ok is True only when every sheet is still there, no original cell changed or went missing, and no row was lost.
+    `added` counts cells that exist only in the copy (the new column). Always run this before sending an edited file
+    and report the result in plain words."""
+    from openpyxl import load_workbook
+    a, b = load_workbook(src), load_workbook(dst)
+    out, ok = [], True
+    for ws in a.worksheets:
+        if ws.title not in b.sheetnames:
+            out.append({"sheet": ws.title, "missing_sheet": True})
+            ok = False
+            continue
+        wd = b[ws.title]
+        changed, lost, rows_a = [], 0, 0
+        for row in ws.iter_rows(max_col=min(ws.max_column, 200)):
+            if any(c.value is not None for c in row):
+                rows_a += 1
+            for c in row:
+                if c.value is None:
+                    continue
+                nv = wd.cell(row=c.row, column=c.column).value
+                if nv is None:
+                    lost += 1
+                elif nv != c.value:
+                    changed.append(f"{c.coordinate}: {c.value!r} -> {nv!r}")
+        rows_b = sum(1 for row in wd.iter_rows(max_col=min(wd.max_column, 200)) if any(c.value is not None for c in row))
+        added = sum(1 for row in wd.iter_rows(max_col=min(wd.max_column, 200)) for c in row
+                    if c.value is not None and ws.cell(row=c.row, column=c.column).value is None)
+        good = not changed and not lost and rows_b >= rows_a
+        ok = ok and good
+        out.append({"sheet": ws.title, "rows_original": rows_a, "rows_now": rows_b, "cells_changed": len(changed),
+                    "cells_lost": lost, "cells_added": added, "examples": changed[:max_examples], "same_apart_from_additions": good})
+    return {"ok": ok, "sheets": out, "sheets_in_copy_only": [n for n in b.sheetnames if n not in a.sheetnames]}
+
+
+# ---------------------------------------------------------------- names, invoice numbers, FIFO, TDS
+_NOISE = {"m", "s", "ms", "mrs", "mr", "shri", "shree", "the", "pvt", "private", "ltd", "limited", "llp", "co", "company"}
+
+
+def name_key(s) -> str:
+    """Spelling-proof key: lower case, '&'=='and', no punctuation or double spaces, plurals folded
+    ('Stores'=='Store', 'Traders'=='Trader'). 'M/s Verma  Kirana & General Stores' == 'verma kirana and general store'."""
+    t = str(s or "").lower().replace("&", " and ")
+    t = re.sub(r"[^a-z0-9 ]+", " ", t)
+    toks = []
+    for w in t.split():
+        if w in _NOISE:
+            continue
+        if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+            w = w[:-1]
+        toks.append(w)
+    return " ".join(toks)
+
+
+def _skeleton(k: str) -> str:
+    """Agarwal / Agrawal, Maheshwari / Maheswari, Shah / Saha: drop vowels and doubled letters."""
+    return re.sub(r"(.)\1+", r"\1", re.sub(r"[aeiouhy ]", "", k))
+
+
+def match_names(names, master, *, cutoff: float = 0.88, margin: float = 0.04) -> dict:
+    """Match every spelling in `names` to one name in `master`.
+    Returns {'map': {spelling: master_name}, 'review': [{'name', 'best', 'second', 'score'}], 'exact': n, 'fuzzy': n}.
+    Exact key first; then the consonant skeleton; then difflib similarity. A name whose two best candidates are within
+    `margin`, or below `cutoff`, goes to 'review' (not guessed): ask the owner or use the invoices it is allocated to.
+    Look at `review` and at every fuzzy pair before you rely on the result."""
+    import difflib
+    master = list(dict.fromkeys(str(m) for m in master))
+    by_key, by_skel = {}, {}
+    for m in master:
+        by_key.setdefault(name_key(m), []).append(m)
+        by_skel.setdefault(_skeleton(name_key(m)), []).append(m)
+    out, review, exact, fuzzy = {}, [], 0, 0
+    for n in dict.fromkeys(str(x) for x in names):
+        k = name_key(n)
+        if len(by_key.get(k, [])) == 1:
+            out[n] = by_key[k][0]; exact += 1; continue
+        s = by_skel.get(_skeleton(k), [])
+        if len(s) == 1:
+            out[n] = s[0]; fuzzy += 1; continue
+        scored = sorted(((difflib.SequenceMatcher(None, k, name_key(m)).ratio(), m) for m in master), reverse=True)
+        best = scored[0] if scored else (0, None)
+        second = scored[1] if len(scored) > 1 else (0, None)
+        if best[0] >= cutoff and best[0] - second[0] >= margin:
+            out[n] = best[1]; fuzzy += 1
+        else:
+            review.append({"name": n, "best": best[1], "second": second[1], "score": round(best[0], 3)})
+    return {"map": out, "review": review, "exact": exact, "fuzzy": fuzzy}
+
+
+def norm_invoice(s) -> str:
+    """'hcp/2604/333', 'HCP-2604-333 ', 'HCP 2604 333' -> 'HCP2604333'. Leading zeros inside numbers are dropped."""
+    t = re.sub(r"(?<![0-9])0+(?=[0-9])", "", str(s or "").upper())
+    return re.sub(r"[^A-Z0-9]", "", t)
+
+
+def fifo_apply(invoices: list[dict], payments: list[dict]) -> dict:
+    """First-in-first-out for lump-sum ('On Account') receipts.
+    invoices: [{'party','ref','date','balance'}] balance already net of credit notes and receipts allocated to that invoice.
+    payments: [{'party','amount'}] unallocated money. Per party the oldest invoice (by date, then ref) with a balance is
+    cleared first. Money left over after every invoice is cleared is an ADVANCE; it is reported, never netted off
+    against anything. Returns {'open': [{'party','ref','date','balance'}...], 'advances': {party: rupees}}."""
+    by_party: dict = {}
+    for inv in invoices:
+        by_party.setdefault(inv["party"], []).append(dict(inv))
+    pay: dict = {}
+    for p in payments:
+        pay[p["party"]] = pay.get(p["party"], 0.0) + float(p["amount"])
+    open_rows, advances = [], {}
+    for party in set(by_party) | set(pay):
+        rows = sorted(by_party.get(party, []), key=lambda r: (r["date"], str(r["ref"])))
+        left = pay.get(party, 0.0)
+        for r in rows:
+            bal = float(r["balance"])
+            if bal <= 0:
+                if bal < 0:                       # an invoice paid more than its value
+                    advances[party] = advances.get(party, 0.0) - bal
+                continue
+            take = min(left, bal)
+            left -= take
+            r["balance"] = round(bal - take, 2)
+            if r["balance"] > 0.004:
+                open_rows.append(r)
+        if left > 0.004:
+            advances[party] = advances.get(party, 0.0) + left
+    return {"open": open_rows, "advances": {k: round(v, 2) for k, v in advances.items()}}
+
+
+def tds_194q(bills: list[dict], *, limit: float = 5_000_000.0, rate: float = 0.001, no_pan_rate: float = 0.05) -> dict:
+    """Section 194Q, per supplier. bills: [{'supplier','date','taxable','pan'(optional),'ref'(optional)}].
+    Count each supplier invoice once (pass de-duplicated bills). Bills are taken in date order; tax is due only on the
+    part of the running total ABOVE `limit` (the bill that crosses the limit is taxed on its excess only).
+    Rate is `no_pan_rate` when the supplier has no PAN. Returns {supplier: {'tds','above_limit','total','rate'}}."""
+    by: dict = {}
+    for b in bills:
+        by.setdefault(b["supplier"], []).append(b)
+    out = {}
+    for sup, rows in by.items():
+        rows = sorted(rows, key=lambda r: (r["date"], str(r.get("ref", ""))))
+        total = sum(float(r["taxable"]) for r in rows)
+        above = max(0.0, total - limit)
+        has_pan = any(str(r.get("pan") or "").strip() not in ("", "nan", "None") for r in rows)
+        rt = rate if has_pan else no_pan_rate
+        out[sup] = {"tds": round(above * rt, 2), "above_limit": round(above, 2), "total": round(total, 2), "rate": rt}
+    return out

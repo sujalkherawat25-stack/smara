@@ -30,6 +30,9 @@ Table `payables` with columns supplier, supplier_gstin, bill_ref, bill_date, amo
 ## Cash-flow honesty
 When the owner is short of cash, help them choose: pay micro/small suppliers past their deadline first, then those about to cross it, then everything else by the supplier's own terms. Show the totals for each step so they can see what is possible.
 
+## TDS on purchases of goods (section 194Q)
+When asked: per supplier, add up the bills in the year (each supplier invoice once; bills booked twice count once). Tax is due only on the part of the running total ABOVE Rs 50 lakh, never on all purchases: the bill that crosses the limit is taxed on its excess only. Rate 0.1%, or 5% when the supplier has no PAN. Use `mh.tds_194q(bills)` with each bill's supplier, date, taxable value and PAN; it returns tds, the amount above the limit and the total per supplier. Skip suppliers whose total is under the limit. The buyer must also have a turnover over Rs 10 crore in the previous year for 194Q to apply: say so, and let the CA confirm.
+
 ## Mistakes to avoid
 - Presenting an estimated deadline as the legal deadline.
 - Treating `unknown` suppliers as exempt.

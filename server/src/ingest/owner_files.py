@@ -170,6 +170,15 @@ def live_files(base: str, tenant_id: str, now: datetime) -> list[dict]:
         return sorted((_view(e, now) for e in files if e["deleted"] is None), key=lambda v: v["no"])
 
 
+def agent_files(base: str, tenant_id: str, now: datetime) -> list[dict]:
+    """The files the agent may reopen: number, name, size, when it was kept and the file ref to pass to its file tools."""
+    folder = _folder(base, tenant_id)
+    with _lock:
+        files = _load(folder)["files"].items()
+        rows = [{**_view(e, now), "file_ref": f"local:{token}:{e['name']}"} for token, e in files if e["deleted"] is None]
+    return sorted(rows, key=lambda v: v["no"], reverse=True)
+
+
 def deleted_files(base: str, tenant_id: str, now: datetime) -> list[dict]:
     """The shop's deleted files that can still be restored, by number."""
     folder = _folder(base, tenant_id)
