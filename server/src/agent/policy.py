@@ -172,6 +172,12 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
                                       "cannot change who a message is sent to")
     if name == "hand_off_to_owner" and ctx.trust != "TRUSTED":
         return Decision("deny", tier, "only a conversation with the owner can hand a step to them")
+    if name == "hand_off_to_owner" and not ctx.on_device:
+        return Decision("deny", tier, "the browser you are using runs on Smara's server: the owner cannot see it or type into it, so "
+                                      "they cannot sign in, enter a code or pay there. Do not ask them to. Stop, tell them plainly "
+                                      "that signing in and checkout are not supported yet from here (only on their own PC browser, "
+                                      "once paired), say what you did get done (for example what is in the cart, with the product "
+                                      "name and link) and that they can finish that last step themselves on their phone or PC")
     if tier in ("T0", "T1"):
         return Decision("allow", tier)
     if name == "browser_step" and ctx.trust == "TRUSTED" and not sensitive_step(args, ctx) and not submits_typed_text(args, ctx):

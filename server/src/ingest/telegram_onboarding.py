@@ -10,6 +10,7 @@ the admins can invite them with one tap (admin_tg.py).
 import logging
 
 from src import tenants
+from src.ingest import onboarding
 from src.ingest.onboarding import _code_from, _valid_invite, display_name, welcome_done
 from src.loop.wa_format import to_telegram_html
 from src.ops_alert import ops_alert
@@ -88,7 +89,13 @@ async def _join(app, m: dict, chat_id: int, code: str | None) -> None:
                 """INSERT INTO onboarding_sessions (phone, state, invite_code) VALUES (%s, 'DONE', %s)
                    ON CONFLICT (phone) DO UPDATE SET state = 'DONE', updated_at = now()""", (key, code))
             await conn.execute("UPDATE waitlist SET invited_at = now() WHERE phone = %s", (key,))
-    t = await tenants.create(pool, name=name, owner_phone=phone)
+    try:
+        t = await tenants.create(pool, name=name, owner_phone=phone)
+    except Exception:
+        log.exception("could not create the account for telegram chat %s", chat_id)
+        await onboarding.give_back_invite(pool, code, key)       # the single use must not be lost to our error
+        return await _say(app, chat_id, "Sorry, something went wrong while setting up your account. Nothing was used up: "
+                                        "please open your invite link again in a minute.")
     async with pool.connection() as conn:
         await conn.execute(
             "UPDATE tenants SET joined_with_code = %s, telegram_chat_id = %s, owner_last_channel = 'telegram' WHERE id = %s",
