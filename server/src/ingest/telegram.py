@@ -121,10 +121,10 @@ async def _link(pool, code: str, chat_id: int) -> str:
 
 
 async def _is_link_code(pool, code: str) -> bool:
-    """True if this /start code is a shop's Telegram link code (used or expired ones included, so they get the right reply)."""
-    from src.ingest.onboarding import _code_from, _valid_invite
-    invite = _code_from(f"join {code}")
-    return not (invite and await _valid_invite(pool, invite))
+    """True only if this /start code is a shop's own Telegram link code (an expired one still counts, so it gets the right reply).
+    Anything else, including an invite link that expired or was already used, goes to sign-up, which answers it properly."""
+    async with pool.connection() as conn:
+        return await (await conn.execute("SELECT 1 FROM tenants WHERE telegram_link_code = %s", (code,))).fetchone() is not None
 
 
 @router.post("/telegram/webhook")
@@ -145,6 +145,9 @@ async def handle_update(app, upd: dict) -> None:
     if cq := upd.get("callback_query"):
         await tg.answer(cq["id"])
         chat_id = ((cq.get("message") or {}).get("chat") or {}).get("id")
+        from src.ingest import admin_tg
+        if chat_id and await admin_tg.handle_callback(app, chat_id, cq.get("data") or ""):      # an admin's invite buttons
+            return
         tenant = await tenants.by_telegram_chat(pool, chat_id) if chat_id else None
         if tenant:
             await _owner(app, tenant, InboundMessage(
