@@ -60,3 +60,14 @@ async def test_a_failed_button_spinner_does_not_stop_the_tap():
 
 async def _noop():
     return None
+
+
+async def test_a_502_from_telegram_is_retried(monkeypatch):
+    calls = []
+
+    def handler(req):
+        calls.append(1)
+        return httpx.Response(502 if len(calls) < 3 else 200, json={"ok": True, "result": {}})
+    monkeypatch.setattr("asyncio.sleep", lambda s: _noop())
+    await client(handler).send({"chat_id": 1, "text": "hi"})
+    assert len(calls) == 3

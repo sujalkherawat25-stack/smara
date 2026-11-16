@@ -14,6 +14,8 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
+
+import httpx
 import logging
 from datetime import date, datetime, timedelta, timezone
 
@@ -465,11 +467,42 @@ async def _execute(app, ctx, tenant, name, args) -> dict:
         return {"error": f"{type(e).__name__}: {str(e)[:300]}"}
 
 
+REDELIVER_AFTER_S = (15, 45, 120, 300, 600)       # when the channel is down: try the answer again after each of these
+
+
+def _channel_down(err: Exception) -> bool:
+    """A network problem or a 5xx/429 from Telegram or WhatsApp: the answer is fine, the channel is not. Worth retrying."""
+    if isinstance(err, httpx.HTTPStatusError):
+        return err.response.status_code >= 500 or err.response.status_code == 429
+    return isinstance(err, httpx.HTTPError)
+
+
 async def _finish(app, row, text: str) -> None:
     if row["trust"] == "TRUSTED" and text.strip():
         tenant = await tenants.by_id(app.state.pool, str(row["tenant_id"]))
-        await send_to_owner(app, tenant, text_message(tenant.owner_phone, text[:12000]), kind="owner_text",
-                            reply_channel=row["channel"])
+        payload = text_message(tenant.owner_phone, text[:12000])
+        try:
+            await send_to_owner(app, tenant, payload, kind="owner_text", reply_channel=row["channel"])
+        except Exception as err:
+            if not _channel_down(err):
+                raise
+            # The answer exists but Telegram did not take it (seen 16 Nov: every call to Telegram timed out for a while, the
+            # run was marked FAILED and the owner was left at 'Still working on it'). Keep trying in the background.
+            log.warning("could not deliver the answer (%s); will retry", type(err).__name__)
+            _spawn(app, _redeliver(app, tenant, payload, row["channel"], str(row["id"])))
+
+
+async def _redeliver(app, tenant, payload: dict, channel: str | None, sid: str) -> None:
+    for wait in REDELIVER_AFTER_S:
+        await asyncio.sleep(wait)
+        try:
+            await send_to_owner(app, tenant, payload, kind="owner_text", reply_channel=channel)
+            log.info("answer for session %s delivered after a retry", sid)
+            return
+        except Exception as err:
+            if not _channel_down(err):
+                break
+    log.error("answer for session %s could not be delivered after %d retries", sid, len(REDELIVER_AFTER_S))
 
 
 GRANT_FOR = timedelta(minutes=15)
