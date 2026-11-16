@@ -101,7 +101,7 @@ app.include_router(telegram_router)
 STALE_OUTBOX_S = 1800
 
 
-@app.get("/healthz")
+@app.api_route("/healthz", methods=["GET", "HEAD"])
 async def healthz(response: Response):
     """200 when Postgres answers and Continuum delivery is keeping up; else 503 (for an uptime monitor).
     Counts and flags only, so the desktop app may read it from its own origin (channel status)."""

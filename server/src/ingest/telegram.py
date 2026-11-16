@@ -29,9 +29,22 @@ class TelegramClient:
         self._username: str | None = None
 
     async def _call(self, method: str, payload: dict) -> dict:
-        resp = await self._http.post(f"{self._bot}/{method}", json=payload)
+        resp = await self._post(f"{self._bot}/{method}", json=payload)
         resp.raise_for_status()
         return resp.json().get("result") or {}
+
+    async def _post(self, url: str, **kw) -> httpx.Response:
+        """POST, trying again (twice, after 0.5 s and 1.5 s) when the connection to Telegram could not even be opened. The
+        request never reached Telegram in that case, so a retry cannot send anything twice. A brief network blip used to
+        lose an owner's reply or an admin's answer (seen 16 Nov: 'admin command failed (ConnectError)')."""
+        import asyncio
+        for wait in (0.5, 1.5, None):
+            try:
+                return await self._http.post(url, **kw)
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                if wait is None:
+                    raise
+                await asyncio.sleep(wait)
 
     async def send(self, payload: dict) -> None:
         """sendMessage. If Telegram refuses the HTML (a tag it cannot parse), the same words go again as plain text, so a
@@ -67,8 +80,8 @@ class TelegramClient:
         await self._call("setMyCommands", {"commands": [{"command": c, "description": d} for c, d in commands]})
 
     async def send_document(self, chat_id: int, data: bytes, filename: str, caption: str = "") -> None:
-        resp = await self._http.post(f"{self._bot}/sendDocument", data={"chat_id": chat_id, "caption": caption[:1000]},
-                                     files={"document": (filename, data)})
+        resp = await self._post(f"{self._bot}/sendDocument", data={"chat_id": chat_id, "caption": caption[:1000]},
+                                files={"document": (filename, data)})
         resp.raise_for_status()
 
     async def answer(self, callback_id: str, text: str = "") -> None:
@@ -147,7 +160,10 @@ async def webhook(request: Request):
 async def handle_update(app, upd: dict) -> None:
     pool, tg = app.state.pool, app.state.tg
     if cq := upd.get("callback_query"):
-        await tg.answer(cq["id"])
+        try:
+            await tg.answer(cq["id"])                # only stops the button's spinner: never let it block the tap itself
+        except httpx.HTTPError:
+            log.warning("could not answer the button tap; carrying on")
         chat_id = ((cq.get("message") or {}).get("chat") or {}).get("id")
         from src.ingest import admin_tg
         if chat_id and await admin_tg.handle_callback(app, chat_id, cq.get("data") or ""):      # an admin's invite buttons
