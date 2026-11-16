@@ -56,8 +56,9 @@ async def test_join_in_plain_text_works_and_a_spent_or_unknown_code_does_not(poo
     await tgmod.handle_update(app, msg(f"JOIN {code}"))
     assert await tenants.by_owner_phone(pool, tgo.owner_key(CHAT))
     other = 5151
-    await tgmod.handle_update(app, msg(f"JOIN {code}", chat=other))                  # the single use is gone: waitlist, no account
-    assert "waitlist" in last(app, chat=other)["text"].lower()
+    await tgmod.handle_update(app, msg(f"JOIN {code}", chat=other))                  # the single use is gone: told plainly, waitlisted, no account
+    assert "expired or was already used" in last(app, chat=other)["text"].lower()
+    assert await one(pool, "select 1 as x from waitlist where phone = %s", tgo.session_key(other))
     assert await tenants.by_owner_phone(pool, tgo.owner_key(other)) is None
     assert (await one(pool, "select uses from invite_codes where code = %s", code))["uses"] == 1
 

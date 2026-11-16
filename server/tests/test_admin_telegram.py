@@ -85,3 +85,61 @@ def test_admin_ids_come_from_the_list_or_else_the_ops_chat():
     assert admin_tg.admin_ids(Settings(admin_telegram_ids=(1, 2), ops_telegram_chat_id=3)) == {1, 2}
     assert admin_tg.admin_ids(Settings(ops_telegram_chat_id=3)) == {3}
     assert admin_tg.admin_ids(Settings()) == set()
+
+
+def tap(data, chat):
+    return {"callback_query": {"id": f"cb{next(_n)}", "data": data, "message": {"chat": {"id": chat, "type": "private"}, "message_id": 1}}}
+
+
+async def test_a_fresh_link_lasts_twenty_hours_and_one_tap_makes_another(pool):
+    app = make_app(pool, admin_telegram_ids=(ADMIN,))
+    await tgmod.handle_update(app, msg("/admin", ADMIN))
+    keys = [b["callback_data"] for row in app.state.tg.sent[-1]["reply_markup"]["inline_keyboard"] for b in row]
+    assert "adm:new" in keys                                                    # the admin menu has a New invite link button
+    await tgmod.handle_update(app, tap("adm:new", ADMIN))
+    reply = texts(app, ADMIN)[-1]
+    assert "20 ghante" in reply and "https://t.me/smara_test_bot?start=SMA-" in reply
+    assert app.state.tg.sent[-1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "adm:new"     # and a button for the next one
+    code = reply.split("start=")[1].split()[0].split("\n")[0]
+    row = await one(pool, "select extract(epoch from (expires_at - created_at)) / 3600 as hours, max_uses from invite_codes where code = %s", code)
+    assert 19.99 < float(row["hours"]) < 20.01 and row["max_uses"] == 1
+    await tgmod.handle_update(app, tap("adm:new", ADMIN))
+    assert (await one(pool, "select count(*) as n from invite_codes"))["n"] == 2
+
+
+async def test_the_admin_buttons_do_nothing_for_anyone_else(pool):
+    app = make_app(pool, admin_telegram_ids=(ADMIN,))
+    await tgmod.handle_update(app, tap("adm:new", STRANGER))
+    assert (await one(pool, "select count(*) as n from invite_codes"))["n"] == 0
+    assert not texts(app, STRANGER)
+
+
+async def test_the_admins_are_told_who_joined_through_which_link_and_the_dashboard_shows_it(pool):
+    from src import ops_summary
+    app = make_app(pool, admin_telegram_ids=(ADMIN,), ops_telegram_chat_id=ADMIN)
+    await tgmod.handle_update(app, msg("/invite Ramesh Hardware", ADMIN))
+    code = texts(app, ADMIN)[-1].split("start=")[1].split()[0].split("\n")[0]
+    await tgmod.handle_update(app, msg(f"/start {code}", OTHER, first_name="Ramesh"))
+    note = texts(app, ADMIN)[-1]
+    assert "Ramesh" in note and code in note and "Ramesh Hardware" in note and "0 invite link khule" in note
+    out = await ops_summary.build(pool, 30, {"ok": True})
+    link = next(x for x in out["invite_links"] if x["label"] == "Ramesh Hardware")
+    assert link["status"] == "used" and link["joined_name"] == "Ramesh" and code not in str(link)       # who joined, and no full code
+    await tgmod.handle_update(app, msg("/invite Meera", ADMIN))
+    out = await ops_summary.build(pool, 30, {"ok": True})
+    assert next(x for x in out["invite_links"] if x["label"] == "Meera")["status"] == "open"
+
+
+async def test_an_expired_link_is_refused_and_shown_as_expired(pool):
+    from src import ops_summary
+    app = make_app(pool, admin_telegram_ids=(ADMIN,))
+    await tgmod.handle_update(app, msg("/invite Late Lala", ADMIN))
+    code = texts(app, ADMIN)[-1].split("start=")[1].split()[0].split("\n")[0]
+    async with pool.connection() as c:
+        await c.execute("update invite_codes set expires_at = now() - interval '1 minute' where code = %s", (code,))
+    await tgmod.handle_update(app, msg(f"/start {code}", OTHER))
+    assert "expired or was already used" in texts(app, OTHER)[-1] and "WhatsApp" not in texts(app, OTHER)[-1]
+    assert str(OTHER) in texts(app, ADMIN)[-1] and "used or expired invite link" in texts(app, ADMIN)[-1]    # the admins can answer with one tap
+    assert (await one(pool, "select count(*) as n from tenants"))["n"] == 0
+    out = await ops_summary.build(pool, 30, {"ok": True})
+    assert next(x for x in out["invite_links"] if x["label"] == "Late Lala")["status"] == "expired"

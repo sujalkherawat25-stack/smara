@@ -21,6 +21,8 @@ NOT_INVITED = ("Hi! I'm Smara, an AI assistant for anyone who works, studies or 
                "the moment you're in.\n\nIf you have an invite code, send 'JOIN CODE' here.")
 STILL_WAITING = "You're still on the waitlist. I'll message you here as soon as you have access. If you have an invite code, send 'JOIN CODE'."
 BAD_INVITE = "That invite code no longer works. Please ask for a new one."
+BAD_LINK = ("That invite link has expired or was already used (a link works for one person and lasts 20 hours). "
+            "I have told the team, so you will get a fresh one here soon.")
 LEGACY_STATES = ("ASK_PHONE", "ASK_SHOP", "ASK_UPI")     # people who were in the old question chat are let straight in
 
 
@@ -59,7 +61,11 @@ async def handle(app, m: dict, chat_id: int, text: str) -> None:
                ON CONFLICT (phone) DO UPDATE SET last_text = EXCLUDED.last_text, messages = waitlist.messages + 1
                RETURNING (xmax = 0) AS fresh""", (key, text[:300], text[:300]))
         fresh = (await cur.fetchone())["fresh"]
-    if fresh:                                       # the first time: the full welcome, and the admins can invite with one tap
+    if code and not invite:                         # they came with a link that no longer works: say so, and the admins can invite with one tap
+        await _say(app, chat_id, BAD_LINK)
+        from src.ingest import admin_tg
+        await admin_tg.tell_admins_about_waitlist(app, m, chat_id, f"[used or expired invite link {code}]")
+    elif fresh:                                     # the first time: the full welcome, and the admins can invite with one tap
         await _say(app, chat_id, NOT_INVITED)
         from src.ingest import admin_tg
         await admin_tg.tell_admins_about_waitlist(app, m, chat_id, text)
@@ -102,4 +108,20 @@ async def _join(app, m: dict, chat_id: int, code: str | None) -> None:
             (code, chat_id, t.id))
     await _say(app, chat_id, welcome_done(name))
     log.info("new account %s joined on Telegram via %s", t.id, code or "open sign-up")
-    await ops_alert(app, f"new-shop-{t.id}", f"Smara: someone new joined on Telegram: {name}.")
+    await _tell_admins_joined(app, str(t.id), name, code)
+
+
+async def _tell_admins_joined(app, tenant_id: str, name: str, code: str | None) -> None:
+    """One message to the admins when someone joins: who, through which invite, and how many invites are still open."""
+    try:
+        async with app.state.pool.connection() as conn:
+            inv = await (await conn.execute("SELECT label FROM invite_codes WHERE code = %s", (code,))).fetchone() if code else None
+            left = (await (await conn.execute(
+                """SELECT count(*) AS n FROM invite_codes WHERE revoked_at IS NULL AND uses < max_uses
+                      AND (expires_at IS NULL OR expires_at > now())""")).fetchone())["n"]
+        via = f" via {code} ({inv['label'] or 'no label'})" if inv else ""
+        text = f"Smara: naya insaan juda: {name}{via}. Ab {left} invite link khule hain. Dashboard par bhi dikh jayega."
+    except Exception:
+        log.exception("could not build the join note")
+        text = f"Smara: someone new joined on Telegram: {name}."
+    await ops_alert(app, f"new-shop-{tenant_id}", text)

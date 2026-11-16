@@ -54,6 +54,16 @@ async def build(pool, days: int, health: dict) -> dict:
                                                          AND (expires_at IS NULL OR expires_at > now())) AS open,
                                       count(*) FILTER (WHERE uses >= max_uses) AS used,
                                       count(*) FILTER (WHERE revoked_at IS NOT NULL) AS revoked FROM invite_codes""")
+        invite_links = await many("""
+            SELECT i.label, i.created_at, i.expires_at, i.uses, i.max_uses,
+                   CASE WHEN i.revoked_at IS NOT NULL THEN 'revoked'
+                        WHEN i.uses >= i.max_uses THEN 'used'
+                        WHEN i.expires_at IS NOT NULL AND i.expires_at <= now() THEN 'expired'
+                        ELSE 'open' END AS status,
+                   j.name AS joined_name, j.created_at AS joined_at, '…' || right(i.code, 3) AS code_tail
+              FROM invite_codes i LEFT JOIN LATERAL (SELECT t.name, t.created_at FROM tenants t
+                                                      WHERE t.joined_with_code = i.code ORDER BY t.created_at LIMIT 1) j ON true
+             ORDER BY i.created_at DESC LIMIT 40""")
         daily = await many(f"""
             SELECT d::date AS day,
                    coalesce(m.owner_messages, 0) AS owner_messages, coalesce(m.smara_messages, 0) AS smara_messages,
@@ -95,6 +105,7 @@ async def build(pool, days: int, health: dict) -> dict:
         "runs": {r["status"]: r["n"] for r in runs},
         "waitlist": dict(waitlist),
         "invites": dict(invites),
+        "invite_links": [dict(r) for r in invite_links],
         "daily": [{**dict(r), "day": r["day"].isoformat()} for r in daily],
         "accounts": [{**{k: v for k, v in dict(a).items() if k not in ("id", "owner_phone")},
                       "account": str(a["id"])[:8], "contact": _tail(a["owner_phone"])} for a in accounts],

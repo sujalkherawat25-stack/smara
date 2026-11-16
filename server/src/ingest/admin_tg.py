@@ -1,7 +1,7 @@
 """Admin commands in Telegram, for the people who run Smara (ADMIN_TELEGRAM_IDS; if unset, the ops chat OPS_TELEGRAM_CHAT_ID).
 
 An admin invites people from the chat, without a server login:
-    /invite                       a one-use code (14 days) and its link, to forward to anyone
+    /invite                       a one-use code (20 hours) and its link, to forward to anyone (or tap "New invite link" in /admin)
     /invite 6765688446 Ramesh     the same, and the bot sends the link to that Telegram user itself
                                   (works for anyone who has written to the bot, e.g. someone on the waitlist)
     /waitlist                     who asked for access and is not invited yet
@@ -21,13 +21,18 @@ from src.loop.wa_format import to_telegram_html
 
 log = logging.getLogger(__name__)
 COMMANDS = ("invite", "waitlist", "invites", "revoke", "admin")
-CODE_DAYS = 14
+CODE_HOURS = 20          # a link stops working 20 hours after it is made; make a fresh one when you need one
+BUTTONS = {"inline_keyboard": [[{"text": "➕ New invite link", "callback_data": "adm:new"}],
+                               [{"text": "📋 Open links", "callback_data": "adm:list"}, {"text": "⏳ Waitlist", "callback_data": "adm:wait"}]]}
+MORE = {"inline_keyboard": [[{"text": "➕ Another link", "callback_data": "adm:new"}]]}
 HELP = ("Smara admin:\n"
         "• /invite : ek invite code + link banata hai (aap kisi ko bhi forward kar sakte hain)\n"
         "• /invite 6765688446 naam : code banakar us Telegram user ko bot khud bhej deta hai\n"
         "• /waitlist : jinhone access maanga aur abhi invite nahi hue\n"
         "• /invites : jo codes abhi chal sakte hain\n"
-        "• /revoke CODE : ek code band karta hai")
+        "• /revoke CODE : ek code band karta hai\n"
+        "Har link banne ke 20 ghante baad apne aap band ho jata hai aur sirf ek insaan ke liye chalta hai. "
+        "Koi judta hai to aapko yahin bata diya jata hai.")
 
 
 def admin_ids(settings) -> set[int]:
@@ -41,8 +46,29 @@ def is_admin(settings, chat_id: int) -> bool:
     return chat_id in admin_ids(settings)
 
 
-async def _reply(app, chat_id: int, text: str) -> None:
-    await app.state.tg.send({"chat_id": chat_id, "text": to_telegram_html(text), "parse_mode": "HTML"})
+async def _reply(app, chat_id: int, text: str, keys: dict | None = None) -> None:
+    payload = {"chat_id": chat_id, "text": to_telegram_html(text), "parse_mode": "HTML"}
+    if keys is not None:
+        payload["reply_markup"] = keys
+    await app.state.tg.send(payload)
+
+
+async def handle_callback(app, chat_id: int, data: str) -> bool:
+    """A tap on one of the admin buttons. False if it is not an admin button or the person is not an admin."""
+    if not data.startswith("adm:") or not is_admin(app.state.settings, chat_id):
+        return False
+    try:
+        action = data[4:]
+        if action == "new":
+            await _invite(app, chat_id, "")
+        elif action == "list":
+            await _invites(app, chat_id)
+        elif action == "wait":
+            await _waitlist(app, chat_id)
+    except Exception:
+        log.exception("admin button failed")
+        await _reply(app, chat_id, "Ye nahi chala. Dobara try kijiye.")
+    return True
 
 
 async def handle(app, chat_id: int, text: str) -> bool:
@@ -62,19 +88,25 @@ async def handle(app, chat_id: int, text: str) -> bool:
         elif name == "revoke":
             await _revoke(app, chat_id, rest)
         else:
-            await _reply(app, chat_id, HELP)
+            await _reply(app, chat_id, HELP, BUTTONS)
     except Exception:
         log.exception("admin command failed")
         await _reply(app, chat_id, "Ye command nahi chala. Dobara try kijiye, ya server log dekhiye.")
     return True
 
 
-async def _make_code(pool, label: str) -> str:
+async def _make_code(pool, label: str) -> tuple[str, datetime]:
     code = new_code("SMA")
+    expires = datetime.now(timezone.utc) + timedelta(hours=CODE_HOURS)
     async with pool.connection() as conn:
         await conn.execute("INSERT INTO invite_codes (code, label, max_uses, expires_at) VALUES (%s, %s, 1, %s)",
-                           (code, label[:80], datetime.now(timezone.utc) + timedelta(days=CODE_DAYS)))
-    return code
+                           (code, label[:80], expires))
+    return code, expires
+
+
+def _till(expires: datetime) -> str:
+    from src import clock
+    return expires.astimezone(clock.IST).strftime("%d %b, %I:%M %p IST")
 
 
 async def _invite(app, chat_id: int, rest: str) -> None:
@@ -82,10 +114,12 @@ async def _invite(app, chat_id: int, rest: str) -> None:
     first, _, tail = rest.partition(" ")
     if re.fullmatch(r"\d{5,15}", first):
         target, label = int(first), tail
-    code = await _make_code(app.state.pool, label or (f"tg {target}" if target else "admin invite"))
+    code, expires = await _make_code(app.state.pool, label or (f"tg {target}" if target else f"admin invite {datetime.now(timezone.utc):%d %b %H:%M}"))
     link = f"https://t.me/{await app.state.tg.username()}?start={code}"
     if target is None:
-        return await _reply(app, chat_id, f"Invite ready (ek istemaal, {CODE_DAYS} din):\n{link}\nYa unhe 'JOIN {code}' bhejne ko kahiye.")
+        return await _reply(app, chat_id, f"Naya invite link (sirf ek insaan ke liye, {CODE_HOURS} ghante, {_till(expires)} tak):\n{link}\n\n"
+                                          f"Unhe kahiye: pehle Telegram install karke login kar lein, phir link kholkar START dabayein. "
+                                          f"Ya bot ko 'JOIN {code}' bhejein.", MORE)
     try:
         await app.state.tg.send({"chat_id": target, "disable_web_page_preview": True, "text": (
             "Hi! I'm Smara, an AI assistant. You now have access. To begin, open this link and tap Start: "
@@ -95,7 +129,7 @@ async def _invite(app, chat_id: int, rest: str) -> None:
                                           f"(unhone bot ko kabhi message nahi kiya, ya bot ko block kiya hai). Ye link unhe bhejiye:\n{link}")
     async with app.state.pool.connection() as conn:
         await conn.execute("UPDATE waitlist SET invited_at = now() WHERE phone = %s", (f"tg:{target}",))
-    await _reply(app, chat_id, f"Invite {target} ko bhej diya ({code}).")
+    await _reply(app, chat_id, f"Invite {target} ko bhej diya ({code}, {_till(expires)} tak).", MORE)
 
 
 async def _waitlist(app, chat_id: int) -> None:
@@ -120,9 +154,10 @@ async def _invites(app, chat_id: int) -> None:
                 WHERE revoked_at IS NULL AND uses < max_uses AND (expires_at IS NULL OR expires_at > now())
                 ORDER BY created_at DESC LIMIT 15""")).fetchall()
     if not rows:
-        return await _reply(app, chat_id, "Abhi koi chalne wala invite code nahi hai.")
+        return await _reply(app, chat_id, "Abhi koi chalne wala invite code nahi hai.", MORE)
     await _reply(app, chat_id, "Chalne wale codes:\n" + "\n".join(
-        f"• {r['code']} ({r['label'] or 'no label'}), {r['uses']}/{r['max_uses']} used, {r['expires_at']:%d %b} tak" for r in rows))
+        f"• {r['code']} ({r['label'] or 'no label'}), {r['uses']}/{r['max_uses']} used, "
+        f"{_till(r['expires_at']) if r['expires_at'] else 'kabhi nahi'} tak" for r in rows), MORE)
 
 
 async def _revoke(app, chat_id: int, rest: str) -> None:
