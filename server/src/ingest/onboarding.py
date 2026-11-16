@@ -18,7 +18,7 @@ from src.loop.whatsapp import text_message
 log = logging.getLogger(__name__)
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 JOIN = re.compile(r"^\s*(?:join|code|invite|start)?\s*[:\-]?\s*([A-Za-z]{2,5}-?[A-Za-z0-9]{4,6})\s*$", re.I)
-JOIN_WORD = re.compile(r"^\s*(?:join|code|invite)\b[\s:\-]*([A-Za-z0-9\-]{4,14})\s*$", re.I)
+JOIN_WORD = re.compile(r"^\s*(?:join|code|invite)\b[\s:\-]*([A-Za-z0-9][A-Za-z0-9\- ]{3,15}?)\s*$", re.I)   # spaces allowed: "join sma zjl9ur"
 
 INVITE_ONLY = ("Hi! I'm Smara, an AI assistant for anyone who works, studies or runs something: writing, research, files, "
                "plans, reminders and more.\n\nAccess is by invite for now. You're on the waitlist, and I'll message you here "
@@ -61,8 +61,8 @@ async def _valid_invite(pool, code: str, who: str | None = None) -> dict | None:
         return None
     async with pool.connection() as conn:
         row = await (await conn.execute(
-            """SELECT code, label FROM invite_codes WHERE code = %s AND revoked_at IS NULL AND uses < max_uses
-                  AND (expires_at IS NULL OR expires_at > now())""", (code,))).fetchone()
+            """SELECT code, label FROM invite_codes WHERE replace(code, '-', '') = replace(%s, '-', '') AND revoked_at IS NULL
+                  AND uses < max_uses AND (expires_at IS NULL OR expires_at > now())""", (code,))).fetchone()
     if row is None and who:
         import time
         _misses.setdefault(who, []).append(time.monotonic())
@@ -130,6 +130,15 @@ def welcome_done(name: str | None = None) -> str:
         "I'll suggest where I can help.")
 
 
+async def give_back_invite(pool, code: str | None, key: str) -> None:
+    """Account creation failed after the invite was spent: give the use back and forget the half-done sign-up, so the same link works again."""
+    async with pool.connection() as conn:
+        async with conn.transaction():
+            if code:
+                await conn.execute("UPDATE invite_codes SET uses = greatest(uses - 1, 0) WHERE code = %s", (code,))
+            await conn.execute("DELETE FROM onboarding_sessions WHERE phone = %s", (key,))
+
+
 async def create_shop(app, phone: str, name: str | None, code: str | None, number_id: str | None = None) -> None:
     pool = app.state.pool
     async with pool.connection() as conn:
@@ -145,7 +154,13 @@ async def create_shop(app, phone: str, name: str | None, code: str | None, numbe
                                   ON CONFLICT (phone) DO UPDATE SET state = 'DONE', updated_at = now()""", (phone, code))
             await conn.execute("UPDATE waitlist SET invited_at = now() WHERE phone = %s", (phone,))
     name = display_name(name)
-    t = await tenants.create(pool, name=name, owner_phone=normalize_phone(phone))
+    try:
+        t = await tenants.create(pool, name=name, owner_phone=normalize_phone(phone))
+    except Exception:
+        log.exception("could not create the account for %s", phone)
+        await give_back_invite(pool, code, phone)               # the single use must not be lost to our error
+        return await _send(app, phone, "Sorry, something went wrong while setting up your account. Nothing was used up: "
+                                       "please send your invite code again in a minute.", number_id)
     async with pool.connection() as conn:
         await conn.execute("UPDATE tenants SET joined_with_code = %s WHERE id = %s", (code, t.id))
     await _send(app, phone, welcome_done(name), number_id)

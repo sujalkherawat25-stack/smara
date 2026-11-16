@@ -125,7 +125,8 @@ TOOLS = [
          "value": _S}, ["action"]),
     _fn("hand_off_to_owner", "Pause and ask the owner to do a step themselves in the open browser: signing in, entering a password, "
         "OTP or card details, paying, or solving a CAPTCHA. Say exactly what they should do. They tap Done when finished and you "
-        "get the fresh page back to continue. Use it whenever a page result lists needs_owner (captcha, login, otp, payment).",
+        "get the fresh page back to continue. Use it when a page result lists needs_owner (captcha, login, otp, payment) AND you are in "
+        "the owner's own PC browser. It is refused on the server browser, which the owner cannot see: there, stop and tell them.",
         {"reason": _S}, ["reason"]),
     _fn("propose_ledger_adjustment", "Propose changing an invoice: PARTIAL_PAYMENT (give paid_rupees), DISCOUNT_CLAIM "
         "(give discount_percent, or new_amount_rupees if they state a new total), PROMISE_DATE_CHANGE (new_due_date), or "
