@@ -55,7 +55,8 @@ async def _run_one(app, t: dict) -> None:
                 if payload.get("owner_said") else "")
         content = (f"A follow-up you scheduled has come due. What you asked yourself to do:\n{payload['instruction']}\n{said}"
                    f"It is now {clock.describe()}. If the owner should know the outcome, message them with "
-                   f"send_whatsapp_message(to='owner').")
+                   f"send_whatsapp_message(to='owner'). If it cannot be done right now (e.g. their PC is off), tell the owner "
+                   f"ONCE and at most retry once later; do not message them again about the same failure.")
         sid = await start_session(app, tenant=tenant, trust="SYSTEM", trigger="scheduled_followup", content=content,
                                   background=False)
         async with app.state.pool.connection() as conn:

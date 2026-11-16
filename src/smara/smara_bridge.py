@@ -92,7 +92,10 @@ SIGNALS_JS = r"""() => {
       || /captcha|verify you are human|not a robot|unusual traffic/.test(t)) out.push('captcha');
   if (document.querySelector('input[type=password]')) out.push('login');
   if (document.querySelector('input[autocomplete=one-time-code]') || /one.time password|verification code|enter otp|enter the otp/.test(t)) out.push('otp');
-  if (/card number|cvv|enter upi|select payment method|net banking|pay securely/.test(t)) out.push('payment');
+  // payment: a real pay form or a checkout/pay page, not a shop page that merely advertises card or net-banking offers
+  const payField = document.querySelector('input[autocomplete^=cc-],input[name*=card i],input[placeholder*=card i],input[name*=cvv i],input[placeholder*=cvv i],input[placeholder*=upi i],input[name*=vpa i]');
+  const payPage = /checkout|payment|\/pay(\/|$|\?)|\/buy\/|spc|placeorder/i.test(location.pathname + location.search);
+  if (payField || (payPage && /card number|cvv|enter upi|select payment method|net banking|pay securely|payment method/.test(t))) out.push('payment');
   if (/digital signature certificate|\bdsc\b|emsigner|sign with dsc/.test(t)) out.push('dsc');
   // The site refuses automated browsers (some government portals do): never try to get around it, hand it over.
   if (t.length < 1500 && /permission denied|access denied|request blocked|you have been blocked|automated (access|queries)|bot detected|forbidden.{0,3}403/.test(t)) out.push('blocked');

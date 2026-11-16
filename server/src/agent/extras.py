@@ -16,6 +16,21 @@ MAX_PER_DAY = 50
 MAX_AHEAD = timedelta(days=60)
 MIN_AHEAD = timedelta(minutes=1)
 MAX_FILE_BYTES = 16_000_000
+MAX_RETRIES, RETRY_WINDOW = 2, timedelta(hours=6)     # quick re-schedules from a follow-up run, per 12 hours
+
+
+async def _retries_used(conn, ctx: SessionCtx) -> int:
+    """How many soon-running follow-ups were scheduled by follow-up runs (i.e. retries) in the last 12 hours. 0 if this
+    session is not itself a follow-up run (the owner asking for reminders is never limited by this)."""
+    me = await (await conn.execute("SELECT trigger FROM agent_sessions WHERE id::text = %s", (ctx.id,))).fetchone()
+    if not me or me["trigger"] != "scheduled_followup":
+        return 0
+    row = await (await conn.execute(
+        """SELECT count(*) n FROM agent_tasks t JOIN agent_sessions s ON s.id = t.created_by_session
+            WHERE t.tenant_id = %s AND t.kind = 'followup' AND s.trigger = 'scheduled_followup'
+              AND t.created_at > now() - interval '12 hours' AND t.run_at < t.created_at + interval '6 hours'""",
+        (ctx.tenant_id,))).fetchone()
+    return row["n"]
 SENDABLE = {".pdf": "application/pdf", ".csv": "text/csv", ".txt": "text/plain",
             ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -80,6 +95,11 @@ async def schedule_followup(app, ctx: SessionCtx, args: dict) -> dict:
                  FROM agent_tasks WHERE tenant_id = %s""", (ctx.tenant_id,))).fetchone()
         if c["pending"] >= MAX_PENDING or c["today"] >= MAX_PER_DAY:
             return {"error": f"too many scheduled tasks (max {MAX_PENDING} pending, {MAX_PER_DAY} per day); cancel some first"}
+        if at < now + RETRY_WINDOW and await _retries_used(conn, ctx) >= MAX_RETRIES:
+            # a scheduled job that keeps failing must not retry (and message the owner) every half hour all day
+            return {"error": f"retry limit reached ({MAX_RETRIES} quick retries in 12 hours). Do not schedule another retry. "
+                             "Tell the owner once, briefly, what failed and that they can ask again when it is fixed; "
+                             "a next-day run (more than 6 hours ahead) is still allowed."}
         row = await (await conn.execute(
             """INSERT INTO agent_tasks (tenant_id, run_at, kind, payload, created_by_session)
                VALUES (%s, %s, 'followup', %s, %s) RETURNING id""",

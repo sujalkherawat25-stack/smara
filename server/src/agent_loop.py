@@ -339,7 +339,7 @@ async def _run(app, sid: str, fallback=None) -> None:
                 if busy > RATE_RETRIES:
                     raise
                 if busy == 1 and row["trust"] == "TRUSTED":
-                    await _finish(app, row, "Model abhi busy hai, main thodi der mein dobara try karta hoon. Aapko kuch nahi karna.")
+                    await _finish(app, row, "Model abhi busy hai, main thodi der mein dobara try karti hoon. Aapko kuch nahi karna.")
                 await asyncio.sleep(RATE_RETRY_S)
                 continue
             await _record_usage(pool, row, msg.pop("_usage", None))

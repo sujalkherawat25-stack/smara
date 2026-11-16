@@ -34,6 +34,9 @@ LEDGER_SCHEMA = (
     "Money columns are already in RUPEES (amount_rupees). Select and sum them as they are and quote the result; never divide or "
     "multiply them. A total you quote (one customer, a group, overdue, everything) must come from SELECT sum(...) in the same query, "
     "never from adding bill amounts in your head: if you also list the bills, the total must equal their sum. "
+    "A ranking by a combination the owner names ('amount x din', 'amount aur din dono', weighted, per customer) must be "
+    "computed in SQL exactly as asked, e.g. ORDER BY sum(amount_rupees * (current_date - due_date)) DESC per customer; never "
+    "rank by only one of the factors. Say in one line how you ranked. "
     "(The tables also keep amounts in paise, as amount_paise and proposed_amount_paise: do not use those.)"
 )
 
