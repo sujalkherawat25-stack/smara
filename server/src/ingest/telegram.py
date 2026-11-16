@@ -8,6 +8,7 @@ secret Telegram was given at setWebhook time.
 """
 import hmac
 import logging
+import re
 import secrets
 
 import httpx
@@ -121,8 +122,11 @@ async def _link(pool, code: str, chat_id: int) -> str:
 
 
 async def _is_link_code(pool, code: str) -> bool:
-    """True only if this /start code is a shop's own Telegram link code (an expired one still counts, so it gets the right reply).
-    Anything else, including an invite link that expired or was already used, goes to sign-up, which answers it properly."""
+    """True if this /start code is a shop's own Telegram link code (a used or expired one included, so it gets the right reply).
+    Shop link codes are 16 random characters; an invite code looks like SMA-ZJL9UR. An invite that expired, was used or was
+    revoked must reach sign-up (which answers it properly), not the 'send telegram on WhatsApp' reply."""
+    if not re.fullmatch(r"[A-Za-z]{2,5}-?[A-Za-z0-9]{4,6}", code):
+        return True
     async with pool.connection() as conn:
         return await (await conn.execute("SELECT 1 FROM tenants WHERE telegram_link_code = %s", (code,))).fetchone() is not None
 
