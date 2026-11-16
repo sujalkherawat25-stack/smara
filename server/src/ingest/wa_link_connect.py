@@ -10,7 +10,7 @@ import html
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -160,6 +160,11 @@ def _require_sidecar(request: Request) -> None:
         raise HTTPException(status_code=401, detail="unauthorized")
 
 
+def _sidecar_only(request: Request) -> None:
+    """A route dependency: the shared secret is checked BEFORE the body is parsed, so a stranger gets 401, never a hint about the schema."""
+    _require_sidecar(request)
+
+
 class StateBody(BaseModel):
     tenant_id: str = Field(min_length=36, max_length=36)
     auth: str = Field(min_length=2, max_length=5_000_000)
@@ -196,7 +201,7 @@ async def _known_tenant(request: Request, tenant_id: str):
     return tenant
 
 
-@router.post("/internal/wa-link/state")
+@router.post("/internal/wa-link/state", dependencies=[Depends(_sidecar_only)])
 async def internal_state(body: StateBody, request: Request):
     _require_sidecar(request)
     try:
@@ -210,7 +215,7 @@ async def internal_state(body: StateBody, request: Request):
     return {"ok": True}
 
 
-@router.post("/internal/wa-link/status")
+@router.post("/internal/wa-link/status", dependencies=[Depends(_sidecar_only)])
 async def internal_status(body: StatusBody, request: Request):
     _require_sidecar(request)
     tenant = await _known_tenant(request, body.tenant_id)
@@ -221,7 +226,7 @@ async def internal_status(body: StatusBody, request: Request):
     return {"ok": True}
 
 
-@router.post("/internal/wa-link/inbound")
+@router.post("/internal/wa-link/inbound", dependencies=[Depends(_sidecar_only)])
 async def internal_inbound(body: InboundBody, request: Request):
     """A customer wrote to the shop's SIM. It goes through the same pipeline as a message on the shared number."""
     _require_sidecar(request)

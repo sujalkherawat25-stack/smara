@@ -48,7 +48,7 @@ async def handle(app, m: dict, chat_id: int, text: str) -> None:
         return await _join(app, m, chat_id, sess["invite_code"])
 
     code = _code_from(text)
-    invite = await _valid_invite(pool, code) if code else None
+    invite = await _valid_invite(pool, code, key) if code else None
     if invite or getattr(app.state.settings, "signup_mode", "invite") == "open":
         return await _join(app, m, chat_id, invite["code"] if invite else None)
 
