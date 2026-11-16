@@ -9,12 +9,51 @@ import asyncio
 import json
 import logging
 import random
+import re
 import time
 
 import httpx
 
 log = logging.getLogger(__name__)
 RETRY_STATUS = {429, 500, 502, 503, 504}
+
+
+_XML_PAIR = re.compile(r"\s*</arg_value>\s*<arg_key>(.*?)</arg_key>\s*<arg_value>", re.S)
+_XML_ARGS = re.compile(r"<arg_key>(.*?)</arg_key>\s*<arg_value>(.*?)(?:</arg_value>|$)", re.S)
+
+
+def repair_args(raw: str | None) -> str | None:
+    """Some models (GLM) sometimes leak their native XML tool-call format into the JSON arguments, e.g.
+    {"obligation_id": "abc</arg_value><arg_key>party_id</arg_key><arg_value>def"}. That made the tool reject a correct id
+    ('unknown obligation_id'). Split such values back into separate keys; anything clean is returned unchanged."""
+    if not raw or "arg_" not in raw:
+        return raw
+    try:
+        args = json.loads(raw)
+    except ValueError:
+        pairs = _XML_ARGS.findall(raw)
+        return json.dumps({k.strip(): v.strip() for k, v in pairs}, ensure_ascii=False) if pairs else raw
+    if not isinstance(args, dict):
+        return raw
+    out: dict = {}
+    for k, v in args.items():
+        if isinstance(v, str) and ("<arg_key>" in v or "</arg_value>" in v):
+            parts = _XML_PAIR.split(v)                    # [value, key2, value2, key3, value3, ...]
+            out.setdefault(k, parts[0].replace("</arg_value>", "").strip())
+            for k2, v2 in zip(parts[1::2], parts[2::2]):
+                out.setdefault(k2.strip(), v2.replace("</arg_value>", "").strip())
+        else:
+            out[k] = v                                     # an explicit key always wins over a leaked one
+    return json.dumps(out, ensure_ascii=False)
+
+
+def repair_call(call: dict) -> dict:
+    fn = call.get("function") or {}
+    fixed = repair_args(fn.get("arguments"))
+    if fixed == fn.get("arguments"):
+        return call
+    log.info("repaired leaked XML in the arguments of %s", fn.get("name"))
+    return {**call, "function": {**fn, "arguments": fixed}}
 
 
 class RateLimited(Exception):
@@ -233,6 +272,8 @@ class LLM:
     def _reply(self, body: dict, model: str) -> dict:
         self.last_usage = body.get("usage") or {}
         msg = dict(body["choices"][0]["message"])
+        if msg.get("tool_calls"):
+            msg["tool_calls"] = [repair_call(c) for c in msg["tool_calls"]]
         u = self.last_usage
         msg["_usage"] = {"model": model, "prompt": int(u.get("prompt_tokens") or 0),
                          "completion": int(u.get("completion_tokens") or 0), "total": int(u.get("total_tokens") or 0)}

@@ -168,7 +168,7 @@ async def c_import_twice(env):
 async def c_lang(env, amount="16,575"):
     t = said(env)
     low = t.lower()
-    named = any(n in low for n in ("ravi", "रवि", "रवी"))        # Latin, Devanagari, Gujarati script
+    named = any(n in low for n in ("ravi", "रवि", "रवी", "રવી", "રવિ"))        # Latin, Devanagari, Gujarati script
     return has_num(t, amount) and named, t[:200]
 
 
@@ -345,6 +345,108 @@ TASKS += [
     Task("product_facts_only_from_page", ("owner", owner("amazon.in par boAt Rockerz 255 earphones dhundho, price aur rating batao", "pf1")), c_product_facts_grounded, approve=True),
     Task("browser_login_wall_on_server", ("owner", owner("amazon.in kholo aur mere last order ka status batao", "bl1")), c_server_login_wall, approve=True),
 ]
+
+
+# ---- India in practice: lakh/crore/k amounts, day-first dates, Devanagari, short questions, persona, unknown names -----------
+async def open_rs(env, name_like: str) -> int:
+    r = await q(env, """select coalesce(sum(o.amount_paise),0) s from obligations o join parties p on p.id = o.party_id
+                        where p.canonical_name ilike %s and o.state <> 'PAID'""", name_like)
+    return r[0]["s"]
+
+
+MASC = re.compile(r"\b(main|mai|मैं)\b[^.!?\n]{0,40}\b(karta|deta|bhejta|dekhta|leta|raha)\s+(hoon|hu|hun)\b|\b(dunga|karunga|bhejunga|"
+                  r"dekhunga|lunga|rahunga|करूंगा|दूंगा|भेजूंगा)\b", re.I)
+
+
+def c_short(limit, need=None):
+    async def check(env):
+        t = said(env)
+        ok = 0 < len(t) <= limit and (need is None or re.search(need, t, re.I))
+        return bool(ok) and "outstanding" not in t.lower() and "baaki" not in t.lower(), f"len={len(t)} said={t[:200]!r}"
+    return check
+
+
+def c_open(name_like, rupees, also_said=None):
+    async def check(env):
+        got = await open_rs(env, name_like)
+        t = said(env)
+        extra = also_said is None or has_num(t, also_said)
+        return got == RS(rupees) and extra, f"{name_like} open={got / 100:,.2f} want={rupees:,} said={t[:180]!r}"
+    return check
+
+
+async def c_unknown_name(env):
+    t = said(env)
+    verma = " ".join(l for l in t.splitlines() if "verma" in l.lower())   # an amount on Verma's own line would be invented
+    invented = re.findall(r"\d[\d,]{2,}", verma)
+    honest = any(w in t.lower() for w in ("nahi mila", "nahi hai", "not found", "no customer", "koi customer nahi", "ledger mein nahi",
+                                            "nahin", "नहीं", "no such", "isn't in", "is not in", "not in your"))
+    return honest and not invented, f"honest={honest} amounts_named={invented} said={t[:200]!r}"
+
+
+async def c_reminder_card_feminine(env):
+    pend = await q(env, "select pending from agent_sessions where status = 'WAITING_APPROVAL'")
+    card = any(p["pending"] and p["pending"].get("name") == "send_whatsapp_message" for p in pend)
+    t = said(env)
+    masc = MASC.findall(t)
+    return card and not masc, f"card={card} masculine={masc[:3]} said={t[:200]!r}"
+
+
+async def c_tomorrow_10(env):
+    from datetime import timedelta
+    from src import clock
+    r = await q(env, "select run_at from agent_tasks where kind = 'followup' order by created_at desc limit 1")
+    if not r:
+        return False, f"no follow-up; said={said(env)[:160]!r}"
+    at = r[0]["run_at"].astimezone(clock.IST)
+    want = (clock.now() + timedelta(days=1)).date()
+    return at.date() == want and at.hour == 10 and at.minute == 0, f"run_at_ist={at:%Y-%m-%d %H:%M} want={want} 10:00"
+
+
+async def c_day_first(env):
+    t = said(env).lower()
+    ok = any(w in t for w in ("5 dec", "05 dec", "5th dec", "dec 5", "december 5", "5 december", "05-12", "05/12", "दिसंबर"))
+    wrong = any(w in t for w in ("may", "मई", "12 may", "5/12 may"))
+    return ok and not wrong, f"said={t[:220]!r}"
+
+
+async def c_crore(env):
+    t = said(env)
+    ok = has_num(t, "2,00,00,000") or has_num(t, "20,000,000") or "2 crore" in t.lower() or "2 cr" in t.lower() or "२ करोड़" in t
+    return ok and has_num(t, "424,725"), f"said={t[:220]!r}"
+
+
+async def c_43bh(env):
+    t = said(env)
+    return "45" in t and len(t) < 1400 and await ledger_untouched(env), f"len={len(t)} said={t[:200]!r}"
+
+
+TASKS += [
+    Task("in_time_short", ("owner", owner("time kya hua?", "in1")), c_short(260, r"\d{1,2}[:.]\d{2}|baje|बजे")),
+    Task("in_hi_short", ("owner", owner("hi", "in2")), c_short(420)),
+    Task("in_lakh_neft_utr", ("owner", owner("Agarwal Agencies ne 1.2 lakh NEFT kiye, UTR 412345678901", "in3")), c_open("agarwal%", 100000), approve=True),
+    Task("in_50k_partial", ("owner", owner("Singh electronics ne 50k de diye aaj", "in4")), c_open("singh%", 48750), approve=True),
+    Task("in_devanagari_total", ("owner", owner("सब ग्राहकों का कुल कितना बकाया है?", "in5")), lambda e: c_lang_total(e)),
+    Task("in_unknown_customer", ("owner", owner("Verma ji ka kitna baaki hai?", "in6")), c_unknown_name),
+    Task("in_reminder_draft_hi", ("owner", owner("Gupta Traders ko payment ka reminder bhejo, thoda polite", "in7")), c_reminder_card_feminine),
+    Task("in_remind_me_tomorrow_10", ("owner", owner("kal subah 10 baje mujhe yaad dilana ki Jain Hardware se paise lene hain", "in8")), c_tomorrow_10),
+    Task("in_day_first_date", ("owner", owner("Jain Hardware bol raha hai 05/12 ko payment karega. Note kar lo aur batao kab ki date note ki.", "in9")), c_day_first, approve=True),
+    Task("in_crore_target", ("owner", owner("Mera is saal ka target 2 cr ka sale hai. Abhi total kitna outstanding hai? Dono numbers Indian format mein likho.", "in10")), c_crore),
+    Task("in_ca_43bh_simple", ("owner", owner("Main CA hoon. 43B(h) ko simple Hindi mein 3-4 line mein samjhao, client ko bhejna hai", "in11")), c_43bh),
+    Task("in_record_udhaar_sale", ("owner", owner("Ravi Kirana ko aaj 2,500 ka maal udhaar diya, 15 din ka credit", "in12")), c_open("ravi%", 19075), approve=True),
+    Task("in_hinglish_voice_style", ("owner", owner("bhai sabse purana baki kiska hai aur kitne din se", "in13")), lambda e: c_oldest(e)),
+    Task("in_paid_full_cash", ("owner", owner("Pandey Sweets ka poora payment aa gaya cash mein", "in14")), c_open("pandey%", 0), approve=True),
+]
+
+
+async def c_lang_total(env):
+    t = said(env)
+    return has_num(t, "424,725"), t[:200]
+
+
+async def c_oldest(env):
+    t = said(env).lower()
+    return "agarwal" in t and "55" in t, t[:200]
 
 
 if __name__ == "__main__":
