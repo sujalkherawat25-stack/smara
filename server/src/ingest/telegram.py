@@ -40,11 +40,16 @@ class TelegramClient:
         import asyncio
         for wait in (0.5, 1.5, None):
             try:
-                return await self._http.post(url, **kw)
+                resp = await self._http.post(url, **kw)
             except (httpx.ConnectError, httpx.ConnectTimeout):
                 if wait is None:
                     raise
                 await asyncio.sleep(wait)
+                continue
+            if resp.status_code in (502, 503, 504) and wait is not None:     # Telegram's gateway had a hiccup: it did not process this
+                await asyncio.sleep(wait)
+                continue
+            return resp
 
     async def send(self, payload: dict) -> None:
         """sendMessage. If Telegram refuses the HTML (a tag it cannot parse), the same words go again as plain text, so a
