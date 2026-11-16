@@ -15,6 +15,16 @@ async def open_pool(database_url: str) -> AsyncConnectionPool:
     return pool
 
 
+# The agent's read-only SQL runs as smara_agent_ro with a row filter keyed on the setting smara.tenant_id. A query that could call
+# set_config() could point that filter at another shop, so nobody but the app's own role may call it (and the other functions that
+# act on the server or on other sessions). The app sets the filter BEFORE it drops to the read-only role (see tools.query_ledger_sql).
+AGENT_LOCKDOWN = """
+REVOKE EXECUTE ON FUNCTION pg_catalog.set_config(text, text, boolean) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION pg_catalog.pg_terminate_backend(integer, bigint) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION pg_catalog.pg_cancel_backend(integer) FROM PUBLIC;
+"""
+
+
 async def migrate(pool: AsyncConnectionPool) -> list[str]:
     """Apply unapplied migrations/*.sql in filename order; return applied names."""
     applied: list[str] = []
@@ -35,4 +45,5 @@ async def migrate(pool: AsyncConnectionPool) -> list[str]:
                 "INSERT INTO schema_migrations (name) VALUES (%s)", (path.name,)
             )
             applied.append(path.name)
+        await conn.execute(AGENT_LOCKDOWN)       # every start, not once: it must hold even after a restore or an upgrade
     return applied

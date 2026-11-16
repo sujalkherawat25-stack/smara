@@ -27,7 +27,7 @@ WAITLISTED = "You're on the waitlist. I'll message you here as soon as you have 
 
 
 def new_code(prefix: str = "SMA") -> str:
-    return f"{prefix.upper()[:4]}-" + "".join(secrets.choice(ALPHABET) for _ in range(4))
+    return f"{prefix.upper()[:4]}-" + "".join(secrets.choice(ALPHABET) for _ in range(6))     # 6 letters: about a billion codes
 
 
 def _code_from(text: str) -> str | None:
@@ -39,11 +39,34 @@ async def _send(app, to: str, text: str, number_id: str | None = None) -> None:
     await app.state.wa.send(text_message(to, text), number_id=number_id or None)
 
 
-async def _valid_invite(pool, code: str) -> dict | None:
+GUESS_LIMIT, GUESS_WINDOW_S = 6, 3600
+_misses: dict[str, list[float]] = {}
+
+
+def _guessing(who: str) -> bool:
+    """True when this sender has already tried too many wrong codes in the last hour (they get no more tries until it passes)."""
+    import time
+    now = time.monotonic()
+    recent = [t for t in _misses.get(who, []) if now - t < GUESS_WINDOW_S]
+    _misses[who] = recent
+    if len(_misses) > 5000:                      # never let the table grow without bound
+        for k in [k for k, v in _misses.items() if not v or now - v[-1] >= GUESS_WINDOW_S][:2500]:
+            _misses.pop(k, None)
+    return len(recent) >= GUESS_LIMIT
+
+
+async def _valid_invite(pool, code: str, who: str | None = None) -> dict | None:
+    """The invite behind `code`, if it is live. Pass `who` (the sender) to count wrong guesses against them."""
+    if who and _guessing(who):
+        return None
     async with pool.connection() as conn:
-        return await (await conn.execute(
+        row = await (await conn.execute(
             """SELECT code, label FROM invite_codes WHERE code = %s AND revoked_at IS NULL AND uses < max_uses
                   AND (expires_at IS NULL OR expires_at > now())""", (code,))).fetchone()
+    if row is None and who:
+        import time
+        _misses.setdefault(who, []).append(time.monotonic())
+    return row
 
 
 async def handle_stranger(app, msg) -> None:
@@ -57,7 +80,7 @@ async def handle_stranger(app, msg) -> None:
         return await create_shop(app, msg.sender, msg.profile_name, sess["invite_code"], msg.number_id)
 
     code = _code_from(text)
-    invite = await _valid_invite(pool, code) if code else None
+    invite = await _valid_invite(pool, code, msg.sender) if code else None
     if invite:
         return await create_shop(app, msg.sender, msg.profile_name, invite["code"], msg.number_id)
     if getattr(s, "signup_mode", "invite") == "open":

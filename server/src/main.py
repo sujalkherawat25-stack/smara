@@ -88,7 +88,7 @@ def _vault_ready() -> bool:
         return False
 
 
-app = FastAPI(title="Smara", lifespan=lifespan)
+app = FastAPI(title="Smara", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)   # no public map of the API
 app.include_router(router)
 app.include_router(device_router)
 app.include_router(pay_router)

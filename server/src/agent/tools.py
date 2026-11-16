@@ -18,6 +18,10 @@ from src.bridge.outbox import enqueue_standalone
 
 MAX_ROWS = 50
 _SQL = re.compile(r"^\s*(select|with)\b", re.I)
+# Not the real protection (the database role is), just a second wall: functions that change settings, run text as SQL, or touch the server.
+_FORBIDDEN = re.compile(r"\b(set_config|pg_terminate_backend|pg_cancel_backend|query_to_xml\w*|cursor_to_xml|table_to_xml\w*|"
+                        r"schema_to_xml\w*|database_to_xml\w*|dblink\w*|lo_\w+|pg_read_\w+|pg_ls_\w+|pg_stat_file|pg_sleep\w*|"
+                        r"pg_advisory\w*|pg_notify|nextval|setval)\b", re.I)
 LEDGER_SCHEMA = (
     "Tables (PostgreSQL, already limited to this shop): "
     "parties(id, canonical_name, aliases text[], whatsapp_phone, gstin, last_inbound_at); "
@@ -240,12 +244,16 @@ async def query_ledger_sql(app, ctx: SessionCtx, args: dict) -> dict:
     sql = str(args.get("sql", "")).strip().rstrip(";").strip()
     if not sql or len(sql) > 4000 or ";" in sql or not _SQL.match(sql):
         return {"error": "only a single SELECT (or WITH ... SELECT) statement is allowed"}
+    if _FORBIDDEN.search(sql):
+        return {"error": "that function is not allowed in a ledger query"}
     try:
         async with app.state.pool.connection() as conn:
             async with conn.transaction():
                 await conn.execute("SET TRANSACTION READ ONLY")
-                await conn.execute("SET LOCAL ROLE smara_agent_ro")
+                # the row filter is set first, as the app's role; the read-only role cannot call set_config (db.AGENT_LOCKDOWN),
+                # so the query cannot move the filter to another shop
                 await conn.execute("SELECT set_config('smara.tenant_id', %s, true)", (ctx.tenant_id,))
+                await conn.execute("SET LOCAL ROLE smara_agent_ro")
                 await conn.execute("SET LOCAL statement_timeout = '3000'")
                 await conn.execute("SET LOCAL TIME ZONE 'Asia/Kolkata'")   # current_date = the shop's today
                 cur = await conn.execute(sql)
