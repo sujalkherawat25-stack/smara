@@ -64,5 +64,11 @@ class ContinuumClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def delete_user(self, user_id: str) -> None:
+        """Erase everything Continuum holds for one user_id (a 404 means there was nothing: fine)."""
+        resp = await self._http.delete("/memories", params={"user_id": user_id})
+        if resp.status_code != 404:
+            resp.raise_for_status()
+
     async def aclose(self) -> None:
         await self._http.aclose()

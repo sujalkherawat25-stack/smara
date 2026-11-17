@@ -11,7 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 router = APIRouter()
-CONTACT = "Message 'delete my data' to Smara on WhatsApp or Telegram"
+CONTACT = "Message 'delete my data' to Smara on Telegram, then confirm with DELETE MY ACCOUNT"
 EMAIL = "hello@syntarus.com"
 UPDATED = "November 2026"
 
@@ -141,9 +141,13 @@ Smara is not a financial, legal or tax adviser.</p>
 @router.get("/data-deletion", response_class=HTMLResponse)
 async def data_deletion(request: Request):
     return _shell(request, "Delete your Smara data", """
-<p>To delete your business data from Smara:</p>
-<ol><li>Open WhatsApp or Telegram and message Smara: <strong>delete my data</strong>.</li>
-<li>Smara records your request and confirms it. We delete your shop, your customer list, dues, messages and saved notes within 7 days,
-and then tell you it is done.</li>
+<p>You can delete everything Smara holds about you, yourself, at any time:</p>
+<ol><li>Open Telegram and message Smara: <strong>delete my data</strong>. Smara explains what will go.</li>
+<li>To confirm, send exactly <strong>DELETE MY ACCOUNT</strong> (capital letters, typed). Nothing softer deletes anything.</li>
+<li>Smara then deletes, right away, your shop, customers, dues, messages, files, saved skills and everything its memory service
+holds about you, and tells you it is done. It cannot be undone. If the memory service cannot be reached, nothing is deleted and
+Smara asks you to try again.</li>
 <li>Backups made before that are removed automatically within 7 days.</li></ol>
+<p>To free file space without deleting the account, send <strong>files</strong> to see your files and <strong>delete 3</strong> to remove one
+(restorable for 30 days). To remove all kept files, send <strong>delete all files</strong> and confirm with <strong>DELETE ALL FILES</strong>.</p>
 <p>A customer of a shop who wants their number removed can reply <strong>STOP</strong> to any message, and that shop will not message them again.</p>""")

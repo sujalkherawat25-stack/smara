@@ -107,14 +107,11 @@ async def test_shops_that_existed_before_limits_are_exempt(env):
 
 # ---------------------------------------------------------------- data requests and the legal pages
 
-async def test_delete_my_data_is_recorded_once_and_can_be_cancelled(env):
+async def test_delete_my_data_only_explains_and_deletes_nothing(env):
     env.app.state.llm.enabled = False
     await dispatch(env.app, owner("d1", "delete my data"))
-    assert "7 din" in env.app.state.wa.to(OWNER)[-1]["text"]["body"]
-    await dispatch(env.app, owner("d2", "delete my data"))
-    assert (await one(env.pool, "select count(*) n from data_requests"))["n"] == 1
-    await dispatch(env.app, owner("d3", "cancel delete"))
-    assert (await one(env.pool, "select count(*) n from data_requests"))["n"] == 0
+    assert "DELETE MY ACCOUNT" in env.app.state.wa.to(OWNER)[-1]["text"]["body"]
+    assert (await one(env.pool, "select count(*) n from tenants"))["n"] >= 1
 
 
 async def test_privacy_terms_and_deletion_pages_are_public():
