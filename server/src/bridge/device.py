@@ -20,7 +20,20 @@ from datetime import datetime, timedelta, timezone
 PAIR_TTL = timedelta(hours=1)
 ONLINE_WITHIN = timedelta(seconds=45)       # the bridge long-polls every ~25 s, so a live one is seen well inside this
 JOB_TIMEOUT_S = 60
+CLAIM_WAIT_S = 15            # a PC that has not even picked a step up by now is busy or starting up (Brave cold start, waking from sleep)
+STALL_COOLDOWN_S = 90        # after that, other steps fail at once instead of each waiting a full minute (seen 17 Nov: 3 minutes of silence)
 POLL_S = 25
+_stalled: dict[str, float] = {}
+STALL_NOTE = ("The owner's PC browser did not respond (it is busy or still starting up). Do not retry it for about a minute: "
+              "tell the owner in one short line, then either try again later or answer from what you already know.")
+
+
+def mark_stalled(tenant_id: str) -> None:
+    _stalled[str(tenant_id)] = time.monotonic()
+
+
+def is_stalled(tenant_id: str) -> bool:
+    return time.monotonic() - _stalled.get(str(tenant_id), float("-inf")) < STALL_COOLDOWN_S
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
@@ -132,6 +145,8 @@ async def finish_job(pool, device: dict, job_id: str, result: dict) -> bool:
                 (json.dumps(result, default=str)[:200_000], job_id, device["tenant_id"]))).fetchone()
     except Exception:
         return False
+    if row is not None:
+        _stalled.pop(str(device["tenant_id"]), None)       # it answered: it is not stalled any more
     return row is not None
 
 
@@ -143,6 +158,8 @@ async def run_pc_tool(pool, tenant_id: str, sid: str, tool: str, args: dict, tim
         return {"error": "no PC is paired with this shop, so there is no PC folder to reach"}
     if not await reachable_device(pool, tenant_id):
         return {"error": offline_note(paired)}
+    if is_stalled(tenant_id):
+        return {"error": STALL_NOTE}
     cmd = {"tool": tool, **{k: v for k, v in args.items() if v is not None}}
     async with pool.connection() as conn:
         row = await (await conn.execute(
@@ -159,6 +176,7 @@ async def run_pc_tool(pool, tenant_id: str, sid: str, tool: str, args: dict, tim
         await asyncio.sleep(0.4)
     async with pool.connection() as conn:
         await conn.execute("UPDATE bridge_jobs SET status = 'EXPIRED' WHERE id = %s AND status IN ('PENDING','CLAIMED')", (job_id,))
+    mark_stalled(tenant_id)
     return {"error": f"the owner's PC did not answer within {timeout_s}s"}
 
 
@@ -182,6 +200,8 @@ class DeviceBrowser:
         if not await reachable_device(self.pool, tenant_id):
             self._open.discard(sid)
             return {"error": "the owner's PC is not connected right now: it needs to be on with Smara Desktop (or the helper) running"}
+        if is_stalled(tenant_id):
+            return {"error": STALL_NOTE}
         cmd = {k: args[k] for k in ("action", "url", "ref", "text", "selector", "value", "links") if args.get(k) is not None}
         if cmd.get("action") != "navigate" and sid not in self._open:
             return {"error": "no open page: navigate first"}
@@ -189,10 +209,16 @@ class DeviceBrowser:
             row = await (await conn.execute(
                 "INSERT INTO bridge_jobs (tenant_id, session_id, command) VALUES (%s, %s, %s) RETURNING id",
                 (tenant_id, sid, json.dumps(cmd)))).fetchone()
-        job_id, deadline = row["id"], time.monotonic() + self.step_timeout_s
+        job_id, started = row["id"], time.monotonic()
+        deadline = started + self.step_timeout_s
         while time.monotonic() < deadline:
             async with self.pool.connection() as conn:
                 job = await (await conn.execute("SELECT status, result FROM bridge_jobs WHERE id = %s", (job_id,))).fetchone()
+            if job["status"] == "PENDING" and time.monotonic() - started > CLAIM_WAIT_S:
+                async with self.pool.connection() as conn:
+                    await conn.execute("UPDATE bridge_jobs SET status = 'EXPIRED' WHERE id = %s AND status = 'PENDING'", (job_id,))
+                mark_stalled(tenant_id)
+                return {"error": STALL_NOTE}
             if job["status"] == "DONE":
                 out = job["result"] or {}
                 if cmd.get("action") == "navigate" and not out.get("error"):
@@ -206,7 +232,8 @@ class DeviceBrowser:
             await asyncio.sleep(0.4)
         async with self.pool.connection() as conn:
             await conn.execute("UPDATE bridge_jobs SET status = 'EXPIRED' WHERE id = %s AND status IN ('PENDING','CLAIMED')", (job_id,))
-        return {"error": f"the browser on the owner's PC did not answer within {self.step_timeout_s}s"}
+        mark_stalled(tenant_id)
+        return {"error": f"the browser on the owner's PC did not answer within {self.step_timeout_s}s. {STALL_NOTE}"}
 
     async def close(self, sid: str) -> None:
         self._open.discard(sid)

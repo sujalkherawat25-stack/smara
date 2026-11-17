@@ -788,3 +788,35 @@ def test_approvals_read_the_controls_name_from_the_page_listing():
     enter = {"action": "press", "value": "Enter"}
     assert submits_typed_text(enter, SessionCtx(id="s", tenant_id="t", trust="TRUSTED", controls=listing, last_fill="5"))
     assert not submits_typed_text(enter, SessionCtx(id="s", tenant_id="t", trust="TRUSTED", controls=listing, last_fill="3"))
+
+
+async def test_a_pc_that_does_not_pick_the_step_up_is_stalled_fast_and_later_steps_do_not_wait(env, monkeypatch):
+    """17 Nov: the owner's PC browser was slow to start; each search waited 60 s per engine and the owner got 3 minutes of
+    'Still working on it'. Now a step nobody picks up fails after CLAIM_WAIT_S and the next ones fail at once."""
+    import time
+    monkeypatch.setattr(device, "CLAIM_WAIT_S", 0.6)
+    device._stalled.clear()
+    async with api(env) as http:
+        await pair(env, http)
+        db = DeviceBrowser(env.pool, step_timeout_s=30)
+        t0 = time.monotonic()
+        out = await db.step("s1", {"action": "navigate", "url": "https://example.com"}, tenant_id=env.t.id)
+        assert "did not respond" in out["error"] and time.monotonic() - t0 < 5
+        t1 = time.monotonic()
+        again = await db.step("s1", {"action": "navigate", "url": "https://example.com/2"}, tenant_id=env.t.id)
+        assert "did not respond" in again["error"] and time.monotonic() - t1 < 0.5        # no second wait
+        assert (await one(env.pool, "select count(*) as n from bridge_jobs"))["n"] == 1       # and no second job was queued
+
+
+async def test_the_stall_clears_when_the_pc_answers_again(env, monkeypatch):
+    monkeypatch.setattr(device, "CLAIM_WAIT_S", 0.5)
+    device._stalled.clear()
+    async with api(env) as http:
+        token, _ = await pair(env, http)
+        db = DeviceBrowser(env.pool, step_timeout_s=30)
+        await db.step("s1", {"action": "navigate", "url": "https://example.com"}, tenant_id=env.t.id)
+        assert device.is_stalled(env.t.id)
+        device._stalled.pop(str(env.t.id))                      # the cooldown ends (or the helper wakes up)
+        out, _ = await asyncio.gather(db.step("s2", {"action": "navigate", "url": "https://example.com"}, tenant_id=env.t.id),
+                                      fake_bridge(http, token, rounds=1))
+        assert out.get("title") == "Page" and not device.is_stalled(env.t.id)

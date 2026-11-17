@@ -107,6 +107,8 @@ async def web_search(app, ctx: SessionCtx, args: dict) -> dict:
             if out.get("error"):
                 last_error = out["error"]
                 await browsers.close(sid)
+                if "did not respond" in last_error or "did not answer" in last_error:
+                    break                    # the PC browser is stalled: a second engine would only wait again
                 continue
             via = browsers.where(sid) if hasattr(browsers, "where") else ""
             used_device = used_device or via == "device"
@@ -125,7 +127,10 @@ async def web_search(app, ctx: SessionCtx, args: dict) -> dict:
                 "next": "Smara's cloud browser could not read search results just now. Try other words, or open a site you "
                         "know directly with browser_step navigate. Do not suggest pairing a PC or Smara Desktop."}
     try:
-        if used_device:
+        from src.bridge.device import STALL_NOTE, is_stalled
+        if is_stalled(ctx.tenant_id):
+            note = STALL_NOTE
+        elif used_device:
             note = ("The owner's PC browser opened the search pages, but they returned no readable result links. "
                     "Do NOT say the PC helper is disconnected; tell the owner the search results could not be read.")
         elif await reachable_device(app.state.pool, ctx.tenant_id):
