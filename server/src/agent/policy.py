@@ -22,6 +22,10 @@ BROWSER_READ = frozenset({"navigate", "read", "text", "scroll", "back", "wait", 
 BROWSER_ACT = frozenset({"click", "fill", "press", "select"})
 
 
+# The emoji Telegram allows as a reaction, cut down to the ones that suit a business chat.
+REACTIONS = ("👍", "❤", "🔥", "👏", "🎉", "🙏", "👌", "💯", "🤝", "🫡", "🤔", "👀", "😁", "🤩", "⚡", "🏆", "✍", "😢")
+
+
 @dataclass(frozen=True)
 class SessionCtx:
     id: str
@@ -100,7 +104,7 @@ def can_open(ref, ctx) -> bool:
 def tier_of(name: str, args: dict) -> str:
     if name in ("query_ledger_sql", "resolve_continuum_memory", "run_python", "get_current_time", "check_gstin",
                 "build_payment_request", "list_followups", "web_search", "read_attachment", "make_document", "load_skill",
-                "search_chat_history", "gst_reconcile", "find_customer", "list_my_files"):
+                "search_chat_history", "gst_reconcile", "find_customer", "list_my_files", "react_to_message"):
         return "T0"
     if name in ("schedule_followup", "cancel_followup", "send_file_to_owner", "set_customer_phone", "set_reply_style",
                 "save_skill", "delete_skill"):
