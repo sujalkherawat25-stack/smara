@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from src import clock
 from src.agent import actions
-from src.agent.policy import SessionCtx
+from src.agent.policy import REACTIONS, SessionCtx
 from src.box.gstin import check_gstin_status
 from src.loop.owner_channel import send_document_to_owner
 from src.loop.upi import pay_url, rupees, upi_text
@@ -164,6 +164,26 @@ async def build_payment_request(app, ctx: SessionCtx, args: dict) -> dict:
                    o["invoice_ref"]) if app.state.settings.public_base_url else None
     return {"invoice": o["invoice_ref"], "amount_rupees": o["amount_paise"] / 100, "amount": rupees(o["amount_paise"]),
             "text": text + (f"\nTap to pay: {link}" if link else ""), "link": link}
+
+
+async def react_to_owner(app, ctx: SessionCtx, args: dict) -> dict:
+    """An emoji reaction on the owner's latest Telegram message. Never raises: a reaction is a nicety, so any failure is
+    reported to the model as a short note and the turn carries on."""
+    from src import tenants
+    emoji = str(args.get("emoji") or "").strip()
+    if emoji not in REACTIONS:
+        return {"reacted": False, "error": "use one of: " + " ".join(REACTIONS)}
+    tg = getattr(app.state, "tg", None)
+    tenant = await tenants.by_id(app.state.pool, ctx.tenant_id)
+    chat_id = getattr(tenant, "telegram_chat_id", None) if tenant else None
+    mid = (getattr(app.state, "tg_last", None) or {}).get(chat_id)
+    if tg is None or not chat_id or not mid:
+        return {"reacted": False, "note": "no Telegram message to react to here; just write your reply"}
+    try:
+        await tg.react(chat_id, mid, emoji)
+    except Exception as err:
+        return {"reacted": False, "note": f"reaction not shown ({type(err).__name__}); just write your reply"}
+    return {"reacted": True, "note": "the reaction is on their message; still write your normal reply"}
 
 
 async def send_file_to_owner(app, ctx: SessionCtx, args: dict) -> dict:

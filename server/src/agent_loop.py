@@ -46,7 +46,7 @@ EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memo
              "get_current_time": extras.get_current_time, "schedule_followup": extras.schedule_followup,
              "list_followups": extras.list_followups, "list_my_files": extras.list_my_files, "cancel_followup": extras.cancel_followup,
              "check_gstin": extras.check_gstin, "build_payment_request": extras.build_payment_request,
-             "send_file_to_owner": extras.send_file_to_owner, "web_search": web.web_search,
+             "send_file_to_owner": extras.send_file_to_owner, "react_to_message": extras.react_to_owner, "web_search": web.web_search,
              "pc_files": pc.pc_files, "set_customer_phone": bookkeeping.set_customer_phone,
              "find_customer": bookkeeping.find_customer, "set_reply_style": prefs.set_reply_style,
              "gst_reconcile": gst.gst_reconcile}

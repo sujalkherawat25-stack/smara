@@ -80,6 +80,11 @@ class TelegramClient:
         """Shows 'typing…' in the owner's chat for about five seconds."""
         await self._call("sendChatAction", {"chat_id": chat_id, "action": "typing"})
 
+    async def react(self, chat_id: int, message_id: int, emoji: str) -> None:
+        """Puts one emoji reaction on a message in the owner's chat (what a person does with a long-press)."""
+        await self._call("setMessageReaction", {"chat_id": chat_id, "message_id": message_id,
+                                                "reaction": [{"type": "emoji", "emoji": emoji}]})
+
     async def set_commands(self, commands: list[tuple[str, str]]) -> None:
         """The menu Telegram shows when the owner types '/'."""
         await self._call("setMyCommands", {"commands": [{"command": c, "description": d} for c, d in commands]})
@@ -216,6 +221,9 @@ async def handle_update(app, upd: dict) -> None:
     elif audio := m.get("audio"):                             # a music or audio file, not a voice note: a file
         kind, media_id, filename = "document", audio["file_id"], audio.get("file_name", "")
         mime, size = audio.get("mime_type", ""), audio.get("file_size", 0)
+    if not hasattr(app.state, "tg_last"):
+        app.state.tg_last = {}
+    app.state.tg_last[chat_id] = m["message_id"]               # the message the agent's react tool puts an emoji on
     await _owner(app, tenant, InboundMessage(
         wamid=f"tg:{chat_id}:{m['message_id']}", sender=tenant.owner_phone, kind=kind, text=text,
         media_id=media_id, filename=filename, caption=m.get("caption", ""), channel="telegram", chat_id=chat_id,

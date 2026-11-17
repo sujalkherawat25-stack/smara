@@ -11,7 +11,7 @@ from decimal import Decimal
 import psycopg
 
 from src import chatlog
-from src.agent.policy import SessionCtx
+from src.agent.policy import REACTIONS, SessionCtx
 from src.agent.prompt import forget_standing
 from src.bridge.continuum import scope_user
 from src.bridge.outbox import enqueue_standalone
@@ -85,6 +85,10 @@ TOOLS = [
     _fn("send_file_to_owner", "Send the owner a file you created in the sandbox (PDF statement, Excel report, CSV). "
         "file_ref must be one of the output_file_refs from run_python.",
         {"file_ref": _S, "caption": _S}, ["file_ref"]),
+    _fn("react_to_message", "Put an emoji reaction on the owner's latest Telegram message, like a person would, to be warm and "
+        "alive (thanks, good news, a file received, a greeting, a done job). It is not a reply: still write your answer. Use it "
+        "now and then, at most once per turn, never on every message and never on bad news, anger or a serious question.",
+        {"emoji": {"type": "string", "enum": list(REACTIONS)}}, ["emoji"]),
     _fn("make_document", "Make a professional PDF (or Word, format=docx) document for the owner: kind=statement (a customer's "
         "account statement, needs party_id), reminder_letter (needs party_id and body = the letter's paragraph(s) only), "
         "payables_schedule (supplier bills with 43B(h) deadlines), owner_report (receivables, ageing, collections; days = period), "
