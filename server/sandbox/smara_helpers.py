@@ -394,3 +394,52 @@ def tds_194q(bills: list[dict], *, limit: float = 5_000_000.0, rate: float = 0.0
         rt = rate if has_pan else no_pan_rate
         out[sup] = {"tds": round(above * rt, 2), "above_limit": round(above, 2), "total": round(total, 2), "rate": rt}
     return out
+
+
+def categorise(rows: list[dict], rules: dict, *, text_key: str = "narration", amount_key: str = "amount", default: str = "Others") -> dict:
+    """Group rows (bank narrations, expense lines) into categories by keywords. rules = {category: [keywords]}. A keyword matches
+    WHOLE WORDS only, so 'RENT' does not match 'TORRENT POWER'; if several categories match, the longest keyword wins.
+    Returns {'totals': {cat: sum}, 'counts': {cat: n}, 'items': {cat: [distinct texts]}, 'unmatched': [distinct texts]}.
+    ALWAYS print 'items' and read each category's list for misfiled lines before you answer (a category with far more
+    entries than the others is a warning sign)."""
+    import re
+    comp = sorted(((len(kw.strip()), cat, re.compile(r"(?<![A-Za-z0-9])" + re.escape(kw.strip()) + r"(?![A-Za-z0-9])", re.I))
+                   for cat, kws in rules.items() for kw in kws), key=lambda x: -x[0])
+    totals: dict = {}
+    counts: dict = {}
+    items: dict = {}
+    for r in rows:
+        text = str(r.get(text_key) or "")
+        cat = next((c for _, c, rx in comp if rx.search(text)), default)
+        totals[cat] = totals.get(cat, 0) + float(r.get(amount_key) or 0)
+        counts[cat] = counts.get(cat, 0) + 1
+        items.setdefault(cat, set()).add(text)
+    return {"totals": {k: round(v, 2) for k, v in totals.items()}, "counts": counts,
+            "items": {k: sorted(v) for k, v in items.items()}, "unmatched": sorted(items.get(default, []))}
+
+
+def snapshot_diff(old: list[dict], new: list[dict], *, key: str = "ref", amount: str = "amount") -> dict:
+    """Compare two outstanding lists (old = the earlier one) bill by bill. Rows are dicts with an invoice number (`key`) and the
+    pending `amount`. Invoice numbers are compared ignoring case and punctuation. Returns:
+      cleared (in old, gone now), part_paid (in both, amount lower now: with the reduction), grown (amount higher), new_bills
+      (not in old), and totals: old_total, new_total, net_change (new - old), cleared_total, part_paid_total,
+      collected (= cleared + part payments), new_bills_total. Use this for 'what changed since last week' instead of
+      importing both lists into the ledger."""
+    o = {norm_invoice(r[key]): r for r in old}
+    n = {norm_invoice(r[key]): r for r in new}
+    cleared = [o[k] for k in o if k not in n]
+    new_bills = [n[k] for k in n if k not in o]
+    part, grown = [], []
+    for k in o.keys() & n.keys():
+        d = float(o[k][amount]) - float(n[k][amount])
+        if d > 0.005:
+            part.append({**n[k], "was": float(o[k][amount]), "reduction": round(d, 2)})
+        elif d < -0.005:
+            grown.append({**n[k], "was": float(o[k][amount]), "increase": round(-d, 2)})
+    tot = lambda rows, f=lambda r: float(r[amount]): round(sum(f(r) for r in rows), 2)
+    cleared_total, part_total = tot(cleared), tot(part, lambda r: r["reduction"])
+    old_total, new_total = tot(list(o.values())), tot(list(n.values()))
+    return {"cleared": cleared, "part_paid": part, "grown": grown, "new_bills": new_bills,
+            "totals": {"old_total": old_total, "new_total": new_total, "net_change": round(new_total - old_total, 2),
+                       "cleared_total": cleared_total, "part_paid_total": part_total, "collected": round(cleared_total + part_total, 2),
+                       "new_bills_total": tot(new_bills), "cleared_count": len(cleared), "part_paid_count": len(part), "new_bills_count": len(new_bills)}}

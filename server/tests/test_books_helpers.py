@@ -69,3 +69,22 @@ def test_importer_reads_hinglish_headers_and_skips_credit_balances():
     csv_bytes = "\n".join(['Naam,Bill,O/S,Due Date', 'Zaveri,ZV-1,"12,500/-",15-12-2026', 'Nair,NS-9,"1,500 Cr",10-12-2026']).encode()
     rows, notes, _ = map_sheet_detail("x.csv", csv_bytes)
     assert [r.invoice_ref for r in rows] == ["ZV-1"] and any("credit balance" in n for n in notes)
+
+
+def test_categorise_uses_whole_words_so_torrent_is_not_rent():
+    rows = [{"narration": "OFFICE RENT NOV", "amount": 100}, {"narration": "TORRENT POWER", "amount": 40}, {"narration": "MSEB ELECTRICITY BILL", "amount": 60},
+            {"narration": "GODOWN RENT SHARMA", "amount": 10}, {"narration": "CHEQUE BOOK", "amount": 5}]
+    out = mh.categorise(rows, {"Rent": ["RENT"], "Electricity": ["ELECTRICITY", "TORRENT POWER", "MSEB"]})
+    assert out["totals"] == {"Rent": 110.0, "Electricity": 100.0, "Others": 5.0}
+    assert out["items"]["Electricity"] == ["MSEB ELECTRICITY BILL", "TORRENT POWER"] and out["unmatched"] == ["CHEQUE BOOK"]
+
+
+def test_snapshot_diff_finds_cleared_part_paid_and_new_bills():
+    old = [{"ref": "A/1", "amount": 1000}, {"ref": "A-2", "amount": 500}, {"ref": "A3", "amount": 300}, {"ref": "A4", "amount": 200}]
+    new = [{"ref": "a/1", "amount": 1000}, {"ref": "A2", "amount": 200}, {"ref": "N1", "amount": 700}]       # A3, A4 gone; A-2 part-paid; N1 new
+    d = mh.snapshot_diff(old, new)
+    t = d["totals"]
+    assert [r["ref"] for r in d["cleared"]] == ["A3", "A4"] or {r["ref"] for r in d["cleared"]} == {"A3", "A4"}
+    assert t["cleared_total"] == 500 and t["part_paid_total"] == 300 and t["collected"] == 800
+    assert t["new_bills_total"] == 700 and t["old_total"] == 2000 and t["new_total"] == 1900 and t["net_change"] == -100
+    assert t["cleared_count"] == 2 and t["part_paid_count"] == 1 and t["new_bills_count"] == 1
