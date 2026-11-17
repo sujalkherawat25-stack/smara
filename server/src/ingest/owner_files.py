@@ -201,6 +201,29 @@ def delete(base: str, tenant_id: str, no: int, now: datetime) -> dict | None:
     return None
 
 
+def delete_all(base: str, tenant_id: str, now: datetime) -> tuple[int, int]:
+    """Hide every kept file (all can be restored for RESTORE_WINDOW). Returns (files, bytes) hidden."""
+    folder = _folder(base, tenant_id)
+    with _lock:
+        idx = _load(folder)
+        live = [e for e in idx["files"].values() if e["deleted"] is None]
+        for e in live:
+            e["deleted"] = now.isoformat()
+        if live:
+            _write(folder, idx)
+        return len(live), sum(e["bytes"] for e in live)
+
+
+def erase_folder(base: str, tenant_id: str) -> int:
+    """Remove the shop's whole file space for good, deleted-but-restorable files included. Returns how many files were there."""
+    import shutil
+    folder = _folder(base, tenant_id)
+    with _lock:
+        n = sum(1 for f in folder.iterdir() if f.is_file() and f.name not in (INDEX, INDEX + ".tmp")) if folder.is_dir() else 0
+        shutil.rmtree(folder, ignore_errors=True)
+    return n
+
+
 def restore(base: str, tenant_id: str, no: int, now: datetime) -> dict | None:
     """Bring back a file deleted within RESTORE_WINDOW. None if it is not in the deleted list.
     Raises StorageFull if the space no longer has room for it."""

@@ -102,6 +102,13 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
             from src.agent.bookkeeping import decide_phone_card
             return await decide_phone_card(app, tenant_id, ref, action == "phone_ok")
         return None
+    if msg.kind == "text" and not spoken_note:      # the exact phrases only (typed, in capitals): see src/erasure.py
+        from src import erasure
+        if erasure.is_account_confirm(msg.text):
+            await erasure.handle_confirm(app, tenant_id, msg.channel)     # sends its own reply: the shop is gone afterwards
+            return None
+        if erasure.is_files_confirm(msg.text):
+            return await erasure.delete_all_files(app, tenant_id)
     if msg.kind == "text" and msg.text.strip().startswith("/"):     # Telegram's '/' menu: '/files' is 'files'
         msg = replace(msg, text=msg.text.strip()[1:].split("@")[0] if " " not in msg.text.strip() else msg.text.strip()[1:])
     cmd = " ".join(msg.text.strip().lower().replace("'", "").split())
@@ -145,19 +152,9 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         from src.bridge.device import online_device
         d = await online_device(app.state.pool, tenant_id)
         return f"Your PC browser is online ({d['name']})." if d else "Your PC browser is not connected. Send 'pair browser' to connect it; until then I use the server browser."
-    if cmd in ("delete my data", "mera data delete karo", "data delete karo", "delete my account"):
-        async with app.state.pool.connection() as conn:
-            open_ = await (await conn.execute("SELECT 1 FROM data_requests WHERE tenant_id = %s AND kind = 'delete' AND status = 'OPEN'",
-                                              (tenant_id,))).fetchone()
-            if not open_:
-                await conn.execute("INSERT INTO data_requests (tenant_id, kind) VALUES (%s, 'delete')", (tenant_id,))
-        return ("Aapka data delete karne ka request mil gaya. 7 din ke andar aapka shop, customers, baaki rakam aur messages "
-                "hata diye jayenge, aur hum yahin bata denge. Rokna ho to 'cancel delete' likhiye.")
-    if cmd in ("cancel delete", "delete cancel"):
-        async with app.state.pool.connection() as conn:
-            n = (await conn.execute("DELETE FROM data_requests WHERE tenant_id = %s AND kind = 'delete' AND status = 'OPEN'",
-                                    (tenant_id,))).rowcount
-        return "Delete request cancel kar diya." if n else "Koi delete request khula nahi tha."
+    from src import erasure
+    if erasure.soft_account(cmd):                   # only explains: the account goes on the exact phrase (see above)
+        return erasure.ASK_ACCOUNT
     if cmd in ("connect whatsapp", "whatsapp connect", "connect my whatsapp", "apna number jodo", "number connect karo"):
         from src.ingest.connect import configured, new_link
         if app.state.settings.wa_link_url:            # the shop's own SIM, through the link sidecar (QR code page)
@@ -173,6 +170,8 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
                 f"{link}\n\nAapke customers ko message aapke apne number se jayenge. Kuch bhi bina aapke tap ke nahi jata.")
     if msg.kind == "text" and (reply := await file_commands.handle(app, tenant_id, msg.text or "")):
         return reply
+    if msg.kind == "text" and len(cmd) <= 40 and erasure.soft_files(cmd):
+        return erasure.ASK_FILES
     reopen_ref = parse_reopen_command(msg.text)
     if reopen_ref:
         reply = await reopen_invoice(app.state.pool, tenant_id, reopen_ref)
