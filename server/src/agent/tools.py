@@ -203,7 +203,12 @@ TOOLS = [
         "mh.match_names(names, ledger_names) maps typed spellings to the ledger ('and'/'&', case, spaces, Agarwal/Agrawal) and lists "
         "the unclear ones in 'review'; mh.fifo_apply(invoices, payments) applies lump-sum receipts oldest invoice first and returns "
         "open balances and advances; mh.norm_invoice(no) compares invoice numbers ignoring punctuation and case; "
-        "mh.tds_194q(bills) does section 194Q on the part above Rs 50 lakh. Load the receivables-from-books skill first for such work. "
+        "mh.tds_194q(bills) does section 194Q: 0.1% ONLY on the part of a supplier's year purchases ABOVE Rs 50 lakh (62.5 lakh "
+        "means tax on 12.5 lakh, never on the whole 62.5 lakh), and 5% (not 20%) when the supplier has no PAN; for supplier totals pass "
+        "one row per supplier with a date. mh.categorise(rows, rules) groups narrations by keywords using WHOLE words (RENT must not "
+        "match TORRENT) and returns each category's lines: print them and fix any misfiled line before you answer. "
+        "mh.snapshot_diff(old_rows, new_rows) compares two outstanding lists bill by bill (cleared, part-paid, new, net change): use it "
+        "for 'what changed since last week', never import both lists. Load the receivables-from-books skill first for such work. "
         "Pass the file_refs of every file you open: without them ./in is empty.",
         {"code": _S, "file_refs": {"type": "array", "items": _S}}, ["code"]),
     _fn("pc_files", "Reach the Smara Shared folder on the owner's own PC (only that folder, only text files). action=list shows "
