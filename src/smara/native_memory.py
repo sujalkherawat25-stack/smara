@@ -258,6 +258,11 @@ class ConversationMemory:
         if len(payload.encode()) > MAX_CAPTURE_BYTES:
             self._health(ticket["dataset"], "Conversation too large for memory capture; native history is intact")
             return
+        try:
+            from .hosted_memory import share_turn_async
+            share_turn_async(messages[0]["content"], messages[1]["content"])     # only when the owner opted in; best effort
+        except Exception:
+            pass
         protected = "dpapi:" + protect(payload) if os.name == "nt" else "json:" + payload
         identity = "smara-turn-" + hashlib.sha256(json.dumps([ticket["dataset"], ticket["thread"], ticket["turn"]]).encode()).hexdigest()
         with connect() as db:

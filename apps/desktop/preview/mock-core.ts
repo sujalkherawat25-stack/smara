@@ -94,6 +94,7 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
       const request = (args.request ?? {}) as Record<string, unknown>;
       if (request.operation === "audit") return auditPreview(request) as T;
       if (request.operation === "goals") return goalsPreview((request.goal ?? {}) as Record<string, unknown>) as T;
+      if (request.operation === "hosted_memory") return { connected: true, shop: "Sharma Traders", enabled: request.action === "set" ? request.enabled === true : false } as T;
       if (request.operation === "hosted_approvals") return hostedPreview(request) as T;
       return setup as T;
     }

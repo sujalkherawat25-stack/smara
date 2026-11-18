@@ -4,6 +4,16 @@ export type HostedStatus = { connected: boolean; shop: string; server: string };
 export type HostedList = HostedStatus & { approvals: HostedApproval[] };
 export type Outcome = "done" | "already" | "chat_only";
 
+export type SharingStatus = { connected: boolean; shop: string; enabled: boolean };
+
+/** What the memory-sharing switch tells the owner, in plain words. */
+export function sharingText(status: SharingStatus | null): string {
+  if (!status || !status.connected) return "Connect this PC to your Smara above to choose whether memory is shared.";
+  return status.enabled
+    ? `On for ${status.shop}. Notes from your chats here are shared with Smara, kept apart and marked unverified. Passwords, keys, card numbers and OTPs are removed first.`
+    : "Off. Nothing from this PC's chats is shared with Smara.";
+}
+
 export const TOOL_WORDS: Record<string, string> = {
   browser_step: "Browser on this PC", pc_files: "Smara Shared folder", hand_off_to_owner: "Your turn",
 };

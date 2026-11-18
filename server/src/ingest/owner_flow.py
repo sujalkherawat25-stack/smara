@@ -158,6 +158,20 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         from src.bridge.approvals import revoke as revoke_approvals
         n = await revoke_approvals(app.state.pool, tenant_id)
         return "Smara Desktop can no longer approve steps." if n else "Smara Desktop approvals were not switched on."
+    if cmd in ("share desktop memory", "desktop memory on", "share memory with desktop"):
+        from src.bridge import memory_share
+        await memory_share.set_enabled(app.state.pool, tenant_id, True)
+        return ("Memory sharing with Smara Desktop is ON. Notes your PC shares are kept apart, marked unverified, and never "
+                "include passwords, keys, card numbers or OTPs. Send 'stop sharing desktop memory' to turn it off, or "
+                "'forget desktop memory' to erase what your PC shared.")
+    if cmd in ("stop sharing desktop memory", "desktop memory off", "stop desktop memory"):
+        from src.bridge import memory_share
+        await memory_share.set_enabled(app.state.pool, tenant_id, False)
+        return "Memory sharing with Smara Desktop is OFF. Nothing more is shared either way. Send 'forget desktop memory' to erase what was shared."
+    if cmd in ("forget desktop memory", "delete desktop memory"):
+        from src.bridge import memory_share
+        await memory_share.forget(app, tenant_id)
+        return "Everything Smara Desktop shared has been erased."
     if cmd in ("unpair browser", "disconnect browser"):
         from src.bridge.device import revoke_all
         from src.bridge.approvals import revoke as revoke_approvals

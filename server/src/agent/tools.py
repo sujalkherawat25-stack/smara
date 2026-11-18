@@ -299,7 +299,19 @@ async def resolve_continuum_memory(app, ctx: SessionCtx, args: dict) -> dict:
     except Exception as e:
         return {"error": f"memory unavailable: {type(e).__name__}"}
     r = res.get("resolution", {})
-    return {"state_card": (r.get("state_card") or "")[:2500], "claims": (r.get("evidence") or [])[:5]}
+    out = {"state_card": (r.get("state_card") or "")[:2500], "claims": (r.get("evidence") or [])[:5]}
+    if str(args.get("party_id")) == "shop":
+        from src.bridge import memory_share
+        if await memory_share.is_enabled(app.state.pool, ctx.tenant_id):       # the owner opted in to what Desktop shares
+            try:
+                d = await app.state.continuum.resolve(user_id=memory_share.desktop_scope(ctx.tenant_id),
+                                                      query=str(args.get("query", ""))[:500], max_claims=3)
+                card = ((d.get("resolution") or {}).get("state_card") or "")[:1500]
+                if card:
+                    out["from_desktop_unverified"] = card
+            except Exception:
+                pass
+    return out
 
 
 async def write_continuum_evidence(app, ctx: SessionCtx, args: dict) -> dict:

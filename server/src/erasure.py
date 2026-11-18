@@ -45,7 +45,7 @@ ASK_FILES = (
 TENANT_TABLES = (
     "agent_sessions", "agent_tasks", "bridge_jobs", "bridge_devices", "bridge_pairings", "browser_tasks", "chat_messages",
     "customer_routing", "data_requests", "digest_log", "digest_optout", "llm_usage", "outbound_messages", "owner_inbound_log", "owner_prefs",
-    "owner_skills", "owner_desktop_tokens", "owner_desktop_pairings", "payables", "shop_facts", "tally_syncs", "tenant_keys", "tenant_secrets", "wa_link_daily_sends",
+    "owner_skills", "owner_desktop_tokens", "owner_desktop_pairings", "owner_memory_sharing", "payables", "shop_facts", "tally_syncs", "tenant_keys", "tenant_secrets", "wa_link_daily_sends",
     "wa_links", "whatsapp_connect_links", "whatsapp_connections", "obligations", "parties",
 )
 
@@ -71,7 +71,7 @@ async def _continuum_users(pool, tenant_id: str) -> list[str]:
         rows = await (await conn.execute(
             "SELECT DISTINCT user_id FROM continuum_outbox WHERE starts_with(user_id, %s)", (f"{tenant_id}_",))).fetchall()
         parties = await (await conn.execute("SELECT id FROM parties WHERE tenant_id = %s", (tenant_id,))).fetchall()
-    ids = {r["user_id"] for r in rows} | {scope_user(tenant_id, str(p["id"])) for p in parties} | {scope_user(tenant_id, "shop")}
+    ids = {r["user_id"] for r in rows} | {scope_user(tenant_id, str(p["id"])) for p in parties} | {scope_user(tenant_id, "shop"), scope_user(tenant_id, "desktop")}
     return sorted(ids)
 
 

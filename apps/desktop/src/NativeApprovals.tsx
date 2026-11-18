@@ -3,8 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { goalRequest, type Goal, type GoalList } from "./goalApi";
 import { supportsApproval } from "./nativeView";
 import { approvalText } from "./taskBoardView";
-import { askedLabel, codeLooksRight, outcomeText, toolLabel, type HostedList, type HostedStatus, type Outcome } from "./approvalsView";
+import { askedLabel, codeLooksRight, outcomeText, sharingText, toolLabel, type HostedList, type HostedStatus, type Outcome, type SharingStatus } from "./approvalsView";
 
+const sharing = <T,>(action: string, values: Record<string, unknown> = {}) =>
+  invoke<T>("native_manage", { request: { operation: "hosted_memory", action, ...values } });
 const hosted = <T,>(action: string, values: Record<string, unknown> = {}) =>
   invoke<T>("native_manage", { request: { operation: "hosted_approvals", action, ...values } });
 
@@ -16,6 +18,7 @@ export default function NativeApprovals({ chatWaiting, onShowChat, onCount }: { 
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [share, setShare] = useState<SharingStatus | null>(null);
 
   const refresh = async () => {
     const status = await hosted<HostedStatus>("status");
@@ -23,6 +26,7 @@ export default function NativeApprovals({ chatWaiting, onShowChat, onCount }: { 
       try { setLink(await hosted<HostedList>("list")); }
       catch (reason) { setLink({ ...status, connected: false, approvals: [] }); setError(String(reason)); }
     } else setLink({ ...status, approvals: [] });
+    setShare(await sharing<SharingStatus>("status").catch(() => null));
     const list = await goalRequest<GoalList>("list");
     const waiting = list.goals.filter(goal => goal.state === "awaiting_approval");
     const full = await Promise.all(waiting.map(goal => goalRequest<Goal>("get", { id: goal.id }).catch(() => null)));
@@ -73,6 +77,15 @@ export default function NativeApprovals({ chatWaiting, onShowChat, onCount }: { 
       </div>
     </article>)}
     {link?.connected && <button className="link" disabled={pending} onClick={() => { if (window.confirm("Stop answering Smara's approvals on this PC? To switch it off on Smara's side too, send 'stop desktop approvals' in chat.")) void run(async () => { await hosted("disconnect"); }); }}>Disconnect approvals on this PC</button>}
+
+    <h3>Share memory with Smara <small>optional</small></h3>
+    <div className="inbox-card">
+      <p className="inbox-text">{sharingText(share)}</p>
+      {share?.connected && <div className="task-actions">
+        <label><input type="checkbox" checked={!!share.enabled} disabled={pending} onChange={event => void run(async () => { setShare(await sharing<SharingStatus>("set", { enabled: event.target.checked })); setNotice(event.target.checked ? "Memory sharing is on for this shop." : "Memory sharing is off."); })} /> Share this PC's chat notes with {share.shop}</label>
+        <button disabled={pending} onClick={() => { if (window.confirm("Erase everything this PC shared with Smara? This cannot be undone.")) void run(async () => { await sharing("forget"); setNotice("Everything this PC shared was erased from Smara."); }); }}>Forget what I shared</button>
+      </div>}
+    </div>
 
     <h3>Background tasks <small>{tasks.length ? `${tasks.length} waiting` : "none waiting"}</small></h3>
     {tasks.map(goal => goal.approvals!.map(request => <article key={goal.id + request.id} className="inbox-card">
