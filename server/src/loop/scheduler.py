@@ -6,6 +6,7 @@ from src import clock, health_watch, tenants
 from src.bridge.outbox import drain
 from src.ingest import owner_files
 from src.loop import wa_link
+from src.loop import review
 from src.loop.digest import build_digest
 from src.loop.reminders import (claim_due, draft_reminder, release_claim, reminder_card, reopen_unanswered,
                                 stale_sync_note, state_card)
@@ -131,7 +132,10 @@ async def send_digests(app, local: datetime) -> int:
         if not first:
             continue
         try:
-            text = await build_digest(pool, t.id, local.date())
+            if await review.opted_out(pool, t.id):
+                continue
+            # Monday: the weekly review. Other days: only an alert, and only when something needs attention (else nothing is sent).
+            text = await (review.weekly_review if local.weekday() == 0 else review.daily_alerts)(pool, t.id, local.date())
             if not text:
                 continue
             await send_to_owner(app, t, text_message(t.owner_phone, text), kind="owner_digest")

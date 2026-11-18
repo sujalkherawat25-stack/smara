@@ -19,7 +19,7 @@ from src.ingest.guides import EXPORT_GUIDE
 from src.ingest.telegram import link_message, unlink
 from src.ingest.sheet_mapper import SheetRow, map_sheet_detail, parse_amount_paise, parse_date, parse_phone
 from src.agent_loop import attach_to_running, resume, start_session
-from src.loop import wa_link
+from src.loop import review, wa_link
 from src.loop.digest import build_digest
 from src.loop.reminders import decide_reminder
 from src.loop.owner_channel import send_to_owner
@@ -35,7 +35,7 @@ HELP = ("Just talk to me, in English, Hindi or Hinglish, by text or voice note. 
         "• For a business: 'Ravi ka kitna baaki hai?', 'Gupta ne 5000 cash diya', payment reminders, GST\n\n"
         "When something works well, I can save it as a skill so it is faster next time. I only act with your OK: nothing "
         "is sent to anyone or changed until you approve it.\n\n"
-        "Commands:\n• 'digest': today's summary\n• 'style': language and length of my answers\n• 'skills': your saved skills\n"
+        "Commands:\n• 'digest': today's summary ('digest off' stops the Monday summary and alerts)\n• 'style': language and length of my answers\n• 'skills': your saved skills\n"
         "• 'files': files you sent me\n• 'export': how to get a list out of Tally or Busy\n• 'sample': a sample file\n"
         "• 'telegram': connect Telegram (from WhatsApp)")
 PC_LATER = ("Apne PC ka browser jodna Smara Desktop ke saath aayega, jo abhi jaldi aa raha hai. Tab tak main Smara ke apne cloud "
@@ -190,7 +190,13 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         return await link_message(app, tenant_id)
     if msg.text.strip().lower() == "telegram off":
         return await unlink(app, tenant_id)
-    if cmd == "digest":                    # the morning summary on demand: built from the ledger, no model
+    if cmd in ("digest off", "summary off", "weekly off", "digest band", "digest band karo", "digest stop"):
+        await review.set_digest(app.state.pool, tenant_id, False)
+        return "Theek hai, ab main hafte ka summary aur daily alerts nahi bhejunga. Dobara chahiye to 'digest on' likhiye."
+    if cmd in ("digest on", "summary on", "weekly on", "digest chalu", "digest chalu karo", "digest start"):
+        await review.set_digest(app.state.pool, tenant_id, True)
+        return "Done. Ab har Monday hafte ka summary aayega, aur kuch zaroori hone par alert. 'digest' likhkar kabhi bhi dekh sakte hain."
+    if cmd == "digest":                    # the full summary on demand: built from the ledger, no model
         digest = await build_digest(app.state.pool, tenant_id, clock.today())
         line = await wa_link.health_line(app.state.pool, tenant_id)
         return f"{line}\n\n{digest}" if line else digest

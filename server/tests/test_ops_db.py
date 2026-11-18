@@ -171,10 +171,11 @@ async def test_24h_window_and_template(app):
 async def test_digest_once_per_day_per_tenant_across_restarts(app):
     await tenant_with_debtor(app, "alpha", "919000000001")
     await tenant_with_debtor(app, "beta", "919000000002", debtor="919876543211")
-    local = NOW.astimezone(IST)
-    assert await send_digests(app, local) == 2
-    assert await send_digests(app, local) == 0                           # a restart does not resend
-    assert await send_digests(app, local + timedelta(days=1)) == 2       # next day does
+    monday = datetime(2026, 11, 9, 9, 30, tzinfo=IST)                    # Monday: the weekly review
+    assert await send_digests(app, monday) == 2
+    assert await send_digests(app, monday) == 0                          # a restart does not resend
+    assert await send_digests(app, monday + timedelta(days=1)) == 0      # Tuesday: the bill is 9 days late, nothing new: stays quiet
+    assert await send_digests(app, datetime(2026, 12, 1, 9, 30, tzinfo=IST)) == 2   # the bill crosses 30 days: an alert
 
 
 async def test_healthz_flags_dead_outbox(app):
