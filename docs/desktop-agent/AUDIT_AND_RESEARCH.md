@@ -263,3 +263,31 @@ approvals, pause/stop/resume, event log), not a second runtime.
 Checked for real: two separate processes raced for the input lock 200 times each. The lock was never held by the
 wrong agent and every refusal was the clean "Another agent" message. This run found and fixed a Windows-only crash:
 creating the lock file while the other process is deleting it raises "permission denied", not "exists".
+
+## 8. Milestone 4: one Approvals inbox
+
+* **Approvals** (toolbar, with a count) shows everything that waits for the owner:
+  * **From Smara on Telegram:** steps hosted Smara wants to take on this PC (browser steps, the Smara Shared folder,
+    hand-offs), with the same card text and the same Approve / Approve + this site (15 min) / Reject as the chat card.
+    The first answer wins; a second one reads "Already answered".
+  * **Background tasks:** their pending approvals, with Approve / Deny.
+  * **This chat:** how many wait in the open chat, with a button back to it.
+* **Server (needs a release):**
+  * Migration `030_desktop_approvals.sql` adds hashed owner tokens and one-time codes, both removed with an
+    account erasure.
+  * `src/bridge/approvals.py` and the endpoints `POST /bridge/approvals/pair`, `GET /bridge/approvals` and
+    `POST /bridge/approvals/{sid}`.
+  * Chat commands: `desktop approvals` (code, 1 hour, single use), `stop desktop approvals`. `unpair browser`
+    also revokes the approvals token.
+* **Rules kept from the plan:**
+  * The browser helper's device token is refused (401). A compromised helper cannot approve its own steps.
+  * Only PC steps are listed or answerable. Messages to customers and book changes are refused (403) and
+    stay chat-only.
+  * Shops are isolated. Decisions are rate-limited and written to the chat log (`channel=desktop`).
+* **Desktop client** (`smara.hosted_approvals`):
+  * The owner token is kept DPAPI-protected in `hosted-approvals.json`.
+  * The server address comes from the paired PC helper.
+  * A revoked token disconnects this PC with a clear message.
+
+Not in this milestone: separate lists of allowed and blocked sites (the "any public website" switch and the
+project's site list stay as they are), and memory sharing (M5).

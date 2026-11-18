@@ -144,9 +144,25 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
                 "starts by itself whenever the PC is on, and I will use your own browser (your logins stay on your PC).\n\n"
                 f"No Smara Desktop? Run once: python smara_bridge.py pair --code {code} && python smara_bridge.py install-startup\n"
                 "Send 'unpair browser' to disconnect.")
+    if cmd in ("desktop approvals", "approvals on desktop", "pc approvals", "desktop approval"):
+        if not pc_allowed(getattr(app.state, "settings", None), tenant_id):
+            return PC_LATER
+        from src.bridge.approvals import start_pairing as start_approvals
+        code = await start_approvals(app.state.pool, tenant_id)
+        return (f"Smara Desktop approvals code: {code}\n(valid 1 hour, works once)\n\n"
+                "On your PC open Smara Desktop > Approvals, paste the code and press Connect. Then steps on your PC "
+                "(browser clicks, files in the Smara Shared folder) can be approved there as well as here; the first answer "
+                "counts. Messages to customers and changes to your books are still approved here only.\n"
+                "Send 'stop desktop approvals' to switch it off.")
+    if cmd in ("stop desktop approvals", "desktop approvals off", "unpair desktop approvals"):
+        from src.bridge.approvals import revoke as revoke_approvals
+        n = await revoke_approvals(app.state.pool, tenant_id)
+        return "Smara Desktop can no longer approve steps." if n else "Smara Desktop approvals were not switched on."
     if cmd in ("unpair browser", "disconnect browser"):
         from src.bridge.device import revoke_all
+        from src.bridge.approvals import revoke as revoke_approvals
         n = await revoke_all(app.state.pool, tenant_id)
+        await revoke_approvals(app.state.pool, tenant_id)      # a PC that is unpaired can not approve either
         return "Your PC browser is disconnected." if n else "No PC browser was connected."
     if cmd in ("browser status", "browser"):
         from src.bridge.device import online_device

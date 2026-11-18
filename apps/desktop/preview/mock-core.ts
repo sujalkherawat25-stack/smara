@@ -94,6 +94,7 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
       const request = (args.request ?? {}) as Record<string, unknown>;
       if (request.operation === "audit") return auditPreview(request) as T;
       if (request.operation === "goals") return goalsPreview((request.goal ?? {}) as Record<string, unknown>) as T;
+      if (request.operation === "hosted_approvals") return hostedPreview(request) as T;
       return setup as T;
     }
     case "native_project_files": return {
@@ -153,3 +154,17 @@ function goalsPreview(goal: Record<string, unknown>) {
   return { goals: sampleGoals, service: { running: true }, max_parallel: 3, parallel_limit: 4,
     input: { holder: "h", label: "Kiran: Post the day book totals", task: "t2", pid: 1, until: Date.now() / 1000 + 15 } };
 }
+
+// Sample hosted (Telegram) approvals for the preview inbox.
+function hostedPreview(request: Record<string, unknown>) {
+  const status = { connected: true, shop: "Sharma Traders", server: "https://ai.syntarus.com/smara" };
+  if (request.action === "decide") return { outcome: "done" };
+  if (request.action !== "list") return status;
+  return { ...status, approvals: [
+    { id: "aaaaaaaa-1111-2222-3333-444444444444", tool: "browser_step", card: "Smara wants to click the “File return” button on services.gst.gov.in/returns (Returns Dashboard).\n\nApprove?",
+      step: { action: "click", ref: "41" }, site_choice: true, asked_at: new Date(Date.now() - 120000).toISOString() },
+    { id: "bbbbbbbb-1111-2222-3333-444444444444", tool: "pc_files", card: "Save this file on your PC (Smara Shared folder)?\n\nreports/october-dues.csv",
+      step: { action: "write", path: "reports/october-dues.csv" }, site_choice: false, asked_at: new Date(Date.now() - 20000).toISOString() },
+  ] };
+}
+

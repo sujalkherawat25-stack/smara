@@ -23,12 +23,63 @@ class ResultBody(BaseModel):
     result: dict
 
 
+class OwnerPairBody(BaseModel):
+    code: str = Field(min_length=8, max_length=12)
+    name: str = Field(default="PC", max_length=60)
+
+
+class DecisionBody(BaseModel):
+    choice: str = Field(pattern="^(approve|site|reject)$")
+
+
 async def _device(request: Request, authorization: str | None) -> dict:
     token = (authorization or "").removeprefix("Bearer ").strip()
     dev = await device.device_for_token(request.app.state.pool, token) if token else None
     if dev is None:
         raise HTTPException(status_code=401, detail="unknown or revoked device")
     return dev
+
+
+async def _owner(request: Request, authorization: str | None) -> dict:
+    """The owner's Desktop approvals token. A browser helper's device token is not accepted here."""
+    from src.bridge import approvals
+    token = (authorization or "").removeprefix("Bearer ").strip()
+    owner = await approvals.owner_for_token(request.app.state.pool, token) if token else None
+    if owner is None:
+        raise HTTPException(status_code=401, detail="unknown or revoked approvals token")
+    return owner
+
+
+@router.post("/approvals/pair")
+async def approvals_pair(body: OwnerPairBody, request: Request):
+    from src.bridge import approvals
+    done = await approvals.complete_pairing(request.app.state.pool, body.code, body.name)
+    if done is None:
+        raise HTTPException(status_code=400, detail="that code is wrong, used, or expired; send 'desktop approvals' to Smara for a new one")
+    return {"owner_token": done["token"], "shop": done["shop"]}
+
+
+@router.get("/approvals")
+async def approvals_list(request: Request, authorization: str | None = Header(default=None)):
+    """Steps on the owner's PC that wait for the owner (browser, PC folder, hand-offs), newest first."""
+    from src.bridge import approvals
+    owner = await _owner(request, authorization)
+    return {"approvals": await approvals.pending(request.app.state.pool, str(owner["tenant_id"]))}
+
+
+@router.post("/approvals/{sid}")
+async def approvals_decide(sid: str, body: DecisionBody, request: Request, authorization: str | None = Header(default=None)):
+    from src.bridge import approvals
+    owner = await _owner(request, authorization)
+    if not approvals.rate_ok(str(owner["id"])):
+        raise HTTPException(status_code=429, detail="too many decisions in a short time; wait a few minutes")
+    outcome = await approvals.decide(request.app, str(owner["tenant_id"]), sid, body.choice,
+                                     background=getattr(request.app.state, "agent_background", True))
+    if outcome == "already":
+        raise HTTPException(status_code=409, detail="already handled")
+    if outcome == "not_here":
+        raise HTTPException(status_code=403, detail="this approval is answered in chat only")
+    return {"ok": True}
 
 
 @router.post("/pair")
