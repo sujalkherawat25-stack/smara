@@ -98,12 +98,14 @@ services:
     network_mode: none
     read_only: true
     tmpfs:
-      - /tmp:size=512m,mode=1777
+      - /tmp:size=1g,mode=1777
     volumes:
       - smara_jobs:/jobs
-    mem_limit: 2g
-    cpus: 1.5
-    pids_limit: 256
+    environment:
+      SANDBOX_WORKERS: "4"          # jobs at the same time; each is capped at 1.5 GB (RLIMIT_AS), so 4 fit in mem_limit
+    mem_limit: 6g
+    cpus: 3
+    pids_limit: 512
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE]   # runner only; jobs run as nobody with no caps
     security_opt:

@@ -127,23 +127,51 @@ def start_heartbeat(jobs: Path, every_s: float = 5.0) -> None:
     threading.Thread(target=beat, daemon=True, name="heartbeat").start()
 
 
-def serve(jobs: Path) -> None:
-    """Container entrypoint: claim ready jobs one at a time (mkdir is the atomic lock)."""
-    os.chmod(jobs, 0o711)                   # nobody may traverse but not list /jobs
-    start_heartbeat(jobs)                   # the only writer: two writers would share the temp file
+def _ready_jobs(jobs: Path) -> list[Path]:
+    """Jobs waiting for a worker, oldest first (so nobody waits behind later arrivals)."""
+    waiting = []
+    for d in jobs.iterdir():
+        try:
+            if d.is_dir() and (d / "ready").exists() and not (d / "result.json").exists():
+                waiting.append((os.stat(d / "ready").st_mtime, d))
+        except OSError:                          # the app removed it while we looked
+            continue
+    return [d for _, d in sorted(waiting)]
+
+
+def _work(jobs: Path) -> None:
+    """One worker: claim a waiting job (mkdir is the atomic lock, so any number of workers can share the folder), run it, repeat."""
     while True:
-        for d in sorted(p for p in jobs.iterdir() if p.is_dir()):
-            if (d / "ready").exists() and not (d / "result.json").exists():
-                try:
-                    (d / "taken").mkdir()
-                except FileExistsError:
-                    continue
-                try:
-                    execute(d)
-                except Exception as e:   # never let one bad job stop the runner
-                    (d / "result.json").write_text(json.dumps({"exit_code": -1, "stderr": f"runner error: {e}"}))
+        for d in _ready_jobs(jobs):
+            try:
+                (d / "taken").mkdir()
+            except (FileExistsError, FileNotFoundError):
+                continue
+            try:
+                execute(d)
+            except Exception as e:   # never let one bad job stop the runner
+                (d / "result.json").write_text(json.dumps({"exit_code": -1, "stderr": f"runner error: {e}"}))
         time.sleep(0.2)
 
 
+def serve(jobs: Path, workers: int | None = None) -> None:
+    """Container entrypoint. SANDBOX_WORKERS jobs run at the same time, so one long job does not make everyone else wait.
+    This process only keeps the heartbeat and restarts a worker that died; each worker is its own single-threaded process
+    (a process that forks job children must not have other threads running, or a lock held at fork time can hang the child)."""
+    n = max(1, workers or int(os.environ.get("SANDBOX_WORKERS", "4")))
+    os.chmod(jobs, 0o711)                   # nobody may traverse but not list /jobs
+    start_heartbeat(jobs)                   # the only writer: two writers would share the temp file
+    procs: list = [None] * n
+    while True:
+        for k, pr in enumerate(procs):
+            if pr is None or pr.poll() is not None:
+                procs[k] = subprocess.Popen([sys.executable, "-u", __file__, "--worker"], env={**os.environ, "SANDBOX_JOBS": str(jobs)})
+        time.sleep(1)
+
+
 if __name__ == "__main__":
-    serve(Path(os.environ.get("SANDBOX_JOBS", "/jobs")))
+    _dir = Path(os.environ.get("SANDBOX_JOBS", "/jobs"))
+    if "--worker" in sys.argv:
+        _work(_dir)
+    else:
+        serve(_dir)

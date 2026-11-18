@@ -24,3 +24,24 @@ def test_a_stale_heartbeat_still_means_unhealthy(tmp_path):
     assert sb.healthy() is False
     (tmp_path / ".heartbeat").write_text(str(time.time()))
     assert sb.healthy() is True
+
+
+async def test_several_jobs_run_at_the_same_time(tmp_path):
+    """Three 2-second jobs finish in about 2 seconds with 3 workers, not 6: one long job no longer blocks the rest."""
+    import asyncio
+    import os
+    import subprocess
+
+    runner_py = Path(runner.__file__)
+    env = {**os.environ, "SANDBOX_JOBS": str(tmp_path), "SANDBOX_WORKERS": "3"}
+    proc = subprocess.Popen([sys.executable, str(runner_py)], env=env)
+    try:
+        sb = Sandbox(str(tmp_path), mode="container")
+        started = time.monotonic()
+        results = await asyncio.gather(*(sb.run("import time; time.sleep(2); print('done')", {}, timeout_s=30) for _ in range(3)))
+        took = time.monotonic() - started
+    finally:
+        proc.terminate()
+        proc.wait(10)
+    assert all("done" in r.get("stdout", "") for r in results), results
+    assert took < 5.5, f"jobs ran one after another ({took:.1f}s)"
