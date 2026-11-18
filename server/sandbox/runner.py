@@ -103,11 +103,35 @@ def execute(job_dir: Path, *, isolate: bool = True) -> dict:
     return result
 
 
+def write_heartbeat(jobs: Path) -> None:
+    """Atomic (write a temp file, then rename): a reader never sees the file empty, which made the app's check fail at random."""
+    tmp = jobs / ".heartbeat.tmp"
+    tmp.write_text(str(time.time()))
+    tmp.replace(jobs / ".heartbeat")
+
+
+def start_heartbeat(jobs: Path, every_s: float = 5.0) -> None:
+    """Write the heartbeat from its own thread. The app calls the sandbox unhealthy when it is older than 30 s, and one long job
+    (a bank reconciliation takes 30 to 80 s) used to stop the beat, so /healthz returned 503 and the uptime alert fired
+    although nothing was wrong (seen 17 and 18 Nov). The thread keeps beating while a job runs; if the process dies it stops."""
+    import threading
+
+    def beat() -> None:
+        while True:
+            try:
+                write_heartbeat(jobs)
+            except OSError:
+                pass
+            time.sleep(every_s)
+
+    threading.Thread(target=beat, daemon=True, name="heartbeat").start()
+
+
 def serve(jobs: Path) -> None:
     """Container entrypoint: claim ready jobs one at a time (mkdir is the atomic lock)."""
     os.chmod(jobs, 0o711)                   # nobody may traverse but not list /jobs
+    start_heartbeat(jobs)                   # the only writer: two writers would share the temp file
     while True:
-        (jobs / ".heartbeat").write_text(str(time.time()))
         for d in sorted(p for p in jobs.iterdir() if p.is_dir()):
             if (d / "ready").exists() and not (d / "result.json").exists():
                 try:
