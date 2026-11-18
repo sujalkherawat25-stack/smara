@@ -443,3 +443,171 @@ def snapshot_diff(old: list[dict], new: list[dict], *, key: str = "ref", amount:
             "totals": {"old_total": old_total, "new_total": new_total, "net_change": round(new_total - old_total, 2),
                        "cleared_total": cleared_total, "part_paid_total": part_total, "collected": round(cleared_total + part_total, 2),
                        "new_bills_total": tot(new_bills), "cleared_count": len(cleared), "part_paid_count": len(part), "new_bills_count": len(new_bills)}}
+
+
+# ---------------------------------------------------------------------------------------------- bank statement PDFs
+_BS_DATE = re.compile(r"(?<![\d.])(\d{1,2})[-/ .]((?:\d{1,2})|(?:[A-Za-z]{3,9}))[-/ .,]+(20\d{2}|\d{2}(?!\d))")
+_BS_MONEY = re.compile(r"(?<![\w.,])(?:Rs\.?|INR|₹)?\s*(\(?-?\d[\d,]*\.\d{2}\)?)(?:\s*(Cr|Dr|CR|DR)\b)?")
+_BS_TIME = re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?\b", re.I)
+_BS_OPEN = re.compile(r"opening\s+balance[^\d\-]{0,80}(-?\d[\d,]*\.\d{2})", re.I)
+_BS_CLOSE = re.compile(r"closing\s+balance[^\d\-]{0,80}(-?\d[\d,]*\.\d{2})", re.I)
+_BS_MARK = re.compile(r"\b(CR|DR)\b\s+(?:Rs\.?\s*)?\(?-?\d[\d,]*\.\d{2}", re.I)
+
+
+def _bs_num(tok: str, suffix: str | None = None) -> float | None:
+    """A printed amount as a number. A leading minus, brackets or a Dr suffix on a BALANCE mean overdrawn (negative)."""
+    t = tok.strip()
+    neg = t.startswith("-") or t.startswith("(")
+    v = parse_amount(t.strip("()-"))
+    if v is None:
+        return None
+    v = abs(v)
+    return -v if neg or (suffix or "").lower() == "dr" else v
+
+
+def _bs_header(line: str) -> bool:
+    low = line.lower()
+    return "balance" in low and any(w in low for w in ("debit", "credit", "withdraw", "deposit", "amount"))
+
+
+def bank_statement_pdf(path, password: str = "") -> dict:
+    """Read a bank statement PDF with code, not by eye: every transaction row, the totals, and the check that opening balance +
+    credits - debits = closing balance. Works on the usual layouts (a Debit and a Credit column, or one Amount column with Cr/Dr)
+    and decides each row's direction from how the running balance moved, so it does not depend on column positions.
+    Returns {"ok": False, "error": ...} for a password-protected PDF (ask the owner for the password and pass password=) or a
+    scan (no text). Rows whose balance did not move (failed or rejected transactions) are listed apart and left out of the totals.
+    Check result["ties"]: when it is False, say so plainly and show result["notes"] instead of quoting the totals as final."""
+    from pypdf import PdfReader
+    reader = PdfReader(str(path))
+    if reader.is_encrypted and not reader.decrypt(password or ""):
+        return {"ok": False, "need_password": True,
+                "error": "this PDF is password protected: ask the owner for the password (often the account holder's date of birth "
+                         "or the last digits of the mobile number) or an unprotected copy"}
+    lines: list[str] = []
+    for page in reader.pages[:200]:
+        try:
+            text = page.extract_text(extraction_mode="layout") or ""
+        except Exception:
+            text = page.extract_text() or ""
+        lines += re.sub(r"SYNTHETIC DATA\s*-\s*MACHINE GENERATED", " ", text).splitlines()
+    if sum(len(x.strip()) for x in lines) < 200:
+        return {"ok": False, "error": "no text in this PDF: it is a scan. Ask the owner to download the statement from net banking "
+                                      "(PDF or Excel), or send a clear photo of each page."}
+    whole = "\n".join(lines)
+    m_open, m_close = _BS_OPEN.search(whole), _BS_CLOSE.search(whole)
+    opening = parse_amount(m_open.group(1)) if m_open else None
+    closing = parse_amount(m_close.group(1)) if m_close else None
+
+    # 1. group the lines into transactions: a row starts with a date near the left and carries at least two amounts
+    rows: list[dict] = []
+    pre_failed: list[dict] = []
+    head_cols: dict = {}
+    for raw in lines:
+        s = raw.strip()
+        if not s or re.fullmatch(r"page\s*\d+(\s*of\s*\d+)?", s, re.I):
+            continue
+        if _bs_header(s):
+            low = raw.lower()
+            for key, words in (("debit", ("debit", "withdraw")), ("credit", ("credit", "deposit"))):
+                for w in words:
+                    if w in low:
+                        head_cols[key] = low.index(w)
+            continue
+        lead = raw.lstrip()
+        shift = len(raw) - len(lead)
+        d = _BS_DATE.search(lead)
+        ok_row = bool(d) and d.start() <= 40
+        money = [(mm, mm.start()) for mm in _BS_MONEY.finditer(lead[d.end():])] if ok_row else []
+        if ok_row and len(money) >= 2:
+            first_money = d.end() + money[0][1]
+            mk = _BS_MARK.search(lead[d.end():])
+            rows.append({"date_text": d.group(0), "text": lead[d.end():first_money],
+                         "money": [(_bs_num(mm.group(1), mm.group(2)), mm.group(2), shift + d.end() + pos) for mm, pos in money],
+                         "marker": mk.group(1) if mk else None})
+        elif ok_row and len(money) == 1 and re.search(r"fail|reject|declin|unsuccess|insufficient", lead, re.I):
+            pre_failed.append({"row": None, "date": d.group(0), "description": re.sub(r"\s+", " ", lead[d.end():money[0][1] + d.end()]).strip(), "amount": abs(parse_amount(money[0][0].group(1)) or 0.0), "why": "failed: no balance printed"})
+        elif rows and not _BS_MONEY.search(s) and not _BS_DATE.fullmatch(s):
+            rows[-1]["text"] += " " + s                      # the description wrapped onto the next line
+    if not rows:
+        return {"ok": False, "error": "found no transaction rows in this PDF: tell the owner it is not a layout I can read yet and "
+                                      "ask for the Excel/CSV download from net banking."}
+
+    # 2. work out each row's amount and direction from the running balance
+    out, failed, notes, breaks = [], list(pre_failed), [], []
+    prev = opening
+    for i, r in enumerate(rows):
+        bal = r["money"][-1][0]
+        cands = r["money"][:-1]
+        amount_tok = cands[0] if len(cands) == 1 else next((t for t in cands if t[0]), cands[0])
+        amount = abs(amount_tok[0] or 0.0)
+        pos = amount_tok[2]
+        desc = _BS_TIME.sub(" ", _BS_DATE.sub(" ", r["text"]))
+        desc = re.sub(r"\s+\d{3,5}\s*$", "", re.sub(r"\s+", " ", desc).strip()).strip(" -")
+        direction, chain = None, None
+        if prev is not None and bal is not None:
+            for cand in ((bal, -bal) if bal > 0 else (bal,)):        # a balance printed without its minus sign: overdrawn?
+                delta = round(cand - prev, 2)
+                if abs(abs(delta) - amount) < 0.011 and amount > 0:
+                    direction, chain, bal = ("credit" if delta > 0 else "debit"), True, cand
+                    break
+            delta = round(bal - prev, 2)
+            if chain:
+                pass
+            elif abs(delta) < 0.011 and amount > 0:
+                failed.append({"row": i + 1, "date": r["date_text"], "description": desc, "amount": amount,
+                               "why": "balance did not change"})
+                continue
+            else:
+                chain = False
+        if direction is None:
+            if r["marker"]:
+                direction = "credit" if r["marker"].upper() == "CR" else "debit"
+            elif head_cols.get("debit") is not None and head_cols.get("credit") is not None:
+                direction = "debit" if abs(pos - head_cols["debit"]) <= abs(pos - head_cols["credit"]) else "credit"
+            else:
+                direction = "credit" if re.search(r"\b(cr|credit|deposit|by|received)\b", desc, re.I) else "debit"
+        if chain is False:
+            breaks.append(i + 1)
+        dt = parse_date(r["date_text"])
+        out.append({"row": i + 1, "date": dt.isoformat() if dt else r["date_text"], "description": desc,
+                    "debit": amount if direction == "debit" else 0.0, "credit": amount if direction == "credit" else 0.0,
+                    "balance": bal, "balance_check": chain})
+        prev = bal
+    if opening is None and out and out[0]["balance"] is not None:
+        opening = round(out[0]["balance"] - out[0]["credit"] + out[0]["debit"], 2)
+        notes.append("the statement shows no opening balance; I worked it out from the first row")
+    cr = round(sum(x["credit"] for x in out), 2)
+    dr = round(sum(x["debit"] for x in out), 2)
+    if closing is None and out:
+        closing = out[-1]["balance"]
+    computed = round((opening or 0.0) + cr - dr, 2) if opening is not None else None
+    ties = computed is not None and closing is not None and abs(computed - closing) < 0.02
+    last_bal = out[-1]["balance"] if out else None
+    rows_consistent = computed is not None and last_bal is not None and abs(computed - last_bal) < 0.02
+    if not ties and rows_consistent:
+        notes.append(f"the rows add up (opening + credits - debits = {computed} = the last row's balance) but the closing balance printed in the "
+                     f"statement header is {closing}: the statement itself is inconsistent, say so")
+    elif not ties and last_bal is not None and closing is not None and abs(last_bal - closing) < 0.02 and computed is not None:
+        notes.append(f"the closing balance matches the last row, but the credits and debits listed do not add up to it (they are {round(closing - computed, 2)} short): "
+                     "transactions may be missing from the PDF or the running balance has gaps; say so instead of quoting the totals as final")
+    elif not ties:
+        notes.append(f"opening + credits - debits = {computed} but the closing balance printed is {closing}: some rows were not read "
+                     "correctly or the statement itself does not add up; do not quote the totals as final")
+    if breaks:
+        notes.append(f"the running balance did not follow {len(breaks)} row(s): {breaks[:10]}")
+    if failed:
+        notes.append(f"{len(failed)} row(s) where the balance did not change (failed or rejected): left out of the totals")
+    months: dict = {}
+    for x in out:
+        mth = months.setdefault(x["date"][:7], {"credits": 0.0, "debits": 0.0})
+        mth["credits"] = round(mth["credits"] + x["credit"], 2)
+        mth["debits"] = round(mth["debits"] + x["debit"], 2)
+    dates = [x["date"] for x in out if re.match(r"\d{4}-", x["date"])]
+    return {"ok": True, "rows": out, "row_count": len(out),
+            "credits": {"total": cr, "count": sum(1 for x in out if x["credit"])},
+            "debits": {"total": dr, "count": sum(1 for x in out if x["debit"])},
+            "opening": opening, "closing": closing, "computed_closing": computed, "ties": ties, "rows_consistent": rows_consistent,
+            "chain_breaks": breaks, "failed": failed, "notes": notes, "by_month": months,
+            "period": {"from": min(dates) if dates else None, "to": max(dates) if dates else None},
+            "top_credits": sorted((x for x in out if x["credit"]), key=lambda x: -x["credit"])[:5],
+            "top_debits": sorted((x for x in out if x["debit"]), key=lambda x: -x["debit"])[:5]}

@@ -108,7 +108,8 @@ TOOLS = [
     _fn("delete_skill", "Delete one of this shop's own saved skills, when the owner asks.", {"name": _S}, ["name"]),
     _fn("read_attachment", "Read ANY file the owner attached: PDF, Word, PowerPoint, text, photo or scan (OCR), voice note, "
         "or a zip (lists what is inside). Returns the text so you can answer from it. For spreadsheets use inspect_and_import_file; "
-        "for heavy processing use run_python.", {"file_ref": _S}, ["file_ref"]),
+        "for heavy processing use run_python. A bank statement PDF comes back already read by a program (totals, rows, tie-out): quote those "
+        "figures. A password-protected PDF returns need_password: ask the owner, then call again with password.", {"file_ref": _S, "password": _S}, ["file_ref"]),
     _fn("inspect_and_import_file", "Open a file attached to this conversation: an Excel/CSV sheet, or a Tally Prime XML export "
         "(sales invoices are read directly). Not for PDFs: read a PDF with read_attachment. mode=inspect previews the rows and totals; mode=import loads them into the ledger "
         "and reports sheet vs ledger totals to verify. The result lists open invoices in Smara that this file does not "
@@ -213,6 +214,7 @@ TOOLS = [
         "match TORRENT) and returns each category's lines: print them and fix any misfiled line before you answer. "
         "mh.snapshot_diff(old_rows, new_rows) compares two outstanding lists bill by bill (cleared, part-paid, new, net change): use it "
         "for 'what changed since last week', never import both lists. Load the receivables-from-books skill first for such work. "
+        "mh.bank_statement_pdf(path, password='') reads a bank statement PDF: every row, totals, top credits/debits and a tie-out against the closing balance (check r['ties'] and r['notes']); never add up statement numbers by reading text. "
         "Pass the file_refs of every file you open: without them ./in is empty.",
         {"code": _S, "file_refs": {"type": "array", "items": _S}}, ["code"]),
     _fn("pc_files", "Reach the Smara Shared folder on the owner's own PC (only that folder, only text files). action=list shows "

@@ -19,11 +19,37 @@ def _cap(text: str) -> dict:
     return {"text": text[:MAX_TEXT], "truncated": len(text) > MAX_TEXT, "chars": len(text)}
 
 
-def pdf_text(data: bytes) -> dict:
+def _bank_statement(data: bytes, password: str = "") -> dict | None:
+    """If this PDF is a bank statement, read it with code (rows, totals, tie-out against the closing balance) so the agent
+    quotes figures a program computed instead of adding up numbers it read off pages. None when it is not a statement."""
+    import tempfile
+    from pathlib import Path
+    from sandbox import smara_helpers as mh
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "statement.pdf"
+        path.write_bytes(data)
+        try:
+            res = mh.bank_statement_pdf(path, password)
+        except Exception:
+            return None
+    if not res.get("ok"):
+        return {"error": res["error"], "need_password": True} if res.get("need_password") else None
+    keep = ("row_count", "credits", "debits", "opening", "closing", "computed_closing", "ties", "rows_consistent", "period",
+            "by_month", "top_credits", "top_debits", "failed", "notes", "chain_breaks")
+    return {"statement": {k: res[k] for k in keep},
+            "rows_preview": res["rows"][:5],
+            "next": "These figures were computed by a program from every row of the PDF: quote them, do not re-add numbers by eye. "
+                    "If statement.ties is false, tell the owner plainly what statement.notes says and do not present the totals as final. "
+                    "For anything more (by party or category, matching to the ledger, an Excel of the rows) call run_python with "
+                    "`import smara_helpers as mh; r = mh.bank_statement_pdf(path)`; r['rows'] has every row."}
+
+
+def pdf_text(data: bytes, password: str = "") -> dict:
     from pypdf import PdfReader
     reader = PdfReader(io.BytesIO(data))
-    if reader.is_encrypted and not reader.decrypt(""):
-        return {"error": "this PDF is password protected; ask the owner for an unprotected copy"}
+    if reader.is_encrypted and not reader.decrypt(password):
+        return {"error": "this PDF is password protected: ask the owner for the password (then call read_attachment again with password=) "
+                         "or for an unprotected copy", "need_password": True}
     pages = []
     for page in reader.pages[:MAX_PDF_PAGES]:
         pages.append(page.extract_text() or "")
@@ -62,7 +88,13 @@ async def read_attachment(app, ctx: SessionCtx, args: dict) -> dict:
     base = {"filename": filename, "size_bytes": len(data), "mime": mime}
     try:
         if name.endswith(".pdf") or mime == "application/pdf":
-            return {**base, "kind": "pdf", **pdf_text(data)}
+            pw = str(args.get("password") or "")
+            text = pdf_text(data, pw)
+            if "text" in text and re.search(r"opening balance|closing balance|(debit|withdrawal).{0,80}(credit|deposit).{0,80}balance", text["text"], re.I | re.S):
+                bank = _bank_statement(data, pw)
+                if bank and "statement" in bank:
+                    return {**base, "kind": "bank_statement_pdf", "pages": text.get("pages"), **bank}
+            return {**base, "kind": "pdf", **text}
         if name.endswith(".docx"):
             return {**base, "kind": "word", **_office_text(data, r"word/document\.xml", "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")}
         if name.endswith(".pptx"):
