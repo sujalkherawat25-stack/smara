@@ -74,6 +74,7 @@ try {
         '--hidden-import', 'smara.native_runtime'
         '--hidden-import', 'smara.agent_audit'
         '--hidden-import', 'smara.computer_control'
+        '--hidden-import', 'smara.hosted_approvals'
         '--hidden-import', 'smara.native_provider'
         '--hidden-import', 'smara.native_memory'
         '--collect-all', 'syntarus'

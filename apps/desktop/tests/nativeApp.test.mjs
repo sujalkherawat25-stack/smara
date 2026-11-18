@@ -150,6 +150,7 @@ function fixture({ olderChats = [], startupFailure = false, unknownTurn = false,
     if (name.endsWith("NativeMemorySettings")) return { default: () => null, memoryShouldBeOn: () => false, __esModule: true };
     if (name.endsWith("NativeGoals")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeTaskBoard")) return { default: () => null, __esModule: true };
+    if (name.endsWith("NativeApprovals")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeVoice")) return { default: () => null, ReadAloud: () => null, __esModule: true };
     if (name.endsWith("goalApi")) return { ...goal, goalRequest: async (action, values = {}) => {
       goalCalls.push({ action, values: JSON.parse(JSON.stringify(values)) });

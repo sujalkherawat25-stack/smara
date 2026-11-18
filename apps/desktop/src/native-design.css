@@ -233,3 +233,16 @@ html.control-bar-window, html.control-bar-window body { background: transparent;
 /* The task board takes the whole work area; the chat comes back with Back to chat. */
 .native-work-area.with-board > .native-chat-area { display: none; }
 .native-work-area.with-board > .task-board { flex: 1; min-width: 0; }
+
+/* Approvals inbox (full width, like the task board). */
+.approvals-inbox { display: flex; flex-direction: column; gap: 10px; padding: 18px 22px; overflow: auto; height: 100%; box-sizing: border-box; flex: 1; min-width: 0; max-width: 900px; }
+.approvals-inbox h3 { margin: 12px 0 0; font-size: 14px; font-weight: 600; color: var(--text-soft); }
+.approvals-inbox h3 small { color: var(--text-dim); font-weight: 400; margin-left: 6px; }
+.inbox-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--warn); border-radius: var(--radius); background: var(--bg-card); font-size: 13px; }
+.inbox-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.inbox-empty { color: var(--text-dim); }
+.inbox-connect { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
+.approvals-inbox button.link { align-self: flex-start; background: none; border: 0; color: var(--focus); cursor: pointer; padding: 0; font-size: 12px; }
+.native-notice { color: var(--ok); margin: 0; }
+.count-badge { margin-left: 6px; min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--warn); color: #1b1b1a; font-size: 11px; font-weight: 700; }
+.native-work-area.with-board > .approvals-inbox { flex: 1; }
