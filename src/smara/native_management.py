@@ -185,6 +185,9 @@ def manage(request):
     if operation == "audit":
         from .agent_audit import manage as audit
         return audit(request)
+    if operation == "hosted_memory":
+        from .hosted_memory import manage as hosted_memory
+        return hosted_memory(request)
     if operation == "hosted_approvals":
         from .hosted_approvals import manage as hosted_approvals
         return hosted_approvals(request)

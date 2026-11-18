@@ -67,6 +67,66 @@ async def approvals_list(request: Request, authorization: str | None = Header(de
     return {"approvals": await approvals.pending(request.app.state.pool, str(owner["tenant_id"]))}
 
 
+class MemoryNote(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class MemoryQuery(BaseModel):
+    query: str = Field(min_length=3, max_length=500)
+
+
+class MemoryToggle(BaseModel):
+    enabled: bool
+
+
+async def _sharing_on(request: Request, owner: dict) -> None:
+    from src.bridge import memory_share
+    if not await memory_share.is_enabled(request.app.state.pool, str(owner["tenant_id"])):
+        raise HTTPException(status_code=403, detail="memory sharing is off for this shop")
+
+
+@router.get("/memory")
+async def memory_status(request: Request, authorization: str | None = Header(default=None)):
+    from src.bridge import memory_share
+    owner = await _owner(request, authorization)
+    return {"enabled": await memory_share.is_enabled(request.app.state.pool, str(owner["tenant_id"]))}
+
+
+@router.post("/memory/enable")
+async def memory_enable(body: MemoryToggle, request: Request, authorization: str | None = Header(default=None)):
+    from src.bridge import memory_share
+    owner = await _owner(request, authorization)
+    await memory_share.set_enabled(request.app.state.pool, str(owner["tenant_id"]), body.enabled)
+    return {"enabled": body.enabled}
+
+
+@router.post("/memory/notes")
+async def memory_note(body: MemoryNote, request: Request, authorization: str | None = Header(default=None)):
+    from src.bridge import memory_share
+    owner = await _owner(request, authorization)
+    await _sharing_on(request, owner)
+    return await memory_share.add_note(request.app, str(owner["tenant_id"]), body.text)
+
+
+@router.post("/memory/search")
+async def memory_search(body: MemoryQuery, request: Request, authorization: str | None = Header(default=None)):
+    from src.bridge import memory_share
+    owner = await _owner(request, authorization)
+    await _sharing_on(request, owner)
+    try:
+        return await memory_share.search(request.app, str(owner["tenant_id"]), body.query)
+    except Exception:
+        raise HTTPException(status_code=502, detail="memory is unavailable right now")
+
+
+@router.post("/memory/forget")
+async def memory_forget(request: Request, authorization: str | None = Header(default=None)):
+    from src.bridge import memory_share
+    owner = await _owner(request, authorization)
+    await memory_share.forget(request.app, str(owner["tenant_id"]))
+    return {"ok": True}
+
+
 @router.post("/approvals/{sid}")
 async def approvals_decide(sid: str, body: DecisionBody, request: Request, authorization: str | None = Header(default=None)):
     from src.bridge import approvals

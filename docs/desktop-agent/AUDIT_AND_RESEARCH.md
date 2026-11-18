@@ -291,3 +291,23 @@ creating the lock file while the other process is deleting it raises "permission
 
 Not in this milestone: separate lists of allowed and blocked sites (the "any public website" switch and the
 project's site list stay as they are), and memory sharing (M5).
+
+## 9. Milestone 5: optional memory sharing with hosted Continuum
+
+* **Off until the owner turns it on, per shop, revocable.**
+  * Server table `owner_memory_sharing` (migration 031), one row per shop, default off.
+  * The owner turns it on from Desktop (Approvals page) or in chat: `share desktop memory`.
+  * `stop sharing desktop memory` stops both directions at once. `forget desktop memory` erases what Desktop shared.
+  * On the PC the switch is tied to the shop it was turned on for. A different shop on the same PC starts off.
+* **What is shared:** finished chat turns from Desktop's conversation memory, as notes, and only if the owner opted in.
+  * Notes go to their own Continuum scope `{tenant}_desktop`, so forgetting erases exactly them.
+  * They are stored as UNTRUSTED. They inform hosted Smara and never count as ledger facts.
+  * Hosted Smara reads them only while sharing is on (`resolve_continuum_memory` for the shop, shown as
+    `from_desktop_unverified`).
+  * Desktop can read the shop's own notes (never customers') through `/bridge/memory/search`, while sharing is on.
+* **Never shared:** credentials or vault values. Passwords, keys, tokens, private keys, OTP/PIN/CVV values and
+  Luhn-valid card numbers are removed on the PC before sending and again on the server before storing.
+* **Endpoints** (owner approvals token only, not the browser helper's device token): `GET /bridge/memory`,
+  `POST /bridge/memory/enable|notes|search|forget`. Notes and search answer 403 while sharing is off.
+* Account deletion removes the table and the `{tenant}_desktop` scope.
+* Sharing is best effort: a failing server never blocks or fails a chat turn.

@@ -40,5 +40,17 @@ test("the inbox answers through the owner's approvals link and asks before disco
   const app = readFileSync(new URL("../src/NativeApp.tsx", import.meta.url), "utf8");
   assert.match(app, /panel === "inbox" && <NativeApprovals/);
   const rust = readFileSync(new URL("../src-tauri/src/native_main.rs", import.meta.url), "utf8");
-  assert.match(rust, /"hosted_approvals"\]/);
+  assert.match(rust, /"hosted_approvals", "hosted_memory"]/);
+});
+
+test("memory sharing is optional, off until chosen, and the page asks before erasing", () => {
+  assert.match(v.sharingText({ connected: false, shop: "", enabled: false }), /Connect this PC/);
+  assert.match(v.sharingText({ connected: true, shop: "Sharma Traders", enabled: false }), /^Off\. Nothing/);
+  assert.match(v.sharingText({ connected: true, shop: "Sharma Traders", enabled: true }), /On for Sharma Traders.*Passwords, keys, card numbers and OTPs are removed/);
+  const page = readFileSync(new URL("../src/NativeApprovals.tsx", import.meta.url), "utf8");
+  assert.match(page, /operation: "hosted_memory"/);
+  assert.match(page, /sharing<SharingStatus>\("set", \{ enabled: event\.target\.checked \}\)/);
+  assert.match(page, /window\.confirm\("Erase everything this PC shared with Smara\?/);
+  const rust = readFileSync(new URL("../src-tauri/src/native_main.rs", import.meta.url), "utf8");
+  assert.match(rust, /"hosted_memory"\]/);
 });
