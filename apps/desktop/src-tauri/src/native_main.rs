@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 mod native_runtime;
 mod browser_bridge;
+mod control_bar;
 use native_runtime::{native_send, native_start, native_status, native_stop};
 
 fn app_data_dir() -> PathBuf {
@@ -366,9 +367,11 @@ fn main() {
         return;
     }
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file, native_project_files, browser_bridge::bridge_state, browser_bridge::bridge_check, browser_bridge::bridge_ensure, browser_bridge::bridge_stop, browser_bridge::bridge_pause, browser_bridge::bridge_pair, browser_bridge::bridge_unpair, browser_bridge::bridge_install_components])
-        .setup(|_| {
+        .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file, native_project_files, browser_bridge::bridge_state, browser_bridge::bridge_check, browser_bridge::bridge_ensure, browser_bridge::bridge_stop, browser_bridge::bridge_pause, browser_bridge::bridge_pair, browser_bridge::bridge_unpair, browser_bridge::bridge_install_components, control_bar::computer_bar_state, control_bar::computer_bar_pause, control_bar::computer_bar_stop])
+        .setup(|app| {
             browser_bridge::ensure_on_startup();
+            // The on-screen "Smara is controlling your PC" bar and the Ctrl+Alt+Esc stop key.
+            control_bar::start(app.handle().clone(), state_path().parent().map(Path::to_path_buf).unwrap_or_else(app_data_dir));
             // Load projects and model profiles in the background, so the first terminal command does not wait for it.
             refresh_snapshot();
             Ok(())

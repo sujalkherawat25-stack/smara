@@ -199,3 +199,28 @@ goes under `third_party/<name>/` with its LICENSE and a line in `THIRD_PARTY_NOT
 Not in this PR: Playwright MCP cannot be told to refuse downloads, so in Desktop chat a download still
 happens on an approved click without a separate download prompt (it is now recorded). Computer-use
 screenshots go to the audit log in M2.
+
+## 6. Milestone 2: computer use under the owner's control
+
+* **The Smara bar.** While any app-control grant is live, the Desktop app shows a small always-on-top
+  bar at the top of the screen. It reads "Smara is controlling your PC", shows the last step (for example
+  "typing in Excel") or when the grant ends, and has **Pause/Resume** and **Stop**. It does not take focus
+  when it appears and it closes when the grant ends or is stopped (`src-tauri/src/control_bar.rs`, `ControlBar.tsx`).
+* **Ctrl+Alt+Esc** stops computer control from anywhere (Win32 `RegisterHotKey`; the bar shows the key only
+  when registration worked).
+* **One shared control file** (`computer-control.json`, `smara.computer_control`). Stop revokes every grant made
+  before it (all projects). Pause holds every agent. A damaged file counts as paused. The computer server checks
+  it before every step, every few pointer-movement steps and every 5 typed characters, so Pause/Stop cut into a
+  running click or typing (the step reports "Outcome may be partial").
+* **Allowed apps.** Settings → Browser & computer has a list of apps Smara may control (default: Excel, Tally,
+  File Explorer, Notepad, Calculator). "Allow my apps for 30 minutes" grants only those. "Any app" is a separate,
+  more strongly worded button. The never-driven list (terminals, security dialogs, password managers, Smara
+  itself) still applies to both.
+* **Audit.** Every computer step (observe, act, launch, Excel, Tally, refusals) is written to the activity log
+  with the window's screenshot after the step, typed text scrubbed. Screenshots stop being kept after 500 MB
+  in one day (the steps are still logged).
+* Approval before outward/irreversible steps is unchanged (`computer_act_confirmed`, `excel_save`).
+
+Live check on this PC (debug build, throwaway data folder): the bar appeared within half a second of a grant, was
+topmost and did not take focus; a real click on Pause wrote `paused: true, by: bar`; Ctrl+Alt+Esc wrote Stop
+(`by: hotkey`) and the bar closed.

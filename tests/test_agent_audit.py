@@ -91,7 +91,7 @@ def test_runtime_hook_records_tool_calls_approvals_and_downloads(tmp_path):
     rows = list(reversed(audit.entries()))
     assert [(r["kind"], r["action"]) for r in rows] == [
         ("approval", "approved"), ("browser", "browser_click"), ("browser", "download_saved"),
-        ("browser", "browser_take_screenshot"), ("computer", "computer_act")]
+        ("browser", "browser_take_screenshot")]          # computer steps are logged by the computer server itself, with a screenshot
     assert rows[0]["detail"]["asked"].startswith("Allow browser_click") and rows[0]["task"] == "th1"
     assert rows[1]["target"] == "element=Download" and rows[1]["outcome"].startswith("completed")
     assert rows[2]["target"] == "gstr2b.json"

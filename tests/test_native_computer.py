@@ -244,7 +244,7 @@ def test_open_url_refuses_private_local_and_credentialed_addresses(setup, url):
 def test_open_url_without_a_grant_explains_how_to_switch_control_on(tmp_path, monkeypatch):
     monkeypatch.setenv("SMARA_DESKTOP_STATE", str(tmp_path / "state.json"))
     computer = Computer(tmp_path, Fake())
-    with pytest.raises(ValueError, match="Settings > Automation.*Grant any app"):
+    with pytest.raises(ValueError, match="Settings > Browser & computer.*Allow my apps"):
         computer.call("computer_open_url", {"url": "https://example.com/"})
     with pytest.raises(ValueError, match="stopped or expired"):
         computer.call("computer_windows", {})

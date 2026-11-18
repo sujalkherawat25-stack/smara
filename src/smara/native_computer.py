@@ -26,6 +26,7 @@ from pathlib import Path
 from .native_profiles import read_object, write_object, state_path
 from .native_goals import workspace_key
 from .native_tools import tool, MAX_BYTES
+from . import computer_control as control
 
 ACTION_LIMIT = 400
 BROWSER_EXES = {"chrome.exe", "msedge.exe", "brave.exe", "firefox.exe", "opera.exe", "vivaldi.exe", "arc.exe"}
@@ -155,18 +156,25 @@ class Computer:
     def grant(self):
         value = selected(self.workspace)
         if not value:
-            raise ValueError("Computer control is stopped or expired. Ask the owner to switch it on in Settings > Automation with 'Grant any app for 30 minutes' "
-                             "(nothing is controlled until they do; no restart is needed), then call computer_windows again.")
+            raise ValueError("Computer control is stopped or expired. Ask the owner to switch it on in Settings > Browser & computer with "
+                             "'Allow my apps for 30 minutes' (nothing is controlled until they do; no restart is needed), then call computer_windows again.")
+        why = control.halted(value)
+        if why:
+            raise ValueError(control.HALT_TEXT[why])
         return value
 
     def alive(self, grant_id):
-        return (selected(self.workspace) or {}).get("id") == grant_id
+        current = selected(self.workspace) or {}
+        return current.get("id") == grant_id and control.halted(current) is None
 
     def eligible(self, grant):
         items = self.backend.targets()
         if grant.get("scope") == "window":
             pin = grant.get("target") or {}
             items = [w for w in items if w["pid"] == pin.get("pid") and w.get("created") == pin.get("created")]
+        elif grant.get("scope") == "apps":
+            allowed = set(grant.get("apps") or [])
+            items = [w for w in items if w["app"] in allowed]
         for item in items: self.windows[item["id"]] = item
         return items
 
@@ -291,6 +299,9 @@ class Computer:
         self.latest = None; self.actions += 1  # The observation is spent whatever happens next.
         permitted = lambda: self.alive(grant["id"])
         window, oid = prior["window"], prior["observation_id"]
+        control.note_activity(window["app"], prior["title"], action, str(self.workspace))
+        # Stop and Pause cut in during pointer travel and typing too, not only between steps.
+        self.backend.halt = lambda: not permitted()
         def check_focus():
             live = self.backend.focused(window)
             bad = sensitive_reason(action, args, live)
@@ -309,6 +320,8 @@ class Computer:
             elif action == "set_value": self.backend.set_value(window, oid, args["element_index"], args["value"])
         except ValueError as error:
             raise ValueError(str(error) + " Outcome may be partial; observe and compare before any retry.") from None
+        finally:
+            self.backend.halt = None
         time.sleep(.35)  # let the UI settle before confirming the effect
         try: result = self.observe(window["id"])
         except ValueError:
@@ -366,26 +379,55 @@ def manage(request):
     action = request.get("action", "status")
     if action == "stop":
         with management_lock(): write_object(grant_path(workspace), {"enabled": False})
-        return {"selected": None, "targets": [], "detail": "Control revoked immediately. An action already dispatched may have an uncertain result; never replay it."}
+        return {"selected": None, "targets": [], "detail": "Control revoked immediately. An action already dispatched may have an uncertain result; never replay it.",
+                **control.view()}
+    if action in {"pause", "resume", "stop_all"}:
+        {"pause": control.pause, "resume": control.resume, "stop_all": control.stop}[action]("settings")
+        return {"selected": selected(workspace), "targets": [], "detail": "", **control.view()}
+    if action == "save_apps":
+        control.save_apps(request.get("apps"))
+        return {"selected": selected(workspace), "targets": [], "detail": "Saved. A grant you make from now on covers these apps.", **control.view()}
     if action in {"select", "grant_desktop"}:
         from .native_windows import WindowsBackend
         backend = WindowsBackend()
         minutes = max(5, min(int(request.get("minutes") or GRANT_DEFAULT_MINUTES), GRANT_MAX_MINUTES))
-        grant = {"id": uuid.uuid4().hex, "enabled": True, "actions": 0, "expires": time.time() + minutes * 60, "share_screenshots": bool(request.get("share_screenshots"))}
+        grant = {"id": uuid.uuid4().hex, "enabled": True, "actions": 0, "created": time.time(), "expires": time.time() + minutes * 60,
+                 "share_screenshots": bool(request.get("share_screenshots"))}
         if action == "select":
             target = next((item for item in backend.targets() if item["id"] == request.get("id")), None)
             if not target: raise ValueError("Choose a current returned window")
             grant.update(scope="window", target={k: target[k] for k in ("id", "pid", "created", "exe", "title")})
-        else: grant.update(scope="desktop", target={"title": "Any app window"})
+        elif request.get("any_app") is True: grant.update(scope="desktop", target={"title": "Any app window"})
+        else:
+            apps = control.allowed_apps()
+            if not apps: raise ValueError("Tick at least one app first")
+            grant.update(scope="apps", apps=apps, target={"title": ", ".join(control.KNOWN_APPS.get(a, a) for a in apps)[:200]})
         with management_lock(): write_object(grant_path(workspace), grant)
     elif action != "status": raise ValueError("Unsupported computer control")
     try:
         from .native_windows import WindowsBackend
         targets = [{k: w[k] for k in ("id", "title", "app")} | {"exe": w["exe"]} for w in WindowsBackend().targets()]
-        detail = "Agent can activate, look at, click and type in the granted windows for a limited time. Never terminals, security UI or password managers; never types secrets; critical steps ask you first. Stop revokes instantly."
+        detail = ("Agent can activate, look at, click and type in the allowed apps for a limited time. Never terminals, security UI or password "
+                  f"managers; never types secrets; critical steps ask you first. Pause or Stop on the Smara bar, or press {control.HOTKEY}.")
     except (ImportError, RuntimeError, OSError):
         targets = []; detail = "Windows UIA dependency or interactive desktop unavailable. Computer control stays disabled."
-    return {"selected": selected(workspace), "targets": targets, "detail": detail}
+    return {"selected": selected(workspace), "targets": targets, "detail": detail, **control.view()}
+
+
+def audit_call(name, args, out, error=""):
+    """One line in the owner's activity log per computer step, with the screenshot of the window after it."""
+    from . import agent_audit
+    try:
+        out = out or {}
+        window = out.get("window") or {}
+        detail = {k: v for k, v in (args or {}).items() if k != "observation_id"}
+        if isinstance(out.get("effect"), dict):
+            detail["changed"] = out["effect"].get("changed_ui_text")
+        target = " · ".join(x for x in (str(window.get("app") or ""), str(window.get("title") or "")) if x) or str(args.get("window_id") or args.get("app") or "")
+        agent_audit.record("desktop", "computer", str(name or "?"), target=target, detail=detail,
+                           outcome=("error: " + error) if error else "ok", screenshot=out.get("image") or None)
+    except Exception:  # noqa: BLE001 - the log must never break a step
+        pass
 
 
 def _content(result, grant_share):
@@ -419,9 +461,11 @@ def main(argv=None):
                     share = bool((selected(computer.workspace) or {}).get("share_screenshots"))
                     shown = {k: v for k, v in out.items()}
                     result = {"content": _content(shown, share), "isError": False}
+                    audit_call(params.get("name"), params.get("arguments") or {}, out)
                 except Exception as error:
                     message = str(error) if isinstance(error, ValueError) else type(error).__name__
                     result = {"content": [{"type": "text", "text": "Computer call rejected: " + message[:400] + " Reobserve; never retry an uncertain action."}], "isError": True}
+                    audit_call(params.get("name"), params.get("arguments") or {}, None, message)
             else: raise ValueError("Unknown method")
             reply = {"jsonrpc": "2.0", "id": identity, "result": result}
         except (ValueError, TypeError, KeyError): reply = {"jsonrpc": "2.0", "id": identity, "error": {"code": -32600, "message": "Invalid request"}}

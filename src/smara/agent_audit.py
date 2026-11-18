@@ -98,7 +98,7 @@ def record(source: str, kind: str, action: str, *, task: str = "", target: str =
     """Append one step. Never raises: an audit failure must not break the agent, but it is reported in the entry."""
     if source not in SOURCES:
         raise ValueError("unknown audit source")
-    entry = {"id": uuid.uuid4().hex[:16], "ts": round(time.time(), 3), "source": source, "task": str(task)[:80],
+    entry = {"id": uuid.uuid4().hex[:16], "ts": round(time.time(), 6), "source": source, "task": str(task)[:80],
              "kind": str(kind)[:30], "action": str(action)[:60], "target": scrub(target)[:MAX_TEXT],
              "detail": scrub_value(detail) if detail is not None else None, "outcome": scrub(outcome)[:MAX_TEXT],
              "approval": str(approval)[:20], "screenshot": ""}
@@ -120,9 +120,14 @@ def record(source: str, kind: str, action: str, *, task: str = "", target: str =
     return entry
 
 
+SHOTS_PER_DAY_BYTES = 500_000_000
+
+
 def _store_shot(day: str, identity: str, screenshot) -> str:
     folder = audit_dir() / "shots" / day
     folder.mkdir(parents=True, exist_ok=True)
+    if sum(p.stat().st_size for p in folder.iterdir() if p.is_file()) > SHOTS_PER_DAY_BYTES:
+        return ""                         # a very busy day: the step is still logged, without its picture
     target = folder / f"{identity}.png"
     if isinstance(screenshot, (bytes, bytearray)):
         target.write_bytes(bytes(screenshot))
@@ -223,6 +228,8 @@ def delete(day: str | None = None) -> int:
 # ---- Desktop runtime hook ---------------------------------------------------------------------------------------
 BROWSER_SERVERS = {"playwright", "smara_browser"}
 COMPUTER_SERVERS = {"smara_computer"}
+# Servers that write their own, richer entries (window, screenshot): the stream hook does not repeat them.
+SELF_AUDITED = {"smara_computer"}
 # Steps that can start a download (all of them ask the owner first). Screenshots and snapshots the browser tool
 # writes to the same folder are its own output files, not downloads.
 DOWNLOAD_TRIGGERS = {"browser_click", "browser_press_key", "browser_type", "browser_fill_form", "browser_select_option",
@@ -286,7 +293,7 @@ class RuntimeAuditor:
                                                            "task": params.get("threadId", "")}
             elif method == "item/completed":
                 item = params.get("item") or {}
-                if item.get("type") == "mcpToolCall":
+                if item.get("type") == "mcpToolCall" and str(item.get("server", "")) not in SELF_AUDITED:
                     server, tool = str(item.get("server", "")), str(item.get("tool", ""))
                     record("desktop", kind_of(server), tool, task=params.get("threadId", ""), target=_target(item.get("arguments")),
                            detail={"server": server, "arguments": item.get("arguments"), "ms": item.get("durationMs")},

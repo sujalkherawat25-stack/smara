@@ -87,6 +87,9 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
       }
       return undefined as T;
     }
+    case "computer_bar_state": case "computer_bar_pause": case "computer_bar_stop":
+      return { active: true, paused: command === "computer_bar_pause" && args.paused === true, until: Date.now() / 1000 + 1500, app: "tallyprime.exe",
+        title: "Gateway of Tally", action: "press_key", last_ts: Date.now() / 1000, hotkey: "Ctrl+Alt+Esc", hotkey_ok: true } as T;
     case "native_manage": {
       const request = (args.request ?? {}) as Record<string, unknown>;
       if (request.operation === "audit") return auditPreview(request) as T;
