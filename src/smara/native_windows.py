@@ -121,6 +121,11 @@ class WindowsBackend:
             try: self.user32.SetProcessDPIAware()
             except (OSError, AttributeError): pass
         self._cache = {}  # observation id -> {index: UIAElementInfo}
+        self.halt = None  # set by the policy layer during an action: returns True once the owner pressed Pause or Stop
+
+    def _check_halt(self):
+        if self.halt is not None and self.halt():
+            raise ValueError("Stopped: the owner paused or stopped computer control")
 
     # ---- windows -------------------------------------------------------
     def _info(self, hwnd):
@@ -308,6 +313,7 @@ class WindowsBackend:
         point = wintypes.POINT(); self.user32.GetCursorPos(ctypes.byref(point))
         for step in range(1, steps + 1):
             t = step / steps; t = 1 - (1 - t) ** 2
+            if step % 4 == 1: self._check_halt()
             nx, ny = self._norm(point.x + (x - point.x) * t, point.y + (y - point.y) * t)
             self._send(self._mouse(MOVE | ABSOLUTE | VIRTUALDESK, nx, ny)); time.sleep(.008)
 
@@ -356,7 +362,9 @@ class WindowsBackend:
             if not permitted(): raise ValueError("Computer control revoked or expired")
             if check_focus: check_focus()
             if not self.foreground_ok(self.window(target)): raise ForegroundRequired("Focus left the target window; typing stopped")
-            for ch in text[chunk_start:chunk_start + 40]: self._type_char(ch)
+            for n, ch in enumerate(text[chunk_start:chunk_start + 40]):
+                if n % 5 == 0: self._check_halt()
+                self._type_char(ch)
             time.sleep(.02)
 
     def _type_char(self, ch):

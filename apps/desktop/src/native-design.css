@@ -183,3 +183,17 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline
 .audit-row > button.link { justify-self: start; background: none; border: 0; padding: 0; color: var(--focus); cursor: pointer; font-size: 12px; }
 .audit-shot { max-width: 100%; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
 .audit-empty { padding: 12px; color: var(--text-dim); }
+
+/* The "Smara is controlling your PC" bar (its own small always-on-top window). */
+html.control-bar-window, html.control-bar-window body { background: transparent; margin: 0; overflow: hidden; }
+.control-bar { box-sizing: border-box; height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 10px 0 14px;
+  background: #1d1d1c; color: var(--text); border: 2px solid var(--accent); border-radius: 12px; font-size: 13px; user-select: none; }
+.control-bar.paused { border-color: var(--warn); }
+.control-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; animation: control-pulse 1.2s ease-in-out infinite; }
+.control-bar.paused .control-dot { background: var(--warn); animation: none; }
+@keyframes control-pulse { 50% { opacity: .35; } }
+.control-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.control-error { color: var(--danger); font-size: 12px; }
+.control-bar button { height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--bg-raised); color: var(--text); font-weight: 600; cursor: pointer; }
+.control-bar button.control-stop { background: #b42318; border-color: #b42318; color: #fff; }
+.control-bar small { color: var(--text-dim); font-size: 11px; }
