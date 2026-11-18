@@ -93,6 +93,7 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
     case "native_manage": {
       const request = (args.request ?? {}) as Record<string, unknown>;
       if (request.operation === "audit") return auditPreview(request) as T;
+      if (request.operation === "goals") return goalsPreview((request.goal ?? {}) as Record<string, unknown>) as T;
       return setup as T;
     }
     case "native_project_files": return {
@@ -127,4 +128,28 @@ function auditPreview(request: Record<string, unknown>) {
   if (request.action === "list") return { entries: auditRows };
   if (request.action === "shot") return { png_base64: tinyImage };
   return { deleted: request.day ?? "all", days: [] };
+}
+
+// Sample tasks for the preview task board.
+const sampleGoal = (id: string, state: string, objective: string, agent: string, detail: string) => ({
+  id, state, session_id: null, lease: state === "running" || state === "awaiting_approval" ? "lease" : null, updated: Date.now() / 1000,
+  cycles: 2, requests: 5, token_estimate: 12000, detail,
+  checkpoint: { summary: "Read the October purchase register (212 invoices).", next_step: "Open the GSTR-2B download page." },
+  spec: { objective, success_criteria: "A sheet of mismatches", workspace: "C:/Users/owner/Documents/Sharma Traders", profile_id: "glm", sandbox: "read-only",
+    agent_id: agent, use_apps: agent === "kiran", max_cycles: 8, max_requests: 30, max_token_estimate: 500000 } });
+const sampleGoals = [
+  sampleGoal("t1", "awaiting_approval", "Download the GSTR-2B for October from the GST portal and compare it with the purchase register", "scout", "Finished browser click"),
+  sampleGoal("t2", "running", "Post the day book totals from Tally into the monthly Excel summary", "kiran", "Started computer act"),
+  sampleGoal("t3", "queued", "Draft payment reminders for dues older than 60 days", "rohan", ""),
+  sampleGoal("t4", "completed", "Read the three bank statement PDFs and list failed rows", "nisha", "Accepted by user"),
+];
+function goalsPreview(goal: Record<string, unknown>) {
+  if (goal.action === "get") {
+    const found = sampleGoals.find(item => item.id === goal.id) ?? sampleGoals[0];
+    return { ...found, events: [{ seq: 1, kind: "activity", created: 0, body: { summary: "Starting cycle 2 of 8" } }, { seq: 2, kind: "activity", created: 0, body: { summary: found.detail || "Queued" } }],
+      approvals: found.state === "awaiting_approval" ? [{ id: "r1", method: "mcpServer/elicitation/request", params: { mode: "form", serverName: "playwright",
+        message: "Allow the playwright tool browser_click: Download GSTR-2B (JSON)?", requestedSchema: { type: "object", properties: {} }, _meta: { codex_approval_kind: "mcp_tool_call" } } }] : [] };
+  }
+  return { goals: sampleGoals, service: { running: true }, max_parallel: 3, parallel_limit: 4,
+    input: { holder: "h", label: "Kiran: Post the day book totals", task: "t2", pid: 1, until: Date.now() / 1000 + 15 } };
 }

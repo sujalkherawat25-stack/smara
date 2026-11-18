@@ -268,8 +268,9 @@ class RuntimeAuditor:
     ``download_dir``; new files there are recorded after each browser step.
     """
 
-    def __init__(self, download_dir: Path | None = None, enabled: bool = True):
+    def __init__(self, download_dir: Path | None = None, enabled: bool = True, task: str = ""):
         self.enabled = enabled
+        self.task = task          # a background task's id; a chat uses the conversation's thread id
         self.download_dir = Path(download_dir) if download_dir else None
         self.pending: dict[str, dict] = {}
         self.seen_files = self._files()
@@ -290,16 +291,16 @@ class RuntimeAuditor:
             params = message.get("params") or {}
             if method == "mcpServer/elicitation/request" and "id" in message:
                 self.pending[json.dumps(message["id"])] = {"server": params.get("serverName", ""), "message": params.get("message", ""),
-                                                           "task": params.get("threadId", "")}
+                                                           "task": self.task or params.get("threadId", "")}
             elif method == "item/completed":
                 item = params.get("item") or {}
                 if item.get("type") == "mcpToolCall" and str(item.get("server", "")) not in SELF_AUDITED:
                     server, tool = str(item.get("server", "")), str(item.get("tool", ""))
-                    record("desktop", kind_of(server), tool, task=params.get("threadId", ""), target=_target(item.get("arguments")),
+                    record("desktop", kind_of(server), tool, task=self.task or params.get("threadId", ""), target=_target(item.get("arguments")),
                            detail={"server": server, "arguments": item.get("arguments"), "ms": item.get("durationMs")},
                            outcome=f"{item.get('status', '')} {_result_text(item)}".strip())
                     if server in BROWSER_SERVERS:
-                        self._new_downloads(params.get("threadId", ""), report=tool in DOWNLOAD_TRIGGERS)
+                        self._new_downloads(self.task or params.get("threadId", ""), report=tool in DOWNLOAD_TRIGGERS)
         except Exception:  # noqa: BLE001 - the audit must never break the chat
             pass
 

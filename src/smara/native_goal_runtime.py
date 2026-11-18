@@ -14,10 +14,37 @@ import sys
 import threading
 import time
 
-from .native_goals import ACTIVE, GoalStore
+from .native_goals import ACTIVE, MAX_PARALLEL, GoalStore
 
 
-MAX_CONCURRENT_GOALS = 2
+MAX_CONCURRENT_GOALS = MAX_PARALLEL     # upper bound of the worker pool; the owner's setting (store.max_parallel) decides
+
+
+def assigned_agent(spec):
+    """The roster entry this task was given to (name, role, instructions), or None."""
+    if not spec.get("agent_id"):
+        return None
+    try:
+        from .native_agents import roster
+        from .native_management import settings_path
+        from .native_profiles import read_object
+        return next((a for a in roster(read_object(settings_path())) if a["id"] == spec["agent_id"]), None)
+    except (ImportError, OSError, RuntimeError, ValueError):
+        return None
+
+
+def task_label(spec):
+    agent = assigned_agent(spec)
+    title = " ".join(str(spec.get("objective", "")).split())[:40]
+    return f"{agent['name']}: {title}" if agent else f"Smara task: {title}"
+
+
+def goal_instructions(spec, base):
+    agent = assigned_agent(spec)
+    if not agent:
+        return base
+    return (base + f"\n\nYou are {agent['name']}, the shop's {agent.get('role') or 'assistant'}. "
+            + str(agent.get("instructions") or "")[:4000])
 
 _FAILURE_STAGE_LABELS = {
     "load_provider_profile": "loading the model profile",
@@ -170,7 +197,11 @@ class NativeGoalSession:
             raise _tag_file_failure(FileNotFoundError("Native executable is unavailable"), "native_runtime_missing")
         options, env = launch_options(adapter, home=runtime_home(), workspace=workspace,
             tools_enabled=spec["tools_enabled"], search_enabled=not spec["tools_enabled"],
-            workers_enabled=spec["workers_enabled"], browser_origins=spec["browser_origins"])
+            workers_enabled=spec["workers_enabled"], browser_origins=spec["browser_origins"],
+            computer=bool(spec.get("use_apps")), agent_label=task_label(spec), task_id=goal["id"])
+        # Every tool call and approval of this task goes to the owner's activity log, under the task's id.
+        from .agent_audit import RuntimeAuditor
+        self.auditor = RuntimeAuditor(download_dir=workspace / ".smara" / "browser", task=goal["id"])
         try:
             self.process = subprocess.Popen([str(executable), *options, "app-server", "--listen", "stdio://"],
                 cwd=workspace, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -197,7 +228,9 @@ class NativeGoalSession:
         def read():
             try:
                 for line in self.process.stdout:
-                    self.messages.put(json.loads(line))
+                    message = json.loads(line)
+                    self.auditor.from_runtime(message)
+                    self.messages.put(message)
             except (ValueError, OSError):
                 pass  # EOF below is an explicit transport failure.
             finally:
@@ -235,6 +268,7 @@ class NativeGoalSession:
             for request_id in list(self.pending_requests):
                 response = self.store.consume_response(self.goal, request_id)
                 if response:
+                    self.auditor.from_owner(response)
                     self.send(response)
                     self.pending_requests.remove(request_id)
             try:
@@ -273,6 +307,8 @@ class NativeGoalSession:
                     "collabAgentToolCall": "parallel worker coordination",
                 }
                 summary = f"{verb} {labels.get(kind, 'agent step')}"
+                if kind == "mcpToolCall" and item.get("tool"):
+                    summary = f"{verb} {str(item['tool']).replace('_', ' ')[:60]}"
                 self.store.progress(self.goal, summary)
             elif method == "item/agentMessage/delta":
                 now = time.monotonic()
@@ -518,7 +554,8 @@ def execute_cycle(store, goal, *, endpoint=None, session_factory=NativeGoalSessi
                 phase = "initialize_native_protocol"
                 session.rpc("initialize", {"clientInfo": {"name": "smara_goal_supervisor", "version": "1"}, "capabilities": None})
                 session.send({"method": "initialized"})
-                params = {"cwd": goal["spec"]["workspace"], "approvalPolicy": "on-request", "sandbox": goal["spec"]["sandbox"], "developerInstructions": CHECKPOINT_INSTRUCTIONS}
+                params = {"cwd": goal["spec"]["workspace"], "approvalPolicy": "on-request", "sandbox": goal["spec"]["sandbox"],
+                          "developerInstructions": goal_instructions(goal["spec"], CHECKPOINT_INSTRUCTIONS)}
                 if goal.get("session_id"):
                     phase = "resume_saved_session"
                     params["threadId"] = goal["session_id"]
@@ -712,7 +749,7 @@ def run(store):
                         with store.connect() as db:
                             store.set_meta(db, "background_health", {"online": online, "updated": time.time()})
                         if online: enqueue_due(store)
-                    while online and len(futures) < MAX_CONCURRENT_GOALS and not stop.is_set():
+                    while online and len(futures) < min(store.max_parallel(), MAX_CONCURRENT_GOALS) and not stop.is_set():
                         goal = store.claim()
                         if goal is None:
                             break

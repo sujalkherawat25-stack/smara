@@ -54,7 +54,14 @@ def _write(path: Path, value: dict) -> None:
         temporary = Path(handle.name)
         json.dump(value, handle, ensure_ascii=False)
     try:
-        os.replace(temporary, path)
+        for attempt in range(20):            # Windows refuses to replace a file another process is reading at that instant
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                time.sleep(0.01)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -144,10 +151,10 @@ def save_apps(values) -> list[str]:
 
 
 # ---- last action (for the bar) ------------------------------------------------------------------------------------
-def note_activity(app: str, title: str, action: str, workspace: str = "") -> None:
+def note_activity(app: str, title: str, action: str, workspace: str = "", agent: str = "") -> None:
     try:
         _write(activity_path(), {"ts": time.time(), "app": str(app)[:60], "title": str(title)[:120], "action": str(action)[:60],
-                                 "workspace": str(workspace)[:300]})
+                                 "workspace": str(workspace)[:300], "agent": str(agent)[:80]})
     except OSError:
         pass
 
@@ -157,4 +164,103 @@ def last_activity() -> dict:
 
 
 def view() -> dict:
-    return {"control": state(), "apps": allowed_apps(), "known_apps": KNOWN_APPS, "hotkey": HOTKEY, "last": last_activity()}
+    return {"control": state(), "apps": allowed_apps(), "known_apps": KNOWN_APPS, "hotkey": HOTKEY, "last": last_activity(),
+            "input": input_holder()}
+
+
+# ---- one agent on the mouse and keyboard at a time ----------------------------------------------------------------
+# ``computer-input.json`` {"holder", "label", "task", "pid", "until"}. An agent takes it before a step that moves the
+# pointer, types or brings a window forward, and keeps it while it keeps acting (each step renews it). It lapses
+# INPUT_LEASE_S after the last step, or at once when its process is gone. Reading a file, Excel through COM, Tally's
+# XML port and the browsers (they run on their own pages) do not need it.
+INPUT_LEASE_S = 20
+
+
+def input_path() -> Path:
+    return _folder() / "computer-input.json"
+
+
+def _lock_path() -> Path:
+    return _folder() / "computer-input.lock"
+
+
+class _Guard:
+    """A tiny cross-process critical section: create-exclusive a lock file, remove it after. A lock older than
+    3 seconds belongs to a process that died mid-way and is broken."""
+
+    def __enter__(self):
+        path = _lock_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + 3
+        while True:
+            try:
+                os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                return self
+            except (FileExistsError, PermissionError):  # Windows says "permission denied" while another process deletes it
+                try:
+                    if time.time() - path.stat().st_mtime > 3:
+                        path.unlink(missing_ok=True)
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() > deadline:
+                    raise ValueError("Could not check who is using the mouse and keyboard; try again")
+                time.sleep(0.02)
+
+    def __exit__(self, *_):
+        _lock_path().unlink(missing_ok=True)
+
+
+def _pid_alive(pid) -> bool:
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return code.value == 259                                         # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def input_holder(now: float | None = None) -> dict | None:
+    """Who has the mouse and keyboard right now, or None."""
+    value = _read(input_path())
+    now = time.time() if now is None else now
+    if not value or float(value.get("until") or 0) <= now or not _pid_alive(value.get("pid")):
+        return None
+    return {k: value.get(k) for k in ("holder", "label", "task", "pid", "until")}
+
+
+def take_input(holder: str, label: str = "", task: str = "") -> None:
+    """Take or renew the mouse/keyboard for this agent; refuse while another agent holds it."""
+    with _Guard():
+        current = input_holder()
+        if current and current["holder"] != holder:
+            left = max(1, int(float(current["until"]) - time.time()))
+            raise ValueError(f"Another agent ({current.get('label') or 'another Smara task'}) is using the mouse and keyboard right now. "
+                             f"Wait about {left} seconds and try again, or do work that does not need them (files, excel_live, "
+                             "tally_read, the browser). Never fight over the screen.")
+        _write(input_path(), {"holder": holder, "label": str(label)[:80], "task": str(task)[:80], "pid": os.getpid(),
+                              "until": time.time() + INPUT_LEASE_S})
+
+
+def release_input(holder: str) -> None:
+    try:
+        with _Guard():
+            current = _read(input_path()) or {}
+            if current.get("holder") == holder:
+                input_path().unlink(missing_ok=True)
+    except (ValueError, OSError):
+        pass

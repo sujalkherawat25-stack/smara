@@ -15,6 +15,8 @@ const state = over => ({ active: true, paused: false, until: 1763460000, app: "e
 test("the bar says plainly who is in control and what it just did", () => {
   assert.equal(v.headline(state()), "Smara is controlling your PC");
   assert.equal(v.headline(state({ paused: true })), "Smara is paused");
+  assert.equal(v.headline(state({ agent: "Kiran: Tally day book" })), "Kiran (Smara) is controlling your PC");
+  assert.equal(v.headline(state({ agent: "Smara chat" })), "Smara is controlling your PC");
   assert.equal(v.lastStep(state(), 1060), "typing in Excel");
   assert.equal(v.lastStep(state({ app: "tallyprime.exe", action: "press_key" }), 1001), "pressing a key in TallyPrime");
   assert.equal(v.lastStep(state(), 1000 + 121), "");                         // old news is not shown

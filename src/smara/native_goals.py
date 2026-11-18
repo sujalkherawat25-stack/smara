@@ -22,6 +22,9 @@ import uuid
 
 TERMINAL = {"completed", "stopped"}
 ACTIVE = {"running", "awaiting_approval"}
+# Tasks that may work at the same time. Each runs its own model session; only one at a time may use the mouse and
+# keyboard (smara.computer_control). More than 4 would mostly wait on the model provider and the PC.
+DEFAULT_PARALLEL, MAX_PARALLEL = 2, 4
 
 
 def default_path():
@@ -89,6 +92,14 @@ def goal_spec(value):
             or len({r["id"] for r in requirements}) != len(requirements)):
         raise ValueError("Provide up to 20 distinct outcome requirements with id and description")
     result["requirements"] = requirements
+    agent = value.get("agent_id", "")
+    if not isinstance(agent, str) or (agent and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}", agent)):
+        raise ValueError("Choose one of your agents")
+    result["agent_id"] = agent
+    use_apps = value.get("use_apps", False)
+    if type(use_apps) is not bool:
+        raise ValueError("Using apps must be true or false")
+    result["use_apps"] = use_apps
     count = value.get("min_sources", 2)
     if type(count) is not int or not 1 <= count <= 20:
         raise ValueError("Minimum sources must be 1..20")
@@ -350,10 +361,13 @@ class GoalStore:
             for row in db.execute("SELECT * FROM goals WHERE state='queued' AND lease IS NULL AND due<=? AND (? IS NULL OR id=?) ORDER BY due", (time.time(), identity, identity)).fetchall():
                 goal = self.decode(row)
                 key = workspace_key(goal["spec"]["workspace"])
-                if db.execute("SELECT 1 FROM goals WHERE workspace_key=? AND lease IS NOT NULL LIMIT 1", (key,)).fetchone():
+                writes = goal["spec"]["sandbox"] == "workspace-write"
+                running = [json.loads(spec) for (spec,) in db.execute("SELECT spec FROM goals WHERE workspace_key=? AND lease IS NOT NULL", (key,))]
+                # Tasks that only read can work side by side in one project; a task that edits files has it to itself.
+                if running and (writes or any(item.get("sandbox") == "workspace-write" for item in running)):
                     continue
                 interactive = self.meta(db, "interactive:" + key, {})
-                if interactive.get("heartbeat", 0) > time.time() - 10 and interactive.get("busy"):
+                if writes and interactive.get("heartbeat", 0) > time.time() - 10 and interactive.get("busy"):
                     continue
                 if goal["cycles"] >= goal["spec"]["max_cycles"] or goal["requests"] >= goal["spec"]["max_requests"] or goal["token_estimate"] >= goal["spec"]["max_token_estimate"]:
                     db.execute("UPDATE goals SET state='paused',detail='Cumulative goal budget reached' WHERE id=?", (goal["id"],))
@@ -473,8 +487,9 @@ class GoalStore:
             previous = self.meta(db, key, {})
             if busy:
                 canonical = workspace_key(workspace)
-                if db.execute("SELECT 1 FROM goals WHERE lease IS NOT NULL AND workspace_key=? LIMIT 1", (canonical,)).fetchone():
-                    raise ValueError("A goal is working in this project; pause it before starting another turn or shell")
+                editing = [json.loads(spec) for (spec,) in db.execute("SELECT spec FROM goals WHERE lease IS NOT NULL AND workspace_key=?", (canonical,))]
+                if any(item.get("sandbox") == "workspace-write" for item in editing):
+                    raise ValueError("A task that edits files is working in this project; pause it before starting another turn or shell")
                 if previous.get("owner") != owner and previous.get("busy") and previous.get("heartbeat", 0) > time.time() - 10:
                     raise ValueError("Another Smara session is working in this project")
                 self.set_meta(db, key, {"owner": owner, "busy": True, "heartbeat": time.time()})
@@ -492,6 +507,18 @@ class GoalStore:
             db.execute("UPDATE goal_requests SET state='expired' WHERE state IN ('pending','answered')")
             # Telegram sends accepted before a crash have uncertain delivery.
             db.execute("UPDATE telegram_outbox SET state='unknown' WHERE state='sending'")
+
+    def max_parallel(self):
+        with self.connect() as db:
+            value = self.meta(db, "max_parallel", DEFAULT_PARALLEL)
+        return value if type(value) is int and 1 <= value <= MAX_PARALLEL else DEFAULT_PARALLEL
+
+    def set_max_parallel(self, value):
+        if type(value) is not int or not 1 <= value <= MAX_PARALLEL:
+            raise ValueError(f"Choose 1 to {MAX_PARALLEL} tasks at once")
+        with self.connect() as db:
+            self.set_meta(db, "max_parallel", value)
+        return value
 
     def service(self):
         with self.connect() as db:
@@ -542,9 +569,13 @@ def operate(request, *, store=None):
                 "success_criteria": current["spec"]["success_criteria"][:2000]}
             current["checkpoint"] = {k: str(current["checkpoint"].get(k, ""))[:5000 if k == "summary" else 1200]
                 for k in ("summary", "next_step")}
-        return {"goals": goals, "current_goal": current, "service": store.service()}
+        from .computer_control import input_holder
+        return {"goals": goals, "current_goal": current, "service": store.service(), "max_parallel": store.max_parallel(),
+                "parallel_limit": MAX_PARALLEL, "input": input_holder()}
     if action == "get":
         return store.get(request.get("id"))
+    if action == "set_parallel":
+        return {"max_parallel": store.set_max_parallel(request.get("max_parallel"))}
     if action in {"delete", "dismiss", "clear"}:
         store.action(request)
         return {"ok": True, "id": request.get("id")}

@@ -113,7 +113,7 @@ def _search_credential_available() -> bool:
         return False
 
 
-def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, tools_enabled: bool = False, search_enabled: bool = False, workers_enabled: bool = False, browser_origins: list[str] | None = None, interactive: bool = False) -> tuple[list[str], dict[str, str]]:
+def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, tools_enabled: bool = False, search_enabled: bool = False, workers_enabled: bool = False, browser_origins: list[str] | None = None, interactive: bool = False, computer: bool = False, agent_label: str = "", task_id: str = "") -> tuple[list[str], dict[str, str]]:
     if not workspace.is_dir():
         raise ValueError("Workspace must be an existing directory")
     adapter.configure_memory(workspace)
@@ -230,7 +230,9 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
             settings["mcp_servers.smara_browser.env.PYTHONPATH"] = str((source_root() / "src").resolve())
         for entry in browser_tools:
             settings[f'mcp_servers.smara_browser.tools.{entry["name"]}.approval_mode'] = "approve" if entry["name"] in LOOK_ONLY else "prompt"
-    if interactive:
+    if interactive or computer:
+        # Chats always get the app tools; a background task only when the owner ticked "may use my apps" for it.
+        # Either way every call still needs a live grant, the allowed-apps list and the one-at-a-time input lock.
         from .native_computer import selected, approval_mode, TOOLS as computer_tools
         # Always offered in interactive chats: every call re-checks the owner's grant, so without one each tool only returns the
         # instruction to switch control on, and granting later works in the same chat without a restart. A server that cannot start
@@ -245,6 +247,9 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
             "mcp_servers.smara_computer.required": granted, "mcp_servers.smara_computer.tool_timeout_sec": 60,
             "mcp_servers.smara_computer.default_tools_approval_mode": "prompt"})
         for entry in computer_tools: settings[f'mcp_servers.smara_computer.tools.{entry["name"]}.approval_mode'] = approval_mode(entry["name"])
+        settings["mcp_servers.smara_computer.env.SMARA_AGENT_LABEL"] = (agent_label or "Smara chat")[:80]
+        if task_id:
+            settings["mcp_servers.smara_computer.env.SMARA_TASK_ID"] = task_id[:80]
     # TOML rejects JSON's surrogate-pair escapes for non-BMP characters. Keep
     # Unicode literal so emoji/non-Latin workspace paths survive native parsing.
     argv = [part for key, value in settings.items() for part in ("-c", key + "=" + json.dumps(value, ensure_ascii=False))]

@@ -197,3 +197,39 @@ html.control-bar-window, html.control-bar-window body { background: transparent;
 .control-bar button { height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--bg-raised); color: var(--text); font-weight: 600; cursor: pointer; }
 .control-bar button.control-stop { background: #b42318; border-color: #b42318; color: #fff; }
 .control-bar small { color: var(--text-dim); font-size: 11px; }
+
+/* Task board: one column per kind of status, one card per task. */
+.task-board { display: flex; flex-direction: column; gap: 14px; padding: 18px 22px; overflow: auto; height: 100%; box-sizing: border-box; }
+.task-board-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.task-board-head h2 { margin: 0 0 2px; font-size: 22px; font-weight: 600; }
+.task-board-head p { margin: 0; color: var(--text-dim); font-size: 14px; }
+.task-board-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.task-board-bar label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-soft); }
+.task-board-bar small { color: var(--text-dim); flex: 1; min-width: 200px; }
+.pill { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); font-size: 12px; color: var(--text-soft); }
+.pill.on { border-color: var(--ok); color: var(--ok); }
+.task-new { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+.task-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; align-items: start; }
+.task-column { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.task-column h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--text-soft); }
+.task-column h3 small { color: var(--text-dim); font-weight: 400; margin-left: 4px; }
+.task-column.needs_you h3 { color: var(--warn); }
+.task-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-card); font-size: 13px; }
+.task-column.needs_you .task-card { border-color: var(--warn); }
+.task-card-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-dim); }
+.task-agent { color: var(--text-soft); font-weight: 600; }
+.task-card > small { color: var(--text-dim); }
+.task-step { margin: 0; color: var(--text-soft); font-size: 12px; }
+.task-approval { border-top: 1px solid var(--line); padding-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.task-approval p { margin: 0; width: 100%; overflow-wrap: anywhere; }
+.task-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.task-actions button, .task-approval button { padding: 3px 10px; font-size: 12px; }
+.task-actions button.link { background: none; border: 0; color: var(--focus); cursor: pointer; padding: 3px 0; }
+.task-log { border-top: 1px solid var(--line); padding-top: 6px; font-size: 12px; color: var(--text-soft); }
+.task-log h4 { margin: 6px 0 2px; font-size: 12px; color: var(--text-dim); }
+.task-log ol { margin: 0; padding-left: 18px; }
+.task-log time { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+/* The task board takes the whole work area; the chat comes back with Back to chat. */
+.native-work-area.with-board > .native-chat-area { display: none; }
+.native-work-area.with-board > .task-board { flex: 1; min-width: 0; }
