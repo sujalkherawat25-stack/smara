@@ -8,14 +8,16 @@ import NativeEmail from "./NativeEmail";
 import NativeBackground from "./NativeBackground";
 import NativeAutomation from "./NativeAutomation";
 import NativeBrowser from "./NativeBrowser";
+import NativeAudit from "./NativeAudit";
 
 const aliases: Record<string, string> = { tavily: "TAVILY_API_KEY", exa: "EXA_API_KEY", serper: "SERPER_API_KEY", brave: "BRAVE_SEARCH_API_KEY" };
 const emptyModel = { id: "", label: "", provider: "", base_url: "", model: "", api_key: "", auth_header: "authorization", context_window: "" as string | number | null };
-type Tab = "models" | "memory" | "browser" | "tools" | "email" | "background" | "telegram" | "help";
+type Tab = "models" | "memory" | "browser" | "activity" | "tools" | "email" | "background" | "telegram" | "help";
 const NAV: { id: Tab; label: string }[] = [
   { id: "models", label: "Models" },
   { id: "memory", label: "Memory" },
   { id: "browser", label: "Browser & computer" },
+  { id: "activity", label: "Activity log" },
   { id: "tools", label: "Search & tools" },
   { id: "email", label: "Email" },
   { id: "background", label: "Background" },
@@ -146,6 +148,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
         </section></div>
       </div>}
 
+      {tab === "activity" && <NativeAudit locked={disabled} />}
       {tab === "email" && <div className="set-page"><NativeEmail workspace={setup.preferences.workspace} locked={disabled} onUpdate={onUpdate} onPendingChange={integrationBusy} /></div>}
       {tab === "background" && <div className="set-page"><NativeBackground workspace={setup.preferences.workspace} profile={setup.preferences.active_model} locked={disabled} onPendingChange={integrationBusy} /></div>}
       {tab === "telegram" && <div className="set-page"><NativeTelegramSettings workspace={setup.preferences.workspace} profile={setup.preferences.active_model} locked={disabled} onSaved={() => { void nativeSettings().then(onUpdate); }} /></div>}

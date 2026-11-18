@@ -123,11 +123,15 @@ TOOLS = [
         "words in the page text but not in the list, act on it with text = its exact words instead of ref. Actions: navigate "
         "(url), read, text (the whole page text, for reading long pages), click (ref or text), hover (ref or text, opens "
         "menus), fill (ref + value), select (ref + value), press (value = key, e.g. Enter; ref optional), scroll (value "
-        "down/up/top/bottom, or ref/text to bring it into view), back, wait (value ms). In the owner's own "
+        "down/up/top/bottom, or ref/text to bring it into view), back, wait (value ms), tabs (list the open tabs), tab (value = "
+        "tab number: carry on in that tab), close_tab (value = tab number, or the current one). Only in the owner's own PC "
+        "browser: download (ref or text of the link/button that downloads; the file is saved in the Smara Shared folder "
+        "under Downloads) and upload (ref of the file box + value = a file's path in the Smara Shared folder); both always "
+        "wait for the owner's tap. In the owner's own "
         "browser most steps run on their own; paying, placing orders, sending, deleting and signing in wait for the owner's tap; "
         "OTP, card details and CAPTCHA are the owner's to do (use hand_off_to_owner).",
         {"action": {"type": "string", "enum": ["navigate", "read", "text", "click", "hover", "fill", "select", "press", "scroll",
-                                               "back", "wait"]},
+                                               "back", "wait", "tabs", "tab", "close_tab", "download", "upload"]},
          "url": _S, "ref": {"type": "integer", "description": "the number in [ ] before a control in the latest page"},
          "text": {"type": "string", "description": "exact visible words of a control that has no ref"},
          "value": _S}, ["action"]),
