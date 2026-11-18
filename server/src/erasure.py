@@ -44,7 +44,7 @@ ASK_FILES = (
 # Every table that holds a shop's rows through tenant_id, children before parents. test_erasure checks this list is complete.
 TENANT_TABLES = (
     "agent_sessions", "agent_tasks", "bridge_jobs", "bridge_devices", "bridge_pairings", "browser_tasks", "chat_messages",
-    "customer_routing", "data_requests", "digest_log", "llm_usage", "outbound_messages", "owner_inbound_log", "owner_prefs",
+    "customer_routing", "data_requests", "digest_log", "digest_optout", "llm_usage", "outbound_messages", "owner_inbound_log", "owner_prefs",
     "owner_skills", "payables", "shop_facts", "tally_syncs", "tenant_keys", "tenant_secrets", "wa_link_daily_sends",
     "wa_links", "whatsapp_connect_links", "whatsapp_connections", "obligations", "parties",
 )
