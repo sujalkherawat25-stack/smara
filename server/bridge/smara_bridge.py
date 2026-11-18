@@ -782,7 +782,14 @@ async def observe(page, *, changes_since: dict | None = None, url_before: str | 
 
 
 # ---------------------------------------------------------------- doing things: one step, then report what changed
-ACTIONS = ("navigate", "read", "text", "scroll", "back", "wait", "click", "hover", "fill", "select", "press")
+ACTIONS = ("navigate", "read", "text", "scroll", "back", "wait", "click", "hover", "fill", "select", "press",
+           "tabs", "tab", "close_tab", "download", "upload")
+# Files move only in the owner's own PC browser (run() switches this on), never in Smara's server browser.
+FILES_ALLOWED = False
+DOWNLOAD_BLOCKED = re.compile(r"\.(exe|msi|msix|msp|appx|appxbundle|bat|cmd|com|scr|pif|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|hta|cpl|"
+                              r"dll|sys|lnk|url|reg|jar|iso|img|vhd|vhdx|application|gadget|scf|inf)$", re.I)
+DOWNLOAD_MAX = 50_000_000
+UPLOAD_MAX = 20_000_000
 DISABLED_JS = "e => !!(e.disabled || e.getAttribute('aria-disabled') === 'true')"
 MESSAGE_BOX_JS = """e => (e.isContentEditable || e.tagName === 'TEXTAREA' || e.getAttribute('role') === 'textbox')
   && e.type !== 'search' && e.getAttribute('role') !== 'searchbox'
@@ -945,6 +952,78 @@ async def page_links(page) -> list[dict]:
         return []
 
 
+def _tab_rows(page) -> list[dict]:
+    rows = []
+    for n, tab in enumerate(page.context.pages, 1):
+        try:
+            closed = tab.is_closed()
+        except Exception:
+            closed = True
+        if not closed:
+            rows.append({"tab": n, "url": tab.url, "current": tab is page})
+    return rows
+
+
+def _tab_number(cmd: dict, page) -> int:
+    raw = cmd.get("value") if cmd.get("value") not in (None, "") else cmd.get("ref")
+    try:
+        n = int(str(raw).strip().strip("[]"))
+    except (TypeError, ValueError):
+        raise RefError("give value = the tab number from the tabs list") from None
+    if not 1 <= n <= len(page.context.pages):
+        raise RefError(f"there is no tab {n}; there are {len(page.context.pages)}")
+    return n
+
+
+def _safe_name(name: str) -> str:
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(name or "download")).strip(" .")[:120]
+    return name or "download"
+
+
+async def download_from(page, cmd: dict) -> dict:
+    """Click the control that downloads a file and keep the file in Smara Shared/Downloads. Programs are refused."""
+    loc, ref = await target_of(page, cmd)
+    async with page.expect_download(timeout=30000) as info:
+        await press_once(page, loc)
+    dl = await info.value
+    name = _safe_name(dl.suggested_filename)
+    if DOWNLOAD_BLOCKED.search(name):
+        await dl.cancel()
+        raise PermissionError(f"that file ({name}) is a program or script; Smara never downloads those")
+    folder = SHARED_DIR / "Downloads"
+    folder.mkdir(parents=True, exist_ok=True)
+    target, n = folder / name, 1
+    while target.exists():
+        stem, dot, ext = name.rpartition(".")
+        target = folder / (f"{stem} ({n}).{ext}" if dot else f"{name} ({n})")
+        n += 1
+    await dl.save_as(str(target))
+    size = target.stat().st_size
+    if size > DOWNLOAD_MAX:
+        target.unlink(missing_ok=True)
+        raise PermissionError(f"that file is over {DOWNLOAD_MAX // 1_000_000} MB, so it was not kept")
+    return {"downloaded": f"Downloads/{target.name}", "bytes": size, "from": urlparse(dl.url).hostname or ""}
+
+
+async def upload_to(page, cmd: dict) -> dict:
+    """Put one file from the Smara Shared folder into a file box on the page (the owner approved this exact file)."""
+    rel = str(cmd.get("value") or "").strip()
+    path = shared_path(rel)
+    if not rel or not path.is_file():
+        raise PermissionError("that file is not in the Smara Shared folder; list it with pc_files first")
+    if path.name.startswith(".") or path.stat().st_size > UPLOAD_MAX:
+        raise PermissionError(f"only visible files up to {UPLOAD_MAX // 1_000_000} MB can be uploaded")
+    loc, ref = await target_of(page, cmd)
+    if await loc.evaluate("e => e.tagName === 'INPUT' && e.type === 'file'"):
+        await loc.set_input_files(str(path))
+    else:                                         # a styled button that opens the file picker
+        async with page.expect_file_chooser(timeout=8000) as chooser:
+            await press_once(page, loc)
+        await (await chooser.value).set_files(str(path))
+    await settle(page, max_ms=4000)
+    return {"uploaded": path.name, "bytes": path.stat().st_size}
+
+
 async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
     """Run one step and return the page after it: what changed, the numbered controls, the visible text."""
     page = current(page)
@@ -956,11 +1035,44 @@ async def handle(page, cmd: dict, allow_private: bool = False) -> dict:
             return {"error": "the owner paused Smara in the browser (Stop button); ask them to press Resume"}
     except Exception:
         pass
+    if a in ("download", "upload") and not FILES_ALLOWED:
+        return {"error": "downloads and uploads work only in the owner's own PC browser, not in this browser"}
     url_before, seen_before, sig_before = page.url, dict(_SEEN.get(id(page)) or {}), await signature(page)
     extra: dict = {}
-    track = a in ("click", "hover", "fill", "select", "press", "scroll", "back")
+    track = a in ("click", "hover", "fill", "select", "press", "scroll", "back", "upload")
     try:
-        if a == "navigate":
+        if a == "tabs":
+            return {"url": page.url, "title": await page.title(), "tabs": _tab_rows(page),
+                    "hint": "carry on in another tab with action tab and value = its number"}
+        if a == "tab":
+            tab = page.context.pages[_tab_number(cmd, page) - 1]
+            if tab is not page:
+                if url_allowed(tab.url, allow_private) and tab.url != "about:blank":
+                    return {"error": "that tab is on a private or local address, which is blocked"}
+                await tab.bring_to_front()
+                PAGES.pop(id(tab), None)               # an older "continue on" link from this tab must not send us back
+                PAGES[id(page)] = tab
+                page = tab
+            extra["switched_to_tab"] = page.context.pages.index(page) + 1
+            await settle(page, max_ms=4000)
+        elif a == "close_tab":
+            n = _tab_number(cmd, page) if cmd.get("value") not in (None, "") else page.context.pages.index(page) + 1
+            if len(page.context.pages) <= 1:
+                return {"error": "this is the only tab; it stays open"}
+            tab = page.context.pages[n - 1]
+            rest = [t for t in page.context.pages if t is not tab]
+            if tab is page:
+                page = rest[-1]
+                PAGES.pop(id(page), None)
+                PAGES[id(tab)] = page
+            await tab.close()
+            await page.bring_to_front()
+            extra["closed_tab"] = n
+        elif a == "download":
+            extra.update(await download_from(page, cmd))
+        elif a == "upload":
+            extra.update(await upload_to(page, cmd))
+        elif a == "navigate":
             _LAST_TYPED.pop(id(page), None)
             why = url_allowed(str(cmd.get("url", "")), allow_private)
             if why:
@@ -1181,6 +1293,46 @@ def describe_step(cmd: dict, result: dict) -> str:
     return f"step {what} on {host or 'page'}: ok ({str(result.get('title', ''))[:60]})"
 
 
+AUDIT_DIR = Path(os.environ.get("SMARA_AUDIT_DIR") or (Path(os.environ["APPDATA"]) / "Smara" / "audit" if os.environ.get("APPDATA")
+                                                      else HOME / "audit"))
+AUDIT_SHOT_ACTIONS = ("click", "fill", "select", "press", "download", "upload", "close_tab")
+
+
+def _audit_value(cmd: dict) -> str:
+    """What was typed, for the owner's log: long digit runs (cards, account numbers, OTPs) are masked."""
+    value = str(cmd.get("value") or "")[:200]
+    return re.sub(r"\d(?:[ -]?\d){5,}", lambda m: "•" * len(m.group(0)), value)
+
+
+def audit_step(job: dict, result: dict, shot: bytes | None = None) -> None:
+    """One line in the owner's local audit log (Smara Desktop shows it). Same format as smara.agent_audit."""
+    import datetime
+    import uuid
+    cmd = job.get("command") or {}
+    day = datetime.date.today().isoformat()
+    entry = {"id": uuid.uuid4().hex[:16], "ts": round(__import__("time").time(), 3), "source": "bridge",
+             "task": str(job.get("job_id", ""))[:80], "kind": "tool" if cmd.get("tool") else "browser",
+             "action": str(cmd.get("action") or cmd.get("tool") or "?")[:60],
+             "target": str(result.get("target") or cmd.get("url") or result.get("url") or "")[:600],
+             "detail": {"url": str(result.get("url") or "")[:300], "title": str(result.get("title") or "")[:120],
+                        **({"value": _audit_value(cmd)} if cmd.get("action") in ("fill", "select", "press", "upload") else {}),
+                        **{k: result[k] for k in ("downloaded", "uploaded", "bytes", "closed_tab", "switched_to_tab", "opened_new_tab")
+                           if k in result}},
+             "outcome": ("error: " + str(result["error"])[:300]) if result.get("error") else "ok",
+             "approval": "", "screenshot": ""}
+    try:
+        AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+        if shot:
+            folder = AUDIT_DIR / "shots" / day
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"{entry['id']}.jpg").write_bytes(shot)
+            entry["screenshot"] = f"shots/{day}/{entry['id']}.jpg"
+        with (AUDIT_DIR / f"{day}.bridge.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
 class Browser:
     """Opens your browser only when Smara has work for it, and closes it again when it has been idle for a while.
     So the helper can sit in the background all day without a window until it is actually needed."""
@@ -1300,6 +1452,8 @@ async def run(a) -> int:
     headers = {"Authorization": f"Bearer {cfg['token']}"}
     HOME.mkdir(parents=True, exist_ok=True)
     PID.write_text(str(os.getpid()))
+    global FILES_ALLOWED
+    FILES_ALLOWED = True                               # this is the owner's own PC: downloads/uploads (each approved) may run
     async with async_playwright() as p, httpx.AsyncClient(base_url=cfg["server"], headers=headers, timeout=45) as http:
         br = Browser(p, a)
         if not a.lazy:
@@ -1326,10 +1480,12 @@ async def run(a) -> int:
                 await http.post("/bridge/result", json={"job_id": job["job_id"], "result": {
                     "error": "the owner paused Smara's browser in Smara Desktop; ask them to press Resume"}})
                 log(f"step {job['command'].get('action')} refused: paused")
+                audit_step(job, {"error": "paused by the owner in Smara Desktop"})
                 continue
             if job["command"].get("tool"):         # a PC tool, not a browser step: no browser window is opened for it
                 result = run_tool(job["command"])
                 log(f"tool {job['command']['tool']} {job['command'].get('action', '')}: {'error' if result.get('error') else 'ok'}")
+                audit_step(job, result)
                 await http.post("/bridge/result", json={"job_id": job["job_id"], "result": result})
                 continue
             try:
@@ -1352,6 +1508,13 @@ async def run(a) -> int:
             where = result if result.get("url") else {**result, "url": getattr(br.page, "url", "") if br.page else ""}
             log(describe_step(job["command"], where))
             write_status(last_step_at=time.time(), last_step=describe_step(job["command"], where))
+            shot = None
+            if job["command"].get("action") in AUDIT_SHOT_ACTIONS and br.page is not None:
+                try:
+                    shot = await br.page.screenshot(type="jpeg", quality=55, timeout=4000)
+                except Exception:
+                    shot = None
+            audit_step(job, where, shot)
             await http.post("/bridge/result", json={"job_id": job["job_id"], "result": result})
 
 

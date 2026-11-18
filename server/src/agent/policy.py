@@ -18,8 +18,10 @@ import re
 from dataclasses import dataclass, field
 
 UNTRUSTED_ALLOWED = frozenset({"write_continuum_evidence", "propose_ledger_adjustment"})
-BROWSER_READ = frozenset({"navigate", "read", "text", "scroll", "back", "wait", "hover"})
-BROWSER_ACT = frozenset({"click", "fill", "press", "select"})
+BROWSER_READ = frozenset({"navigate", "read", "text", "scroll", "back", "wait", "hover", "tabs", "tab"})
+BROWSER_ACT = frozenset({"click", "fill", "press", "select", "close_tab"})
+# Moving a file between the owner's PC and a website: always the owner's tap, on their own PC browser only.
+BROWSER_FILES = frozenset({"download", "upload"})
 
 
 # The emoji Telegram allows as a reaction, cut down to the ones that suit a business chat.
@@ -138,8 +140,20 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
                                           "evidence or propose an adjustment for the owner to review")
         if args.get("party_id", ctx.party_id) != ctx.party_id:
             return Decision("deny", tier, "a counterparty session may only touch its own party")
-    if name == "browser_step" and args.get("action") not in BROWSER_READ | BROWSER_ACT:
+    if name == "browser_step" and args.get("action") not in BROWSER_READ | BROWSER_ACT | BROWSER_FILES:
         return Decision("deny", tier, "unsupported browser action")
+    if name == "browser_step" and args.get("action") in BROWSER_FILES:
+        if ctx.trust != "TRUSTED":
+            return Decision("deny", tier, "only a conversation with the owner can move files to or from a website")
+        if not ctx.on_device:
+            return Decision("deny", tier, "downloads and uploads work only in the owner's own PC browser (Smara Desktop), "
+                                          "not in Smara's server browser. Tell the owner plainly.")
+        if args.get("action") == "upload" and not str(args.get("value") or "").strip():
+            return Decision("deny", tier, "upload needs value = the file's path inside the Smara Shared folder on the PC "
+                                          "(see pc_files list)")
+        # Never on its own and never covered by a site grant: a download brings a file onto the PC, an upload sends one out.
+        page = {"page": ctx.controls, "url": f"https://{ctx.host}/" if ctx.host else ""}
+        return Decision("approve", tier, card=approval_text(name, args, page))
     if name == "pc_files":
         if ctx.trust != "TRUSTED":
             return Decision("deny", tier, "only a conversation with the owner can reach the files on their PC")
@@ -283,5 +297,13 @@ def approval_text(name: str, args: dict, page: dict | None = None, typed: str = 
             return f"Smara wants to type into {what} on {site}:\n\n\"{val[:300]}\"\n\nApprove?"
         if act == "press":
             return f"Smara wants to press {val or 'Enter'} on {site}.\n\nApprove?"
+        if act == "download":
+            return (f"Smara wants to DOWNLOAD a file from {site} by clicking {what}.\n\nIt will be saved in the Smara "
+                    f"Shared folder on your PC (Downloads). Programs and scripts are refused.\n\nApprove?")
+        if act == "upload":
+            return (f"Smara wants to UPLOAD your file “{val[:120]}” (Smara Shared folder on your PC) to {site}, into "
+                    f"{what}.\n\nThis sends the file to that website.\n\nApprove?")
+        if act == "close_tab":
+            return f"Smara wants to close a browser tab ({val or 'the current one'}) on {site}.\n\nApprove?"
         return f"Smara wants to {act} {what} on {site}.\n\nApprove?"
     return f"Allow {name}?"

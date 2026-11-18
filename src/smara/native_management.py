@@ -182,6 +182,9 @@ def manage(request):
     if operation == "computer_control":
         from .native_computer import manage as computer
         return computer(request)
+    if operation == "audit":
+        from .agent_audit import manage as audit
+        return audit(request)
     if operation == "outreach":
         from .native_outreach import operate
         return operate(request.get("outreach") or {})

@@ -87,7 +87,11 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
       }
       return undefined as T;
     }
-    case "native_manage": return setup as T;
+    case "native_manage": {
+      const request = (args.request ?? {}) as Record<string, unknown>;
+      if (request.operation === "audit") return auditPreview(request) as T;
+      return setup as T;
+    }
     case "native_project_files": return {
       path: "", truncated: false,
       entries: [
@@ -102,4 +106,22 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
     } as T;
     default: return {} as T;
   }
+}
+
+// Sample Activity log for the preview (Settings > Activity log).
+const now = Date.now() / 1000;
+const auditRows = [
+  { id: "a6", ts: now - 20, source: "bridge", task: "j1", kind: "browser", action: "download", target: '[4] link "Download GSTR-2B"', detail: null, outcome: "ok", approval: "", screenshot: "shots/demo.jpg" },
+  { id: "a5", ts: now - 60, source: "desktop", task: "t1", kind: "approval", action: "approved", target: "playwright", detail: null, outcome: "", approval: "owner", screenshot: "" },
+  { id: "a4", ts: now - 70, source: "desktop", task: "t1", kind: "browser", action: "browser_click", target: "element=Search", detail: null, outcome: "completed ok", approval: "", screenshot: "" },
+  { id: "a3", ts: now - 300, source: "desktop", task: "t2", kind: "computer", action: "computer_act", target: "window_id=TallyPrime", detail: null, outcome: "completed typed 3 characters", approval: "", screenshot: "" },
+  { id: "a2", ts: now - 400, source: "bridge", task: "j0", kind: "browser", action: "fill", target: '[7] textbox "GSTIN"', detail: null, outcome: "error: the owner paused Smara in the browser (Stop button)", approval: "", screenshot: "" },
+  { id: "a1", ts: now - 900, source: "bridge", task: "j0", kind: "browser", action: "navigate", target: "https://services.gst.gov.in", detail: null, outcome: "ok", approval: "", screenshot: "" },
+];
+const tinyImage = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+function auditPreview(request: Record<string, unknown>) {
+  if (request.action === "days") return { days: [{ day: new Date().toISOString().slice(0, 10), entries: auditRows.length, bytes: 2400 }], folder: "C:/Users/owner/AppData/Roaming/Smara/audit", keep_days: 30 };
+  if (request.action === "list") return { entries: auditRows };
+  if (request.action === "shot") return { png_base64: tinyImage };
+  return { deleted: request.day ?? "all", days: [] };
 }

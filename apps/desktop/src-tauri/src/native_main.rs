@@ -188,7 +188,7 @@ fn invalidate_snapshot() {
 /// Settings operations the UI may request. Anything else (secret reads, legacy execution) is refused here.
 const UI_SETTINGS_OPERATIONS: &[&str] = &["bootstrap", "runtime_health", "goals", "background", "browser_control", "computer_control",
     "voice", "outreach", "save_outreach", "add_project", "select_project", "save_project_options", "select_model", "select_search",
-    "save_credential", "delete_credential", "save_model", "save_memory", "test_memory", "test_model", "test_search", "agents"];
+    "save_credential", "delete_credential", "save_model", "save_memory", "test_memory", "test_model", "test_search", "agents", "audit"];
 
 /// Operations after which the cached projects or model profiles are stale. Settings that do not affect
 /// them (memory, search, keys for other models, probes, outreach) leave the cache alone.

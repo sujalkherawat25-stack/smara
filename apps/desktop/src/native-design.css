@@ -169,3 +169,17 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline
 @media (max-width: 900px) { .native-item.user { max-width: 100%; } }
 .browser-step > div { min-width: 0; }
 .browser-step strong { overflow-wrap: anywhere; }
+
+/* Activity log (Settings): one row per step an agent took on this PC. */
+.audit-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); max-height: 60vh; overflow: auto; }
+.audit-row { display: grid; grid-template-columns: 72px 130px 1fr; gap: 4px 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.audit-row:last-child { border-bottom: 0; }
+.audit-row time { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.audit-who { color: var(--text-soft); }
+.audit-what { overflow-wrap: anywhere; }
+.audit-outcome, .audit-row > button, .audit-shot { grid-column: 3; }
+.audit-outcome { color: var(--text-dim); overflow-wrap: anywhere; }
+.audit-row.failed .audit-outcome { color: var(--danger); }
+.audit-row > button.link { justify-self: start; background: none; border: 0; padding: 0; color: var(--focus); cursor: pointer; font-size: 12px; }
+.audit-shot { max-width: 100%; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+.audit-empty { padding: 12px; color: var(--text-dim); }

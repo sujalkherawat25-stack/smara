@@ -343,6 +343,9 @@ def serve_bootstrap(input_stream=None, output_stream=None) -> int:
         owner = uuid.uuid4().hex
         activity_lock, output_lock = threading.Lock(), threading.Lock()
         project_activity = NativeProjectActivity()
+        # Every tool call and approval answer in this chat goes to the owner's local audit log (read-only watch).
+        from .agent_audit import RuntimeAuditor
+        auditor = RuntimeAuditor(download_dir=workspace / ".smara" / "browser")
         ended = threading.Event()
 
         def write_output(line):
@@ -381,6 +384,7 @@ def serve_bootstrap(input_stream=None, output_stream=None) -> int:
                                 write_output(json.dumps({"id": message["id"], "error": {"code": -32000, "message": str(exc)}}) + "\n")
                                 continue
                             project_activity.request(message)
+                    auditor.from_owner(message)
                     process.stdin.write(line)
                     process.stdin.flush()
             except (BrokenPipeError, OSError, ValueError):
@@ -402,6 +406,7 @@ def serve_bootstrap(input_stream=None, output_stream=None) -> int:
         try:
             for line in process.stdout:
                 message = json.loads(line)
+                auditor.from_runtime(message)
                 with activity_lock:
                     project_activity.observe(message)
                     if not project_activity.busy:
