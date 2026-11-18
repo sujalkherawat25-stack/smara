@@ -10,6 +10,7 @@ import HostedPanel from "./ui/HostedPanel";
 import { EmptyChat } from "./ui/EmptyChat";
 import NativeBrowser from "./NativeBrowser";
 import NativeGoals from "./NativeGoals";
+import NativeTaskBoard from "./NativeTaskBoard";
 import { EMPTY_ROSTER, agentById, agentNameProblem, chatsForAgent, chatsNewestFirst, developerInstructionsFor, threadTime, agentTone, contactTime, type AgentRecord, type AgentRoster as RosterData } from "./agents";
 import { groupTranscript } from "./toolCards";
 import { hostedStatus, type HelperSnapshot } from "./hostedStatus";
@@ -70,7 +71,7 @@ function terminalError(reason: unknown): string {
 }
 
 /** Right-pane tabs. The last one opened is saved in localStorage (for the next session's first open). */
-type Pane = "changes" | "terminal" | "browser" | "tasks" | "files" | "hosted";
+type Pane = "changes" | "terminal" | "browser" | "tasks" | "files" | "hosted" | "board";
 const PANE_KEY = "smara.lastPane";
 
 const NATIVE_DEVELOPER_INSTRUCTIONS = [
@@ -1215,6 +1216,7 @@ export default function NativeApp() {
           <button className="hosted-status" data-tone={hosted.tone} aria-pressed={panel === "hosted"} title="Open Hosted Smara" onClick={() => openPane("hosted")}><span className="status-dot" aria-hidden="true" />{hosted.label}</button>
         </div>}
         {!settingsOpen && <div className="workspace-actions">
+          <button aria-pressed={panel === "board"} className={panel === "board" ? "selected" : ""} disabled={reviewBusy} onClick={() => openPane("board")}>Task board</button>
           <button aria-pressed={panel === "changes"} className={panel === "changes" ? "selected" : ""} disabled={reviewBusy || !workspace} onClick={() => setPanel(panel === "changes" ? null : "changes")}>Changes{turnDiff ? <span className="signal-dot" aria-hidden="true" /> : null}</button>
           <button aria-pressed={panel === "terminal"} className={panel === "terminal" ? "selected" : ""} disabled={reviewBusy || goalWorking} onClick={() => setPanel(panel === "terminal" ? null : "terminal")}>Terminal{terminalActive ? <span className="signal-dot" aria-hidden="true" /> : null}</button>
           <div className="tools-menu">
@@ -1230,13 +1232,13 @@ export default function NativeApp() {
           </div>
         </div>}
       </header>
-      {setup?.computer?.enabled && <div className="native-warning" role="status">Experimental app control · after approval, bring the selected app forward within 10 seconds · 15-minute grant<button onClick={() => {
+      {setup?.computer?.enabled && <div className="native-warning" role="status">Smara may control your allowed apps for a limited time · Pause or Stop on the Smara bar at the top of the screen, or press Ctrl+Alt+Esc<button onClick={() => {
         void invoke("native_manage", { request: { operation: "computer_control", action: "stop", workspace } }).then(() => setSetup(current => current ? { ...current, computer: { enabled: false, expires: null } } : current)).catch(reason => setError(String(reason)));
       }}>Stop computer control</button></div>}
       {built === false && <div className="native-warning">Native runtime is missing. Build scripts/build-smara-native.ps1; no old-engine fallback is used.</div>}
       {error && <div role="alert" className="native-error">{error}{!settingsOpen && !connected && (!busy || uncertain) && <button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Retry setup</button>}<button aria-label="Dismiss error" onClick={() => setError("")}>Dismiss</button></div>}
       {settingsOpen && setup ? <NativeSettings initialTab={settingsTab} setup={setup} locked={busy || connecting || loadingThread} call={settingsCall} onUpdate={updateSetup} onClose={() => void closeSettings()} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : <>
-      <div className={`native-work-area ${panel ? "with-panel" : ""}`}>
+      <div className={`native-work-area ${panel ? "with-panel" : ""} ${panel === "board" ? "with-board" : ""}`}>
       <div className="native-chat-area">
       {goalInAnotherConversation && <div className="goal-other-chat" role="status"><span><strong>Background goal {goalLabel(currentGoal!.state).toLowerCase()}</strong><small>Chat and project activity are paused while it works.</small></span><button disabled={connecting || loadingThread} onClick={() => void openGoalConversation()}>Open task chat</button></div>}
       {goalInThisConversation && currentGoal && <section className={`native-goal-status state-${currentGoal.state}`} aria-label="Autonomous goal progress">
@@ -1338,6 +1340,7 @@ export default function NativeApp() {
       </div>
       {panel === "changes" && <NativeChanges key={workspace + threadId} workspace={workspace} threadId={threadId} locked={navigationLocked || terminalActive || goalWorking} revision={reviewRevision} notice={reviewNotice} onBusyChange={reviewPending} onPreviewFile={setPreviewPath} onClose={() => setPanel(null)} />}
       {panel === "browser" && <NativeBrowser locked={navigationLocked} />}
+      {panel === "board" && <NativeTaskBoard projects={setup?.preferences.projects ?? []} workspace={workspace} profile={profile} roster={roster} locked={navigationLocked} onClose={() => setPanel(null)} />}
       {panel === "tasks" && <NativeGoals workspace={workspace} profile={profile} locked={navigationLocked} onClose={() => setPanel(null)} onPreview={setPreviewPath} />}
       {panel === "files" && <NativeFiles workspace={workspace} onPreview={setPreviewPath} />}
       {panel === "hosted" && <HostedPanel snapshot={helper} locked={navigationLocked} />}

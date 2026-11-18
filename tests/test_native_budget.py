@@ -162,7 +162,8 @@ def test_interruption_keeps_observed_results_without_inventing_completion(tmp_pa
 def test_targeted_claim_cannot_take_another_due_goal(tmp_path):
     from smara.native_goals import GoalStore
     store = GoalStore(tmp_path / "goals.sqlite")
-    spec = dict(action="create", workspace=str(tmp_path), objective="Synthetic first goal", success_criteria="Evidence", profile_id="synthetic", interval_seconds=0)
+    spec = dict(action="create", workspace=str(tmp_path), objective="Synthetic first goal", success_criteria="Evidence", profile_id="synthetic", interval_seconds=0,
+                sandbox="workspace-write")   # file-editing tasks own their project; reading tasks may share it
     first = store.action(spec)
     second = store.action({**spec, "objective": "Synthetic second goal"})
     assert store.claim(second)["id"] == second

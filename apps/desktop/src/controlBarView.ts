@@ -1,6 +1,6 @@
 /** Pure helpers for the "Smara is controlling your PC" bar. */
 export type BarState = {
-  active: boolean; paused: boolean; until: number; app: string; title: string; action: string; last_ts: number;
+  active: boolean; paused: boolean; until: number; app: string; title: string; action: string; last_ts: number; agent?: string;
   hotkey: string; hotkey_ok: boolean;
 };
 
@@ -20,7 +20,8 @@ export function appName(exe: string): string {
 /** Main line of the bar. */
 export function headline(state: BarState): string {
   if (state.paused) return "Smara is paused";
-  return "Smara is controlling your PC";
+  const who = (state.agent ?? "").split(":")[0].trim();
+  return who && !["Smara chat", "Smara task"].includes(who) ? `${who} (Smara) is controlling your PC` : "Smara is controlling your PC";
 }
 
 /** What it did last, if recent (2 minutes). */

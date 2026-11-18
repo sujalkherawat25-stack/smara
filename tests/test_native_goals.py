@@ -243,14 +243,14 @@ def test_stale_cycle_cannot_override_new_lease(tmp_path):
 
 def test_interactive_project_work_and_goals_do_not_overlap(tmp_path):
     store = GoalStore(tmp_path / "goals.sqlite")
-    identity = create(store, tmp_path)
+    identity = create(store, tmp_path, sandbox="workspace-write")
     store.interactive(tmp_path, "foreground-owner", True)
     assert store.claim() is None
     with pytest.raises(ValueError, match="Another"):
         store.interactive(tmp_path, "other-owner", True)
     store.interactive(tmp_path, "foreground-owner", False)
     assert store.claim()
-    with pytest.raises(ValueError, match="A goal"):
+    with pytest.raises(ValueError, match="A task that edits files"):
         store.interactive(tmp_path, "foreground-owner", True)
 
 
@@ -259,7 +259,7 @@ def test_windows_verbatim_project_path_shares_one_interactive_key(tmp_path):
         pytest.skip("Windows canonical path spelling is required")
     verbatim = Path("\\\\?\\" + str(tmp_path.resolve()))
     store = GoalStore(tmp_path / "goals.sqlite")
-    identity = create(store, verbatim)
+    identity = create(store, verbatim, sandbox="workspace-write")
     assert len(store.list(tmp_path)) == 1
     assert len(store.list(verbatim)) == 1
     store.interactive(verbatim, "rust-desktop", True)
@@ -303,8 +303,8 @@ def test_live_goal_cannot_be_deleted_under_its_worker(tmp_path):
 
 def test_goal_claims_run_in_parallel_only_for_distinct_projects(tmp_path):
     store = GoalStore(tmp_path / "goals.sqlite")
-    first = create(store, tmp_path, objective="First project task")
-    second = create(store, tmp_path, objective="Second task in same project")
+    first = create(store, tmp_path, objective="First project task", sandbox="workspace-write")
+    second = create(store, tmp_path, objective="Second task in same project", sandbox="workspace-write")
     other_workspace = tmp_path / "other-project"
     other_workspace.mkdir()
     other = create(store, other_workspace, objective="Independent project task")
@@ -515,3 +515,40 @@ def test_new_edit_invalidates_prior_tests_in_partial_resume(tmp_path):
         observed_items={"new": {"id": "new-edit", "type": "fileChange", "status": "completed", "changes": []}})
     result = partial_checkpoint(session, {"spec": {"workspace": str(tmp_path), "task_kind": "coding"}, "checkpoint": {}}, 1)
     assert not result["outcome"]["tests"] and not result["outcome"]["passed"]
+
+
+def test_read_only_tasks_share_a_project_and_work_beside_the_chat(tmp_path):
+    store = GoalStore(tmp_path / "goals.sqlite")
+    first = create(store, tmp_path, objective="Read the ledgers")
+    second = create(store, tmp_path, objective="Check the GST portal")
+    editing = create(store, tmp_path, objective="Rewrite the report", sandbox="workspace-write")
+    store.interactive(tmp_path, "chat", True)                       # the owner is chatting in this project
+    assert {store.claim()["id"], store.claim()["id"]} == {first, second}
+    assert store.claim() is None                                    # the file-editing task waits for them and the chat
+    store.interactive(tmp_path, "chat", False)
+    store.interactive(tmp_path, "chat", True)                       # reading tasks never block the chat
+    store.interactive(tmp_path, "chat", False)
+    for goal in [store.get(first), store.get(second)]:
+        store.finish({**goal, "lease": goal["lease"]}, checkpoint(), "queued", "Continue")
+    assert store.claim()["id"] in {editing, first, second}
+
+
+def test_tasks_carry_their_agent_and_app_permission(tmp_path):
+    store = GoalStore(tmp_path / "goals.sqlite")
+    identity = create(store, tmp_path, agent_id="kiran", use_apps=True)
+    spec = store.get(identity)["spec"]
+    assert spec["agent_id"] == "kiran" and spec["use_apps"] is True
+    plain = create(store, tmp_path, objective="Plain")
+    assert store.get(plain)["spec"]["use_apps"] is False and store.get(plain)["spec"]["agent_id"] == ""
+    for bad in ({"agent_id": "Bad Agent!"}, {"use_apps": "yes"}):
+        with pytest.raises(ValueError):
+            create(store, tmp_path, objective="Bad", **bad)
+
+
+def test_parallel_limit_is_the_owners_choice_within_bounds(tmp_path):
+    store = GoalStore(tmp_path / "goals.sqlite")
+    assert store.max_parallel() == 2
+    assert store.set_max_parallel(4) == 4 and store.max_parallel() == 4
+    for bad in (0, 5, "3", True):
+        with pytest.raises(ValueError):
+            store.set_max_parallel(bad)

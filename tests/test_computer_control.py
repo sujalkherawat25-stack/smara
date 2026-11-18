@@ -109,3 +109,60 @@ def test_every_step_is_audited_with_its_screenshot(env):
     assert rows[1]["target"] == "fixture.exe · Fixture" and rows[1]["detail"]["text"] == "Rs 500" and rows[1]["screenshot"]
     assert agent_audit.screenshot_path(rows[2]["screenshot"]).read_bytes() == b"PNG"
     assert control.last_activity()["action"] == "type_text"
+
+
+# ---- one agent on the mouse and keyboard at a time ----------------------------------------------------------------
+def test_only_one_agent_drives_the_mouse_and_keyboard(env, monkeypatch):
+    first, backend, tmp = env
+    monkeypatch.setenv("SMARA_AGENT_LABEL", "Kiran: Tally day book")
+    second = Computer(tmp, backend)
+    first.call("computer_observe", {"window_id": "7"})                       # the chat takes the input
+    assert control.input_holder()["label"] == "Smara chat"
+    with pytest.raises(ValueError, match=r"Another agent \(Smara chat\) is using the mouse and keyboard"):
+        second.call("computer_observe", {"window_id": "7"})
+    assert second.call("computer_windows", {})["windows"]                      # listing windows does not need it
+    obs = first.call("computer_observe", {"window_id": "7"})                 # the holder keeps going
+    first.call("computer_act", {"observation_id": obs["observation_id"], "action": "scroll", "x": 5, "y": 5})
+    control.release_input(second.holder)                                     # only the holder can release it
+    assert control.input_holder()["holder"] == first.holder
+    control.release_input(first.holder)
+    second.call("computer_observe", {"window_id": "7"})
+    assert control.input_holder()["label"] == "Kiran: Tally day book"
+
+
+def test_the_input_lapses_after_the_lease_or_when_its_process_is_gone(env):
+    computer, _, _ = env
+    control._write(control.input_path(), {"holder": "old", "label": "x", "pid": 1, "until": time.time() + 60})
+    assert control.input_holder() is None or control.input_holder()["pid"] == 1   # pid 1 is not ours: usually gone
+    control._write(control.input_path(), {"holder": "old", "label": "x", "pid": __import__("os").getpid(), "until": time.time() - 1})
+    assert control.input_holder() is None                                    # lease over
+    computer.call("computer_observe", {"window_id": "7"})
+    assert control.input_holder()["holder"] == computer.holder
+
+
+def test_background_tasks_get_app_tools_only_when_allowed(tmp_path):
+    from smara.native_provider import ChatEndpoint, ResponsesAdapter
+    from smara.native_runtime import launch_options
+    adapter = ResponsesAdapter(ChatEndpoint("https://example.com/v2", "test", "key"))
+    try:
+        plain, _ = launch_options(adapter, home=tmp_path / "h", workspace=tmp_path)
+        assert 'mcp_servers.smara_computer.enabled=false' in plain
+        task, _ = launch_options(adapter, home=tmp_path / "h", workspace=tmp_path, computer=True, agent_label="Kiran: Tally", task_id="goal42")
+        joined = " ".join(task)
+        assert 'mcp_servers.smara_computer.enabled=true' in task
+        assert 'mcp_servers.smara_computer.env.SMARA_TASK_ID="goal42"' in task
+        assert 'mcp_servers.smara_computer.env.SMARA_AGENT_LABEL="Kiran: Tally"' in task
+        assert 'mcp_servers.smara_computer.tools.computer_act_confirmed.approval_mode="prompt"' in joined
+    finally:
+        adapter.server.server_close()
+        adapter.client.close()
+
+
+def test_a_task_works_as_its_agent():
+    from smara.native_goal_runtime import goal_instructions, task_label
+    spec = {"agent_id": "kiran", "objective": "Reconcile the November day book with the bank statement"}
+    assert task_label(spec).startswith("Kiran: Reconcile the November")
+    text = goal_instructions(spec, "BASE")
+    assert text.startswith("BASE") and "You are Kiran, the shop's Accounts" in text and "Tally" in text
+    assert goal_instructions({"agent_id": "", "objective": "x"}, "BASE") == "BASE"
+    assert goal_instructions({"agent_id": "nobody", "objective": "x"}, "BASE") == "BASE"

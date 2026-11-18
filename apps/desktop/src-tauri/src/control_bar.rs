@@ -27,6 +27,8 @@ pub struct BarState {
     pub title: String,
     pub action: String,
     pub last_ts: f64,
+    /// The agent holding the mouse and keyboard now (the input lease), else the one that acted last.
+    pub agent: String,
     pub hotkey: String,
     pub hotkey_ok: bool,
 }
@@ -66,8 +68,11 @@ pub fn state_in(dir: &Path, at: f64) -> BarState {
     }
     let last = read_json(&dir.join("computer-activity.json")).flatten().unwrap_or(Value::Null);
     let text = |key: &str| last[key].as_str().unwrap_or("").chars().take(80).collect::<String>();
+    let input = read_json(&dir.join("computer-input.json")).flatten().unwrap_or(Value::Null);
+    let holder = if input["until"].as_f64().unwrap_or(0.0) > at { input["label"].as_str().unwrap_or("").chars().take(80).collect::<String>() } else { String::new() };
+    let agent = if holder.is_empty() { text("agent") } else { holder };
     BarState { active: until > 0.0, paused, until, app: text("app"), title: text("title"), action: text("action"),
-        last_ts: last["ts"].as_f64().unwrap_or(0.0), hotkey: HOTKEY.into(), hotkey_ok: HOTKEY_OK.load(Ordering::Relaxed) }
+        last_ts: last["ts"].as_f64().unwrap_or(0.0), agent, hotkey: HOTKEY.into(), hotkey_ok: HOTKEY_OK.load(Ordering::Relaxed) }
 }
 
 /// Pause/resume (Some) or stop (stop = true). Atomic replace so a reader never sees half a file.
@@ -197,6 +202,10 @@ mod tests {
         fs::write(dir.join("computer-activity.json"), json!({"ts": 5.0, "app": "excel.exe", "title": "x".repeat(200), "action": "type_text"}).to_string()).unwrap();
         let state = state_in(&dir, now());
         assert_eq!((state.app.as_str(), state.action.as_str(), state.title.len()), ("excel.exe", "type_text", 80));
+        let at = now();
+        fs::write(dir.join("computer-input.json"), json!({"label": "Kiran: day book", "until": at + 10.0}).to_string()).unwrap();
+        assert_eq!(state_in(&dir, at).agent, "Kiran: day book");
+        assert_eq!(state_in(&dir, at + 11.0).agent, "");                 // lease over, no agent in the last action
         fs::remove_dir_all(dir).unwrap();
     }
 }

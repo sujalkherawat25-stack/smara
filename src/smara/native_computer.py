@@ -15,7 +15,9 @@ failed or uncertain action is never blindly repeated.
 """
 from __future__ import annotations
 import argparse
+import atexit
 import base64
+import os
 import hashlib
 import json
 import re
@@ -144,6 +146,13 @@ class Computer:
         self.workspace = Path(workspace).resolve(strict=True)
         self._backend = backend  # Created on first use, so the server starts (and explains the grant) even where UIA is unavailable.
         self.latest = None; self.actions = 0; self.windows = {}
+        # Who this agent is, for the one-at-a-time mouse/keyboard lock, the Smara bar and the activity log.
+        self.holder = uuid.uuid4().hex
+        self.label = os.environ.get("SMARA_AGENT_LABEL", "") or "Smara chat"
+        self.task = os.environ.get("SMARA_TASK_ID", "")
+
+    def take_input(self):
+        control.take_input(self.holder, self.label, self.task)
 
     @property
     def backend(self):
@@ -195,6 +204,7 @@ class Computer:
 
     def launch(self, name):
         grant = self.grant()
+        self.take_input()
         from .native_windows import resolve_launch
         path = resolve_launch(name)
         before = {w["id"] for w in self.eligible(grant)}
@@ -210,6 +220,7 @@ class Computer:
         grant = self.grant()
         from .research import _is_public_http_url
         if not isinstance(url, str) or len(url) > 2000 or not _is_public_http_url(url): raise ValueError("Only public http(s) pages can be opened; private addresses and logins in the URL are refused")
+        self.take_input()
         before = {w["id"] for w in self.eligible(grant)}
         self.backend.open_url(url)
         deadline, found = time.monotonic() + 12, []
@@ -226,6 +237,7 @@ class Computer:
         grant = self.grant()
         window = next((w for w in self.eligible(grant) if w["id"] == str(window_id)), None)
         if not window: raise ValueError("Unknown window id; call computer_windows")
+        self.take_input()  # observing brings the window to the front, which would disturb another agent's typing
         identity = uuid.uuid4().hex
         raw = self.backend.observe(window, identity, screenshot=bool(screenshot), text=bool(text))
         extra = {}
@@ -282,6 +294,7 @@ class Computer:
         if not prior or grant["id"] != prior["grant_id"] or args["observation_id"] != prior["observation_id"] or time.monotonic() - prior["created"] > OBSERVATION_TTL:
             raise ValueError("Stale observation; call computer_observe again")
         if grant.get("actions", 0) >= ACTION_LIMIT: raise ValueError("Computer action allowance reached; grant a fresh session explicitly")
+        self.take_input()
         action = args["action"]
         if "element_index" in args and not any(e["index"] == args["element_index"] for e in prior["elements"]): raise ValueError("Unknown element index")
         focused = prior["focused"]
@@ -299,7 +312,7 @@ class Computer:
         self.latest = None; self.actions += 1  # The observation is spent whatever happens next.
         permitted = lambda: self.alive(grant["id"])
         window, oid = prior["window"], prior["observation_id"]
-        control.note_activity(window["app"], prior["title"], action, str(self.workspace))
+        control.note_activity(window["app"], prior["title"], action, str(self.workspace), self.label)
         # Stop and Pause cut in during pointer travel and typing too, not only between steps.
         self.backend.halt = lambda: not permitted()
         def check_focus():
@@ -424,7 +437,7 @@ def audit_call(name, args, out, error=""):
         if isinstance(out.get("effect"), dict):
             detail["changed"] = out["effect"].get("changed_ui_text")
         target = " · ".join(x for x in (str(window.get("app") or ""), str(window.get("title") or "")) if x) or str(args.get("window_id") or args.get("app") or "")
-        agent_audit.record("desktop", "computer", str(name or "?"), target=target, detail=detail,
+        agent_audit.record("desktop", "computer", str(name or "?"), task=os.environ.get("SMARA_TASK_ID", ""), target=target, detail=detail,
                            outcome=("error: " + error) if error else "ok", screenshot=out.get("image") or None)
     except Exception:  # noqa: BLE001 - the log must never break a step
         pass
@@ -440,6 +453,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--workspace", required=True)
     args = parser.parse_args(argv)
     computer = Computer(args.workspace)
+    atexit.register(control.release_input, computer.holder)
     initialized = False
     for line in sys.stdin:
         identity = None

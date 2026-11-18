@@ -224,3 +224,42 @@ screenshots go to the audit log in M2.
 Live check on this PC (debug build, throwaway data folder): the bar appeared within half a second of a grant, was
 topmost and did not take focus; a real click on Pause wrote `paused: true, by: bar`; Ctrl+Alt+Esc wrote Stop
 (`by: hotkey`) and the bar closed.
+
+## 7. Milestone 3: several agents at once
+
+Built on the existing background-task system (`native_goals` / `native_goal_runtime`: durable tasks, budgets,
+approvals, pause/stop/resume, event log), not a second runtime.
+
+* **Task board** (toolbar → Task board, `NativeTaskBoard.tsx`). Every task in every project, in columns:
+  Needs you / Working / Waiting to start / Paused or stuck / Done. Each card shows:
+  * the agent and the task
+  * the project, and whether it edits files or uses apps
+  * rounds used and the live step
+  * approvals with Approve/Deny
+  * Pause/Resume/Stop/Accept/Remove
+  * a Log (today's PC steps from the activity log, plus progress events)
+* **New task** from the board: what to do, when it is done, **which agent** (Kiran, Rohan, Scout, Nisha or the
+  owner's own), project, "may change files", "may use my apps". The agent's instructions are added to the task's
+  model session.
+* **Limits.**
+  * "At once" is 1 to 4 tasks (default 2, the owner chooses).
+  * Tasks that only read can work side by side in one project.
+  * A task that edits files has its project to itself, and the chat waits for it, as before.
+  * Reading tasks no longer block the chat.
+  * Each task keeps its own rounds/requests/token budget.
+* **One agent on the mouse and keyboard.**
+  * `computer-input.json` is a lease that an agent takes before observing (which brings a window forward),
+    acting, launching an app or opening a page. Each step renews it.
+  * It lapses 20 s after the last step, or at once when the holder's process is gone.
+  * Another agent gets a clear "Another agent (Kiran: …) is using the mouse and keyboard; wait about N seconds,
+    or do work that does not need them" and does not act.
+  * Excel through COM, Tally's XML port, files and the browsers do not need the lease.
+  * The board and the Smara bar name the agent that holds it.
+* **Apps for background tasks**: only when "may use my apps" is ticked. The live grant, the allowed-apps list,
+  Pause/Stop and approval for critical steps all still apply.
+* **Audit**: a background task's tool calls and approval answers go to the activity log under the task's id, so
+  the board's Log shows them.
+
+Checked for real: two separate processes raced for the input lock 200 times each. The lock was never held by the
+wrong agent and every refusal was the clean "Another agent" message. This run found and fixed a Windows-only crash:
+creating the lock file while the other process is deleting it raises "permission denied", not "exists".
