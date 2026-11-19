@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from smara import native_prompt
-from smara.native_runtime import FAST_CONTEXT_TOKENS
+from smara.native_runtime import COMPACT_CONTEXT_TOKENS
 
 
 def test_base_prompt_is_short_smara_and_keeps_the_safety_rules(tmp_path):
@@ -16,12 +16,14 @@ def test_base_prompt_is_short_smara_and_keeps_the_safety_rules(tmp_path):
     assert native_prompt.write_base_prompt(tmp_path) == path   # rewriting is idempotent
 
 
-def test_long_chats_compact_but_leave_room_for_multi_step_work():
-    # 32k compacted every few steps once pages and screenshots were in play, and the agent lost its place.
-    assert 64_000 <= FAST_CONTEXT_TOKENS <= 128_000
+def test_long_chats_compact_at_800k_on_a_1m_window_and_earlier_on_smaller_models():
+    # 32k, then 96k, compacted every few steps once pages and screenshots were in play, and the agent lost its place.
+    assert COMPACT_CONTEXT_TOKENS == 800_000
+    assert min(int(1_048_576 * .8), COMPACT_CONTEXT_TOKENS) == 800_000        # glm5.3: 1M window
+    assert min(int(131_072 * .8), COMPACT_CONTEXT_TOKENS) == 104_857          # a 131k model keeps its margin
     source = Path(native_prompt.__file__).with_name("native_runtime.py").read_text(encoding="utf-8")
     assert 'settings["model_instructions_file"] = str(write_base_prompt(home))' in source
-    assert "min(int(window * .8), FAST_CONTEXT_TOKENS)" in source
+    assert "min(int(window * .8), COMPACT_CONTEXT_TOKENS)" in source
 
 
 def test_chats_reply_at_low_reasoning_and_greetings_skip_memory_lookup():
@@ -57,3 +59,25 @@ def test_websites_go_to_the_browser_tools_and_apps_to_the_computer_tools():
     described = {t["name"]: t["description"] for t in nc.TOOLS}
     assert described["computer_open_url"].startswith("Last resort for websites")
     assert "Not for websites" in described["computer_request_access"]
+
+
+def test_desktop_only_offers_models_with_a_1m_window_and_hides_the_rest_without_deleting_them(tmp_path, monkeypatch):
+    import json
+    from smara import native_management as management
+    from smara.native_profiles import desktop_ready, profile_window
+    sarvam = {"base_url": "https://api.sarvam.ai/v2", "provider": "sarvam", "auth_header": "api-subscription-key", "credential_name": "K", "updated_at": ""}
+    glm = {**sarvam, "id": "glm", "label": "glm", "model": "glm5.3"}
+    small = {**sarvam, "id": "small", "label": "gemma", "model": "gemma4"}
+    custom_small = {"id": "c", "label": "c", "model": "x", "provider": "custom", "base_url": "https://example.test/v1", "auth_header": "authorization", "credential_name": "K", "updated_at": "", "context_window": 128_000}
+    unknown = {**custom_small, "id": "u", "label": "u", "context_window": None}
+    unknown.pop("context_window")
+    assert profile_window(glm) == 1_048_576 and profile_window(small) == 131_072 and profile_window(unknown) is None
+    assert [desktop_ready(p) for p in (glm, small, custom_small, unknown)] == [True, False, False, True]
+    state = tmp_path / "desktop.json"
+    monkeypatch.setenv("SMARA_DESKTOP_STATE", str(state))
+    monkeypatch.setenv("SMARA_DESKTOP_CREDENTIALS", str(tmp_path / "credentials.json"))
+    state.write_text(json.dumps({"workspace": str(tmp_path)}))
+    (tmp_path / "native-settings.json").write_text(json.dumps({"model_profiles": [glm, small, custom_small, unknown], "active_model": "glm"}))
+    offered = [p["id"] for p in management.bootstrap()["profiles"]]
+    assert offered == ["glm", "u"]
+    assert len(json.loads((tmp_path / "native-settings.json").read_text())["model_profiles"]) == 4   # hidden, never deleted

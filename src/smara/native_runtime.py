@@ -23,10 +23,10 @@ from .native_provider import ChatEndpoint, ResponsesAdapter
 
 # Every message re-sends the whole conversation (no prompt cache on most providers), so long chats are compacted early:
 # a chat that had grown to ~65k tokens made even "hi" take 8-10 s. The compacted summary keeps what matters.
-# Compact long chats at this size. 32k compacted every few steps once screenshots and pages were in play, and the
-# agent lost track of what it had done (it repeated "re-check the window" steps). Provider time barely depends on
-# prompt size once seen (1.2-1.9 s at 2k-45k tokens), so leave room for real multi-step work.
-FAST_CONTEXT_TOKENS = 96_000
+# Compact long chats at 800k tokens: the owner's models have 1M-token windows. Earlier limits (32k, then 96k) compacted
+# every few steps once pages and screenshots were in play, and the agent lost track of what it had done. A model with a
+# smaller known window still compacts at 80% of it (see model_auto_compact_token_limit below).
+COMPACT_CONTEXT_TOKENS = 800_000
 
 
 class NativeProjectActivity:
@@ -177,7 +177,7 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
     window = adapter.endpoint.effective_context_window
     if window:
         settings["model_context_window"] = window
-    settings["model_auto_compact_token_limit"] = min(int(window * .8), FAST_CONTEXT_TOKENS) if window else FAST_CONTEXT_TOKENS
+    settings["model_auto_compact_token_limit"] = min(int(window * .8), COMPACT_CONTEXT_TOKENS) if window else COMPACT_CONTEXT_TOKENS
     if interactive:
         # Chats answer at low reasoning: measured on GLM-5.3, a one-line reply took 1.3-1.8 s with ~130 hidden reasoning
         # tokens at the provider default, 0.9-1.1 s and none at low. Background tasks keep the default for harder work.

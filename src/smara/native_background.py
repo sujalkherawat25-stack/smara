@@ -160,12 +160,12 @@ def manage(request, store=None):
     action = request.get("action", "status")
     if action == "add" and not supplied:
         from .native_management import preferences
-        from .native_profiles import load_profiles
+        from .native_profiles import desktop_ready, load_profiles
         spec = request.get("spec") or {}
         if not any(workspace_key(p["workspace"]) == workspace_key(spec.get("workspace", "")) for p in preferences()["projects"]):
             raise ValueError("Choose a registered project")
-        if not any(p["id"] == spec.get("profile_id") for p in load_profiles()[0]):
-            raise ValueError("Choose a configured model")
+        if not any(p["id"] == spec.get("profile_id") and desktop_ready(p) for p in load_profiles()[0]):
+            raise ValueError("Choose a configured model with a 1M-token window")
     if action == "add": add(store, request)
     elif action in {"enable", "pause"}: enable(store, request.get("id"), action == "enable")
     elif action == "startup":

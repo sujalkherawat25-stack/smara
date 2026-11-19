@@ -39,6 +39,29 @@ def load_profiles(path: Path | None = None):
     return profiles, selected, read_object(vault_path)
 
 
+MIN_DESKTOP_WINDOW = 1_000_000
+
+
+def profile_window(profile: dict) -> int | None:
+    """The context window a saved model profile has: what the owner configured, bounded by the provider's published
+    window for known Sarvam models. None when nothing says (never a guess)."""
+    from urllib.parse import urlparse
+    from .native_provider import SARVAM_CONTEXT_WINDOWS
+    configured = profile.get("context_window")
+    configured = configured if isinstance(configured, int) and not isinstance(configured, bool) else None
+    known = SARVAM_CONTEXT_WINDOWS.get(str(profile.get("model"))) if urlparse(str(profile.get("base_url") or "")).hostname == "api.sarvam.ai" else None
+    if configured and known:
+        return min(configured, known)
+    return configured or known
+
+
+def desktop_ready(profile: dict) -> bool:
+    """Smara Desktop works on long multi-step jobs and compacts at 800k tokens, so it only offers models with a 1M window.
+    A model whose window is not known is kept (the owner chose it); a known smaller window is left out, not deleted."""
+    window = profile_window(profile)
+    return window is None or window >= MIN_DESKTOP_WINDOW
+
+
 def unprotect(value: str) -> str:
     if os.name != "nt":
         return value
