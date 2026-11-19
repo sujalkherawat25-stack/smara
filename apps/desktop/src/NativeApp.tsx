@@ -894,6 +894,22 @@ export default function NativeApp() {
       await startGoal(textToSend);
       return;
     }
+    if (textToSend.trim() && busyRef.current && activeTurnRef.current && !uncertain && !goalWorking && !goalPending && !lifecycleRef.current && !loadingThreadRef.current && !reviewBusyRef.current && !approvals.length && threadRef.current) {
+      // The agent is mid-task: hand the new message to the running turn. It
+      // reads it at its next step, so the owner can steer without stopping it.
+      const files = [...contextFiles], id = threadRef.current, expected = activeTurnRef.current;
+      const text = contextMessage(textToSend, files);
+      try {
+        await clientRef.current!.request("turn/steer", { threadId: id, expectedTurnId: expected, input: [{ type: "text", text, text_elements: [] }] });
+        setDraft(current => current === textToSend ? "" : current);
+        const sent = new Set(files.map(file => file.path));
+        setContextFiles(current => current.filter(file => !sent.has(file.path)));
+        setError("");
+        // The runtime normally echoes the message; show it ourselves if it does not.
+        window.setTimeout(() => setItems(current => current.some(item => item.kind === "user" && item.text.includes(textToSend.trim())) ? current : [...current, { id: `steer-${crypto.randomUUID()}`, kind: "user", text: textToSend.trim() }]), 1500);
+      } catch (reason) { setError(`Could not add that to the running task: ${String(reason)}`); }
+      return;
+    }
     if (!textToSend.trim() || goalWorking || goalPending || workers.some(workerOutstanding) || busyRef.current || lifecycleRef.current || loadingThreadRef.current || reviewBusyRef.current || approvals.length || !profile || built !== true) return;
     const filesToSend = [...contextFiles];
     if (!connected && !await connect()) return;
@@ -1385,7 +1401,8 @@ export default function NativeApp() {
         <div className="composer-toolbar"><div className="composer-context"><button type="button" aria-label="Add project files" title="Add project files" disabled={navigationLocked || !workspace} onClick={() => setContextOpen(true)}>Attach</button><NativeVoice key={workspace + threadId} disabled={navigationLocked} onTranscript={text => setDraft(current => current ? current + "\n" + text : text)} /><small>{connecting ? "Preparing project…" : ""}</small></div><div className="composer-actions">
           {canContinueTurn && !busy && <button type="button" className="continue-button" disabled={goalWorking || connecting || loadingThread} title="Start a fresh turn in this conversation; previous tools will not replay" onClick={() => void send("Continue from where you left off. First inspect the current state and completed tool results so you do not repeat actions.")}>Continue</button>}
           <select aria-label="Model" title="Choose a model" value={profile} disabled={navigationLocked} onChange={event => void selectModel(event.target.value)}><option value="" disabled>Choose model</option>{profiles.map(model => <option value={model.id} key={model.id}>{model.label}</option>)}</select>
-          <button className={busy ? "stop-button" : "primary"} aria-label={busy ? "Stop response" : "Send message"} title={busy ? "Stop response" : "Send message"} type={busy ? "button" : "submit"} disabled={reviewBusy || connecting || loadingThread || goalPending || (busy ? !turnId : workers.some(workerOutstanding) || (goalWorking && !/^\/goal(?:\s|$)/i.test(draft.trim())) || !profile || built !== true || !draft.trim() || approvals.length > 0)} onClick={busy ? () => void stopTurn() : undefined}>{busy ? "Stop" : "Send"}</button>
+          {busy && <button className="stop-button" type="button" aria-label="Stop response" title="Stop response" disabled={reviewBusy || connecting || loadingThread || goalPending || !turnId} onClick={() => void stopTurn()}>Stop</button>}
+          {(!busy || draft.trim()) && <button className="primary" aria-label={busy ? "Send to the running task" : "Send message"} title={busy ? "Send now; the agent reads it at its next step" : "Send message"} type="submit" disabled={reviewBusy || connecting || loadingThread || goalPending || (busy ? !turnId || uncertain || approvals.length > 0 : workers.some(workerOutstanding) || (goalWorking && !/^\/goal(?:\s|$)/i.test(draft.trim())) || !profile || built !== true || !draft.trim() || approvals.length > 0)}>Send</button>}
         </div></div>
       </form>}<div className="composer-status">{approvals[0] && busy && <button type="button" className="text-button ask-stop" aria-label="Stop response" title="Stop this response without answering" disabled={!turnId} onClick={() => void stopTurn()}>Stop response</button>}<small role="status">{reviewBusy ? "Saving local review…" : busy || uncertain || loadingThread || (status !== "Ready" && status !== "completed") ? status : ""}</small></div></footer>
       </div>

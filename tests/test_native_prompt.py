@@ -50,9 +50,9 @@ def test_the_computer_server_offers_the_chat_request_and_asks_first():
 def test_websites_go_to_the_browser_tools_and_apps_to_the_computer_tools():
     from smara.native_prompt import BASE_PROMPT
     from smara import native_computer as nc
-    assert "use the `browser_*` tools" in BASE_PROMPT and "not for websites" in BASE_PROMPT
+    assert "use the `browser_*` tools" in BASE_PROMPT and "You may use them whenever the job needs it" in BASE_PROMPT
     assert "Please sign in to <site> in the Smara browser window" in BASE_PROMPT
     assert "fails twice" in BASE_PROMPT and "instead of looping" in BASE_PROMPT
     described = {t["name"]: t["description"] for t in nc.TOOLS}
-    assert described["computer_open_url"].startswith("Last resort for websites")
-    assert "Not for websites" in described["computer_request_access"]
+    assert described["computer_open_url"].startswith("Open a page in the owner's own Chrome")
+    assert "Prefer the browser_* tools" in described["computer_request_access"]
