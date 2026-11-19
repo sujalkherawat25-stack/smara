@@ -3,6 +3,7 @@ import { emit } from "./mock-event";
 
 const WORKSPACE = "C:/Users/sujal/Work";
 const nowSeconds = () => Date.now() / 1000;
+let listCalls = 0;
 
 const setup = {
   preferences: {
@@ -19,7 +20,7 @@ const setup = {
   computer: { enabled: false, expires: null },
   agents: {
     roster: [
-      { id: "smara", name: "Smara", role: "Manager", icon: "✦", instructions: "You are the owner's manager and first point of contact.", preset: true },
+      { id: "smara", name: "Smara", role: "Manager", icon: "S", instructions: "You are the owner's manager and first point of contact.", preset: true },
       { id: "meera", name: "Meera", role: "Mail handler", icon: "📧", instructions: "You read the shop's inbox every morning, sort what matters and draft replies. Never send without asking.\n\nStanding rules from the owner:\n- Always cc the owner on replies to GST officers.", preset: false },
       { id: "kiran", name: "Kiran", role: "Accounts", icon: "📒", instructions: "", preset: true },
       { id: "rohan", name: "Rohan", role: "Dues", icon: "🔔", instructions: "", preset: true },
@@ -99,6 +100,16 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
     case "native_manage": {
       const request = (args.request ?? {}) as Record<string, unknown>;
       if (request.operation === "audit") return auditPreview(request) as T;
+      if (request.operation === "agents" && request.action === "list") {
+        // Preview: Smara "hires" Zoya a moment after the app opens, so the live sidebar refresh and the New badge show.
+        listCalls += 1;
+        const zoya = { id: "zoya-1a2b3c", name: "Zoya", role: "Instagram DMs", icon: "💬", instructions: "You draft replies to Instagram DMs about prices. Never send without asking.", preset: false };
+        const roster = listCalls >= 2 ? [...setup.agents.roster, zoya] : [...setup.agents.roster];
+        return { agents: { ...setup.agents, roster: roster.map(agent => ({ ...agent })) } } as T;
+      }
+      if (request.operation === "background") return { startup: false, service: { running: true }, detail: "", schedules: [
+        { id: "r1", name: "Meera: Read the inbox and draft replies", enabled: 1, runs: 3, max_runs: 30, due: nowSeconds() + 3600 * 15, interval: 86400,
+          spec: { agent_id: "meera" }, goal_state: "completed", detail: "" }] } as T;
       if (request.operation === "goals") return goalsPreview((request.goal ?? {}) as Record<string, unknown>) as T;
       if (request.operation === "hosted_memory") return { connected: true, shop: "Sharma Traders", enabled: request.action === "set" ? request.enabled === true : false } as T;
       if (request.operation === "hosted_approvals") return hostedPreview(request) as T;

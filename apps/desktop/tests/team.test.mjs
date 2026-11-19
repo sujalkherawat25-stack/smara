@@ -62,3 +62,24 @@ test("routines are listed under their own employee, with a plain status line", (
   assert.match(t.routineLine({ ...mine, enabled: 0 }), /paused/);
   assert.match(t.routineLine({ ...mine, goal_state: "awaiting_acceptance" }), /waiting for you to accept the last report/);
 });
+
+test("new hires are found, unchanged rosters are not redrawn, and only team-changing tools trigger a refresh", () => {
+  assert.deepEqual(t.newMembers(["smara", "kiran"], ["smara", "kiran", "zoya-1a2b3c"]), ["zoya-1a2b3c"]);
+  assert.deepEqual(t.newMembers(["smara", "kiran"], ["smara"]), []);
+  const r = { default: "smara", assignments: {}, roster: [{ id: "smara", name: "Smara", role: "Manager", icon: "S", instructions: "x", preset: true }] };
+  assert.equal(t.sameRoster(r, JSON.parse(JSON.stringify(r))), true);
+  assert.equal(t.sameRoster(r, { ...r, roster: [{ ...r.roster[0], name: "Asha" }] }), false);
+  assert.equal(t.changesTeam({ type: "mcpToolCall", tool: "team_hire" }), true);
+  assert.equal(t.changesTeam({ type: "mcpToolCall", tool: "team_remove" }), true);
+  assert.equal(t.changesTeam({ type: "mcpToolCall", tool: "team_list" }), false);
+  assert.equal(t.changesTeam({ type: "commandExecution", tool: "team_hire" }), false);
+});
+
+test("the sidebar re-reads the team after a team change, after each reply and on window focus", () => {
+  const app = readFileSync(new URL("../src/NativeApp.tsx", import.meta.url), "utf8");
+  assert.match(app, /nativeSettings\("agents", \{ action: "list" \}\)/);
+  assert.match(app, /changesTeam\(item\)\) refreshTeam\(\)/);
+  assert.match(app, /window\.addEventListener\("focus", focus\)/);
+  assert.match(app, /member-new/);
+  assert.match(app, /manager \? "S" : initials\(agent\.name\)/);
+});

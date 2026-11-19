@@ -19,7 +19,7 @@ function parseToolMessage(message: string): { tool: string; target: string } | n
   return match ? { tool: match[1], target: match[2].trim() } : null;
 }
 
-const TEAM_TITLES: Record<string, string> = { "Hire an employee": "team_hire", "Change an employee": "team_update", "Remember a rule": "team_remember", "Set up a routine": "team_routine" };
+const TEAM_TITLES: Record<string, string> = { "Hire an employee": "team_hire", "Change an employee": "team_update", "Remember a rule": "team_remember", "Set up a routine": "team_routine", "Remove an employee": "team_remove" };
 function toolFromTitle(title: string): string { return TEAM_TITLES[title] ?? ""; }
 
 /** Team changes (hire, change, remember) in the owner's words: who, what, and the job text to check. */
@@ -29,6 +29,8 @@ function teamView(server: string, tool: string, params: Record<string, unknown>)
   if (tool === "team_hire") return { kind: "team", title: `Hire ${who || "a new employee"}${str(params.role) ? ` as ${str(params.role)}` : ""}?`,
     summary: str(params.job), detail: "", risky: false };
   if (tool === "team_remember") return { kind: "team", title: `Should ${who || "this employee"} remember this from now on?`, summary: str(params.rule), detail: "", risky: false };
+  if (tool === "team_remove") return { kind: "team", title: `Remove ${who || "this employee"} from the team?`,
+    summary: "Their past chats stay. You can hire someone again any time.", detail: "", risky: true };
   if (tool === "team_routine") {
     const when = { hour: "every hour", day: `every day at ${str(params.at) || "09:00"}`, week: `every week at ${str(params.at) || "09:00"}` }[str(params.every) as "hour"] ?? str(params.every);
     return { kind: "team", title: `Let ${who || "this employee"} do this ${when}?`, summary: str(params.task),

@@ -62,3 +62,9 @@ test("a routine asks in plain words with the schedule", () => {
   assert.equal(view.title, "Let Kiran do this every day at 09:00?");
   assert.equal(view.summary, "Check unpaid invoices");
 });
+
+test("removing an employee is a risky ask with the name", () => {
+  const view = askView({ method: "mcpServer/elicitation/request", params: { message: "Allow the smara_team MCP server to run tool \"team_remove\"?", _meta: { tool_name: "team_remove", tool_params: { employee: "Zoya" } } } });
+  assert.equal(view.title, "Remove Zoya from the team?");
+  assert.equal(view.risky, true);
+});

@@ -30,7 +30,7 @@ import NativeOutcome from "./NativeOutcome";
 import { requestQuestions, waitingReason } from "./chatStatus";
 import NativeAskCard from "./NativeAskCard";
 import type { ArchivedActions } from "./NativeArchived";
-import { HIRE_STARTER, MANAGER_ID, blocksChat, initials, memberStatus, splitRoster } from "./team";
+import { HIRE_STARTER, MANAGER_ID, blocksChat, changesTeam, initials, memberStatus, newMembers, sameRoster, splitRoster } from "./team";
 import JobPanel from "./ui/JobPanel";
 import { nativeSettings, sameWorkspace, type NativeSetup } from "./nativeApi";
 import { NativeRpc, RpcOutcomeUnknown, type RpcMessage } from "./nativeRpc";
@@ -146,6 +146,29 @@ export default function NativeApp() {
   const [earlier, setEarlier] = useState<Item[]>([]);
   const [earlierState, setEarlierState] = useState<"none" | "loading" | "loaded">("none");
   const [roster, setRoster] = useState<RosterData>(EMPTY_ROSTER);
+  /** Employees who just joined (hired in chat): shown with a "New" badge and a short highlight. */
+  const [freshIds, setFreshIds] = useState<string[]>([]);
+  const rosterIdsRef = useRef<string[]>([]);
+  useEffect(() => {
+    const ids = roster.roster.map(agent => agent.id);
+    const before = rosterIdsRef.current;
+    if (before.length) {
+      const joined = newMembers(before, ids);
+      if (joined.length) setFreshIds(current => [...current, ...joined]);
+    }
+    rosterIdsRef.current = ids;
+  }, [roster]);
+  /** Re-read the team from disk: Smara's team tools change it from the runtime, outside this window. */
+  const refreshTeam = () => {
+    void nativeSettings("agents", { action: "list" })
+      .then(value => { if (value.agents) setRoster(current => sameRoster(current, value.agents!) ? current : value.agents!); })
+      .catch(() => { /* Keep the team already shown. */ });
+  };
+  useEffect(() => {
+    const focus = () => refreshTeam();
+    window.addEventListener("focus", focus);
+    return () => window.removeEventListener("focus", focus);
+  }, []);
   const [inboxCount, setInboxCount] = useState(0);   // what the Approvals inbox last counted (hosted + tasks + this chat)
   const [selectedAgent, setSelectedAgent] = useState("");
   const [helper, setHelper] = useState<HelperSnapshot>(undefined);
@@ -625,6 +648,7 @@ export default function NativeApp() {
       const item = params.item as Record<string, unknown> | undefined;
       if (!item) return;
       setWorkers(current => mergeWorkers(current, item));
+      if (message.method === "item/completed" && changesTeam(item)) refreshTeam();
       setItems(current => mergeItem(current, displayItem(item), false, message.method === "item/started"));
     } else if (message.method === "turn/started") {
       const turn = params.turn as { id: string };
@@ -643,6 +667,7 @@ export default function NativeApp() {
       setApprovals(current => current.filter(item => !(item.params.threadId === params.threadId && item.params.turnId === turn.id)));
       setStatus(turn.status);
       if (turn.status !== "completed" && turn.error?.message) setError(displayRuntimeError(turn.error.message));
+      refreshTeam();
       void sealTurn();
     } else if (message.method === "error" || message.method === "smara/runtimeError") {
       setError(displayRuntimeError(params.message ?? (params.error as { message?: string })?.message ?? "Native runtime error"));
@@ -1062,7 +1087,7 @@ export default function NativeApp() {
   const windowed = visibleWindow(transcriptItems, visibleLimit);
   const agentThreads = chatsForAgent(threads, roster, selectedAgent || roster.default);
   const currentAgent = agentById(roster, selectedAgent || roster.default);
-  const avatarInitial = currentAgent?.id === MANAGER_ID ? "✦" : currentAgent ? initials(currentAgent.name) : "✦";
+  const avatarInitial = currentAgent?.id === MANAGER_ID ? "S" : currentAgent ? initials(currentAgent.name) : "S";
   const avatarTone = !currentAgent || currentAgent.id === MANAGER_ID ? "manager" : agentTone(currentAgent);
   const agentSearch = agentQuery.trim().toLowerCase();
   const teamSplit = splitRoster(roster);
@@ -1215,11 +1240,12 @@ export default function NativeApp() {
           const selected = agent.id === activeAgentId;
           const manager = agent.id === MANAGER_ID;
           const state = selected && busy ? { tone: "working" as const, text: "Replying…" } : memberStatus(agent.id, teamGoals, latest ? threadLabel(latest) : "", agent.role);
-          return <div className={`member${manager ? " member-manager" : ""}`} key={agent.id}>
-            <button className="member-open" aria-current={selected ? "true" : undefined} disabled={navigationLocked} onClick={() => openAgent(agent.id)}>
-              <span className="member-avatar" data-tone={manager ? "manager" : agentTone(agent)} aria-hidden="true">{manager ? "✦" : initials(agent.name)}</span>
+          const fresh = freshIds.includes(agent.id);
+          return <div className={`member${manager ? " member-manager" : ""}${fresh ? " member-new" : ""}`} key={agent.id}>
+            <button className="member-open" aria-current={selected ? "true" : undefined} disabled={navigationLocked} onClick={() => { setFreshIds(current => current.filter(id => id !== agent.id)); openAgent(agent.id); }}>
+              <span className="member-avatar" data-tone={manager ? "manager" : agentTone(agent)} aria-hidden="true">{manager ? "S" : initials(agent.name)}</span>
               <span className="member-text">
-                <span className="member-line"><span className="member-name">{agent.name}</span>{manager ? <span className="member-tag">Manager</span> : <span className="member-role">{agent.role}</span>}{latest && !manager && <time className="contact-time">{contactTime(threadTime(latest), Date.now())}</time>}</span>
+                <span className="member-line"><span className="member-name">{agent.name}</span>{fresh && <span className="member-fresh">New</span>}{manager ? <span className="member-tag">Manager</span> : <span className="member-role">{agent.role}</span>}{latest && !manager && <time className="contact-time">{contactTime(threadTime(latest), Date.now())}</time>}</span>
                 <span className="member-status" data-tone={state.tone}>{state.tone !== "idle" && <i aria-hidden="true" />}{state.text}</span>
               </span>
             </button>

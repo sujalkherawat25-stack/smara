@@ -137,3 +137,18 @@ test("a full context window gets an actionable message", () => {
   }
   assert.equal(displayRuntimeError("provider unavailable"), "provider unavailable");
 });
+
+test("background-task chats are titled by their objective, never raw JSON", () => {
+  assert.equal(threadLabel({ preview: '{"task": {"objective": "Check Tally for unpaid invoices", "cycle": 1}}' }), "Task: Check Tally for unpaid invoices");
+  assert.equal(threadLabel({ preview: '{"something": 1}' }), "Background task");
+  assert.equal(threadLabel({ preview: "hi there" }), "hi there");
+});
+
+test("tool calls read in the owner's words, with the result kept as detail", () => {
+  const hired = displayItem({ type: "mcpToolCall", id: "t1", server: "smara_team", tool: "team_hire", arguments: { name: "Zoya", role: "DMs" },
+    status: "completed", result: { content: [{ type: "text", text: "{\"hired\": {\"name\": \"Zoya\"}}" }] } });
+  assert.equal(hired.text.split("\n")[0], "Hired an employee · Zoya");
+  assert.match(hired.text, /hired/);
+  assert.equal(displayItem({ type: "mcpToolCall", id: "t2", tool: "team_list", arguments: {} }).text, "Looked at the team");
+  assert.equal(displayItem({ type: "mcpToolCall", id: "t3", tool: "browser_navigate", arguments: { url: "x" } }).text, "Browser · navigate");
+});

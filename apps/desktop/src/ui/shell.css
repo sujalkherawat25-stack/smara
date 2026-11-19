@@ -587,7 +587,7 @@
 .native-app .member-avatar[data-tone="amber"] { background: var(--smara-tone-amber); }
 .native-app .member-avatar[data-tone="blue"] { background: var(--smara-tone-blue); }
 .native-app .member-avatar[data-tone="violet"] { background: var(--smara-tone-violet); }
-.native-app .member-avatar[data-tone="manager"] { background: linear-gradient(135deg, var(--smara-accent), #c9853a); color: #fff; font-size: 16px; }
+.native-app .member-avatar[data-tone="manager"] { background: linear-gradient(135deg, #8ef0b4, #3ccf7e); color: #fff; font-size: 17px; font-weight: 800; }
 .native-app .member-text { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 1px; }
 .native-app .member-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .native-app .member-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -640,4 +640,17 @@
 .native-app .member-name { flex: 0 1 auto; min-width: 2.5em; }
 .native-app .member-tag { margin-right: 0; }
 .native-app .member-line .contact-time { margin-left: auto; }
-.native-app .avatar[data-tone="manager"] { background: linear-gradient(135deg, var(--smara-accent), #c9853a); color: #fff; }
+.native-app .avatar[data-tone="manager"] { background: linear-gradient(135deg, #8ef0b4, #3ccf7e); color: #fff; font-weight: 800; }
+
+/* A new employee hired in chat slides into the team list with a short glow and a "New" badge until opened. */
+@keyframes member-join { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes member-glow { 0% { box-shadow: 0 0 0 0 rgba(60, 207, 126, .55); } 100% { box-shadow: 0 0 0 10px rgba(60, 207, 126, 0); } }
+.native-app .member-new { animation: member-join .35s ease-out both; }
+.native-app .member-new .member-avatar { animation: member-glow 1.4s ease-out 3; }
+.native-app .member-fresh { margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 700; letter-spacing: .02em;
+  color: #0b3d22; background: #8ef0b4; }
+@media (prefers-reduced-motion: reduce) { .native-app .member-new, .native-app .member-new .member-avatar { animation: none; } }
+.native-app .job-routines { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 6px; }
+.native-app .job-routines li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px;
+  border-radius: 10px; background: rgba(60, 207, 126, .08); border: 1px solid rgba(60, 207, 126, .22); }
+.native-app .job-routines li span { font-size: 13px; line-height: 1.4; }

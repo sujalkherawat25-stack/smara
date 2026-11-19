@@ -26,8 +26,8 @@ def names():
 
 def test_changing_the_team_always_asks_the_owner_and_reading_does_not():
     assert {t["name"] for t in team.TOOLS} == {"team_list", "team_hire", "team_update", "team_remember", "team_delegate", "team_tasks",
-                                           "team_routine", "team_routines", "team_routine_pause"}
-    for name in ("team_hire", "team_update", "team_remember", "team_routine"):
+                                           "team_routine", "team_routines", "team_routine_pause", "team_remove"}
+    for name in ("team_hire", "team_update", "team_remember", "team_routine", "team_remove"):
         assert team.approval_mode(name) == "prompt"
     for name in ("team_list", "team_tasks", "team_delegate", "team_routines", "team_routine_pause"):
         assert team.approval_mode(name) == "approve"
@@ -95,7 +95,7 @@ def test_the_server_speaks_mcp_and_reports_refusals_as_tool_errors(setup, monkey
     team.main([])
     replies = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert replies[0]["result"]["serverInfo"]["name"] == "smara-team"
-    assert len(replies[1]["result"]["tools"]) == 9
+    assert len(replies[1]["result"]["tools"]) == 10
     assert replies[2]["result"]["isError"] is True and "Team change refused" in replies[2]["result"]["content"][0]["text"]
 
 
@@ -152,3 +152,23 @@ def test_due_routine_queues_a_goal_that_belongs_to_the_employee(ledger, setup):
     goal = ledger.list()[0]
     assert goal["spec"]["agent_id"] == "kiran" and goal["spec"]["sandbox"] == "read-only"
     assert native_background.enqueue_due(ledger, time.time() + 7300) == []   # waits for the owner to accept the first report
+
+
+def test_a_second_person_for_the_same_role_is_refused_with_who_already_does_it(setup):
+    team.call("team_hire", {"name": "Arjun", "role": "LinkedIn manager", "job": "You draft LinkedIn posts. Never post without asking."})
+    with pytest.raises(ValueError, match="Arjun is already your LinkedIn manager"):
+        team.call("team_hire", {"name": "Dev", "role": "linkedin manager", "job": "x"})
+
+
+def test_removing_a_hired_employee_keeps_smara_and_built_ins(setup):
+    team.call("team_hire", {"name": "Zoya", "role": "Instagram DMs", "job": "You draft replies to Instagram DMs."})
+    assert "Zoya" in names()
+    out = team.call("team_remove", {"employee": "zoya"})
+    assert out["removed"] == "Zoya" and "Zoya" not in names()
+    with pytest.raises(ValueError, match="manager and stays"):
+        team.call("team_remove", {"employee": "Smara"})
+    kiran = next(a for a in team.call("team_list", {})["team"] if a["name"] == "Kiran")
+    assert kiran["built_in"] is True
+    with pytest.raises(ValueError, match="built in"):
+        team.call("team_remove", {"employee": "Kiran"})
+    assert "Kiran" in names() and "Smara" in names()
