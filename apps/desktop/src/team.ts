@@ -76,7 +76,7 @@ export function sameRoster(a: AgentRoster, b: AgentRoster): boolean {
   return key(a) === key(b);
 }
 
-const TEAM_CHANGING = new Set(["team_hire", "team_update", "team_remember", "team_remove"]);
+const TEAM_CHANGING = new Set(["team_hire", "team_update", "team_remember", "team_remove", "skill_save", "skill_forget"]);
 /** A finished tool call that may have changed the team, so the sidebar re-reads it. */
 export function changesTeam(item: Record<string, unknown>): boolean {
   return item.type === "mcpToolCall" && TEAM_CHANGING.has(String(item.tool ?? ""));

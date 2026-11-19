@@ -19,16 +19,22 @@ function parseToolMessage(message: string): { tool: string; target: string } | n
   return match ? { tool: match[1], target: match[2].trim() } : null;
 }
 
-const TEAM_TITLES: Record<string, string> = { "Hire an employee": "team_hire", "Change an employee": "team_update", "Remember a rule": "team_remember", "Set up a routine": "team_routine", "Remove an employee": "team_remove" };
+const TEAM_TITLES: Record<string, string> = { "Hire an employee": "team_hire", "Change an employee": "team_update", "Remember a rule": "team_remember", "Set up a routine": "team_routine", "Remove an employee": "team_remove", "Save a skill": "skill_save", "Forget a skill": "skill_forget" };
 function toolFromTitle(title: string): string { return TEAM_TITLES[title] ?? ""; }
 
 /** Team changes (hire, change, remember) in the owner's words: who, what, and the job text to check. */
 function teamView(server: string, tool: string, params: Record<string, unknown>): AskView | null {
-  if (server !== "smara_team" && !tool.startsWith("team_")) return null;
+  if (server !== "smara_team" && !tool.startsWith("team_") && !tool.startsWith("skill_")) return null;
   const who = str(params.name) || str(params.employee);
   if (tool === "team_hire") return { kind: "team", title: `Hire ${who || "a new employee"}${str(params.role) ? ` as ${str(params.role)}` : ""}?`,
     summary: str(params.job), detail: "", risky: false };
   if (tool === "team_remember") return { kind: "team", title: `Should ${who || "this employee"} remember this from now on?`, summary: str(params.rule), detail: "", risky: false };
+  if (tool.startsWith("skill_")) {
+    // Skill tools name the employee by id ("kiran", "zoya-1a2b3c"); show it as a name.
+    const id = str(params.employee).replace(/-[0-9a-f]{6}$/, "");
+    const employee = id ? id.charAt(0).toUpperCase() + id.slice(1) : "";
+    return skillView(tool, employee, params);
+  }
   if (tool === "team_remove") return { kind: "team", title: `Remove ${who || "this employee"} from the team?`,
     summary: "Their past chats stay. You can hire someone again any time.", detail: "", risky: true };
   if (tool === "team_routine") {
@@ -40,6 +46,22 @@ function teamView(server: string, tool: string, params: Record<string, unknown>)
     const changes = [str(params.name) && `name → ${str(params.name)}`, str(params.role) && `role → ${str(params.role)}`].filter(Boolean).join(", ");
     return { kind: "team", title: `Change ${str(params.employee) || "this employee"}?`, summary: [changes, str(params.job) && `New job: ${str(params.job)}`].filter(Boolean).join("\n\n"), detail: "", risky: false };
   }
+  return null;
+}
+
+/** Teaching or forgetting a workflow: the owner checks the exact steps the employee will follow from now on. */
+function skillView(tool: string, who: string, params: Record<string, unknown>): AskView | null {
+  if (tool === "skill_save") {
+    const steps = Array.isArray(params.steps) ? params.steps.map(String) : str(params.steps).split(/\r?\n/).filter(Boolean);
+    const extra = [str(params.output) && `Output: ${str(params.output)}`,
+      Array.isArray(params.never) && params.never.length ? `Never: ${params.never.map(String).join("; ")}` : "",
+      str(params.change_note) && `Change: ${str(params.change_note)}`].filter(Boolean).join("\n");
+    return { kind: "team", title: `Teach ${who || "this employee"} “${str(params.name) || "this workflow"}”?`,
+      summary: [`Use when: ${str(params.when_to_use)}`, steps.map((step, i) => `${i + 1}. ${step}`).join("\n")].join("\n\n"),
+      detail: extra, risky: false };
+  }
+  if (tool === "skill_forget") return { kind: "team", title: `Should ${who || "this employee"} forget “${str(params.name)}”?`,
+    summary: "They will stop following this workflow. You can teach it again any time.", detail: "", risky: true };
   return null;
 }
 

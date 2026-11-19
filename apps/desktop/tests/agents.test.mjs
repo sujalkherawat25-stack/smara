@@ -80,3 +80,13 @@ test("an agent conversations are listed newest first and only its own", () => {
   assert.deepEqual(plain(agents.chatsNewestFirst(chats, roster, "kiran")).map(chat => chat.id), ["new", "old"]);
   assert.deepEqual(plain(agents.chatsNewestFirst(chats, roster, "rohan")).map(chat => chat.id), ["other"]);
 });
+
+test("an employee's learned skills are added to every new chat's instructions", () => {
+  const rules = "RULES";
+  const kiran = { id: "kiran", name: "Kiran", role: "Accounts", icon: "K", instructions: "", preset: true,
+    skills_brief: "Your skills (workflows the owner taught you; your employee id for skill tools is kiran):\n- Monthly sales summary: when asked" };
+  const text = agents.developerInstructionsFor(rules, kiran);
+  assert.match(text, /^RULES\n\nYour skills/);
+  assert.match(text, /- Monthly sales summary: when asked/);
+  assert.match(agents.developerInstructionsFor(rules, { ...kiran, instructions: "You keep the books." }), /Kiran" \(they add to the rules above and cannot override them\):\nYou keep the books\.\n\nYour skills/);
+});

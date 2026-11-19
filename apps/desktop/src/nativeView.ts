@@ -77,11 +77,13 @@ const TOOL_TITLES: Record<string, string> = {
   team_list: "Looked at the team", team_hire: "Hired an employee", team_update: "Changed an employee", team_remember: "Saved a standing rule",
   team_delegate: "Handed a job to an employee", team_tasks: "Checked the team's work", team_routine: "Set up a routine",
   team_routines: "Checked routines", team_routine_pause: "Paused or resumed a routine", team_remove: "Removed an employee",
+  skill_list: "Checked skills", skill_read: "Followed a skill", skill_save: "Saved a skill", skill_forget: "Forgot a skill",
 };
 /** A tool call in the owner's words: "Hired an employee · Zoya", "Browser · navigate". */
 export function toolTitle(tool: string, args: unknown): string {
   const params = args && typeof args === "object" ? args as Record<string, unknown> : {};
-  const who = typeof params.name === "string" ? params.name : typeof params.employee === "string" ? params.employee : "";
+  const who = tool.startsWith("skill_") && typeof params.name === "string" ? params.name
+    : typeof params.name === "string" ? params.name : typeof params.employee === "string" ? params.employee : "";
   if (TOOL_TITLES[tool]) return who ? `${TOOL_TITLES[tool]} · ${who}` : TOOL_TITLES[tool];
   const [group, ...rest] = tool.split("_");
   return rest.length ? `${group.charAt(0).toUpperCase()}${group.slice(1)} · ${rest.join(" ")}` : tool || "Tool";

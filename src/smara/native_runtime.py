@@ -251,6 +251,8 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         "mcp_servers.smara_team.env.PYTHONIOENCODING": "utf-8", "mcp_servers.smara_team.env.PYTHONUTF8": "1",
         "mcp_servers.smara_team.required": False, "mcp_servers.smara_team.tool_timeout_sec": 30,
         "mcp_servers.smara_team.default_tools_approval_mode": "prompt"})
+    from .native_skills import root as skills_root
+    settings["mcp_servers.smara_team.env.SMARA_AGENT_SKILLS_DIR"] = str(skills_root().resolve())  # one place for learned skills
     if not getattr(sys, "frozen", False):
         settings["mcp_servers.smara_team.env.PYTHONPATH"] = str((source_root() / "src").resolve())
     for entry in team_tools:

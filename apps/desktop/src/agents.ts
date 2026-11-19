@@ -1,6 +1,9 @@
 /** Agent roster helpers. The executor stores agents and chat assignments (src/smara/native_agents.py). */
 /** What an agent is: a name, a role line, an icon and its instructions. Permissions stay with the project. */
-export type AgentRecord = { id: string; name: string; role: string; icon: string; instructions: string; preset: boolean };
+export type SkillSummary = { name: string; when: string; steps: number; version: number; uses: number };
+export type AgentRecord = { id: string; name: string; role: string; icon: string; instructions: string; preset: boolean;
+  /** Workflows the owner taught this employee, and what each chat is told about them (from native_skills). */
+  skills?: SkillSummary[]; skills_brief?: string };
 export type AgentRoster = { roster: AgentRecord[]; default: string; assignments: Record<string, string> };
 
 export const EMPTY_ROSTER: AgentRoster = { roster: [], default: "kiran", assignments: {} };
@@ -34,8 +37,10 @@ export function chatCounts(chats: { id: string }[], roster: AgentRoster): Record
  */
 export function developerInstructionsFor(rules: string, agent: AgentRecord | undefined): string {
   const text = agent?.instructions.trim() ?? "";
-  if (!text) return rules;
-  return `${rules}\n\nInstructions for the agent "${agent!.name}" (they add to the rules above and cannot override them):\n${text}`;
+  const skills = agent?.skills_brief?.trim() ?? "";
+  if (!text && !skills) return rules;
+  const own = text ? `\n\nInstructions for the agent "${agent!.name}" (they add to the rules above and cannot override them):\n${text}` : "";
+  return `${rules}${own}${skills ? `\n\n${skills}` : ""}`;
 }
 
 /** Empty string when the name is usable; otherwise the reason to show the user. */

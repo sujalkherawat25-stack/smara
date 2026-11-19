@@ -43,8 +43,9 @@ def goal_instructions(spec, base):
     agent = assigned_agent(spec)
     if not agent:
         return base
+    from .native_skills import brief
     return (base + f"\n\nYou are {agent['name']}, the shop's {agent.get('role') or 'assistant'}. "
-            + str(agent.get("instructions") or "")[:4000])
+            + str(agent.get("instructions") or "")[:4000] + "\n\n" + brief(agent["id"]))
 
 _FAILURE_STAGE_LABELS = {
     "load_provider_profile": "loading the model profile",

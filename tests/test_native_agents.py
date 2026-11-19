@@ -29,7 +29,8 @@ def test_bootstrap_lists_smara_the_manager_first_then_four_employees(setup):
 def test_presets_carry_only_the_fields_that_do_something(setup):
     value = management.manage({"operation": "bootstrap"})
     for agent in value["agents"]["roster"]:
-        assert set(agent) == {"id", "name", "role", "icon", "instructions", "preset"}, agent
+        # Stored fields, plus the read-only skills view (the employee's learned workflows).
+        assert set(agent) == {"id", "name", "role", "icon", "instructions", "preset", "skills", "skills_brief"}, agent
 
 
 def test_save_custom_agent_keeps_unrelated_settings(setup):
