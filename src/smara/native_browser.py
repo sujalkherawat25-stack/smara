@@ -243,7 +243,7 @@ def failure_text(exc):
     if isinstance(exc, (ValueError, StaleObservation)):
         return message[:300] or type(exc).__name__
     line = (str(exc).strip().splitlines() or [""])[0].strip()[:200]
-    hint = " The page may block automated browsers or be unreachable; try another source, or open it in the owner's real browser with computer_open_url and drive it with computer_observe and computer_act (needs the owner's computer control grant in Settings > Automation)." if line or type(exc).__name__ in {"Error", "TimeoutError"} else ""
+    hint = " The page may block automated browsers or be unreachable; try another source, retry once, or tell the owner what is blocking you. Do not switch to computer_* tools for a website." if line or type(exc).__name__ in {"Error", "TimeoutError"} else ""
     return (type(exc).__name__ + (": " + line if line else "") + "." + hint)
 
 
