@@ -662,3 +662,18 @@
 .native-app .skill-head:focus-visible { outline: 2px solid #3ccf7e; border-radius: 10px; }
 .native-app .skill-body { padding: 0 12px 10px; font-size: 13px; }
 .native-app .skill-body ol { margin: 4px 0 8px; padding-left: 20px; display: grid; gap: 3px; }
+
+/* Browser & computer: one line saying what is on now; the many controls sit behind "More controls". */
+.native-app .access-now { display: flex; align-items: center; gap: 12px; padding: 14px 16px; margin: 0 0 14px; border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.03); }
+.native-app .access-dot { width: 10px; height: 10px; border-radius: 50%; background: #6b7280; flex: none; }
+.native-app .access-dot[data-on="true"] { background: #3ccf7e; box-shadow: 0 0 0 4px rgba(60,207,126,.2); }
+.native-app .access-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.native-app .access-text small { opacity: .75; }
+.native-app .access-actions { display: flex; gap: 8px; }
+.native-app .set-advanced { margin-top: 14px; border-radius: 14px; border: 1px solid rgba(255,255,255,.08); padding: 4px 14px 10px; }
+.native-app .set-advanced > summary { cursor: pointer; padding: 10px 0; font-weight: 600; list-style: none; }
+.native-app .set-advanced > summary::-webkit-details-marker { display: none; }
+.native-app .set-advanced > summary::before { content: "▸ "; opacity: .7; }
+.native-app .set-advanced[open] > summary::before { content: "▾ "; }
+.native-app .set-advanced > summary small { font-weight: 400; opacity: .6; margin-left: 6px; }

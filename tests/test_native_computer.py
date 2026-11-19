@@ -241,13 +241,50 @@ def test_open_url_refuses_private_local_and_credentialed_addresses(setup, url):
         computer.call("computer_open_url", {"url": url})
 
 
-def test_open_url_without_a_grant_explains_how_to_switch_control_on(tmp_path, monkeypatch):
+def test_open_url_without_a_grant_tells_the_agent_to_ask_in_the_chat_not_in_settings(tmp_path, monkeypatch):
     monkeypatch.setenv("SMARA_DESKTOP_STATE", str(tmp_path / "state.json"))
     computer = Computer(tmp_path, Fake())
-    with pytest.raises(ValueError, match="Settings > Browser & computer.*Allow my apps"):
+    with pytest.raises(ValueError, match="computer_request_access.*ask the owner in this chat") as refusal:
         computer.call("computer_open_url", {"url": "https://example.com/"})
-    with pytest.raises(ValueError, match="stopped or expired"):
+    assert "Settings >" not in str(refusal.value) and "Allow my apps" not in str(refusal.value)
+    with pytest.raises(ValueError, match="off, stopped or expired"):
         computer.call("computer_windows", {})
+
+
+def test_asking_for_access_in_chat_starts_a_limited_grant_for_those_apps(tmp_path, monkeypatch):
+    import smara.native_windows as windows
+    monkeypatch.setenv("SMARA_DESKTOP_STATE", str(tmp_path / "state.json"))
+    monkeypatch.setattr(windows, "WindowsBackend", lambda: Fake())
+    computer = Computer(tmp_path, Fake())
+    assert nc.approval_mode("computer_request_access") == "prompt"          # the owner taps Allow on a card first
+    out = computer.call("computer_request_access", {"apps": ["Chrome", "tally"], "minutes": 45, "reason": "Check LinkedIn"})
+    assert out["granted"] is True and out["minutes"] == 45 and "Chrome" in out["apps"] and "TallyPrime" in out["apps"]
+    grant = nc.selected(tmp_path)
+    assert grant["scope"] == "apps" and "chrome.exe" in grant["apps"] and "tallyprime.exe" in grant["apps"]
+    assert 44 * 60 < grant["expires"] - time.time() <= 45 * 60
+    assert computer.grant()["id"] == grant["id"]                              # tools work at once, no restart
+
+
+def test_access_requests_are_bounded_and_refuse_odd_input(tmp_path, monkeypatch):
+    import smara.native_windows as windows
+    monkeypatch.setenv("SMARA_DESKTOP_STATE", str(tmp_path / "state.json"))
+    monkeypatch.setattr(windows, "WindowsBackend", lambda: Fake())
+    computer = Computer(tmp_path, Fake())
+    assert computer.call("computer_request_access", {"minutes": 9999})["minutes"] == 120
+    assert computer.call("computer_request_access", {"minutes": 1})["minutes"] == 5
+    for bad in ({"apps": "chrome"}, {"minutes": "30"}, {"shell": "cmd"}, {"apps": ["a"] * 13}):
+        with pytest.raises(ValueError):
+            computer.call("computer_request_access", bad)
+
+
+def test_an_app_name_that_is_not_understood_is_ignored_not_fatal(tmp_path, monkeypatch):
+    import smara.native_windows as windows
+    monkeypatch.setenv("SMARA_DESKTOP_STATE", str(tmp_path / "state.json"))
+    monkeypatch.setattr(windows, "WindowsBackend", lambda: Fake())
+    computer = Computer(tmp_path, Fake())
+    out = computer.call("computer_request_access", {"apps": ["Windows windows", "Chrome"]})
+    assert out["granted"] is True and out["ignored_app_names"] == ["Windows windows"] and "Chrome" in out["apps"]
+    assert "chrome.exe" in nc.selected(tmp_path)["apps"]
 
 
 def test_browser_windows_are_observed_again_until_the_page_appears(setup):

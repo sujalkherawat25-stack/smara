@@ -77,7 +77,7 @@ const TOOL_TITLES: Record<string, string> = {
   team_list: "Looked at the team", team_hire: "Hired an employee", team_update: "Changed an employee", team_remember: "Saved a standing rule",
   team_delegate: "Handed a job to an employee", team_tasks: "Checked the team's work", team_routine: "Set up a routine",
   team_routines: "Checked routines", team_routine_pause: "Paused or resumed a routine", team_remove: "Removed an employee",
-  skill_list: "Checked skills", skill_read: "Followed a skill", skill_save: "Saved a skill", skill_forget: "Forgot a skill",
+  computer_request_access: "Asked to use your apps", skill_list: "Checked skills", skill_read: "Followed a skill", skill_save: "Saved a skill", skill_forget: "Forgot a skill",
 };
 /** A tool call in the owner's words: "Hired an employee · Zoya", "Browser · navigate". */
 export function toolTitle(tool: string, args: unknown): string {
