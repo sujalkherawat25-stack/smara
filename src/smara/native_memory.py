@@ -144,6 +144,14 @@ def probe():
     return {"kind": "memory", "ok": True, "detail": "Hosted search responded. This checks reads, not write processing or recall quality."}
 
 
+_SMALL_TALK = re.compile(r"(?i)^(hi+|hello|hey|hii+|namaste|ok(ay)?|thanks?( you)?|thank you|good (morning|evening|night)|yes|no|sure|cool|great)[\s!.?]*$")
+
+
+def small_talk(text: str) -> bool:
+    """A greeting or acknowledgement that needs no memory lookup."""
+    return bool(_SMALL_TALK.match((text or "").strip()))
+
+
 def conversation(request, headers=None):
     """Identify a root user turn, excluding compaction, worker and tool history."""
     metadata = request.get("client_metadata") or {}
@@ -209,6 +217,8 @@ class ConversationMemory:
         info = conversation(request, headers)
         if info is None:
             return None
+        if small_talk(info["user"]):
+            return None      # "hi", "thanks", "ok": no remote recall round trip before a two-word reply
         with self.lock:
             binding = self._binding()
             if not binding:

@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 
-const contact = (f, name) => f.nodes().find(node => node.type === "button" && node.props.className === "contact" && f.text(node).includes(name));
+const contact = (f, name) => f.nodes().find(node => node.type === "button" && node.props.className === "member-open" && f.text(node).includes(name));
 const openProjects = async (f) => { f.nodes().find(node => node.type === "button" && f.text(node).startsWith("Project:")).props.onClick(); await f.flush(); };
 
 function fixture({ olderChats = [], startupFailure = false, unknownTurn = false, sandboxReady = true, terminalPlatformSupported = true, projectOptions, backgroundGoal = false, agentRoster } = {}) {
@@ -23,7 +23,7 @@ function fixture({ olderChats = [], startupFailure = false, unknownTurn = false,
   ], default: "kiran", assignments: {} };
   const goalRecord = backgroundGoal && typeof backgroundGoal === "object" ? backgroundGoal : backgroundGoal ? {
     id: "fixturegoal", state: "running", lease: "synthetic-active-goal", updated: Date.now() / 1000, cycles: 1, requests: 1, token_estimate: 100,
-    detail: "Synthetic task is working", session_id: "synthetic-goal-session", spec: { objective: "Synthetic goal", success_criteria: "Evidence", workspace: "C:/first", profile_id: "one", sandbox: "read-only", max_cycles: 8, max_requests: 30, max_token_estimate: 500000 },
+    detail: "Synthetic task is working", session_id: "synthetic-goal-session", spec: { objective: "Synthetic goal", success_criteria: "Evidence", workspace: "C:/first", profile_id: "one", sandbox: "workspace-write", max_cycles: 8, max_requests: 30, max_token_estimate: 500000 },
     checkpoint: {}, events: [], approvals: [],
   } : null;
   const hooks = {
@@ -35,6 +35,7 @@ function fixture({ olderChats = [], startupFailure = false, unknownTurn = false,
     useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
     // Callbacks and memo only matter for re-render cost; the harness re-runs the render, so identity is not needed here.
     useCallback(callback) { cursor++; return callback; },
+    useMemo(factory) { cursor++; return factory(); },
     memo(component) { return component; },
     useEffect(effect, deps) {
       const index = cursor++, previous = slots[index];
@@ -124,6 +125,16 @@ function fixture({ olderChats = [], startupFailure = false, unknownTurn = false,
     if (name.endsWith("agents")) return agentsModule;
     assert.fail(`Unexpected import ${name}`);
   });
+  const teamModule = evaluate("../src/team.ts", () => assert.fail("Team helpers must have no side-effect imports"));
+  const askCardModule = evaluate("../src/askCard.ts", () => assert.fail("Ask card wording must have no side-effect imports"));
+  const askCard = evaluate("../src/NativeAskCard.tsx", name => {
+    if (name === "react") return hooks;
+    if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
+    if (name.endsWith("askCard")) return askCardModule;
+    if (name.endsWith("nativeView")) return view;
+    if (name.endsWith("chatStatus")) return chatStatus;
+    assert.fail(`Unexpected import ${name}`);
+  });
   const goal = evaluate("../src/goalApi.ts", n => n === "@tauri-apps/api/core" ? { invoke: async () => ({}) } : assert.fail(n));
   function Settings() {}
   function Changes() {}
@@ -151,6 +162,9 @@ function fixture({ olderChats = [], startupFailure = false, unknownTurn = false,
     if (name.endsWith("NativeGoals")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeTaskBoard")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeApprovals")) return { default: () => null, __esModule: true };
+    if (name.endsWith("NativeAskCard")) return askCard;
+    if (name.endsWith("/team")) return teamModule;
+    if (name.endsWith("ui/JobPanel")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeVoice")) return { default: () => null, ReadAloud: () => null, __esModule: true };
     if (name.endsWith("goalApi")) return { ...goal, goalRequest: async (action, values = {}) => {
       goalCalls.push({ action, values: JSON.parse(JSON.stringify(values)) });
@@ -214,7 +228,7 @@ test("foreign requests cannot grant authority in the selected conversation", asy
   const f = fixture(); await f.flush(); await f.enter("Synthetic task");
   f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} }); await f.flush();
   f.emit({ id: 8, method: "item/commandExecution/requestApproval", params: { threadId: "foreign", turnId: "other", command: "synthetic" } }); await f.flush();
-  assert.equal(f.nodes().some(node => node.type === "button" && node.props.children === "Allow this action"), false);
+  assert.equal(f.nodes().some(node => node.type === "button" && node.props.children === "Allow"), false);
   assert.equal(f.calls.some(call => call.method === "respond"), false);
 });
 
@@ -416,7 +430,7 @@ test("a new chat runs with the Smara rules first, then the selected agent's inst
   f.button("New chat").props.onClick(); await f.flush();
   await submit("First question");
   const plain = starts().at(-1).params.developerInstructions;
-  f.nodes().find(node => node.type === "button" && node.props.className === "contact" && f.text(node).includes("Rohan")).props.onClick(); await f.flush();
+  f.nodes().find(node => node.type === "button" && node.props.className === "member-open" && f.text(node).includes("Rohan")).props.onClick(); await f.flush();
   f.button("New chat").props.onClick(); await f.flush();
   await submit("Second question");
   const withAgent = starts().at(-1).params.developerInstructions;

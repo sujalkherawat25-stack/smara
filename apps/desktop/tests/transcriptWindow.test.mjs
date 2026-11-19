@@ -14,9 +14,9 @@ const rows = (count) => Array.from({ length: count }, (_, index) => ({ id: `item
 test("a long chat renders only its newest rows, and the rest stay behind a button", () => {
   const items = rows(1000);
   const { visible, hidden } = visibleWindow(items, INITIAL_WINDOW);
-  assert.equal(visible.length, 60);
-  assert.equal(hidden, 940);
-  assert.equal(visible[0].id, "item-940");
+  assert.equal(visible.length, 30);
+  assert.equal(hidden, 970);
+  assert.equal(visible[0].id, "item-970");
   assert.equal(visible.at(-1).id, "item-999");
 });
 
@@ -25,7 +25,7 @@ test("'show earlier' adds one step at a time, up to the whole chat", () => {
   let limit = INITIAL_WINDOW;
   assert.equal(widenWindow(limit), limit + WINDOW_STEP);
   limit = widenWindow(limit);
-  assert.deepEqual([visibleWindow(items, limit).visible.length, visibleWindow(items, limit).hidden], [120, 10]);
+  assert.deepEqual([visibleWindow(items, limit).visible.length, visibleWindow(items, limit).hidden], [90, 40]);
   limit = widenWindow(limit);
   assert.deepEqual([visibleWindow(items, limit).visible.length, visibleWindow(items, limit).hidden], [130, 0]);
 });

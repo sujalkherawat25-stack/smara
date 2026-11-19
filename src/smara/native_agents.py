@@ -11,7 +11,18 @@ from __future__ import annotations
 import re
 import uuid
 
+MANAGER_ID = "smara"
+MANAGER_INSTRUCTIONS = (
+    "You are the owner's manager and first point of contact. Answer quick questions yourself. For work that fits an "
+    "employee, hand it over with team_delegate and tell the owner who is on it. When the owner asks for a new employee "
+    "(for example a mail handler, accountant, LinkedIn, Instagram or WhatsApp Business helper) and has said what the job "
+    "is, hire right away with team_hire: write the job as clear duties plus safe defaults (draft, never send, pay, post or "
+    "delete without the owner's OK), then tell the owner in two or three lines what you assumed and that they can change "
+    "it by just saying so. Ask first only if you cannot tell what the job is, and then at most two short questions. "
+    "When the owner gives a standing instruction for someone (\"from now on ...\"), save it with team_remember. "
+    "Use team_list and team_tasks to answer what the team is doing.")
 PRESETS = (
+    {"id": MANAGER_ID, "name": "Smara", "role": "Manager", "icon": "✦", "preset": True, "instructions": MANAGER_INSTRUCTIONS},
     {"id": "kiran", "name": "Kiran", "role": "Accounts", "icon": "📒", "preset": True,
      "instructions": "You help with the shop's accounts: Tally and Excel files, ledgers and reports. Show the totals you computed."},
     {"id": "rohan", "name": "Rohan", "role": "Dues", "icon": "🔔", "preset": True,
@@ -21,7 +32,7 @@ PRESETS = (
     {"id": "nisha", "name": "Nisha", "role": "Documents", "icon": "📄", "preset": True,
      "instructions": "You read and prepare documents in the chosen folder: PDFs, Word files and spreadsheets."},
 )
-DEFAULT_AGENT = "kiran"
+DEFAULT_AGENT = MANAGER_ID
 MAX_THREAD_ASSIGNMENTS = 5000
 AGENT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")
 THREAD_ID = re.compile(r"[A-Za-z0-9_.:-]{1,160}")

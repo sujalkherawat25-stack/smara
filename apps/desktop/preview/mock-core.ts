@@ -19,13 +19,15 @@ const setup = {
   computer: { enabled: false, expires: null },
   agents: {
     roster: [
+      { id: "smara", name: "Smara", role: "Manager", icon: "✦", instructions: "You are the owner's manager and first point of contact.", preset: true },
+      { id: "meera", name: "Meera", role: "Mail handler", icon: "📧", instructions: "You read the shop's inbox every morning, sort what matters and draft replies. Never send without asking.\n\nStanding rules from the owner:\n- Always cc the owner on replies to GST officers.", preset: false },
       { id: "kiran", name: "Kiran", role: "Accounts", icon: "📒", instructions: "", preset: true },
       { id: "rohan", name: "Rohan", role: "Dues", icon: "🔔", instructions: "", preset: true },
       { id: "scout", name: "Scout", role: "Web tasks", icon: "🧭", instructions: "", preset: true },
       { id: "nisha", name: "Nisha", role: "Documents", icon: "📄", instructions: "", preset: true },
     ],
-    default: "kiran",
-    assignments: { "t-dues": "rohan" },
+    default: "smara",
+    assignments: { "t-dues": "rohan", "t-tally": "kiran" },
   },
 };
 
@@ -84,6 +86,10 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
       if (message?.id !== undefined && message.method) {
         const result = response(message.method, message.params ?? {});
         setTimeout(() => emit("native-runtime-event", { generation: args.generation, message: { id: message.id, result } }), 5);
+        if (message.method === "thread/resume" && message.params?.threadId === "t-tally") setTimeout(() => emit("native-runtime-event", { generation: args.generation, message: {
+          id: "preview-ask-1", method: "mcpServer/elicitation/request", params: { threadId: message.params?.threadId, turnId: "turn-live", serverName: "playwright", mode: "form",
+            message: "Allow the playwright tool browser_click: “Submit return” button on services.gst.gov.in/returns?", requestedSchema: { type: "object", properties: {} },
+            _meta: { codex_approval_kind: "mcp_tool_call" } } } }), 600);
       }
       return undefined as T;
     }

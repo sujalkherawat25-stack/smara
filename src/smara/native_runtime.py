@@ -21,6 +21,10 @@ from typing import Any
 
 from .native_provider import ChatEndpoint, ResponsesAdapter
 
+# Every message re-sends the whole conversation (no prompt cache on most providers), so long chats are compacted early:
+# a chat that had grown to ~65k tokens made even "hi" take 8-10 s. The compacted summary keeps what matters.
+FAST_CONTEXT_TOKENS = 32_000
+
 
 class NativeProjectActivity:
     """Conservative ownership projection; native events remain authoritative."""
@@ -167,9 +171,17 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         # descendants, junction escape and PTY lifecycle on this backend.
         settings["windows.sandbox"] = "mxc"
         settings["features.prefer_mxc"] = False
-    if adapter.endpoint.effective_context_window:
-        settings["model_context_window"] = adapter.endpoint.effective_context_window
-        settings["model_auto_compact_token_limit"] = int(adapter.endpoint.effective_context_window * .8)
+    window = adapter.endpoint.effective_context_window
+    if window:
+        settings["model_context_window"] = window
+    settings["model_auto_compact_token_limit"] = min(int(window * .8), FAST_CONTEXT_TOKENS) if window else FAST_CONTEXT_TOKENS
+    if interactive:
+        # Chats answer at low reasoning: measured on GLM-5.3, a one-line reply took 1.3-1.8 s with ~130 hidden reasoning
+        # tokens at the provider default, 0.9-1.1 s and none at low. Background tasks keep the default for harder work.
+        settings["model_reasoning_effort"] = "low"
+    # Smara's short base prompt instead of the generic 21 KB Codex CLI coding prompt (sent with every message).
+    from .native_prompt import write_base_prompt
+    settings["model_instructions_file"] = str(write_base_prompt(home))
     # The clock and explicit document/image analysis are standard tools.
     # Local memory/academic readers still require project opt-in; document
     # uploads remain separately approval-gated by the native core.
@@ -230,6 +242,19 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
             settings["mcp_servers.smara_browser.env.PYTHONPATH"] = str((source_root() / "src").resolve())
         for entry in browser_tools:
             settings[f'mcp_servers.smara_browser.tools.{entry["name"]}.approval_mode'] = "approve" if entry["name"] in LOOK_ONLY else "prompt"
+    # The team tools (Smara the manager, hiring, standing rules, handing out jobs) in every chat. Changes to the
+    # team always ask the owner first (approval mode "prompt"); reading the team and delegating do not.
+    from .native_team import TOOLS as team_tools, approval_mode as team_approval
+    settings.update({"mcp_servers.smara_team.enabled": True, "mcp_servers.smara_team.command": sys.executable,
+        "mcp_servers.smara_team.args": (["--native-team"] if getattr(sys, "frozen", False) else ["-m", "smara.native_team"]) + ["--workspace", str(workspace.resolve())],
+        "mcp_servers.smara_team.env.SMARA_DESKTOP_STATE": str(state_path().resolve()),
+        "mcp_servers.smara_team.env.PYTHONIOENCODING": "utf-8", "mcp_servers.smara_team.env.PYTHONUTF8": "1",
+        "mcp_servers.smara_team.required": False, "mcp_servers.smara_team.tool_timeout_sec": 30,
+        "mcp_servers.smara_team.default_tools_approval_mode": "prompt"})
+    if not getattr(sys, "frozen", False):
+        settings["mcp_servers.smara_team.env.PYTHONPATH"] = str((source_root() / "src").resolve())
+    for entry in team_tools:
+        settings[f'mcp_servers.smara_team.tools.{entry["name"]}.approval_mode'] = team_approval(entry["name"])
     if interactive or computer:
         # Chats always get the app tools; a background task only when the owner ticked "may use my apps" for it.
         # Either way every call still needs a live grant, the allowed-apps list and the one-at-a-time input lock.

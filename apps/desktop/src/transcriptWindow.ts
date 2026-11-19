@@ -1,5 +1,5 @@
 /** Long-chat windowing: render the newest rows, and reveal earlier ones in steps. */
-export const INITIAL_WINDOW = 60;
+export const INITIAL_WINDOW = 30;
 export const WINDOW_STEP = 60;
 
 export function visibleWindow<T>(items: readonly T[], limit: number): { visible: T[]; hidden: number } {
