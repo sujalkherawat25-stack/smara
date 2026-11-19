@@ -100,6 +100,11 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
     case "native_manage": {
       const request = (args.request ?? {}) as Record<string, unknown>;
       if (request.operation === "audit") return auditPreview(request) as T;
+      if (request.operation === "agents" && (request.action === "skills" || request.action === "forget_skill")) return { skills: request.agent_id === "meera" && request.action === "skills" ? [
+        { name: "Morning inbox triage", when: "Every morning, or when the owner says check my mail", steps: 5, version: 2, uses: 14,
+          steps_text: ["Open the shop inbox in the owner's browser", "List mail since yesterday 6 pm", "Mark GST, bank and supplier mail as important",
+            "Draft replies for the important ones in the owner's tone", "Report: important mail, drafts ready, anything needing the owner"],
+          checks: ["Nothing was sent", "Every draft names who it is for"], output: "A short report in chat", never: ["Send, delete or archive mail"], updated: nowSeconds() - 7200 }] : [] } as T;
       if (request.operation === "agents" && request.action === "list") {
         // Preview: Smara "hires" Zoya a moment after the app opens, so the live sidebar refresh and the New badge show.
         listCalls += 1;

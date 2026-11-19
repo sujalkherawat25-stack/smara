@@ -68,3 +68,14 @@ test("removing an employee is a risky ask with the name", () => {
   assert.equal(view.title, "Remove Zoya from the team?");
   assert.equal(view.risky, true);
 });
+
+test("saving a skill shows the workflow as numbered steps to check", () => {
+  const view = askView({ method: "mcpServer/elicitation/request", params: { message: "Allow the smara_team MCP server to run tool \"skill_save\"?", _meta: { tool_name: "skill_save",
+    tool_params: { employee: "kiran", name: "Monthly sales summary", when_to_use: "When asked for a month's sales", steps: ["Read sales_<M>.csv", "Skip cancelled rows"], output: "summary_<M>.md", never: ["Edit the csv"] } } } });
+  assert.equal(view.title, "Teach Kiran “Monthly sales summary”?");
+  assert.equal(view.summary, "Use when: When asked for a month's sales\n\n1. Read sales_<M>.csv\n2. Skip cancelled rows");
+  assert.match(view.detail, /Output: summary_<M>\.md/);
+  assert.match(view.detail, /Never: Edit the csv/);
+  const forget = askView({ method: "mcpServer/elicitation/request", params: { message: "x", _meta: { tool_name: "skill_forget", tool_params: { employee: "kiran", name: "Monthly sales summary" } } } });
+  assert.equal(forget.risky, true);
+});

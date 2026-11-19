@@ -21,6 +21,9 @@ MAX_BYTES = 256 * 1024
 MANAGER_ID = native_agents.MANAGER_ID
 RULES_HEADING = "Standing rules from the owner:"
 MAX_RULES = 30
+# The goal budget reserves each request's payload bytes plus its maximum output (about 70k on a tool-using turn), so
+# the 500k default stopped a 24-request job after ~7 requests. Size it to the request allowance instead.
+JOB_TOKEN_ESTIMATE = 24 * 100_000
 
 
 def _tool(name, description, properties=None, required=None, title=""):
@@ -70,11 +73,32 @@ TOOLS = [
     _tool("team_routine_pause", "Pause or resume a routine by its id from team_routines.",
           {"id": {"type": "string"}, "resume": {"type": "boolean", "description": "true to resume; default pauses"}},
           ["id"], title="Pause a routine"),
+    _tool("skill_list", "An employee's skills: workflows the owner taught them, with when to use each. Check this before a "
+          "multi-step task.", {"employee": _EMP}, ["employee"], title="See skills"),
+    _tool("skill_read", "Read one skill's full steps, checks, output and never-do rules, then follow them in order, exactly.",
+          {"employee": _EMP, "name": {"type": "string", "description": "The skill's name from skill_list"}}, ["employee", "name"],
+          title="Read a skill"),
+    _tool("skill_save", "Save how the owner wants a job done, after doing it, so the employee does it the same way every time. Use the "
+          "same name to update a skill after a correction. Steps must be concrete enough to follow without this chat: file "
+          "names, column names, formulas, order, rounding and the exact output format. Never include passwords, OTPs, keys or "
+          "card numbers. The owner confirms in an approval card.",
+          {"employee": _EMP,
+           "name": {"type": "string", "description": "Short name, e.g. Monthly GST summary"},
+           "when_to_use": {"type": "string", "description": "When this skill applies, in the owner's words"},
+           "inputs": {"type": "array", "items": {"type": "string"}, "description": "What is needed each time, e.g. 'the month (YYYY-MM)'"},
+           "steps": {"type": "array", "items": {"type": "string"}, "description": "Numbered steps in order, one action each"},
+           "checks": {"type": "array", "items": {"type": "string"}, "description": "What to verify before reporting"},
+           "output": {"type": "string", "description": "Exactly what is produced: file name pattern and format"},
+           "never": {"type": "array", "items": {"type": "string"}, "description": "What never to do in this job"},
+           "change_note": {"type": "string", "description": "For an update: what changed and why"}},
+          ["employee", "name", "when_to_use", "steps"], title="Save a skill"),
+    _tool("skill_forget", "Forget a skill when the owner asks. The owner confirms in an approval card.",
+          {"employee": _EMP, "name": {"type": "string"}}, ["employee", "name"], title="Forget a skill"),
     _tool("team_tasks", "What each employee is doing: their background tasks with state and latest progress.",
           {"employee": {"type": "string", "description": "Optional: only this employee"}}, title="See the team's work"),
 ]
-PROMPTED = {"team_hire", "team_update", "team_remember", "team_routine", "team_remove"}
-READONLY = {"team_list", "team_tasks", "team_routines"}
+PROMPTED = {"team_hire", "team_update", "team_remember", "team_routine", "team_remove", "skill_save", "skill_forget"}
+READONLY = {"team_list", "team_tasks", "team_routines", "skill_list", "skill_read"}
 for _entry in TOOLS:
     _entry["annotations"].update(readOnlyHint=_entry["name"] in READONLY, destructiveHint=False,
                                  idempotentHint=_entry["name"] in READONLY, openWorldHint=False)
@@ -210,7 +234,7 @@ def _routine(args: dict, workspace: str) -> dict:
     if not target:
         raise ValueError("Open a project first")
     spec = {"workspace": target, "profile_id": prefs.get("active_model") or "", "objective": task, "success_criteria": done,
-            "agent_id": agent["id"], "sandbox": "read-only", "max_cycles": 6, "max_requests": 24}
+            "agent_id": agent["id"], "sandbox": "read-only", "max_cycles": 6, "max_requests": 24, "max_token_estimate": JOB_TOKEN_ESTIMATE}
     store = GoalStore()
     identity = native_background.add(store, {"name": f"{agent['name']}: {task[:60]}", "spec": spec, "interval_seconds": interval,
                                   "max_runs": times, "start_at": first})
@@ -308,13 +332,29 @@ def call(name: str, args: dict, workspace: str = "") -> dict:
             raise ValueError("Open a project first")
         goal = operate({"action": "create", "workspace": target, "profile_id": prefs.get("active_model") or "",
                         "objective": task, "success_criteria": done, "agent_id": agent["id"], "sandbox": "read-only",
-                        "max_cycles": 6, "max_requests": 24})
+                        "max_cycles": 6, "max_requests": 24, "max_token_estimate": JOB_TOKEN_ESTIMATE})
         try:
             operate({"action": "start_service"})          # the background worker picks the job up
         except Exception:
             pass
         return {"task_id": goal.get("id"), "employee": agent["name"], "state": goal.get("state"),
                 "tell_the_owner": f"{agent['name']} has the job. It shows on the task board; approvals it needs come to you."}
+    if name.startswith("skill_"):
+        from . import native_skills
+        agent = _find(_settings(), args.get("employee"))
+        if name == "skill_list":
+            return {"employee": agent["name"], "skills": [native_skills.summary(s) for s in native_skills.all_for(agent["id"])]}
+        if name == "skill_read":
+            skill = native_skills.find(agent["id"], args.get("name"))
+            native_skills.record_use(agent["id"], skill)
+            return {"skill": native_skills.render(skill), "follow": "Follow these steps in order, exactly. Report which checks passed."}
+        if name == "skill_save":
+            saved = native_skills.save(agent["id"], args)
+            verb = "learned" if saved["version"] == 1 else f"updated to version {saved['version']}"
+            return {"saved": native_skills.summary(saved), "tell_the_owner": f"{agent['name']} {verb} \"{saved['name']}\" "
+                    f"({len(saved['steps'])} steps) and will do it this way every time."}
+        if name == "skill_forget":
+            return {"forgot": native_skills.forget(agent["id"], args.get("name")), "employee": agent["name"]}
     if name == "team_routine":
         return _routine(args, workspace)
     if name == "team_routines":

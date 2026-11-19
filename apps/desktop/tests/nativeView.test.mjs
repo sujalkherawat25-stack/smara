@@ -152,3 +152,8 @@ test("tool calls read in the owner's words, with the result kept as detail", () 
   assert.equal(displayItem({ type: "mcpToolCall", id: "t2", tool: "team_list", arguments: {} }).text, "Looked at the team");
   assert.equal(displayItem({ type: "mcpToolCall", id: "t3", tool: "browser_navigate", arguments: { url: "x" } }).text, "Browser · navigate");
 });
+
+test("skill tool rows name the skill", () => {
+  assert.equal(displayItem({ type: "mcpToolCall", id: "s1", tool: "skill_read", arguments: { employee: "kiran", name: "Monthly sales summary" } }).text, "Followed a skill · Monthly sales summary");
+  assert.equal(displayItem({ type: "mcpToolCall", id: "s2", tool: "skill_list", arguments: { employee: "kiran" } }).text, "Checked skills · kiran");
+});

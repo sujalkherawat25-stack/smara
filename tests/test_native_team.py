@@ -26,7 +26,8 @@ def names():
 
 def test_changing_the_team_always_asks_the_owner_and_reading_does_not():
     assert {t["name"] for t in team.TOOLS} == {"team_list", "team_hire", "team_update", "team_remember", "team_delegate", "team_tasks",
-                                           "team_routine", "team_routines", "team_routine_pause", "team_remove"}
+                                           "team_routine", "team_routines", "team_routine_pause", "team_remove",
+                                           "skill_list", "skill_read", "skill_save", "skill_forget"}
     for name in ("team_hire", "team_update", "team_remember", "team_routine", "team_remove"):
         assert team.approval_mode(name) == "prompt"
     for name in ("team_list", "team_tasks", "team_delegate", "team_routines", "team_routine_pause"):
@@ -83,6 +84,7 @@ def test_delegating_creates_a_background_task_for_that_employee(setup, monkeypat
     create = created[0]
     assert create["action"] == "create" and create["agent_id"] == "kiran" and create["sandbox"] == "read-only"
     assert create["objective"] == "Total the October sales from Tally" and create["max_cycles"] == 6
+    assert create["max_token_estimate"] == create["max_requests"] * 100_000
     assert created[1] == {"action": "start_service"}
 
 
@@ -95,7 +97,7 @@ def test_the_server_speaks_mcp_and_reports_refusals_as_tool_errors(setup, monkey
     team.main([])
     replies = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert replies[0]["result"]["serverInfo"]["name"] == "smara-team"
-    assert len(replies[1]["result"]["tools"]) == 10
+    assert len(replies[1]["result"]["tools"]) == 14
     assert replies[2]["result"]["isError"] is True and "Team change refused" in replies[2]["result"]["content"][0]["text"]
 
 

@@ -82,7 +82,15 @@ def roster(saved: dict) -> list[dict]:
 
 def view(saved: dict) -> dict:
     assignments = saved.get("thread_agents") if isinstance(saved.get("thread_agents"), dict) else {}
-    return {"roster": roster(saved), "default": DEFAULT_AGENT, "assignments": assignments}
+    from . import native_skills
+    team = []
+    for agent in roster(saved):
+        try:
+            skills = native_skills.all_for(agent["id"])
+        except (OSError, ValueError):
+            skills = []
+        team.append({**agent, "skills": [native_skills.summary(s) for s in skills], "skills_brief": native_skills.brief(agent["id"])})
+    return {"roster": team, "default": DEFAULT_AGENT, "assignments": assignments}
 
 
 def apply(saved: dict, request: dict) -> None:
