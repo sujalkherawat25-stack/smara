@@ -677,3 +677,7 @@
 .native-app .set-advanced > summary::before { content: "▸ "; opacity: .7; }
 .native-app .set-advanced[open] > summary::before { content: "▾ "; }
 .native-app .set-advanced > summary small { font-weight: 400; opacity: .6; margin-left: 6px; }
+
+/* Copy / Read aloud appear when you point at a message, not under every progress line. */
+.native-app .native-item .item-heading { opacity: 0; transition: opacity .15s ease; }
+.native-app .native-item:hover .item-heading, .native-app .native-item:focus-within .item-heading { opacity: 1; }

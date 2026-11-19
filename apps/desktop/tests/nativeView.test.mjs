@@ -157,3 +157,10 @@ test("skill tool rows name the skill", () => {
   assert.equal(displayItem({ type: "mcpToolCall", id: "s1", tool: "skill_read", arguments: { employee: "kiran", name: "Monthly sales summary" } }).text, "Followed a skill · Monthly sales summary");
   assert.equal(displayItem({ type: "mcpToolCall", id: "s2", tool: "skill_list", arguments: { employee: "kiran" } }).text, "Checked skills · kiran");
 });
+
+test("screenshot and compaction steps read in plain words, never raw JSON", () => {
+  assert.equal(displayItem({ type: "imageView", id: "i1", path: "C:/x.png" }).text, "Looked at a screenshot");
+  const compact = displayItem({ type: "contextCompaction", id: "c1" });
+  assert.equal(compact.kind, "separator");
+  assert.match(compact.text, /summarised/);
+});

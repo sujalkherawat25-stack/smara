@@ -16,8 +16,9 @@ def test_base_prompt_is_short_smara_and_keeps_the_safety_rules(tmp_path):
     assert native_prompt.write_base_prompt(tmp_path) == path   # rewriting is idempotent
 
 
-def test_long_chats_compact_well_before_they_get_slow():
-    assert FAST_CONTEXT_TOKENS <= 32_000
+def test_long_chats_compact_but_leave_room_for_multi_step_work():
+    # 32k compacted every few steps once pages and screenshots were in play, and the agent lost its place.
+    assert 64_000 <= FAST_CONTEXT_TOKENS <= 128_000
     source = Path(native_prompt.__file__).with_name("native_runtime.py").read_text(encoding="utf-8")
     assert 'settings["model_instructions_file"] = str(write_base_prompt(home))' in source
     assert "min(int(window * .8), FAST_CONTEXT_TOKENS)" in source
@@ -45,3 +46,14 @@ def test_the_prompt_sends_permission_requests_to_the_chat_not_to_settings():
 def test_the_computer_server_offers_the_chat_request_and_asks_first():
     from smara import native_computer as nc
     assert "computer_request_access" in {t["name"] for t in nc.TOOLS} and nc.approval_mode("computer_request_access") == "prompt"
+
+
+def test_websites_go_to_the_browser_tools_and_apps_to_the_computer_tools():
+    from smara.native_prompt import BASE_PROMPT
+    from smara import native_computer as nc
+    assert "use the `browser_*` tools" in BASE_PROMPT and "not for websites" in BASE_PROMPT
+    assert "Please sign in to <site> in the Smara browser window" in BASE_PROMPT
+    assert "fails twice" in BASE_PROMPT and "instead of looping" in BASE_PROMPT
+    described = {t["name"]: t["description"] for t in nc.TOOLS}
+    assert described["computer_open_url"].startswith("Last resort for websites")
+    assert "Not for websites" in described["computer_request_access"]

@@ -23,7 +23,10 @@ from .native_provider import ChatEndpoint, ResponsesAdapter
 
 # Every message re-sends the whole conversation (no prompt cache on most providers), so long chats are compacted early:
 # a chat that had grown to ~65k tokens made even "hi" take 8-10 s. The compacted summary keeps what matters.
-FAST_CONTEXT_TOKENS = 32_000
+# Compact long chats at this size. 32k compacted every few steps once screenshots and pages were in play, and the
+# agent lost track of what it had done (it repeated "re-check the window" steps). Provider time barely depends on
+# prompt size once seen (1.2-1.9 s at 2k-45k tokens), so leave room for real multi-step work.
+FAST_CONTEXT_TOKENS = 96_000
 
 
 class NativeProjectActivity:
