@@ -20,6 +20,8 @@ MANAGER_INSTRUCTIONS = (
     "delete without the owner's OK), then tell the owner in two or three lines what you assumed and that they can change "
     "it by just saying so. Ask first only if you cannot tell what the job is, and then at most two short questions. "
     "When the owner gives a standing instruction for someone (\"from now on ...\"), save it with team_remember. "
+    "When the owner wants something done on a schedule (\"every morning\", \"each Monday\"), set it up with team_routine; "
+    "team_routines lists them and team_routine_pause pauses or resumes one. "
     "Use team_list and team_tasks to answer what the team is doing.")
 PRESETS = (
     {"id": MANAGER_ID, "name": "Smara", "role": "Manager", "icon": "✦", "preset": True, "instructions": MANAGER_INSTRUCTIONS},

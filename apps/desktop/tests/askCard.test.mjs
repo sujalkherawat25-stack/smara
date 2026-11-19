@@ -56,3 +56,9 @@ test("team changes read as hiring, rules and changes, with the job text to check
   assert.equal(rename.title, "Change smara?");
   assert.match(rename.summary, /name → Munshi/);
 });
+
+test("a routine asks in plain words with the schedule", () => {
+  const view = askView({ method: "mcpServer/elicitation/request", params: { message: "Allow the smara_team MCP server to run tool \"team_routine\"?", _meta: { tool_name: "team_routine", tool_params: { employee: "Kiran", task: "Check unpaid invoices", every: "day", at: "09:00" } } } });
+  assert.equal(view.title, "Let Kiran do this every day at 09:00?");
+  assert.equal(view.summary, "Check unpaid invoices");
+});

@@ -25,10 +25,11 @@ def names():
 
 
 def test_changing_the_team_always_asks_the_owner_and_reading_does_not():
-    assert {t["name"] for t in team.TOOLS} == {"team_list", "team_hire", "team_update", "team_remember", "team_delegate", "team_tasks"}
-    for name in ("team_hire", "team_update", "team_remember"):
+    assert {t["name"] for t in team.TOOLS} == {"team_list", "team_hire", "team_update", "team_remember", "team_delegate", "team_tasks",
+                                           "team_routine", "team_routines", "team_routine_pause"}
+    for name in ("team_hire", "team_update", "team_remember", "team_routine"):
         assert team.approval_mode(name) == "prompt"
-    for name in ("team_list", "team_tasks", "team_delegate"):
+    for name in ("team_list", "team_tasks", "team_delegate", "team_routines", "team_routine_pause"):
         assert team.approval_mode(name) == "approve"
 
 
@@ -94,5 +95,60 @@ def test_the_server_speaks_mcp_and_reports_refusals_as_tool_errors(setup, monkey
     team.main([])
     replies = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert replies[0]["result"]["serverInfo"]["name"] == "smara-team"
-    assert len(replies[1]["result"]["tools"]) == 6
+    assert len(replies[1]["result"]["tools"]) == 9
     assert replies[2]["result"]["isError"] is True and "Team change refused" in replies[2]["result"]["content"][0]["text"]
+
+
+@pytest.fixture
+def ledger(setup, monkeypatch):
+    import smara.native_goals as goals
+    store = goals.GoalStore(setup / "goals.db")
+    monkeypatch.setattr(goals, "GoalStore", lambda: store)
+    monkeypatch.setattr(goals, "operate", lambda request, store=None: {"id": "x", "state": "ok"})
+    monkeypatch.setattr(management, "preferences", lambda: {"workspace": str(setup), "active_model": "glm"})
+    return store
+
+
+def test_first_run_lands_on_the_owners_clock_and_never_in_the_past():
+    import datetime
+    now = datetime.datetime(2026, 11, 19, 10, 0).timestamp()
+    first, step = team._first_run("day", "09:00", now)
+    assert datetime.datetime.fromtimestamp(first) == datetime.datetime(2026, 11, 20, 9, 0) and step == 86400
+    first, _ = team._first_run("day", "18:30", now)
+    assert datetime.datetime.fromtimestamp(first) == datetime.datetime(2026, 11, 19, 18, 30)
+    assert team._first_run("week", "07:05", now)[1] == 7 * 86400
+    assert team._first_run("hour", "", now) == (now + 3600, 3600)
+    for bad in ("25:00", "9am", "12:61"):
+        with pytest.raises(ValueError):
+            team._first_run("day", bad, now)
+    with pytest.raises(ValueError):
+        team._first_run("minute", "", now)
+
+
+def test_a_routine_is_a_read_only_scheduled_job_for_that_employee_and_can_be_paused(ledger, setup):
+    out = team.call("team_routine", {"employee": "Kiran", "task": "Check Tally for unpaid invoices and report", "every": "day", "at": "09:00"}, str(setup))
+    routines = team.call("team_routines", {})["routines"]
+    assert len(routines) == 1 and routines[0]["id"] == out["routine_id"]
+    assert routines[0]["employee"] == "kiran" and routines[0]["paused"] is False and routines[0]["max_runs"] == 30
+    assert ledger  # the schedule is stored in the one goal ledger
+    from smara import native_background
+    spec = native_background.schedules(ledger)[0]["spec"]
+    assert spec["sandbox"] == "read-only" and spec["agent_id"] == "kiran"
+    team.call("team_routine_pause", {"id": out["routine_id"]})
+    assert team.call("team_routines", {})["routines"][0]["paused"] is True
+    team.call("team_routine_pause", {"id": out["routine_id"], "resume": True})
+    assert team.call("team_routines", {})["routines"][0]["paused"] is False
+    with pytest.raises(ValueError, match="No routine"):
+        team.call("team_routine_pause", {"id": "nope"})
+
+
+def test_due_routine_queues_a_goal_that_belongs_to_the_employee(ledger, setup):
+    import time
+    from smara import native_background
+    team.call("team_routine", {"employee": "Kiran", "task": "Summarise yesterday's sales", "every": "hour"}, str(setup))
+    assert native_background.enqueue_due(ledger, time.time()) == []          # first run is an hour away
+    made = native_background.enqueue_due(ledger, time.time() + 3601)
+    assert len(made) == 1
+    goal = ledger.list()[0]
+    assert goal["spec"]["agent_id"] == "kiran" and goal["spec"]["sandbox"] == "read-only"
+    assert native_background.enqueue_due(ledger, time.time() + 7300) == []   # waits for the owner to accept the first report

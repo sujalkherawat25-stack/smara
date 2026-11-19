@@ -48,3 +48,18 @@ export function shortTask(text: string): string {
 export function blocksChat(goals: GoalLike[]): boolean {
   return goals.some(goal => !!goal.lease && goal.spec.sandbox === "workspace-write");
 }
+
+export type Routine = { id: string; name: string; enabled: number; runs: number; max_runs: number; due: number; interval?: number; spec?: { agent_id?: string }; goal_state?: string };
+
+/** Routines that belong to one employee (a routine with no employee belongs to the manager). */
+export function routinesFor(all: Routine[], agentId: string): Routine[] {
+  return all.filter(item => (item.spec?.agent_id || MANAGER_ID) === agentId);
+}
+
+/** One line for the job panel: what, how often, and where it stands. */
+export function routineLine(item: Routine): string {
+  const hours = (item.interval ?? 0) / 3600;
+  const every = hours >= 168 ? "every week" : hours >= 24 ? "every day" : hours >= 1 ? "every hour" : "";
+  const state = !item.enabled ? "paused" : item.goal_state && item.goal_state !== "completed" ? "waiting for you to accept the last report" : `next ${new Date(item.due * 1000).toLocaleString()}`;
+  return `${item.name.replace(/^[^:]+:\s*/, "")}${every ? ` · ${every}` : ""} · ${state} · ${item.runs}/${item.max_runs} runs`;
+}

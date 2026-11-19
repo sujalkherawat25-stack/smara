@@ -40,10 +40,14 @@ def add(store, request):
         raise ValueError("Recurring wakes require read-only scope")
     if spec.get("browser_origins"):
         raise ValueError("Interactive browser sessions require a foreground human")
+    first = request.get("start_at")
+    now = time.time()
+    if first is not None and (type(first) not in (int, float) or not now - 60 <= first <= now + 366 * 86400):
+        raise ValueError("The first run must be within the next year")
     identity = uuid.uuid4().hex
     with store.connect() as db:
         db.execute("INSERT INTO goal_schedules(id,name,spec,due,interval,max_runs) VALUES(?,?,?,?,?,?)",
-                   (identity, name.strip(), json.dumps(spec), time.time(), interval, maximum))
+                   (identity, name.strip(), json.dumps(spec), now if first is None else float(first), interval, maximum))
     return identity
 
 
