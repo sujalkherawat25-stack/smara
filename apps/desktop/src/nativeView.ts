@@ -114,6 +114,8 @@ export function displayItem(item: Record<string, unknown>): ViewItem {
     exitCode: typeof item.exitCode === "number" ? item.exitCode : undefined,
     durationMs: typeof item.durationMs === "number" ? item.durationMs : undefined,
   };
+  if (kind === "imageView") return { id: String(item.id), kind, text: "Looked at a screenshot", status: "completed" };
+  if (kind === "contextCompaction") return { id: String(item.id), kind: "separator", text: "Earlier steps summarised to keep this chat fast" };
   if (kind === "mcpToolCall") {
     const title = toolTitle(String(item.tool ?? ""), item.arguments);
     const error = item.error && typeof item.error === "object" ? String((item.error as { message?: unknown }).message ?? "") : "";
