@@ -51,3 +51,14 @@ test("Hire opens Smara's chat with the starter text, so the job is explained in 
   assert.match(app, />\+ Hire<\/button>/);
   assert.equal(t.HIRE_STARTER, "I want to hire someone to ");
 });
+
+test("routines are listed under their own employee, with a plain status line", () => {
+  const mine = { id: "a", name: "Kiran: Check Tally for unpaid invoices", enabled: 1, runs: 2, max_runs: 30, due: 0, interval: 86400, spec: { agent_id: "kiran" }, goal_state: "completed" };
+  const other = { ...mine, id: "b", spec: { agent_id: "meera" } };
+  const manager = { ...mine, id: "c", spec: {} };
+  assert.deepEqual(t.routinesFor([mine, other, manager], "kiran").map(r => r.id), ["a"]);
+  assert.deepEqual(t.routinesFor([mine, other, manager], "smara").map(r => r.id), ["c"]);
+  assert.match(t.routineLine(mine), /^Check Tally for unpaid invoices · every day · next .* · 2\/30 runs$/);
+  assert.match(t.routineLine({ ...mine, enabled: 0 }), /paused/);
+  assert.match(t.routineLine({ ...mine, goal_state: "awaiting_acceptance" }), /waiting for you to accept the last report/);
+});

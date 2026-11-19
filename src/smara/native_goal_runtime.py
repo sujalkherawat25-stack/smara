@@ -374,7 +374,9 @@ For explicit outcome requirements, include coverage entries with requirement_id 
 claim_indexes (zero-based), outputs, and test_commands linking that requirement to
 observed evidence. Do not mark unsupported requirements covered. Use an empty coverage
 list if no explicit requirements were provided. A linkage is not semantic proof.
-Use ready_for_review only when you have evidence addressing all success criteria. Use blocked
+Use ready_for_review only when you have evidence addressing all success criteria. When the task
+was answered directly with no tools, evidence is one line saying so, e.g. "Answered directly from
+the task and my job description; no tools were needed". Use blocked
 when user input or an external change is needed. The user accepts the result to finish the goal.
 Never send messages, publish, pay, delete unrelated data or bypass native permission controls.
 """
@@ -434,6 +436,8 @@ def checkpoint_from(text, workspace, task_kind="general"):
     value = checkpoint_json(text)
     if not isinstance(value, dict) or value.get("decision") not in {"continue", "blocked", "ready_for_review"}:
         raise ValueError("Native response did not contain a valid goal checkpoint")
+    if value.get("next_step") is None:
+        value["next_step"] = ""  # "no next step" written as null; carries no claim
     for key in ("summary", "next_step"):
         if not isinstance(value.get(key), str) or len(value[key]) > 30_000:
             raise ValueError("Invalid goal checkpoint text")
@@ -448,6 +452,18 @@ def checkpoint_from(text, workspace, task_kind="general"):
         outputs.append(output_record(root, name)["path"])
     value["outputs"] = outputs
     claims = value.get("claims", [])
+    if isinstance(claims, list) and task_kind != "research":
+        # A claim with neither a URL nor a quote cites nothing. Drop it locally and unlink it
+        # from coverage; this only removes support, never adds evidence.
+        keep = [i for i, c in enumerate(claims) if not (isinstance(c, dict) and not str(c.get("url") or "").strip()
+                                                       and not str(c.get("quote") or "").strip())]
+        if len(keep) != len(claims):
+            moved = {old: new for new, old in enumerate(keep)}
+            claims = [claims[i] for i in keep]
+            if isinstance(value.get("coverage"), list):
+                for entry in value["coverage"]:
+                    if isinstance(entry, dict) and isinstance(entry.get("claim_indexes"), list):
+                        entry["claim_indexes"] = [moved[i] for i in entry["claim_indexes"] if type(i) is int and i in moved]
     if not isinstance(claims, list) or len(claims) > 100 or any(
         not isinstance(c, dict)
         or any(not isinstance(c.get(k), str) or not c[k].strip() or len(c[k]) > 4000 for k in ("claim", "quote"))
@@ -619,7 +635,7 @@ def execute_cycle(store, goal, *, endpoint=None, session_factory=NativeGoalSessi
                     adapter.checkpoint_thread_id = thread["id"]
                     try:
                         repaired = session.rpc("turn/start", {"threadId": thread["id"], "outputSchema": CHECKPOINT_SCHEMA,
-                            "input": [{"type": "text", "text": "Serialize the work already observed into the required goal checkpoint, including coverage. Do not continue the task, run tools, fabricate evidence or repeat actions. If evidence is missing, say so.", "text_elements": []}]})["turn"]
+                            "input": [{"type": "text", "text": "Serialize the work already observed into the required goal checkpoint, including coverage. Do not continue the task, run tools, fabricate evidence or repeat actions. If no tools were needed, evidence is one line saying the answer came directly from the task. If evidence is missing, say so.", "text_elements": []}]})["turn"]
                         store.attach(goal, thread["id"], repaired["id"])
                         cycle_turn_ids.append(repaired["id"])
                         if session.wait_turn(repaired["id"]).get("status") != "completed":

@@ -54,11 +54,24 @@ TOOLS = [
           {"employee": _EMP, "task": {"type": "string", "description": "What to do, with the details the owner gave"},
            "done_when": {"type": "string", "description": "How the employee knows the job is finished"}},
           ["employee", "task"], title="Hand a job to an employee"),
+    _tool("team_routine", "Set up a routine: an employee does a read-only job on a schedule (e.g. every morning at 9 check the inbox and "
+          "report). Each run is a background task that reports back for the owner to accept before the next one starts; anything "
+          "outward still asks the owner. The owner confirms the routine in an approval card.",
+          {"employee": _EMP, "task": {"type": "string", "description": "What to do on every run, with the details the owner gave"},
+           "done_when": {"type": "string", "description": "What a good report contains"},
+           "every": {"type": "string", "enum": ["hour", "day", "week"], "description": "How often"},
+           "at": {"type": "string", "description": "Local time of day as HH:MM, for day or week (default 09:00)"},
+           "times": {"type": "integer", "description": "Stop after this many runs (default 30, at most 100)"}},
+          ["employee", "task", "every"], title="Set up a routine"),
+    _tool("team_routines", "List routines: employee, schedule, next run, runs so far and whether paused.", title="See routines"),
+    _tool("team_routine_pause", "Pause or resume a routine by its id from team_routines.",
+          {"id": {"type": "string"}, "resume": {"type": "boolean", "description": "true to resume; default pauses"}},
+          ["id"], title="Pause a routine"),
     _tool("team_tasks", "What each employee is doing: their background tasks with state and latest progress.",
           {"employee": {"type": "string", "description": "Optional: only this employee"}}, title="See the team's work"),
 ]
-PROMPTED = {"team_hire", "team_update", "team_remember"}
-READONLY = {"team_list", "team_tasks"}
+PROMPTED = {"team_hire", "team_update", "team_remember", "team_routine"}
+READONLY = {"team_list", "team_tasks", "team_routines"}
 for _entry in TOOLS:
     _entry["annotations"].update(readOnlyHint=_entry["name"] in READONLY, destructiveHint=False,
                                  idempotentHint=_entry["name"] in READONLY, openWorldHint=False)
@@ -146,6 +159,69 @@ def _tasks(employee: str = "") -> list[dict]:
     return out[:40]
 
 
+def _first_run(every: str, at: str, now=None) -> tuple[float, int]:
+    """(first run as epoch seconds, seconds between runs). Daily and weekly runs land on the owner's local clock time."""
+    import datetime
+    import time
+    now = time.time() if now is None else now
+    if every == "hour":
+        return now + 3600, 3600
+    if every not in {"day", "week"}:
+        raise ValueError("Choose hour, day or week")
+    match = re.fullmatch(r"\s*(\d{1,2}):(\d{2})\s*", at or "09:00")
+    if not match or int(match[1]) > 23 or int(match[2]) > 59:
+        raise ValueError("Give the time as HH:MM, for example 09:00")
+    local = datetime.datetime.fromtimestamp(now)
+    when = local.replace(hour=int(match[1]), minute=int(match[2]), second=0, microsecond=0)
+    if when.timestamp() <= now:
+        when += datetime.timedelta(days=1)
+    return when.timestamp(), 86400 if every == "day" else 7 * 86400
+
+
+def _routines() -> list[dict]:
+    from . import native_background
+    from .native_goals import GoalStore
+    out = []
+    for item in native_background.schedules(GoalStore()):
+        spec = item["spec"]
+        out.append({"id": item["id"], "employee": spec.get("agent_id") or MANAGER_ID, "name": item["name"],
+                    "every_hours": round(item["interval"] / 3600, 1), "next_run": item["due"], "runs": item["runs"],
+                    "max_runs": item["max_runs"], "paused": not item["enabled"], "detail": item["detail"]})
+    return out[:40]
+
+
+def _routine(args: dict, workspace: str) -> dict:
+    saved = _settings()
+    agent = _find(saved, args.get("employee"))
+    task = _clean_text(args.get("task"), "task", 4000)
+    done = str(args.get("done_when") or "").strip() or "A short, clear report of what was found and what needs the owner."
+    first, interval = _first_run(str(args.get("every") or ""), str(args.get("at") or ""))
+    times = args.get("times", 30)
+    if type(times) is not int or not 1 <= times <= 100:
+        raise ValueError("Runs must be 1 to 100")
+    from . import native_background
+    from .native_goals import GoalStore, operate
+    from .native_management import preferences
+    prefs = preferences()
+    target = workspace or prefs.get("workspace") or ""
+    if not target:
+        raise ValueError("Open a project first")
+    spec = {"workspace": target, "profile_id": prefs.get("active_model") or "", "objective": task, "success_criteria": done,
+            "agent_id": agent["id"], "sandbox": "read-only", "max_cycles": 6, "max_requests": 24}
+    store = GoalStore()
+    identity = native_background.add(store, {"name": f"{agent['name']}: {task[:60]}", "spec": spec, "interval_seconds": interval,
+                                  "max_runs": times, "start_at": first})
+    native_background.enable(store, identity, True)
+    try:
+        operate({"action": "start_service"})
+    except Exception:
+        pass
+    import datetime
+    return {"routine_id": identity, "employee": agent["name"], "first_run": datetime.datetime.fromtimestamp(first).strftime("%a %d %b %H:%M"),
+            "tell_the_owner": f"{agent['name']} will do this {args.get('every')}ly starting {datetime.datetime.fromtimestamp(first).strftime('%a %d %b at %H:%M')}. "
+            "Each run reports back to the task board; accept it there and the next run goes ahead. Smara must be running on this PC."}
+
+
 def call(name: str, args: dict, workspace: str = "") -> dict:
     if name == "team_list":
         saved = _settings()
@@ -221,6 +297,18 @@ def call(name: str, args: dict, workspace: str = "") -> dict:
             pass
         return {"task_id": goal.get("id"), "employee": agent["name"], "state": goal.get("state"),
                 "tell_the_owner": f"{agent['name']} has the job. It shows on the task board; approvals it needs come to you."}
+    if name == "team_routine":
+        return _routine(args, workspace)
+    if name == "team_routines":
+        return {"routines": _routines()}
+    if name == "team_routine_pause":
+        from . import native_background
+        from .native_goals import GoalStore
+        wanted = str(args.get("id") or "")
+        if not any(r["id"] == wanted for r in _routines()):
+            raise ValueError("No routine with that id. Call team_routines.")
+        native_background.enable(GoalStore(), wanted, bool(args.get("resume")))
+        return {"id": wanted, "state": "running on schedule" if args.get("resume") else "paused"}
     raise ValueError("Unknown team tool")
 
 
