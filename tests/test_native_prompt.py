@@ -21,3 +21,17 @@ def test_long_chats_compact_well_before_they_get_slow():
     source = Path(native_prompt.__file__).with_name("native_runtime.py").read_text(encoding="utf-8")
     assert 'settings["model_instructions_file"] = str(write_base_prompt(home))' in source
     assert "min(int(window * .8), FAST_CONTEXT_TOKENS)" in source
+
+
+def test_chats_reply_at_low_reasoning_and_greetings_skip_memory_lookup():
+    source = Path(native_prompt.__file__).with_name("native_runtime.py").read_text(encoding="utf-8")
+    assert 'settings["model_reasoning_effort"] = "low"' in source
+    from smara.native_memory import small_talk
+    assert all(small_talk(t) for t in ("hi", "Hello!", "thanks", "ok", "namaste"))
+    assert not any(small_talk(t) for t in ("who owes me the most?", "hi can you check tally", "ok send the reminder to Sharma"))
+
+
+def test_every_chat_offers_the_team_tools_and_team_changes_ask_first(tmp_path, monkeypatch):
+    source = Path(native_prompt.__file__).with_name("native_runtime.py").read_text(encoding="utf-8")
+    assert '"mcp_servers.smara_team.enabled": True' in source
+    assert "team_approval(entry[\"name\"])" in source

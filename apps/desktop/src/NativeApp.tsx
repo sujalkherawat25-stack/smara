@@ -30,6 +30,8 @@ import NativeOutcome from "./NativeOutcome";
 import { requestQuestions, waitingReason } from "./chatStatus";
 import NativeAskCard from "./NativeAskCard";
 import type { ArchivedActions } from "./NativeArchived";
+import { HIRE_STARTER, MANAGER_ID, blocksChat, initials, memberStatus, splitRoster } from "./team";
+import JobPanel from "./ui/JobPanel";
 import { nativeSettings, sameWorkspace, type NativeSetup } from "./nativeApi";
 import { NativeRpc, RpcOutcomeUnknown, type RpcMessage } from "./nativeRpc";
 import { appendTerminalOutput, decodeTerminalOutput, encodeTerminalInput, terminalExecParams, type TerminalSession } from "./terminalProtocol";
@@ -112,6 +114,9 @@ export default function NativeApp() {
   const [chatSort, setChatSort] = useState<ChatSort>("recent");
   const [showArchived, setShowArchived] = useState(false);
   const [agentQuery, setAgentQuery] = useState("");
+  /** Every background task, for the team's status lines in the sidebar. */
+  const [teamGoals, setTeamGoals] = useState<Goal[]>([]);
+  const [jobOpen, setJobOpen] = useState(false);
   const [threadMenu, setThreadMenu] = useState("");
   const [threadActionBusy, setThreadActionBusy] = useState("");
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -188,7 +193,7 @@ export default function NativeApp() {
   const olderChats = chatsNewestFirst(threads, roster, activeAgentId).filter(chat => chat.id !== threadId);
   /** Opening an agent shows its most recent conversation, the way a chat app opens a contact. */
   const openAgent = (id: string) => {
-    setSelectedAgent(id); setAgentDraft(null); setSettingsOpen(false);
+    setSelectedAgent(id); setAgentDraft(null); setSettingsOpen(false); setJobOpen(false);
     const latest = chatsNewestFirst(threads, roster, id)[0];
     if (latest) { if (latest.id !== threadId) void selectThread(latest.id); }
     else newConversation();
@@ -208,6 +213,15 @@ export default function NativeApp() {
       setEarlier(history); setEarlierState("loaded");
     } catch (reason) { setError(String(reason)); setEarlierState("none"); }
   };
+  /** "+ Hire": the owner explains the job to Smara in chat; Smara asks what it needs and hires (with an approval card). */
+  const hireInChat = () => {
+    setSelectedAgent(MANAGER_ID); setAgentDraft(null); setSettingsOpen(false); setPanel(null); setJobOpen(false);
+    if (threadRef.current && agentOfChatId(threadRef.current) !== MANAGER_ID) newConversation();
+    else if (!threadRef.current) newConversation();
+    setDraft(HIRE_STARTER);
+    requestAnimationFrame(() => { const input = composerRef.current; if (input) { input.focus(); input.setSelectionRange(HIRE_STARTER.length, HIRE_STARTER.length); } });
+  };
+  const agentOfChatId = (chatId: string) => roster.assignments[chatId] && agentById(roster, roster.assignments[chatId]) ? roster.assignments[chatId] : roster.default;
   const startNewAgent = () => { setAgentProblem(""); setAgentDraft({ name: "", role: "", icon: "", instructions: "", preset: false }); };
   const editAgent = (agent: AgentRecord) => { setAgentProblem(""); setAgentDraft({ id: agent.id, name: agent.name, role: agent.role, icon: agent.icon, instructions: agent.instructions, preset: agent.preset }); };
   const selectAgent = (id: string) => { setSelectedAgent(id); setAgentDraft(null); };
@@ -278,7 +292,8 @@ export default function NativeApp() {
         ? goals.find(g => g.id === currentGoalRef.current?.id) ?? null
         : null
     );
-    setGoalWorking(allGoals.some(goal => !!goal.lease) || !!value.current_goal?.lease);
+    setGoalWorking(blocksChat(allGoals) || (!!value.current_goal?.lease && value.current_goal.spec.sandbox === "workspace-write"));
+    setTeamGoals(allGoals);
     setGoalServiceRunning(!!value.service.running);
     if (value.service.running) {
       setGoalServiceStarting(false); setGoalServiceError(value.service.online === false ? "Network offline · queued work waits; interrupted actions are not replayed." : ""); setGoalPollError("");
@@ -1047,9 +1062,10 @@ export default function NativeApp() {
   const windowed = visibleWindow(transcriptItems, visibleLimit);
   const agentThreads = chatsForAgent(threads, roster, selectedAgent || roster.default);
   const currentAgent = agentById(roster, selectedAgent || roster.default);
-  const avatarInitial = currentAgent?.name.charAt(0) || "S";
-  const avatarTone = currentAgent ? agentTone(currentAgent) : "teal";
+  const avatarInitial = currentAgent?.id === MANAGER_ID ? "✦" : currentAgent ? initials(currentAgent.name) : "✦";
+  const avatarTone = !currentAgent || currentAgent.id === MANAGER_ID ? "manager" : agentTone(currentAgent);
   const agentSearch = agentQuery.trim().toLowerCase();
+  const teamSplit = splitRoster(roster);
   const shownAgents = agentSearch ? roster.roster.filter(agent => `${agent.name} ${agent.role}`.toLowerCase().includes(agentSearch)) : roster.roster;
   const activeProfile = setup?.profiles.find(item => item.id === profile);
   const hosted = hostedStatus(helper);
@@ -1084,7 +1100,9 @@ export default function NativeApp() {
       if (await disconnect(true, "Restarting Smara…")) await connect();
     }
   };
-  const goalInThisConversation = !!currentGoal && (!currentGoal.spec?.origin_thread_id || currentGoal.spec?.origin_thread_id === threadId);
+  const goalInThisConversation = !!currentGoal && (currentGoal.spec?.origin_thread_id
+    ? currentGoal.spec.origin_thread_id === threadId
+    : (currentGoal.spec?.agent_id || roster.default) === activeAgentId);
   const goalInAnotherConversation = !!currentGoal?.spec?.origin_thread_id
     && currentGoal.spec?.origin_thread_id !== threadId
     && !["completed", "stopped"].includes(currentGoal.state);
@@ -1186,38 +1204,33 @@ export default function NativeApp() {
   return <div className="native-app">
     <div className={`native-layout${settingsOpen ? " settings-mode" : ""}`}><aside>
       <div className="sidebar-top">
-        <input className="agent-search" type="search" aria-label="Search agents" placeholder="Search agents" value={agentQuery} onChange={event => setAgentQuery(event.target.value)} />
+        <input className="agent-search" type="search" aria-label="Search agents" placeholder="Search your team" value={agentQuery} onChange={event => setAgentQuery(event.target.value)} />
         <button className="new-chat" disabled={navigationLocked} onClick={newConversation}>New chat</button>
       </div>
-      {showArchived ? <div className="contact-list" aria-label="Archived conversations">
-        {threads.map(thread => <div className="contact-item" key={thread.id}>
-          <button className="contact" disabled={navigationLocked || !connected} onClick={() => { setSettingsOpen(false); void selectThread(thread.id); }}>
-            <span className="avatar" aria-hidden="true">{threadLabel(thread).charAt(0).toUpperCase()}</span>
-            <span className="contact-text"><span className="contact-name">{threadLabel(thread)}</span><span className="contact-preview">Archived</span></span>
-          </button>
-          <button className="text-button contact-edit" disabled={!!threadActionBusy || navigationLocked} onClick={() => void archiveChat(thread, true)}>Restore</button>
-        </div>)}
-        {!threads.length && <p className="sidebar-empty">{loadingMore ? "Loading…" : "No archived conversations."}</p>}
-      </div> : <div className="contact-list" aria-label="Agents">
-        {shownAgents.map(agent => {
+      <nav className="team-list" aria-label="Smara and your team">
+        {[teamSplit.manager, ...teamSplit.employees].filter((agent): agent is AgentRecord => !!agent)
+          .filter(agent => !agentSearch || `${agent.name} ${agent.role}`.toLowerCase().includes(agentSearch))
+          .map(agent => {
           const latest = chatsNewestFirst(threads, roster, agent.id)[0];
           const selected = agent.id === activeAgentId;
-          return <div className="contact-item" key={agent.id}>
-            <button className="contact" aria-current={selected ? "true" : undefined} disabled={navigationLocked} onClick={() => openAgent(agent.id)}>
-              <span className="avatar" data-tone={agentTone(agent)} aria-hidden="true">{agent.name.charAt(0)}</span>
-              <span className="contact-text">
-                <span className="contact-line"><span className="contact-name">{agent.name}</span>{latest && <time className="contact-time">{contactTime(threadTime(latest), Date.now())}</time>}</span>
-                <span className="contact-preview">{selected && busy ? "Working…" : latest ? threadLabel(latest) : (agent.role || "No conversations yet")}</span>
+          const manager = agent.id === MANAGER_ID;
+          const state = selected && busy ? { tone: "working" as const, text: "Replying…" } : memberStatus(agent.id, teamGoals, latest ? threadLabel(latest) : "", agent.role);
+          return <div className={`member${manager ? " member-manager" : ""}`} key={agent.id}>
+            <button className="member-open" aria-current={selected ? "true" : undefined} disabled={navigationLocked} onClick={() => openAgent(agent.id)}>
+              <span className="member-avatar" data-tone={manager ? "manager" : agentTone(agent)} aria-hidden="true">{manager ? "✦" : initials(agent.name)}</span>
+              <span className="member-text">
+                <span className="member-line"><span className="member-name">{agent.name}</span>{manager ? <span className="member-tag">Manager</span> : <span className="member-role">{agent.role}</span>}{latest && !manager && <time className="contact-time">{contactTime(threadTime(latest), Date.now())}</time>}</span>
+                <span className="member-status" data-tone={state.tone}>{state.tone !== "idle" && <i aria-hidden="true" />}{state.text}</span>
               </span>
             </button>
-            <button className="text-button contact-edit" aria-label={`Edit ${agent.name}`} disabled={navigationLocked} onClick={() => editAgent(agent)}>Edit</button>
+            <button className="text-button member-edit" aria-label={`Edit ${agent.name}`} disabled={navigationLocked} onClick={() => editAgent(agent)}>Edit</button>
+            {manager && <div className="team-heading"><span>Team · {teamSplit.employees.length}</span><button className="text-button" disabled={navigationLocked} title="Tell Smara who you need; it sets the new employee up in chat" onClick={hireInChat}>+ Hire</button></div>}
           </div>;
         })}
-        {!!roster.roster.length && !shownAgents.length && <p className="sidebar-empty">No agent matches "{agentQuery.trim()}".</p>}
-        {!roster.roster.length && <p className="sidebar-empty">Agents appear here once Smara is ready.</p>}
-      </div>}
+        {!roster.roster.length && <p className="sidebar-empty">Your team appears here once Smara is ready.</p>}
+        {!!agentSearch && !roster.roster.some(agent => `${agent.name} ${agent.role}`.toLowerCase().includes(agentSearch)) && <p className="sidebar-empty">No one matches "{agentQuery.trim()}".</p>}
+      </nav>
       <div className="sidebar-footer">
-        {!showArchived && <button className="text-button" disabled={navigationLocked} onClick={startNewAgent}>New agent</button>}
         <button className="text-button" aria-expanded={projectOpen} onClick={() => setProjectOpen(!projectOpen)}>Project: {project?.label || "None"}</button>
         {projectOpen && <div className="project-list">
           <button className="text-button" disabled={navigationLocked} onClick={() => setAddingProject(!addingProject)}>Add project</button>
@@ -1232,6 +1245,7 @@ export default function NativeApp() {
           {!settingsOpen && currentAgent && <span className="avatar sm" data-tone={avatarTone} aria-hidden="true">{avatarInitial}</span>}
           <strong title={settingsOpen ? "Settings" : currentAgent?.name}>{settingsOpen ? "Settings" : currentAgent?.name || "Smara"}</strong>
           {!settingsOpen && [currentAgent?.role, project?.label].filter(Boolean).length > 0 && <small>{[currentAgent?.role, project?.label].filter(Boolean).join(" · ")}</small>}
+          {!settingsOpen && currentAgent && <button className="text-button job-button" aria-expanded={jobOpen} onClick={() => setJobOpen(value => !value)}>{currentAgent.id === MANAGER_ID ? "How Smara works" : "Job & rules"}</button>}
         </div>
         {!settingsOpen && <div className="topbar-status">
           <button className="hosted-status" data-tone={hosted.tone} aria-pressed={panel === "hosted"} title="Open Hosted Smara" onClick={() => openPane("hosted")}><span className="status-dot" aria-hidden="true" />{hosted.label}</button>
@@ -1313,6 +1327,7 @@ export default function NativeApp() {
       </section>}
       {goalInThisConversation && currentGoal && <NativeOutcome goal={currentGoal} onPreviewFile={setPreviewPath} />}
       {uncertain && <div className="native-warning"><button onClick={() => void checkStatus()}>Check response status</button><button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Recover chat</button> The request may have been accepted. Your message will not be resent automatically.</div>}
+      {jobOpen && currentAgent && !settingsOpen && <JobPanel agent={currentAgent} onEdit={() => { setJobOpen(false); editAgent(currentAgent); }} onClose={() => setJobOpen(false)} />}
       {agentDraft && <div className="agent-form-panel" role="dialog" aria-modal="true" aria-label={agentDraft.id ? "Edit agent" : "New agent"}><AgentForm draft={agentDraft} problem={agentProblem} disabled={navigationLocked} onChange={patch => setAgentDraft(current => current ? { ...current, ...patch } : current)} onSubmit={() => void submitAgent()} onCancel={() => setAgentDraft(null)} /></div>}
         <div className="native-transcript" aria-live="off">
         {!!workers.length && <section className="native-workers"><strong>Workers · {workers.filter(worker => worker.status === "completed").length}/{workers.length} complete · changes are not auto-merged</strong>{liveWorkers && <button disabled={connecting || loadingThread} title="Stops this chat's native runtime and all its workers; saved history is kept" onClick={() => void stopWorkers()}>Stop workers</button>}{workers.map(worker => <div key={worker.id}><code>{worker.id}</code> · {worker.status}{worker.activity && <span> · {worker.activity}{worker.lastActivityAt && ` · ${Math.max(0, Math.floor((activityClock - worker.lastActivityAt) / 1000))}s ago`}</span>} <button disabled={!connected || connecting || loadingThread} onClick={() => void inspectWorker(worker.id)}>Check status & checkout</button>{worker.cwd && <pre>{worker.cwd}</pre>}</div>)}</section>}
@@ -1322,7 +1337,7 @@ export default function NativeApp() {
         {groupTranscript(windowed.visible).map(segment => segment.type === "item"
           ? <TranscriptItem key={segment.item.id} item={segment.item} busy={busy} copied={copiedItemId === segment.item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} agentInitial={avatarInitial} agentTone={avatarTone} />
           : <ToolGroup key={segment.key} items={segment.items} running={segment.running}>{item => <TranscriptItem item={item} busy={busy} copied={copiedItemId === item.id} onCopy={stableCopy} onEdit={stableEdit} onPreviewFile={stablePreview} agentInitial={avatarInitial} agentTone={avatarTone} />}</ToolGroup>)}
-        {busy && turnStartedAt && <div className="working-line"><span className="avatar" data-tone={avatarTone} aria-hidden="true">{avatarInitial}</span><p role="status"><span className="working-dots" aria-hidden="true"><i /><i /><i /></span>{waitingReason(items, approvals.length, activityClock, lastNativeEventRef.current)} · {Math.max(0, Math.floor((activityClock - turnStartedAt) / 1000))}s elapsed</p></div>}
+        {busy && turnStartedAt && <div className="working-line"><span className="avatar" data-tone={avatarTone} aria-hidden="true">{avatarInitial}</span><p role="status"><span className="thinking-text">{currentAgent?.name ?? "Smara"} · {waitingReason(items, approvals.length, activityClock, lastNativeEventRef.current)}</span><small>{Math.max(0, Math.floor((activityClock - turnStartedAt) / 1000))}s</small></p></div>}
         <div ref={bottom} />
       </div>
       <footer>{approvals[0] ? <NativeAskCard key={String(approvals[0].id)} request={approvals[0]} waiting={approvals.length} relevant={approvalRelevant(approvals[0])} agentName={currentAgent?.name ?? "Smara"}

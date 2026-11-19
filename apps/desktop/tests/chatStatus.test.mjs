@@ -9,7 +9,7 @@ vm.runInNewContext(code, { module, exports: module.exports });
 const { waitingReason, requestQuestions } = module.exports;
 test("quiet provider/tool periods are waiting, not a proven freeze or fabricated progress", () => {
   assert.match(waitingReason([], 0, 60000, 0), /no new events for 60s/);
-  assert.match(waitingReason([], 1, 60000, 0), /not approved/);
+  assert.match(waitingReason([], 1, 60000, 0), /nothing is approved/);
   assert.match(waitingReason([{ id: "x", kind: "commandExecution", status: "inProgress" }], 0, 10000, 0), /Running a command/);
   assert.match(waitingReason([{ id: "x", kind: "collabAgentToolCall", status: "inProgress" }], 0, 10000, 0), /worker results/);
 });

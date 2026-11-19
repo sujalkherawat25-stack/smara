@@ -1,13 +1,14 @@
 import type { ViewItem } from "./nativeView";
 export function waitingReason(items: ViewItem[], approvalCount: number, now: number, lastEvent: number): string {
-  if (approvalCount) return "Waiting for your response · pending actions are not approved";
+  if (approvalCount) return "Waiting for your answer · nothing is approved until you choose";
   const tool = [...items].reverse().find(item => item.status === "inProgress" && !["assistant", "user"].includes(item.kind));
-  let detail = "Waiting for the model response";
+  const writing = !tool && items.at(-1)?.kind === "assistant" && items.at(-1)?.status === "inProgress";
+  let detail = writing ? "Writing" : "Thinking";
   if (tool?.kind === "commandExecution") detail = "Running a command";
   else if (tool?.kind === "collabAgentToolCall") detail = "Waiting for worker results";
-  else if (tool) detail = "Waiting for a tool result";
+  else if (tool) detail = "Using a tool";
   const quiet = Math.max(0, Math.floor((now - lastEvent) / 1000));
-  return quiet >= 30 ? `${detail} · no new events for ${quiet}s. Stop remains available; a freeze is not confirmed.` : `${detail} · Stop is available below`;
+  return quiet >= 30 ? `${detail} · no new events for ${quiet}s. Stop still works; a freeze is not confirmed.` : detail;
 }
 export type InputQuestion = { id: string; question: string; isSecret?: boolean; options?: { label: string; description: string }[] | null };
 export function requestQuestions(params: Record<string, unknown>): InputQuestion[] | undefined {

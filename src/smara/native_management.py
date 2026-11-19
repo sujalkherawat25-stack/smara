@@ -404,6 +404,9 @@ def main(argv=None):
     if args[:1] == ["--native-browser"]:
         from .native_browser import main as serve
         return serve(args[1:])
+    if args[:1] == ["--native-team"]:
+        from .native_team import main as team_main
+        return team_main(args[1:])
     if args[:1] == ["--native-computer"]:
         from .native_computer import main as computer_main
         return computer_main(args[1:])

@@ -2,6 +2,7 @@ import type { AgentRecord } from "../agents";
 
 /** Starter prompts per built-in agent. Each one fills the composer; the owner still reviews and sends it. */
 const STARTERS: Record<string, string[]> = {
+  smara: ["What is my team working on?", "Hire someone to handle my email inbox", "Ask Kiran to total this month's sales"],
   kiran: ["Who owes me the most this month?", "Summarise the totals in my Tally export", "Check this sheet for duplicate invoices"],
   rohan: ["Draft a polite reminder for overdue dues", "Which customers are more than 30 days late?", "What is due this week?"],
   scout: ["Find the public price of a product on a shop's site", "List the contact details on a public business page"],

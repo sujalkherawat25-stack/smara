@@ -42,3 +42,17 @@ test("opening a chat jumps to its newest message without scrolling the window", 
   assert.match(app, /pane\.scrollTop = pane\.scrollHeight/);
   assert.match(app, /setItems\(\[\]\); stickRef\.current = true;/);
 });
+
+test("team changes read as hiring, rules and changes, with the job text to check", () => {
+  const hire = askView({ method: "mcpServer/elicitation/request", params: { serverName: "smara_team", message: "Allow the smara_team MCP server to run tool \"team_hire\"?",
+    _meta: { tool_title: "Hire an employee", tool_params: { name: "Meera", role: "Mail handler", job: "You handle the inbox. Never send without asking." } } } });
+  assert.equal(hire.title, "Hire Meera as Mail handler?");
+  assert.match(hire.summary, /Never send without asking/);
+  assert.equal(hire.kind, "team");
+  const rule = askView({ method: "mcpServer/elicitation/request", params: { serverName: "smara_team", _meta: { tool_title: "Remember a rule", tool_params: { employee: "Kiran", rule: "Show totals in lakhs." } } } });
+  assert.equal(rule.title, "Should Kiran remember this from now on?");
+  assert.equal(rule.summary, "Show totals in lakhs.");
+  const rename = askView({ method: "mcpServer/elicitation/request", params: { serverName: "smara_team", _meta: { tool_title: "Change an employee", tool_params: { employee: "smara", name: "Munshi" } } } });
+  assert.equal(rename.title, "Change smara?");
+  assert.match(rename.summary, /name → Munshi/);
+});

@@ -1,5 +1,5 @@
 /** Plain-language wording for the approval card that takes the composer's place while Smara waits for the owner. */
-export type AskView = { title: string; summary: string; detail: string; kind: "command" | "files" | "browser" | "computer" | "access" | "tool"; risky: boolean };
+export type AskView = { title: string; summary: string; detail: string; kind: "command" | "files" | "browser" | "computer" | "access" | "tool" | "team"; risky: boolean };
 
 const RISKY = /\b(send|submit|pay|payment|delete|remove|publish|post|transfer|upload|sign in|login|log in|purchase|buy|confirm)\b/i;
 
@@ -17,6 +17,23 @@ function str(value: unknown): string {
 function parseToolMessage(message: string): { tool: string; target: string } | null {
   const match = /tool\s+([A-Za-z0-9_.-]+)\s*:?\s*(.*?)\??$/s.exec(message);
   return match ? { tool: match[1], target: match[2].trim() } : null;
+}
+
+const TEAM_TITLES: Record<string, string> = { "Hire an employee": "team_hire", "Change an employee": "team_update", "Remember a rule": "team_remember" };
+function toolFromTitle(title: string): string { return TEAM_TITLES[title] ?? ""; }
+
+/** Team changes (hire, change, remember) in the owner's words: who, what, and the job text to check. */
+function teamView(server: string, tool: string, params: Record<string, unknown>): AskView | null {
+  if (server !== "smara_team" && !tool.startsWith("team_")) return null;
+  const who = str(params.name) || str(params.employee);
+  if (tool === "team_hire") return { kind: "team", title: `Hire ${who || "a new employee"}${str(params.role) ? ` as ${str(params.role)}` : ""}?`,
+    summary: str(params.job), detail: "", risky: false };
+  if (tool === "team_remember") return { kind: "team", title: `Should ${who || "this employee"} remember this from now on?`, summary: str(params.rule), detail: "", risky: false };
+  if (tool === "team_update") {
+    const changes = [str(params.name) && `name → ${str(params.name)}`, str(params.role) && `role → ${str(params.role)}`].filter(Boolean).join(", ");
+    return { kind: "team", title: `Change ${str(params.employee) || "this employee"}?`, summary: [changes, str(params.job) && `New job: ${str(params.job)}`].filter(Boolean).join("\n\n"), detail: "", risky: false };
+  }
+  return null;
 }
 
 export function askView(request: { method: string; params: Record<string, unknown> }): AskView {
@@ -37,6 +54,10 @@ export function askView(request: { method: string; params: Record<string, unknow
   }
   const message = str(p.message);
   const server = str(p.serverName);
+  const meta = (p._meta && typeof p._meta === "object" ? p._meta : {}) as Record<string, unknown>;
+  const params = (meta.tool_params && typeof meta.tool_params === "object" ? meta.tool_params : {}) as Record<string, unknown>;
+  const team = teamView(server, str(meta.tool_name) || toolFromTitle(str(meta.tool_title)), params);
+  if (team) return team;
   const parsed = parseToolMessage(message);
   if (parsed && /playwright|browser/i.test(server + parsed.tool)) {
     const verb = TOOL_WORDS[parsed.tool] ?? parsed.tool.replace(/^browser_/, "").replace(/_/g, " ");

@@ -19,13 +19,15 @@ const setup = {
   computer: { enabled: false, expires: null },
   agents: {
     roster: [
+      { id: "smara", name: "Smara", role: "Manager", icon: "✦", instructions: "You are the owner's manager and first point of contact.", preset: true },
+      { id: "meera", name: "Meera", role: "Mail handler", icon: "📧", instructions: "You read the shop's inbox every morning, sort what matters and draft replies. Never send without asking.\n\nStanding rules from the owner:\n- Always cc the owner on replies to GST officers.", preset: false },
       { id: "kiran", name: "Kiran", role: "Accounts", icon: "📒", instructions: "", preset: true },
       { id: "rohan", name: "Rohan", role: "Dues", icon: "🔔", instructions: "", preset: true },
       { id: "scout", name: "Scout", role: "Web tasks", icon: "🧭", instructions: "", preset: true },
       { id: "nisha", name: "Nisha", role: "Documents", icon: "📄", instructions: "", preset: true },
     ],
-    default: "kiran",
-    assignments: { "t-dues": "rohan" },
+    default: "smara",
+    assignments: { "t-dues": "rohan", "t-tally": "kiran" },
   },
 };
 
