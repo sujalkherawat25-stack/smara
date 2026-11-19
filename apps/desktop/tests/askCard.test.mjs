@@ -79,3 +79,13 @@ test("saving a skill shows the workflow as numbered steps to check", () => {
   const forget = askView({ method: "mcpServer/elicitation/request", params: { message: "x", _meta: { tool_name: "skill_forget", tool_params: { employee: "kiran", name: "Monthly sales summary" } } } });
   assert.equal(forget.risky, true);
 });
+
+test("asking for app access in chat names the apps, the time and the safety limits", () => {
+  const view = askView({ method: "mcpServer/elicitation/request", params: { serverName: "smara_computer", message: "Allow the smara_computer MCP server to run tool \"computer_request_access\"?",
+    _meta: { tool_name: "computer_request_access", tool_params: { apps: ["chrome", "tally"], minutes: 30, reason: "Open your LinkedIn to check notifications" } } } });
+  assert.equal(view.title, "Let Smara use chrome, tally for 30 minutes?");
+  assert.equal(view.summary, "Open your LinkedIn to check notifications");
+  assert.match(view.detail, /Pause or Stop/);
+  assert.match(view.detail, /never types passwords/i);
+  assert.equal(view.kind, "computer");
+});

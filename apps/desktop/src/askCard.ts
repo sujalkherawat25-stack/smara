@@ -65,6 +65,16 @@ function skillView(tool: string, who: string, params: Record<string, unknown>): 
   return null;
 }
 
+/** The agent asking for permission to use the owner's apps, in chat, with the time and apps spelled out. */
+function accessView(params: Record<string, unknown>): AskView {
+  const minutes = typeof params.minutes === "number" ? Math.max(5, Math.min(120, params.minutes)) : 30;
+  const apps = Array.isArray(params.apps) ? params.apps.map(String).filter(Boolean) : [];
+  return { kind: "computer", title: `Let Smara use ${apps.length ? apps.join(", ") : "your apps"} for ${minutes} minutes?`,
+    summary: str(params.reason) || "Smara needs to open and use an app on this PC to do this.",
+    detail: "It stops by itself after the time, or when you press Pause or Stop on the bar at the top of the screen (or Ctrl+Alt+Esc). "
+      + "Sending, paying, deleting and signing in still ask you each time. It never types passwords, OTPs or card numbers.", risky: false };
+}
+
 export function askView(request: { method: string; params: Record<string, unknown> }): AskView {
   const p = request.params;
   const reason = str(p.reason);
@@ -87,6 +97,7 @@ export function askView(request: { method: string; params: Record<string, unknow
   const params = (meta.tool_params && typeof meta.tool_params === "object" ? meta.tool_params : {}) as Record<string, unknown>;
   const team = teamView(server, str(meta.tool_name) || toolFromTitle(str(meta.tool_title)), params);
   if (team) return team;
+  if (str(meta.tool_name) === "computer_request_access" || /computer_request_access/.test(message)) return accessView(params);
   const parsed = parseToolMessage(message);
   if (parsed && /playwright|browser/i.test(server + parsed.tool)) {
     const verb = TOOL_WORDS[parsed.tool] ?? parsed.tool.replace(/^browser_/, "").replace(/_/g, " ");

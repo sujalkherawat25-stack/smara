@@ -83,3 +83,22 @@ test("the sidebar re-reads the team after a team change, after each reply and on
   assert.match(app, /member-new/);
   assert.match(app, /manager \? "S" : initials\(agent\.name\)/);
 });
+
+test("the Browser & computer page says what is on now and sends permission to the chat", async () => {
+  const ts = (await import("typescript")).default;
+  const mod = { exports: {} };
+  vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../src/access.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { module: mod, exports: mod.exports });
+  const now = Date.UTC(2026, 10, 19, 10, 0, 0);
+  const off = mod.exports.accessLine(null, now);
+  assert.equal(off.on, false);
+  assert.match(off.detail, /asks you in the chat/);
+  const on = mod.exports.accessLine({ selected: { expires: (now + 24 * 60000) / 1000, target: { title: "Chrome, TallyPrime" } }, control: { paused: false } }, now);
+  assert.equal(on.on, true);
+  assert.equal(on.title, "Allowed: Chrome, TallyPrime");
+  assert.match(on.detail, /^Ends in 24 minutes/);
+  assert.match(mod.exports.accessLine({ selected: { expires: (now + 60000) / 1000 }, control: { paused: true } }, now).title, /Paused/);
+  assert.equal(mod.exports.accessLine({ selected: { expires: (now - 1000) / 1000 } }, now).on, false);
+  const settings = readFileSync(new URL("../src/NativeSettings.tsx", import.meta.url), "utf8");
+  assert.match(settings, /<AccessNow workspace=/);
+  assert.match(settings, /<details className="set-advanced">/);
+});

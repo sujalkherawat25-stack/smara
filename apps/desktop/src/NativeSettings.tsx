@@ -8,6 +8,7 @@ import NativeEmail from "./NativeEmail";
 import NativeBackground from "./NativeBackground";
 import NativeAutomation from "./NativeAutomation";
 import NativeBrowser from "./NativeBrowser";
+import AccessNow from "./ui/AccessNow";
 import NativeAudit from "./NativeAudit";
 import NativeArchived, { type ArchivedActions } from "./NativeArchived";
 
@@ -120,7 +121,8 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
       {tab === "memory" && <NativeMemorySettings setup={setup} locked={disabled} onUpdate={onUpdate} onPendingChange={integrationBusy} />}
 
       {tab === "browser" && <div className="set-page">
-        <header><h2>Browser & computer</h2><p>Let Smara use websites and Windows apps for you. It asks before anything that pays, sends, submits, deletes or signs in.</p></header>
+        <header><h2>Browser & computer</h2><p>You don't need to set anything up here. When Smara needs a website or an app, it asks you in the chat and you tap Allow. This page shows what is on and lets you stop it.</p></header>
+        <AccessNow workspace={setup.preferences.workspace} locked={disabled} />
         <div className="set-group">
           <div className="set-row"><div><strong>Browse any public website</strong><small>Smara can open and use any public site in chats for this project. Private and local network addresses stay blocked.</small></div>
             <label className="set-switch"><input type="checkbox" aria-label="Browse any public website" disabled={disabled} checked={anySite} onChange={event => { const next = event.target.checked ? ANY_SITE : ""; onOriginsChange(next); void saveOptions({ tools: toolsEnabled, workers: workersEnabled, origins: next ? [next] : [] }); }} /><span /></label></div>
@@ -128,8 +130,10 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
             <small>Separate sites with spaces. Leave empty to turn browsing off.</small>
             <div className="set-actions"><button disabled={disabled} onClick={() => void saveOptions({ tools: toolsEnabled, workers: workersEnabled, origins })}>Save sites</button></div></div>}
         </div>
-        <NativeBrowser locked={disabled} />
-        <NativeAutomation workspace={setup.preferences.workspace} locked={disabled} onPendingChange={integrationBusy} onSelectionChange={async () => onUpdate(await nativeSettings())} />
+        <details className="set-advanced"><summary>More controls <small>your own browser, allowed apps, limits and the activity feed</small></summary>
+          <NativeBrowser locked={disabled} />
+          <NativeAutomation workspace={setup.preferences.workspace} locked={disabled} onPendingChange={integrationBusy} onSelectionChange={async () => onUpdate(await nativeSettings())} />
+        </details>
       </div>}
 
       {tab === "tools" && <div className="set-page">

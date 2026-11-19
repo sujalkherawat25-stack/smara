@@ -35,3 +35,13 @@ def test_every_chat_offers_the_team_tools_and_team_changes_ask_first(tmp_path, m
     source = Path(native_prompt.__file__).with_name("native_runtime.py").read_text(encoding="utf-8")
     assert '"mcp_servers.smara_team.enabled": True' in source
     assert "team_approval(entry[\"name\"])" in source
+
+
+def test_the_prompt_sends_permission_requests_to_the_chat_not_to_settings():
+    from smara.native_prompt import BASE_PROMPT
+    assert "computer_request_access" in BASE_PROMPT and "never by sending the owner to Settings" in BASE_PROMPT
+
+
+def test_the_computer_server_offers_the_chat_request_and_asks_first():
+    from smara import native_computer as nc
+    assert "computer_request_access" in {t["name"] for t in nc.TOOLS} and nc.approval_mode("computer_request_access") == "prompt"

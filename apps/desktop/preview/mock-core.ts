@@ -4,6 +4,7 @@ import { emit } from "./mock-event";
 const WORKSPACE = "C:/Users/sujal/Work";
 const nowSeconds = () => Date.now() / 1000;
 let listCalls = 0;
+const computerOn = new URLSearchParams(window.location.search).get("access") === "on";
 
 const setup = {
   preferences: {
@@ -89,8 +90,9 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
         setTimeout(() => emit("native-runtime-event", { generation: args.generation, message: { id: message.id, result } }), 5);
         if (message.method === "thread/resume" && message.params?.threadId === "t-tally") setTimeout(() => emit("native-runtime-event", { generation: args.generation, message: {
           id: "preview-ask-1", method: "mcpServer/elicitation/request", params: { threadId: message.params?.threadId, turnId: "turn-live", serverName: "playwright", mode: "form",
-            message: "Allow the playwright tool browser_click: “Submit return” button on services.gst.gov.in/returns?", requestedSchema: { type: "object", properties: {} },
-            _meta: { codex_approval_kind: "mcp_tool_call" } } } }), 600);
+            message: "Allow the smara_computer MCP server to run tool \"computer_request_access\"?", requestedSchema: { type: "object", properties: {} },
+            _meta: { codex_approval_kind: "mcp_tool_call", tool_name: "computer_request_access",
+              tool_params: { apps: ["Chrome", "TallyPrime"], minutes: 30, reason: "Open your LinkedIn in Chrome to check notifications and messages." } } } } }), 600);
       }
       return undefined as T;
     }
@@ -100,6 +102,8 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
     case "native_manage": {
       const request = (args.request ?? {}) as Record<string, unknown>;
       if (request.operation === "audit") return auditPreview(request) as T;
+      if (request.operation === "computer_control") return { selected: computerOn ? { expires: nowSeconds() + 24 * 60, scope: "apps", target: { title: "Chrome, TallyPrime" } } : null,
+        targets: [], detail: "", control: { paused: false }, apps: [], known_apps: {}, hotkey: "Ctrl+Alt+Esc" } as T;
       if (request.operation === "agents" && (request.action === "skills" || request.action === "forget_skill")) return { skills: request.agent_id === "meera" && request.action === "skills" ? [
         { name: "Morning inbox triage", when: "Every morning, or when the owner says check my mail", steps: 5, version: 2, uses: 14,
           steps_text: ["Open the shop inbox in the owner's browser", "List mail since yesterday 6 pm", "Mark GST, bank and supplier mail as important",

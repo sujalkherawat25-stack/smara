@@ -114,7 +114,7 @@ def halted(grant: dict) -> str | None:
 
 HALT_TEXT = {
     "stopped": "The owner pressed Stop, so computer control is off. Do not try again; tell the owner what you had done so far. "
-               "They can switch it on again in Settings > Browser & computer.",
+               "If the owner asks you to continue, call computer_request_access to ask them again in the chat.",
     "paused": "The owner paused computer control (the Smara bar at the top of the screen). Do nothing on the PC until they "
               "press Resume; tell them what you were about to do and wait.",
 }
@@ -132,6 +132,29 @@ def clean_apps(values) -> list[str]:
         if name not in out:
             out.append(name)
     return out
+
+
+_ALIASES = {"chrome": "chrome.exe", "google chrome": "chrome.exe", "edge": "msedge.exe", "microsoft edge": "msedge.exe", "browser": "chrome.exe",
+            "firefox": "firefox.exe", "brave": "brave.exe", "excel": "excel.exe", "word": "winword.exe", "tally": "tallyprime.exe",
+            "tallyprime": "tallyprime.exe", "tally prime": "tallyprime.exe", "busy": "busywin.exe", "notepad": "notepad.exe",
+            "calculator": "calc.exe", "calc": "calc.exe", "paint": "mspaint.exe", "outlook": "outlook.exe", "explorer": "explorer.exe",
+            "file explorer": "explorer.exe", "files": "explorer.exe", "pdf": "acrord32.exe", "adobe reader": "acrord32.exe"}
+
+
+def app_names(values) -> tuple[list[str], list[str]]:
+    """Process names for the plain app names the agent asked for ("chrome", "Tally"), and the names that were not understood.
+    A name that is not understood adds nothing: the owner already tapped Allow for a limited grant, never for a guess."""
+    known: list[str] = []
+    unknown: list[str] = []
+    for value in values:
+        key = str(value or "").strip().lower()
+        name = _ALIASES.get(key) or (key if key.endswith(".exe") else "")
+        if name and _EXE.match(name):
+            if name not in known:
+                known.append(name)
+        elif key:
+            unknown.append(str(value)[:40])
+    return known, unknown
 
 
 def allowed_apps() -> list[str]:
