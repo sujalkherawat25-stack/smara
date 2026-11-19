@@ -173,6 +173,9 @@ def manage(request):
         from .native_memory import status as memory_status
         return {"search": search_status(protected_only=True), "memory": memory_status(workspace),
                 "network_probes": 0, "detail": "Local configuration and sync receipts only; not a live connectivity test"}
+    if operation == "agents" and request.get("action") == "list":
+        # Read-only: the sidebar refreshes the team after Smara hires or changes someone in chat.
+        return {"agents": native_agents.view(read_object(settings_path()))}
     if operation == "background":
         from .native_background import manage as background
         return background(request)

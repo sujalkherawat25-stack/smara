@@ -35,6 +35,11 @@ export function toolSummary(item: ViewItem): ToolSummary {
   }
   const state: ToolSummary["state"] = item.status === "inProgress" ? "running" : item.status === "failed" ? "failed" : "done";
   const verbs: Record<string, string> = { fileChange: "Edited", webSearch: "Searched the web", browserStep: "Browsed", mcpToolCall: "Used a tool" };
+  if (item.kind === "mcpToolCall") {
+    // The first line is already the action in plain words ("Hired an employee · Zoya").
+    const verb = firstLine(item.text, 80) || "Used a tool";
+    return { verb, target: "", state, duration, line: [verb, duration].filter(Boolean).join(" · ") };
+  }
   const verb = verbs[item.kind] ?? (item.kind.replace(/([A-Z])/g, " $1").trim() || "Tool");
   const target = firstLine(item.text, 80);
   return { verb, target, state, duration, line: [verb, target, duration].filter(Boolean).join(" · ") };

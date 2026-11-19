@@ -36,7 +36,7 @@ TOOLS = [
     _tool("team_hire", "Hire a new employee once the owner has said what the job is. Write the job with safe defaults (draft, never "
           "send, pay, post or delete without the owner's OK). Ask first only if the job itself is unclear. The owner confirms "
           "in an approval card.",
-          {"name": {"type": "string", "description": "A short first name, e.g. Meera"},
+          {"name": {"type": "string", "description": "A person's short first name, e.g. Meera or Arjun (not the platform or job, unless the owner chose it)"},
            "role": {"type": "string", "description": "Job title in 1-4 words, e.g. Mail handler, Accountant, Instagram manager"},
            "job": {"type": "string", "description": "The job description in plain words, written to the employee as 'You ...': duties, "
                    "tools and sites to use, what to always ask the owner about, and what never to do"},
@@ -45,6 +45,9 @@ TOOLS = [
           "The owner confirms in an approval card.",
           {"employee": _EMP, "name": {"type": "string"}, "role": {"type": "string"}, "job": {"type": "string"}, "icon": {"type": "string"}},
           ["employee"], title="Change an employee"),
+    _tool("team_remove", "Remove an employee from the team when the owner asks (\"let Zoya go\", \"remove the LinkedIn person\"). Their past chats "
+          "stay. Smara and built-in employees (built_in true in team_list) cannot be removed: say so and offer to rename or change them instead. The owner confirms in an approval card.",
+          {"employee": _EMP}, ["employee"], title="Remove an employee"),
     _tool("team_remember", "Save one standing rule the owner gave an employee (\"from now on ...\", \"always ...\", \"never ...\"), so it is "
           "followed in every future chat and task of that employee. The owner confirms in an approval card.",
           {"employee": _EMP, "rule": {"type": "string", "description": "The rule in one sentence, in the owner's words"}},
@@ -70,7 +73,7 @@ TOOLS = [
     _tool("team_tasks", "What each employee is doing: their background tasks with state and latest progress.",
           {"employee": {"type": "string", "description": "Optional: only this employee"}}, title="See the team's work"),
 ]
-PROMPTED = {"team_hire", "team_update", "team_remember", "team_routine"}
+PROMPTED = {"team_hire", "team_update", "team_remember", "team_routine", "team_remove"}
 READONLY = {"team_list", "team_tasks", "team_routines"}
 for _entry in TOOLS:
     _entry["annotations"].update(readOnlyHint=_entry["name"] in READONLY, destructiveHint=False,
@@ -139,7 +142,7 @@ def _clean_text(value, field: str, limit: int) -> str:
 def _employee_view(agent: dict) -> dict:
     job, rules = split_rules(agent.get("instructions", ""))
     return {"id": agent["id"], "name": agent["name"], "role": agent.get("role", ""), "manager": agent["id"] == MANAGER_ID,
-            "job": job, "rules": rules}
+            "built_in": bool(agent.get("preset")), "job": job, "rules": rules}
 
 
 def _tasks(employee: str = "") -> list[dict]:
@@ -242,6 +245,10 @@ def call(name: str, args: dict, workspace: str = "") -> dict:
         def hire(saved):
             if any(a["name"].lower() == record["name"].lower() for a in native_agents.roster(saved)):
                 raise ValueError(f"There is already someone called {record['name']}. Pick another name.")
+            same = next((a for a in native_agents.roster(saved) if a.get("role", "").strip().lower() == record["role"].lower()), None)
+            if same:
+                raise ValueError(f"{same['name']} is already your {same['role']}. Hand {same['name']} the work with team_delegate, change "
+                                 f"{same['name']}'s job with team_update, or give the new person a different role.")
             before = {a["id"] for a in native_agents.roster(saved)}
             native_agents.apply(saved, {"action": "save", "agent": record})
             new = next(a for a in native_agents.roster(saved) if a["id"] not in before)
@@ -264,6 +271,17 @@ def call(name: str, args: dict, workspace: str = "") -> dict:
             agent["instructions"] = join_rules(job, rules)
             return _employee_view(_save(saved, agent))
         return {"updated": _mutate(update)}
+    if name == "team_remove":
+        def remove(saved):
+            agent = _find(saved, args.get("employee"))
+            if agent["id"] == MANAGER_ID:
+                raise ValueError("Smara is the manager and stays. Rename Smara with team_update instead.")
+            if agent.get("preset"):
+                raise ValueError(f"{agent['name']} is built in and cannot be removed. Change {agent['name']}'s name or job with team_update.")
+            native_agents.apply(saved, {"action": "delete", "agent_id": agent["id"]})
+            return agent["name"]
+        gone = _mutate(remove)
+        return {"removed": gone, "tell_the_owner": f"{gone} is no longer on the team. Their past chats are kept."}
     if name == "team_remember":
         rule = _clean_text(args.get("rule"), "rule", 300).replace("\n", " ")
 

@@ -60,6 +60,24 @@ export function routinesFor(all: Routine[], agentId: string): Routine[] {
 export function routineLine(item: Routine): string {
   const hours = (item.interval ?? 0) / 3600;
   const every = hours >= 168 ? "every week" : hours >= 24 ? "every day" : hours >= 1 ? "every hour" : "";
-  const state = !item.enabled ? "paused" : item.goal_state && item.goal_state !== "completed" ? "waiting for you to accept the last report" : `next ${new Date(item.due * 1000).toLocaleString()}`;
+  const state = !item.enabled ? "paused" : item.goal_state && item.goal_state !== "completed" ? "waiting for you to accept the last report" : `next ${new Date(item.due * 1000).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
   return `${item.name.replace(/^[^:]+:\s*/, "")}${every ? ` · ${every}` : ""} · ${state} · ${item.runs}/${item.max_runs} runs`;
+}
+
+/** Ids that are in the new roster but were not in the old one: employees who just joined. */
+export function newMembers(before: string[], after: string[]): string[] {
+  const known = new Set(before);
+  return after.filter(id => !known.has(id));
+}
+
+/** True when two rosters show the same people with the same names, roles and jobs (so the sidebar need not redraw). */
+export function sameRoster(a: AgentRoster, b: AgentRoster): boolean {
+  const key = (r: AgentRoster) => JSON.stringify([r.default, r.roster.map(x => [x.id, x.name, x.role, x.icon, x.instructions]), r.assignments]);
+  return key(a) === key(b);
+}
+
+const TEAM_CHANGING = new Set(["team_hire", "team_update", "team_remember", "team_remove"]);
+/** A finished tool call that may have changed the team, so the sidebar re-reads it. */
+export function changesTeam(item: Record<string, unknown>): boolean {
+  return item.type === "mcpToolCall" && TEAM_CHANGING.has(String(item.tool ?? ""));
 }

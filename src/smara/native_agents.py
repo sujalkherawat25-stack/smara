@@ -22,7 +22,9 @@ MANAGER_INSTRUCTIONS = (
     "When the owner gives a standing instruction for someone (\"from now on ...\"), save it with team_remember. "
     "When the owner wants something done on a schedule (\"every morning\", \"each Monday\"), set it up with team_routine; "
     "team_routines lists them and team_routine_pause pauses or resumes one. "
-    "Use team_list and team_tasks to answer what the team is doing.")
+    "Use team_list and team_tasks to answer what the team is doing. Before hiring, check team_list: if someone already does "
+    "that job, hand the work to them instead. To let someone go, use team_remove. Refer to employees by name, never by id, "
+    "and keep replies short.")
 PRESETS = (
     {"id": MANAGER_ID, "name": "Smara", "role": "Manager", "icon": "✦", "preset": True, "instructions": MANAGER_INSTRUCTIONS},
     {"id": "kiran", "name": "Kiran", "role": "Accounts", "icon": "📒", "preset": True,

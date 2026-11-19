@@ -63,7 +63,33 @@ export function mergeWorkers(workers: WorkerView[], item: Record<string, unknown
   return result;
 }
 export function threadLabel(thread: { name?: string | null; preview?: string }): string {
-  return (thread.name?.trim() || thread.preview?.trim() || "New conversation").replace(/\s+/g, " ").slice(0, 96);
+  const text = thread.name?.trim() || readablePreview(thread.preview?.trim() ?? "") || "New conversation";
+  return text.replace(/\s+/g, " ").slice(0, 96);
+}
+/** Background tasks start their chat with a JSON brief; show its objective, never the raw JSON. */
+function readablePreview(preview: string): string {
+  if (!preview.startsWith("{")) return preview;
+  const objective = /"objective"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(preview)?.[1];
+  if (objective) return "Task: " + objective.replace(/\\n/g, " ").replace(/\\"/g, '"');
+  return "Background task";
+}
+const TOOL_TITLES: Record<string, string> = {
+  team_list: "Looked at the team", team_hire: "Hired an employee", team_update: "Changed an employee", team_remember: "Saved a standing rule",
+  team_delegate: "Handed a job to an employee", team_tasks: "Checked the team's work", team_routine: "Set up a routine",
+  team_routines: "Checked routines", team_routine_pause: "Paused or resumed a routine", team_remove: "Removed an employee",
+};
+/** A tool call in the owner's words: "Hired an employee · Zoya", "Browser · navigate". */
+export function toolTitle(tool: string, args: unknown): string {
+  const params = args && typeof args === "object" ? args as Record<string, unknown> : {};
+  const who = typeof params.name === "string" ? params.name : typeof params.employee === "string" ? params.employee : "";
+  if (TOOL_TITLES[tool]) return who ? `${TOOL_TITLES[tool]} · ${who}` : TOOL_TITLES[tool];
+  const [group, ...rest] = tool.split("_");
+  return rest.length ? `${group.charAt(0).toUpperCase()}${group.slice(1)} · ${rest.join(" ")}` : tool || "Tool";
+}
+function toolResultText(result: unknown): string {
+  const content = result && typeof result === "object" ? (result as { content?: unknown }).content : undefined;
+  if (!Array.isArray(content)) return "";
+  return content.map(part => part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string" ? (part as { text: string }).text : "").join("\n").slice(0, 4000);
 }
 export function answerKey(requestId: number | string, questionId: string): string {
   return JSON.stringify([requestId, questionId]);
@@ -86,6 +112,13 @@ export function displayItem(item: Record<string, unknown>): ViewItem {
     exitCode: typeof item.exitCode === "number" ? item.exitCode : undefined,
     durationMs: typeof item.durationMs === "number" ? item.durationMs : undefined,
   };
+  if (kind === "mcpToolCall") {
+    const title = toolTitle(String(item.tool ?? ""), item.arguments);
+    const error = item.error && typeof item.error === "object" ? String((item.error as { message?: unknown }).message ?? "") : "";
+    const detail = error || toolResultText(item.result);
+    return { id: String(item.id), kind, text: detail ? `${title}\n\n${detail}` : title, status: typeof item.status === "string" ? item.status : undefined,
+      durationMs: typeof item.durationMs === "number" ? item.durationMs : undefined };
+  }
   const value = kind === "userMessage" && Array.isArray(content)
     ? content.map(part => part.type === "text" ? part.text ?? "" : `[${part.type ?? "attachment"}]`).join("\n")
     : item.text ?? item.aggregatedOutput ?? item.command ?? content ?? item;
