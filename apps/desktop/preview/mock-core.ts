@@ -84,6 +84,10 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
       if (message?.id !== undefined && message.method) {
         const result = response(message.method, message.params ?? {});
         setTimeout(() => emit("native-runtime-event", { generation: args.generation, message: { id: message.id, result } }), 5);
+        if (message.method === "thread/resume" && message.params?.threadId === "t-tally") setTimeout(() => emit("native-runtime-event", { generation: args.generation, message: {
+          id: "preview-ask-1", method: "mcpServer/elicitation/request", params: { threadId: message.params?.threadId, turnId: "turn-live", serverName: "playwright", mode: "form",
+            message: "Allow the playwright tool browser_click: “Submit return” button on services.gst.gov.in/returns?", requestedSchema: { type: "object", properties: {} },
+            _meta: { codex_approval_kind: "mcp_tool_call" } } } }), 600);
       }
       return undefined as T;
     }

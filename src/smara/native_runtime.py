@@ -21,6 +21,10 @@ from typing import Any
 
 from .native_provider import ChatEndpoint, ResponsesAdapter
 
+# Every message re-sends the whole conversation (no prompt cache on most providers), so long chats are compacted early:
+# a chat that had grown to ~65k tokens made even "hi" take 8-10 s. The compacted summary keeps what matters.
+FAST_CONTEXT_TOKENS = 32_000
+
 
 class NativeProjectActivity:
     """Conservative ownership projection; native events remain authoritative."""
@@ -167,9 +171,13 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         # descendants, junction escape and PTY lifecycle on this backend.
         settings["windows.sandbox"] = "mxc"
         settings["features.prefer_mxc"] = False
-    if adapter.endpoint.effective_context_window:
-        settings["model_context_window"] = adapter.endpoint.effective_context_window
-        settings["model_auto_compact_token_limit"] = int(adapter.endpoint.effective_context_window * .8)
+    window = adapter.endpoint.effective_context_window
+    if window:
+        settings["model_context_window"] = window
+    settings["model_auto_compact_token_limit"] = min(int(window * .8), FAST_CONTEXT_TOKENS) if window else FAST_CONTEXT_TOKENS
+    # Smara's short base prompt instead of the generic 21 KB Codex CLI coding prompt (sent with every message).
+    from .native_prompt import write_base_prompt
+    settings["model_instructions_file"] = str(write_base_prompt(home))
     # The clock and explicit document/image analysis are standard tools.
     # Local memory/academic readers still require project opt-in; document
     # uploads remain separately approval-gated by the native core.

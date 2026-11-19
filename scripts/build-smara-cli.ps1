@@ -26,7 +26,7 @@ try {
     $smaraCliArgs += @('--hidden-import','smara.native_sources')
     $smaraCliArgs += @('--hidden-import','smara.native_memory','--collect-all','syntarus')
     $smaraCliArgs += @('--hidden-import','smara.native_budget','--hidden-import','smara.native_admission','--hidden-import','smara.native_outreach','--hidden-import','smara.native_mail_oauth')
-    $smaraCliArgs += @('--hidden-import','smara.native_background','--hidden-import','smara.native_browser_control','--hidden-import','smara.native_browser_transfer','--hidden-import','smara.native_computer','--hidden-import','smara.agent_audit','--hidden-import','smara.computer_control','--hidden-import','smara.hosted_approvals','--hidden-import','smara.hosted_memory','--hidden-import','smara.native_windows','--collect-all','pywinauto','--collect-all','comtypes','--hidden-import','psutil')
+    $smaraCliArgs += @('--hidden-import','smara.native_background','--hidden-import','smara.native_browser_control','--hidden-import','smara.native_browser_transfer','--hidden-import','smara.native_computer','--hidden-import','smara.agent_audit','--hidden-import','smara.computer_control','--hidden-import','smara.hosted_approvals','--hidden-import','smara.hosted_memory','--hidden-import','smara.native_prompt','--hidden-import','smara.native_windows','--collect-all','pywinauto','--collect-all','comtypes','--hidden-import','psutil')
     $smaraCliArgs += @('--hidden-import','smara.native_pdf','--collect-all','pypdfium2','--collect-all','pypdfium2_raw')
     $smaraCliArgs += 'scripts\native_cli_entry.py'
     & $smaraCliPython @smaraCliArgs

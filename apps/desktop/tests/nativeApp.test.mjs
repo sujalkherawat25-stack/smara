@@ -35,6 +35,7 @@ function fixture({ olderChats = [], startupFailure = false, unknownTurn = false,
     useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
     // Callbacks and memo only matter for re-render cost; the harness re-runs the render, so identity is not needed here.
     useCallback(callback) { cursor++; return callback; },
+    useMemo(factory) { cursor++; return factory(); },
     memo(component) { return component; },
     useEffect(effect, deps) {
       const index = cursor++, previous = slots[index];
@@ -124,6 +125,15 @@ function fixture({ olderChats = [], startupFailure = false, unknownTurn = false,
     if (name.endsWith("agents")) return agentsModule;
     assert.fail(`Unexpected import ${name}`);
   });
+  const askCardModule = evaluate("../src/askCard.ts", () => assert.fail("Ask card wording must have no side-effect imports"));
+  const askCard = evaluate("../src/NativeAskCard.tsx", name => {
+    if (name === "react") return hooks;
+    if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
+    if (name.endsWith("askCard")) return askCardModule;
+    if (name.endsWith("nativeView")) return view;
+    if (name.endsWith("chatStatus")) return chatStatus;
+    assert.fail(`Unexpected import ${name}`);
+  });
   const goal = evaluate("../src/goalApi.ts", n => n === "@tauri-apps/api/core" ? { invoke: async () => ({}) } : assert.fail(n));
   function Settings() {}
   function Changes() {}
@@ -151,6 +161,7 @@ function fixture({ olderChats = [], startupFailure = false, unknownTurn = false,
     if (name.endsWith("NativeGoals")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeTaskBoard")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeApprovals")) return { default: () => null, __esModule: true };
+    if (name.endsWith("NativeAskCard")) return askCard;
     if (name.endsWith("NativeVoice")) return { default: () => null, ReadAloud: () => null, __esModule: true };
     if (name.endsWith("goalApi")) return { ...goal, goalRequest: async (action, values = {}) => {
       goalCalls.push({ action, values: JSON.parse(JSON.stringify(values)) });
@@ -214,7 +225,7 @@ test("foreign requests cannot grant authority in the selected conversation", asy
   const f = fixture(); await f.flush(); await f.enter("Synthetic task");
   f.nodes().find(node => node.type === "form" && node.props.className === "native-composer").props.onSubmit({ preventDefault() {} }); await f.flush();
   f.emit({ id: 8, method: "item/commandExecution/requestApproval", params: { threadId: "foreign", turnId: "other", command: "synthetic" } }); await f.flush();
-  assert.equal(f.nodes().some(node => node.type === "button" && node.props.children === "Allow this action"), false);
+  assert.equal(f.nodes().some(node => node.type === "button" && node.props.children === "Allow"), false);
   assert.equal(f.calls.some(call => call.method === "respond"), false);
 });
 

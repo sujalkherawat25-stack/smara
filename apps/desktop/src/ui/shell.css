@@ -538,3 +538,38 @@
 .native-app .native-settings .browser-step strong { font-size: 13px; font-weight: 500; color: var(--smara-ink); overflow-wrap: anywhere; }
 .native-app .native-settings .browser-step-state { flex: 0 0 auto; padding: 1px 8px; border-radius: 999px; background: var(--smara-hover); color: var(--smara-ok); font-size: 11px; font-weight: 600; }
 .native-app .native-settings .browser-step-error .browser-step-state { color: var(--smara-error); }
+
+/* ---------- ask card: takes the composer's place while Smara waits for the owner ---------- */
+.native-app .ask-card { max-width: 800px; margin: 0 auto; background: var(--smara-surface); border: 1px solid var(--smara-line);
+  border-left: 3px solid var(--smara-running); border-radius: 14px; padding: 14px 16px 12px; box-shadow: var(--smara-shadow);
+  display: flex; flex-direction: column; gap: 6px; animation: ask-in .16s ease-out; }
+.native-app .ask-card.ask-risky { border-left-color: var(--smara-warn); }
+.native-app .ask-card header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.native-app .ask-badge { font-size: var(--smara-meta); font-weight: 600; color: var(--smara-running); text-transform: none; }
+.native-app .ask-risky .ask-badge { color: var(--smara-warn); }
+.native-app .ask-more { font-size: var(--smara-meta); color: var(--smara-muted); }
+.native-app .ask-card h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--smara-ink); }
+.native-app .ask-card .ask-summary { margin: 0; color: var(--smara-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.native-app .ask-toggle { align-self: flex-start; padding: 0; font-size: var(--smara-meta); color: var(--smara-muted); background: none; border: 0; }
+.native-app .ask-detail { margin: 0; max-height: 180px; overflow: auto; padding: 8px 10px; border-radius: 8px; background: var(--smara-bg);
+  border: 1px solid var(--smara-line); font: 12px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.native-app .ask-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.native-app .ask-actions button { min-width: 112px; }
+.native-app .ask-actions p { margin: 0; flex: 1 1 100%; font-size: var(--smara-meta); }
+.native-app .ask-question { border: 0; padding: 0; margin: 4px 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.native-app .ask-question legend { padding: 0; margin-bottom: 6px; font-weight: 600; color: var(--smara-ink); }
+.native-app .ask-options { display: flex; flex-direction: column; gap: 6px; }
+.native-app .ask-options button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; width: 100%; padding: 9px 12px; }
+.native-app .ask-options button small { color: var(--smara-muted); font-weight: 400; }
+.native-app .ask-options button[aria-pressed="true"] { border-color: var(--smara-running); box-shadow: 0 0 0 1px var(--smara-running) inset; }
+@keyframes ask-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .native-app .ask-card { animation: none; } }
+
+/* ---------- Settings > Archived chats ---------- */
+.native-app .archived-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.native-app .archived-list li { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--smara-line); border-radius: 10px; background: var(--smara-surface); }
+.native-app .archived-list li > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.native-app .archived-list li strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.native-app .ask-more { display: inline-flex; align-items: center; gap: 10px; }
+.native-app .composer-status { display: flex; align-items: center; justify-content: space-between; }
+.native-app .ask-stop { order: 2; padding: 2px 8px; font-size: var(--smara-meta); color: var(--smara-error); background: none; border: 0; }

@@ -9,15 +9,17 @@ import NativeBackground from "./NativeBackground";
 import NativeAutomation from "./NativeAutomation";
 import NativeBrowser from "./NativeBrowser";
 import NativeAudit from "./NativeAudit";
+import NativeArchived, { type ArchivedActions } from "./NativeArchived";
 
 const aliases: Record<string, string> = { tavily: "TAVILY_API_KEY", exa: "EXA_API_KEY", serper: "SERPER_API_KEY", brave: "BRAVE_SEARCH_API_KEY" };
 const emptyModel = { id: "", label: "", provider: "", base_url: "", model: "", api_key: "", auth_header: "authorization", context_window: "" as string | number | null };
-type Tab = "models" | "memory" | "browser" | "activity" | "tools" | "email" | "background" | "telegram" | "help";
+type Tab = "models" | "memory" | "browser" | "activity" | "archived" | "tools" | "email" | "background" | "telegram" | "help";
 const NAV: { id: Tab; label: string }[] = [
   { id: "models", label: "Models" },
   { id: "memory", label: "Memory" },
   { id: "browser", label: "Browser & computer" },
   { id: "activity", label: "Activity log" },
+  { id: "archived", label: "Archived chats" },
   { id: "tools", label: "Search & tools" },
   { id: "email", label: "Email" },
   { id: "background", label: "Background" },
@@ -25,7 +27,9 @@ const NAV: { id: Tab; label: string }[] = [
   { id: "help", label: "Help & setup" },
 ];
 type SettingsProps = {
-  initialTab?: "models" | "memory" | "tools" | "browser";
+  initialTab?: "models" | "memory" | "tools" | "browser" | "archived";
+  /** Archived chats of the open project (Settings > Archived chats). */
+  archived?: ArchivedActions;
   setup: NativeSetup; locked: boolean; version: string; runtimeBuilt: boolean;
   onUpdate: (value: NativeSetup) => void; onClose: () => void;
   onPendingChange: (pending: boolean) => void;
@@ -34,7 +38,7 @@ type SettingsProps = {
   /** Runs one settings operation. The parent stops the chat runtime first only when the change needs it. */
   call?: (operation: string, args: Record<string, unknown>) => Promise<NativeSetup>;
 };
-export default function NativeSettings({ setup, locked, onUpdate, onClose, onPendingChange, version, runtimeBuilt, toolsEnabled, workersEnabled, browserOrigins, onToolsChange, onWorkersChange, onOriginsChange, initialTab = "models", call }: SettingsProps) {
+export default function NativeSettings({ setup, locked, onUpdate, onClose, onPendingChange, version, runtimeBuilt, toolsEnabled, workersEnabled, browserOrigins, onToolsChange, onWorkersChange, onOriginsChange, initialTab = "models", call, archived }: SettingsProps) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [model, setModel] = useState(emptyModel);
   const [editing, setEditing] = useState(false);
@@ -149,6 +153,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
       </div>}
 
       {tab === "activity" && <NativeAudit locked={disabled} />}
+      {tab === "archived" && <NativeArchived actions={archived} locked={disabled} />}
       {tab === "email" && <div className="set-page"><NativeEmail workspace={setup.preferences.workspace} locked={disabled} onUpdate={onUpdate} onPendingChange={integrationBusy} /></div>}
       {tab === "background" && <div className="set-page"><NativeBackground workspace={setup.preferences.workspace} profile={setup.preferences.active_model} locked={disabled} onPendingChange={integrationBusy} /></div>}
       {tab === "telegram" && <div className="set-page"><NativeTelegramSettings workspace={setup.preferences.workspace} profile={setup.preferences.active_model} locked={disabled} onSaved={() => { void nativeSettings().then(onUpdate); }} /></div>}
