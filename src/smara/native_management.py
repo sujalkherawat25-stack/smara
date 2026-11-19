@@ -117,8 +117,7 @@ def put_credential(name, secret, provider):
 
 def bootstrap():
     profiles, _, _ = load_profiles()
-    from .native_profiles import desktop_ready
-    profiles = [{k: v for k, v in profile.items() if k in PROFILE_FIELDS} for profile in profiles if desktop_ready(profile)]
+    profiles = [{k: v for k, v in profile.items() if k in PROFILE_FIELDS} for profile in profiles]
     from .native_memory import skills_roots, status as memory_status
     from .native_computer import selected as computer_selected
     prefs = preferences()
@@ -357,10 +356,6 @@ def manage(request):
             # Catch known Sarvam API/model-version mismatches before saving a
             # profile or replacing its protected key.
             ChatEndpoint(base, profile["model"].strip(), "", header, context_window)
-            from .native_profiles import MIN_DESKTOP_WINDOW, desktop_ready
-            if not desktop_ready({"model": profile["model"].strip(), "base_url": base, "context_window": context_window}):
-                raise ValueError(f"Smara Desktop needs a model with a {MIN_DESKTOP_WINDOW // 1_000_000}M-token context window; "
-                                 "this one is smaller. Pick a larger model, or set its context window if it really has one.")
             secret = profile.get("api_key") or ""
             if secret:
                 alias = alias.strip().upper()  # put_credential stores this exact alias.

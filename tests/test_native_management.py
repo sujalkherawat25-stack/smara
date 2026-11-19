@@ -162,21 +162,12 @@ def test_legacy_operation_is_rejected(setup):
 
 def test_edit_preserves_model_context_window(setup):
     root, _, _ = setup
-    profile = {"id": "test", "label": "Synthetic", "provider": "local", "model": "synthetic", "base_url": "http://127.0.0.1:9/v1", "api_key": "synthetic", "context_window": 1_200_000}
+    profile = {"id": "test", "label": "Synthetic", "provider": "local", "model": "synthetic", "base_url": "http://127.0.0.1:9/v1", "api_key": "synthetic", "context_window": 200000}
     management.manage({"operation": "save_model", "profile": profile})
     profile.pop("context_window")
     profile["api_key"] = ""
     result = management.manage({"operation": "save_model", "profile": profile})
-    assert result["profiles"][0]["context_window"] == 1_200_000
-
-
-def test_a_model_with_a_smaller_window_is_refused_with_the_reason(setup):
-    small = {"id": "small", "label": "Small", "provider": "local", "model": "synthetic", "base_url": "http://127.0.0.1:9/v1", "api_key": "synthetic", "context_window": 200000}
-    with pytest.raises(ValueError, match="1M-token context window"):
-        management.manage({"operation": "save_model", "profile": small})
-    sarvam = {"id": "g", "label": "Gemma", "provider": "sarvam", "model": "gemma4", "base_url": "https://api.sarvam.ai/v2", "auth_header": "api-subscription-key", "api_key": "synthetic"}
-    with pytest.raises(ValueError, match="1M-token context window"):
-        management.manage({"operation": "save_model", "profile": sarvam})
+    assert result["profiles"][0]["context_window"] == 200000
 
 
 def test_metadata_save_failure_restores_previous_protected_model_key(setup, monkeypatch):

@@ -55,8 +55,8 @@ declined so the real roster was unchanged.
 - GLM-5.3 at default reasoning: 1.3–1.8 s and about 130 reasoning tokens for a one-line reply. At low: 0.9–1.1 s and none.
 - Changes made:
   - Chats run at low reasoning.
-  - Long chats compact at 800k tokens on a 1M window (80% of a smaller window). 32k and 96k compacted every few
-    steps once pages and screenshots were in play, and the agent lost its place.
+  - Smara Desktop is for models with a 1M-token window or more. Long chats compact at 800k tokens. 32k and 96k
+    compacted every few steps once pages and screenshots were in play, and the agent lost its place.
   - Smara's own 2 KB base prompt replaces the 21 KB Codex CLI prompt.
   - No snapshot helper runs per message in projects without Git.
   - The memory lookup is skipped for greetings.

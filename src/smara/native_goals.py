@@ -584,10 +584,10 @@ def operate(request, *, store=None):
         return service_control(store, request)
     if action == "save_telegram":
         from .native_management import preferences
-        from .native_profiles import desktop_ready, load_profiles
+        from .native_profiles import load_profiles
         project = next((p for p in preferences()["projects"] if p["workspace"] == request.get("workspace")), None)
         profiles, _, _ = load_profiles()
-        if not project or not any(p["id"] == request.get("profile_id") and desktop_ready(p) for p in profiles):
+        if not project or not any(p["id"] == request.get("profile_id") for p in profiles):
             raise ValueError("Choose a registered project and model for Telegram")
         spec = goal_spec({**request, "objective": "Telegram goal defaults", "success_criteria": "User supplied criteria", "options": project.get("options") or {}})
         with store.connect() as db:
@@ -599,15 +599,15 @@ def operate(request, *, store=None):
         return store.get(request.get("id"))
     if action == "create":
         from .native_management import preferences
-        from .native_profiles import desktop_ready, load_profiles
+        from .native_profiles import load_profiles
         spec = goal_spec(request)
         projects = preferences()["projects"]
         project = next((p for p in projects if os.path.normcase(p["workspace"]) == os.path.normcase(spec["workspace"])), None)
         if not project:
             raise ValueError("Add this project in Smara Settings first")
         profiles, _, _ = load_profiles()
-        if not any(p["id"] == spec["profile_id"] and desktop_ready(p) for p in profiles):
-            raise ValueError("Choose a configured model with a 1M-token window")
+        if not any(p["id"] == spec["profile_id"] for p in profiles):
+            raise ValueError("Choose a configured model")
         request = {**spec, "action": "create", "options": project.get("options") or {}, **({"identity": request["identity"]} if request.get("identity") else {})}
     identity = store.action(request)
     return store.get(identity)
