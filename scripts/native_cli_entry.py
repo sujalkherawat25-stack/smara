@@ -2,7 +2,7 @@
 import sys
 from smara.native_runtime import main
 
-if sys.argv[1:2] in (["--native-goals"], ["--native-mail-connect"]):
+if sys.argv[1:2] in (["--native-goals"], ["--native-mail-connect"], ["--native-teach"]):
     from smara.native_management import main as manage_main
     raise SystemExit(manage_main(sys.argv[1:]))
 

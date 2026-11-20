@@ -197,6 +197,9 @@ def manage(request):
     if operation == "connectors":
         from .native_connectors import manage as connectors
         return connectors(request)
+    if operation == "teach":
+        from .native_teach import manage as teach
+        return teach(request)
     if operation == "hosted_login":
         from .hosted_login import manage as hosted_login
         return hosted_login(request)
@@ -401,6 +404,9 @@ def main(argv=None):
         parser = argparse.ArgumentParser(); parser.add_argument("--generation")
         try: authorize(generation=parser.parse_args(args[1:]).generation); return 0
         except Exception: return 1
+    if args[:1] == ["--native-teach"]:
+        from .native_teach import main as teach_main
+        return teach_main(args[1:])
     if args[:1] == ["--native-goals"]:
         from .native_goal_runtime import run
         from .native_goals import GoalStore

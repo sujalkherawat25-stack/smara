@@ -7,6 +7,7 @@ import { AgentForm, type AgentDraft } from "./ui/AgentRoster";
 import { ToolGroup } from "./ui/ToolCard";
 import NativeFiles from "./ui/NativeFiles";
 import HostedPanel from "./ui/HostedPanel";
+import TeachPanel from "./ui/TeachPanel";
 import { EmptyChat } from "./ui/EmptyChat";
 import NativeBrowser from "./NativeBrowser";
 import NativeGoals from "./NativeGoals";
@@ -76,7 +77,7 @@ function terminalError(reason: unknown): string {
 }
 
 /** Right-pane tabs. The last one opened is saved in localStorage (for the next session's first open). */
-type Pane = "changes" | "terminal" | "browser" | "tasks" | "files" | "hosted" | "board" | "inbox";
+type Pane = "changes" | "terminal" | "browser" | "tasks" | "files" | "hosted" | "board" | "inbox" | "teach";
 const PANE_KEY = "smara.lastPane";
 
 const NATIVE_DEVELOPER_INSTRUCTIONS = [
@@ -245,6 +246,13 @@ export default function NativeApp() {
     else if (!threadRef.current) newConversation();
     setDraft(HIRE_STARTER);
     requestAnimationFrame(() => { const input = composerRef.current; if (input) { input.focus(); input.setSelectionRange(HIRE_STARTER.length, HIRE_STARTER.length); } });
+  };
+  /** Teach panel: open a chat with the employee and put the recorded steps in the box; the owner reads them and presses Send. */
+  const teachInChat = (agentId: string, lesson: string) => {
+    setSelectedAgent(agentId); setAgentDraft(null); setSettingsOpen(false); setPanel(null); setJobOpen(false);
+    if (!threadRef.current || agentOfChatId(threadRef.current) !== agentId) newConversation();
+    setDraft(lesson);
+    requestAnimationFrame(() => { const input = composerRef.current; if (input) { input.focus(); input.style.height = "auto"; input.style.height = `${Math.min(input.scrollHeight, 260)}px`; } });
   };
   const agentOfChatId = (chatId: string) => roster.assignments[chatId] && agentById(roster, roster.assignments[chatId]) ? roster.assignments[chatId] : roster.default;
   const startNewAgent = () => { setAgentProblem(""); setAgentDraft({ name: "", role: "", icon: "", instructions: "", preset: false }); };
@@ -1268,7 +1276,7 @@ export default function NativeApp() {
               </span>
             </button>
             <button className="text-button member-edit" aria-label={`Edit ${agent.name}`} disabled={navigationLocked} onClick={() => editAgent(agent)}>Edit</button>
-            {manager && <div className="team-heading"><span>Team · {teamSplit.employees.length}</span><button className="text-button" disabled={navigationLocked} title="Tell Smara who you need; it sets the new employee up in chat" onClick={hireInChat}>+ Hire</button></div>}
+            {manager && <div className="team-heading"><span>Team · {teamSplit.employees.length}</span><button className="text-button" disabled={navigationLocked} title="Tell Smara who you need; it sets the new employee up in chat" onClick={hireInChat}>+ Hire</button><button className="text-button" disabled={navigationLocked || teamSplit.employees.length === 0} title="Show an employee how a job is done in the browser" onClick={() => openPane("teach")}>Teach</button></div>}
           </div>;
         })}
         {!roster.roster.length && <p className="sidebar-empty">Your team appears here once Smara is ready.</p>}
@@ -1318,7 +1326,7 @@ export default function NativeApp() {
       {built === false && <div className="native-warning">Native runtime is missing. Build scripts/build-smara-native.ps1; no old-engine fallback is used.</div>}
       {error && <div role="alert" className="native-error">{error}{!settingsOpen && !connected && (!busy || uncertain) && <button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Retry setup</button>}<button aria-label="Dismiss error" onClick={() => setError("")}>Dismiss</button></div>}
       {settingsOpen && setup ? <NativeSettings initialTab={settingsTab} archived={archivedActions} setup={setup} locked={busy || connecting || loadingThread} call={settingsCall} onUpdate={updateSetup} onClose={() => void closeSettings()} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : <>
-      <div className={`native-work-area ${panel ? "with-panel" : ""} ${panel === "board" || panel === "inbox" || panel === "hosted" ? "with-board" : ""}`}>
+      <div className={`native-work-area ${panel ? "with-panel" : ""} ${panel === "board" || panel === "inbox" || panel === "hosted" || panel === "teach" ? "with-board" : ""}`}>
       <div className="native-chat-area">
       {goalInAnotherConversation && <div className="goal-other-chat" role="status"><span><strong>Background goal {goalLabel(currentGoal!.state).toLowerCase()}</strong><small>Chat and project activity are paused while it works.</small></span><button disabled={connecting || loadingThread} onClick={() => void openGoalConversation()}>Open task chat</button></div>}
       {goalInThisConversation && currentGoal && <section className={`native-goal-status state-${currentGoal.state}`} aria-label="Autonomous goal progress">
@@ -1414,6 +1422,7 @@ export default function NativeApp() {
       {panel === "board" && <NativeTaskBoard projects={setup?.preferences.projects ?? []} workspace={workspace} profile={profile} roster={roster} locked={navigationLocked} onClose={() => setPanel(null)} />}
       {panel === "tasks" && <NativeGoals workspace={workspace} profile={profile} locked={navigationLocked} onClose={() => setPanel(null)} onPreview={setPreviewPath} />}
       {panel === "files" && <NativeFiles workspace={workspace} onPreview={setPreviewPath} />}
+      {panel === "teach" && <TeachPanel employees={teamSplit.employees} locked={navigationLocked} onTeach={teachInChat} onClose={() => setPanel(null)} />}
       {panel === "hosted" && <HostedPanel snapshot={helper} locked={navigationLocked} onChange={() => { reloadHelper.current(); setTimeout(() => reloadHelper.current(), 2500); }} />}
       {panel === "terminal" && <NativeTerminal workspace={workspace} connected={connected} session={terminalSession} interactiveSupported={terminalPlatformSupported} onConnect={() => { void connect(); }} onStart={() => startTerminal()} onInput={value => { void writeTerminal(value); }} onInterrupt={interruptTerminal} onStop={() => { void stopTerminal(); }} onResize={resizeTerminal} onClear={() => setTerminalSession(current => current ? { ...current, output: "", truncated: false } : current)} onClose={() => setPanel(null)} />}
       </div>

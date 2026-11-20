@@ -173,10 +173,26 @@ How each test works:
 request's bytes plus its maximum output, about 70k per request, against a 500k default. Delegated jobs and routines
 now get 100k per allowed request.
 
+## Teaching an employee
+
+Two ways, both ending in the same `skill_save` approval card (the owner reads the exact steps before anything is learned):
+
+- **By telling.** The owner explains a job in chat. The employee repeats it back, asks about anything unclear, saves
+  the skill, and says it has not run yet, so the first real job is a trial the owner can correct.
+- **By showing.** Sidebar > Teach. Smara opens its own browser (the one the agents use, so logins are already there)
+  and writes down what the owner does: pages, clicks, fields, choices. `src/smara/native_teach.py` runs the recorder
+  as a separate process (`--native-teach`) that uses a page script plus Playwright's binding; a heartbeat in
+  `teach/session.json` shows it is alive. The owner reviews the list, removes steps, and "Teach <name> this" puts the
+  steps in that employee's chat box for the owner to send.
+
+What is never kept: anything typed in a password, one-time code, PIN, card, token or similar field (the page script
+and the Python side both drop it), query strings (they can hold tokens), and untrusted events (script-made, not real
+input). Typed values go through the secret scrubber. Start and stop are audited. The recorder refuses local and
+private addresses, and does not start while another recording is alive or the agents' browser is open.
+
 ## Not done yet
 
 - **Push-style triggers.** Watches poll; nothing wakes the PC when mail arrives.
-- **Teach by doing.** Record a browser workflow once, then save it as a reusable skill.
 - **Group chats of employees.**
 - **Per-employee tool sets.** For example, no browser tools for the accountant. The runtime's tool list is fixed per
   launch, so this needs per-employee runtimes.
