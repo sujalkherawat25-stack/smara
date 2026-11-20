@@ -275,3 +275,14 @@ def test_only_columns_the_owner_named_can_change(reg, tmp_path):
     r = se.apply(str(reg), out, [{"action": "add_column", "header": "Aug Status", "value": "x"},
                                  {"column": "Aug Status", "rows": [2], "value": "y"}], owner_words="ek column Status add karo")
     assert r.get("verified"), r
+
+
+def test_a_plain_formula_is_filled_down_like_excel(reg, tmp_path):
+    out = tmp_path / "o.xlsx"
+    r = se.apply(str(reg), str(out), [{"action": "add_column", "header": "Aug Status",
+                                       "formula": '=IF(G2>=0,"Clear","Pending")'}])
+    assert r["verified"], r
+    after = cells(out)
+    assert after[(2, 12)] == '=IF(G2>=0,"Clear","Pending")' and after[(5, 12)] == '=IF(G5>=0,"Clear","Pending")'
+    shown = se._Eval(after, {})
+    assert shown.value(2, 12) == "Clear" and shown.value(5, 12) == "Pending"

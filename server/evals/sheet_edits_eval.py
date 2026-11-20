@@ -258,13 +258,28 @@ async def run_task(env, task):
     return r
 
 
+def say_then_pick_first(text: str, wamid: str, media=None, then: str = ""):
+    """The owner's message; if Smara asks first (allowed when an instruction would overwrite their figures), the owner taps
+    option 1 (the instruction as given) and the result is checked. `then` is a follow-up message after that."""
+    async def ev(env):
+        env.questions = 0
+        for i, msg in enumerate([owner(text, wamid, media)] + ([owner(then, wamid + "b")] if then else [])):
+            await dispatch(env.app, msg)
+            if asked(env) and not sent_xlsx(env) or (i and asked(env)):
+                env.questions += 1
+                await dispatch(env.app, owner("1", f"{wamid}-pick{i}"))
+    return ("custom", ev)
+
+
 TASKS = [
-    Task("write_paid_exactly", ("owner", owner("Is excel mein Aug Collection column mein har student ke aage 'paid' likh do", "w1", REG)),
+    Task("write_paid_exactly", say_then_pick_first("Is excel mein Aug Collection column mein har student ke aage 'paid' likh do", "w1", REG),
          c_write_paid),
     Task("unclear_asks_first", ("owner", owner("Iss excel file mein aug collection ko paid kardo pura aur bss isi ko edit karke mujhe file dedo",
                                                "a1", REG)), c_unclear_asks),
     Task("unclear_then_answer", ("custom", ev_unclear_then_answer), c_unclear_then_answer),
-    Task("followup_keeps_first_edit", ("custom", ev_followup), c_followup),
+    Task("followup_keeps_first_edit", say_then_pick_first(
+        "Sep-26 Collection mein jinka Sep ka baaki hai, unka baaki amount daal do taaki Sep-26 Total 0 ho jaye", "f1", REG,
+        then="ab Aug ke liye bhi same karo, Aug Collection mein"), c_followup),
     Task("named_people_only", ("owner", owner("Stuti aur Nidhi ke Aug Collection mein 'paid' likh do", "n1", REG)), c_named_people),
     Task("summary_from_the_sheet", ("owner", owner("Is file mein Aug ka total bill kitna hai, aur kitne students ka Aug abhi baaki hai?",
                                                    "s1", REG)), c_summary),

@@ -104,10 +104,12 @@ class _Eval:
             if key in self.busy:
                 return UNK
             self.busy.add(key)
+            saved = (getattr(self, "toks", None), getattr(self, "i", 0))    # a formula inside a formula: keep the outer place
             try:
                 out = self._formula(v[1:])
             except Exception:
                 out = UNK
+            self.toks, self.i = saved
             self.busy.discard(key)
             if out is UNK and self.cached.get(key) is not None:
                 out = self.cached[key]
@@ -846,8 +848,14 @@ def _new_value(sh, ch: dict, r: int):
             raise ValueError(f"could not compute '{ch['compute']}' (only + - * / and SUM/MIN/MAX/ROUND/ABS are supported)")
         return v
     if "formula" in ch:
-        f = str(ch["formula"])
-        return "=" + _substitute(sh, f, r).lstrip("=")
+        f = "=" + str(ch["formula"]).lstrip("=")
+        if "{" in f:
+            return "=" + _substitute(sh, f, r).lstrip("=")
+        anchor = ch.get("_anchor")                 # a plain formula written for the first row is filled down, as Excel does
+        if anchor and anchor[0] != r:
+            from openpyxl.formula.translate import Translator
+            return Translator(f, origin=f"{col_letter(anchor[1])}{anchor[0]}").translate_formula(f"{col_letter(anchor[1])}{r}")
+        return f
     if "value" in ch:
         return ch["value"]
     raise ValueError("say the new value: value (text or number), formula, copy_from or compute")
@@ -950,6 +958,7 @@ def plan(book, changes: list[dict], owner_words: str = "") -> tuple[list, list]:
         n, sample, formulas_over, values_over = 0, [], 0, 0
         for r in rows:
             old = sh.cells.get((r, col))
+            ch.setdefault("_anchor", (rows[0], col))
             new = None if action == "clear" else _new_value(sh, ch, r)
             if isinstance(new, float) and new.is_integer():
                 new = int(new)
