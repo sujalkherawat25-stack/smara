@@ -89,3 +89,10 @@ test("asking for app access in chat names the apps, the time and the safety limi
   assert.match(view.detail, /never types passwords/i);
   assert.equal(view.kind, "computer");
 });
+
+test("a watch asks in plain words and says it stays quiet", () => {
+  const card = askView({ method: "mcpServer/elicitation/request", params: { serverName: "smara_team", message: "Set up a routine", _meta: { tool_name: "team_routine", tool_params: { employee: "Kiran", task: "Check the Gmail inbox", every: "15min", watch_for: "a mail from the GST portal" } } } });
+  assert.match(card.title, /watch for a mail from the GST portal/);
+  assert.match(card.summary, /Checks every 15 minutes/);
+  assert.match(card.detail, /Stays quiet/);
+});

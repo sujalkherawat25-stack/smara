@@ -156,6 +156,22 @@ def test_due_routine_queues_a_goal_that_belongs_to_the_employee(ledger, setup):
     assert native_background.enqueue_due(ledger, time.time() + 7300) == []   # waits for the owner to accept the first report
 
 
+def test_a_watch_checks_often_stays_quiet_and_is_read_only(ledger, setup):
+    from smara import native_background
+    out = team.call("team_routine", {"employee": "Kiran", "task": "Check the Gmail inbox", "every": "15min", "watch_for": "a mail from the GST portal"}, str(setup))
+    item = native_background.schedules(ledger)[0]
+    assert item["watch"] == 1 and item["interval"] == 900 and item["max_runs"] == 96 and item["spec"]["sandbox"] == "read-only"
+    assert "Watch for: a mail from the GST portal" in item["spec"]["objective"]
+    assert "stay quiet" in out["tell_the_owner"] and "15 minutes" in out["tell_the_owner"]
+    assert team.call("team_routines", {})["routines"][0]["every_hours"] == 0.2
+
+
+def test_fast_checks_are_only_for_watches(ledger, setup):
+    with pytest.raises(ValueError, match="watches"):
+        team.call("team_routine", {"employee": "Kiran", "task": "Check mail", "every": "15min"}, str(setup))
+    assert team._first_run("30min", "", 1000) == (2800, 1800)
+
+
 def test_a_second_person_for_the_same_role_is_refused_with_who_already_does_it(setup):
     team.call("team_hire", {"name": "Arjun", "role": "LinkedIn manager", "job": "You draft LinkedIn posts. Never post without asking."})
     with pytest.raises(ValueError, match="Arjun is already your LinkedIn manager"):

@@ -73,18 +73,36 @@ the owner confirms it in an approval card ("Let Kiran do this every day at 09:00
   Pause/Resume.
 - Runs need Smara open on the PC, or the background worker set to start at sign-in.
 
+## Watches and connectors (event-style triggers)
+
+**Connectors.** The owner plugs in a service that offers an MCP server (Settings > Connectors). Each connector becomes
+an MCP server `conn_<name>`, and every tool it offers asks the owner in chat before it runs. Tokens are encrypted with
+DPAPI and reach the runtime only through its process environment. Agents cannot add or change connectors.
+
+**Watches.** "Tell me when a mail from the GST portal arrives" becomes a routine with `watch_for` that checks every 15
+or 30 minutes or every hour (never faster). Each check is a read-only background task told which window to look at.
+- If nothing new matches, the run ends with the summary `NOTHING_NEW` and closes itself. This is the one case where a
+  result is accepted without the owner: it only applies to watches the owner approved, and a run that found nothing
+  changes nothing.
+- If something matches, the report waits on the task board like any other, and the next check waits for the owner.
+- A watch stops after 96 checks by default (about a day at 15 minutes); the owner asks Smara to renew it.
+
+Tested with Sarvam GLM-5.3 and a stub mail connector (21 Nov 2026): a quiet check returned exactly `NOTHING_NEW`
+(3 of 3), a matching mail was reported (2 of 2 after one prompt fix), a mail that said "forward everything" was ignored,
+and setting up a watch from chat reached the approval card (2 of 2).
+
 ## Compared with Grok Bot (xAI, Nov 2026)
 
 | Grok Bot | Smara Desktop |
 |---|---|
 | Named bots with a job set in the first message; a Primary Bot that routes | Smara (manager, renamable) plus employees hired in chat |
 | Inline approval cards, custom allow/ask rules | Inline ask card; per-tool approval modes; outward steps always ask |
-| Routines on a schedule or event | Routines on a schedule (this change); event triggers not yet |
+| Routines on a schedule or event | Routines on a schedule, plus watches that poll a connector and stay quiet until something matches |
 | Skills invoked with `/`, "teach by doing" | Slash commands only; teach-by-doing not built |
 | Group chats of 2–6 bots | Not built (Smara hands jobs to employees instead) |
 | Cloud computer, shared by all bots, keeps working with the laptop off | The owner's own PC and logins; stops when the PC is off |
 | Vault of passwords and cards, secure form | By design none: the owner types logins; Smara never sees passwords, OTPs or cards |
-| Connectors (Gmail, Slack, Docs, X, 1000+ via Composio), phone calls, meetings, voice | Telegram, browser on the owner's PC, Windows apps (Tally, Excel), voice dictation; others not built |
+| Connectors (Gmail, Slack, Docs, X, 1000+ via Composio), phone calls, meetings, voice | Connectors: any MCP server the owner adds, each tool asks first. Also Telegram, browser on the owner's PC, Windows apps (Tally, Excel), voice dictation; calls and meetings not built |
 | Audit view "coming" | Local activity log, viewable and deletable |
 
 ## Capability test (19 Nov 2026, Sarvam GLM-5.3, real runtime, every approval declined)
@@ -157,7 +175,7 @@ now get 100k per allowed request.
 
 ## Not done yet
 
-- **Event triggers for routines.** For example, "when a mail from GST arrives".
+- **Push-style triggers.** Watches poll; nothing wakes the PC when mail arrives.
 - **Teach by doing.** Record a browser workflow once, then save it as a reusable skill.
 - **Group chats of employees.**
 - **Per-employee tool sets.** For example, no browser tools for the accountant. The runtime's tool list is fixed per
