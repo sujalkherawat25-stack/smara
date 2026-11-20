@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-MAX_OUT_FILES, MAX_OUT_BYTES, MAX_STREAM = 10, 10_000_000, 20_000
+MAX_OUT_FILES, MAX_OUT_BYTES, MAX_STREAM = 10, 45_000_000, 20_000   # 45 MB: a Telegram bot can send 50 MB; a 500k-row Excel is ~30 MB
 WRAPPER = '''import json, os, sys, traceback
 sys.path.insert(0, os.getcwd())   # -I drops the script dir; helpers live here, inputs stay in ./in
 g = {"__name__": "__main__"}
@@ -42,7 +42,7 @@ def _limits(cpu_s: int):
         import resource
         resource.setrlimit(resource.RLIMIT_CPU, (cpu_s, cpu_s))
         resource.setrlimit(resource.RLIMIT_AS, (1_500_000_000, 1_500_000_000))
-        resource.setrlimit(resource.RLIMIT_FSIZE, (50_000_000, 50_000_000))
+        resource.setrlimit(resource.RLIMIT_FSIZE, (600_000_000, 600_000_000))   # a 500k-row .xlsx writes ~200 MB of XML before zipping it to ~30 MB
         resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
         resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))   # applies to nobody once uid drops
         if os.getuid() == 0:            # drop to nobody before user code runs

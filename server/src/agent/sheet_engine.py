@@ -513,6 +513,8 @@ def load(path: str, big_ok: bool = True) -> dict:
         rows, delim = _read_csv(path)
         cells = {(r, c): _csv_cell(v) for r, row in enumerate(rows, 1) for c, v in enumerate(row, 1) if v.strip() != ""}
         mc = max((len(r) for r in rows), default=0)
+        if len(rows) > BIG_ROWS and not big_ok:
+            raise ValueError(f"the file has {len(rows):,} rows; open it with open_spreadsheet / query_spreadsheet")
         return {"kind": "csv", "delimiter": delim, "sheets": [Sheet("csv", cells, {}, len(rows), mc)], "notes": []}
     if low.endswith(".xls"):
         raise ValueError("this is an old .xls file. It cannot be changed in place; tell the owner, and offer to save the "
@@ -522,7 +524,7 @@ def load(path: str, big_ok: bool = True) -> dict:
     probe = load_workbook(path, read_only=True)
     sizes = {ws.title: (ws.max_row or 0) for ws in probe.worksheets}
     probe.close()
-    big = max(sizes.values(), default=0) > BIG_ROWS
+    big = max(sizes.values(), default=0) > BIG_ROWS or _sheet_xml_bytes(path) > BIG_SHEET_XML
     if big and not big_ok:
         raise ValueError(f"the sheet has {max(sizes.values()):,} rows; editing cell by cell at that size is too slow here. "
                          "Use run_python with pandas for this file and send the result as a new file")
@@ -583,22 +585,20 @@ def _layout_big(path: str, sheet, rows, find, preview_rows: int) -> dict:
     """A very large sheet, read once as a stream: per-column counts and sums, first rows, a total row near the end, and
     any rows asked for. Nothing else is kept in memory, so 500,000 rows fit in the sandbox."""
     from collections import deque
-    from openpyxl import load_workbook
-    wb = load_workbook(path, read_only=True)
     out = {"file": Path(path).name, "sheets": [], "big": True,
-           "note": "a big file: summarised in one pass. For grouping, top-N or charts use run_python with pandas "
-                   "(timeout_s up to 300); edits cell by cell are not available at this size"}
+           "note": "a big file: summarised in one pass. Answer questions with query_spreadsheet (filters, groups, totals "
+                   "over every row); edit_spreadsheet works row by row at this size (formatting is not kept)"}
     win = None
     if rows:
         a, _, b = str(rows).partition("-")
         win = (int(a), int(b or a))
     key = norm(find) if find else ""
-    for ws in wb.worksheets:
-        if sheet and norm(ws.title) != norm(sheet):
+    for title, stream in _streams(path, values=False):
+        if sheet and norm(title) != norm(sheet):
             continue
         head, hdr, best = [], 1, 0
         stats, tail, picked, hits, n_rows, first, fast = {}, deque(maxlen=40), [], [], 0, [], {}
-        for r, vals in enumerate(ws.iter_rows(values_only=True), 1):
+        for r, vals in enumerate(stream, 1):
             if r <= 30:
                 head.append(vals)
                 texts = sum(1 for v in vals if isinstance(v, str) and v.strip() and not is_formula(v))
@@ -662,7 +662,7 @@ def _layout_big(path: str, sheet, rows, find, preview_rows: int) -> dict:
             if s is not None and not id_like(headers.get(c, "")):
                 item["sum_of_data_rows"] = round(s, 2)
             cols.append(item)
-        s = {"sheet": ws.title, "header_row": hdr, "columns": cols[:40],
+        s = {"sheet": title, "header_row": hdr, "columns": cols[:40],
              "data_rows": f"{hdr + 1}-{(totals[0] - 1) if totals else n_rows}", "data_row_count": max(0, (totals[0] - 1 if totals else n_rows) - hdr)}
         if totals:
             s["total_rows"] = [row_dict(r, v) for r, v in tail if r in totals]
@@ -673,21 +673,14 @@ def _layout_big(path: str, sheet, rows, find, preview_rows: int) -> dict:
         else:
             s["first_rows"] = [row_dict(r, v) for r, v in first if r > hdr][:preview_rows]
         out["sheets"].append(s)
-    wb.close()
     return out
 
 
 # ---------------------------------------------------------------- what the agent sees before it changes anything
 def layout(path: str, sheet: str | None = None, rows: str | None = None, find: str | None = None,
            preview_rows: int = 6) -> dict:
-    low = path.lower()
-    if low.endswith((".xlsx", ".xlsm")):
-        from openpyxl import load_workbook
-        probe = load_workbook(path, read_only=True)
-        biggest = max(((ws.max_row or 0) for ws in probe.worksheets), default=0)
-        probe.close()
-        if biggest > BIG_ROWS:
-            return _layout_big(path, sheet, rows, find, preview_rows)
+    if is_big(path):
+        return _layout_big(path, sheet, rows, find, preview_rows)
     book = load(path)
     out = {"file": Path(path).name, "sheets": []}
     if book["notes"]:
@@ -929,13 +922,13 @@ def plan(book, changes: list[dict], owner_words: str = "") -> tuple[list, list]:
     writes, reports, claimed = [], [], {}
     for i, ch in enumerate(changes):
         action = ch.get("action", "set")
-        target = ch.get("column") if action != "add_column" else (ch.get("after") or ch.get("header"))
+        target = ch.get("column") if action != "add_column" else (ch.get("after") or ch.get("header") or ch.get("name") or ch.get("column"))
         sh, err = _pick_sheet(book, ch.get("sheet"), target)
         if err:
             raise ValueError(f"change {i + 1}: {err}")
         rep = {"change": i + 1, "sheet": sh.title, "action": action}
         if action == "add_column":
-            header = str(ch.get("header") or "").strip()
+            header = str(ch.get("header") or ch.get("name") or ch.get("column") or "").strip()
             if not header:
                 raise ValueError(f"change {i + 1}: add_column needs header (the new column's title)")
             if sh.find_column(header)[0] and not sh.find_column(header)[1] and norm(sh.headers.get(sh.find_column(header)[0])) == norm(header):
@@ -1184,11 +1177,924 @@ def outside_what_was_asked(original: str, edited: str, owner_words: str) -> list
     return problems
 
 
+# ---------------------------------------------------------------- questions answered from every row, not by eye
+# "Who still owes", "revenue by country", "how many returns": a model reading a few preview rows guesses these. Here a
+# small spec (filters, groups, measures) is run over every entry row, any size, and the result carries its own counts
+# (rows matched, rows skipped because a cell was not a number) so the answer can be quoted, not computed by the model.
+import ast
+import datetime as _dt
+
+_DATE_RE = re.compile(r"^\s*(\d{1,4})[/.-](\d{1,2})[/.-](\d{1,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?\s*$")
+_MON = {m[:3]: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+_DMY_RE = re.compile(r"^\s*(\d{1,2})[ -/]([A-Za-z]{3})[a-z]*[ -/,]*(\d{2,4})\s*$")
+
+
+def as_date(v, dayfirst: bool = True):
+    """A cell as a datetime: Excel dates, '2011-03-05', '05/03/2011' (day first unless the column shows month first),
+    '5-Mar-2011'. None when it is not a date."""
+    if isinstance(v, _dt.datetime):
+        return v
+    if isinstance(v, _dt.date):
+        return _dt.datetime(v.year, v.month, v.day)
+    if not isinstance(v, str):
+        return None
+    m = _DATE_RE.match(v)
+    try:
+        if m:
+            a, b, c = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            hh, mm, ss = int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0)
+            if len(m.group(1)) == 4:
+                y, mo, d = a, b, c
+            else:
+                y = c + (2000 if c < 100 else 0)
+                d, mo = (a, b) if dayfirst else (b, a)
+            return _dt.datetime(y, mo, d, hh, mm, ss)
+        m = _DMY_RE.match(v)
+        if m and m.group(2).lower()[:3] in _MON:
+            y = int(m.group(3))
+            return _dt.datetime(y + (2000 if y < 100 else 0), _MON[m.group(2).lower()[:3]], int(m.group(1)))
+    except ValueError:
+        return None
+    return None
+
+
+def num(v):
+    """A cell as a number for a total, or None: '1,250', '₹ 1,250.50', '(300)' = -300 count; other text does not."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return v
+    if isinstance(v, str):
+        t = v.strip().replace(",", "").replace("₹", "").replace("Rs.", "").replace("Rs", "").strip()
+        neg = t.startswith("(") and t.endswith(")")
+        t = t.strip("()").strip()
+        try:
+            x = float(t) if t and t not in (".", "-") else None
+        except ValueError:
+            return None
+        if x is not None and x.is_integer() and "." not in t:
+            x = int(x)
+        return -x if (neg and x is not None) else x
+    return None
+
+
+class _Head:
+    """The header of a streamed sheet, enough to find columns by name the same way as a loaded one."""
+    find_column = Sheet.find_column
+
+    def __init__(self, title: str, headers: dict):
+        self.title, self.headers = title, headers
+        self.max_col = max(headers, default=0)
+
+
+_EXPR_NODES = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant, ast.Name, ast.Load, ast.Add, ast.Sub, ast.Mult,
+               ast.Div, ast.Pow, ast.Mod, ast.USub, ast.UAdd)
+
+
+def _value_fn(spec, head):
+    """'Quantity' or '{Quantity} * {UnitPrice}' -> (fn(get) -> value, label, columns used). An expression gives a number
+    or None (a cell that is not a number makes the row count as skipped, never as 0)."""
+    text = str(spec or "").strip()
+    if not text:
+        raise ValueError("say which column (its header)")
+    if "{" not in text:
+        c, err = head.find_column(text)
+        if err:
+            raise ValueError(err)
+        return (lambda get: get(c)), head.headers.get(c) or col_letter(c), [c]
+    cols = []
+
+    def rep(m):
+        c, err = head.find_column(m.group(1))
+        if err:
+            raise ValueError(err)
+        if c not in cols:
+            cols.append(c)
+        return f"_c{c}"
+    src = re.sub(r"\{([^{}]+)\}", rep, text)
+    try:
+        tree = ast.parse(src, mode="eval")
+    except SyntaxError:
+        raise ValueError(f"'{text}' is not a sum I can work out: use {{Column}} names with + - * / and numbers")
+    for node in ast.walk(tree):
+        if not isinstance(node, _EXPR_NODES) or (isinstance(node, ast.Name) and not node.id.startswith("_c")) or \
+                (isinstance(node, ast.Constant) and not is_num(node.value)):
+            raise ValueError(f"'{text}': only {{Column}} names, numbers and + - * / are allowed")
+    code = compile(tree, "<expr>", "eval")
+
+    def fn(get):
+        env = {}
+        for c in cols:
+            x = num(get(c))
+            if x is None:
+                return None
+            env[f"_c{c}"] = x
+        try:
+            return eval(code, {"__builtins__": {}}, env)
+        except (ZeroDivisionError, OverflowError):
+            return None
+    fn.is_expr = True                      # a row it cannot work out is reported as skipped, never counted as 0
+    return fn, text, cols
+
+
+def _same(v, want, dayfirst=True) -> bool:
+    if isinstance(want, bool):
+        return v is want
+    w = num(want) if not isinstance(want, (_dt.date, _dt.datetime)) else None
+    if w is not None:
+        x = num(v)
+        if x is not None:
+            return abs(x - w) < 1e-9
+    wd = as_date(want) if isinstance(want, str) else None
+    if wd is not None and (vd := as_date(v, dayfirst)) is not None:
+        return vd.date() == wd.date() if len(str(want).strip()) <= 10 else vd == wd
+    return str(v if v is not None else "").strip().casefold() == str(want if want is not None else "").strip().casefold()
+
+
+def _equals(want, dayfirst=True):
+    """_same with the wanted value worked out once (a filter runs it on every row)."""
+    if isinstance(want, bool) or isinstance(want, (_dt.date, _dt.datetime)):
+        return lambda v: _same(v, want, dayfirst)
+    w = num(want)
+    wd = as_date(want) if isinstance(want, str) and w is None else None
+    wt = str(want if want is not None else "").strip().casefold()
+    day_only = wd is not None and len(str(want).strip()) <= 10
+
+    def eq(v):
+        if w is not None:
+            x = num(v)
+            if x is not None:
+                return abs(x - w) < 1e-9
+        if wd is not None and (vd := as_date(v, dayfirst)) is not None:
+            return vd.date() == wd.date() if day_only else vd == wd
+        if isinstance(v, str):
+            return v.strip().casefold() == wt
+        return str(v if v is not None else "").strip().casefold() == wt
+    return eq
+
+
+QUERY_OPS = ("=", "!=", "<", "<=", ">", ">=", "between", "in", "not_in", "contains", "not_contains", "starts_with",
+             "not_starts_with", "ends_with", "empty", "not_empty")
+
+
+_OP_ALIAS = {"==": "=", "eq": "=", "equals": "=", "is": "=", "<>": "!=", "ne": "!=", "neq": "!=", "not": "!=", "gt": ">",
+             "gte": ">=", "ge": ">=", "lt": "<", "lte": "<=", "le": "<=", "is_empty": "empty", "isnull": "empty", "null": "empty",
+             "blank": "empty", "filled": "not_empty", "not_blank": "not_empty", "notnull": "not_empty", "startswith": "starts_with",
+             "begins_with": "starts_with", "not_startswith": "not_starts_with", "endswith": "ends_with", "has": "contains",
+             "includes": "contains", "like": "contains", "nin": "not_in", "range": "between"}
+_COND_KEYS = {"column", "col", "field", "name", "expr", "op", "operator", "value", "values", "val", "is", "equals"}
+
+
+def _plain_cond(cond) -> dict:
+    """The condition as {'column', 'op', 'value'} whichever way it was written: 'operator' for 'op', 'field' for 'column',
+    {'Country': 'Germany'} or {'InvoiceNo': {'startsWith': 'C'}} (the shapes models reach for first)."""
+    if not isinstance(cond, dict):
+        raise ValueError("each where condition is {'column': 'Country', 'op': '=', 'value': 'Germany'}")
+    col = cond.get("column") or cond.get("col") or cond.get("field") or cond.get("name") or cond.get("expr")
+    op = cond.get("op") or cond.get("operator")
+    if "value" in cond or "values" in cond or "val" in cond:
+        val = cond.get("value", cond.get("values", cond.get("val")))
+    else:
+        val = cond.get("equals", cond.get("is"))
+    if col:
+        return {"column": col, "op": op or ("in" if isinstance(val, list) else "="), "value": val}
+    extra = [k for k in cond if k not in _COND_KEYS]
+    if len(extra) == 1:
+        k, v = extra[0], cond[extra[0]]
+        if isinstance(v, dict) and len(v) == 1:
+            o, w = next(iter(v.items()))
+            o = str(o).lstrip("$")
+            return {"column": k, "op": o, "value": w.strip("%") if isinstance(w, str) and o == "like" else w}
+        return {"column": k, "op": "in" if isinstance(v, list) else "=", "value": v}
+    raise ValueError("a where condition needs a column: {'column': 'Country', 'op': '=', 'value': 'Germany'}; ops: "
+                     + ", ".join(QUERY_OPS))
+
+
+def _cond_fn(cond: dict, head, dayfirst):
+    cond = _plain_cond(cond)
+    get_v, label, _ = _value_fn(cond.get("column"), head)
+    op = str(cond.get("op") or "=").strip().lower().replace(" ", "_")
+    op = _OP_ALIAS.get(op, op)
+    if op not in QUERY_OPS:
+        raise ValueError(f"op '{op}' is not one of: {', '.join(QUERY_OPS)}")
+    want = cond.get("value")
+    if op in ("empty", "not_empty"):
+        return lambda get: (get_v(get) in (None, "")) == (op == "empty")
+    if op in ("contains", "not_contains", "starts_with", "not_starts_with", "ends_with"):
+        w = str(want if want is not None else "").strip().casefold()
+        if op == "contains":
+            return lambda get: w in str(get_v(get) if get_v(get) is not None else "").casefold()
+        if op == "not_contains":
+            return lambda get: w not in str(get_v(get) if get_v(get) is not None else "").casefold()
+
+        def text(get):
+            v = get_v(get)
+            return str(int(v) if isinstance(v, float) and v.is_integer() else (v if v is not None else "")).strip().casefold()
+        if op == "starts_with":
+            return lambda get: text(get).startswith(w)
+        if op == "not_starts_with":
+            return lambda get: not text(get).startswith(w)
+        return lambda get: text(get).endswith(w)
+    if op in ("in", "not_in"):
+        opts = want if isinstance(want, list) else [want]
+        texts = {str(o).strip().casefold() for o in opts if num(o) is None and as_date(o) is None}
+        nums = {num(o) for o in opts if num(o) is not None}
+        others = [_equals(o, dayfirst) for o in opts if num(o) is None and as_date(o) is not None]
+
+        def hit(v):
+            if isinstance(v, str) and v.strip().casefold() in texts:
+                return True
+            x = num(v)
+            if x is not None and x in nums:
+                return True
+            if isinstance(v, (int, float)) and str(v) in texts:
+                return True
+            return any(e(v) for e in others)
+        return (lambda get: hit(get_v(get))) if op == "in" else (lambda get: not hit(get_v(get)))
+    if op in ("=", "!="):
+        eq = _equals(want, dayfirst)
+        return (lambda get: eq(get_v(get))) if op == "=" else (lambda get: not eq(get_v(get)))
+    lo_hi = want if op == "between" else [want]
+    if op == "between" and not (isinstance(want, list) and len(want) == 2):
+        raise ValueError("between needs value: [low, high] (both included)")
+    as_nums = [num(x) for x in lo_hi]
+    if all(x is not None for x in as_nums):
+        def key(get):
+            return num(get_v(get))
+        bounds = as_nums
+    else:
+        dates = [as_date(x) if isinstance(x, str) else as_date(x) for x in lo_hi]
+        if any(d is None for d in dates):
+            raise ValueError(f"'{label}' {op} {want!r}: give a number or a date like 2011-03-31")
+        if op in ("<=", "between") and isinstance(lo_hi[-1], str) and len(lo_hi[-1].strip()) <= 10:
+            dates[-1] = dates[-1].replace(hour=23, minute=59, second=59)       # up to a date = the whole of that day
+
+        def key(get):
+            return as_date(get_v(get), dayfirst)
+        bounds = dates
+    b = bounds[0]
+    cmp = {"<": lambda x: x < b, "<=": lambda x: x <= b, ">": lambda x: x > b, ">=": lambda x: x >= b,
+           "between": lambda x: bounds[0] <= x <= bounds[1]}[op]
+
+    def ok(get):
+        x = key(get)
+        return x is not None and cmp(x)
+    return ok
+
+
+_BY = {"year": lambda d: f"{d.year}", "quarter": lambda d: f"{d.year}-Q{(d.month - 1) // 3 + 1}",
+       "month": lambda d: f"{d.year}-{d.month:02d}", "week": lambda d: f"{d.isocalendar()[0]}-W{d.isocalendar()[1]:02d}",
+       "day": lambda d: d.strftime("%Y-%m-%d"), "weekday": lambda d: d.strftime("%a"), "hour": lambda d: f"{d.hour:02d}:00",
+       "fy": lambda d: f"FY{d.year if d.month >= 4 else d.year - 1}-{(d.year + 1 if d.month >= 4 else d.year) % 100:02d}"}
+
+
+def _group_fn(g, head, dayfirst):
+    if isinstance(g, str):
+        g = {"column": g}
+    get_v, label, _ = _value_fn(g.get("column") or g.get("field") or g.get("of"), head)
+    by = str(g.get("by") or "").lower()
+    if not by:
+        def key(get):
+            v = get_v(get)
+            if isinstance(v, str):
+                return v.strip()
+            if isinstance(v, float) and v.is_integer():
+                return int(v)
+            return v if v is not None else "(blank)"
+        return key, label
+    if by not in _BY:
+        raise ValueError(f"group by '{by}': one of {', '.join(_BY)}")
+    f = _BY[by]
+
+    def key(get):
+        d = as_date(get_v(get), dayfirst)
+        return f(d) if d else "(not a date)"
+    return key, f"{label} ({by})"
+
+
+MEASURE_OPS = ("count", "sum", "avg", "min", "max", "count_distinct", "median")
+
+
+class _Query:
+    def __init__(self, q: dict, head, dayfirst):
+        if not isinstance(q, dict):
+            raise ValueError("each query is an object with where / group_by / measures")
+        self.q = q
+        conds = q.get("where") or []
+        self.where = [_cond_fn(c, head, dayfirst) for c in (conds if isinstance(conds, list) else [conds])]
+        gb = q.get("group_by") or []
+        self.groups = [_group_fn(g, head, dayfirst) for g in (gb if isinstance(gb, list) else [gb])]
+        ms = q.get("measures") or [{"op": "count"}]
+        ms = ms if isinstance(ms, list) else [ms]
+        self.measures = []
+        for m in ms:
+            if isinstance(m, str):
+                m = {"op": "sum", "of": m}
+            if not isinstance(m, dict):
+                raise ValueError("each measure is {'op': 'sum', 'of': 'Amount'} (op: " + ", ".join(MEASURE_OPS) + ")")
+            op = str(m.get("op") or m.get("agg") or m.get("function") or "sum").lower()
+            op = {"average": "avg", "mean": "avg", "total": "sum", "distinct": "count_distinct", "unique": "count_distinct",
+                  "nunique": "count_distinct", "len": "count"}.get(op, op)
+            if op not in MEASURE_OPS:
+                raise ValueError(f"measure op '{op}': one of {', '.join(MEASURE_OPS)}")
+            of = m.get("of") or m.get("column") or m.get("field") or m.get("expr")
+            if op == "count" and not of:
+                self.measures.append((op, None, m.get("as") or "rows"))
+                continue
+            fn, label, _ = _value_fn(of, head)
+            self.measures.append((op, fn, m.get("as") or f"{op} of {label}"))
+        self.list_rows = bool(q.get("list"))
+        self.columns = [head.find_column(c) for c in (q.get("columns") or [])]
+        if bad := [e for _, e in self.columns if e]:
+            raise ValueError(bad[0])
+        self.head = head
+        self.limit = max(1, min(int(q.get("limit") or (30 if self.list_rows else 20)), 200))
+        self.acc, self.matched, self.skipped = {}, 0, {}
+        self.sample = []
+        sort = str(q.get("sort") or "").strip()
+        self.sort_desc = not sort.lower().endswith(" asc")
+        self.sort = re.sub(r"\s+(asc|desc)$", "", sort, flags=re.I)
+        self.sort_fn = None
+        if self.list_rows and self.sort:
+            self.sort_fn = _value_fn(self.sort, head)[0]
+
+    def add(self, r: int, get, row_fn):
+        for ok in self.where:
+            if not ok(get):
+                return
+        self.matched += 1
+        key = tuple(k(get) for k, _ in self.groups)
+        st = self.acc.get(key)
+        if st is None:
+            st = self.acc[key] = [[0, 0, None, None, set() if op == "count_distinct" else ([] if op == "median" else None)]
+                                  for op, _, _ in self.measures]
+        for (op, fn, name), s in zip(self.measures, st):
+            if fn is None:
+                s[1] += 1
+                continue
+            v = fn(get)
+            if op == "count":
+                if v not in (None, ""):
+                    s[1] += 1
+                continue
+            if op == "count_distinct":
+                if v not in (None, ""):
+                    s[4].add(v.strip().casefold() if isinstance(v, str) else v)
+                continue
+            x = num(v)
+            if x is None:
+                if v not in (None, "") or getattr(fn, "is_expr", False):
+                    self.skipped[name] = self.skipped.get(name, 0) + 1
+                continue
+            s[0] += x
+            s[1] += 1
+            s[2] = x if s[2] is None or x < s[2] else s[2]
+            s[3] = x if s[3] is None or x > s[3] else s[3]
+            if op == "median":
+                s[4].append(x)
+        if self.list_rows:
+            if self.sort_fn is not None:
+                import heapq
+                x = num(self.sort_fn(get))
+                if x is None:
+                    return
+                key = x if self.sort_desc else -x
+                if len(self.sample) < self.limit:
+                    heapq.heappush(self.sample, (key, r, row_fn()))
+                elif key > self.sample[0][0]:
+                    heapq.heapreplace(self.sample, (key, r, row_fn()))
+            elif len(self.sample) < self.limit:
+                self.sample.append((0, r, row_fn()))
+
+    @staticmethod
+    def _final(op, s):
+        if op == "sum":
+            return round(s[0], 2) if s[1] else 0
+        if op == "count":
+            return s[1]
+        if op == "count_distinct":
+            return len(s[4])
+        if op == "avg":
+            return round(s[0] / s[1], 2) if s[1] else None
+        if op == "min":
+            return s[2]
+        if op == "max":
+            return s[3]
+        if op == "median":
+            v = sorted(s[4])
+            n = len(v)
+            return None if not n else round(v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2, 2)
+
+    def result(self) -> dict:
+        out = {"rows_matched": self.matched}
+        names = [n for _, _, n in self.measures]
+        if self.skipped:
+            out["not_numbers_skipped"] = self.skipped
+        if not self.groups:
+            st = self.acc.get((), [[0, 0, None, None, set() if op == "count_distinct" else []] for op, _, _ in self.measures])
+            out["result"] = {n: self._final(op, s) for (op, _, n), s in zip(self.measures, st)}
+        else:
+            rows = []
+            for key, st in self.acc.items():
+                row = {label: k for (_, label), k in zip(self.groups, key)}
+                row.update({n: self._final(op, s) for (op, _, n), s in zip(self.measures, st)})
+                rows.append(row)
+            by_time = any(isinstance(g, dict) and g.get("by") for g in
+                          (self.q.get("group_by") if isinstance(self.q.get("group_by"), list) else [self.q.get("group_by")]))
+            sort = self.sort if self.sort in names or self.sort in [l for _, l in self.groups] else ""
+            if not sort and not by_time:
+                sort = names[0]
+            if sort:
+                rows.sort(key=lambda x: (x.get(sort) is None, x.get(sort) if not isinstance(x.get(sort), str) else 0,
+                                         str(x.get(sort))), reverse=False)
+                if self.sort_desc and not (by_time and not self.sort):
+                    rows = [r for r in rows if r.get(sort) is not None][::-1] + [r for r in rows if r.get(sort) is None]
+            else:
+                rows.sort(key=lambda x: str(list(x.values())[0]))
+            if self.q.get("percent"):
+                for op, _, n in self.measures:
+                    if op in ("sum", "count"):
+                        tot = sum(r[n] or 0 for r in rows)
+                        for r in rows:
+                            r[f"{n} %"] = round(100 * (r[n] or 0) / tot, 2) if tot else None
+            out["groups"] = len(rows)
+            out["rows"] = rows[: self.limit]
+            if len(rows) > self.limit:
+                out["shown"] = f"first {self.limit} of {len(rows)} groups (sorted by {sort or 'name'}); raise limit to see more"
+            out["all_groups"] = {n: self._final(op, self._merge(op, [st[i] for st in self.acc.values()]))
+                                 for i, (op, _, n) in enumerate(self.measures)}
+        if self.list_rows:
+            items = sorted(self.sample, key=lambda t: (-t[0], t[1])) if self.sort_fn is not None else self.sample
+            out["matching_rows"] = [d for _, _, d in items]
+            if self.matched > len(items):
+                out["matching_rows_note"] = f"showing {len(items)} of {self.matched}"
+        return out
+
+    @staticmethod
+    def _merge(op, states):
+        m = [0, 0, None, None, set() if op == "count_distinct" else []]
+        for s in states:
+            m[0] += s[0]
+            m[1] += s[1]
+            m[2] = s[2] if m[2] is None or (s[2] is not None and s[2] < m[2]) else m[2]
+            m[3] = s[3] if m[3] is None or (s[3] is not None and s[3] > m[3]) else m[3]
+            if op == "count_distinct":
+                m[4] |= s[4]
+            elif op == "median":
+                m[4].extend(s[4])
+        return m
+
+    def wanted_cols(self):
+        return [c for c, _ in self.columns]
+
+
+BIG_SHEET_XML = 24_000_000     # a sheet whose XML is this big holds ~60,000 rows of a typical table
+
+
+def _sheet_xml_bytes(path: str) -> int:
+    try:
+        with zipfile.ZipFile(path) as z:
+            return max((i.file_size for i in z.infolist() if i.filename.startswith("xl/worksheets/") and i.filename.endswith(".xml")),
+                       default=0)
+    except zipfile.BadZipFile:
+        return 0
+
+
+def is_big(path: str) -> bool:
+    """Too big to hold in memory cell by cell. By row count, and by the size of the sheet's XML as well: a file written
+    in streaming mode (by this tool, pandas to_excel in some modes, exports) does not say how many rows it has."""
+    low = path.lower()
+    if low.endswith((".xlsx", ".xlsm")):
+        if _sheet_xml_bytes(path) > BIG_SHEET_XML:
+            return True
+        from openpyxl import load_workbook
+        probe = load_workbook(path, read_only=True)
+        biggest = max(((ws.max_row or 0) for ws in probe.worksheets), default=0)
+        probe.close()
+        return biggest > BIG_ROWS
+    if low.endswith((".csv", ".tsv", ".txt")):
+        with open(path, "rb") as f:
+            return sum(chunk.count(b"\n") for chunk in iter(lambda: f.read(1 << 20), b"")) > BIG_ROWS
+    return False
+
+
+def _streams(path: str, values: bool = True):
+    """(sheet title, iterator of row tuples) for each sheet, read once without holding the file in memory. values=True gives
+    what formulas last showed (Excel's saved results); False gives the formulas as written."""
+    low = path.lower()
+    if low.endswith((".csv", ".tsv", ".txt")):
+        text = open(path, encoding="utf-8-sig", errors="replace", newline="")
+        sample = text.read(4096)
+        text.seek(0)
+        try:
+            delim = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+        except csv.Error:
+            delim = ","
+        yield "csv", (tuple(_csv_cell(v) for v in row) for row in csv.reader(text, delimiter=delim))
+        text.close()
+        return
+    from openpyxl import load_workbook
+    wb = load_workbook(path, read_only=True, data_only=values)
+    for ws in wb.worksheets:
+        yield ws.title, ws.iter_rows(values_only=True)
+    wb.close()
+
+
+def _header_of(rows_iter):
+    """Read up to 30 rows to find the header (the first row with the most text cells); returns (header_row, headers,
+    the rows read so far as (r, vals), the rest of the iterator)."""
+    head, hdr, best = [], 1, 0
+    for r, vals in enumerate(rows_iter, 1):
+        head.append((r, vals))
+        texts = sum(1 for v in vals if isinstance(v, str) and v.strip() and not is_formula(v))
+        if texts > best and texts >= 2:
+            best, hdr = texts, r
+        if r >= 30:
+            break
+    hv = next((v for r, v in head if r == hdr), ())
+    headers = {c: str(v).strip() for c, v in enumerate(hv, 1) if v not in (None, "")}
+    return hdr, headers, head, rows_iter
+
+
+def _dayfirst(path: str, cols_text) -> bool:
+    """Is '03/05/2011' 3 May or 5 March in this file? Looked up from the file itself: a first part over 12 means day first,
+    a second part over 12 means month first. Indian files default to day first."""
+    first = second = 0
+    seen = 0
+    for _, it in _streams(path):
+        for vals in it:
+            for v in vals:
+                if isinstance(v, str) and (m := _DATE_RE.match(v)) and len(m.group(1)) <= 2:
+                    seen += 1
+                    first += int(m.group(1)) > 12
+                    second += int(m.group(2)) > 12
+            if seen > 200_000 or (first + second) > 50:
+                break
+        break
+    return not (second > first)
+
+
+def query(path: str, queries: list, sheet: str | None = None, include_rows_below_totals: bool = False) -> dict:
+    """Run filters / groups / measures over every entry row. Total rows (and the block under them) are never counted as
+    entries, whatever their size; formulas count with the value they show."""
+    if isinstance(queries, dict):
+        queries = [queries]
+    if not isinstance(queries, list) or not queries or len(queries) > 8:
+        return {"error": "queries: 1 to 8 objects like {'where': [...], 'group_by': 'Country', 'measures': [{'op': 'sum', 'of': 'Amount'}]}"}
+    dayfirst = _dayfirst(path, None) if path.lower().endswith((".csv", ".tsv", ".txt")) else True
+    big = is_big(path)
+    out = {"file": Path(path).name}
+    if not big:
+        book = load(path)
+        cand = [sh for sh in book["sheets"] if not sheet or norm(sh.title) == norm(sheet)]
+        if not cand:
+            return {"error": f"no sheet '{sheet}'. Sheets: {', '.join(s.title for s in book['sheets'])}"}
+        if len(cand) > 1:
+            fits = []
+            for sh in cand:
+                try:
+                    [_Query(q, sh, dayfirst) for q in queries]
+                    fits.append(sh)
+                except ValueError:
+                    pass
+            if len(fits) != 1:
+                return {"error": f"the file has {len(cand)} sheets ({', '.join(s.title for s in cand)}); say which sheet"}
+            cand = fits
+        sh = cand[0]
+        try:
+            qs = [_Query(q, sh, dayfirst) for q in queries]
+        except ValueError as e:
+            return {"error": str(e)}
+        rows = [r for r in sh.data_rows() if sh.has_content(r)]
+        if include_rows_below_totals:
+            rows += [r for r in sh.below if sh.has_content(r)]
+        unknown = [0]
+
+        for r in rows:
+            def get(c, r=r):
+                v = sh.ev.value(r, c)
+                if v is UNK:
+                    unknown[0] += 1
+                    return None
+                return v
+            for q in qs:
+                q.add(r, get, lambda q=q, r=r, get=get: _row_out(sh.headers, r, get, q.wanted_cols() or list(sh.headers)))
+        out.update({"sheet": sh.title, "entry_rows": len(rows), "not_counted": {
+            **({"total_rows": sh.total_rows} if sh.total_rows else {}),
+            **({"rows_below_totals": f"{sh.below[0]}-{sh.below[-1]}"} if sh.below and not include_rows_below_totals else {})}})
+        if not out["not_counted"]:
+            out.pop("not_counted")
+        if unknown[0]:
+            out["unknown_formula_cells"] = f"{unknown[0]} cells hold formulas this tool cannot work out; they count as blank"
+    else:
+        for title, it in _streams(path):
+            if sheet and norm(title) != norm(sheet):
+                continue
+            hdr, headers, head, rest = _header_of(it)
+            hd = _Head(title, headers)
+            try:
+                qs = [_Query(q, hd, dayfirst) for q in queries]
+            except ValueError as e:
+                if sheet:
+                    return {"error": str(e)}
+                continue
+            n, totals = 0, []
+
+            def feed(r, vals):
+                nonlocal n
+                if all(v in (None, "") for v in vals):
+                    return
+                if any(isinstance(v, str) and TOTAL_RE.match(v.strip()) for v in vals[:6]):
+                    totals.append(r)
+                    return
+                n += 1
+                L = len(vals)
+
+                def get(c):
+                    return vals[c - 1] if c <= L else None
+                for q in qs:
+                    q.add(r, get, lambda q=q: _row_out(headers, r, get, q.wanted_cols() or list(headers)))
+            for r, vals in head:
+                if r > hdr:
+                    feed(r, vals)
+            for r, vals in enumerate(rest, len(head) + 1):
+                feed(r, vals)
+            out.update({"sheet": title, "entry_rows": n, "big": True})
+            if totals:
+                out["not_counted"] = {"total_rows": totals[:5]}
+            break
+        else:
+            return {"error": "no sheet has all the columns these queries name" if not sheet else f"no sheet '{sheet}'"}
+    out["answers"] = [q.result() for q in qs]
+    out["how_to_use"] = ("Quote these numbers as they are (they are worked out from every row). Say what you filtered on in "
+                         "plain words. If not_numbers_skipped is there, say how many rows were left out and why.")
+    return out
+
+
+def _row_out(headers, r, get, cols):
+    d = {"row": r}
+    for c in cols:
+        v = get(c)
+        if v not in (None, ""):
+            d[headers.get(c) or col_letter(c)] = str(v) if hasattr(v, "isoformat") else short(v)
+    return d
+
+
+# ---------------------------------------------------------------- edits on very big sheets, one row at a time
+_REL_REF = re.compile(r"(?<![A-Za-z_!$])(\$?)([A-Z]{1,3})(\$?)(\d{1,7})(?![A-Za-z_(\d])")
+
+
+def _shift_rows(formula: str, delta: int) -> str:
+    """'=D2*E2' written for row 2, as row 2+delta (relative rows move, $-anchored rows stay), without a full parser."""
+    if not delta:
+        return formula
+    parts = re.split(r'("[^"]*")', formula)               # leave text in quotes alone
+    return "".join(p if p.startswith('"') else _REL_REF.sub(
+        lambda m: f"{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4) if m.group(3) else int(m.group(4)) + delta}", p)
+        for p in parts)
+
+
+def _row_template(head, formula) -> str:
+    """'={Quantity}*{UnitPrice}' -> '=D{r}*F{r}' ({r} is filled in per row); a plain formula is kept as written."""
+    def rep(m):
+        if m.group(1) == "r":
+            return "{r}"
+        c, err = head.find_column(m.group(1))
+        if err:
+            raise ValueError(err)
+        return f"{col_letter(c)}{{r}}"
+    return re.sub(r"\{([^{}]+)\}", rep, "=" + str(formula).lstrip("="))
+
+
+def _guard_column(i, header, letter, action, owner_words):
+    if owner_words and not named_by_owner(header, letter, owner_words):
+        raise ValueError(f"change {i + 1}: the owner did not name the column {letter} '{header}'. Change only the columns they "
+                         "named; if you think this one must change too, ask_owner first")
+    if action == "clear" and owner_words and not CLEAR_WORDS.search(owner_words):
+        raise ValueError(f"change {i + 1}: the owner did not ask to empty or remove anything; do not clear '{header}'")
+
+
+def _has_formulas(path: str, probe_rows: int = 2000) -> bool:
+    """Does the start of the sheet hold formulas? A big data dump almost never does; then values and formulas are the same
+    thing and the file need only be read once."""
+    for _, it in _streams(path, values=False):
+        for r, vals in enumerate(it, 1):
+            if any(is_formula(v) for v in vals):
+                return True
+            if r >= probe_rows:
+                break
+    return False
+
+
+def apply_big(src: str, dst: str, changes: list[dict], preview: bool = False, owner_words: str = "") -> dict:
+    """The same edit spec on a sheet too big to hold in memory: read as a stream, written as a stream, then read back and
+    compared cell by cell. Rows are picked with 'data', 'A-B' or {'where': [...]} (names lists: use where 'in')."""
+    low = src.lower()
+    is_csv = low.endswith((".csv", ".tsv", ".txt"))
+    dayfirst = _dayfirst(src, None) if is_csv else True
+    reports, first_error = [], None
+    title_of_target = None
+    formulas = False if is_csv else _has_formulas(src)
+    # first pass: only the header, to resolve columns (and choose the sheet)
+    for title, it in _streams(src, values=False):
+        hdr, headers, _, _ = _header_of(it)
+        hd = _Head(title, dict(headers))
+        try:
+            steps = []
+            for i, ch in enumerate(changes):
+                action = ch.get("action", "set")
+                if action == "add_column":
+                    header = str(ch.get("header") or ch.get("name") or ch.get("column") or "").strip()
+                    if not header:
+                        raise ValueError(f"change {i + 1}: add_column needs header")
+                    c = hd.max_col + 1
+                    hd.headers[c] = header
+                    hd.max_col = c
+                else:
+                    c, err = hd.find_column(ch.get("column"))
+                    if err:
+                        raise ValueError(f"change {i + 1}: {err}")
+                    added = any(s["col"] == c and s["action"] == "add_column" for s in steps)
+                    if not added:
+                        _guard_column(i, hd.headers.get(c, ""), col_letter(c), action, owner_words)
+                rows = ch.get("rows", "data")
+                where, span = [], None
+                if isinstance(rows, dict):
+                    if rows.get("names"):
+                        raise ValueError(f"change {i + 1}: on a sheet this big pick rows with where, e.g. "
+                                         "{'where': [{'column': 'CustomerID', 'op': 'in', 'value': [...]}]}")
+                    w = rows.get("where") or []
+                    where = [_cond_fn(x, hd, dayfirst) for x in (w if isinstance(w, list) else [w])]
+                elif isinstance(rows, str) and (m := re.fullmatch(r"\s*(\d+)\s*-\s*(\d+)\s*", rows)):
+                    span = (int(m.group(1)), int(m.group(2)))
+                elif isinstance(rows, list):
+                    span = set(int(x) for x in rows)
+                elif rows not in ("data", "all", None):
+                    raise ValueError(f"change {i + 1}: rows must be 'data', 'A-B', a list of row numbers or {{'where': [...]}}")
+                kind = next((k for k in ("copy_from", "compute", "formula", "value") if k in ch), None)
+                if action != "clear" and not kind:
+                    raise ValueError(f"change {i + 1}: give value, formula, compute or copy_from")
+                fn = None
+                if kind == "copy_from":
+                    fn = _value_fn(ch["copy_from"], hd)[0]
+                elif kind == "compute":
+                    fn = _value_fn(ch["compute"] if "{" in str(ch["compute"]) else "{" + str(ch["compute"]) + "}", hd)[0]
+                formula = _row_template(hd, ch["formula"]) if kind == "formula" else None
+                steps.append({"i": i, "col": c, "action": action, "where": where, "span": span, "kind": kind, "fn": fn,
+                              "formula": formula, "value": ch.get("value"), "only_empty": bool(ch.get("only_empty")),
+                              "include_total_rows": bool(ch.get("include_total_rows")), "header": hd.headers.get(c, ""),
+                              "n": 0, "examples": [], "over": 0})
+        except ValueError as e:
+            first_error = first_error or str(e)
+            continue
+        title_of_target, target_hdr = title, hdr
+        break
+    if title_of_target is None:
+        return {"error": first_error or "no sheet has the columns these changes name", "nothing_changed": True}
+
+    planned = {}
+    out_rows_written = 0
+
+    def new_rows(title, vals_it, form_it):
+        """Yield the rows of the edited sheet, recording every planned cell."""
+        nonlocal out_rows_written
+        pairs = zip(vals_it, form_it) if form_it is not None else ((v, v) for v in vals_it)
+        for r, (vals, forms) in enumerate(pairs, 1):
+            row = list(forms)
+            if title == title_of_target:
+                if r == target_hdr:
+                    for s in steps:
+                        if s["action"] == "add_column":
+                            while len(row) < s["col"]:
+                                row.append(None)
+                            row[s["col"] - 1] = s["header"]
+                            planned[(r, s["col"])] = s["header"]
+                elif r > target_hdr and not all(v in (None, "") for v in vals):
+                    total = any(isinstance(v, str) and TOTAL_RE.match(v.strip()) for v in vals[:6])
+                    L = len(vals)
+
+                    def get(c, vals=vals, L=L):
+                        return vals[c - 1] if c <= L else None
+                    for s in steps:
+                        if total and not s["include_total_rows"]:
+                            continue
+                        if s["span"] is not None and (r not in s["span"] if isinstance(s["span"], set)
+                                                      else not s["span"][0] <= r <= s["span"][1]):
+                            continue
+                        if s["where"] and not all(ok(get) for ok in s["where"]):
+                            continue
+                        c = s["col"]
+                        old = row[c - 1] if c <= len(row) else None
+                        if s["only_empty"] and old not in (None, ""):
+                            continue
+                        if s["action"] == "clear":
+                            new = None
+                        elif s["kind"] == "value":
+                            new = s["value"]
+                        elif s["kind"] == "formula":
+                            new = s["formula"].replace("{r}", str(r)) if "{r}" in s["formula"] else \
+                                _shift_rows(s["formula"], r - (target_hdr + 1))
+                        else:
+                            new = s["fn"](get)
+                            if isinstance(new, float):
+                                new = round(new, 10)
+                                if new.is_integer():
+                                    new = int(new)
+                        if new == old:
+                            continue
+                        while len(row) < c:
+                            row.append(None)
+                        row[c - 1] = new
+                        planned[(r, c)] = new
+                        s["n"] += 1
+                        s["over"] += old not in (None, "")
+                        if len(s["examples"]) < 5:
+                            s["examples"].append(f"{col_letter(c)}{r}: {short(old) if old not in (None, '') else 'blank'} -> "
+                                                 f"{short(new) if new not in (None, '') else 'blank'}")
+            out_rows_written += 1
+            yield row
+
+    import time as _time
+    t0 = _time.time()
+    if is_csv:
+        _, vit = next(_streams(src, values=False))
+        rows_iter = new_rows("csv", vit, None)
+        if preview:
+            for _ in rows_iter:
+                pass
+        else:
+            with open(src, encoding="utf-8-sig", errors="replace", newline="") as f:
+                sample = f.read(4096)
+            try:
+                delim = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+            except csv.Error:
+                delim = ","
+            with open(dst, "w", encoding="utf-8-sig", newline="") as f:
+                w = csv.writer(f, delimiter=delim, lineterminator="\r\n")
+                for row in rows_iter:
+                    w.writerow(["" if v is None else v for v in row])
+    else:
+        from openpyxl import Workbook
+        wbo = Workbook(write_only=True) if not preview else None
+        pairs = zip(_streams(src, values=True), _streams(src, values=False)) if formulas else             (((t, v), (t, None)) for t, v in _streams(src, values=False))
+        for (title, vit), (_, fit) in pairs:
+            ws = wbo.create_sheet(title) if wbo else None
+            for row in new_rows(title, vit, fit):
+                if ws is not None:
+                    ws.append(row)
+        if wbo:
+            wbo.save(dst)
+    for s in steps:
+        rep = {"change": s["i"] + 1, "sheet": title_of_target, "action": s["action"],
+               "column": f"{col_letter(s['col'])} '{s['header']}'" + (" (new)" if s["action"] == "add_column" else ""),
+               "rows_changed": s["n"] if s["action"] != "add_column" or s["n"] else s["n"], "examples": s["examples"]}
+        if s["over"]:
+            rep["values_replaced"] = s["over"]
+        if not s["n"] and s["action"] != "add_column":
+            rep["warning"] = "no row matched; nothing changed for this step"
+        reports.append(rep)
+    result = {"changes": reports, "cells_to_change": len(planned), "big": True,
+              "note": "a big file: edited row by row. Formatting (colours, widths) is not carried over at this size; values "
+                      "and formulas are. Formulas that read the changed cells were not re-worked out here."}
+    if preview:
+        return {**result, "preview": True, "next": "Nothing is saved yet. Save it by calling again without preview."}
+    if not planned:
+        return {**result, "saved": False, "note": "nothing to change: the cells already hold these values"}
+    # read back: every cell equals the original, except the planned ones, which equal the plan
+    wrong, outside = [], []
+    src_it, dst_it = _streams(src, values=False), _streams(dst, values=False)
+    for (ta, ia), (tb, ib) in zip(src_it, dst_it):
+        import itertools
+        for r, (va, vb) in enumerate(itertools.zip_longest(ia, ib, fillvalue=()), 1):
+            n = max(len(va), len(vb))
+            for c in range(1, n + 1):
+                a = va[c - 1] if c <= len(va) else None
+                b = vb[c - 1] if c <= len(vb) else None
+                if ta == title_of_target and (r, c) in planned:
+                    exp = planned[(r, c)]
+                    if not (b == exp or (exp in (None, "") and b in (None, "")) or str(b) == str(exp)):
+                        if len(wrong) < 10:
+                            wrong.append(f"{col_letter(c)}{r}")
+                elif a != b and not (a in (None, "") and b in (None, "")) and str(a) != str(b):
+                    if len(outside) < 10:
+                        outside.append(f"{ta}!{col_letter(c)}{r}: {short(a)} -> {short(b)}")
+    result.update({"saved": True, "verified": not wrong and not outside, "seconds": round(_time.time() - t0, 1),
+                   "check": "read the saved file back: only the cells listed above changed" if not wrong and not outside
+                   else "MISMATCH after saving: do not send this file",
+                   **({"changed_outside_plan": outside} if outside else {}), **({"not_written": wrong} if wrong else {})})
+    return result
+
+
 def main(spec_path: str) -> dict:
     spec = json.loads(Path(spec_path).read_text(encoding="utf-8"))
     try:
         if spec["op"] == "layout":
             return layout(spec["src"], spec.get("sheet"), spec.get("rows"), spec.get("find"))
+        if spec["op"] == "query":
+            return query(spec["src"], spec.get("queries") or [], spec.get("sheet"), bool(spec.get("include_rows_below_totals")))
+        if is_big(spec["src"]):
+            return apply_big(spec["src"], spec["dst"], spec.get("changes") or [], bool(spec.get("preview")),
+                             spec.get("owner_words") or "")
         return apply(spec["src"], spec["dst"], spec.get("changes") or [], bool(spec.get("preview")), spec.get("owner_words") or "")
     except ValueError as e:
         return {"error": str(e)}

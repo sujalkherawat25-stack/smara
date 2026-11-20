@@ -15,7 +15,7 @@ MAX_PENDING = 25
 MAX_PER_DAY = 50
 MAX_AHEAD = timedelta(days=60)
 MIN_AHEAD = timedelta(minutes=1)
-MAX_FILE_BYTES = 16_000_000
+MAX_FILE_BYTES = 45_000_000      # Telegram bots send up to 50 MB (they only DOWNLOAD 20 MB)
 MAX_RETRIES, RETRY_WINDOW = 2, timedelta(hours=6)     # quick re-schedules from a follow-up run, per 12 hours
 
 
@@ -195,7 +195,7 @@ async def send_file_to_owner(app, ctx: SessionCtx, args: dict) -> dict:
         return {"error": f"cannot send {ext or 'this'} file; allowed: {', '.join(sorted(SENDABLE))}"}
     data = app.state.sandbox.read_output(job_id, name)
     if not data or len(data) > MAX_FILE_BYTES:
-        return {"error": "file is empty or larger than 16 MB"}
+        return {"error": "file is empty or larger than 45 MB"}
     from src.agent import sheet_tools
     if problems := await sheet_tools.edit_problems(app, ctx, data, name):     # however the copy was made
         return {"sent": False, "error": "not sent: this copy of the owner's sheet goes beyond what they asked: "
