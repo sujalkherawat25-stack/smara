@@ -57,6 +57,51 @@ async def _run(app, ctx, file_ref: str, spec: dict, timeout_s: int = 240) -> tup
     return out, name, refs
 
 
+GUARD_MAX_BYTES = 5_000_000
+
+
+async def edit_problems(app, ctx, data: bytes, name: str) -> list[str]:
+    """Before an Excel/CSV goes to the owner: if it is a changed copy of a sheet they sent in this conversation, what it
+    changed beyond their words. Matched to their file by the header row. [] when fine, unrelated or too big to check."""
+    import asyncio
+    import tempfile
+    from src.agent import sheet_engine as se
+    ext = name.lower().rsplit(".", 1)[-1] if "." in name else ""
+    words = getattr(ctx, "owner_words", "") or ""
+    if ext not in ("xlsx", "xlsm", "csv") or not words or len(data) > GUARD_MAX_BYTES:
+        return []
+    originals = [r for r in getattr(ctx, "files", ()) if str(r).startswith("local:") and str(r).lower().endswith("." + ext)]
+    if not originals:
+        return []
+    with tempfile.TemporaryDirectory() as d:
+        new = Path(d) / f"new.{ext}"
+        new.write_bytes(data)
+
+        def check(orig_bytes: bytes) -> list[str] | None:
+            old = Path(d) / f"old.{ext}"
+            old.write_bytes(orig_bytes)
+            try:
+                a, b = se.load(str(old), big_ok=False), se.load(str(new), big_ok=False)
+            except Exception:
+                return None
+            ha = [h for _, h in sorted(a["sheets"][0].headers.items()) if h]
+            hb = [h for _, h in sorted(b["sheets"][0].headers.items()) if h]
+            if not ha or ha != hb[:len(ha)] or a["sheets"][0].title not in {s.title for s in b["sheets"]}:
+                return None                       # not a copy of this file (a new report built from it is fine)
+            return se.outside_what_was_asked(str(old), str(new), words)
+        for ref in reversed(originals):           # the latest upload first
+            try:
+                orig, _, _ = await actions._fetch(app, ref, ctx)
+            except Exception:
+                continue
+            if len(orig) > GUARD_MAX_BYTES:
+                continue
+            found = await asyncio.to_thread(check, orig)
+            if found is not None:
+                return found
+    return []
+
+
 async def open_spreadsheet(app, ctx, args: dict) -> dict:
     ref = str(args.get("file_ref") or "")
     spec = {"op": "layout", **{k: args[k] for k in ("sheet", "rows", "find") if args.get(k)}}

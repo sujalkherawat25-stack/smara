@@ -196,6 +196,10 @@ async def send_file_to_owner(app, ctx: SessionCtx, args: dict) -> dict:
     data = app.state.sandbox.read_output(job_id, name)
     if not data or len(data) > MAX_FILE_BYTES:
         return {"error": "file is empty or larger than 16 MB"}
+    from src.agent import sheet_tools
+    if problems := await sheet_tools.edit_problems(app, ctx, data, name):     # however the copy was made
+        return {"sent": False, "error": "not sent: this copy of the owner's sheet goes beyond what they asked: "
+                + "; ".join(problems) + ". Redo it from their file with edit_spreadsheet, or ask_owner first."}
     tenant = await tenants.by_id(app.state.pool, ctx.tenant_id)
     mime = SENDABLE.get(ext) or mimetypes.guess_type(name)[0] or "application/octet-stream"
     caption = re.sub(r"\s+", " ", str(args.get("caption") or ""))[:900]

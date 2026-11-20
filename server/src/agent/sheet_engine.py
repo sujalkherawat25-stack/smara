@@ -1148,6 +1148,42 @@ def apply(src: str, dst: str, changes: list[dict], preview: bool = False, owner_
     return result
 
 
+TOTAL_WORDS = re.compile(r"(total|kul|jod|sum)", re.I)
+
+
+def outside_what_was_asked(original: str, edited: str, owner_words: str) -> list[str]:
+    """Problems with an edited copy of the owner's sheet, however it was made: a column they did not name that changed, cells
+    emptied when they did not ask to remove anything, a Total row or the block under it touched when they did not mention it.
+    Empty list = fine. Added columns and new sheets are fine (they are additions)."""
+    a, b = load(original, big_ok=False), load(edited, big_ok=False)
+    by_title = {s.title: s for s in b["sheets"]}
+    problems, clears = [], CLEAR_WORDS.search(owner_words or "")
+    for sa in a["sheets"]:
+        sb = by_title.get(sa.title)
+        if sb is None:
+            problems.append(f"sheet '{sa.title}' is missing")
+            continue
+        cols, emptied, protected = set(), 0, set()
+        for key in set(sa.cells) | set(sb.cells):
+            va, vb = sa.cells.get(key), sb.cells.get(key)
+            if va == vb or key[1] > sa.max_col:
+                continue
+            cols.add(key[1])
+            if vb in (None, "") and va not in (None, ""):
+                emptied += 1
+            if key[0] in sa.total_rows or key[0] in sa.below:
+                protected.add(key[0])
+        for c in sorted(cols):
+            h = sa.headers.get(c, "")
+            if not named_by_owner(h, col_letter(c), owner_words):
+                problems.append(f"column {col_letter(c)} '{h}' changed, but the owner did not name it")
+        if emptied and not clears:
+            problems.append(f"{emptied} cells were emptied, but the owner did not ask to remove anything")
+        if protected and not TOTAL_WORDS.search(owner_words or ""):
+            problems.append(f"the total row / rows under the totals changed (rows {', '.join(map(str, sorted(protected)[:6]))})")
+    return problems
+
+
 def main(spec_path: str) -> dict:
     spec = json.loads(Path(spec_path).read_text(encoding="utf-8"))
     try:

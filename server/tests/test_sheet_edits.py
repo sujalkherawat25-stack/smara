@@ -286,3 +286,28 @@ def test_a_plain_formula_is_filled_down_like_excel(reg, tmp_path):
     assert after[(2, 12)] == '=IF(G2>=0,"Clear","Pending")' and after[(5, 12)] == '=IF(G5>=0,"Clear","Pending")'
     shown = se._Eval(after, {})
     assert shown.value(2, 12) == "Clear" and shown.value(5, 12) == "Pending"
+
+
+async def test_a_hand_made_copy_that_goes_beyond_the_ask_is_not_sent(app, reg, tmp_path):
+    """The 20 Nov edit, done with run_python instead of the tool: Paid Arpita filled from Collection, Collection emptied."""
+    wb = load_workbook(reg)
+    ws = wb.active
+    for r in range(2, 10):
+        if ws.cell(r, 6).value:
+            ws.cell(r, 5).value = (ws.cell(r, 5).value or 0) + ws.cell(r, 6).value
+            ws.cell(r, 6).value = None
+    bad = tmp_path / "bad.xlsx"
+    wb.save(bad)
+    ctx = SimpleNamespace(tenant_id="t", files=("local:abc:Electricity Aug Sep.xlsx",),
+                          owner_words="Iss excel file mein aug collection ko paid kardo pura")
+    problems = await sheet_tools.edit_problems(app, ctx, bad.read_bytes(), "Electricity_Aug_Sep.xlsx")
+    assert any("Aug-26 Paid Arpita" in p for p in problems) and any("emptied" in p for p in problems)
+    good = tmp_path / "good.xlsx"
+    se.apply(str(reg), str(good), [{"column": "Aug Collection", "value": "Paid"}])
+    assert await sheet_tools.edit_problems(app, ctx, good.read_bytes(), "x.xlsx") == []
+    report = Workbook()                                # a new report built from it is not a copy
+    report.active.title = "Pending"
+    report.active.append(HEAD)
+    rp = tmp_path / "report.xlsx"
+    report.save(rp)
+    assert await sheet_tools.edit_problems(app, ctx, rp.read_bytes(), "report.xlsx") == []

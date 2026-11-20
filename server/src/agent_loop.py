@@ -165,7 +165,7 @@ def _ctx(row, call_id: str = "", browsers=None) -> SessionCtx:
                       owner_words=owner_words(row.get("messages") or []))
 
 
-def owner_words(messages: list[dict], last: int = 4) -> str:
+def owner_words(messages: list[dict], last: int = 12) -> str:
     """The owner's own recent messages (not system notes), newest last."""
     said = [m.get("content") or "" for m in messages if m.get("role") == "user"]
     said = [t for t in said if not t.startswith(("[system note]", "[Earlier conversation omitted"))]
