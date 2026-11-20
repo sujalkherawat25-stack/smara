@@ -129,6 +129,23 @@ class _Eval:
         return self.toks[self.i] if self.i < len(self.toks) else None
 
     def _expr(self):
+        v = self._sum()
+        op = self._peek()
+        if op in ("<", ">", "=", "<=", ">=", "<>"):
+            self.i += 1
+            w = self._sum()
+            if UNK in (v, w):
+                return UNK
+            if op in ("=", "<>"):
+                same = (as_number(v) == as_number(w)) if ERR not in (as_number(v), as_number(w)) else norm(v) == norm(w)
+                return same if op == "=" else not same
+            x, y = as_number(v), as_number(w)
+            if ERR in (x, y):
+                return ERR
+            return {"<": x < y, ">": x > y, "<=": x <= y, ">=": x >= y}[op]
+        return v
+
+    def _sum(self):
         v = self._term()
         while self._peek() in ("+", "-"):
             op = self.toks[self.i]
@@ -256,6 +273,13 @@ class _Eval:
             if not nums:
                 return 0 if name != "AVERAGE" else ERR
             return min(nums) if name == "MIN" else max(nums) if name == "MAX" else sum(nums) / len(nums)
+        if name == "IF" and 2 <= len(args) <= 3 and all(k == "one" for k, _ in args):
+            cond = args[0][1]
+            if cond is UNK or cond == ERR:
+                return cond
+            pick = args[1][1] if (cond if isinstance(cond, bool) else as_number(cond) not in (0, ERR)) else \
+                (args[2][1] if len(args) == 3 else False)
+            return pick
         if name in ("ROUND", "ABS") and args and args[0][0] == "one":
             if args[0][1] is UNK:
                 return UNK
@@ -841,7 +865,43 @@ def _substitute(sh, template: str, r: int) -> str:
     return re.sub(r"\{([^{}]+)\}", rep, template)
 
 
-def plan(book, changes: list[dict]) -> tuple[list, list]:
+MONTHS = {"jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec", "january", "february",
+          "march", "april", "june", "july", "august", "september", "october", "november", "december"}
+
+
+CLEAR_WORDS = re.compile(r"(clear|empty|blank|remove|delete|erase|hata|mita|khali|khaali|saaf|nikal|हटा|मिटा|खाली)", re.I)
+
+
+def _words(text) -> list[str]:
+    return re.findall(r"[a-z]+", str(text or "").lower())
+
+
+def named_by_owner(header: str, letter: str, owner_words: str) -> bool:
+    """Did the owner name this column? Its distinctive words ('paid arpita' of 'Aug-26 Paid Arpita') must all be in what
+    they wrote (a word may be shortened: 'collect'), and if they named months, its month must be one of them. A column
+    letter ('F column', 'column F') counts too."""
+    said = set(_words(owner_words))
+    low = str(owner_words or "").lower()
+    if re.search(rf"\b(col(umn)?\s*{letter.lower()}|{letter.lower()}\s*col(umn)?)\b", low):
+        return True
+    hw = _words(header)
+    key = [w for w in hw if w not in MONTHS and len(w) > 2]
+    months = {w[:3] for w in hw if w in MONTHS}
+    said_months = {w[:3] for w in said if w in MONTHS}
+
+    def has(w):
+        return any(s == w or (len(s) >= 4 and (w.startswith(s) or s.startswith(w))) for s in said)
+    if not key:
+        return bool(months & said_months)
+    return all(has(w) for w in key) and (not months or not said_months or bool(months & said_months))
+
+
+def added_here(writes, sh, col) -> bool:
+    """A column an earlier step of this same call just added (its header was written by us)."""
+    return any(w[0] is sh and w[1] == sh.header_row and w[2] == col and w[3] is None for w in writes)
+
+
+def plan(book, changes: list[dict], owner_words: str = "") -> tuple[list, list]:
     """Work out every cell each change writes. Returns (writes, reports); writes are (sheet, row, col, old, new)."""
     writes, reports, claimed = [], [], {}
     for i, ch in enumerate(changes):
@@ -873,7 +933,14 @@ def plan(book, changes: list[dict]) -> tuple[list, list]:
             col, err = sh.find_column(ch.get("column"))
             if err:
                 raise ValueError(f"change {i + 1}: {err}")
-            rep["column"] = f"{col_letter(col)} '{sh.headers.get(col, '')}'"
+            header = sh.headers.get(col, "")
+            if owner_words and not added_here(writes, sh, col) and not named_by_owner(header, col_letter(col), owner_words):
+                raise ValueError(f"change {i + 1}: the owner did not name the column {col_letter(col)} '{header}'. Change only "
+                                 "the columns they named; if you think this one must change too, ask_owner first")
+            if action == "clear" and owner_words and not CLEAR_WORDS.search(owner_words):
+                raise ValueError(f"change {i + 1}: the owner did not ask to empty or remove anything; do not clear "
+                                 f"'{header}'. Ask them if you think it should be")
+            rep["column"] = f"{col_letter(col)} '{header}'"
         rows = _target_rows(sh, ch, col, rep)
         if not rows:
             rep["rows_changed"] = 0
@@ -888,8 +955,8 @@ def plan(book, changes: list[dict]) -> tuple[list, list]:
                 new = int(new)
             if new == old:
                 continue
-            if (sh.title, r, col) in claimed:
-                raise ValueError(f"change {i + 1} writes {col_letter(col)}{r} again (change {claimed[(sh.title, r, col)]} already did)")
+            if (sh.title, r, col) in claimed:          # a later step refines an earlier one (add a column, then fill some rows)
+                writes[:] = [w for w in writes if not (w[0] is sh and w[1] == r and w[2] == col)]
             claimed[(sh.title, r, col)] = i + 1
             if is_formula(old):
                 formulas_over += 1
@@ -956,14 +1023,14 @@ def _cell_map(path: str) -> dict:
     return {sh.title: sh.cells for sh in book["sheets"]}
 
 
-def apply(src: str, dst: str, changes: list[dict], preview: bool = False) -> dict:
+def apply(src: str, dst: str, changes: list[dict], preview: bool = False, owner_words: str = "") -> dict:
     """Make the changes (or only say what they would do, preview=True). The result says exactly which cells changed and
     proves nothing else did: the saved file is read back and compared with the original, cell by cell."""
     if not isinstance(changes, list) or not changes:
         return {"error": "changes must be a list of steps, e.g. [{'column': 'Aug Collection', 'value': 'Paid'}]"}
     book = load(src, big_ok=False)
     try:
-        writes, reports = plan(book, changes)
+        writes, reports = plan(book, changes, owner_words)
     except ValueError as e:
         return {"error": str(e), "nothing_changed": True}
     result = {"changes": reports, "cells_to_change": len(writes)}
@@ -974,8 +1041,9 @@ def apply(src: str, dst: str, changes: list[dict], preview: bool = False) -> dic
         result["file_has"] = lost
     if preview:
         result["preview"] = True
-        result["next"] = ("Nothing is saved yet. If this is what the owner asked, call again without preview. If the owner's words "
-                          "could mean something else, or an effect above would surprise them, ask them first.")
+        result["next"] = ("Nothing is saved yet. If this is what the owner's words say, save it (call again without preview) and "
+                          "tell them the effects in one line; effects are to report, not a reason to ask. Ask only if their "
+                          "words could mean a different change.")
         return result
     if not writes:
         return {**result, "saved": False, "note": "nothing to change: the cells already hold these values"}
@@ -1050,6 +1118,6 @@ def main(spec_path: str) -> dict:
     try:
         if spec["op"] == "layout":
             return layout(spec["src"], spec.get("sheet"), spec.get("rows"), spec.get("find"))
-        return apply(spec["src"], spec["dst"], spec.get("changes") or [], bool(spec.get("preview")))
+        return apply(spec["src"], spec["dst"], spec.get("changes") or [], bool(spec.get("preview")), spec.get("owner_words") or "")
     except ValueError as e:
         return {"error": str(e)}

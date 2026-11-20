@@ -161,7 +161,15 @@ def _ctx(row, call_id: str = "", browsers=None) -> SessionCtx:
                       on_device=bool(browsers) and getattr(browsers, "where", lambda _: "")(sid) == "device",
                       page=page_text(browsers.page(sid)) if browsers else "",
                       controls=str((browsers.page(sid) or {}).get("page", "")) if browsers else "",
-                      last_fill=last_fill(row.get("messages") or [])[0], last_fill_value=last_fill(row.get("messages") or [])[1])
+                      last_fill=last_fill(row.get("messages") or [])[0], last_fill_value=last_fill(row.get("messages") or [])[1],
+                      owner_words=owner_words(row.get("messages") or []))
+
+
+def owner_words(messages: list[dict], last: int = 4) -> str:
+    """The owner's own recent messages (not system notes), newest last."""
+    said = [m.get("content") or "" for m in messages if m.get("role") == "user"]
+    said = [t for t in said if not t.startswith(("[system note]", "[Earlier conversation omitted"))]
+    return "\n".join(said[-last:])[-4000:]
 
 
 async def _record_usage(pool, row, usage: dict | None) -> None:

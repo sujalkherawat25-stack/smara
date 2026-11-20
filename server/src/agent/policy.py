@@ -43,6 +43,7 @@ class SessionCtx:
     last_fill: str = ""            # ref of the last box the agent typed into in this conversation
     last_fill_value: str = ""      # and what it typed there
     controls: str = ""             # the numbered controls of the current page ('[12] button "Add to cart"' per line)
+    owner_words: str = ""          # the owner's last few messages: what a file edit may touch is what they named
 
 
 @dataclass(frozen=True)

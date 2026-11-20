@@ -204,18 +204,58 @@ async def c_status_column(env):
     d = diff(after)
     ok, why = only_cols(d, {nc})
     g = col("Aug Total")
+    shown = se._Eval(after, {})                # the agent may write the word or a live IF formula: both are right
     wrong = []
     for r in entries():
         v = sh.ev.value(r, g)
         want = "clear" if isinstance(v, (int, float)) and v >= 0 else "pending"
-        if str(after.get((r, nc)) or "").strip().lower() != want:
+        if str(shown.value(r, nc) or "").strip().lower() != want:
             wrong.append(r)
     return ok and not wrong, why or f"wrong status in rows {wrong[:8]}"
 
 
+def big_facts(data: bytes) -> dict:
+    from collections import Counter
+    wb = load_workbook(io.BytesIO(data), read_only=True)
+    rows, qty, countries = 0, 0, Counter()
+    for i, v in enumerate(wb.active.iter_rows(values_only=True)):
+        if i == 0 or v[0] is None:
+            continue
+        rows += 1
+        qty += v[3] if isinstance(v[3], (int, float)) else 0
+        countries[v[7]] += 1
+    return {"rows": rows, "qty": int(qty), "top": countries.most_common(1)[0][0]}
+
+
 async def c_big(env):
     t = texts(env)
-    return has_num(t, "541,909") and (has_num(t, "5,176,450") or has_num(t, "51,76,450")) and "united kingdom" in t.lower(), t[-400:]
+    f = ORIG["big"]
+    nums = (has_num(t, f"{f['rows']:,}") or has_num(t, h_inr(f["rows"]))) and (has_num(t, f"{f['qty']:,}") or has_num(t, h_inr(f["qty"])))
+    return nums and f["top"].lower() in t.lower(), f"expected {f}; said: {t[-400:]!r}"
+
+
+def h_inr(n: int) -> str:
+    s = str(n)
+    head, tail = s[:-3], s[-3:]
+    return (re.sub(r"(\d)(?=(\d\d)+$)", r"\1,", head) + "," if head else "") + tail
+
+
+async def run_task(env, task):
+    """The demo harness run, plus: no file from an earlier task counts, and what the agent did is kept for reading."""
+    env.wa.uploads.clear()
+    r = await ds.run_task(env, task)
+    rows = await h.q(env, "select messages from agent_sessions order by created_at")
+    trace = []
+    for row in rows:
+        for m in row["messages"]:
+            for c in m.get("tool_calls") or []:
+                trace.append(f"CALL {c['function']['name']} {c['function']['arguments'][:700]}")
+            if m["role"] == "tool":
+                trace.append(f"  -> {(m.get('content') or '')[:500]}")
+            elif m["role"] == "user" and not m["content"].startswith("You are"):
+                trace.append(f"USER {m['content'][:200]}")
+    r["trace"] = trace[-80:]
+    return r
 
 
 TASKS = [
@@ -245,6 +285,8 @@ if __name__ == "__main__":
     setup(reg, big)
     sys.argv = [sys.argv[0]] + rest
     h.TASKS[:] = [t for t in TASKS if big or t.name != "big_file_question"]
+    if big:
+        ORIG["big"] = big_facts(big)
     h.seed = ds.seed
-    h.run_task = ds.run_task
+    h.run_task = run_task
     asyncio.run(h.main(), loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()))

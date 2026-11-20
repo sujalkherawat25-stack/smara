@@ -258,3 +258,20 @@ def test_a_name_on_two_rows_is_not_guessed(tmp_path):
     assert "Nidhi on rows 2, 3" in r["error"] and r["nothing_changed"]
     r = se.apply(str(p), str(tmp_path / "o.xlsx"), [{"column": "Paid", "rows": {"names": ["Nidhi"], "all_matches": True}, "value": "paid"}])
     assert r["verified"] and r["changes"][0]["rows_changed"] == 2
+
+
+def test_only_columns_the_owner_named_can_change(reg, tmp_path):
+    said = "Iss excel file mein aug collection ko paid kardo pura"
+    assert se.named_by_owner("Aug Collection", "F", said)
+    assert not se.named_by_owner("Aug-26 Paid Arpita", "E", said)          # what the agent changed on 20 Nov
+    assert not se.named_by_owner("Sep-26 Collection", "J", said)           # another month
+    assert se.named_by_owner("Sep-26 Collection", "J", "collection mein daal do")
+    assert se.named_by_owner("Aug-26 Paid Arpita", "E", "column E mein 0 kar do")
+    out = str(tmp_path / "o.xlsx")
+    r = se.apply(str(reg), out, [{"column": "Aug-26 Paid Arpita", "copy_from": "Aug-26 Bill Amount"}], owner_words=said)
+    assert "did not name the column E" in r["error"] and r["nothing_changed"]
+    r = se.apply(str(reg), out, [{"action": "clear", "column": "Aug Collection"}], owner_words=said)
+    assert "did not ask to empty" in r["error"]
+    r = se.apply(str(reg), out, [{"action": "add_column", "header": "Aug Status", "value": "x"},
+                                 {"column": "Aug Status", "rows": [2], "value": "y"}], owner_words="ek column Status add karo")
+    assert r.get("verified"), r

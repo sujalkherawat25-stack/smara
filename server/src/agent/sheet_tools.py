@@ -79,7 +79,8 @@ async def edit_spreadsheet(app, ctx, args: dict) -> dict:
         return {"error": "changes must be a list like [{\"column\": \"Aug Collection\", \"value\": \"Paid\"}]"}
     if len(changes) > 20:
         return {"error": "at most 20 changes in one call"}
-    out, name, refs = await _run(app, ctx, ref, {"op": "edit", "changes": changes, "preview": bool(args.get("preview"))})
+    out, name, refs = await _run(app, ctx, ref, {"op": "edit", "changes": changes, "preview": bool(args.get("preview")),
+                                                 "owner_words": getattr(ctx, "owner_words", "") or ""})
     if out.get("saved") and out.get("verified") and refs:
         out["file_ref"] = refs[0]
         out["filename"] = name
