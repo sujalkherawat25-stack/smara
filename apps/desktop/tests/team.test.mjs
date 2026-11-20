@@ -46,7 +46,7 @@ test("job text and standing rules split the same way the team tool saves them", 
 
 test("Hire opens Smara's chat with the starter text, so the job is explained in chat", () => {
   const app = readFileSync(new URL("../src/NativeApp.tsx", import.meta.url), "utf8");
-  assert.match(app, /const hireInChat = \(\) => \{\n\s+setSelectedAgent\(MANAGER_ID\)/);
+  assert.match(app, /const hireInChat = \(\) => \{\r?\n\s+setSelectedAgent\(MANAGER_ID\)/);
   assert.match(app, /setDraft\(HIRE_STARTER\)/);
   assert.match(app, />\+ Hire<\/button>/);
   assert.equal(t.HIRE_STARTER, "I want to hire someone to ");

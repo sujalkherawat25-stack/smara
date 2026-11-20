@@ -59,7 +59,10 @@ what is blocking you instead of looping.
 
 def write_base_prompt(home: Path) -> Path:
     """Write the prompt into the runtime home (rewritten each launch, so an upgrade always takes effect)."""
+    from .native_connectors import prompt_line
     path = home / "smara-instructions.md"
-    if not path.is_file() or path.read_text(encoding="utf-8") != BASE_PROMPT:
-        path.write_text(BASE_PROMPT, encoding="utf-8")
+    line = prompt_line()
+    text = BASE_PROMPT + (f"\n# Connected services\n- {line}\n" if line else "")
+    if not path.is_file() or path.read_text(encoding="utf-8") != text:
+        path.write_text(text, encoding="utf-8")
     return path

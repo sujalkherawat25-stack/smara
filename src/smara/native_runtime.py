@@ -280,6 +280,10 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         settings["mcp_servers.smara_computer.env.SMARA_AGENT_LABEL"] = (agent_label or "Smara chat")[:80]
         if task_id:
             settings["mcp_servers.smara_computer.env.SMARA_TASK_ID"] = task_id[:80]
+    # Services the owner plugged in (Settings > Connectors). Every tool they offer asks the owner first.
+    from .native_connectors import runtime_settings as connector_settings
+    connector_config, connector_environment = connector_settings()
+    settings.update(connector_config)
     # TOML rejects JSON's surrogate-pair escapes for non-BMP characters. Keep
     # Unicode literal so emoji/non-Latin workspace paths survive native parsing.
     argv = [part for key, value in settings.items() for part in ("-c", key + "=" + json.dumps(value, ensure_ascii=False))]
@@ -300,6 +304,7 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
     # This fresh per-invocation token is required only by the local adapter;
     # restore it after the generic secret scrub removes ambient token values.
     environment["SMARA_NATIVE_WIRE_TOKEN"] = adapter.token
+    environment.update(connector_environment)       # after the scrub: only the connectors' own tokens, by name
     return argv, environment
 
 

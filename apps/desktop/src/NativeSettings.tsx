@@ -9,16 +9,18 @@ import NativeBackground from "./NativeBackground";
 import NativeAutomation from "./NativeAutomation";
 import NativeBrowser from "./NativeBrowser";
 import AccessNow from "./ui/AccessNow";
+import Connectors from "./ui/Connectors";
 import NativeAudit from "./NativeAudit";
 import NativeArchived, { type ArchivedActions } from "./NativeArchived";
 
 const aliases: Record<string, string> = { tavily: "TAVILY_API_KEY", exa: "EXA_API_KEY", serper: "SERPER_API_KEY", brave: "BRAVE_SEARCH_API_KEY" };
 const emptyModel = { id: "", label: "", provider: "", base_url: "", model: "", api_key: "", auth_header: "authorization", context_window: "" as string | number | null };
-type Tab = "models" | "memory" | "browser" | "activity" | "archived" | "tools" | "email" | "background" | "telegram" | "help";
+type Tab = "models" | "memory" | "browser" | "connectors" | "activity" | "archived" | "tools" | "email" | "background" | "telegram" | "help";
 const NAV: { id: Tab; label: string }[] = [
   { id: "models", label: "Models" },
   { id: "memory", label: "Memory" },
   { id: "browser", label: "Browser & computer" },
+  { id: "connectors", label: "Connectors" },
   { id: "activity", label: "Activity log" },
   { id: "archived", label: "Archived chats" },
   { id: "tools", label: "Search & tools" },
@@ -119,6 +121,8 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
       </div>}
 
       {tab === "memory" && <NativeMemorySettings setup={setup} locked={disabled} onUpdate={onUpdate} onPendingChange={integrationBusy} />}
+
+      {tab === "connectors" && <div className="set-page"><Connectors locked={disabled} /></div>}
 
       {tab === "browser" && <div className="set-page">
         <header><h2>Browser & computer</h2><p>You don't need to set anything up here. When Smara needs a website or an app, it asks you in the chat and you tap Allow. This page shows what is on and lets you stop it.</p></header>
