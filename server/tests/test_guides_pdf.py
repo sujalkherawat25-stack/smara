@@ -110,5 +110,5 @@ def test_landing_page_claim_matches_what_the_agent_does():
 
 def test_agent_prompt_says_it_reads_pdfs_and_wants_excel_only_for_bulk_import():
     assert "you CAN read a PDF" in prompt.BASE and "read_attachment" in prompt.BASE
-    assert "Excel or CSV export" in prompt.BASE
+    assert "Excel or CSV export" in prompt.BOOKS
     assert reader.MAX_PDF_PAGES == 80

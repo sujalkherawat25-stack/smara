@@ -27,8 +27,7 @@ async def test_list_my_files_returns_kept_files_newest_first_with_refs_that_open
 
 
 def test_the_instructions_say_to_edit_a_sent_file_in_place_and_never_claim_unchecked_totals():
-    assert "change THAT file in place" in BASE and "Never rebuild it from a dataframe" in BASE
-    assert "mh.compare_workbooks" in BASE and "list_my_files" in BASE
+    assert "edit_spreadsheet" in BASE and "ask_owner" in BASE and "list_my_files" in BASE
     assert "never say a file is gone before you have checked" in BASE
 
 

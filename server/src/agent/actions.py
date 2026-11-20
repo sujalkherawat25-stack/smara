@@ -99,6 +99,9 @@ async def inspect_and_import_file(app, ctx: SessionCtx, args: dict) -> dict:
         missing = [o for o in await open_refs(app.state.pool, ctx.tenant_id, None) if o["invoice_ref"] not in listed]
         preview["open_in_smara_not_in_file"] = len(missing)
         preview["not_in_file_sample"] = sorted({o["canonical_name"] for o in missing})[:5]
+    if not rows and not is_tally:
+        preview["next"] = ("Nothing here looks like money customers owe, so nothing was imported. It is still the owner's sheet: "
+                           "use open_spreadsheet to read it (columns, totals, rows) and edit_spreadsheet for any change they ask.")
     if args.get("mode") != "import" or not rows:
         return preview
     result = await import_rows(app.state.pool, ctx.tenant_id, rows, source="TALLY" if is_tally else "SHEET")
@@ -118,7 +121,11 @@ async def run_python(app, ctx: SessionCtx, args: dict) -> dict:
     for ref in args.get("file_refs") or []:
         data, _, filename = await _fetch(app, ref, ctx)
         inputs[filename or "file"] = data
-    res = await app.state.sandbox.run(args["code"], inputs)
+    try:
+        timeout = max(10, min(int(args.get("timeout_s") or 60), 300))   # a 500,000-row Excel needs a few minutes
+    except (TypeError, ValueError):
+        timeout = 60
+    res = await app.state.sandbox.run(args["code"], inputs, timeout_s=timeout)
     refs = [f"sandbox:{res['job_id']}:{n}" for n in res.get("outputs") or []] if res.get("job_id") else []
     return {**{k: res.get(k) for k in ("exit_code", "timed_out", "seconds", "stdout", "stderr", "result", "error")
                if res.get(k) not in (None, "")},

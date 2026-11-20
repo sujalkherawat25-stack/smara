@@ -399,7 +399,7 @@ async def test_the_owner_lists_and_deletes_skills_in_chat_and_the_agent_can_save
 
 def test_the_prompt_no_longer_limits_smara_to_the_ledger():
     from src.agent.prompt import BASE
-    assert "anyone can use" in BASE and "there is no fixed list of allowed tasks" in BASE
+    assert "not a chatbot with a fixed menu" in BASE and "learn the owner's own workflows as skills" in BASE
     assert "are not kept in the ledger: say so" not in BASE
     assert "Skills never" in __import__("inspect").getsource(__import__("src.agent.prompt", fromlist=["x"]).build_system)
 
@@ -408,7 +408,7 @@ def test_the_prompt_no_longer_limits_smara_to_the_ledger():
 
 def test_the_instructions_do_not_limit_smara_to_businesses():
     from src.agent.prompt import BASE
-    assert "anyone can use" in BASE and "knowledge" in BASE and "Do not assume they run a shop" in BASE
+    assert "work, study, personal or business" in BASE and "Do not assume they run a" in BASE
     assert "small business in India" not in BASE and "back-office agent" not in BASE
     from src.ingest import onboarding, telegram_onboarding as tgo
     for text in (onboarding.welcome_done('Asha'), onboarding.INVITE_ONLY, tgo.NOT_INVITED):

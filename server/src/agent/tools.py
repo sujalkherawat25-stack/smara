@@ -85,6 +85,23 @@ TOOLS = [
     _fn("send_file_to_owner", "Send the owner a file you created in the sandbox (PDF statement, Excel report, CSV). "
         "file_ref must be one of the output_file_refs from run_python.",
         {"file_ref": _S, "caption": _S}, ["file_ref"]),
+    _fn("open_spreadsheet", "Read an Excel/CSV file's structure: header row, each column (letter, filled rows, formula, which "
+        "columns' formulas use it, sum_of_data_rows), the entry rows, total rows and any block below the totals (those are "
+        "not entries). find='name' returns the rows mentioning it; rows='100-130' shows those rows.",
+        {"file_ref": _S, "sheet": _S, "find": _S, "rows": _S}, ["file_ref"]),
+    _fn("edit_spreadsheet", "Change an Excel/CSV file cell-exactly; nothing outside the change is touched, and the saved "
+        "file is checked against the original. A change: column (header); value (text/number) | formula ('={Bill}-{Paid}', "
+        "{Header} = that column, same row) | compute (same, written as a number) | copy_from (column); action set|clear|"
+        "add_column (+header); rows: 'data' (default: entry rows, not header/totals/block below) | [row numbers] | "
+        "{'names': [...]} | {'where': [{'column', 'op' (< <= > >= = != empty not_empty contains), 'value'}]}; only_empty; "
+        "include_total_rows; include_rows_below_totals. preview: true = dry run. Returns changed cells, side effects "
+        "(#VALUE!, moved totals), verified, and file_ref (send it; use it for the next change to this file).",
+        {"file_ref": _S, "changes": {"type": "array", "items": {"type": "object"}}, "preview": {"type": "boolean"}},
+        ["file_ref", "changes"]),
+    _fn("ask_owner", "Ask the owner one question with 2-4 tap-able options, each saying exactly what you would do, when "
+        "their instruction can be read in ways that give different results. Option 1 is their words taken literally. Ends "
+        "your turn; the answer is their next message.",
+        {"question": _S, "options": {"type": "array", "items": _S}}, ["question"]),
     _fn("react_to_message", "Put an emoji reaction on the owner's latest Telegram message, like a person would, to be warm and "
         "alive (thanks, good news, a file received, a greeting, a done job). It is not a reply: still write your answer. Use it "
         "now and then, at most once per turn, never on every message and never on bad news, anger or a serious question.",
@@ -190,7 +207,7 @@ TOOLS = [
         "(propose_ledger_adjustment is for what a customer claims). The owner sees a card and nothing changes until they tap "
         "Approve; do not say it is recorded until the result says recorded.",
         {"customer": _S, "rupees": {"type": "number"}, "invoice_ref": _S, "note": _S}, ["customer", "rupees"]),
-    _fn("run_python", "Run Python in an isolated sandbox (no network, 60 s) for Tally/Excel/CSV work. "
+    _fn("run_python", "Run Python in an isolated sandbox (no network; 60 s, or timeout_s up to 300 for big files) for Tally/Excel/CSV work. "
         "Attached files are at ./in/<filename>; write output files to ./out/ (they come back as file_refs you "
         "can pass to inspect_and_import_file); set RESULT = <json-able> for structured output. pandas, openpyxl "
         "and `import smara_helpers as mh` are available: mh.read_table(path) finds the real header row; "
@@ -202,12 +219,11 @@ TOOLS = [
         "party=..., rows=[{invoice, date, due_date, amount, paid}], note=...) writes a customer account statement PDF and "
         "mh.write_xlsx({'Sheet': DataFrame}, 'out/report.xlsx') writes a formatted Excel file. Make the file type the "
         "owner asked for (PDF means .pdf, Excel means .xlsx), not a CSV. Always print or RESULT the totals you computed so you can verify them. "
-        "TO CHANGE A FILE THE OWNER SENT (add a column, fix values, a formula): edit THAT workbook in place, never rebuild it "
-        "with pandas or write_xlsx (that drops formulas, formatting and rows). mh.add_column(src, dst, source_header=..., "
-        "new_header=..., formula='={c}{r}*0.4') adds one column to every sheet that has the header (found per sheet, on any "
-        "row) and returns what it did and which sheets it skipped; for any other edit use openpyxl load_workbook(path) (NOT "
-        "data_only) and change only the cells asked. Then ALWAYS run mh.compare_workbooks(src, dst): it must say ok, and you "
-        "tell the owner in plain words what changed, what stayed the same and any sheet you could not change. "
+        "TO CHANGE A FILE THE OWNER SENT (write a value in a column, fill a column, add a column, a formula): do NOT use "
+        "run_python; use edit_spreadsheet, which changes exactly the cells asked and proves nothing else moved. Only for an "
+        "edit it cannot express: openpyxl load_workbook(path) (NOT data_only), change only the cells asked, save, then "
+        "mh.compare_workbooks(src, dst, allowed=['F']) (the column letters you meant to change) must say ok. Files from an "
+        "earlier run are NOT in ./out: pass their output_file_ref in file_refs. "
         "FOR BOOKS (what customers owe, receipts against invoices, TDS, GST bills) do NOT hand-write the matching: "
         "mh.match_names(names, ledger_names) maps typed spellings to the ledger ('and'/'&', case, spaces, Agarwal/Agrawal) and lists "
         "the unclear ones in 'review'; mh.fifo_apply(invoices, payments) applies lump-sum receipts oldest invoice first and returns "
@@ -220,7 +236,7 @@ TOOLS = [
         "for 'what changed since last week', never import both lists. Load the receivables-from-books skill first for such work. "
         "mh.bank_statement_pdf(path, password='') reads a bank statement PDF: every row, totals, top credits/debits and a tie-out against the closing balance (check r['ties'] and r['notes']); never add up statement numbers by reading text. "
         "Pass the file_refs of every file you open: without them ./in is empty.",
-        {"code": _S, "file_refs": {"type": "array", "items": _S}}, ["code"]),
+        {"code": _S, "file_refs": {"type": "array", "items": _S}, "timeout_s": {"type": "integer"}}, ["code"]),
     _fn("pc_files", "Reach the Smara Shared folder on the owner's own PC (only that folder, only text files). action=list shows "
         "what is in it, read opens a text file, write saves a new text file there (the owner approves each write). Use it when the "
         "owner says 'save this on my PC', 'what is in my Smara folder' or asks you to use a file they left on their PC.",
