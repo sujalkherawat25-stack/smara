@@ -249,12 +249,19 @@ def add_column(src: str, dst: str, *, source_header: str, new_header: str, formu
     return report
 
 
-def compare_workbooks(src: str, dst: str, max_examples: int = 5) -> dict:
+def compare_workbooks(src: str, dst: str, max_examples: int = 5, allowed=None) -> dict:
     """Compare the owner's original workbook with the edited copy, cell by cell (formulas count as they are written).
     ok is True only when every sheet is still there, no original cell changed or went missing, and no row was lost.
-    `added` counts cells that exist only in the copy (the new column). Always run this before sending an edited file
-    and report the result in plain words."""
+    `added` counts cells that exist only in the copy (the new column). With allowed=['F', 'L'] (the column letters you
+    meant to change), changes in those columns are expected and ok means nothing changed anywhere ELSE. Always run this
+    before sending an edited file and report the result in plain words."""
+    import os
     from openpyxl import load_workbook
+    for p in (src, dst):
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"{p} does not exist. Files written by an earlier run_python are not in ./out any more: "
+                                    "pass that run's output_file_ref in file_refs and open it from ./in/")
+    allowed = {str(c).upper() for c in (allowed or [])}
     a, b = load_workbook(src), load_workbook(dst)
     out, ok = [], True
     for ws in a.worksheets:
@@ -263,7 +270,7 @@ def compare_workbooks(src: str, dst: str, max_examples: int = 5) -> dict:
             ok = False
             continue
         wd = b[ws.title]
-        changed, lost, rows_a = [], 0, 0
+        changed, expected, lost, rows_a = [], [], 0, 0
         for row in ws.iter_rows(max_col=min(ws.max_column, 200)):
             if any(c.value is not None for c in row):
                 rows_a += 1
@@ -271,17 +278,29 @@ def compare_workbooks(src: str, dst: str, max_examples: int = 5) -> dict:
                 if c.value is None:
                     continue
                 nv = wd.cell(row=c.row, column=c.column).value
+                if c.column_letter in allowed:
+                    if nv != c.value:
+                        expected.append(f"{c.coordinate}: {c.value!r} -> {nv!r}")
+                    continue
                 if nv is None:
                     lost += 1
                 elif nv != c.value:
                     changed.append(f"{c.coordinate}: {c.value!r} -> {nv!r}")
         rows_b = sum(1 for row in wd.iter_rows(max_col=min(wd.max_column, 200)) if any(c.value is not None for c in row))
-        added = sum(1 for row in wd.iter_rows(max_col=min(wd.max_column, 200)) for c in row
-                    if c.value is not None and ws.cell(row=c.row, column=c.column).value is None)
-        good = not changed and not lost and rows_b >= rows_a
+        new_cells = [c for row in wd.iter_rows(max_col=min(wd.max_column, 200)) for c in row
+                     if c.value is not None and ws.cell(row=c.row, column=c.column).value is None]
+        added = len(new_cells)
+        stray = [c.coordinate for c in new_cells if allowed and c.column_letter not in allowed]
+        good = not changed and not lost and rows_b >= rows_a and not stray
         ok = ok and good
-        out.append({"sheet": ws.title, "rows_original": rows_a, "rows_now": rows_b, "cells_changed": len(changed),
-                    "cells_lost": lost, "cells_added": added, "examples": changed[:max_examples], "same_apart_from_additions": good})
+        item = {"sheet": ws.title, "rows_original": rows_a, "rows_now": rows_b, "cells_changed": len(changed),
+                "cells_lost": lost, "cells_added": added, "examples": changed[:max_examples], "same_apart_from_additions": good}
+        if allowed:
+            item["changed_in_allowed_columns"] = len(expected)
+            item["allowed_examples"] = expected[:max_examples]
+            if stray:
+                item["added_outside_allowed"] = stray[:max_examples]
+        out.append(item)
     return {"ok": ok, "sheets": out, "sheets_in_copy_only": [n for n in b.sheetnames if n not in a.sheetnames]}
 
 

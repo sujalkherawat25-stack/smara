@@ -131,7 +131,7 @@ def parts_of(payload: dict) -> list[dict]:
 
 
 def _clean(part: dict) -> dict:
-    return {k: v for k, v in part.items() if v is not None}
+    return {k: v for k, v in part.items() if v is not None and not k.startswith("_")}
 
 
 async def send_to_owner(app, tenant, payload: dict, *, kind: str, obligation_id=None, adjustment_id=None,
@@ -159,12 +159,17 @@ async def _deliver(app, tenant, payload: dict, *, kind: str, obligation_id=None,
                      status="held", obligation_id=obligation_id, adjustment_id=adjustment_id,
                      agent_session_id=agent_session_id, payload=payload if kind == "owner_note" else None)
         return "held"
+    options = payload.get("_options")        # answer buttons for a question (Telegram); WhatsApp gets them numbered in the text
     parts = [_clean(p) for p in parts_of(payload)]
     if pick_channel(app, tenant, now, reply_channel) == "telegram":
         for i, part in enumerate(parts):
             if i:
                 await asyncio.sleep(PART_GAP_S)
-            await tg.send(wa_to_telegram(part, tenant.telegram_chat_id))
+            out = wa_to_telegram(part, tenant.telegram_chat_id)
+            if options and i == len(parts) - 1 and "reply_markup" not in out:
+                out["reply_markup"] = {"keyboard": [[{"text": o}] for o in options], "one_time_keyboard": True,
+                                       "resize_keyboard": True, "input_field_placeholder": "Tap one, or type your own answer"}
+            await tg.send(out)
         return "telegram"
     if uses_link(app, tenant, reply_channel):
         from src.loop.wa_link import SidecarError, client as link_client

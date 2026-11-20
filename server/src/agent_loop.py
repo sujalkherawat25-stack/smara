@@ -20,7 +20,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from src import chatlog, clock, health_watch, prefs, tenants
-from src.agent import actions, bookkeeping, documents, extras, gst, memory_pass, pc, reader, skills, tools, web
+from src.agent import actions, bookkeeping, documents, extras, gst, memory_pass, pc, reader, sheet_tools, skills, tools, web
 from src.agent.context import compact
 from src.agent.policy import SessionCtx, approval_text, pre_tool_use
 from src.agent.prompt import build_system, latest_owner_text
@@ -49,7 +49,8 @@ EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memo
              "send_file_to_owner": extras.send_file_to_owner, "react_to_message": extras.react_to_owner, "web_search": web.web_search,
              "pc_files": pc.pc_files, "set_customer_phone": bookkeeping.set_customer_phone,
              "find_customer": bookkeeping.find_customer, "set_reply_style": prefs.set_reply_style,
-             "gst_reconcile": gst.gst_reconcile}
+             "gst_reconcile": gst.gst_reconcile, "open_spreadsheet": sheet_tools.open_spreadsheet,
+             "edit_spreadsheet": sheet_tools.edit_spreadsheet, "ask_owner": extras.ask_owner}
 
 
 def _spawn(app, coro) -> None:
@@ -228,7 +229,8 @@ async def start_session(app, *, tenant, trust: str, trigger: str, content: str, 
     return sid
 
 
-HEAVY_TOOLS = frozenset({"run_python", "inspect_and_import_file", "browser_step", "read_attachment", "make_document"})
+HEAVY_TOOLS = frozenset({"run_python", "inspect_and_import_file", "browser_step", "read_attachment", "make_document",
+                         "open_spreadsheet", "edit_spreadsheet"})
 
 
 def heavy(messages: list[dict]) -> bool:
@@ -241,6 +243,13 @@ def heavy(messages: list[dict]) -> bool:
 
 _FILE_ASK = re.compile(r"\b(pdf|excel|xlsx)\b", re.I)
 _SEND_ASK = re.compile(r"(bhej|send|bana|de do|dedo|chahiye|chahie|mail)", re.I)
+
+
+def asked_owner(messages: list[dict], calls: list[dict]) -> bool:
+    """True when this step put a question to the owner (ask_owner went out)."""
+    ids = {c["id"] for c in calls if c["function"]["name"] == "ask_owner"}
+    return any(m["role"] == "tool" and m.get("tool_call_id") in ids and '"asked": true' in (m.get("content") or "")
+               for m in messages[-len(calls) - 2:])
 
 
 def owes_file(messages: list[dict]) -> bool:
@@ -386,6 +395,9 @@ async def _run(app, sid: str, fallback=None) -> None:
                 suspended = True   # keep the browser page alive for the approved step
                 return await _save(pool, sid, messages, steps=steps)
             await _save(pool, sid, messages, steps=steps)
+            if asked_owner(messages, calls):       # a question is with the owner: the turn ends; the answer is their next message
+                if await _finish_unless_inbox(pool, sid, messages, steps):
+                    return
         # Out of budget: never go silent. Ask the model for an honest status instead of a dead end.
         await _take_inbox(app, row, messages)              # what the owner sent meanwhile is in the status it writes
         messages.append({"role": "user", "content": "[system note] Step budget reached. Without calling any tool, tell the owner "

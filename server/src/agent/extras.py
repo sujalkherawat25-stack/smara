@@ -204,3 +204,24 @@ async def send_file_to_owner(app, ctx: SessionCtx, args: dict) -> dict:
         return {"sent": False, "error": "the owner's 24-hour WhatsApp window is closed, so a file cannot be sent now; "
                                         "tell them in your reply or try again after they message"}
     return {"sent": True, "via": via, "filename": name, "bytes": len(data)}
+
+
+async def ask_owner(app, ctx: SessionCtx, args: dict) -> dict:
+    """A question when the owner's words can mean more than one thing. Telegram shows the options as buttons (a tap sends
+    the option as the owner's reply); WhatsApp gets them numbered. The turn ends here: the answer arrives as the owner's
+    next message in this same conversation."""
+    from src import tenants
+    from src.loop.owner_channel import send_to_owner
+    from src.loop.whatsapp import text_message
+    q = " ".join(str(args.get("question") or "").split())
+    opts = [" ".join(str(o).split())[:120] for o in (args.get("options") or []) if str(o).strip()]
+    if not 5 <= len(q) <= 700:
+        return {"error": "question: one short question (5 to 700 characters)"}
+    if opts and not 2 <= len(opts) <= 4:
+        return {"error": "options: 2 to 4 short answers the owner can tap, or none"}
+    text = q + ("\n\n" + "\n".join(f"{i}. {o}" for i, o in enumerate(opts, 1)) if opts else "")
+    tenant = await tenants.by_id(app.state.pool, ctx.tenant_id)
+    payload = {**text_message(tenant.owner_phone, text), **({"_options": [f"{i}. {o}"[:120] for i, o in enumerate(opts, 1)]} if opts else {})}
+    via = await send_to_owner(app, tenant, payload, kind="owner_text")
+    return {"asked": True, "via": via, "note": "The question is with the owner. Your turn ends now; their answer comes as the "
+                                               "next message (a tap sends e.g. '2. ...'). Do not write anything else now."}
