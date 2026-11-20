@@ -858,7 +858,8 @@ def _new_value(sh, ch: dict, r: int):
         return f
     if "value" in ch:
         return ch["value"]
-    raise ValueError("say the new value: value (text or number), formula, copy_from or compute")
+    raise ValueError(f"no new value for '{ch.get('column') or ch.get('header')}': each change carries its own value, formula, "
+                     "copy_from or compute, e.g. {\"action\": \"add_column\", \"header\": \"Status\", \"formula\": \"=IF(G2>=0,\\\"Clear\\\",\\\"Pending\\\")\"}")
 
 
 def _substitute(sh, template: str, r: int) -> str:
@@ -1015,6 +1016,17 @@ def effects(book, writes) -> list[str]:
         for c, rs in sorted(errors.items()):
             out.append(f"{len(rs)} cells in {col_letter(c)} '{sh.headers.get(c, '')}' will show #VALUE! (they do arithmetic on "
                        f"the changed cells, which now hold text), e.g. {col_letter(c)}{rs[0]}")
+        for c in sorted(set(moved) | set(errors)):          # where each affected column ends up, so a goal ("Total 0") is checkable
+            rows = [r for r in sh.data_rows() if is_formula(sh.cells.get((r, c)))]
+
+            def spread(ev):
+                vals = [ev.value(r, c) for r in rows]
+                neg = [r for r, v in zip(rows, vals) if is_num(v) and v < 0]
+                return (len(neg), sum(1 for v in vals if is_num(v) and v == 0), sum(1 for v in vals if is_num(v) and v > 0), neg)
+            b, a = spread(before), spread(after)
+            if b[:3] != a[:3]:
+                out.append(f"{col_letter(c)} '{sh.headers.get(c, '')}' rows below 0 / at 0 / above 0: before {b[0]}/{b[1]}/{b[2]}, "
+                           f"after {a[0]}/{a[1]}/{a[2]}" + (f" (still below 0: rows {', '.join(map(str, a[3][:8]))})" if a[0] else ""))
         for c, ms in sorted(moved.items()):
             tot = [m for m in ms if m[0] in sh.total_rows]
             if tot:
