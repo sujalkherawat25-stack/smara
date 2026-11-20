@@ -14,5 +14,5 @@ def test_the_skill_does_not_tell_the_agent_to_wait_before_importing():
 
 
 def test_the_prompt_says_import_first_then_report():
-    text = prompt.BASE
+    text = prompt.BOOKS
     assert "Do not ask for confirmation first" in text and "no WhatsApp number (by name)" in text

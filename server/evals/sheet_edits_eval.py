@@ -17,6 +17,7 @@ import sys
 from openpyxl import Workbook, load_workbook
 
 from evals import agent_harness as h
+from evals import demo_scenarios as ds      # importing it routes owner file downloads to the in-memory files
 from evals.agent_harness import OWNER, Task, has_num, owner
 from src.agent import sheet_engine as se
 from src.ingest.dispatch import dispatch
@@ -244,4 +245,6 @@ if __name__ == "__main__":
     setup(reg, big)
     sys.argv = [sys.argv[0]] + rest
     h.TASKS[:] = [t for t in TASKS if big or t.name != "big_file_question"]
+    h.seed = ds.seed
+    h.run_task = ds.run_task
     asyncio.run(h.main(), loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()))
