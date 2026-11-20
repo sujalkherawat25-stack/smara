@@ -246,3 +246,4 @@ html.control-bar-window, html.control-bar-window body { background: transparent;
 .native-notice { color: var(--ok); margin: 0; }
 .count-badge { margin-left: 6px; min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--warn); color: #1b1b1a; font-size: 11px; font-weight: 700; }
 .native-work-area.with-board > .approvals-inbox { flex: 1; }
+.native-work-area.with-board > .hosted-panel { flex: 1; }

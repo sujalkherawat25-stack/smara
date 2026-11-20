@@ -172,6 +172,7 @@ export default function NativeApp() {
   const [inboxCount, setInboxCount] = useState(0);   // what the Approvals inbox last counted (hosted + tasks + this chat)
   const [selectedAgent, setSelectedAgent] = useState("");
   const [helper, setHelper] = useState<HelperSnapshot>(undefined);
+  const reloadHelper = useRef<() => void>(() => undefined);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [terminalSession, setTerminalSession] = useState<TerminalSession | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
@@ -188,6 +189,7 @@ export default function NativeApp() {
   // Helper status for the hosted chip and panel. Read on start and every 30 s; the helper itself is never touched here.
   useEffect(() => {
     const load = () => { void invoke<HelperSnapshot>("bridge_state").then(value => setHelper(value)).catch(() => setHelper(null)); };
+    reloadHelper.current = load;
     load();
     const timer = setInterval(load, 30000);
     return () => clearInterval(timer);
@@ -1316,7 +1318,7 @@ export default function NativeApp() {
       {built === false && <div className="native-warning">Native runtime is missing. Build scripts/build-smara-native.ps1; no old-engine fallback is used.</div>}
       {error && <div role="alert" className="native-error">{error}{!settingsOpen && !connected && (!busy || uncertain) && <button disabled={connecting || loadingThread} onClick={() => void recoverSession()}>Retry setup</button>}<button aria-label="Dismiss error" onClick={() => setError("")}>Dismiss</button></div>}
       {settingsOpen && setup ? <NativeSettings initialTab={settingsTab} archived={archivedActions} setup={setup} locked={busy || connecting || loadingThread} call={settingsCall} onUpdate={updateSetup} onClose={() => void closeSettings()} onPendingChange={pending => { settingsPendingRef.current = pending; setSettingsSaving(pending); }} version={packageInfo.version} runtimeBuilt={built === true} toolsEnabled={toolsEnabled} workersEnabled={workersEnabled} browserOrigins={browserOrigins} onToolsChange={setToolsEnabled} onWorkersChange={setWorkersEnabled} onOriginsChange={setBrowserOrigins} /> : <>
-      <div className={`native-work-area ${panel ? "with-panel" : ""} ${panel === "board" || panel === "inbox" ? "with-board" : ""}`}>
+      <div className={`native-work-area ${panel ? "with-panel" : ""} ${panel === "board" || panel === "inbox" || panel === "hosted" ? "with-board" : ""}`}>
       <div className="native-chat-area">
       {goalInAnotherConversation && <div className="goal-other-chat" role="status"><span><strong>Background goal {goalLabel(currentGoal!.state).toLowerCase()}</strong><small>Chat and project activity are paused while it works.</small></span><button disabled={connecting || loadingThread} onClick={() => void openGoalConversation()}>Open task chat</button></div>}
       {goalInThisConversation && currentGoal && <section className={`native-goal-status state-${currentGoal.state}`} aria-label="Autonomous goal progress">
@@ -1412,7 +1414,7 @@ export default function NativeApp() {
       {panel === "board" && <NativeTaskBoard projects={setup?.preferences.projects ?? []} workspace={workspace} profile={profile} roster={roster} locked={navigationLocked} onClose={() => setPanel(null)} />}
       {panel === "tasks" && <NativeGoals workspace={workspace} profile={profile} locked={navigationLocked} onClose={() => setPanel(null)} onPreview={setPreviewPath} />}
       {panel === "files" && <NativeFiles workspace={workspace} onPreview={setPreviewPath} />}
-      {panel === "hosted" && <HostedPanel snapshot={helper} locked={navigationLocked} />}
+      {panel === "hosted" && <HostedPanel snapshot={helper} locked={navigationLocked} onChange={() => { reloadHelper.current(); setTimeout(() => reloadHelper.current(), 2500); }} />}
       {panel === "terminal" && <NativeTerminal workspace={workspace} connected={connected} session={terminalSession} interactiveSupported={terminalPlatformSupported} onConnect={() => { void connect(); }} onStart={() => startTerminal()} onInput={value => { void writeTerminal(value); }} onInterrupt={interruptTerminal} onStop={() => { void stopTerminal(); }} onResize={resizeTerminal} onClear={() => setTerminalSession(current => current ? { ...current, output: "", truncated: false } : current)} onClose={() => setPanel(null)} />}
       </div>
       </>}

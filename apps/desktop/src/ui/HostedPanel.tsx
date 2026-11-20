@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import NativeBrowser from "../NativeBrowser";
+import SignInCard from "./SignInCard";
 import { hostedStatus, type HelperSnapshot } from "../hostedStatus";
 import { channelLines, healthUrl, type ChannelHealth } from "../channelStatus";
 import { overviewLines } from "../shopOverview";
@@ -7,10 +8,9 @@ import { overviewLines } from "../shopOverview";
 /** How often the owner channels are re-read from the server's public health page. */
 const CHANNEL_REFRESH_MS = 60_000;
 
-/** Hosted Smara: whether this PC is paired and running the helper, the owner channels, plus the helper controls. */
-export default function HostedPanel({ snapshot, locked }: { snapshot: HelperSnapshot; locked: boolean }) {
+/** Hosted Smara: one Sign-in card on top; the shop's numbers, channels and browser helper controls sit under Details. */
+export default function HostedPanel({ snapshot, locked, onChange }: { snapshot: HelperSnapshot; locked: boolean; onChange?: () => void }) {
   const status = hostedStatus(snapshot);
-  const last = snapshot?.status?.last_poll_at;
   const server = snapshot?.server;
   const shopLines = overviewLines(snapshot?.overview, snapshot?.now ?? Date.now() / 1000);
   const [health, setHealth] = useState<ChannelHealth>(undefined);
@@ -34,23 +34,18 @@ export default function HostedPanel({ snapshot, locked }: { snapshot: HelperSnap
   }, [server]);
   return (
     <div className="hosted-panel" aria-label="Hosted Smara">
-      <span className="smara-chip" data-tone={status.tone}>{status.label}</span>
-      {snapshot?.shop && <div>Shop: <strong>{snapshot.shop}</strong></div>}
-      {snapshot?.server && <div>Server: <code>{snapshot.server}</code></div>}
-      {last !== undefined && <div>Last poll: {new Date(last * 1000).toLocaleTimeString()}</div>}
-      {shopLines.length > 0 && (
-        <div className="hosted-channels" aria-label="Your shop on Smara">
-          {shopLines.map((line) => (
-            <span key={line.label} className="smara-chip" data-tone={line.tone}>{line.label}</span>
-          ))}
-        </div>
-      )}
-      <div className="hosted-channels" aria-label="Owner channels">
-        {channelLines(health).map((line) => (
-          <span key={line.label} className="smara-chip" data-tone={line.tone}>{line.label}</span>
-        ))}
-      </div>
-      <NativeBrowser locked={locked} />
+      <header className="task-board-head"><div><h2>Smara account</h2><p>Connect this PC to your Smara shop.</p></div></header>
+      <SignInCard helperLabel={status.label} locked={locked} onChange={() => onChange?.()} />
+      <details className="hosted-details">
+        <summary>Details and browser controls</summary>
+        {(shopLines.length > 0 || channelLines(health).length > 0) && (
+          <div className="hosted-channels" aria-label="Your shop on Smara">
+            {shopLines.map((line) => <span key={line.label} className="smara-chip" data-tone={line.tone}>{line.label}</span>)}
+            {channelLines(health).map((line) => <span key={line.label} className="smara-chip" data-tone={line.tone}>{line.label}</span>)}
+          </div>
+        )}
+        <NativeBrowser locked={locked} />
+      </details>
     </div>
   );
 }

@@ -61,12 +61,13 @@ export default function NativeApprovals({ chatWaiting, onShowChat, onCount }: { 
     {total === 0 && link && <p className="inbox-empty">Nothing is waiting for you.</p>}
 
     <h3>From Smara on Telegram <small>{link?.connected ? `Connected · ${link.shop}` : "Not connected"}</small></h3>
-    {link && !link.connected && <form className="settings-form inbox-connect" onSubmit={event => { event.preventDefault(); void run(async () => { await hosted("pair", { code }); setCode(""); setNotice("Connected. Steps Smara wants to take on this PC will show here too; the first answer counts."); }); }}>
+    {link && !link.connected && <p className="inbox-empty">Not signed in. Open <b>Hosted</b> in the top bar and press <b>Sign in</b> to answer Smara's steps here as well as in chat.</p>}
+    {link && !link.connected && <details className="hosted-details"><summary>Have a code instead?</summary><form className="settings-form inbox-connect" onSubmit={event => { event.preventDefault(); void run(async () => { await hosted("pair", { code }); setCode(""); setNotice("Connected. Steps Smara wants to take on this PC will show here too; the first answer counts."); }); }}>
       <p>Answer the steps Smara wants to take on this PC (browser clicks, files in the Smara Shared folder) here as well as in chat. Send <b>desktop approvals</b> to Smara in Telegram, then paste the code.</p>
       {!link.server && <small>First pair this PC's browser with Smara (Browser panel), so Desktop knows where your Smara is.</small>}
       <label>Code<input value={code} onChange={event => setCode(event.target.value)} placeholder="ABCD-EFGH" autoComplete="off" /></label>
       <button className="primary" disabled={pending || !link.server || !codeLooksRight(code)}>Connect</button>
-    </form>}
+    </form></details>}
     {link?.approvals.map(item => <article key={item.id} className="inbox-card">
       <div className="task-card-head"><span className="task-agent">{toolLabel(item.tool)}</span><span>{askedLabel(item.asked_at, Date.now())}</span></div>
       <p className="inbox-text">{item.card}</p>

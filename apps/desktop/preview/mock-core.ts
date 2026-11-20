@@ -121,6 +121,7 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
           spec: { agent_id: "meera" }, goal_state: "completed", detail: "" }] } as T;
       if (request.operation === "goals") return goalsPreview((request.goal ?? {}) as Record<string, unknown>) as T;
       if (request.operation === "hosted_memory") return { connected: true, shop: "Sharma Traders", enabled: request.action === "set" ? request.enabled === true : false } as T;
+      if (request.operation === "hosted_login") return loginPreview(String(request.action)) as T;
       if (request.operation === "hosted_approvals") return hostedPreview(request) as T;
       return setup as T;
     }
@@ -195,3 +196,16 @@ function hostedPreview(request: Record<string, unknown>) {
   ] };
 }
 
+
+// Sign-in mock: Sign in -> waiting (code + links) -> after two polls "asked" -> next poll approved.
+let loginStep = -1;
+function loginPreview(action: string) {
+  const base = { signed_in: false, partial: false, waiting: false, shop: "", server: "https://ai.syntarus.com/munim", code: "", message: "", links: {}, expires_at: 0 };
+  if (action === "start") loginStep = 0;
+  if (action === "cancel" || action === "sign_out") loginStep = action === "sign_out" ? -2 : -1;
+  if (action === "poll" && loginStep >= 0) loginStep += 1;
+  if (loginStep === -2 || loginStep === -1) return { ...base, state: "none" };
+  if (loginStep >= 0 && loginStep < 4) return { ...base, waiting: true, code: "K7QM-4TNP", message: "login K7QM-4TNP", expires_at: Date.now() / 1000 + 540,
+    links: { telegram: "https://t.me/SmaraBot?start=login_K7QM-4TNP", whatsapp: "https://wa.me/919876543210?text=login%20K7QM-4TNP" }, state: loginStep >= 2 ? "asked" : "pending" };
+  return { ...base, signed_in: true, shop: "Sharma Traders", state: "approved" };
+}

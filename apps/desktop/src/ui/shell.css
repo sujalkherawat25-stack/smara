@@ -681,3 +681,20 @@
 /* Copy / Read aloud appear when you point at a message, not under every progress line. */
 .native-app .native-item .item-heading { opacity: 0; transition: opacity .15s ease; }
 .native-app .native-item:hover .item-heading, .native-app .native-item:focus-within .item-heading { opacity: 1; }
+
+/* Smara account: one sign-in card, details folded away */
+.native-app .hosted-panel { display: flex; flex-direction: column; gap: var(--smara-space-3); padding: 18px 22px; overflow: auto; height: 100%; box-sizing: border-box; flex: 1; min-width: 0; max-width: 760px; }
+.native-app .hosted-panel .task-board-head h2 { margin: 0 0 2px; font-size: 22px; font-weight: 600; }
+.native-app .hosted-panel .task-board-head p { margin: 0; color: var(--smara-muted); font-size: 14px; }
+.signin-card { display: grid; gap: var(--smara-space-2); padding: var(--smara-space-3) 18px; border: 1px solid var(--smara-line); border-radius: var(--smara-radius); background: var(--smara-surface); }
+.signin-card h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.signin-help { margin: 0; color: var(--smara-muted); font-size: 14px; line-height: 1.5; }
+.signin-code { justify-self: start; font: 600 28px/1.2 ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 0.14em; padding: 8px 14px; border-radius: var(--smara-radius); background: var(--smara-bg, transparent); border: 1px dashed var(--smara-line); user-select: all; }
+.signin-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.signin-status { display: flex; align-items: center; gap: 10px; }
+.signin-status small { display: block; color: var(--smara-muted); }
+.signin-on .status-dot { background: var(--smara-ok); width: 10px; height: 10px; }
+.hosted-details { border: 1px solid var(--smara-line); border-radius: var(--smara-radius); padding: 8px 14px; }
+.hosted-details > summary { cursor: pointer; font-size: 14px; color: var(--smara-muted); padding: 4px 0; }
+.hosted-details[open] > summary { margin-bottom: 10px; }
+.hosted-details .hosted-channels { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }

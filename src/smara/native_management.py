@@ -194,6 +194,9 @@ def manage(request):
     if operation == "hosted_memory":
         from .hosted_memory import manage as hosted_memory
         return hosted_memory(request)
+    if operation == "hosted_login":
+        from .hosted_login import manage as hosted_login
+        return hosted_login(request)
     if operation == "hosted_approvals":
         from .hosted_approvals import manage as hosted_approvals
         return hosted_approvals(request)
