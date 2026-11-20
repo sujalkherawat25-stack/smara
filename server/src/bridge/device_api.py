@@ -18,6 +18,14 @@ class PairBody(BaseModel):
     name: str = Field(default="PC", max_length=60)
 
 
+class LoginStartBody(BaseModel):
+    name: str = Field(default="PC", max_length=60)
+
+
+class LoginPollBody(BaseModel):
+    device_secret: str = Field(min_length=10, max_length=100)
+
+
 class ResultBody(BaseModel):
     job_id: str
     result: dict
@@ -140,6 +148,43 @@ async def approvals_decide(sid: str, body: DecisionBody, request: Request, autho
     if outcome == "not_here":
         raise HTTPException(status_code=403, detail="this approval is answered in chat only")
     return {"ok": True}
+
+
+@router.post("/login/start")
+async def login_start(body: LoginStartBody, request: Request):
+    """Smara Desktop asks to sign in. Nothing is granted until the owner confirms the code in their own chat."""
+    from urllib.parse import quote
+    from src.bridge import login
+    ip = request.client.host if request.client else "?"
+    if not login.start_ok(ip):
+        raise HTTPException(status_code=429, detail="too many sign-in attempts; wait a few minutes")
+    started = await login.start(request.app.state.pool, body.name)
+    if started is None:
+        raise HTTPException(status_code=503, detail="sign-in is busy; try again in a minute")
+    code, links = started["code"], {}
+    try:
+        links["telegram"] = f"https://t.me/{await request.app.state.tg.username()}?start=login_{code}"
+    except Exception:
+        pass
+    number = getattr(getattr(request.app.state, "settings", None), "wa_display_number", "")
+    if number:
+        links["whatsapp"] = f"https://wa.me/{number}?text={quote('login ' + code)}"
+    return {"device_secret": started["secret"], "code": code, "expires_in": started["expires_in"], "interval": login.POLL_S,
+            "message": f"login {code}", "links": links}
+
+
+@router.post("/logout")
+async def logout(request: Request, authorization: str | None = Header(default=None)):
+    from src.bridge import login
+    owner = await _owner(request, authorization)
+    await login.logout(request.app.state.pool, owner)
+    return {"ok": True}
+
+
+@router.post("/login/poll")
+async def login_poll(body: LoginPollBody, request: Request):
+    from src.bridge import login
+    return await login.poll(request.app.state.pool, body.device_secret)
 
 
 @router.post("/pair")

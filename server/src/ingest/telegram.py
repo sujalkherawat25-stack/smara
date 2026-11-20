@@ -15,6 +15,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 
 from src import tenants
+from src.bridge import login
 from src.ingest.payload import InboundMessage
 
 log = logging.getLogger(__name__)
@@ -196,7 +197,9 @@ async def handle_update(app, upd: dict) -> None:
     tenant = await tenants.by_telegram_chat(pool, chat_id)
     if text.startswith("/start"):
         code = text.partition(" ")[2].strip()
-        if tenant:
+        if tenant and (login_code := login.parse_code(code.replace("_", " ", 1))):
+            await reply(await login.ask(pool, str(tenant.id), login_code))      # one-tap Desktop sign-in
+        elif tenant:
             await reply(f"This Telegram is linked to {tenant.name}. Just write to me here.")
         elif code and await _is_link_code(pool, code):
             await reply(await _link(pool, code, chat_id))

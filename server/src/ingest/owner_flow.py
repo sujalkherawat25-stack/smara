@@ -12,6 +12,7 @@ from src.ingest.importer import import_rows
 from src.ingest.media import MediaError, clean_phone_caption, download_media, media_token, read_image, transcribe
 from src.ingest import owner_file_commands as file_commands
 from src.ingest import owner_files
+from src.bridge import login
 from src.ingest.payload import InboundMessage
 from src.ingest.customer_number import add_number, parse_number_command
 from src.ingest.reopen import parse_reopen_command, reopen_invoice
@@ -112,6 +113,13 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
     if msg.kind == "text" and msg.text.strip().startswith("/"):     # Telegram's '/' menu: '/files' is 'files'
         msg = replace(msg, text=msg.text.strip()[1:].split("@")[0] if " " not in msg.text.strip() else msg.text.strip()[1:])
     cmd = " ".join(msg.text.strip().lower().replace("'", "").split())
+    if msg.kind == "text" and (login_code := login.parse_code(cmd)):
+        from src.config import pc_allowed as _pc_allowed
+        if not _pc_allowed(getattr(app.state, "settings", None), tenant_id):
+            return PC_LATER
+        return await login.ask(app.state.pool, tenant_id, login_code)
+    if msg.kind == "text" and cmd in ("yes", "haan", "ha", "no", "nahi") and await login.has_asked(app.state.pool, tenant_id):
+        return await login.answer(app.state.pool, tenant_id, cmd in ("yes", "haan", "ha"))
     if msg.kind == "text" and (style := prefs.parse(msg.text)):
         return await _style(app, tenant_id, msg, *style)
     if cmd in ("help", "commands", "menu"):

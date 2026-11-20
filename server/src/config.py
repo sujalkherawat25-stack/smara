@@ -1,4 +1,5 @@
 import os
+import re
 
 from src.clock import parse_quiet_hours
 from dataclasses import dataclass, field
@@ -47,6 +48,7 @@ class Settings:
     meta_es_config_id: str = ""      # Embedded Signup configuration id
     wa_access_token: str = ""
     wa_phone_number_id: str = ""
+    wa_display_number: str = ""      # digits only, e.g. 919876543210: lets Desktop offer a one-tap WhatsApp sign-in link
     # Approved Meta template for reminders sent outside the 24h reply window ("" = text only)
     wa_reminder_template: str = ""
     wa_reminder_lang: str = "en"
@@ -140,6 +142,7 @@ def load_settings() -> Settings:
         meta_es_config_id=env.get("META_ES_CONFIG_ID", ""),
         wa_access_token=env.get("WA_ACCESS_TOKEN", ""),
         wa_phone_number_id=env.get("WA_PHONE_NUMBER_ID", ""),
+        wa_display_number=re.sub(r"\D", "", env.get("WA_DISPLAY_NUMBER", "")),
         wa_reminder_template=env.get("WA_REMINDER_TEMPLATE", ""),
         wa_reminder_lang=env.get("WA_REMINDER_LANG", "en"),
         wa_reminder_params=env.get("WA_REMINDER_PARAMS", "customer,invoice,amount,due"),
