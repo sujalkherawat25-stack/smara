@@ -99,7 +99,8 @@ TOOLS = [
         {"file_ref": _S, "changes": {"type": "array", "items": {"type": "object"}}, "preview": {"type": "boolean"}},
         ["file_ref", "changes"]),
     _fn("ask_owner", "Ask the owner one question with 2-4 tap-able options, each saying exactly what you would do, when "
-        "their instruction can be read in ways that give different results. Ends your turn; the answer is their next message.",
+        "their instruction can be read in ways that give different results. Option 1 is their words taken literally. Ends "
+        "your turn; the answer is their next message.",
         {"question": _S, "options": {"type": "array", "items": _S}}, ["question"]),
     _fn("react_to_message", "Put an emoji reaction on the owner's latest Telegram message, like a person would, to be warm and "
         "alive (thanks, good news, a file received, a greeting, a done job). It is not a reply: still write your answer. Use it "

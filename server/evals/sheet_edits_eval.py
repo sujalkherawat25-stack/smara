@@ -258,6 +258,15 @@ async def run_task(env, task):
     return r
 
 
+def literal_option(question: str) -> str:
+    """The owner taps the option that is their own instruction, not a new column or other idea Smara suggested."""
+    opts = re.findall(r"(?m)^\s*(\d)[.)]\s*(.+)$", question)
+    for n, text in opts:
+        if not re.search(r"(naya|nayi|new|alag|status|sirf un|only)", text, re.I):
+            return n
+    return opts[0][0] if opts else "1"
+
+
 def say_then_pick_first(text: str, wamid: str, media=None, then: str = ""):
     """The owner's message; if Smara asks first (allowed when an instruction would overwrite their figures), the owner taps
     option 1 (the instruction as given) and the result is checked. `then` is a follow-up message after that."""
@@ -267,7 +276,7 @@ def say_then_pick_first(text: str, wamid: str, media=None, then: str = ""):
             await dispatch(env.app, msg)
             if asked(env) and not sent_xlsx(env) or (i and asked(env)):
                 env.questions += 1
-                await dispatch(env.app, owner("1", f"{wamid}-pick{i}"))
+                await dispatch(env.app, owner(literal_option(env.wa.last_owner_text()), f"{wamid}-pick{i}"))
     return ("custom", ev)
 
 

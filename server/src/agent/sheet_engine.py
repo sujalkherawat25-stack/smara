@@ -410,6 +410,18 @@ class Sheet:
                     users.setdefault(c, v)
         return [f"{col_letter(c)} '{self.headers.get(c, '')}' ({f})" for c, f in sorted(users.items())]
 
+    def in_words(self, formula: str) -> str:
+        """'=E2+F2-D2' as '[Aug-26 Paid Arpita] + [Aug Collection] - [Aug-26 Bill Amount]' (same-row cells only), so what a
+        negative or positive result means can be read off instead of guessed."""
+        refs = list(REF_RE.finditer(formula))
+        if not refs or any(m.group(3) for m in refs):
+            return ""
+        rows = {int(m.group(2)) for m in refs}
+        if len(rows) != 1:
+            return ""
+        spaced = re.sub(r"\s*([-+*/])\s*", r" \1 ", formula.lstrip("=")).strip()
+        return REF_RE.sub(lambda m: f"[{self.headers.get(col_index(m.group(1))) or m.group(1)}]", spaced)
+
     def describe_column(self, c: int) -> dict:
         vals = [self.cells.get((r, c)) for r in self.data_rows()]
         nums = [v for v in vals if is_num(v)]
@@ -425,6 +437,8 @@ class Sheet:
         if forms:
             out["formulas"] = len(forms)
             out["formula_example"] = forms[0]
+            if words := self.in_words(forms[0]):
+                out["means"] = words
         shown = [self.ev.value(r, c) for r in self.data_rows()]
         if any(is_num(v) for v in shown) and not id_like(self.headers.get(c, "")):
             out["sum_of_data_rows"] = round(sum(v for v in shown if is_num(v)), 2)
