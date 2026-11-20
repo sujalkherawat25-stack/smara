@@ -83,3 +83,71 @@ def test_worker_health_reports_offline_without_claiming_failure(tmp_path):
         store.set_meta(db, "service", {"heartbeat": time.time()})
         store.set_meta(db, "background_health", {"online": False})
     assert store.service()["running"] and store.service()["online"] is False
+
+
+def _watch(tmp_path):
+    store = GoalStore(tmp_path / "goals.sqlite")
+    identity = add(store, {"name": "Kiran: watch mail", "interval_seconds": 900, "max_runs": 5, "watch": True,
+        "spec": {"workspace": str(tmp_path), "profile_id": "synthetic", "objective": "Check the inbox for GST mail",
+                 "success_criteria": "Evidence", "max_requests": 2}})
+    enable(store, identity, True)
+    return store, identity
+
+
+def _finish(store, goal_id, summary, state="ready_for_review"):
+    import json
+    with store.connect() as db:
+        db.execute("UPDATE goals SET state=?,checkpoint=? WHERE id=?", (state, json.dumps({"summary": summary}), goal_id))
+
+
+def test_a_watch_may_not_run_more_often_than_every_15_minutes(tmp_path):
+    store = GoalStore(tmp_path / "goals.sqlite")
+    spec = {"workspace": str(tmp_path), "profile_id": "synthetic", "objective": "x", "success_criteria": "y", "max_requests": 2}
+    with pytest.raises(ValueError):
+        add(store, {"name": "fast", "interval_seconds": 600, "watch": True, "spec": spec})
+    add(store, {"name": "ok", "interval_seconds": 900, "watch": True, "spec": spec})
+
+
+def test_each_watch_run_gets_its_window_and_the_quiet_marker_instruction(tmp_path):
+    store, _ = _watch(tmp_path)
+    now = time.time() + 10000
+    goal = store.get(enqueue_due(store, now)[0])
+    text = goal["spec"]["objective"]
+    assert text.startswith("Check the inbox for GST mail") and "recurring watch" in text and "NOTHING_NEW" in text and "arrived after" in text
+
+
+def test_a_quiet_watch_closes_itself_so_the_next_check_goes_ahead(tmp_path):
+    store, identity = _watch(tmp_path)
+    t = time.time() + 10000
+    first = enqueue_due(store, t)[0]
+    _finish(store, first, "NOTHING_NEW: checked the Gmail inbox")
+    second = enqueue_due(store, t + 901)
+    assert len(second) == 1 and store.get(first)["state"] == "completed"
+    assert "closed automatically" in store.get(first)["detail"]
+
+
+def test_a_watch_with_a_finding_still_waits_for_the_owner(tmp_path):
+    store, identity = _watch(tmp_path)
+    t = time.time() + 10000
+    first = enqueue_due(store, t)[0]
+    _finish(store, first, "GST portal mailed: notice dated 19 Nov")
+    assert enqueue_due(store, t + 901) == [] and store.get(first)["state"] == "ready_for_review"
+
+
+def test_an_ordinary_routine_never_closes_itself_even_if_it_says_nothing_new(tmp_path):
+    store, identity = setup(tmp_path); enable(store, identity, True)
+    t = time.time() + 10000
+    first = enqueue_due(store, t)[0]
+    _finish(store, first, "NOTHING_NEW")
+    assert enqueue_due(store, t + 61) == [] and store.get(first)["state"] == "ready_for_review"
+
+
+def test_an_old_ledger_gains_the_watch_column(tmp_path):
+    store = GoalStore(tmp_path / "goals.sqlite")
+    with store.connect() as db:
+        db.execute("""CREATE TABLE goal_schedules (id TEXT PRIMARY KEY, name TEXT NOT NULL, spec TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 0, due REAL NOT NULL, interval INTEGER NOT NULL, max_runs INTEGER NOT NULL,
+            runs INTEGER NOT NULL DEFAULT 0, goal_id TEXT, detail TEXT NOT NULL DEFAULT 'Paused until explicitly enabled')""")
+    assert schedules(store) == []
+    with store.connect() as db:
+        assert "watch" in {row["name"] for row in db.execute("PRAGMA table_info(goal_schedules)")}

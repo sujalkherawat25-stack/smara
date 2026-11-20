@@ -23,16 +23,19 @@ def initialize(store):
             interval INTEGER NOT NULL, max_runs INTEGER NOT NULL,
             runs INTEGER NOT NULL DEFAULT 0, goal_id TEXT,
             detail TEXT NOT NULL DEFAULT 'Paused until explicitly enabled')""")
+        if "watch" not in {row["name"] for row in db.execute("PRAGMA table_info(goal_schedules)")}:
+            db.execute("ALTER TABLE goal_schedules ADD COLUMN watch INTEGER NOT NULL DEFAULT 0")
 
 
 def add(store, request):
     initialize(store)
     name = request.get("name", "")
     interval, maximum = request.get("interval_seconds", 3600), request.get("max_runs", 10)
+    watch = request.get("watch") is True
     if (not isinstance(name, str) or not name.strip() or len(name) > 160
-            or type(interval) is not int or not 60 <= interval <= 31_536_000
+            or type(interval) is not int or not (WATCH_MIN_SECONDS if watch else 60) <= interval <= 31_536_000
             or type(maximum) is not int or not 1 <= maximum <= 100):
-        raise ValueError("Provide a name, interval 60..31536000 seconds and 1..100 wakes")
+        raise ValueError("Provide a name, interval 60..31536000 seconds (watches: at least 15 minutes) and 1..100 wakes")
     spec = goal_spec(request.get("spec") or {})
     # Background recurrence is initially read-only. Editing goals can still be
     # created explicitly with approvals; a schedule is not standing write consent.
@@ -46,9 +49,32 @@ def add(store, request):
         raise ValueError("The first run must be within the next year")
     identity = uuid.uuid4().hex
     with store.connect() as db:
-        db.execute("INSERT INTO goal_schedules(id,name,spec,due,interval,max_runs) VALUES(?,?,?,?,?,?)",
-                   (identity, name.strip(), json.dumps(spec), now if first is None else float(first), interval, maximum))
+        db.execute("INSERT INTO goal_schedules(id,name,spec,due,interval,max_runs,watch) VALUES(?,?,?,?,?,?,?)",
+                   (identity, name.strip(), json.dumps(spec), now if first is None else float(first), interval, maximum, int(watch)))
     return identity
+
+
+WATCH_MIN_SECONDS = 900
+NOTHING_NEW = "NOTHING_NEW"
+
+
+def is_nothing_new(checkpoint) -> bool:
+    """True when a finished watch run reported only that nothing new matched."""
+    try:
+        value = json.loads(checkpoint) if isinstance(checkpoint, str) else checkpoint
+        return str(value.get("summary", "")).strip().upper().startswith(NOTHING_NEW)
+    except (ValueError, AttributeError):
+        return False
+
+
+def watch_objective(task: str, since: float) -> str:
+    """The standing task plus this run's window, so each wake looks only at what arrived since the last one."""
+    import datetime
+    when = datetime.datetime.fromtimestamp(since - 300).strftime("%a %d %b %H:%M")
+    return (f"{task}\n\nThis is a recurring watch. Look only at items that arrived after {when} (this computer's clock). "
+            f"If nothing new matches, finish with the summary exactly {NOTHING_NEW} and name in the evidence the source you checked. "
+            "If something matches, report each item briefly with where it was found. If the source shows no arrival times, "
+            "report the matching items it lists and say the time was not shown, rather than giving up.")
 
 
 def schedules(store, workspace=None):
@@ -89,10 +115,19 @@ def enqueue_due(store, now=None):
             if row["runs"] >= row["max_runs"]:
                 db.execute("UPDATE goal_schedules SET enabled=0,detail='Wake allowance exhausted' WHERE id=?", (row["id"],)); continue
             if row["goal_id"]:
-                prior = db.execute("SELECT state FROM goals WHERE id=?", (row["goal_id"],)).fetchone()
+                prior = db.execute("SELECT state,checkpoint FROM goals WHERE id=?", (row["goal_id"],)).fetchone()
+                if row["watch"] and prior and prior["state"] == "ready_for_review" and is_nothing_new(prior["checkpoint"]):
+                    # A watch that found nothing closes itself, so a quiet inbox never piles up reviews. A report with
+                    # anything in it still waits for the owner, and nothing here changes anything outside the PC.
+                    db.execute("UPDATE goals SET state='completed',updated=?,detail='Nothing new; closed automatically' WHERE id=? AND state='ready_for_review' AND lease IS NULL",
+                               (now, row["goal_id"]))
+                    store.event(db, row["goal_id"], "completed", {"summary": "Nothing new; closed automatically"})
+                    prior = db.execute("SELECT state,checkpoint FROM goals WHERE id=?", (row["goal_id"],)).fetchone()
                 if not prior or prior["state"] != "completed":
                     db.execute("UPDATE goal_schedules SET detail='Waiting for prior goal acceptance; no automatic replay' WHERE id=?", (row["id"],)); continue
             spec = json.loads(row["spec"])
+            if row["watch"]:
+                spec["objective"] = watch_objective(spec["objective"], now - row["interval"])
             identity = "wake" + row["id"] + str(row["runs"] + 1)
             options = {k: spec[k] for k in ("tools_enabled", "workers_enabled", "browser_origins")}
             store.action({**spec, "action": "create", "identity": identity, "options": options}, db)

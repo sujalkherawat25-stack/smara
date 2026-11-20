@@ -102,3 +102,8 @@ test("the Browser & computer page says what is on now and sends permission to th
   assert.match(settings, /<AccessNow workspace=/);
   assert.match(settings, /<details className="set-advanced">/);
 });
+
+test("the job panel marks a watch and its short interval", () => {
+  const line = t.routineLine({ id: "w", name: "Kiran: Check the Gmail inbox", enabled: 1, runs: 2, max_runs: 96, due: 4102444800, interval: 900, watch: 1, goal_state: "completed" });
+  assert.match(line, /^Watch: Check the Gmail inbox · every 15 min/);
+});

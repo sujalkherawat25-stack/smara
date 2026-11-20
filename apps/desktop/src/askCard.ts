@@ -49,6 +49,13 @@ function teamView(server: string, tool: string, params: Record<string, unknown>)
   }
   if (tool === "team_remove") return { kind: "team", title: `Remove ${who || "this employee"} from the team?`,
     summary: "Their past chats stay. You can hire someone again any time.", detail: "", risky: true };
+  if (tool === "team_routine" && str(params.watch_for)) {
+    const gap = { "15min": "15 minutes", "30min": "30 minutes", hour: "hour" }[str(params.every) as "hour"] ?? str(params.every);
+    return { kind: "team", title: `Let ${who || "this employee"} watch for ${str(params.watch_for).slice(0, 80)}?`, summary: `${str(params.task)}
+
+Checks every ${gap}.`,
+      detail: "Stays quiet when nothing new matches; only a real finding reaches you. Read-only: anything that sends, pays or posts still asks you.", risky: false };
+  }
   if (tool === "team_routine") {
     const when = { hour: "every hour", day: `every day at ${str(params.at) || "09:00"}`, week: `every week at ${str(params.at) || "09:00"}` }[str(params.every) as "hour"] ?? str(params.every);
     return { kind: "team", title: `Let ${who || "this employee"} do this ${when}?`, summary: str(params.task),

@@ -62,10 +62,13 @@ TOOLS = [
           ["employee", "task"], title="Hand a job to an employee"),
     _tool("team_routine", "Set up a routine: an employee does a read-only job on a schedule (e.g. every morning at 9 check the inbox and "
           "report). Each run is a background task that reports back for the owner to accept before the next one starts; anything "
-          "outward still asks the owner. The owner confirms the routine in an approval card.",
+          "outward still asks the owner. The owner confirms the routine in an approval card. For 'tell me when X happens' (a new mail from the "
+          "GST portal, a customer payment) set watch_for and every '15min', '30min' or 'hour': the employee checks that often and stays "
+          "quiet when nothing new matches, and only a real finding reaches the owner.",
           {"employee": _EMP, "task": {"type": "string", "description": "What to do on every run, with the details the owner gave"},
            "done_when": {"type": "string", "description": "What a good report contains"},
-           "every": {"type": "string", "enum": ["hour", "day", "week"], "description": "How often"},
+           "every": {"type": "string", "enum": ["15min", "30min", "hour", "day", "week"], "description": "How often (15min and 30min only with watch_for)"},
+           "watch_for": {"type": "string", "description": "What to wait for, in the owner's words. Makes this a watch that only reports when it finds it"},
            "at": {"type": "string", "description": "Local time of day as HH:MM, for day or week (default 09:00)"},
            "times": {"type": "integer", "description": "Stop after this many runs (default 30, at most 100)"}},
           ["employee", "task", "every"], title="Set up a routine"),
@@ -191,6 +194,9 @@ def _first_run(every: str, at: str, now=None) -> tuple[float, int]:
     import datetime
     import time
     now = time.time() if now is None else now
+    if every in ("15min", "30min"):
+        step = 900 if every == "15min" else 1800
+        return now + step, step
     if every == "hour":
         return now + 3600, 3600
     if every not in {"day", "week"}:
@@ -222,8 +228,13 @@ def _routine(args: dict, workspace: str) -> dict:
     agent = _find(saved, args.get("employee"))
     task = _clean_text(args.get("task"), "task", 4000)
     done = str(args.get("done_when") or "").strip() or "A short, clear report of what was found and what needs the owner."
+    watch = str(args.get("watch_for") or "").strip()
+    if str(args.get("every") or "") in ("15min", "30min") and not watch:
+        raise ValueError("Checking every 15 or 30 minutes is for watches: say what to watch for")
+    if watch:
+        task = _clean_text(task + "\n\nWatch for: " + watch, "task", 4000)
     first, interval = _first_run(str(args.get("every") or ""), str(args.get("at") or ""))
-    times = args.get("times", 30)
+    times = args.get("times", 96 if watch else 30)
     if type(times) is not int or not 1 <= times <= 100:
         raise ValueError("Runs must be 1 to 100")
     from . import native_background
@@ -237,7 +248,7 @@ def _routine(args: dict, workspace: str) -> dict:
             "agent_id": agent["id"], "sandbox": "read-only", "max_cycles": 6, "max_requests": 24, "max_token_estimate": JOB_TOKEN_ESTIMATE}
     store = GoalStore()
     identity = native_background.add(store, {"name": f"{agent['name']}: {task[:60]}", "spec": spec, "interval_seconds": interval,
-                                  "max_runs": times, "start_at": first})
+                                  "max_runs": times, "start_at": first, "watch": bool(watch)})
     native_background.enable(store, identity, True)
     try:
         operate({"action": "start_service"})
@@ -245,8 +256,9 @@ def _routine(args: dict, workspace: str) -> dict:
         pass
     import datetime
     return {"routine_id": identity, "employee": agent["name"], "first_run": datetime.datetime.fromtimestamp(first).strftime("%a %d %b %H:%M"),
-            "tell_the_owner": f"{agent['name']} will do this {args.get('every')}ly starting {datetime.datetime.fromtimestamp(first).strftime('%a %d %b at %H:%M')}. "
-            "Each run reports back to the task board; accept it there and the next run goes ahead. Smara must be running on this PC."}
+            "tell_the_owner": (f"{agent['name']} will check every {interval // 60} minutes for {watch[:80]} and stay quiet unless there is something. It stops after {times} checks (about {times * interval // 3600} hours); ask me to renew it. Smara must be running on this PC."
+                               if watch else f"{agent['name']} will do this {args.get('every')}ly starting {datetime.datetime.fromtimestamp(first).strftime('%a %d %b at %H:%M')}. "
+            "Each run reports back to the task board; accept it there and the next run goes ahead. Smara must be running on this PC.")}
 
 
 def call(name: str, args: dict, workspace: str = "") -> dict:
