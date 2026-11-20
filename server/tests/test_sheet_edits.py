@@ -438,3 +438,23 @@ def test_an_answer_to_a_question_is_known_from_the_conversation():
     assert answered_question(msgs)
     assert not answered_question(msgs + [{"role": "assistant", "content": "done"}, {"role": "user", "content": "now sort it"}])
     assert not answered_question(msgs[:2])
+
+
+async def test_a_copy_with_rows_removed_is_caught_and_an_edit_is_not(app, reg, tmp_path):
+    """'Kharab rows hata do': the agent decided what 'bad' means and deleted 144,025 rows of a 541,909-row file, unasked."""
+    ctx = SimpleNamespace(tenant_id="t", files=("local:abc:Electricity Aug Sep.xlsx",))
+    wb = load_workbook(reg)
+    ws = wb.active
+    ws.delete_rows(4, 2)                                      # two students gone
+    cut = tmp_path / "cut.xlsx"
+    wb.save(cut)
+    gone = await sheet_tools.rows_removed(app, ctx, cut.read_bytes(), "Electricity_Aug_Sep.xlsx")
+    assert gone.startswith("2 of its")
+    edited = tmp_path / "edited.xlsx"
+    se.apply(str(reg), str(edited), [{"column": "Aug Collection", "value": "Paid"}])
+    assert await sheet_tools.rows_removed(app, ctx, edited.read_bytes(), "x.xlsx") == ""
+    other = Workbook()                                        # a different file is not a copy of theirs
+    other.active.append(["a", "b"])
+    op = tmp_path / "other.xlsx"
+    other.save(op)
+    assert await sheet_tools.rows_removed(app, ctx, op.read_bytes(), "o.xlsx") == ""

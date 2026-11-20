@@ -107,6 +107,53 @@ async def edit_problems(app, ctx, data: bytes, name: str) -> list[str]:
     return []
 
 
+async def rows_removed(app, ctx, data: bytes, name: str) -> str:
+    """A copy of a sheet the owner sent in this conversation that has FEWER rows than their file (matched by the header
+    row), however the copy was made. '' when nothing was removed, it is not a copy of theirs, or it cannot be told."""
+    import asyncio
+    import tempfile
+    from src.agent import sheet_engine as se
+    ext = name.lower().rsplit(".", 1)[-1] if "." in name else ""
+    if ext not in ("xlsx", "xlsm", "csv"):
+        return ""
+    originals = [r for r in getattr(ctx, "files", ()) if str(r).startswith("local:") and str(r).lower().endswith("." + ext)]
+    if not originals:
+        return ""
+
+    def head(path):
+        gen = se._streams(path, values=False)
+        try:
+            for _, it in gen:
+                _, headers, _, _ = se._header_of(it)
+                return [h for _, h in sorted(headers.items()) if h]
+            return []
+        finally:
+            gen.close()
+
+    def check(orig_bytes: bytes, new_bytes: bytes):
+        with tempfile.TemporaryDirectory() as d:
+            old, new = Path(d) / f"old.{ext}", Path(d) / f"new.{ext}"
+            old.write_bytes(orig_bytes)
+            new.write_bytes(new_bytes)
+            try:
+                ha, hb = head(str(old)), head(str(new))
+                if not ha or ha != hb[:len(ha)]:
+                    return None                              # not a copy of this file
+                return se.entry_count(str(old)), se.entry_count(str(new))
+            except Exception:
+                return None
+    for ref in reversed(originals):                           # the latest upload first
+        try:
+            orig, _, _ = await actions._fetch(app, ref, ctx)
+        except Exception:
+            continue
+        counts = await asyncio.to_thread(check, orig, data)
+        if counts is not None:
+            before, after = counts
+            return f"{before - after} of its {before} rows are gone" if after < before else ""
+    return ""
+
+
 async def open_spreadsheet(app, ctx, args: dict) -> dict:
     ref = str(args.get("file_ref") or "")
     spec = {"op": "layout", **{k: args[k] for k in ("sheet", "rows", "find") if args.get(k)}}

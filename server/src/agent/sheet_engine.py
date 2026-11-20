@@ -1684,20 +1684,24 @@ def _streams(path: str, values: bool = True):
     low = path.lower()
     if low.endswith((".csv", ".tsv", ".txt")):
         text = open(path, encoding="utf-8-sig", errors="replace", newline="")
-        sample = text.read(4096)
-        text.seek(0)
         try:
-            delim = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
-        except csv.Error:
-            delim = ","
-        yield "csv", (tuple(_csv_cell(v) for v in row) for row in csv.reader(text, delimiter=delim))
-        text.close()
+            sample = text.read(4096)
+            text.seek(0)
+            try:
+                delim = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+            except csv.Error:
+                delim = ","
+            yield "csv", (tuple(_csv_cell(v) for v in row) for row in csv.reader(text, delimiter=delim))
+        finally:
+            text.close()
         return
     from openpyxl import load_workbook
     wb = load_workbook(path, read_only=True, data_only=values)
-    for ws in wb.worksheets:
-        yield ws.title, ws.iter_rows(values_only=True)
-    wb.close()
+    try:
+        for ws in wb.worksheets:
+            yield ws.title, ws.iter_rows(values_only=True)
+    finally:
+        wb.close()                  # also when the caller stops reading early
 
 
 def _header_of(rows_iter):
@@ -2017,11 +2021,13 @@ def apply_big(src: str, dst: str, changes: list[dict], preview: bool = False, ow
     import time as _time
     t0 = _time.time()
     if is_csv:
-        _, vit = next(_streams(src, values=False))
+        stream = _streams(src, values=False)          # kept referenced: a stream is closed the moment nothing holds it
+        _, vit = next(stream)
         rows_iter = new_rows("csv", vit, None)
         if preview:
             for _ in rows_iter:
                 pass
+            stream.close()
         else:
             with open(src, encoding="utf-8-sig", errors="replace", newline="") as f:
                 sample = f.read(4096)
@@ -2033,6 +2039,7 @@ def apply_big(src: str, dst: str, changes: list[dict], preview: bool = False, ow
                 w = csv.writer(f, delimiter=delim, lineterminator="\r\n")
                 for row in rows_iter:
                     w.writerow(["" if v is None else v for v in row])
+            stream.close()
     else:
         from openpyxl import Workbook
         wbo = Workbook(write_only=True) if not preview else None
@@ -2083,6 +2090,21 @@ def apply_big(src: str, dst: str, changes: list[dict], preview: bool = False, ow
                    else "MISMATCH after saving: do not send this file",
                    **({"changed_outside_plan": outside} if outside else {}), **({"not_written": wrong} if wrong else {})})
     return result
+
+
+def entry_count(path: str) -> int:
+    """How many rows of the first sheet hold something (header and totals included; blank rows do not count). Streamed for a
+    big file, so 500,000 rows cost memory for one row."""
+    if is_big(path):
+        gen = _streams(path, values=False)
+        try:
+            for _, it in gen:
+                return sum(1 for vals in it if any(v not in (None, "") for v in vals))
+            return 0
+        finally:
+            gen.close()
+    sh = load(path, big_ok=False)["sheets"][0]
+    return len({r for (r, _), v in sh.cells.items() if v not in (None, "")})
 
 
 def main(spec_path: str) -> dict:

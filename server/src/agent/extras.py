@@ -200,6 +200,11 @@ async def send_file_to_owner(app, ctx: SessionCtx, args: dict) -> dict:
     if problems := await sheet_tools.edit_problems(app, ctx, data, name):     # however the copy was made
         return {"sent": False, "error": "not sent: this copy of the owner's sheet goes beyond what they asked: "
                 + "; ".join(problems) + ". Redo it from their file with edit_spreadsheet, or ask_owner first."}
+    if not getattr(ctx, "confirmed", False) and (gone := await sheet_tools.rows_removed(app, ctx, data, name)):
+        return {"sent": False, "error": f"not sent: in this copy of the owner's sheet {gone}. Deleting their rows must be confirmed "
+                                        "first: ask_owner what exactly should go (the rule you would use and how many rows it removes, "
+                                        "with 2-3 examples), and send it only after they answer. If they only said something vague "
+                                        "like 'bad rows', ask what makes a row bad."}
     tenant = await tenants.by_id(app.state.pool, ctx.tenant_id)
     mime = SENDABLE.get(ext) or mimetypes.guess_type(name)[0] or "application/octet-stream"
     caption = re.sub(r"\s+", " ", str(args.get("caption") or ""))[:900]
