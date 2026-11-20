@@ -194,6 +194,9 @@ def manage(request):
     if operation == "hosted_memory":
         from .hosted_memory import manage as hosted_memory
         return hosted_memory(request)
+    if operation == "connectors":
+        from .native_connectors import manage as connectors
+        return connectors(request)
     if operation == "hosted_login":
         from .hosted_login import manage as hosted_login
         return hosted_login(request)

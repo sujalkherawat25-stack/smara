@@ -121,6 +121,7 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
           spec: { agent_id: "meera" }, goal_state: "completed", detail: "" }] } as T;
       if (request.operation === "goals") return goalsPreview((request.goal ?? {}) as Record<string, unknown>) as T;
       if (request.operation === "hosted_memory") return { connected: true, shop: "Sharma Traders", enabled: request.action === "set" ? request.enabled === true : false } as T;
+      if (request.operation === "connectors") return connectorsPreview(request) as T;
       if (request.operation === "hosted_login") return loginPreview(String(request.action)) as T;
       if (request.operation === "hosted_approvals") return hostedPreview(request) as T;
       return setup as T;
@@ -208,4 +209,13 @@ function loginPreview(action: string) {
   if (loginStep >= 0 && loginStep < 4) return { ...base, waiting: true, code: "K7QM-4TNP", message: "login K7QM-4TNP", expires_at: Date.now() / 1000 + 540,
     links: { telegram: "https://t.me/SmaraBot?start=login_K7QM-4TNP", whatsapp: "https://wa.me/919876543210?text=login%20K7QM-4TNP" }, state: loginStep >= 2 ? "asked" : "pending" };
   return { ...base, signed_in: true, shop: "Sharma Traders", state: "approved" };
+}
+
+// Connectors mock: in-memory list.
+const connectorStore: Array<Record<string, unknown>> = [{ id: "gmail", label: "Gmail", kind: "http", url: "https://mail.example.com/mcp", command: "", args: [], enabled: true, has_token: true, env_names: [] }];
+function connectorsPreview(request: Record<string, unknown>) {
+  if (request.action === "save") connectorStore.push({ id: String(request.label).toLowerCase().replace(/\W+/g, "_"), label: request.label, kind: request.kind, url: request.url ?? "", command: request.command ?? "", args: request.args ?? [], enabled: true, has_token: !!request.token, env_names: [] });
+  if (request.action === "remove") { const i = connectorStore.findIndex(c => c.id === request.id); if (i >= 0) connectorStore.splice(i, 1); }
+  if (request.action === "toggle") for (const c of connectorStore) if (c.id === request.id) c.enabled = request.enabled === true;
+  return { connectors: connectorStore.map(c => ({ ...c })), limit: 12 };
 }

@@ -698,3 +698,10 @@
 .hosted-details > summary { cursor: pointer; font-size: 14px; color: var(--smara-muted); padding: 4px 0; }
 .hosted-details[open] > summary { margin-bottom: 10px; }
 .hosted-details .hosted-channels { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+
+/* Connectors */
+.connectors .connector-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+.connector-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--smara-line); border-radius: var(--smara-radius); }
+.connector-row small { display: block; color: var(--smara-muted); }
+.connector-row[data-off="true"] strong { opacity: 0.55; }
+.connector-actions { display: flex; gap: 8px; flex-shrink: 0; }

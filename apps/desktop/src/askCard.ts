@@ -1,3 +1,15 @@
+/** Server name the runtime gives a connector: `conn_<id>`. */
+export const isConnectorServer = (server: string) => /^conn_[a-z0-9_]+$/.test(server);
+
+/** "conn_google_sheets" -> "Google sheets". Used when the connector's own label is not at hand. */
+export function connectorLabel(server: string): string {
+  const words = server.replace(/^conn_/, "").split("_").filter(Boolean).join(" ");
+  return words ? words[0].toUpperCase() + words.slice(1) : "this service";
+}
+
+/** "mail_send" -> "mail send": a tool name read as words. */
+export const toolWords = (tool: string) => tool.replace(/^mcp__conn_[a-z0-9_]+__/, "").replace(/[_-]+/g, " ").trim();
+
 /** Plain-language wording for the approval card that takes the composer's place while Smara waits for the owner. */
 export type AskView = { title: string; summary: string; detail: string; kind: "command" | "files" | "browser" | "computer" | "access" | "tool" | "team"; risky: boolean };
 
@@ -99,6 +111,12 @@ export function askView(request: { method: string; params: Record<string, unknow
   if (team) return team;
   if (str(meta.tool_name) === "computer_request_access" || /computer_request_access/.test(message)) return accessView(params);
   const parsed = parseToolMessage(message);
+  if (isConnectorServer(server)) {
+    const tool = str(meta.tool_name) || parsed?.tool || "";
+    const words = toolWords(tool);
+    const args = Object.entries(params).slice(0, 6).map(([key, value]) => `${key}: ${typeof value === "string" ? value.slice(0, 200) : JSON.stringify(value).slice(0, 200)}`).join(String.fromCharCode(10));
+    return { kind: "tool", title: `Let ${connectorLabel(server)} ${words || "do this"}?`, summary: message || `${connectorLabel(server)} · ${words}`, detail: args, risky: RISKY.test(`${words} ${message}`) };
+  }
   if (parsed && /playwright|browser/i.test(server + parsed.tool)) {
     const verb = TOOL_WORDS[parsed.tool] ?? parsed.tool.replace(/^browser_/, "").replace(/_/g, " ");
     return { kind: "browser", title: `Let Smara ${verb} in the browser?`, summary: parsed.target || message, detail: message, risky: RISKY.test(message) };

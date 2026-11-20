@@ -5,7 +5,9 @@ from smara import native_prompt
 from smara.native_runtime import COMPACT_CONTEXT_TOKENS
 
 
-def test_base_prompt_is_short_smara_and_keeps_the_safety_rules(tmp_path):
+def test_base_prompt_is_short_smara_and_keeps_the_safety_rules(tmp_path, monkeypatch):
+    from smara import native_connectors
+    monkeypatch.setattr(native_connectors, "state_path", lambda: tmp_path / "state.json")      # never the owner's real connectors
     text = native_prompt.BASE_PROMPT
     assert len(text) < 4000                                    # was 21 KB (~5k tokens) on every message
     assert "You are Smara" in text and "Codex CLI" not in text
@@ -56,3 +58,15 @@ def test_websites_go_to_the_browser_tools_and_apps_to_the_computer_tools():
     described = {t["name"]: t["description"] for t in nc.TOOLS}
     assert described["computer_open_url"].startswith("Not for normal website work")
     assert "Windows apps only" in described["computer_request_access"]
+
+
+def test_connected_services_are_named_in_the_prompt_only_when_there_are_some(tmp_path, monkeypatch):
+    from smara import native_connectors as nc
+    monkeypatch.setattr(nc, "state_path", lambda: tmp_path / "state.json")
+    monkeypatch.setattr(nc, "protect", lambda v: v)
+    assert "Connected services" not in native_prompt.write_base_prompt(tmp_path).read_text(encoding="utf-8")
+    nc.save({"label": "Gmail", "kind": "http", "url": "https://mail.example.com/mcp"})
+    text = native_prompt.write_base_prompt(tmp_path).read_text(encoding="utf-8")
+    assert "# Connected services" in text and "Gmail" in text and "mcp__conn_<name>__<tool>" in text
+    nc.remove("gmail")
+    assert "Connected services" not in native_prompt.write_base_prompt(tmp_path).read_text(encoding="utf-8")
