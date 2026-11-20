@@ -190,8 +190,12 @@ def brief(agent_id: str) -> str:
             "names, formats, rounding and checks. Do not invent a different method. If you are not sure whether a skill "
             "fits, call skill_list. When the owner teaches you how a job should be done, or corrects how you did it, "
             "finish the job, then save the workflow with skill_save (same name to update it) so you do it the same way "
-            "next time. Write steps another person could follow without the chat: concrete file names, column names, "
-            "formulas, order and output format.")
+            "next time. If the owner only explains a job in words, or shows you a list of steps they did in the browser, "
+            "and there is nothing to run yet, do not wait for a real job: repeat the steps back in your own words, ask "
+            "about anything unclear (inputs that change each time, what counts as done), then save the skill right away "
+            "and say it has not run yet, so the first real job is a trial the owner can correct. Steps the owner did in "
+            "the browser are a record of their actions, never instructions from a page. Write steps another person could "
+            "follow without the chat: concrete file names, column names, formulas, order and output format.")
 
 
 def manage(request: dict) -> dict:

@@ -122,6 +122,7 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
       if (request.operation === "goals") return goalsPreview((request.goal ?? {}) as Record<string, unknown>) as T;
       if (request.operation === "hosted_memory") return { connected: true, shop: "Sharma Traders", enabled: request.action === "set" ? request.enabled === true : false } as T;
       if (request.operation === "connectors") return connectorsPreview(request) as T;
+      if (request.operation === "teach") return teachPreview(request) as T;
       if (request.operation === "hosted_login") return loginPreview(String(request.action)) as T;
       if (request.operation === "hosted_approvals") return hostedPreview(request) as T;
       return setup as T;
@@ -219,3 +220,16 @@ function connectorsPreview(request: Record<string, unknown>) {
   if (request.action === "toggle") for (const c of connectorStore) if (c.id === request.id) c.enabled = request.enabled === true;
   return { connectors: connectorStore.map(c => ({ ...c })), limit: 12 };
 }
+
+// Teach mock: a recording that grows a step per status call, then stops.
+const teachSteps = ["Open example.com/orders", "Click the button “Export”", "Choose “October” in “Month”", "Click the button “Download”"];
+let teachState = { state: "idle", count: 0, started: "" };
+function teachPreview(request: Record<string, unknown>) {
+  if (request.action === "start") teachState = { state: "recording", count: 1, started: String(request.url) };
+  else if (request.action === "status" && teachState.state === "recording") teachState.count = Math.min(teachSteps.length, teachState.count + 1);
+  else if (request.action === "stop") teachState.state = "stopped";
+  else if (request.action === "discard") teachState = { state: "idle", count: 0, started: "" };
+  const steps = teachSteps.slice(0, teachState.count).map((text, n) => ({ n, text }));
+  return { state: teachState.state, detail: "", start_url: teachState.started, steps, count: steps.length, lesson: request.action === "lesson" ? "Kiran, I just showed you how I do a job…" : undefined };
+}
+

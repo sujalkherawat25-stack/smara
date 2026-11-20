@@ -705,3 +705,8 @@
 .connector-row small { display: block; color: var(--smara-muted); }
 .connector-row[data-off="true"] strong { opacity: 0.55; }
 .connector-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+.teach-steps { margin: 12px 0; padding-left: 22px; display: grid; gap: 6px; }
+.teach-steps li { padding-left: 4px; }
+.teach-steps li > span { margin-right: 8px; }
+.teach-panel .settings-form { max-width: 520px; }

@@ -98,6 +98,7 @@ try {
         '--hidden-import', 'smara.native_admission'
         '--hidden-import', 'smara.native_outreach'
         '--hidden-import', 'smara.native_mail_oauth'
+        '--hidden-import', 'smara.native_teach'
         '--hidden-import', 'smara.native_background'
         '--hidden-import', 'smara.native_browser_control'
         '--hidden-import', 'smara.native_browser_transfer'
