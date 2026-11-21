@@ -67,11 +67,32 @@ def parse_file(filename: str, data: bytes) -> dict:
 
 
 def _rate(rates: dict, section: str, vendor_type: str):
+    """The rate for this section and vendor type. A table by vendor type may key a rate as the owner wrote it: 'Individual/HUF' or 'Individual, HUF'
+    covers both, case does not matter, and 'others'/'default' catches the rest. None when nothing matches (the row is then listed, not guessed)."""
     r = rates.get(section)
+    if not isinstance(r, dict):
+        return r
+    table = {}
+    for key, value in r.items():
+        for part in re.split(r"\s*(?:/|,|&|\bor\b|\band\b)\s*", str(key).strip().lower()):
+            if part:
+                table[part] = value
+    vt = vendor_type.strip().lower()
+    if vt in table:
+        return table[vt]
+    if len(vt) >= 3:
+        for part, value in table.items():                 # 'Individuals' / 'Indiv.' for 'individual'
+            if len(part) >= 3 and (vt.startswith(part) or part.startswith(vt)):
+                return value
+    return next((table[k] for k in ("others", "other", "default", "all", "rest") if k in table), None)
+
+
+def why_no_rate(rates: dict, row: dict) -> str:
+    r = rates.get(row["section"])
     if isinstance(r, dict):
-        low = {str(k).strip().lower(): v for k, v in r.items()}
-        r = low.get(vendor_type.strip().lower())
-    return r
+        given = ", ".join(str(k) for k in r)
+        return f"vendor type '{row['vendor_type'] or 'blank'}' is not in the {row['section']} rates you gave ({given})"
+    return f"no rate was given for section {row['section']}"
 
 
 def check(rows: list[dict], rates: dict, thresholds: dict, no_pan_rate: float) -> dict:
@@ -81,7 +102,7 @@ def check(rows: list[dict], rates: dict, thresholds: dict, no_pan_rate: float) -
     for r in rows:
         rate = _rate(rates, r["section"], r["vendor_type"])
         if rate is None:
-            no_rate.append(r)
+            no_rate.append({**r, "why": why_no_rate(rates, r)})
             continue
         if r["section"] in th and r["amount"] <= th[r["section"]]:
             due, why = 0, f"at or below the {r['section']} threshold"
@@ -109,7 +130,11 @@ def summary_lines(res: dict, rules: dict) -> list[str]:
          f"Short deducted: {len(s)} payments, {rs(sum(x['diff'] for x in s) / 100)}." + (" Examples: " + "; ".join(f"{x['voucher']} {x['vendor']} {x['section']} short {rs(x['diff'] / 100)} ({x['why']})" for x in sorted(s, key=lambda x: -x["diff"])[:4]) + "." if s else ""),
          f"Deducted too much: {len(e)} payments, {rs(-sum(x['diff'] for x in e) / 100)}." + (" Examples: " + "; ".join(f"{x['voucher']} {x['vendor']} {x['section']} excess {rs(-x['diff'] / 100)}" for x in sorted(e, key=lambda x: x['diff'])[:4]) + "." if e else "")]
     if res["no_rate"]:
-        L.append(f"{len(res['no_rate'])} payments are in sections with no rate given ({', '.join(sorted({x['section'] for x in res['no_rate']}))}) and were left out: give a rate for them.")
+        reasons: dict[str, int] = {}
+        for x in res["no_rate"]:
+            reasons[x["why"]] = reasons.get(x["why"], 0) + 1
+        L.append(f"{len(res['no_rate'])} payments have NO rate and are left OUT of the totals above, so they are incomplete: " + "; ".join(f"{n} where {why}" for why, n in reasons.items())
+                 + ". Say this to the owner with the reason, and ask for the missing rate.")
     return L
 
 

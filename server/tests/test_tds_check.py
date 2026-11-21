@@ -31,6 +31,30 @@ def test_the_threshold_comes_first_a_missing_pan_raises_the_rate_and_halves_roun
     assert res["rows"][1]["why"] == "20% (no PAN)"
 
 
+def test_a_rate_table_keyed_the_way_the_owner_said_it_covers_every_type_in_the_key():
+    """The owner says 'Individual/HUF 1%, Company 2%'; the agent used that as the key and 69 payments were left out of the totals (a connected demo run)."""
+    p, t = rows()
+    for key in ("Individual/HUF", "individual, huf", "Individual & HUF", "Individual or HUF"):
+        res = tc.check(p["rows"], {"194C": {key: 1, "Company": 2}, "194J": 10, "194I": 10, "194H": 2}, {"194C": 30000}, 20)
+        assert not res["no_rate"], key
+        assert sum(x["due"] for x in res["rows"]) / 100 == t["expected_total"], key
+    res = tc.check(p["rows"], {"194C": {"Individuals": 1, "Company": 2}, "194J": 10, "194I": 10, "194H": 2}, {"194C": 30000}, 20)
+    assert not res["no_rate"]                                                    # a close spelling of the type ('Individuals') still matches
+
+
+def test_a_type_with_no_rate_is_listed_with_the_real_reason_and_a_catch_all_covers_the_rest():
+    p, t = rows()
+    only_individuals = {"194C": {"Individual": 1}, "194J": 10, "194I": 10, "194H": 2}
+    res = tc.check(p["rows"], only_individuals, {"194C": 30000}, 20)
+    assert res["no_rate"] and all("vendor type" in x["why"] and "194C" in x["why"] and "Individual" in x["why"] for x in res["no_rate"])
+    lines = tc.summary_lines(res, {"summary": "x"})
+    assert any("left OUT" in ln and "incomplete" in ln and "vendor type" in ln for ln in lines)       # never a silent short total, never "the file has no vendor type"
+    res_all = tc.check(p["rows"], {"194C": {"Individual": 1, "Others": 2}, "194J": 10, "194I": 10, "194H": 2}, {"194C": 30000}, 20)
+    assert not res_all["no_rate"]
+    nothing = tc.check(p["rows"], {"194J": 10}, {}, 20)
+    assert all(x["why"].startswith("no rate was given for section") for x in nothing["no_rate"])
+
+
 def test_the_tool_asks_for_the_rates_instead_of_guessing_and_its_result_arrives_whole(monkeypatch):
     f, t = cd.tds()
     files = {"p1": ("vendor_payments_tds.xlsx", f["vendor_payments_tds.xlsx"])}

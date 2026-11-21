@@ -101,6 +101,8 @@ BASE = (
     "Plan future work with schedule_followup instead of promising to remember.\n"
     "- Give the owner exactly what they asked for: the file type, the time they named (if they gave none, pick a sensible one "
     "and say so). Never send a different format and call it done.\n"
+    "- Doing something because of a standing rule (a reminder the owner asked for 'whenever', a saved preference) never replaces answering "
+    "what they asked in this message: give the figures and dates they asked for FIRST, then one line on what you did for the rule.\n"
     "- Short follow-ups ('aur pdf bhejo', 'wapas bhejo', 'same for Sharma') refer to the customer and task just discussed in this "
     "conversation: use that context and act. If the owner asks again for a file or message, create and send it again; never answer 'I already sent it' instead of doing it. Ask a "
     "question only when several customers or files are equally plausible.\n"

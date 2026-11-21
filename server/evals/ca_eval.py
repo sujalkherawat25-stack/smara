@@ -524,6 +524,18 @@ async def c_learned_bill_rule(env):
     return ok and not asked, f"asked again: {asked} | {detail}"
 
 
+async def c_rule_and_answer(env):
+    """The standing rule fires (the reminder is set) AND the owner's own question in that message is answered (the amount and the last date)."""
+    ok, detail = await c_learned_bill_rule(env)
+    all_text = "\n".join(m["text"]["body"] for m in env.wa.to(OWNER) if m.get("type") == "text")
+    b = BILLS["A"]
+    p = Parts()
+    p.add("the reminder rule was applied", ok, detail)
+    p.add(f"answers the question: amount {b['pay_by_due']:,.0f}", amount_in(all_text, b["pay_by_due"]), all_text[-200:])
+    p.add(f"answers the question: last date {b['due']}", date_in(all_text, b["due"]), all_text[-200:])
+    return p.result()
+
+
 async def c_learned_hindi(env):
     t, b = final(env), BILLS["A"]
     deva = len(re.findall(r"[ऀ-ॿ]", t))
@@ -542,6 +554,8 @@ def learn_tasks():
     if BILLS:
         out += [T("learns_standing_bill_reminder", learn(("Ek rule yaad rakh lo: jab bhi main bijli ka bill bhejun, uski last date se 2 din pehle subah 9 baje yaad dila dena. Alag se bolna nahi padega.", None),
                                                           ("Ye lo is mahine ka bijli bill", "BL_A")), c_learned_bill_rule, G, sheet=False, remind=True, budget=B),
+                T("standing_rule_and_the_question_both_answered", learn(("Ek rule yaad rakh lo: jab bhi main bijli ka bill bhejun, uski last date se 2 din pehle subah 9 baje yaad dila dena. Alag se bolna nahi padega.", None),
+                                                                         ("Ye lo is mahine ka bijli bill. Kitna dena hai aur last date kya hai?", "BL_A")), c_rule_and_answer, G, sheet=False, remind=True, budget=B),
                 T("learns_reply_language", learn(("Aage se mujhse hamesha Hindi (devanagari) mein baat karna.", None), ("Ye bijli ka bill hai, kitna dena hai?", "BL_A")),
                   c_learned_hindi, G, sheet=False, budget=B)]
     return out
