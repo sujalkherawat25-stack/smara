@@ -184,6 +184,10 @@ def write_xlsx(sheets: dict, path="out/report.xlsx") -> str:
             df.to_excel(xw, sheet_name=str(name)[:31], index=False)
             ws = xw.sheets[str(name)[:31]]
             ws.freeze_panes = "A2"
+            for row in ws.iter_rows(min_row=2):              # a customer name like =HYPERLINK(...) must stay text, never run as a formula
+                for c in row:
+                    if c.data_type == "f" and isinstance(c.value, str):
+                        c.data_type = "s"
             for col in ws.columns:
                 ws.column_dimensions[col[0].column_letter].width = min(48, max(10, max(len(str(c.value or "")) for c in col) + 2))
     return str(path)
@@ -305,7 +309,7 @@ def compare_workbooks(src: str, dst: str, max_examples: int = 5, allowed=None) -
 
 
 # ---------------------------------------------------------------- names, invoice numbers, FIFO, TDS
-_NOISE = {"m", "s", "ms", "mrs", "mr", "shri", "shree", "the", "pvt", "private", "ltd", "limited", "llp", "co", "company"}
+_NOISE = {"m", "s", "ms", "mrs", "mr", "messrs", "shri", "shree", "the", "pvt", "private", "ltd", "limited", "llp", "co", "company"}
 
 
 def name_key(s) -> str:
@@ -356,6 +360,33 @@ def match_names(names, master, *, cutoff: float = 0.88, margin: float = 0.04) ->
         else:
             review.append({"name": n, "best": best[1], "second": second[1], "score": round(best[0], 3)})
     return {"map": out, "review": review, "exact": exact, "fuzzy": fuzzy}
+
+
+def group_names(names, *, cutoff: float = 0.8) -> dict:
+    """The spellings of one party gathered together, for a party-wise total over a ledger typed by several people.
+    Returns {'groups': [{'name', 'spellings', 'rows'}], 'maybe_same': [{'a', 'b', 'score'}]}. A group holds spellings that only differ in
+    case, spaces, punctuation, M/s, Messrs, Pvt/Ltd, '&' or a plural: those ARE one party, total them together. 'maybe_same' pairs
+    (Zenith Traders / Zenith Trading Co) may or may not be one party: keep them apart in the totals, list them for the owner and say so."""
+    import difflib
+    from collections import Counter
+    cnt = Counter(str(n).strip() for n in names if str(n or "").strip())
+    by: dict[str, list] = {}
+    for n, c in cnt.items():
+        by.setdefault(name_key(n), []).append((n, c))
+    groups = []
+    for k, lst in by.items():
+        lst.sort(key=lambda x: (-x[1], x[0]))
+        canon = re.sub(r"^(m/s|messrs)\s+", "", lst[0][0].strip(), flags=re.I).strip(" .,")
+        canon = canon.title() if canon.isupper() or canon.islower() else canon
+        groups.append({"name": canon, "key": k, "spellings": [n for n, _ in lst], "rows": sum(c for _, c in lst)})
+    keys = sorted(by)
+    maybe = []
+    for i, a in enumerate(keys):
+        for b in keys[i + 1:]:
+            sc = difflib.SequenceMatcher(None, a, b).ratio()
+            if sc >= cutoff or (_skeleton(a) == _skeleton(b) and len(a) > 4):
+                maybe.append({"a": by[a][0][0], "b": by[b][0][0], "score": round(sc, 2)})
+    return {"groups": sorted(groups, key=lambda g: g["name"].lower()), "maybe_same": maybe}
 
 
 def norm_invoice(s) -> str:
@@ -630,3 +661,185 @@ def bank_statement_pdf(path, password: str = "") -> dict:
             "period": {"from": min(dates) if dates else None, "to": max(dates) if dates else None},
             "top_credits": sorted((x for x in out if x["credit"]), key=lambda x: -x["credit"])[:5],
             "top_debits": sorted((x for x in out if x["debit"]), key=lambda x: -x["debit"])[:5]}
+
+
+def _copy_look(c, n) -> None:
+    """Copy a cell's number format, font, fill, border and alignment into a cell of ANOTHER workbook (style ids are per workbook)."""
+    import copy
+    if c.has_style:
+        n.number_format = c.number_format
+        n.font, n.fill, n.border, n.alignment = copy.copy(c.font), copy.copy(c.fill), copy.copy(c.border), copy.copy(c.alignment)
+
+
+def split_sheets(src: str, dst: str, by: str, *, how: str = "value", sheet=None, header_row: int | None = None, keep_all_sheet: bool = False) -> dict:
+    """Split the owner's sheet into one sheet per value of a column (how='value') or per calendar month of a date column (how='month'),
+    in ONE workbook, keeping every cell exactly as it is: dates stay dates, numbers stay numbers, formulas, number formats, fonts, fills
+    and column widths are copied. Each new sheet gets the title rows and the header row. Total rows (a row whose text says Total) are
+    left out of the pieces. Returns {sheet title: rows}; the row counts add up to the source's data rows. Never go through pandas for
+    this: it turns dates into text and drops the formatting."""
+    import copy
+    from openpyxl import Workbook, load_workbook
+    probe = load_workbook(src, read_only=True)
+    pws = probe[sheet] if sheet else probe.worksheets[0]
+    rows_in_sheet = pws.max_row or 0
+    if not rows_in_sheet:                       # a workbook written as a stream (pandas, big exports) carries no row count: count to the limit
+        for n, _ in enumerate(pws.iter_rows(values_only=True), start=1):
+            rows_in_sheet = n
+            if n > 50_000:
+                break
+    probe.close()
+    if rows_in_sheet > 50_000:
+        return _split_sheets_streaming(src, dst, by, how, sheet, header_row, keep_all_sheet)
+    wb = load_workbook(src)
+    ws = wb[sheet] if sheet else wb.worksheets[0]
+    hdr = header_row
+    if hdr is None:
+        want = re.sub(r"\s+", "", str(by)).lower()
+        for r in range(1, min(ws.max_row, 40) + 1):
+            if any(c.value is not None and re.sub(r"\s+", "", str(c.value)).lower() == want for c in ws[r]):
+                hdr = r
+                break
+    if hdr is None:
+        raise ValueError(f"no header row with a column called {by!r} in the first 40 rows")
+    col = next(c.column for c in ws[hdr] if c.value is not None and re.sub(r"\s+", "", str(c.value)).lower() == re.sub(r"\s+", "", str(by)).lower())
+    groups: dict[str, list] = {}
+    for r in range(hdr + 1, ws.max_row + 1):
+        row = ws[r]
+        if all(c.value in (None, "") for c in row) or any(isinstance(c.value, str) and re.match(r"\s*(grand\s+)?total\b", c.value, re.I) for c in row):
+            continue
+        v = row[col - 1].value
+        if how == "month":
+            d = parse_date(v)
+            key = d.strftime("%Y-%m") if d else "(no date)"
+            label = d.strftime("%b %Y") if d else "(no date)"
+        else:
+            key, label = str(v).strip() if v not in (None, "") else "(blank)", str(v).strip() if v not in (None, "") else "(blank)"
+        groups.setdefault(key, [label, []])[1].append(r)
+    out = Workbook()
+    out.remove(out.active)
+    counts = {}
+    for key in sorted(groups):
+        label, rows = groups[key]
+        title = re.sub(r"[\[\]\\*?/:]", "-", label)[:31] or "sheet"
+        new = out.create_sheet(title)
+        for r in range(1, hdr + 1):                                         # the title rows and the header, with their look
+            for c in ws[r]:
+                n = new.cell(row=r, column=c.column, value=c.value)
+                _copy_look(c, n)
+        for i, r in enumerate(rows, start=hdr + 1):
+            for c in ws[r]:
+                n = new.cell(row=i, column=c.column, value=c.value)
+                _copy_look(c, n)
+        for letter, dim in ws.column_dimensions.items():
+            new.column_dimensions[letter].width = dim.width
+        new.freeze_panes = new.cell(row=hdr + 1, column=1)
+        counts[title] = len(rows)
+    if keep_all_sheet:
+        every = out.create_sheet("All")
+        for row in ws.iter_rows():
+            for c in row:
+                _copy_look(c, every.cell(row=c.row, column=c.column, value=c.value))
+        for letter, dim in ws.column_dimensions.items():
+            every.column_dimensions[letter].width = dim.width
+    Path(dst).parent.mkdir(parents=True, exist_ok=True)
+    out.save(dst)
+    return counts
+
+
+def _split_sheets_streaming(src, dst, by, how, sheet, header_row, keep_all_sheet) -> dict:
+    """split_sheets for a big sheet (over 50,000 rows): read once as a stream and write each piece as a stream, so 540,000 rows take a
+    few minutes and little memory. Values and dates are exact; formatting is limited to a bold header and the column widths."""
+    from openpyxl import Workbook, load_workbook
+    from openpyxl.cell import WriteOnlyCell
+    from openpyxl.styles import Font
+    wb = load_workbook(src, read_only=True)
+    ws = wb[sheet] if sheet else wb.worksheets[0]
+    want = re.sub(r"\s+", "", str(by)).lower()
+    top, hdr, col = [], header_row, None
+    groups: dict[str, list] = {}
+    labels: dict[str, str] = {}
+    for r, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        if hdr is None and r <= 40:
+            top.append(row)
+            for i, v in enumerate(row):
+                if v is not None and re.sub(r"\s+", "", str(v)).lower() == want:
+                    hdr, col = r, i
+                    break
+            continue
+        if hdr is not None and r <= hdr:
+            if r < hdr:
+                top.append(row)
+            elif r == hdr:
+                if col is None:
+                    col = next((i for i, v in enumerate(row) if v is not None and re.sub(r"\s+", "", str(v)).lower() == want), None)
+                top.append(row)
+            continue
+        if hdr is None:
+            wb.close()
+            raise ValueError(f"no header row with a column called {by!r} in the first 40 rows")
+        if all(v in (None, "") for v in row) or any(isinstance(v, str) and re.match(r"\s*(grand\s+)?total\b", v, re.I) for v in row):
+            continue
+        v = row[col] if col is not None and col < len(row) else None
+        if how == "month":
+            d = parse_date(v)
+            key, label = (d.strftime("%Y-%m"), d.strftime("%b %Y")) if d else ("(no date)", "(no date)")
+        else:
+            key = label = str(v).strip() if v not in (None, "") else "(blank)"
+        groups.setdefault(key, []).append(row)
+        labels[key] = label
+    wb.close()
+    if hdr is None or col is None:
+        raise ValueError(f"no header row with a column called {by!r} in the first 40 rows")
+    out = Workbook(write_only=True)
+    counts = {}
+
+    def put(title, rows):
+        s = out.create_sheet(re.sub(r"[\[\]\*?/:]", "-", title)[:31] or "sheet")
+        for i, tr in enumerate(top[:hdr], start=1):
+            if i == hdr:
+                cells = []
+                for v in tr:
+                    c = WriteOnlyCell(s, value=v)
+                    c.font = Font(bold=True)
+                    cells.append(c)
+                s.append(cells)
+            else:
+                s.append(list(tr))
+        for r in rows:
+            s.append(list(r))
+        return s
+    for key in sorted(groups):
+        put(labels[key], groups[key])
+        counts[re.sub(r"[\[\]\*?/:]", "-", labels[key])[:31]] = len(groups[key])
+    if keep_all_sheet:
+        put("All", [r for k in sorted(groups) for r in groups[k]])
+    Path(dst).parent.mkdir(parents=True, exist_ok=True)
+    out.save(dst)
+    return counts
+
+
+def tds_expected(df, *, rates: dict, amount: str = "Amount", section: str = "Section", pan: str = "PAN", vendor_type: str | None = None,
+                 thresholds: dict | None = None, no_pan_rate: float = 20.0):
+    """TDS that should have been deducted on each row of a payments table (a pandas Series of whole rupees, half up).
+    rates: {'194C': {'Individual': 1, 'Company': 2}, '194J': 10, '194I': 10, '194H': 2}: a number, or a dict keyed by the vendor_type column.
+    thresholds: {'194C': 30000}: a payment at or below its section's threshold has NO TDS, even without a PAN (no PAN only raises the rate
+    where TDS applies). No PAN (blank, NA, 'not available') means the higher of the section's rate and no_pan_rate. Then compare with the
+    TDS deducted column: expected minus deducted above 1 rupee is a short deduction, below -1 an excess deduction."""
+    import pandas as pd
+    from decimal import ROUND_HALF_UP, Decimal
+    th = thresholds or {}
+
+    def one(row):
+        sec = str(row[section]).strip()
+        rate = rates.get(sec)
+        if isinstance(rate, dict):
+            rate = rate.get(str(row[vendor_type]).strip()) if vendor_type else None
+        if rate is None:
+            return float("nan")
+        amt = float(row[amount])
+        if sec in th and amt <= th[sec]:
+            return 0.0
+        has_pan = isinstance(row[pan], str) and row[pan].strip().upper() not in ("", "NA", "N/A", "NOT AVAILABLE", "NONE", "-")
+        pct = rate if has_pan else max(rate, no_pan_rate)
+        return float(Decimal(str(amt * pct / 100)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return df.apply(one, axis=1)

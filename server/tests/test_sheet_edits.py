@@ -458,3 +458,91 @@ async def test_a_copy_with_rows_removed_is_caught_and_an_edit_is_not(app, reg, t
     op = tmp_path / "other.xlsx"
     other.save(op)
     assert await sheet_tools.rows_removed(app, ctx, op.read_bytes(), "o.xlsx") == ""
+
+
+async def test_a_month_wise_split_loses_no_rows_even_though_each_sheet_has_fewer(app, reg, tmp_path):
+    """The same rows in three sheets are all still there. The guard compared the first sheet alone and called 780 rows 'gone'."""
+    ctx = SimpleNamespace(tenant_id="t", files=("local:abc:Electricity Aug Sep.xlsx",))
+    src = load_workbook(reg)
+    ws = src.active
+    rows = [[c.value for c in r] for r in ws.iter_rows()]
+    wb = Workbook()
+    wb.remove(wb.active)
+    half = len(rows) // 2
+    for title, part in (("First", rows[1:1 + half]), ("Second", rows[1 + half:])):
+        s = wb.create_sheet(title)
+        s.append(rows[0])
+        for r in part:
+            s.append(r)
+    out = tmp_path / "split.xlsx"
+    wb.save(out)
+    assert await sheet_tools.rows_removed(app, ctx, out.read_bytes(), "split.xlsx") == ""
+    wb.remove(wb["Second"])                                   # but dropping a whole sheet of rows is still caught
+    out2 = tmp_path / "split2.xlsx"
+    wb.save(out2)
+    assert (await sheet_tools.rows_removed(app, ctx, out2.read_bytes(), "split2.xlsx")).endswith("rows are gone")
+
+
+def test_a_formula_put_in_value_is_still_a_formula_and_a_bad_placeholder_is_an_error_not_a_cell(reg, tmp_path):
+    out = tmp_path / "f.xlsx"
+    se.apply(str(reg), str(out), [{"action": "add_column", "column": "Both bills", "value": "=ROUND(({Aug-26 Bill Amount}+{Sep-26 Bill Amount})/2,0)"}])
+    ws = load_workbook(out).active
+    assert "{" not in str(ws["L2"].value) and str(ws["L2"].value).startswith("=ROUND((D2+H2)/2,0)")
+    bad = se.apply(str(reg), str(tmp_path / "g.xlsx"), [{"action": "add_column", "column": "Bad", "formula": "={Aug-26 Bill Amount}+{Nonexistent column}"}])
+    assert bad["nothing_changed"] and "no column called 'Nonexistent column'" in bad["error"]
+    assert not (tmp_path / "g.xlsx").exists()
+
+
+def test_dr_and_cr_after_an_amount_are_plus_and_minus():
+    assert se.num("12,500.00 Dr") == 12500 and se.num("3,200 Cr") == -3200 and se.num("Rs. 49,570") == 49570
+    assert se.num("(300)") == -300 and se.num("1,00,000 dr.") == 100000 and se.num("5 Credit note") is None and se.num("Crown") is None
+
+
+def test_a_text_column_of_amounts_is_described_as_amounts_with_the_right_sum(tmp_path):
+    wb = Workbook()
+    wb.active.append(["Party", "Balance"])
+    for p, v in (("a", "1,000 Dr"), ("b", "250 Cr"), ("c", "Rs. 500"), ("d", "2,000.00")):
+        wb.active.append([p, v])
+    path = tmp_path / "t.xlsx"
+    wb.save(path)
+    col = se.layout(str(path))["sheets"][0]["columns"][1]
+    assert col["amounts_written_as_text"] == 4 and col["sum_of_those_amounts"] == 3250
+
+
+async def test_a_report_that_lists_some_rows_with_columns_of_its_own_is_not_a_copy_with_rows_deleted(app, reg, tmp_path):
+    """An exceptions list (the 39 short-deducted vouchers, with an Expected and a Difference column) kept the owner's header and was
+    refused as '283 of 323 rows gone'. It is a new document; their own sheet with rows missing is still caught."""
+    ctx = SimpleNamespace(tenant_id="t", files=("local:abc:Electricity Aug Sep.xlsx",))
+    ws = load_workbook(reg).active
+    rows = [[c.value for c in r] for r in ws.iter_rows()]
+    rep = Workbook()
+    rep.active.append(rows[0] + ["Expected", "Difference"])
+    for r in rows[1:3]:
+        rep.active.append(r + [1, 2])
+    out = tmp_path / "exceptions.xlsx"
+    rep.save(out)
+    assert await sheet_tools.rows_removed(app, ctx, out.read_bytes(), "exceptions.xlsx") == ""
+    same_columns = Workbook()
+    for r in rows[:3]:
+        same_columns.active.append(r)
+    out2 = tmp_path / "cut_same_columns.xlsx"
+    same_columns.save(out2)
+    assert (await sheet_tools.rows_removed(app, ctx, out2.read_bytes(), "x.xlsx")).endswith("rows are gone")          # their columns, rows missing
+    out3 = tmp_path / "Electricity_Aug_Sep.xlsx"                      # their file name with a column added and rows missing: still their sheet
+    rep.save(out3)
+    assert (await sheet_tools.rows_removed(app, ctx, out3.read_bytes(), "Electricity_Aug_Sep.xlsx")).endswith("rows are gone")
+
+
+async def test_replacing_filled_figures_with_values_worked_out_from_them_is_confirmed_first(app):
+    ctx = SimpleNamespace(tenant_id="t", owner_words="Aug-26 Bill Amount 10% kam kar do", confirmed=False)
+    ch = [{"column": "Aug-26 Bill Amount", "compute": "{Aug-26 Bill Amount} * 0.9"}]
+    held = await sheet_tools.edit_spreadsheet(app, ctx, {"file_ref": "local:abc:x.xlsx", "changes": ch})
+    assert "error" not in held, held
+    assert held["needs_confirmation"] and held["saved"] is False and "already in the file" in held["next"] and "before -> after" in held["next"]
+    ctx.confirmed = True
+    done = await sheet_tools.edit_spreadsheet(app, ctx, {"file_ref": "local:abc:x.xlsx", "changes": ch})
+    assert done["saved"] and done["verified"]
+    fresh = SimpleNamespace(tenant_id="t", owner_words="ek naya column Both bills add karo", confirmed=False)       # a NEW column replaces nothing
+    new_col = await sheet_tools.edit_spreadsheet(app, fresh, {"file_ref": "local:abc:x.xlsx", "changes": [
+        {"action": "add_column", "header": "Both bills", "compute": "{Aug-26 Bill Amount} + {Sep-26 Bill Amount}"}]})
+    assert new_col["saved"]

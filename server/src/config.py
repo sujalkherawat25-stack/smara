@@ -90,6 +90,7 @@ class Settings:
     llm_fallback_on_busy: bool = True  # False: the spare model is for real failures only (it shares the key's quota)
     brave_search_api_key: str = ""
     llm_fallback_model: str = ""
+    llm_reasoning_effort: str = ""        # "low": the agent model thinks less (faster, steadier); "" keeps the provider's default
     # Sarvam speech-to-text for voice notes (owner and customers). Empty key = voice notes are off.
     sarvam_api_key: str = ""
     sarvam_stt_url: str = "https://api.sarvam.ai/speech-to-text"
@@ -169,6 +170,7 @@ def load_settings() -> Settings:
         llm_fallback_on_busy=env.get("LLM_FALLBACK_ON_BUSY", "1").strip().lower() not in ("0", "false", "no", "off"),
         brave_search_api_key=env.get("BRAVE_SEARCH_API_KEY", ""),
         llm_fallback_model=env.get("LLM_FALLBACK_MODEL", ""),
+        llm_reasoning_effort=env.get("LLM_REASONING_EFFORT", ""),
         sarvam_api_key=env.get("SARVAM_API_KEY", ""),
         sarvam_stt_url=env.get("SARVAM_STT_URL", "https://api.sarvam.ai/speech-to-text"),
         owner_files_dir=env.get("OWNER_FILES_DIR") or "./data/owner-files",

@@ -420,11 +420,11 @@ async def test_a_message_that_arrives_as_the_run_finishes_is_still_read(env):
         await dispatch(app, owner("late-1", "one more thing: remind me tomorrow"))
         return say("Here is the answer so far.")           # no tool call: the run would end here
 
-    llm = app.state.llm = ScriptLLM(step1, say("Noted: I will remind you tomorrow."))
+    llm = app.state.llm = ScriptLLM(step1, say("Noted: I have read your last message about tomorrow."))
     await dispatch(app, owner("task-2", "status?"))
     assert len(llm.seen) == 2
     assert "remind me tomorrow" in json.dumps(llm.seen[1])
-    assert app.state.wa.texts()[-2:] == ["Here is the answer so far.", "Noted: I will remind you tomorrow."]
+    assert app.state.wa.texts()[-2:] == ["Here is the answer so far.", "Noted: I have read your last message about tomorrow."]
     assert (await one(env.pool, "SELECT status, steps FROM agent_sessions"))["status"] == "DONE"
 
 

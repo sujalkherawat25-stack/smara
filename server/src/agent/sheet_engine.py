@@ -434,6 +434,12 @@ class Sheet:
         if texts:
             out["text"] = len(texts)
             out["text_examples"] = sorted({short(t, 20) for t in texts})[:4]
+            parsed = [num(t) for t in texts]
+            if len(texts) >= 3 and sum(x is not None for x in parsed) >= 0.8 * len(texts) and not id_like(self.headers.get(c, "")):
+                out["amounts_written_as_text"] = sum(x is not None for x in parsed)
+                out["sum_of_those_amounts"] = round(sum(x for x in parsed if x is not None), 2)
+                out["how_to_read_text_amounts"] = ("Dr is plus and Cr is minus; a bare amount is plus. Say that assumption in your answer. "
+                                                   "query_spreadsheet adds such a column up exactly.")
         if forms:
             out["formulas"] = len(forms)
             out["formula_example"] = forms[0]
@@ -853,11 +859,19 @@ def _new_value(sh, ch: dict, r: int):
         v = ev._formula(expr.lstrip("="))
         if v is UNK or v == ERR:
             raise ValueError(f"could not compute '{ch['compute']}' (only + - * / and SUM/MIN/MAX/ROUND/ABS are supported)")
+        if isinstance(v, float):
+            v = round(v, 10)          # 1404 * 0.9 is 1263.6000000000001 in binary: Excel stores 16 digits, so the read-back must see 1263.6
         return v
-    if "formula" in ch:
-        f = "=" + str(ch["formula"]).lstrip("=")
+    if "formula" in ch or (isinstance(ch.get("value"), str) and (ch["value"].lstrip().startswith("=") or re.search(r"\{[^{}]+\}", ch["value"]))):
+        # a formula the model put in `value` is still a formula: it was written into the cell with its {Header} placeholders
+        # unresolved, the check passed, and the owner got a payroll file full of #NAME? errors
+        f = "=" + str(ch["formula"] if "formula" in ch else ch["value"]).strip().lstrip("=")
         if "{" in f:
-            return "=" + _substitute(sh, f, r).lstrip("=")
+            f = "=" + _substitute(sh, f, r).lstrip("=")
+        if "{" in f or "}" in f:
+            raise ValueError(f"the formula {f[:80]!r} still has a {{ }} that is not a column header; write the column's exact title in the braces, e.g. {{Basic}}")
+        if "formula" not in ch or "{" in str(ch["formula"]):
+            return f
         anchor = ch.get("_anchor")                 # a plain formula written for the first row is filled down, as Excel does
         if anchor and anchor[0] != r:
             from openpyxl.formula.translate import Translator
@@ -957,6 +971,10 @@ def plan(book, changes: list[dict], owner_words: str = "") -> tuple[list, list]:
                 raise ValueError(f"change {i + 1}: the owner did not ask to empty or remove anything; do not clear "
                                  f"'{header}'. Ask them if you think it should be")
             rep["column"] = f"{col_letter(col)} '{header}'"
+        if action == "fill_from":
+            _plan_fill_from(book, sh, col, ch, rep, writes, claimed, i)
+            reports.append(rep)
+            continue
         rows = _target_rows(sh, ch, col, rep)
         if not rows:
             rep["rows_changed"] = 0
@@ -993,6 +1011,60 @@ def plan(book, changes: list[dict], owner_words: str = "") -> tuple[list, list]:
             rep["values_replaced"] = values_over
         reports.append(rep)
     return writes, reports
+
+
+def _plan_fill_from(book, sh, col, ch, rep, writes, claimed, i) -> None:
+    """A lookup that never guesses: fill the EMPTY cells of `column` from another sheet by matching a key (a party name, an item code).
+    Keys match ignoring case, spaces, punctuation, M/s and Pvt/Ltd. A key that gives two different values in the other sheet (the same
+    party with two GSTINs) or no value at all is left empty and listed, never picked."""
+    src = next((s for s in book["sheets"] if norm(s.title) == norm(ch.get("from_sheet"))), None)
+    if src is None:
+        raise ValueError(f"change {i + 1}: no sheet called {ch.get('from_sheet')!r} (sheets: {', '.join(s.title for s in book['sheets'])})")
+    if not ch.get("match_on"):
+        raise ValueError(f"change {i + 1}: fill_from needs match_on (the column in this sheet that identifies the row, e.g. 'Party Name')")
+    key_t, err = sh.find_column(ch["match_on"])
+    if err:
+        raise ValueError(f"change {i + 1}: {err}")
+    key_s, err = src.find_column(ch.get("from_key") or ch["match_on"])
+    if err:
+        raise ValueError(f"change {i + 1}: in sheet {src.title!r}: {err}")
+    val_s, err = src.find_column(ch.get("from_value") or ch.get("column"))
+    if err:
+        raise ValueError(f"change {i + 1}: in sheet {src.title!r}: {err}")
+    table: dict = {}
+    for r in src.data_rows():
+        k, v = _name_key(src.ev.value(r, key_s)), src.ev.value(r, val_s)
+        if k and v not in (None, ""):
+            table.setdefault(k, {}).setdefault(str(v).strip(), v)
+    filled, ambiguous, missing = [], {}, {}
+    for r in sh.data_rows():
+        old = sh.cells.get((r, col))
+        if old not in (None, ""):
+            continue
+        name = sh.ev.value(r, key_t)
+        k = _name_key(name)
+        if not k:
+            continue
+        vals = table.get(k)
+        label = str(name).strip()
+        if vals is None:
+            missing.setdefault(label, []).append(r)
+        elif len(vals) > 1:
+            ambiguous.setdefault(label, {"rows": [], "values": sorted(vals)})["rows"].append(r)
+        else:
+            claimed[(sh.title, r, col)] = i + 1
+            writes.append((sh, r, col, old, next(iter(vals.values()))))
+            filled.append(r)
+    rep["rows_changed"] = len(filled)
+    rep["filled_from"] = f"{src.title}: {sh.headers.get(key_t, '')} -> {src.headers.get(val_s, '')}"
+    if ambiguous:
+        rep["left_empty_two_values_in_the_other_sheet"] = [{"name": n, "rows": v["rows"][:6], "values": v["values"]} for n, v in ambiguous.items()]
+    if missing:
+        rep["left_empty_not_found_in_the_other_sheet"] = [{"name": n, "rows": rs[:6]} for n, rs in missing.items()]
+    rep["still_empty"] = sum(len(v["rows"]) for v in ambiguous.values()) + sum(len(v) for v in missing.values())
+    rep["examples"] = [f"{col_letter(col)}{r}: blank -> {next(iter(table[_name_key(sh.ev.value(r, key_t))].values()))}" for r in filled[:4]]
+    if rep["still_empty"]:
+        rep["note"] = "rows left empty on purpose: tell the owner which names and why (two different values, or not in the other sheet)"
 
 
 def effects(book, writes) -> list[str]:
@@ -1225,7 +1297,12 @@ def num(v):
     if isinstance(v, (int, float)):
         return v
     if isinstance(v, str):
-        t = v.strip().replace(",", "").replace("₹", "").replace("Rs.", "").replace("Rs", "").strip()
+        t = v.strip()
+        sign = 1
+        m = re.search(r"\s*\b(dr|cr)\b\.?\s*$", t, re.I)             # "12,500.00 Dr" / "3,200 Cr": debit is plus, credit is minus
+        if m:
+            sign, t = (-1 if m.group(1).lower() == "cr" else 1), t[:m.start()]
+        t = t.replace(",", "").replace("₹", "").replace("Rs.", "").replace("Rs", "").strip()
         neg = t.startswith("(") and t.endswith(")")
         t = t.strip("()").strip()
         try:
@@ -1234,7 +1311,9 @@ def num(v):
             return None
         if x is not None and x.is_integer() and "." not in t:
             x = int(x)
-        return -x if (neg and x is not None) else x
+        if x is None:
+            return None
+        return sign * (-x if neg else x)
     return None
 
 
@@ -1448,11 +1527,65 @@ _BY = {"year": lambda d: f"{d.year}", "quarter": lambda d: f"{d.year}-Q{(d.month
        "fy": lambda d: f"FY{d.year if d.month >= 4 else d.year - 1}-{(d.year + 1 if d.month >= 4 else d.year) % 100:02d}"}
 
 
+_NAME_NOISE = {"m", "s", "ms", "mrs", "mr", "messrs", "shri", "shree", "the", "pvt", "private", "ltd", "limited", "llp", "co", "company"}
+
+
+def _name_key(s) -> str:
+    """Spelling-proof key for a party name: case, spaces, punctuation, M/s, Messrs, Pvt/Ltd, '&' and plurals do not count."""
+    t = re.sub(r"[^a-z0-9 ]+", " ", str(s or "").lower().replace("&", " and "))
+    out = []
+    for w in t.split():
+        if w in _NAME_NOISE:
+            continue
+        out.append(w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w)
+    return " ".join(out)
+
+
+class _NameKey:
+    """group_by {column, by: 'name'}: gathers the spellings of one party under one key and remembers what it gathered."""
+
+    def __init__(self, get_v):
+        self.get_v, self.seen = get_v, {}
+
+    def __call__(self, get):
+        v = self.get_v(get)
+        if not isinstance(v, str) or not v.strip():
+            return "(blank)"
+        k = _name_key(v) or v.strip().lower()
+        c = self.seen.setdefault(k, {})
+        c[v.strip()] = c.get(v.strip(), 0) + 1
+        return k
+
+    def pretty(self, k):
+        c = self.seen.get(k)
+        if not c:
+            return k
+        best = max(c, key=lambda s: (c[s], -len(s)))
+        best = re.sub(r"^(m/s|messrs)\s+", "", best, flags=re.I).strip(" .,")
+        return best.title() if best.isupper() or best.islower() else best
+
+    def spellings(self, k):
+        return sorted(self.seen.get(k, {}), key=lambda s: -self.seen[k][s])
+
+    def look_alikes(self):
+        import difflib
+        keys = [k for k in self.seen if k != "(blank)"][:300]
+        out = []
+        for i, a in enumerate(keys):
+            for b in keys[i + 1:]:
+                sc = difflib.SequenceMatcher(None, a, b).ratio()
+                if sc >= 0.8:
+                    out.append({"a": self.pretty(a), "b": self.pretty(b), "score": round(sc, 2)})
+        return out[:10]
+
+
 def _group_fn(g, head, dayfirst):
     if isinstance(g, str):
         g = {"column": g}
     get_v, label, _ = _value_fn(g.get("column") or g.get("field") or g.get("of"), head)
     by = str(g.get("by") or "").lower()
+    if by in ("name", "party", "party_name"):
+        return _NameKey(get_v), f"{label}"
     if not by:
         def key(get):
             v = get_v(get)
@@ -1596,8 +1729,11 @@ class _Query:
         else:
             rows = []
             for key, st in self.acc.items():
-                row = {label: k for (_, label), k in zip(self.groups, key)}
+                row = {label: (kf.pretty(k) if isinstance(kf, _NameKey) else k) for (kf, label), k in zip(self.groups, key)}
                 row.update({n: self._final(op, s) for (op, _, n), s in zip(self.measures, st)})
+                for (kf, label), k in zip(self.groups, key):
+                    if isinstance(kf, _NameKey) and len(kf.seen.get(k, {})) > 1:
+                        row["spellings_gathered"] = kf.spellings(k)
                 rows.append(row)
             by_time = any(isinstance(g, dict) and g.get("by") for g in
                           (self.q.get("group_by") if isinstance(self.q.get("group_by"), list) else [self.q.get("group_by")]))
@@ -1618,6 +1754,10 @@ class _Query:
                         for r in rows:
                             r[f"{n} %"] = round(100 * (r[n] or 0) / tot, 2) if tot else None
             out["groups"] = len(rows)
+            for kf, _ in self.groups:
+                if isinstance(kf, _NameKey) and (alike := kf.look_alikes()):
+                    out["names_that_may_be_the_same"] = alike
+                    out["names_note"] = "kept apart in the totals: they may or may not be one party. Show them to the owner and let them decide."
             out["rows"] = rows[: self.limit]
             if len(rows) > self.limit:
                 out["shown"] = f"first {self.limit} of {len(rows)} groups (sorted by {sort or 'name'}); raise limit to see more"
@@ -2105,6 +2245,24 @@ def entry_count(path: str) -> int:
             gen.close()
     sh = load(path, big_ok=False)["sheets"][0]
     return len({r for (r, _), v in sh.cells.items() if v not in (None, "")})
+
+
+def entry_counts(path: str) -> list[tuple[str, list, int]]:
+    """[(sheet title, header titles, rows holding something)] for every sheet; streamed for a big file."""
+    out = []
+    if is_big(path):
+        gen = _streams(path, values=False)
+        try:
+            for title, it in gen:
+                _, headers, head_rows, rest = _header_of(it)
+                n = sum(1 for _, vals in head_rows if any(v not in (None, "") for v in vals)) + sum(1 for vals in rest if any(v not in (None, "") for v in vals))
+                out.append((title, [h for _, h in sorted(headers.items()) if h], n))
+        finally:
+            gen.close()
+        return out
+    for sh in load(path, big_ok=False)["sheets"]:
+        out.append((sh.title, [h for _, h in sorted(sh.headers.items()) if h], len({r for (r, _), v in sh.cells.items() if v not in (None, "")})))
+    return out
 
 
 def main(spec_path: str) -> dict:

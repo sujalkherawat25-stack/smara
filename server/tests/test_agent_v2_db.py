@@ -117,7 +117,7 @@ async def test_schedule_list_cancel_followups_with_limits_and_isolation(env, mon
     assert ok["will_run_at_ist"] == "2026-11-04 15:30" and ok["moved_out_of_quiet_hours"] is False
     late = await extras.schedule_followup(env.app, ctx, {"instruction": "nudge me", "at_ist": "2026-11-04 23:15"})
     assert late["will_run_at_ist"] == "2026-11-05 08:00" and late["moved_out_of_quiet_hours"] is True   # never at night
-    for bad in ({"instruction": "x", "at_ist": "2026-11-04 10:59"}, {"instruction": "x", "in_minutes": 90 * 24 * 60},
+    for bad in ({"instruction": "x", "at_ist": "2026-11-04 10:59"}, {"instruction": "x", "in_minutes": 500 * 24 * 60},
                 {"instruction": "x", "at_ist": "tomorrow"}, {"instruction": "", "in_minutes": 5}, {"instruction": "x"}):
         assert "error" in await extras.schedule_followup(env.app, ctx, bad), bad
     assert len((await extras.list_followups(env.app, ctx, {}))["pending"]) == 2
@@ -641,3 +641,27 @@ async def test_a_model_that_stays_busy_eventually_fails_cleanly(env, monkeypatch
     await dispatch(env.app, owner("rl2", "hello there friend"))
     assert (await one(env.pool, "select status from agent_sessions"))["status"] == "FAILED"
     assert "could not finish" in env.app.state.wa.sent[-1]["text"]["body"]
+
+
+async def test_a_provider_timeout_or_5xx_is_waited_out_like_a_busy_model(env, monkeypatch):
+    """The model provider timed out twice in a row (seen on the big reconciliation): the owner still gets the answer."""
+    import httpx
+    from src import agent_loop
+    monkeypatch.setattr(agent_loop, "RATE_RETRY_S", 0)
+    resp = httpx.Response(503, request=httpx.Request("POST", "http://llm.test/chat"))
+    env.app.state.llm = ScriptLLM(httpx.ReadTimeout("timed out"), httpx.HTTPStatusError("bad gateway", request=resp.request, response=resp),
+                                  say("Ravi ka Rs 10,000 baaki hai."))
+    await dispatch(env.app, owner("to1", "Ravi ka kitna baaki hai?"))
+    texts = [m["text"]["body"] for m in env.app.state.wa.to(OWNER) if m.get("type") == "text"]
+    assert texts[-1].startswith("Ravi ka Rs 10,000") and len([x for x in texts if "busy" in x]) == 1
+    assert (await one(env.pool, "select status from agent_sessions"))["status"] == "DONE"
+
+
+async def test_a_real_client_error_from_the_provider_is_not_retried_forever(env, monkeypatch):
+    import httpx
+    from src import agent_loop
+    monkeypatch.setattr(agent_loop, "RATE_RETRY_S", 0)
+    resp = httpx.Response(401, request=httpx.Request("POST", "http://llm.test/chat"))
+    env.app.state.llm = ScriptLLM(httpx.HTTPStatusError("unauthorized", request=resp.request, response=resp), say("never reached"))
+    await dispatch(env.app, owner("to2", "hello there friend"))
+    assert (await one(env.pool, "select status from agent_sessions"))["status"] == "FAILED"

@@ -25,9 +25,12 @@ PATTERNS = {
 }
 RULES = {name: re.compile(pattern) for name, pattern in PATTERNS.items()}
 MAX_BLOB = 32 * 1024 * 1024
-# One reviewed, deliberately invalid string in the existing secret-rejection
-# test. No value is stored here; neither a test directory nor a rule is exempt.
-REVIEWED_FIXTURES = {("tests/test_production_skills_and_plugins.py", "openai_style_key", "3be4f43fbb3dac59")}
+# Reviewed, deliberately invalid strings in secret-rejection tests (one placeholder
+# key in each). No value is stored here; neither a test directory nor a rule is exempt.
+REVIEWED_FIXTURES = {
+    ("tests/test_production_skills_and_plugins.py", "openai_style_key", "3be4f43fbb3dac59"),
+    ("server/tests/test_memory_share_db.py", "smara_provider_key", "f2b62a70da6691ae"),
+}
 
 
 def scan(data, path, scope, blob=None):

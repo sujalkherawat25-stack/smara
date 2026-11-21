@@ -36,11 +36,30 @@ async def run_due(app, now: datetime) -> int:
                 await conn.execute(
                     "UPDATE agent_tasks SET status = %s, last_error = %s, run_at = %s WHERE id = %s",
                     ("FAILED" if final else "PENDING", f"{type(e).__name__}: {e}"[:300], now + RETRY_AFTER, t["id"]))
+            if final:
+                await _chain(app, t, now)       # a failed run must not end a monthly reminder
             continue
         async with app.state.pool.connection() as conn:
             await conn.execute("UPDATE agent_tasks SET status = 'DONE' WHERE id = %s", (t["id"],))
+        await _chain(app, t, now)
         done += 1
     return done
+
+
+async def _chain(app, t: dict, now: datetime) -> None:
+    """A repeating reminder (daily, weekly, monthly, yearly) schedules its own next time once it has run. Cancelling the pending
+    one therefore ends the series."""
+    import json
+    from src.agent import extras
+    rec = (t["payload"] or {}).get("recur")
+    if not rec:
+        return
+    nxt = extras.next_run(t["run_at"], rec, now)
+    if nxt is None:
+        return
+    async with app.state.pool.connection() as conn:
+        await conn.execute("INSERT INTO agent_tasks (tenant_id, run_at, kind, payload, created_by_session) VALUES (%s, %s, 'followup', %s, %s)",
+                           (t["tenant_id"], nxt, json.dumps(t["payload"]), t["created_by_session"]))
 
 
 async def _run_one(app, t: dict) -> None:

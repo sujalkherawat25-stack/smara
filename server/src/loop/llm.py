@@ -143,17 +143,32 @@ class _Key:
         self.used_seq = 0              # picks go to the least recently used key when two are equally free
 
 
+def effort_args(model: str, effort: str) -> dict:
+    """How to ask a reasoning model to think less. Measured on the provider in use (same hard prompt): glm5.3 at its default spends
+    6,600 tokens and 36 s, with a low effort 1,200 tokens and 8 s; on a larger task the default ran past 24,000 tokens of thinking three
+    times in a row (17 minutes for one answer). deepseek takes `thinking: disabled` instead. Only "low" is used; "" leaves the default."""
+    m = (model or "").lower()
+    if effort != "low":
+        return {}
+    if m.startswith("glm"):
+        return {"reasoning_effort": "low"}
+    if m.startswith("deepseek"):
+        return {"thinking": {"type": "disabled"}}
+    return {}
+
+
 class LLM:
     def __init__(self, base_url: str, api_key: str, model: str, reasoning_model: str = "",
                  client: httpx.AsyncClient | None = None, agent_model: str = "",
                  max_retries: int = 8, max_backoff_s: float = 20.0, max_concurrency: int = 4,
                  agent_rpm: float = 0, fallback_model: str = "", max_wait_s: float = 90.0,
                  fallback_after_s: float = 8.0, api_keys: list[str] | None = None, agent_burst: int = 4,
-                 fallback_on_busy: bool = True, max_tokens: int = 8192):
+                 fallback_on_busy: bool = True, max_tokens: int = 8192, reasoning_effort: str = ""):
         self.enabled = bool(base_url)
         # The provider's own default output limit is 2048 tokens. A reasoning model (glm5.3) spends all of it thinking about a
         # spreadsheet task and returns an empty answer (finish_reason=length), so the limit is set here, not left to the default.
         self.max_tokens = max_tokens
+        self.effort = (reasoning_effort or "").strip().lower()      # "low" asks the agent model to think less (see effort_args)
         self._model, self._reasoning = model, reasoning_model or model
         self.agent_model = agent_model or model     # the tool loop can run on a stronger model than extraction
         self.last_usage: dict = {}
@@ -241,24 +256,30 @@ class LLM:
 
     async def json(self, system: str, user: str | list, *, escalate: bool = False) -> dict:
         """Chat completion constrained to a JSON object. `user` may be multimodal parts."""
+        model = self._reasoning if escalate else self._model
         body = await self._post({
-            "model": self._reasoning if escalate else self._model,
+            "model": model,
             "temperature": 0,
+            "max_tokens": 4096,                      # the provider's default (2048) cut a thinking model's JSON in half
             "response_format": {"type": "json_object"},
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            **({} if escalate else effort_args(model, "low")),       # extraction is a short, structured job: no long thinking
         })
         return json.loads(body["choices"][0]["message"]["content"])
 
     async def chat(self, messages: list[dict], tools: list[dict], allow_fallback: bool = True) -> dict:
         """One agent step: returns the assistant message (content and/or tool_calls)."""
-        req = {"model": self.agent_model, "temperature": 0, "messages": messages, "max_tokens": self.max_tokens}
-        if tools:
-            req.update(tools=tools, tool_choice="auto")
+        def make(model: str) -> dict:
+            r = {"model": model, "temperature": 0, "messages": messages, "max_tokens": self.max_tokens, **effort_args(model, self.effort)}
+            if tools:
+                r.update(tools=tools, tool_choice="auto")
+            return r
+        req = make(self.agent_model)
         fb = bool(self.fallback_model) and self.fallback_model != self.agent_model and allow_fallback
         if any(k.bucket for k in self._keys):
             if fb and self.fallback_on_busy and self._best_wait() > self.fallback_after_s / 2:
                 self.stats["fallbacks"] += 1                    # the main model is busy: do not queue, use the spare one
-                body = await self._post_roomy({**req, "model": self.fallback_model})
+                body = await self._post_roomy(make(self.fallback_model))
                 return self._reply(body, self.fallback_model)
         try:
             # with a fallback model, do not queue behind a rate limit for long: switch after a few seconds
@@ -268,9 +289,17 @@ class LLM:
                 raise
             log.warning("agent model %s is rate limited; answering this step with %s", self.agent_model, self.fallback_model)
             self.stats["fallbacks"] += 1
-            body = await self._post_roomy({**req, "model": self.fallback_model})
+            body = await self._post_roomy(make(self.fallback_model))
             return self._reply(body, self.fallback_model)
-        return self._reply(body, self.agent_model)
+        msg = self._reply(body, self.agent_model)
+        if fb and not msg.get("tool_calls") and not (msg.get("content") or "").strip():
+            # still nothing to show after the roomier retry: the model is lost in its own thinking. The owner must not wait minutes for
+            # that, so this step goes to the spare model.
+            log.warning("agent model %s gave an empty answer twice; answering this step with %s", self.agent_model, self.fallback_model)
+            self.stats["fallbacks"] += 1
+            body = await self._post_roomy(make(self.fallback_model))
+            return self._reply(body, self.fallback_model)
+        return msg
 
     async def _post_roomy(self, req: dict, **kw) -> dict:
         """_post, and when the model ran out of tokens while thinking (nothing to show), once more with three times the room."""

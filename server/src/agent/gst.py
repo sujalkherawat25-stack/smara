@@ -8,6 +8,10 @@ report, taking 1 to 6 minutes and sometimes not finishing. `gst_reconcile` does 
   matched    taxable value and total tax each within Rs 1.
   classes    matched, amount mismatch, in books but not in 2B (the ITC at risk), in 2B but not in books.
   never      auto-matches an invoice whose number differs: those are listed as possible matches for a person to confirm.
+  also       the same invoice entered twice with the same figures is a double booking (counted once, the extra is listed); the
+             GSTR-2B's own "ITC Availability" column is honoured; a narration that looks like blocked credit under section 17(5)
+             (motor car repairs, gifts, food, club fees...) is listed for the CA, never claimed silently; and the ITC that can be
+             claimed this month is worked out from what is left.
 
 It reads files; it changes nothing and sends nothing. The PDF report is made with the normal document engine.
 """
@@ -34,7 +38,34 @@ FIELDS = {
     "sgst": ("sgst", "state ut tax", "state tax", "sgst utgst", "sgst amount", "state tax paid"),
     "cess": ("cess", "cess amount"),
     "total": ("total", "invoice value", "gross total", "invoice amount", "total amount"),
+    "narration": ("narration", "remarks", "description", "nature of expense", "expense head", "ledger name", "item description", "purpose", "nature"),
+    "itc": ("itc availability", "itc available", "eligible for itc", "itc eligibility", "itc eligible", "itc status"),
+    "reason": ("reason", "reason for itc not available", "itc reason"),
 }
+
+# Section 17(5) heads an accountant would look at again. This is a reading of the NARRATION only: some uses are allowed (a vehicle
+# used to carry goods, food for a food business...), so these are listed for the CA to decide, not decided here.
+BLOCKED_HEADS = (
+    ("motor vehicle", r"(motor\s*car|\bcar\b|vehicle|two[- ]wheeler|scooter).{0,40}(repair|maintenance|servic|insurance|fuel|petrol|diesel|purchase)"
+                      r"|(repair|maintenance|servic|insurance|fuel|petrol|diesel).{0,40}(motor\s*car|\bcar\b|vehicle)"),
+    ("rent-a-cab", r"cab\s*hire|rent[- ]a[- ]cab|taxi|cab\s*service"),
+    ("food, beverages, catering", r"canteen|food|beverage|catering|restaurant|meals?\b|snacks|lunch|dinner"),
+    ("gifts, free samples", r"gift|hamper|free\s*samples?"),
+    ("club, health or fitness", r"\bclub\b|membership|gym\b|fitness|health\s*club|beauty|salon|cosmetic|spa\b"),
+    ("life or health insurance", r"life\s*insurance|health\s*insurance|mediclaim"),
+    ("personal use", r"personal\s*(use|consumption)|for\s*(home|residence)|director'?s?\s*(home|residence|personal)"),
+    ("employee travel benefit", r"home\s*travel|leave\s*travel|\bltc\b"),
+    ("construction of immovable property", r"construction\s*of\s*(building|office|factory|plant)|civil\s*work"),
+)
+
+
+def blocked_head(narration: str) -> str:
+    n = str(narration or "").lower()
+    return next((name for name, pat in BLOCKED_HEADS if re.search(pat, n)), "")
+
+
+def not_available(flag: str) -> bool:
+    return str(flag or "").strip().lower() in ("no", "n", "not available", "ineligible", "not eligible", "na", "n/a")
 
 
 def _map(header: list) -> dict[str, int]:
@@ -114,7 +145,8 @@ def parse_file(filename: str, data: bytes) -> dict:
         d = parse_date(_cell(r, cols, "date"))
         rows.append({"supplier": str(_cell(r, cols, "name") or "").strip(), "gstin": _gstin(_cell(r, cols, "gstin")),
                      "invoice": str(inv).strip(), "inv": _inv_key(inv), "date": d.isoformat() if d else "",
-                     "taxable": taxable, "tax": tax})
+                     "taxable": taxable, "tax": tax, "narration": str(_cell(r, cols, "narration") or "").strip(),
+                     "itc": str(_cell(r, cols, "itc") or "").strip(), "reason": str(_cell(r, cols, "reason") or "").strip()})
     return {"rows": rows, "sheet": sheet, "filename": filename, "skipped": skipped}
 
 
@@ -137,25 +169,29 @@ def reconcile(books: list[dict], b2b: list[dict]) -> dict:
     by_name = {_name_key(r["supplier"]): r["gstin"] for r in b2b + books if r["gstin"] and r["supplier"]}
 
     def index(rows):
-        out, dup = {}, 0
+        out, lines, twice = {}, 0, []
         for r in rows:
             k = (_supplier_id(r, by_name), r["inv"])
-            if k in out:                                             # the same invoice twice in one file: add them up
-                dup += 1
-                out[k] = {**out[k], "taxable": out[k]["taxable"] + r["taxable"], "tax": out[k]["tax"] + r["tax"]}
+            if k in out:
+                o = out[k]
+                if o["taxable"] == r["taxable"] and o["tax"] == r["tax"]:       # the same figures again: a double booking, counted once
+                    twice.append(r)
+                else:                                                            # other figures: another line of the same invoice, added up
+                    lines += 1
+                    out[k] = {**o, "taxable": o["taxable"] + r["taxable"], "tax": o["tax"] + r["tax"]}
             else:
                 out[k] = r
-        return out, dup
+        return out, lines, twice
 
-    bk, bdup = index(books)
-    tk, tdup = index(b2b)
+    bk, bdup, btwice = index(books)
+    tk, tdup, ttwice = index(b2b)
     matched, mismatch, missing, extra = [], [], [], []
     for k, b in bk.items():
         t = tk.get(k)
         if t is None:
             missing.append(b)
         elif abs(b["taxable"] - t["taxable"]) <= TOLERANCE and abs(b["tax"] - t["tax"]) <= TOLERANCE:
-            matched.append(b)
+            matched.append((b, t))
         else:
             mismatch.append((b, t))
     extra = [t for k, t in tk.items() if k not in bk]
@@ -182,6 +218,17 @@ def reconcile(books: list[dict], b2b: list[dict]) -> dict:
         c["invoices"].append(f"{b['invoice']} (2B shows less)")
         c["itc"] += d
     rupees = lambda p: round(p / 100, 2)
+    # What can be claimed this month: every invoice that is in both files, at the 2B figure (a value mismatch counts at the lower figure
+    # the supplier reported), except the ones 2B itself marks as ITC not available and the ones that read like blocked credit.
+    claim, blocked, unavailable, claim_n = 0, [], [], 0
+    for b, t in matched + mismatch:
+        if not_available(t.get("itc")):
+            unavailable.append((b, t))
+        elif blocked_head(b.get("narration")):
+            blocked.append((b, t))
+        else:
+            claim += t["tax"]
+            claim_n += 1
     return {
         "counts": {"books_invoices": len(bk), "gstr2b_invoices": len(tk), "matched": len(matched), "amount_mismatch": len(mismatch),
                    "in_books_not_in_2b": len(missing), "in_2b_not_in_books": len(extra), "possible_matches": len(possible)},
@@ -197,6 +244,19 @@ def reconcile(books: list[dict], b2b: list[dict]) -> dict:
         "chase_suppliers": sorted(({"supplier": k, "invoices": v["invoices"], "itc_rupees": rupees(v["itc"])} for k, v in chase.items()),
                                   key=lambda x: -x["itc_rupees"]),
         "duplicates_added_up": {"books": bdup, "gstr2b": tdup},
+        "double_booked_in_books": [{"supplier": r["supplier"], "invoice": r["invoice"], "date": r["date"], "itc_rupees": rupees(r["tax"])} for r in btwice],
+        "double_booked_note": "the same supplier invoice with the same figures entered again; counted once above, the extra entry should be reversed in the books" if btwice else "",
+        "claimable_itc_rupees": rupees(claim), "claimable_invoices": claim_n,
+        "claimable_basis": "the 2B tax of every invoice that is in both files (a value mismatch at the 2B figure), leaving out those 2B marks "
+                           "ITC not available and those whose narration looks like blocked credit under section 17(5); a double booking counts once",
+        "itc_blocked_17_5_to_review": [{"supplier": b["supplier"], "invoice": b["invoice"], "head": blocked_head(b["narration"]), "narration": b["narration"],
+                                        "itc_rupees": rupees(t["tax"])} for b, t in blocked],
+        "itc_blocked_17_5_rupees": rupees(sum(t["tax"] for _, t in blocked)),
+        "itc_blocked_note": "judged from the narration only; some uses are allowed, so the CA decides" if blocked else "",
+        "itc_not_available_per_2b": [{"supplier": t["supplier"], "invoice": t["invoice"], "reason": t.get("reason") or t.get("itc"), "itc_rupees": rupees(t["tax"])}
+                                     for b, t in unavailable],
+        "itc_not_available_rupees": rupees(sum(t["tax"] for _, t in unavailable)),
+        "matched_invoices": [{"supplier": b["supplier"], "invoice": b["invoice"], "date": b["date"], "tax_rupees": rupees(b["tax"])} for b, t in matched],
     }
 
 
@@ -207,7 +267,8 @@ def report_blocks(res: dict) -> list[dict]:
         {"label": "In your books", "value": str(c["books_invoices"]), "hint": "invoices"},
         {"label": "In GSTR-2B", "value": str(c["gstr2b_invoices"]), "hint": "invoices"},
         {"label": "Matched", "value": str(c["matched"]), "tone": "good"},
-        {"label": "ITC at risk", "value": f"Rs {res['itc_at_risk_rupees']:,.2f}", "tone": "bad" if res["itc_at_risk_rupees"] else "good"}]}]
+        {"label": "ITC at risk", "value": f"Rs {res['itc_at_risk_rupees']:,.2f}", "tone": "bad" if res["itc_at_risk_rupees"] else "good"},
+        {"label": "Claimable this month", "value": f"Rs {res['claimable_itc_rupees']:,.2f}", "tone": "good"}]}]
     if res["in_books_not_in_2b"]:
         blocks.append({"type": "table", "caption": "In your books but not in GSTR-2B (the supplier has not reported it): ITC at risk",
                        "columns": money(["Supplier", "Invoice", "Date", "ITC (Rs)"]),
@@ -221,6 +282,18 @@ def report_blocks(res: dict) -> list[dict]:
         blocks.append({"type": "table", "caption": "In GSTR-2B but not in your books (not yet entered, a wrong GSTIN, or not yours)",
                        "columns": money(["Supplier", "Invoice", "Date", "ITC (Rs)"]),
                        "rows": [[r["supplier"], r["invoice"], r["date"], r["itc_rupees"]] for r in res["in_2b_not_in_books"][:PDF_CAP]]})
+    if res["double_booked_in_books"]:
+        blocks.append({"type": "table", "caption": "Entered twice in your books (counted once; the extra entry needs reversing)",
+                       "columns": money(["Supplier", "Invoice", "Date", "ITC (Rs)"]),
+                       "rows": [[r["supplier"], r["invoice"], r["date"], r["itc_rupees"]] for r in res["double_booked_in_books"][:PDF_CAP]]})
+    if res["itc_blocked_17_5_to_review"]:
+        blocks.append({"type": "table", "caption": "Looks like blocked credit under section 17(5): not counted as claimable; the CA decides",
+                       "columns": money(["Supplier", "Invoice", "Head", "Narration", "ITC (Rs)"]),
+                       "rows": [[r["supplier"], r["invoice"], r["head"], r["narration"][:40], r["itc_rupees"]] for r in res["itc_blocked_17_5_to_review"][:PDF_CAP]]})
+    if res["itc_not_available_per_2b"]:
+        blocks.append({"type": "table", "caption": "GSTR-2B itself says ITC is not available",
+                       "columns": money(["Supplier", "Invoice", "Reason", "ITC (Rs)"]),
+                       "rows": [[r["supplier"], r["invoice"], str(r["reason"])[:40], r["itc_rupees"]] for r in res["itc_not_available_per_2b"][:PDF_CAP]]})
     if res["possible_matches"]:
         blocks.append({"type": "table", "caption": "Possible matches with a different invoice number (please confirm)",
                        "columns": money(["Supplier", "In books", "In GSTR-2B", "ITC (Rs)"]),
@@ -229,6 +302,30 @@ def report_blocks(res: dict) -> list[dict]:
                                            "and the taxable value and the tax are each within Rs 1. Prepared for the owner and the CA to review; it is not advice on "
                                            "what to claim or reverse."})
     return blocks
+
+
+from src.agent import ca_reports                      # noqa: E402  (the workbook maker, the PDF + Excel + send step and rs())
+from src.agent.ca_reports import XL_CODE, rs  # noqa: E402,F401
+
+
+def excel_sheets(full: dict) -> list:
+    r = lambda k, cols: [[x.get(c) for c in cols] for x in full[k]]
+    return [
+        ("Summary", ["Item", "Value"], [["Invoices in books", full["counts"]["books_invoices"]], ["Invoices in GSTR-2B", full["counts"]["gstr2b_invoices"]],
+                                         ["Matched", full["counts"]["matched"]], ["Amount mismatch", full["counts"]["amount_mismatch"]],
+                                         ["In books, not in 2B", full["counts"]["in_books_not_in_2b"]], ["In 2B, not in books", full["counts"]["in_2b_not_in_books"]],
+                                         ["ITC at risk (Rs)", full["itc_at_risk_rupees"]], ["Claimable ITC this month (Rs)", full["claimable_itc_rupees"]],
+                                         ["Blocked 17(5), to review (Rs)", full["itc_blocked_17_5_rupees"]], ["2B says ITC not available (Rs)", full["itc_not_available_rupees"]],
+                                         ["How claimable is worked out", full["claimable_basis"]]]),
+        ("In books, not in 2B", ["Supplier", "Invoice", "Date", "ITC (Rs)"], r("in_books_not_in_2b", ["supplier", "invoice", "date", "itc_rupees"])),
+        ("In 2B, not in books", ["Supplier", "Invoice", "Date", "ITC (Rs)"], r("in_2b_not_in_books", ["supplier", "invoice", "date", "itc_rupees"])),
+        ("Amount mismatch", ["Supplier", "Invoice", "Taxable books", "Taxable 2B", "ITC books", "ITC 2B", "Difference"],
+         r("amount_mismatch", ["supplier", "invoice", "taxable_books_rupees", "taxable_2b_rupees", "itc_books_rupees", "itc_2b_rupees", "difference_rupees"])),
+        ("Blocked 17(5) to review", ["Supplier", "Invoice", "Head", "Narration", "ITC (Rs)"], r("itc_blocked_17_5_to_review", ["supplier", "invoice", "head", "narration", "itc_rupees"])),
+        ("ITC not available (2B)", ["Supplier", "Invoice", "Reason", "ITC (Rs)"], r("itc_not_available_per_2b", ["supplier", "invoice", "reason", "itc_rupees"])),
+        ("Entered twice", ["Supplier", "Invoice", "Date", "ITC (Rs)"], r("double_booked_in_books", ["supplier", "invoice", "date", "itc_rupees"])),
+        ("Matched", ["Supplier", "Invoice", "Date", "Tax (Rs)"], r("matched_invoices", ["supplier", "invoice", "date", "tax_rupees"])),
+    ]
 
 
 async def gst_reconcile(app, ctx, args: dict) -> dict:
@@ -248,21 +345,48 @@ async def gst_reconcile(app, ctx, args: dict) -> dict:
     res = reconcile(books[2]["rows"], gstr[2]["rows"])
     res["files"] = {"books": books[0], "gstr2b": gstr[0]}
     res["skipped_rows"] = {"books": books[2]["skipped"], "gstr2b": gstr[2]["skipped"]}
-    for k in ("amount_mismatch", "in_books_not_in_2b", "in_2b_not_in_books", "possible_matches", "chase_suppliers"):
+    for k in ("amount_mismatch", "in_books_not_in_2b", "in_2b_not_in_books", "possible_matches", "chase_suppliers", "itc_blocked_17_5_to_review",
+              "itc_not_available_per_2b", "double_booked_in_books", "matched_invoices"):
         if len(res[k]) > LIST_CAP:
             res[f"{k}_note"] = f"{len(res[k])} in all; the report has up to {PDF_CAP}"
     full = dict(res)
-    res = {k: (v[:LIST_CAP] if isinstance(v, list) else v) for k, v in res.items()}
+    res.pop("matched_invoices", None)                     # the owner does not need 350 matched rows in the chat; they are in the Excel
+    res["summary_lines"] = summary_lines(full)
     if args.get("report", True):
-        doc = await documents.make_document(app, ctx, {"kind": "custom", "title": "GSTR-2B reconciliation",
-                                                       "subtitle": f"{books[0]} against {gstr[0]}", "blocks": report_blocks(full)})
-        if "file_ref" in doc:
-            res.update({"report_file_ref": doc["file_ref"], "report_filename": doc["filename"], "_new_files": doc["_new_files"],
-                        "next": "Send the report with send_file_to_owner(file_ref=report_file_ref), then tell the owner the counts, the ITC at "
-                                "risk and which suppliers to chase. Offer a short message per supplier for the owner's approval."})
-        else:
-            res["report_error"] = doc.get("error", "the report could not be made")
-    return res
+        out = await ca_reports.deliver(app, ctx, title="GSTR-2B reconciliation", subtitle=f"{books[0]} against {gstr[0]}", blocks=report_blocks(full),
+                                       xl_name="GSTR2B_reconciliation.xlsx", sheets=excel_sheets(full), caption="GSTR-2B reconciliation",
+                                       send=bool(args.get("send", True)))
+        res.update({"files_made": out["files"], "files_sent_to_owner": out["sent"], "files_not_sent": out["not_sent"], "_new_files": out["_new_files"],
+                    "file_refs": out["file_refs"]})
+    res["next"] = ("Tell the owner the answer in their language using summary_lines (the figures are final: quote them, never recompute them, "
+                   "never redo this with code). " + ("The PDF and the full Excel have already been sent to them. " if res.get("files_sent_to_owner") else
+                                                     "The files could not be sent; say so and offer to try again. ") +
+                   "Offer a short message per supplier to chase, for their approval.")
+    return ca_reports.compact(res, ("summary_lines", "next", "files_sent_to_owner", "files_not_sent", "counts", "counts_reconcile", "claimable_itc_rupees",
+                                    "claimable_basis", "itc_at_risk_rupees"))
+
+
+def summary_lines(full: dict) -> list[str]:
+    c = full["counts"]
+    lines = [f"Your books have {c['books_invoices']} invoices and GSTR-2B has {c['gstr2b_invoices']}; {c['matched']} match exactly.",
+             f"In your books but NOT in GSTR-2B: {c['in_books_not_in_2b']} invoices, ITC at risk {rs(full['itc_in_books_not_in_2b_rupees'])} (the supplier has not reported them)."]
+    if c["in_2b_not_in_books"]:
+        extra = sum(x["itc_rupees"] for x in full["in_2b_not_in_books"])
+        lines.append(f"In GSTR-2B but not in your books: {c['in_2b_not_in_books']} invoices, ITC {rs(extra)} (not yet entered, a wrong GSTIN, or not yours).")
+    if c["amount_mismatch"]:
+        lines.append(f"Same invoice, different amounts: {c['amount_mismatch']} invoices; the books claim {rs(full['itc_short_in_2b_rupees'])} more ITC than the supplier reported.")
+    if full["double_booked_in_books"]:
+        lines.append(f"Entered twice in your books: {len(full['double_booked_in_books'])} invoices (ITC {rs(sum(x['itc_rupees'] for x in full['double_booked_in_books']))}); the extra entries need reversing.")
+    if full["itc_blocked_17_5_to_review"]:
+        lines.append(f"Looks like blocked credit under section 17(5): {len(full['itc_blocked_17_5_to_review'])} invoices, {rs(full['itc_blocked_17_5_rupees'])} "
+                     "(judged from the narration only; the CA decides).")
+    if full["itc_not_available_per_2b"]:
+        lines.append(f"GSTR-2B itself marks ITC not available: {len(full['itc_not_available_per_2b'])} invoices, {rs(full['itc_not_available_rupees'])}.")
+    if c["possible_matches"]:
+        lines.append(f"{c['possible_matches']} possible matches with a different invoice number need a person to confirm.")
+    lines.append(f"ITC claimable this month: {rs(full['claimable_itc_rupees'])} on {full['claimable_invoices']} invoices (the 2B tax of invoices in both files, "
+                 "leaving out the blocked and not-available ones).")
+    return lines
 
 
 # ---- files that are not receivables --------------------------------------------------------------------------------------

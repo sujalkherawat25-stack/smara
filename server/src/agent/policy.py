@@ -108,7 +108,7 @@ def can_open(ref, ctx) -> bool:
 def tier_of(name: str, args: dict) -> str:
     if name in ("query_ledger_sql", "resolve_continuum_memory", "run_python", "get_current_time", "check_gstin",
                 "build_payment_request", "list_followups", "web_search", "read_attachment", "make_document", "load_skill",
-                "search_chat_history", "gst_reconcile", "find_customer", "list_my_files", "react_to_message",
+                "search_chat_history", "gst_reconcile", "bank_reconcile", "ageing_report", "audit_gst_register", "tds_check", "find_customer", "list_my_files", "react_to_message",
                 "open_spreadsheet", "edit_spreadsheet", "query_spreadsheet"):
         return "T0"
     if name in ("schedule_followup", "cancel_followup", "send_file_to_owner", "set_customer_phone", "set_reply_style",
@@ -131,6 +131,25 @@ def tier_of(name: str, args: dict) -> str:
     return "?"
 
 
+# Government portals where a person signs in, gets an OTP or signs digitally and files returns. Smara never drives these: the
+# owner or their CA does, and the agent prepares what they file. (Reading a public notification page is fine.)
+FILING_HOSTS = ("services.gst.gov.in", "return.gst.gov.in", "einvoice1.gst.gov.in", "einvoice2.gst.gov.in", "ewaybillgst.gov.in",
+                "eportal.incometax.gov.in", "tdscpc.gov.in", "unifiedportal-emp.epfindia.gov.in", "unifiedportal-mem.epfindia.gov.in",
+                "mca.gov.in", "www.mca.gov.in")
+
+
+def filing_portal(url) -> bool:
+    from urllib.parse import urlparse
+    try:
+        u = urlparse(str(url or "").strip() if "//" in str(url or "") else "https://" + str(url or "").strip())
+    except ValueError:
+        return False
+    host = (u.hostname or "").lower()
+    if host in ("gst.gov.in", "www.gst.gov.in"):
+        return True                      # the GST portal's front page is the login page: a browser on it only ever heads to the login
+    return any(host == h or host.endswith("." + h) for h in FILING_HOSTS)
+
+
 def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[str]) -> Decision:
     if name not in known_tools:
         return Decision("deny", reason=f"unknown tool {name!r}")
@@ -145,6 +164,10 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
             return Decision("deny", tier, "a counterparty session may only touch its own party")
     if name == "browser_step" and args.get("action") not in BROWSER_READ | BROWSER_ACT | BROWSER_FILES:
         return Decision("deny", tier, "unsupported browser action")
+    if name == "browser_step" and args.get("action") == "navigate" and filing_portal(args.get("url")):
+        return Decision("deny", tier, "Smara never signs in to or files on a government portal (GST, income tax, TDS, PF, MCA): the login, "
+                                      "OTP and digital signature are the owner's or their CA's. Tell the owner that plainly in one or two "
+                                      "lines and offer what you CAN do: work out the figures, check the data and prepare the files for them to file.")
     if name == "browser_step" and args.get("action") in BROWSER_FILES:
         if ctx.trust != "TRUSTED":
             return Decision("deny", tier, "only a conversation with the owner can move files to or from a website")
@@ -169,6 +192,10 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
             return Decision("deny", tier, "only files attached to this conversation can be opened")
         if tier == "T1" and ctx.trust != "TRUSTED":
             return Decision("deny", tier, "only the owner's own uploads can be imported")
+    if name == "bank_reconcile" and any(args.get(k) not in ctx.files for k in ("book_file_ref", "bank_file_ref")):
+        return Decision("deny", tier, "only files attached to this conversation can be opened")
+    if name in ("ageing_report", "audit_gst_register", "tds_check") and not can_open(args.get("file_ref"), ctx):
+        return Decision("deny", tier, "only files attached to this conversation, or the owner's kept files, can be opened")
     if name == "gst_reconcile" and any(args.get(k) not in ctx.files for k in ("books_file_ref", "gstr2b_file_ref")):
         return Decision("deny", tier, "only files attached to this conversation can be opened")
     if name in ("open_spreadsheet", "edit_spreadsheet", "query_spreadsheet") and not can_open(args.get("file_ref"), ctx):
