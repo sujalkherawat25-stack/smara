@@ -110,7 +110,8 @@ TOOLS = [
     _fn("edit_spreadsheet", "Change an Excel/CSV file cell-exactly; nothing outside the change is touched, and the saved "
         "file is checked against the original. A change: column (header); value (text/number) | formula ('={Bill}-{Paid}', "
         "{Header} = that column, same row) | compute (same, written as a number) | copy_from (column); action set|clear|"
-        "add_column (+header); rows: 'data' (default: entry rows, not header/totals/block below) | [row numbers] | "
+        "add_column (+header) | fill_from (match_on 'Party Name', from_sheet 'Party Master', from_key, from_value): fills the EMPTY cells of "
+        "column from another sheet by matching a key; a key with two different values there or none is left empty and listed, never guessed; rows: 'data' (default: entry rows, not header/totals/block below) | [row numbers] | "
         "{'names': [...]} | {'where': [{'column', 'op' (< <= > >= = != empty not_empty contains), 'value'}]}; only_empty; "
         "include_total_rows; include_rows_below_totals. preview: true = dry run. Returns changed cells, side effects "
         "(#VALUE!, moved totals), verified, and file_ref (send it; use it for the next change to this file).",
@@ -202,6 +203,20 @@ TOOLS = [
         "EVERY bank reconciliation or BRS request, and call it again for a follow-up: never match the two files with your own code. as_on (YYYY-MM-DD) is "
         "optional. If it says 'needs', ask the owner for that (an opening balance) and call again.",
         {"book_file_ref": _S, "bank_file_ref": _S, "as_on": _S, "report": {"type": "boolean"}, "send": {"type": "boolean"}}, ["book_file_ref", "bank_file_ref"]),
+    _fn("audit_gst_register", "Audit a GST sales (or purchase) register in ONE call, Excel or CSV: invoices charged the wrong tax head (IGST inside the "
+        "shop's state or CGST/SGST outside it), invoice value that is not taxable + tax, the same line entered twice, a B2B invoice with no GSTIN or an "
+        "invalid one, and tax that does not match the GST rate. Credit notes are not errors. It lists every problem invoice, makes the PDF and an Excel "
+        "with the problem entries ONLY and sends both to the owner. Use it for EVERY request to check, audit or find mistakes in a sales or purchase "
+        "register; never recheck it with your own code. own_state is optional (it is worked out from the rows).",
+        {"file_ref": _S, "own_state": _S, "report": {"type": "boolean"}, "send": {"type": "boolean"}}, ["file_ref"]),
+    _fn("tds_check", "Check TDS on a table of payments in ONE call (Excel or CSV with section, gross amount and TDS deducted columns, and "
+        "usually vendor, PAN, vendor type): what should have been deducted, what was, which payments are short and which are over-deducted. YOU "
+        "pass the owner's rules: rates {\"194C\": {\"Individual\": 1, \"Company\": 2}, \"194J\": 10, ...} (a number, or a table by vendor type), "
+        "thresholds {\"194C\": 30000} (a payment at or below it has NO TDS, even without a PAN) and no_pan_rate (default 20: the higher of that and the "
+        "rate applies where TDS applies). Never invent a rate: if they did not say, ask. It sends the PDF and an Excel (short, excess, every payment). "
+        "Use it for EVERY TDS check; never do this arithmetic yourself.",
+        {"file_ref": _S, "rates": {"type": "object"}, "thresholds": {"type": "object"}, "no_pan_rate": {"type": "number"}, "report": {"type": "boolean"},
+         "send": {"type": "boolean"}}, ["file_ref", "rates"]),
     _fn("ageing_report", "Receivables or payables ageing in ONE call from a list of open invoices (party, invoice date and/or due date, outstanding amount), "
         "Excel or CSV. Buckets 0-30, 31-60, 61-90, 90+ days from the invoice date (basis 'invoice_date', the default) or days past the due date (basis "
         "'due_date'), as on as_on (YYYY-MM-DD, default today). Returns the bucket totals, party-wise table and the biggest parties in the oldest bucket, "
@@ -263,7 +278,9 @@ TOOLS = [
         "the unclear ones in 'review'; mh.split_sheets(src, dst, 'Invoice Date', how='month') (or how='value' for a column like Country) puts each "
         "month or value on its own sheet of ONE workbook with dates, numbers, formulas and formatting exactly as they were (pandas turns the "
         "dates into text). 'Exact duplicate rows' means df.duplicated() over EVERY column as read, nothing looser (no stripping or lower-casing): keep "
-        "the first copy and quote that count; mh.group_names(names) gathers the spellings of one party (case, M/s, Messrs, Pvt Ltd, '&') for a "
+        "the first copy and quote that count; mh.tds_expected(df, rates={'194C': {'Individual': 1, 'Company': 2}, '194J': 10}, thresholds={'194C': 30000}, "
+        "no_pan_rate=20) gives the TDS each payment should have had (a payment at or below its threshold has none even without PAN); "
+        "mh.group_names(names) gathers the spellings of one party (case, M/s, Messrs, Pvt Ltd, '&') for a "
         "party-wise total and lists 'maybe_same' pairs to keep apart and show the owner; mh.fifo_apply(invoices, payments) applies lump-sum receipts oldest invoice first and returns "
         "open balances and advances; mh.norm_invoice(no) compares invoice numbers ignoring punctuation and case; "
         "mh.tds_194q(bills) does section 194Q: 0.1% ONLY on the part of a supplier's year purchases ABOVE Rs 50 lakh (62.5 lakh "

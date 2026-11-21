@@ -816,3 +816,30 @@ def _split_sheets_streaming(src, dst, by, how, sheet, header_row, keep_all_sheet
     Path(dst).parent.mkdir(parents=True, exist_ok=True)
     out.save(dst)
     return counts
+
+
+def tds_expected(df, *, rates: dict, amount: str = "Amount", section: str = "Section", pan: str = "PAN", vendor_type: str | None = None,
+                 thresholds: dict | None = None, no_pan_rate: float = 20.0):
+    """TDS that should have been deducted on each row of a payments table (a pandas Series of whole rupees, half up).
+    rates: {'194C': {'Individual': 1, 'Company': 2}, '194J': 10, '194I': 10, '194H': 2}: a number, or a dict keyed by the vendor_type column.
+    thresholds: {'194C': 30000}: a payment at or below its section's threshold has NO TDS, even without a PAN (no PAN only raises the rate
+    where TDS applies). No PAN (blank, NA, 'not available') means the higher of the section's rate and no_pan_rate. Then compare with the
+    TDS deducted column: expected minus deducted above 1 rupee is a short deduction, below -1 an excess deduction."""
+    import pandas as pd
+    from decimal import ROUND_HALF_UP, Decimal
+    th = thresholds or {}
+
+    def one(row):
+        sec = str(row[section]).strip()
+        rate = rates.get(sec)
+        if isinstance(rate, dict):
+            rate = rate.get(str(row[vendor_type]).strip()) if vendor_type else None
+        if rate is None:
+            return float("nan")
+        amt = float(row[amount])
+        if sec in th and amt <= th[sec]:
+            return 0.0
+        has_pan = isinstance(row[pan], str) and row[pan].strip().upper() not in ("", "NA", "N/A", "NOT AVAILABLE", "NONE", "-")
+        pct = rate if has_pan else max(rate, no_pan_rate)
+        return float(Decimal(str(amt * pct / 100)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return df.apply(one, axis=1)

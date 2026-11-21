@@ -20,7 +20,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from src import chatlog, clock, health_watch, prefs, tenants
-from src.agent import actions, bookkeeping, documents, extras, ageing, bank, gst, memory_pass, pc, reader, sheet_tools, skills, tools, web
+from src.agent import actions, bookkeeping, documents, extras, ageing, bank, gst, memory_pass, pc, reader, register_audit, sheet_tools, skills, tds_check, tools, web
 from src.agent.context import compact
 from src.agent.policy import SessionCtx, approval_text, pre_tool_use
 from src.agent.prompt import build_system, latest_owner_text
@@ -50,6 +50,7 @@ EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memo
              "pc_files": pc.pc_files, "set_customer_phone": bookkeeping.set_customer_phone,
              "find_customer": bookkeeping.find_customer, "set_reply_style": prefs.set_reply_style,
              "gst_reconcile": gst.gst_reconcile, "bank_reconcile": bank.bank_reconcile, "ageing_report": ageing.ageing_report,
+             "audit_gst_register": register_audit.audit_gst_register, "tds_check": tds_check.tds_check,
              "open_spreadsheet": sheet_tools.open_spreadsheet,
              "edit_spreadsheet": sheet_tools.edit_spreadsheet, "query_spreadsheet": sheet_tools.query_spreadsheet,
              "ask_owner": extras.ask_owner}

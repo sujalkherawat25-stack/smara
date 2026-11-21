@@ -318,8 +318,8 @@ def ist(dt: datetime) -> datetime:
 
 
 # ------------------------------------------------------------------------------------------------------------- claims audit
-CLAIM_FILE = re.compile(r"(bhej\s*(diya|di\s*hai|di\b)|bhej\s*rah[ae]\s*hoon|attached|i(?:'| ha)ve sent|sent (?:you )?(?:the|a|an)\b|yeh\s*raha\s*(?:file|excel|report)|"
-                        r"file\s*(?:ready|taiyar)|bana\s*(?:diya|di)\b)", re.I)
+CLAIM_FILE = re.compile(r"((file|excel|pdf|report|statement|sheet|document|attachment|brs)\W+(\w+\W+){0,4}(bhej\s*(diya|di\b|di\s*hai)|bheji\b|sent\b|attached\b|bana\s*(diya|di)\b)|"
+                        r"(bhej\s*(diya|di\b|di\s*hai)|sent|attached)\W+(\w+\W+){0,3}(file|excel|pdf|report|statement|sheet|document))", re.I)
 CLAIM_REMIND = re.compile(r"(yaad\s*dila\s*(?:dunga|dungi|doonga|ungi|unga)|reminder\s*(?:set|laga|schedule)|set\s*kar\s*(?:diya|di)|"
                           r"schedule\s*kar\s*(?:diya|di)|i['’]ll remind|i will remind|reminder (?:is )?(?:set|scheduled))", re.I)
 
@@ -584,17 +584,20 @@ async def c_dep(env):
         sheets = all_sheets(xs[-1])
     except ValueError as e:
         return False, str(e)
-    main = next((rows for rows in sheets.values() if header_index(rows, "Asset No") is not None), None)
+    def asset_header(rows):          # the asset-wise table, whatever the agent called its first column (Asset No, Asset, Asset ID)
+        return next((i for i, r in enumerate(rows) if r and str(r[0] or "").strip().lower().startswith("asset") and any("deprec" in str(c or "").lower() for c in r)), None)
+    main = next((rows for rows in sheets.values() if asset_header(rows) is not None), None)
     p.add("schedule sheet kept", main is not None)
     if main:
-        hdr = header_index(main, "Asset No")
+        hdr = asset_header(main)
         cols = added_columns(main, hdr, {"dep": "deprec", "close": "clos"})
+        cls_i = next((i for i, c in enumerate(main[hdr]) if str(c or "").strip().lower() in ("class", "asset class", "category")), 2)
         p.add("depreciation and closing columns", len(cols) == 2, f"{cols}")
         if len(cols) == 2:
             per = {}
             for r in main[hdr + 1:]:
                 if r and r[0] and str(r[0]).startswith("FA-") and isinstance(r[cols["dep"]], (int, float)):
-                    c = per.setdefault(r[2], [0, 0])
+                    c = per.setdefault(r[cls_i], [0, 0])
                     c[0] += r[cols["dep"]]
                     c[1] += r[cols["close"]] if isinstance(r[cols["close"]], (int, float)) else 0
             bad = {c: (round(per.get(c, [0])[0]), v["dep"]) for c, v in g["per_class"].items() if abs(per.get(c, [0])[0] - v["dep"]) > 3}

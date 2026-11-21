@@ -971,6 +971,10 @@ def plan(book, changes: list[dict], owner_words: str = "") -> tuple[list, list]:
                 raise ValueError(f"change {i + 1}: the owner did not ask to empty or remove anything; do not clear "
                                  f"'{header}'. Ask them if you think it should be")
             rep["column"] = f"{col_letter(col)} '{header}'"
+        if action == "fill_from":
+            _plan_fill_from(book, sh, col, ch, rep, writes, claimed, i)
+            reports.append(rep)
+            continue
         rows = _target_rows(sh, ch, col, rep)
         if not rows:
             rep["rows_changed"] = 0
@@ -1007,6 +1011,60 @@ def plan(book, changes: list[dict], owner_words: str = "") -> tuple[list, list]:
             rep["values_replaced"] = values_over
         reports.append(rep)
     return writes, reports
+
+
+def _plan_fill_from(book, sh, col, ch, rep, writes, claimed, i) -> None:
+    """A lookup that never guesses: fill the EMPTY cells of `column` from another sheet by matching a key (a party name, an item code).
+    Keys match ignoring case, spaces, punctuation, M/s and Pvt/Ltd. A key that gives two different values in the other sheet (the same
+    party with two GSTINs) or no value at all is left empty and listed, never picked."""
+    src = next((s for s in book["sheets"] if norm(s.title) == norm(ch.get("from_sheet"))), None)
+    if src is None:
+        raise ValueError(f"change {i + 1}: no sheet called {ch.get('from_sheet')!r} (sheets: {', '.join(s.title for s in book['sheets'])})")
+    if not ch.get("match_on"):
+        raise ValueError(f"change {i + 1}: fill_from needs match_on (the column in this sheet that identifies the row, e.g. 'Party Name')")
+    key_t, err = sh.find_column(ch["match_on"])
+    if err:
+        raise ValueError(f"change {i + 1}: {err}")
+    key_s, err = src.find_column(ch.get("from_key") or ch["match_on"])
+    if err:
+        raise ValueError(f"change {i + 1}: in sheet {src.title!r}: {err}")
+    val_s, err = src.find_column(ch.get("from_value") or ch.get("column"))
+    if err:
+        raise ValueError(f"change {i + 1}: in sheet {src.title!r}: {err}")
+    table: dict = {}
+    for r in src.data_rows():
+        k, v = _name_key(src.ev.value(r, key_s)), src.ev.value(r, val_s)
+        if k and v not in (None, ""):
+            table.setdefault(k, {}).setdefault(str(v).strip(), v)
+    filled, ambiguous, missing = [], {}, {}
+    for r in sh.data_rows():
+        old = sh.cells.get((r, col))
+        if old not in (None, ""):
+            continue
+        name = sh.ev.value(r, key_t)
+        k = _name_key(name)
+        if not k:
+            continue
+        vals = table.get(k)
+        label = str(name).strip()
+        if vals is None:
+            missing.setdefault(label, []).append(r)
+        elif len(vals) > 1:
+            ambiguous.setdefault(label, {"rows": [], "values": sorted(vals)})["rows"].append(r)
+        else:
+            claimed[(sh.title, r, col)] = i + 1
+            writes.append((sh, r, col, old, next(iter(vals.values()))))
+            filled.append(r)
+    rep["rows_changed"] = len(filled)
+    rep["filled_from"] = f"{src.title}: {sh.headers.get(key_t, '')} -> {src.headers.get(val_s, '')}"
+    if ambiguous:
+        rep["left_empty_two_values_in_the_other_sheet"] = [{"name": n, "rows": v["rows"][:6], "values": v["values"]} for n, v in ambiguous.items()]
+    if missing:
+        rep["left_empty_not_found_in_the_other_sheet"] = [{"name": n, "rows": rs[:6]} for n, rs in missing.items()]
+    rep["still_empty"] = sum(len(v["rows"]) for v in ambiguous.values()) + sum(len(v) for v in missing.values())
+    rep["examples"] = [f"{col_letter(col)}{r}: blank -> {next(iter(table[_name_key(sh.ev.value(r, key_t))].values()))}" for r in filled[:4]]
+    if rep["still_empty"]:
+        rep["note"] = "rows left empty on purpose: tell the owner which names and why (two different values, or not in the other sheet)"
 
 
 def effects(book, writes) -> list[str]:
