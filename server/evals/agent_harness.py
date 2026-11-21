@@ -439,7 +439,7 @@ async def main() -> None:
     a = ap.parse_args()
     pool = await open_pool(a.db)
     llm = LLM(os.environ["LLM_BASE_URL"], os.environ["LLM_API_KEY"], a.model, agent_model=a.model, agent_rpm=float(os.environ.get("LLM_AGENT_RPM", "0")),
-              fallback_model=os.environ.get("LLM_FALLBACK_MODEL", ""))
+              fallback_model=os.environ.get("LLM_FALLBACK_MODEL", ""), reasoning_effort=os.environ.get("LLM_REASONING_EFFORT", ""))
     tokens = {}
     real_chat = llm.chat
 
