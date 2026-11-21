@@ -489,6 +489,64 @@ def load_bills(folder: str) -> None:
         reg("BL_" + k, v["file"], (root / v["file"]).read_bytes())
 
 
+# ------------------------------------------------------------------------------------------------------- learning: said once, applied later
+async def settle(env, limit: int = 120) -> None:
+    """Let the background memory pass of the last turn finish (it runs after the reply), before the next conversation starts."""
+    for _ in range(limit):
+        if not getattr(env.app.state, "bg", None):
+            return
+        await asyncio.sleep(1)
+
+
+def learn(first, later, gap_days: int = 2):
+    """The owner teaches something in one conversation; days later, in a NEW conversation, asks for work that needs it WITHOUT saying it again.
+    first/later: (text, media_or_None). Records whether the agent asked the owner in the second conversation (env.asked_second)."""
+    async def ev(env):
+        await dispatch(env.app, msg(first[0], "lrn-a-" + str(abs(hash(first[0])) % 99999), first[1]))
+        await settle(env)
+        async with env.pool.connection() as c:
+            await c.execute(f"update agent_sessions set updated_at = now() - interval '{gap_days} days', created_at = now() - interval '{gap_days} days'")
+        before = await ask_count(env)
+        await dispatch(env.app, msg(later[0], "lrn-b-" + str(abs(hash(later[0])) % 99999), later[1]))
+        env.asked_second = await ask_count(env) > before
+    return ("custom", ev)
+
+
+async def c_learned_tds_rules(env):
+    ok, detail = await c_tds(env)
+    asked = getattr(env, "asked_second", None)
+    return ok and not asked, f"asked the owner for the rules again: {asked} | {detail}"
+
+
+async def c_learned_bill_rule(env):
+    ok, detail = await c_bill_reminder(env)
+    asked = getattr(env, "asked_second", None)
+    return ok and not asked, f"asked again: {asked} | {detail}"
+
+
+async def c_learned_hindi(env):
+    t, b = final(env), BILLS["A"]
+    deva = len(re.findall(r"[ऀ-ॿ]", t))
+    p = Parts()
+    p.add("answers in Hindi script as the owner asked earlier", deva >= 15, f"{deva} Devanagari characters | {t[:160]}")
+    p.add(f"gives the amount {b['pay_by_due']:,.0f}", amount_in(t, b["pay_by_due"]), t[:160])
+    return p.result()
+
+
+def learn_tasks():
+    G, B = "learn", 240
+    rules = ("Ye hamare TDS ke rules yaad rakhna, har baar nahi batauga: 194C mein Individual/HUF 1%, Company 2%, aur 30,000 ya usse kam ke single payment pe TDS nahi; "
+             "194J 10%; 194I 10%; 194H 2%; jiska PAN nahi hai uspe 20% (ya rate, jo zyada ho). Rupee tak round karo.")
+    out = [T("learns_tds_rules_for_later", learn((rules, None), ("In payments ka TDS check karo. Batao kitna katna chahiye tha, kitna kata, kahan kam kata aur kahan zyada, aur kam wale vouchers ki list Excel mein do.", "TD")),
+             c_learned_tds_rules, G, budget=B)]
+    if BILLS:
+        out += [T("learns_standing_bill_reminder", learn(("Ek rule yaad rakh lo: jab bhi main bijli ka bill bhejun, uski last date se 2 din pehle subah 9 baje yaad dila dena. Alag se bolna nahi padega.", None),
+                                                          ("Ye lo is mahine ka bijli bill", "BL_A")), c_learned_bill_rule, G, sheet=False, remind=True, budget=B),
+                T("learns_reply_language", learn(("Aage se mujhse hamesha Hindi (devanagari) mein baat karna.", None), ("Ye bijli ka bill hai, kitna dena hai?", "BL_A")),
+                  c_learned_hindi, G, sheet=False, budget=B)]
+    return out
+
+
 def bill_tasks():
     G, B = "bills", 150
     ask = "Ye bijli ka bill hai. Kitna dena hai aur last date kya hai?"
@@ -1608,6 +1666,7 @@ def build_tasks():
     tasks += [T("sum_" + n, say(m, "q" + str(i)), c_sum(n), "calc", sheet=False) for i, (n, (m, _)) in enumerate(SUMS.items())]
     if BILLS:
         tasks += bill_tasks()
+    tasks += learn_tasks()
     return tasks
 
 
@@ -1797,6 +1856,16 @@ async def selftest() -> int:
             ok_two = two_good[0] and not two_bad[0]
             results.append(ok_two)
             print(("OK   " if ok_two else "BAD  ") + "bill_two_reminders" + ("" if ok_two else f"   perfect={two_good} one_only={two_bad}"))
+            def told(text, asked):
+                e_ = E(W(text))
+                e_.asked_second = asked
+                return e_
+            await run("learns_reply_language", c_learned_hindi, told(f"₹{a_['pay_by_due']:,.0f} देना है, आखिरी तारीख 5 दिसंबर है, कृपया समय पर भुगतान करें", False), told(f"Rs {a_['pay_by_due']:,.0f} dena hai", False))
+            followups = fu_good
+            ok_l = (await c_learned_bill_rule(told(f"{nice(want.isoformat())} ko subah 9 baje yaad dilaunga", False)))[0]
+            asked_l = (await c_learned_bill_rule(told(f"{nice(want.isoformat())} ko subah 9 baje yaad dilaunga", True)))[0]
+            results.append(ok_l and not asked_l)
+            print(("OK   " if ok_l and not asked_l else "BAD  ") + f"learns_standing_bill_reminder   (right={ok_l}, if it asked again={asked_l})")
             followups = fu_none
             bad_rem = await c_bill_reminder(E(W("")))
             ok_rem = good_rem[0] and not bad_rem[0]
