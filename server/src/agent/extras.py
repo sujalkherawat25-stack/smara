@@ -13,7 +13,9 @@ from src.loop.upi import pay_url, rupees, upi_text
 
 MAX_PENDING = 25
 MAX_PER_DAY = 50
-MAX_AHEAD = timedelta(days=60)
+MAX_AHEAD = timedelta(days=400)     # a GST or advance-tax date next March is a normal thing to ask for
+REPEATS = ("daily", "weekly", "monthly", "yearly")
+MAX_SERIES = 12                    # reminders that come back by themselves, per shop
 MIN_AHEAD = timedelta(minutes=1)
 MAX_FILE_BYTES = 45_000_000      # Telegram bots send up to 50 MB (they only DOWNLOAD 20 MB)
 MAX_RETRIES, RETRY_WINDOW = 2, timedelta(hours=6)     # quick re-schedules from a follow-up run, per 12 hours
@@ -62,6 +64,52 @@ def _when(args: dict, now: datetime) -> datetime | str:
     return at.replace(tzinfo=clock.IST) if at.tzinfo is None else at.astimezone(clock.IST)
 
 
+def next_run(after: datetime, recur: dict, now: datetime | None = None) -> datetime | None:
+    """The next time a repeating reminder is due, after `after` and after `now`; None once its last date has passed.
+    Monthly keeps its day of the month (the 31st becomes the last day of a shorter month); yearly keeps month and day."""
+    import calendar
+    base = after.astimezone(clock.IST)
+    now = (now or clock.now()).astimezone(clock.IST)
+    every, day = recur.get("every"), int(recur.get("day") or base.day)
+    until = recur.get("until")
+    cur = base
+    for _ in range(4000):
+        if every == "daily":
+            cur = cur + timedelta(days=1)
+        elif every == "weekly":
+            cur = cur + timedelta(days=7)
+        elif every == "monthly":
+            y, m = (cur.year + (cur.month == 12), 1 if cur.month == 12 else cur.month + 1)
+            cur = cur.replace(year=y, month=m, day=min(day, calendar.monthrange(y, m)[1]))
+        elif every == "yearly":
+            y = cur.year + 1
+            cur = cur.replace(year=y, day=min(day, calendar.monthrange(y, cur.month)[1]))
+        else:
+            return None
+        if cur > now:
+            break
+    if until and cur.date().isoformat() > str(until):
+        return None
+    return cur
+
+
+def _repeat(args: dict, at: datetime) -> dict | str | None:
+    """The repeat rule from the tool arguments: None when the reminder is once, a dict, or an error string."""
+    every = str(args.get("repeat") or "").strip().lower()
+    if not every or every in ("none", "once", "no"):
+        return None
+    if every not in REPEATS:
+        return f"repeat must be one of {', '.join(REPEATS)} (or leave it out for a one-time reminder)"
+    until = str(args.get("until_ist") or "").strip()[:10]
+    if until:
+        try:
+            if datetime.fromisoformat(until).date() < at.date():
+                return "until_ist is before the first reminder"
+        except ValueError:
+            return "until_ist must look like 2027-03-31"
+    return {"every": every, "day": at.day, **({"until": until} if until else {})}
+
+
 async def _owner_words(app, session_id: str) -> str:
     """The owner's latest message in this conversation, verbatim. Stored with a follow-up so that if the model
     paraphrases or 'corrects' a name or a time, the original words still travel with the task."""
@@ -84,10 +132,13 @@ async def schedule_followup(app, ctx: SessionCtx, args: dict) -> dict:
     if isinstance(at, str):
         return {"error": at}
     if at < now + MIN_AHEAD or at > now + MAX_AHEAD:
-        return {"error": "the time must be between 1 minute and 60 days from now (check get_current_time)"}
+        return {"error": "the first time must be between 1 minute and 400 days from now (check get_current_time)"}
     owner_said = await _owner_words(app, ctx.id)
     shifted = clock.is_quiet(app.state.settings, at)
     at = clock.next_open(app.state.settings, at)
+    recur = _repeat(args, at)
+    if isinstance(recur, str):
+        return {"error": recur}
     async with app.state.pool.connection() as conn:
         c = await (await conn.execute(
             """SELECT count(*) FILTER (WHERE status = 'PENDING') pending,
@@ -95,6 +146,11 @@ async def schedule_followup(app, ctx: SessionCtx, args: dict) -> dict:
                  FROM agent_tasks WHERE tenant_id = %s""", (ctx.tenant_id,))).fetchone()
         if c["pending"] >= MAX_PENDING or c["today"] >= MAX_PER_DAY:
             return {"error": f"too many scheduled tasks (max {MAX_PENDING} pending, {MAX_PER_DAY} per day); cancel some first"}
+        if recur:
+            series = await (await conn.execute("SELECT count(*) n FROM agent_tasks WHERE tenant_id = %s AND status = 'PENDING' AND payload ? 'recur'",
+                                               (ctx.tenant_id,))).fetchone()
+            if series["n"] >= MAX_SERIES:
+                return {"error": f"already {MAX_SERIES} repeating reminders; cancel one first (list_followups shows them)"}
         if at < now + RETRY_WINDOW and await _retries_used(conn, ctx) >= MAX_RETRIES:
             # a scheduled job that keeps failing must not retry (and message the owner) every half hour all day
             return {"error": f"retry limit reached ({MAX_RETRIES} quick retries in 12 hours). Do not schedule another retry. "
@@ -103,10 +159,14 @@ async def schedule_followup(app, ctx: SessionCtx, args: dict) -> dict:
         row = await (await conn.execute(
             """INSERT INTO agent_tasks (tenant_id, run_at, kind, payload, created_by_session)
                VALUES (%s, %s, 'followup', %s, %s) RETURNING id""",
-            (ctx.tenant_id, at, json.dumps({"instruction": instruction, "owner_said": owner_said}), ctx.id))).fetchone()
-    return {"task_id": str(row["id"]), "will_run_at_ist": at.strftime("%Y-%m-%d %H:%M"),
-            "moved_out_of_quiet_hours": shifted,
-            "note": "When you confirm to the owner, use their exact words for any name; do not change names."}
+            (ctx.tenant_id, at, json.dumps({"instruction": instruction, "owner_said": owner_said, **({"recur": recur} if recur else {})}), ctx.id))).fetchone()
+    out = {"task_id": str(row["id"]), "will_run_at_ist": at.strftime("%Y-%m-%d %H:%M"), "moved_out_of_quiet_hours": shifted,
+           "note": "When you confirm to the owner, use their exact words for any name; do not change names."}
+    if recur:
+        nxt = next_run(at, recur, at)
+        out["repeats"] = recur["every"] + (f" until {recur['until']}" if recur.get("until") else " until cancelled")
+        out["then_next"] = nxt.strftime("%Y-%m-%d %H:%M") if nxt else None
+    return out
 
 
 async def list_followups(app, ctx: SessionCtx, args: dict) -> dict:
@@ -116,6 +176,7 @@ async def list_followups(app, ctx: SessionCtx, args: dict) -> dict:
                 WHERE tenant_id = %s AND status = 'PENDING' ORDER BY run_at LIMIT 30""", (ctx.tenant_id,))).fetchall()
     return {"pending": [{"task_id": str(r["id"]), "run_at_ist": r["run_at"].astimezone(clock.IST).strftime("%Y-%m-%d %H:%M"),
                          "kind": r["kind"], "what": (r["payload"].get("instruction") or r["payload"].get("text") or "")[:200],
+                         **({"repeats": r["payload"]["recur"]["every"]} if r["payload"].get("recur") else {}),
                          "owner_said": r["payload"].get("owner_said", "")}
                         for r in rows]}
 
