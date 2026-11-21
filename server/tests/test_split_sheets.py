@@ -47,3 +47,27 @@ def test_the_owes_file_nudge_knows_that_the_reconciliation_tools_send_their_own_
     sent_by_tool = ask + [{"role": "assistant", "content": "", "tool_calls": [{"id": "c", "type": "function", "function": {"name": "gst_reconcile", "arguments": "{}"}}]},
                           {"role": "tool", "tool_call_id": "c", "content": '{"files_sent_to_owner": ["GSTR2B_reconciliation.xlsx", "report.pdf"]}'}]
     assert not owes_file(sent_by_tool)
+
+
+def test_a_big_sheet_is_split_as_a_stream_with_exact_values_and_dates(tmp_path):
+    """The cell-by-cell copy took 44 minutes on 541,909 rows; over 50,000 rows the split streams (values and dates exact, header bold)."""
+    import time
+    from datetime import date, timedelta
+    from openpyxl import Workbook
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet("Sales")
+    ws.append(["Shop"])
+    ws.append(["Invoice", "Date", "Country", "Amount"])
+    for i in range(60_000):
+        ws.append([f"I{i}", date(2026, 7, 1) + timedelta(days=i % 90), ("UK", "France", "EIRE")[i % 3], i])
+    ws.append(["Total", None, None, 1])
+    wb.save(tmp_path / "big.xlsx")
+    started = time.time()
+    counts = mh.split_sheets(str(tmp_path / "big.xlsx"), str(tmp_path / "o.xlsx"), "Country", how="value", keep_all_sheet=True)
+    assert time.time() - started < 60
+    assert counts == {"EIRE": 20_000, "France": 20_000, "UK": 20_000}                      # the Total row stays out
+    out = load_workbook(tmp_path / "o.xlsx", read_only=True)
+    assert out.sheetnames == ["EIRE", "France", "UK", "All"]
+    rows = list(out["UK"].iter_rows(min_row=1, max_row=4, values_only=True))
+    assert rows[0] == ("Shop",) and rows[1][0] == "Invoice" and rows[2][2] == "UK" and isinstance(rows[2][1], datetime)
+    assert sum(1 for _ in out["All"].iter_rows()) == 60_000 + 2

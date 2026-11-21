@@ -679,6 +679,17 @@ def split_sheets(src: str, dst: str, by: str, *, how: str = "value", sheet=None,
     this: it turns dates into text and drops the formatting."""
     import copy
     from openpyxl import Workbook, load_workbook
+    probe = load_workbook(src, read_only=True)
+    pws = probe[sheet] if sheet else probe.worksheets[0]
+    rows_in_sheet = pws.max_row or 0
+    if not rows_in_sheet:                       # a workbook written as a stream (pandas, big exports) carries no row count: count to the limit
+        for n, _ in enumerate(pws.iter_rows(values_only=True), start=1):
+            rows_in_sheet = n
+            if n > 50_000:
+                break
+    probe.close()
+    if rows_in_sheet > 50_000:
+        return _split_sheets_streaming(src, dst, by, how, sheet, header_row, keep_all_sheet)
     wb = load_workbook(src)
     ws = wb[sheet] if sheet else wb.worksheets[0]
     hdr = header_row
@@ -730,6 +741,78 @@ def split_sheets(src: str, dst: str, by: str, *, how: str = "value", sheet=None,
                 _copy_look(c, every.cell(row=c.row, column=c.column, value=c.value))
         for letter, dim in ws.column_dimensions.items():
             every.column_dimensions[letter].width = dim.width
+    Path(dst).parent.mkdir(parents=True, exist_ok=True)
+    out.save(dst)
+    return counts
+
+
+def _split_sheets_streaming(src, dst, by, how, sheet, header_row, keep_all_sheet) -> dict:
+    """split_sheets for a big sheet (over 50,000 rows): read once as a stream and write each piece as a stream, so 540,000 rows take a
+    few minutes and little memory. Values and dates are exact; formatting is limited to a bold header and the column widths."""
+    from openpyxl import Workbook, load_workbook
+    from openpyxl.cell import WriteOnlyCell
+    from openpyxl.styles import Font
+    wb = load_workbook(src, read_only=True)
+    ws = wb[sheet] if sheet else wb.worksheets[0]
+    want = re.sub(r"\s+", "", str(by)).lower()
+    top, hdr, col = [], header_row, None
+    groups: dict[str, list] = {}
+    labels: dict[str, str] = {}
+    for r, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        if hdr is None and r <= 40:
+            top.append(row)
+            for i, v in enumerate(row):
+                if v is not None and re.sub(r"\s+", "", str(v)).lower() == want:
+                    hdr, col = r, i
+                    break
+            continue
+        if hdr is not None and r <= hdr:
+            if r < hdr:
+                top.append(row)
+            elif r == hdr:
+                if col is None:
+                    col = next((i for i, v in enumerate(row) if v is not None and re.sub(r"\s+", "", str(v)).lower() == want), None)
+                top.append(row)
+            continue
+        if hdr is None:
+            wb.close()
+            raise ValueError(f"no header row with a column called {by!r} in the first 40 rows")
+        if all(v in (None, "") for v in row) or any(isinstance(v, str) and re.match(r"\s*(grand\s+)?total\b", v, re.I) for v in row):
+            continue
+        v = row[col] if col is not None and col < len(row) else None
+        if how == "month":
+            d = parse_date(v)
+            key, label = (d.strftime("%Y-%m"), d.strftime("%b %Y")) if d else ("(no date)", "(no date)")
+        else:
+            key = label = str(v).strip() if v not in (None, "") else "(blank)"
+        groups.setdefault(key, []).append(row)
+        labels[key] = label
+    wb.close()
+    if hdr is None or col is None:
+        raise ValueError(f"no header row with a column called {by!r} in the first 40 rows")
+    out = Workbook(write_only=True)
+    counts = {}
+
+    def put(title, rows):
+        s = out.create_sheet(re.sub(r"[\[\]\*?/:]", "-", title)[:31] or "sheet")
+        for i, tr in enumerate(top[:hdr], start=1):
+            if i == hdr:
+                cells = []
+                for v in tr:
+                    c = WriteOnlyCell(s, value=v)
+                    c.font = Font(bold=True)
+                    cells.append(c)
+                s.append(cells)
+            else:
+                s.append(list(tr))
+        for r in rows:
+            s.append(list(r))
+        return s
+    for key in sorted(groups):
+        put(labels[key], groups[key])
+        counts[re.sub(r"[\[\]\*?/:]", "-", labels[key])[:31]] = len(groups[key])
+    if keep_all_sheet:
+        put("All", [r for k in sorted(groups) for r in groups[k]])
     Path(dst).parent.mkdir(parents=True, exist_ok=True)
     out.save(dst)
     return counts

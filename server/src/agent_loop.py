@@ -284,8 +284,8 @@ def owes_file(messages: list[dict]) -> bool:
 
 _CLAIM_REMINDER = re.compile(r"(yaad\s*dila\s*(dunga|dungi|doonga|doongi|ungi|unga)|reminder\s*(set|laga\s*(diya|di)|ho\s*gaya)|set\s*kar\s*(diya|di)|"
                              r"schedule\s*kar\s*(diya|di)|i['’]ll remind|i will remind|reminder is set|याद\s*दिला\s*(दूंगी|दूंगा))", re.I)
-_CLAIM_FILE = re.compile(r"(bhej\s*(diya|di\s*hai|di\b)|file\s*bhej\s*di|i(?:'|’| ha)ve sent (?:you )?(?:the|a|an)\b|sent (?:you )?(?:the )?(?:file|excel|pdf)|"
-                         r"attached (?:the )?(?:file|excel|pdf))", re.I)
+_CLAIM_FILE = re.compile(r"((file|excel|pdf|report|statement|sheet|document|attachment|brs)\W+(\w+\W+){0,4}(bhej\s*(diya|di\b|di\s*hai)|bheji\b|sent\b|attached\b)|"
+                         r"(bhej\s*(diya|di\b|di\s*hai)|sent|attached)\W+(\w+\W+){0,3}(file|excel|pdf|report|statement|sheet|document))", re.I)
 
 
 def unbacked_claim(messages: list[dict], reply: str) -> str:

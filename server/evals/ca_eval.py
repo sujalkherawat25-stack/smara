@@ -822,7 +822,7 @@ async def c_ask_amount(env):
     p.add("asked which Amount column before changing anything", (await ask_count(env)) > 0 or "?" in final(env), final(env)[:200])
     p.add("did not send a changed file", sent_nothing(env), "sent a file without knowing which column")
     t = final(env).lower()
-    p.add("question names the real choices", sum(k in t for k in ("received", "pending", "amount")) >= 2, "")
+    p.add("the question says what would change (the column and the 10%) so the owner can answer it", "amount" in t and ("10" in t or "%" in t), t[:200])
     return p.result()
 
 
