@@ -161,7 +161,9 @@ async def schedule_followup(app, ctx: SessionCtx, args: dict) -> dict:
                VALUES (%s, %s, 'followup', %s, %s) RETURNING id""",
             (ctx.tenant_id, at, json.dumps({"instruction": instruction, "owner_said": owner_said, **({"recur": recur} if recur else {})}), ctx.id))).fetchone()
     out = {"task_id": str(row["id"]), "will_run_at_ist": at.strftime("%Y-%m-%d %H:%M"), "moved_out_of_quiet_hours": shifted,
-           "note": "When you confirm to the owner, use their exact words for any name; do not change names."}
+           "note": "When you confirm to the owner, use their exact words for any name; do not change names.",
+           "next": "The reminder is only one part of your reply. If the owner also asked something in this message (an amount, a date, a total, a yes or no), "
+                   "answer that FIRST with the figures, then confirm this reminder in one line."}
     if recur:
         nxt = next_run(at, recur, at)
         out["repeats"] = recur["every"] + (f" until {recur['until']}" if recur.get("until") else " until cancelled")

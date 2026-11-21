@@ -508,7 +508,7 @@ async def ev_personal_email(env):
 
 def _business_context(text):
     import re as _re
-    return [text[max(0, m.start() - 30): m.end() + 30] for m in _re.finditer(r"(invoice|invoices|ledger|outstanding|overdue|udhaar|khata)", text.lower())]
+    return [text[max(0, m.start() - 30): m.end() + 30] for m in _re.finditer(r"\b(invoice|invoices|ledger|outstanding|overdue|udhaar|khata)\b", text.lower())]
 
 
 async def c_personal_plan(env):

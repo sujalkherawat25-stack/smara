@@ -263,7 +263,10 @@ async def make_document(app, ctx: SessionCtx, args: dict) -> dict:
     except ValueError as e:
         return {"error": str(e)}
     who = re.sub(r"\W+", "_", spec["meta"][1][1] if kind in ("statement", "reminder_letter") else "")[:30].strip("_")
-    name = safe_name(f"{kind.replace('_', ' ').title().replace(' ', '_')}{'_' + who if who else ''}_{today.isoformat()}.{fmt}")
+    label = kind.replace('_', ' ').title().replace(' ', '_')
+    if kind == "custom":              # a finished report is named after what it is ('GSTR-2B_reconciliation_2026-11-21.pdf'), not 'Custom_...'
+        label = re.sub(r"[^A-Za-z0-9\-]+", "_", str(args.get("title") or "")).strip("_")[:50] or label
+    name = safe_name(f"{label}{'_' + who if who else ''}_{today.isoformat()}.{fmt}")
     spec["_format"], spec["_filename"] = fmt, name
     res = await app.state.sandbox.run(RENDER, {"spec.json": json.dumps(spec, ensure_ascii=False).encode("utf-8")}, timeout_s=60)
     if res.get("exit_code") != 0 or name not in (res.get("outputs") or []):

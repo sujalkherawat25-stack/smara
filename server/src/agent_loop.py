@@ -289,6 +289,18 @@ _CLAIM_FILE = re.compile(r"((file|excel|pdf|report|statement|sheet|document|atta
                          r"(bhej\s*(diya|di\b|di\s*hai)|sent|attached)\W+(\w+\W+){0,3}(file|excel|pdf|report|statement|sheet|document))", re.I)
 
 
+_ASKS_AMOUNT = re.compile(r"(kitna|kitne|kitni|how much|total kya|kya total|amount kya|kya amount|dena hai|dena padega|payable)", re.I)
+_MONEYISH = re.compile(r"(?:rs\.?|₹|inr|rupees?|rupaye)\s*[\d,]+|\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d{3,}", re.I)
+
+
+def gives_a_figure(reply: str) -> bool:
+    """An amount-like number in the reply (Rs 50, 8,803, 12000); a year or a day and month does not count."""
+    return bool(_MONEYISH.search(re.sub(r"\b(?:19|20)\d\d\b", " ", reply or "")))
+
+
+_STANDING_WORDS = re.compile(r"(yaad\s*rakh|aage\s*se|jab\s*bhi|jab\s*kabhi|har\s*baar|hamesha|always|whenever|every\s*time|from now on|\brule\b)", re.I)
+
+
 def unbacked_claim(messages: list[dict], reply: str) -> str:
     """A system note when the reply says something was done that this turn never did: a reminder 'set' with no schedule_followup, a file
     'sent' with no successful send. '' when the claim is backed (or the reply is a question). The owner would otherwise wait for a
@@ -299,7 +311,8 @@ def unbacked_claim(messages: list[dict], reply: str) -> str:
     last = max((i for i, m in enumerate(messages) if m["role"] == "user" and not m["content"].startswith("[system note]")), default=-1)
     turn = messages[last + 1:] if last >= 0 else messages
     calls = [c["function"]["name"] for m in turn for c in (m.get("tool_calls") or [])]
-    if _CLAIM_REMINDER.search(reply) and "schedule_followup" not in calls:
+    taught = "write_continuum_evidence" in calls and bool(_STANDING_WORDS.search(str(messages[last].get("content") or ""))) if last >= 0 else False
+    if _CLAIM_REMINDER.search(reply) and "schedule_followup" not in calls and not taught:      # a standing rule saved to memory is not a reminder set now
         return ("[system note] You said a reminder is set, but you did not call schedule_followup in this turn, so nothing is scheduled and the owner "
                 "would never be reminded. Call schedule_followup now with the exact date and time, then tell them the time it will come; if you could "
                 "not set it, say so plainly instead.")
@@ -307,6 +320,11 @@ def unbacked_claim(messages: list[dict], reply: str) -> str:
     if _CLAIM_FILE.search(reply) and not sent:
         return ("[system note] You said you sent a file, but no send succeeded in this turn, so the owner has nothing. Send it now with "
                 "send_file_to_owner, or tell them plainly that it could not be sent.")
+    asked = str(messages[last].get("content") or "") if last >= 0 else ""
+    if calls and _ASKS_AMOUNT.search(asked) and not gives_a_figure(reply):          # e.g. a bill plus 'kitna dena hai?' answered with only 'reminder set'
+        return ("[system note] The owner asked for an amount in this message, and your reply has no amount in it. Give them the figure now, from the file "
+                "or the tool results you already have (say which amount it is), then add whatever you did for them in one line. If you truly cannot "
+                "find it, say that plainly and ask.")
     return ""
 
 

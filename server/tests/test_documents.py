@@ -211,7 +211,11 @@ async def test_owner_report_and_letter_and_custom(world):
     letter = await D.make_document(app, ctx(t), {"kind": "reminder_letter", "party_id": ravi, "body": "Please pay.", "format": "docx"})
     assert letter["filename"].endswith(".docx") and letter["figures"]["overdue_invoices"] == 1
     cust = await D.make_document(app, ctx(t), {"kind": "custom", "title": "Workings", "blocks": [{"type": "paragraph", "text": "hi"}]})
-    assert cust["figures"] == {"blocks": 1}
+    assert cust["figures"] == {"blocks": 1} and cust["filename"].startswith("Workings_") and cust["filename"].endswith(".pdf")
+    named = await D.make_document(app, ctx(t), {"kind": "custom", "title": "GSTR-2B reconciliation", "blocks": [{"type": "paragraph", "text": "hi"}]})
+    assert named["filename"].startswith("GSTR-2B_reconciliation_")              # named after the report, not "Custom_..."
+    hindi = await D.make_document(app, ctx(t), {"kind": "custom", "title": "जीएसटी रिपोर्ट", "blocks": [{"type": "paragraph", "text": "hi"}]})
+    assert hindi["filename"].startswith("Custom_")                              # no Latin letters to name it by: the old name
     assert "error" in await D.make_document(app, ctx(t), {"kind": "invoice"})
     assert "error" in await D.make_document(app, ctx(t), {"kind": "custom", "title": "x", "blocks": [{"type": "script"}]})
 
