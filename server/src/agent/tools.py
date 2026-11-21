@@ -212,7 +212,7 @@ TOOLS = [
     _fn("tds_check", "Check TDS on a table of payments in ONE call (Excel or CSV with section, gross amount and TDS deducted columns, and "
         "usually vendor, PAN, vendor type): what should have been deducted, what was, which payments are short and which are over-deducted. YOU "
         "pass the owner's rules: rates {\"194C\": {\"Individual\": 1, \"Company\": 2}, \"194J\": 10, ...} (a number, or a table by vendor type), "
-        "thresholds {\"194C\": 30000} (a payment at or below it has NO TDS, even without a PAN) and no_pan_rate (default 20: the higher of that and the "
+        "thresholds {\"194C\": 30000} (ALWAYS pass it when the owner names a limit like '30,000 ya kam pe TDS nahi': a payment at or below it has NO TDS, even without a PAN) and no_pan_rate (default 20: the higher of that and the "
         "rate applies where TDS applies). Never invent a rate: if they did not say, ask. It sends the PDF and an Excel (short, excess, every payment). "
         "Use it for EVERY TDS check; never do this arithmetic yourself.",
         {"file_ref": _S, "rates": {"type": "object"}, "thresholds": {"type": "object"}, "no_pan_rate": {"type": "number"}, "report": {"type": "boolean"},

@@ -55,6 +55,30 @@ def test_a_type_with_no_rate_is_listed_with_the_real_reason_and_a_catch_all_cove
     assert all(x["why"].startswith("no rate was given for section") for x in nothing["no_rate"])
 
 
+def test_the_rules_it_used_say_plainly_when_no_limit_was_applied(monkeypatch):
+    """A connected demo run left out the owner's 30,000 limit and then told the owner it had been applied. The result now shows which limit it used (or
+    that none was), and tells the agent to compare that with what the owner said before answering."""
+    f, t = cd.tds()
+    files = {"p1": ("vendor_payments_tds.xlsx", f["vendor_payments_tds.xlsx"])}
+
+    async def fetch(app, ref, ctx=None):
+        n, d = files[ref]
+        return d, "", n
+
+    async def no_send(app, ctx, args):
+        return {"sent": True}
+    monkeypatch.setattr(actions, "_fetch", fetch)
+    monkeypatch.setattr(extras, "send_file_to_owner", no_send)
+    ctx = SessionCtx("s", "t", "TRUSTED", files=tuple(files))
+    app = SimpleNamespace()
+    without = asyncio.run(tc.tds_check(app, ctx, {"file_ref": "p1", "rates": RATES, "report": False}))
+    assert "NO per-payment limit was given" in without["rules_used"] and "FIRST compare rules_used" in without["next"]
+    assert without["expected_tds_rupees"] != t["expected_total"]                                  # without the limit the figure is different: the mismatch is real
+    with_limit = asyncio.run(tc.tds_check(app, ctx, {"file_ref": "p1", "rates": RATES, "thresholds": {"194C": 30000}, "report": False}))
+    assert "no TDS at or below 194C Rs 30,000" in with_limit["rules_used"] and "NO per-payment limit" not in with_limit["rules_used"]
+    assert with_limit["expected_tds_rupees"] == t["expected_total"]
+
+
 def test_the_tool_asks_for_the_rates_instead_of_guessing_and_its_result_arrives_whole(monkeypatch):
     f, t = cd.tds()
     files = {"p1": ("vendor_payments_tds.xlsx", f["vendor_payments_tds.xlsx"])}
