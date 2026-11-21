@@ -277,6 +277,36 @@ def test_only_columns_the_owner_named_can_change(reg, tmp_path):
     assert r.get("verified"), r
 
 
+def amounts_book(path: Path) -> Path:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["Party", "Amount", "Amount Received", "Amount Pending", "Tax", "Taxable Value"])
+    for i, (a, got) in enumerate([(1000, 400), (2500, 2500), (800, 0)], start=2):
+        ws.append([f"P{i}", a, got, f"=B{i}-C{i}", 90, 500])
+    wb.save(path)
+    return path
+
+
+def test_an_amount_that_other_amount_columns_start_with_is_asked_about_not_guessed(tmp_path):
+    """'Amount 10% kam kar do' on Amount / Amount Received / Amount Pending: the agent picked the column named exactly 'Amount' in about 1 of 3 runs of a
+    connected demo. Now the edit stops with the question, and goes through once the owner has answered."""
+    book, out = amounts_book(tmp_path / "a.xlsx"), str(tmp_path / "o.xlsx")
+    said = "Amount 10% kam kar do aur file bhej do"
+    change = {"column": "Amount", "compute": "={Amount}*0.9"}
+    r = se.apply(str(book), out, [change], owner_words=said)
+    assert r["nothing_changed"] and "also how other number columns start" in r["error"] and "C 'Amount Received'" in r["error"] and "D 'Amount Pending'" in r["error"]
+    assert "owner_confirmed_column" in r["error"] and "ask_owner" in r["error"]
+    ok = se.apply(str(book), out, [{**change, "owner_confirmed_column": True}], owner_words="Amount")
+    assert ok.get("verified") and not ok.get("error"), ok
+    named = se.apply(str(book), out, [{"column": "Amount", "compute": "={Amount}*0.9"}], owner_words="Amount aur Amount Received dono 10% kam kar do")
+    assert not named.get("error"), named                                         # the owner named the longer one too: nothing to ask
+    longer = se.apply(str(book), out, [{"column": "Amount Received", "compute": "={Amount Received}*0.9"}], owner_words="Amount Received 10% kam kar do")
+    assert not longer.get("error"), longer                                       # the LONGER header is already specific
+    tax = se.apply(str(book), out, [{"column": "Tax", "value": 5}], owner_words="Tax 5 kar do")
+    assert not tax.get("error"), tax                                             # 'Tax' is not the start of 'Taxable Value': a different word
+
+
 def test_a_plain_formula_is_filled_down_like_excel(reg, tmp_path):
     out = tmp_path / "o.xlsx"
     r = se.apply(str(reg), str(out), [{"action": "add_column", "header": "Aug Status",

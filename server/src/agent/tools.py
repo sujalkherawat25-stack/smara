@@ -85,6 +85,7 @@ TOOLS = [
     _fn("cancel_followup", "Cancel one of the owner's scheduled reminders or follow-ups ('GSTR wala hata do'): call list_followups, pick "
         "the task whose text matches what they said, then cancel it by task_id and tell them which one you cancelled. Ask only if several "
         "match.", {"task_id": _S}, ["task_id"]),
+    _fn("calculate", "Calculator. Use it for ANY arithmetic on money or quantities that has more than one step (GST, a discount and then GST, interest, a total, an average, a percentage of a total): pass ONE expression such as 84500*(1-2.5%)*(1+5%). Percent signs, commas and Rs are fine. It returns the exact result and the rounded figure: quote it, never work the sum out yourself.", {"expression": _S, "round_to": {"type": "integer"}}, ["expression"]),
     _fn("check_gstin", "Validate a GSTIN's format and checksum (does not check live registration status).",
         {"gstin": _S}, ["gstin"]),
     _fn("build_payment_request", "Prepare the payment request text for an invoice: amount, the shop's UPI ID and a tap-to-pay "
