@@ -440,6 +440,8 @@ async def main() -> None:
     pool = await open_pool(a.db)
     llm = LLM(os.environ["LLM_BASE_URL"], os.environ["LLM_API_KEY"], a.model, agent_model=a.model, agent_rpm=float(os.environ.get("LLM_AGENT_RPM", "0")),
               fallback_model=os.environ.get("LLM_FALLBACK_MODEL", ""), reasoning_effort=os.environ.get("LLM_REASONING_EFFORT", ""))
+    if os.environ.get("EVAL_EXTRACT_MODEL"):
+        llm._model = os.environ["EVAL_EXTRACT_MODEL"]      # reading photos and extracting figures use the production extraction model, not the agent model
     tokens = {}
     real_chat = llm.chat
 
@@ -453,7 +455,8 @@ async def main() -> None:
 
     async def fetch(app, ref, ctx=None):      # the real _fetch takes (app, ref, ctx); the reader passes all three
         ch, mid, name = (ref.split(":", 2) + ["", ""])[:3]
-        return (FILES[mid][1], "application/octet-stream", name) if ch == "whatsapp" else (sb.read_output(mid, name), "", name)
+        mime = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}.get(Path(name).suffix.lower(), "application/octet-stream")   # a real download reports a photo as a photo
+        return (FILES[mid][1], mime, name) if ch == "whatsapp" else (sb.read_output(mid, name), mime if mime != "application/octet-stream" else "", name)
     actions._fetch = fetch
     from src.agent import reader as _reader
     _reader._fetch = fetch      # reader.py imported _fetch by name, so the patch above must reach it too

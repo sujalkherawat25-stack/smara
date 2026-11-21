@@ -79,6 +79,34 @@ def zip_listing(data: bytes) -> dict:
             "note": "Use run_python with this file to open the ones you need (the sandbox has no network)."}
 
 
+MAX_SCAN_PAGES = 4
+IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+
+
+async def _read_scanned_pdf(app, data: bytes, password: str = "") -> dict | None:
+    """A PDF that is only pictures of pages (an office scanner, a scanning app): the sandbox pulls the page pictures out and the same vision read that
+    handles a phone photo reads them. None when nothing could be read, so the caller can still ask for a clearer copy."""
+    sb = getattr(app.state, "sandbox", None)
+    if not (sb and sb.enabled and app.state.llm.enabled):
+        return None
+    res = await sb.run(f"import smara_helpers as mh\nRESULT = mh.pdf_scan_pages('in/scan.pdf', max_pages={MAX_SCAN_PAGES}, password={password!r})\n", {"scan.pdf": data}, timeout_s=90)
+    got = res.get("result") or {}
+    chunks, unread = [], []
+    for name in got.get("files") or []:
+        n = re.search(r"(\d+)", name).group(1)
+        text = ((await read_image_text(app.state.llm, sb.read_output(res["job_id"], name), "image/jpeg")).get("text") or "").strip()
+        (chunks.append(f"--- page {n} ---\n{text}") if text else unread.append(n))
+    if not chunks:
+        return None
+    note = ("read from the pictures of the pages, not from a text layer: quote the figures as read, say they come from a scan, and for a payment or a "
+            "total the owner will act on, ask them to glance at it")
+    if unread:
+        note += f"; page(s) {', '.join(unread)} could not be read"
+    if (got.get("pages") or 0) > MAX_SCAN_PAGES:
+        note += f"; only the first {MAX_SCAN_PAGES} of {got['pages']} pages were read"
+    return {"pages": got.get("pages"), **_cap("\n\n".join(chunks)), "read_from_scan": True, "note": note}
+
+
 async def read_attachment(app, ctx: SessionCtx, args: dict) -> dict:
     try:
         data, mime, filename = await _fetch(app, args["file_ref"], ctx)
@@ -94,6 +122,9 @@ async def read_attachment(app, ctx: SessionCtx, args: dict) -> dict:
                 bank = _bank_statement(data, pw)
                 if bank and "statement" in bank:
                     return {**base, "kind": "bank_statement_pdf", "pages": text.get("pages"), **bank}
+            if "text" in text and not text["text"]:
+                if scanned := await _read_scanned_pdf(app, data, pw):
+                    return {**base, "kind": "pdf", **scanned}
             return {**base, "kind": "pdf", **text}
         if name.endswith(".docx"):
             return {**base, "kind": "word", **_office_text(data, r"word/document\.xml", "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")}
@@ -103,10 +134,11 @@ async def read_attachment(app, ctx: SessionCtx, args: dict) -> dict:
             return {**base, "kind": "zip", **zip_listing(data)}
         if name.endswith((".xlsx", ".xlsm", ".xls")):
             return {**base, "kind": "spreadsheet", "note": "use inspect_and_import_file to read receivables, or run_python for other analysis"}
-        if mime.startswith("image/"):
+        image_type = mime if mime.startswith("image/") else IMAGE_TYPES.get(name[name.rfind("."):] if "." in name else "")       # a photo whose type came back generic
+        if image_type:
             if not app.state.llm.enabled:
                 return {**base, "kind": "image", "error": "photo reading is not configured on this server"}
-            return {**base, "kind": "image", "read": await read_image_text(app.state.llm, data, mime)}
+            return {**base, "kind": "image", "read": await read_image_text(app.state.llm, data, image_type)}
         if mime.startswith("audio/") or name.endswith((".ogg", ".mp3", ".m4a", ".wav", ".opus")):
             spoken = await transcribe(app.state.settings.sarvam_api_key, data, mime or "audio/ogg",
                                       url=app.state.settings.sarvam_stt_url)

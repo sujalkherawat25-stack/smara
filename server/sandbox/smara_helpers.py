@@ -843,3 +843,40 @@ def tds_expected(df, *, rates: dict, amount: str = "Amount", section: str = "Sec
         pct = rate if has_pan else max(rate, no_pan_rate)
         return float(Decimal(str(amt * pct / 100)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
     return df.apply(one, axis=1)
+
+
+# ---------------------------------------------------------------------------------------------------------------- scanned PDFs
+def pdf_scan_pages(path, max_pages: int = 4, max_side: int = 1800, password: str = "") -> dict:
+    """The pictures of a scanned PDF (a PDF with no text layer): each page's biggest image, shrunk to at most max_side pixels, written to
+    out/scan_page_N.jpg so a vision model can read them. A page with no picture is listed in `no_picture`. Returns
+    {"pages": total, "files": [names], "no_picture": [page numbers]}."""
+    import os
+    from pypdf import PdfReader
+    reader = PdfReader(str(path))
+    if reader.is_encrypted and not reader.decrypt(password):
+        return {"pages": 0, "files": [], "error": "password protected"}
+    os.makedirs("out", exist_ok=True)
+    files, missing = [], []
+    for n, page in enumerate(reader.pages[:max_pages], start=1):
+        best = None
+        try:
+            for img in page.images:
+                try:
+                    pic = img.image
+                except Exception:
+                    continue
+                if pic is not None and (best is None or pic.width * pic.height > best.width * best.height):
+                    best = pic
+        except Exception:
+            best = None
+        if best is None:
+            missing.append(n)
+            continue
+        pic = best.convert("RGB")
+        if max(pic.size) > max_side:
+            k = max_side / max(pic.size)
+            pic = pic.resize((max(1, int(pic.width * k)), max(1, int(pic.height * k))))
+        name = f"scan_page_{n}.jpg"
+        pic.save(os.path.join("out", name), "JPEG", quality=82)
+        files.append(name)
+    return {"pages": len(reader.pages), "files": files, "no_picture": missing}
