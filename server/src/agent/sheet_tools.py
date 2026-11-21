@@ -108,8 +108,9 @@ async def edit_problems(app, ctx, data: bytes, name: str) -> list[str]:
 
 
 async def rows_removed(app, ctx, data: bytes, name: str) -> str:
-    """A copy of a sheet the owner sent in this conversation that has FEWER rows than their file (matched by the header
-    row), however the copy was made. '' when nothing was removed, it is not a copy of theirs, or it cannot be told."""
+    """A copy of a sheet the owner sent in this conversation that has FEWER rows than their file (matched by the header row),
+    however the copy was made. Rows count across every sheet that carries the same header, so a month-wise split (the same rows
+    in several sheets) loses nothing. '' when nothing was removed, it is not a copy of theirs, or it cannot be told."""
     import asyncio
     import tempfile
     from src.agent import sheet_engine as se
@@ -120,26 +121,23 @@ async def rows_removed(app, ctx, data: bytes, name: str) -> str:
     if not originals:
         return ""
 
-    def head(path):
-        gen = se._streams(path, values=False)
-        try:
-            for _, it in gen:
-                _, headers, _, _ = se._header_of(it)
-                return [h for _, h in sorted(headers.items()) if h]
-            return []
-        finally:
-            gen.close()
-
-    def check(orig_bytes: bytes, new_bytes: bytes):
+    def check(orig_bytes: bytes, new_bytes: bytes, owner_name: str):
         with tempfile.TemporaryDirectory() as d:
             old, new = Path(d) / f"old.{ext}", Path(d) / f"new.{ext}"
             old.write_bytes(orig_bytes)
             new.write_bytes(new_bytes)
             try:
-                ha, hb = head(str(old)), head(str(new))
-                if not ha or ha != hb[:len(ha)]:
-                    return None                              # not a copy of this file
-                return se.entry_count(str(old)), se.entry_count(str(new))
+                a, b = se.entry_counts(str(old)), se.entry_counts(str(new))
+                if not a or not a[0][1]:
+                    return None
+                title, head, before = a[0]
+                # A copy of THEIR sheet has their columns and (usually) their file name. A report that keeps their header and adds
+                # columns of its own (expected, difference, status) under another name is a new document, however few rows it lists.
+                same_name = Path(name).stem.lower().replace("_", " ") == Path(owner_name).stem.lower().replace("_", " ")
+                like = [n for _, hb, n in b if hb == head or (same_name and hb[:len(head)] == head)]
+                if not like:
+                    return None                              # not a copy of this file (a new report built from it is fine)
+                return before, sum(like)
             except Exception:
                 return None
     for ref in reversed(originals):                           # the latest upload first
@@ -147,7 +145,7 @@ async def rows_removed(app, ctx, data: bytes, name: str) -> str:
             orig, _, _ = await actions._fetch(app, ref, ctx)
         except Exception:
             continue
-        counts = await asyncio.to_thread(check, orig, data)
+        counts = await asyncio.to_thread(check, orig, data, str(ref).split(":", 2)[-1])
         if counts is not None:
             before, after = counts
             return f"{before - after} of its {before} rows are gone" if after < before else ""
@@ -210,13 +208,26 @@ async def edit_spreadsheet(app, ctx, args: dict) -> dict:
         return {"error": "at most 20 changes in one call"}
     preview = bool(args.get("preview"))
     held = not preview and needs_confirmation(changes, ctx)
-    out, name, refs = await _run(app, ctx, ref, {"op": "edit", "changes": changes, "preview": preview or held,
-                                                 "owner_words": getattr(ctx, "owner_words", "") or ""}, timeout_s=290)
+    spec = {"op": "edit", "changes": changes, "preview": preview or held, "owner_words": getattr(ctx, "owner_words", "") or ""}
+    overwrites = False
+    derived = any(isinstance(c, dict) and (c.get("compute") or c.get("copy_from") or (c.get("formula") and c.get("action", "set") != "add_column")) for c in changes)
+    if derived and not preview and not held and not getattr(ctx, "confirmed", False):
+        # new values worked out from the old ones (10% less, a formula over a filled column) replace the owner's figures: look first
+        pre, name, refs = await _run(app, ctx, ref, {**spec, "preview": True}, timeout_s=290)
+        overwrites = "error" not in pre and any(c.get("values_replaced") for c in pre.get("changes", []))
+        if overwrites:
+            held, out = True, pre
+        else:
+            out = None
+    if not (held and overwrites):
+        out, name, refs = await _run(app, ctx, ref, spec, timeout_s=290)
     if held and "error" not in out:
+        why = ("this replaces figures that are already in the file with new values worked out by a rule" if overwrites else
+               "which rows to change comes from your reading of the sheet, not from the owner's words")
         return {**out, "needs_confirmation": True, "saved": False,
-                "next": ("NOT saved. Which rows to change comes from your reading of the sheet, not from the owner's words. Call "
-                         "ask_owner now: say in plain words the rule you used, how many rows it changes, 2-3 examples from "
-                         "'examples', and any effect listed. Options: 1. Yes, do exactly this 2. A different rule (they say which). "
+                "next": (f"NOT saved: {why}. Call ask_owner now: say in plain words the rule, how many cells change, 2-3 examples from "
+                         "'examples' (before -> after) and anything that will not follow (a total or a column that is typed, not a formula). "
+                         "Options: 1. Yes, do exactly this 2. A different rule (they say which). "
                          "When they answer, call edit_spreadsheet again with the same changes.")}
     if out.get("saved") and out.get("verified") and refs:
         out["file_ref"] = refs[0]
