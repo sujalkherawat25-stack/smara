@@ -20,7 +20,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from src import chatlog, clock, health_watch, prefs, tenants
-from src.agent import actions, bookkeeping, documents, extras, gst, memory_pass, pc, reader, sheet_tools, skills, tools, web
+from src.agent import actions, bookkeeping, documents, extras, ageing, bank, gst, memory_pass, pc, reader, sheet_tools, skills, tools, web
 from src.agent.context import compact
 from src.agent.policy import SessionCtx, approval_text, pre_tool_use
 from src.agent.prompt import build_system, latest_owner_text
@@ -49,7 +49,8 @@ EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memo
              "send_file_to_owner": extras.send_file_to_owner, "react_to_message": extras.react_to_owner, "web_search": web.web_search,
              "pc_files": pc.pc_files, "set_customer_phone": bookkeeping.set_customer_phone,
              "find_customer": bookkeeping.find_customer, "set_reply_style": prefs.set_reply_style,
-             "gst_reconcile": gst.gst_reconcile, "open_spreadsheet": sheet_tools.open_spreadsheet,
+             "gst_reconcile": gst.gst_reconcile, "bank_reconcile": bank.bank_reconcile, "ageing_report": ageing.ageing_report,
+             "open_spreadsheet": sheet_tools.open_spreadsheet,
              "edit_spreadsheet": sheet_tools.edit_spreadsheet, "query_spreadsheet": sheet_tools.query_spreadsheet,
              "ask_owner": extras.ask_owner}
 
@@ -277,7 +278,64 @@ def owes_file(messages: list[dict]) -> bool:
     last = max((i for i, m in enumerate(messages) if m["role"] == "user" and not m["content"].startswith("[system note]")), default=-1)
     if last < 0 or not (_FILE_ASK.search(messages[last]["content"]) and _SEND_ASK.search(messages[last]["content"])):
         return False
-    return not any(m["role"] == "tool" and '"sent": true' in m["content"] and '"filename"' in m["content"] for m in messages[last:])
+    return not any(m["role"] == "tool" and (('"sent": true' in m["content"] and '"filename"' in m["content"]) or '"files_sent_to_owner": ["' in m["content"])
+                   for m in messages[last:])        # gst_reconcile / bank_reconcile / ageing_report send their own files
+
+
+_CLAIM_REMINDER = re.compile(r"(yaad\s*dila\s*(dunga|dungi|doonga|doongi|ungi|unga)|reminder\s*(set|laga\s*(diya|di)|ho\s*gaya)|set\s*kar\s*(diya|di)|"
+                             r"schedule\s*kar\s*(diya|di)|i['’]ll remind|i will remind|reminder is set|याद\s*दिला\s*(दूंगी|दूंगा))", re.I)
+_CLAIM_FILE = re.compile(r"(bhej\s*(diya|di\s*hai|di\b)|file\s*bhej\s*di|i(?:'|’| ha)ve sent (?:you )?(?:the|a|an)\b|sent (?:you )?(?:the )?(?:file|excel|pdf)|"
+                         r"attached (?:the )?(?:file|excel|pdf))", re.I)
+
+
+def unbacked_claim(messages: list[dict], reply: str) -> str:
+    """A system note when the reply says something was done that this turn never did: a reminder 'set' with no schedule_followup, a file
+    'sent' with no successful send. '' when the claim is backed (or the reply is a question). The owner would otherwise wait for a
+    reminder that never comes or a file that never arrived."""
+    reply = reply or ""
+    if "?" in reply or re.search(r"(?m)^\s*1[.)]\s", reply):
+        return ""
+    last = max((i for i, m in enumerate(messages) if m["role"] == "user" and not m["content"].startswith("[system note]")), default=-1)
+    turn = messages[last + 1:] if last >= 0 else messages
+    calls = [c["function"]["name"] for m in turn for c in (m.get("tool_calls") or [])]
+    if _CLAIM_REMINDER.search(reply) and "schedule_followup" not in calls:
+        return ("[system note] You said a reminder is set, but you did not call schedule_followup in this turn, so nothing is scheduled and the owner "
+                "would never be reminded. Call schedule_followup now with the exact date and time, then tell them the time it will come; if you could "
+                "not set it, say so plainly instead.")
+    sent = any(m["role"] == "tool" and ('"sent": true' in (m.get("content") or "") or '"files_sent_to_owner": ["' in (m.get("content") or "")) for m in turn)
+    if _CLAIM_FILE.search(reply) and not sent:
+        return ("[system note] You said you sent a file, but no send succeeded in this turn, so the owner has nothing. Send it now with "
+                "send_file_to_owner, or tell them plainly that it could not be sent.")
+    return ""
+
+
+_LIST_ASK = re.compile(r"(dikha|dikhao|dikhana|\blist\b|\bshow\b|kaunse|kaun\s*se|kitne|hata\b|hata\s*do|cancel|delete|band\s*kar|lage\s*hain|pending\s*hain)", re.I)
+
+# One tool does a whole piece of accountant's work and says so in its result. After it has run, redoing the same two files with
+# hand-written code (and getting other figures) is the failure to prevent: the first such attempt is turned back with the reason.
+SPECIALISTS = {"gst_reconcile": ("books_file_ref", "gstr2b_file_ref"), "bank_reconcile": ("book_file_ref", "bank_file_ref")}
+
+
+def specialist_redirect(messages: list[dict], name: str, args) -> dict | None:
+    if name != "run_python" or not isinstance(args, dict) or any('"redirected": true' in (m.get("content") or "") for m in messages if m["role"] == "tool"):
+        return None
+    refs = {r for r in (args.get("file_refs") or []) if isinstance(r, str)}
+    done = {m.get("tool_call_id"): m.get("content") or "" for m in messages if m["role"] == "tool"}
+    for m in messages:
+        for c in m.get("tool_calls") or []:
+            tool = c["function"]["name"]
+            if tool not in SPECIALISTS:
+                continue
+            try:
+                a = json.loads(c["function"].get("arguments") or "{}")
+            except ValueError:
+                continue
+            pair = {a.get(k) for k in SPECIALISTS[tool]}
+            if len(pair) == 2 and pair <= refs and not done.get(c["id"], '{"error"').startswith('{"error"'):
+                return {"error": f"{tool} already did this for these two files: its result holds every figure, and it makes the Excel. Call {tool} "
+                                 f"again (it takes seconds) and quote its summary_lines; do not match or total these files with your own code. "
+                                 f"If you truly need something it does not give, send this run_python call again and it will run.", "redirected": True}
+    return None
 
 
 _REMIND_ASK = re.compile(r"(remind(?!\s+me)\w*\s+\w+|reminder.{0,30}(bhej|send|kar|de\b|do\b)|(bhej|send).{0,30}(reminder|msg|message)|"
@@ -303,7 +361,7 @@ def owes_card(messages: list[dict], reply: str) -> bool:
     not give a reason it cannot be done. Nothing waits for the owner in that case."""
     last = max((i for i, m in enumerate(messages) if m["role"] == "user" and not m["content"].startswith("[system note]")), default=-1)
     ask = messages[last]["content"] if last >= 0 else ""
-    if not _REMIND_ASK.search(ask) or _QUESTION.search(ask) or _NOT_POSSIBLE.search(reply or ""):
+    if not _REMIND_ASK.search(ask) or _QUESTION.search(ask) or _LIST_ASK.search(ask) or _NOT_POSSIBLE.search(reply or ""):
         return False
     return not any(_sent_to_customer(c) for m in messages[last:] for c in (m.get("tool_calls") or []))
 
@@ -349,7 +407,7 @@ async def _run(app, sid: str, fallback=None) -> None:
     if row is None:
         return
     messages, steps, suspended, empties = row["messages"], row["steps"], False, 0
-    budget, seen, nudged, card_nudged, busy = 0, {}, False, False, 0
+    budget, seen, nudged, card_nudged, claim_nudged, busy = 0, {}, False, False, False, 0
     ticker = None
     try:
         tenant = await tenants.by_id(pool, str(row["tenant_id"]))
@@ -365,8 +423,10 @@ async def _run(app, sid: str, fallback=None) -> None:
             messages = compact(messages)
             try:
                 msg = await app.state.llm.chat(messages, tools.TOOLS, allow_fallback=not heavy(messages))
-            except RateLimited:
-                busy += 1                   # a busy model is not a failed job: tell the owner once, wait, try the same step again
+            except (RateLimited, httpx.TransportError, httpx.HTTPStatusError) as err:
+                if isinstance(err, httpx.HTTPStatusError) and err.response.status_code < 500:
+                    raise                   # a 4xx other than a rate limit is a real error (bad request, bad key), not a hiccup
+                busy += 1                   # a busy or briefly unreachable model is not a failed job: tell the owner once, wait, try the same step again
                 if busy > RATE_RETRIES:
                     raise
                 if busy == 1 and row["trust"] == "TRUSTED":
@@ -388,6 +448,10 @@ async def _run(app, sid: str, fallback=None) -> None:
                 messages.append({"role": "user", "content": "[system note] The owner asked for a file and you have not sent one in this "
                                  "turn. Create it with run_python (the file type they asked for) and send it with send_file_to_owner, "
                                  "then confirm. Do this even if you sent a similar file earlier."})
+                continue
+            if not calls and not claim_nudged and row["trust"] == "TRUSTED" and (note := unbacked_claim(messages[:-1], msg.get("content") or "")):
+                claim_nudged = True    # self-check: it says a reminder is set or a file sent that this turn never made
+                messages.append({"role": "user", "content": note})
                 continue
             if not calls and not card_nudged and row["trust"] == "TRUSTED" and owes_card(messages[:-1], msg.get("content") or ""):
                 card_nudged = True     # self-check: it described a reminder but made no card, so the owner would wait for nothing
@@ -459,7 +523,9 @@ async def _process(app, row, messages: list, calls: list) -> bool:
         row["messages"] = messages                    # the policy needs this turn's typing, not the saved copy
         ctx = _ctx(row, cid, getattr(app.state, "browsers", None))
         d = pre_tool_use(ctx, name, args, tools.TOOL_NAMES)
-        if d.verdict == "deny":
+        if d.verdict == "allow" and (turned_back := specialist_redirect(messages, name, args)):
+            result = turned_back
+        elif d.verdict == "deny":
             result = {"error": f"blocked by policy: {d.reason}"}
         elif d.verdict == "allow":
             result = await _execute(app, ctx, tenant, name, args)

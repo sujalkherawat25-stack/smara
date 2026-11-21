@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
                         agent_model=s.llm_agent_model, max_concurrency=s.llm_max_concurrency,
                         agent_rpm=s.llm_agent_rpm, fallback_model=s.llm_fallback_model,
                         agent_burst=s.llm_agent_burst, fallback_on_busy=s.llm_fallback_on_busy,
-                        api_keys=s.llm_keys())
+                        api_keys=s.llm_keys(), reasoning_effort=s.llm_reasoning_effort)
     app.state.bg = set()
     app.state.browsers = BrowserRouter(app.state.pool, BrowserSessions(), pc_allowed=lambda t: pc_allowed(s, t))   # the owner's own device first, else the server browser
     app.state.sandbox = Sandbox(s.sandbox_jobs_dir, s.sandbox_mode)
