@@ -106,7 +106,7 @@ def can_open(ref, ctx) -> bool:
 
 
 def tier_of(name: str, args: dict) -> str:
-    if name in ("query_ledger_sql", "resolve_continuum_memory", "run_python", "get_current_time", "check_gstin",
+    if name in ("query_ledger_sql", "resolve_continuum_memory", "run_python", "get_current_time", "calculate", "check_gstin",
                 "build_payment_request", "list_followups", "web_search", "read_attachment", "make_document", "load_skill",
                 "search_chat_history", "gst_reconcile", "bank_reconcile", "ageing_report", "audit_gst_register", "tds_check", "find_customer", "list_my_files", "react_to_message",
                 "open_spreadsheet", "edit_spreadsheet", "query_spreadsheet"):

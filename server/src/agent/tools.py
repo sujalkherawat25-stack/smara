@@ -85,6 +85,7 @@ TOOLS = [
     _fn("cancel_followup", "Cancel one of the owner's scheduled reminders or follow-ups ('GSTR wala hata do'): call list_followups, pick "
         "the task whose text matches what they said, then cancel it by task_id and tell them which one you cancelled. Ask only if several "
         "match.", {"task_id": _S}, ["task_id"]),
+    _fn("calculate", "Calculator. Use it for ANY arithmetic on money or quantities that has more than one step (GST, a discount and then GST, interest, a total, an average, a percentage of a total): pass ONE expression such as 84500*(1-2.5%)*(1+5%). Percent signs, commas and Rs are fine. It returns the exact result and the rounded figure: quote it, never work the sum out yourself.", {"expression": _S, "round_to": {"type": "integer"}}, ["expression"]),
     _fn("check_gstin", "Validate a GSTIN's format and checksum (does not check live registration status).",
         {"gstin": _S}, ["gstin"]),
     _fn("build_payment_request", "Prepare the payment request text for an invoice: amount, the shop's UPI ID and a tap-to-pay "
@@ -212,7 +213,7 @@ TOOLS = [
     _fn("tds_check", "Check TDS on a table of payments in ONE call (Excel or CSV with section, gross amount and TDS deducted columns, and "
         "usually vendor, PAN, vendor type): what should have been deducted, what was, which payments are short and which are over-deducted. YOU "
         "pass the owner's rules: rates {\"194C\": {\"Individual\": 1, \"Company\": 2}, \"194J\": 10, ...} (a number, or a table by vendor type), "
-        "thresholds {\"194C\": 30000} (a payment at or below it has NO TDS, even without a PAN) and no_pan_rate (default 20: the higher of that and the "
+        "thresholds {\"194C\": 30000} (ALWAYS pass it when the owner names a limit like '30,000 ya kam pe TDS nahi': a payment at or below it has NO TDS, even without a PAN) and no_pan_rate (default 20: the higher of that and the "
         "rate applies where TDS applies). Never invent a rate: if they did not say, ask. It sends the PDF and an Excel (short, excess, every payment). "
         "Use it for EVERY TDS check; never do this arithmetic yourself.",
         {"file_ref": _S, "rates": {"type": "object"}, "thresholds": {"type": "object"}, "no_pan_rate": {"type": "number"}, "report": {"type": "boolean"},

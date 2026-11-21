@@ -906,6 +906,21 @@ def _words(text) -> list[str]:
     return re.findall(r"[a-z]+", str(text or "").lower())
 
 
+def look_alike_columns(sh, col: int) -> list[int]:
+    """Other NUMBER columns whose header starts with all the words of this column's header and has more ('Amount' -> 'Amount Received', 'Amount Pending'),
+    so an owner who says only 'Amount' could mean any of them."""
+    words = _words(sh.headers.get(col, ""))
+    if not words:
+        return []
+    found = []
+    for c, h in sh.headers.items():
+        w = _words(h)
+        if c != col and len(w) > len(words) and w[:len(words)] == words and any(
+                cc == c and (isinstance(v, (int, float)) and not isinstance(v, bool) or is_formula(v)) for (r, cc), v in sh.cells.items()):
+            found.append(c)
+    return found
+
+
 def named_by_owner(header: str, letter: str, owner_words: str) -> bool:
     """Did the owner name this column? Its distinctive words ('paid arpita' of 'Aug-26 Paid Arpita') must all be in what
     they wrote (a word may be shortened: 'collect'), and if they named months, its month must be one of them. A column
@@ -967,6 +982,13 @@ def plan(book, changes: list[dict], owner_words: str = "") -> tuple[list, list]:
             if owner_words and not added_here(writes, sh, col) and not named_by_owner(header, col_letter(col), owner_words):
                 raise ValueError(f"change {i + 1}: the owner did not name the column {col_letter(col)} '{header}'. Change only "
                                  "the columns they named; if you think this one must change too, ask_owner first")
+            if action == "set" and owner_words and not ch.get("owner_confirmed_column") and not added_here(writes, sh, col):
+                alike = look_alike_columns(sh, col)
+                if alike and not any(norm(sh.headers[c]) in norm(owner_words) for c in alike):       # the owner did not name any longer one
+                    raise ValueError(f"change {i + 1}: {col_letter(col)} '{header}' is also how other number columns start: "
+                                     + ", ".join(f"{col_letter(c)} '{sh.headers[c]}'" for c in alike)
+                                     + ". The owner's words may mean any of them, so do not guess: ask_owner which column (option 1 = the column named exactly "
+                                       f"'{header}', then the others; one option can be 'all of them'). Once they have answered, repeat this change with \"owner_confirmed_column\": true.")
             if action == "clear" and owner_words and not CLEAR_WORDS.search(owner_words):
                 raise ValueError(f"change {i + 1}: the owner did not ask to empty or remove anything; do not clear "
                                  f"'{header}'. Ask them if you think it should be")

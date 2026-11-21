@@ -1,5 +1,5 @@
 """The owner is told a reminder is set or a file is sent only when this turn really did it."""
-from src.agent_loop import unbacked_claim
+from src.agent_loop import unanswered_amount, unbacked_claim
 
 
 def turn(owner_text, *calls_and_results):
@@ -30,14 +30,14 @@ def test_an_amount_question_answered_with_no_amount_is_sent_back_once_with_the_q
     """A bill with 'kitna dena hai aur last date kya hai?' answered only with 'reminder set 3 Dec' (6 of 8 runs after a standing rule was saved)."""
     ask = "[The owner attached a file: file_ref=local:x:bill.pdf; caption: Ye lo is mahine ka bijli bill. Kitna dena hai aur last date kya hai?]"
     work = (("read_attachment", '{"kind": "pdf", "text": "Net Payable Rs. 8,803.00"}'), ("schedule_followup", '{"will_run_at_ist": "2026-12-03 09:00"}'))
-    note = unbacked_claim(turn(ask, *work), "Reminder set ho gaya - 3 Dec subah 9 baje yaad dila dungi.")
+    note = unanswered_amount(turn(ask, *work), "Reminder set ho gaya - 3 Dec subah 9 baje yaad dila dungi.")
     assert "asked for an amount" in note and "no amount" in note
-    assert unbacked_claim(turn(ask, *work), "Dena hai *Rs 8,803*, last date 5 Dec 2026. Reminder 3 Dec subah 9 baje.") == ""
-    assert unbacked_claim(turn(ask, *work), "Dena hai ₹12000 tak.") == ""
-    assert unbacked_claim(turn(ask, *work), "Last date 5 Dec 2026 hai, reminder 3 Dec ko.") != ""               # a year and dates are not an amount
-    assert unbacked_claim(turn(ask, *work), "Kaun sa bill hai, bijli ya paani?") == ""                           # a clarifying question is fine
-    assert unbacked_claim(turn("Ye lo bill", *work), "Reminder set ho gaya - 3 Dec subah 9 baje yaad dila dungi.") == ""     # no amount was asked for
-    assert unbacked_claim(turn("kitna dena hai?"), "Bill dekhna padega, bhej dijiye.") == ""                       # nothing was looked up this turn: nothing to repeat
+    assert unanswered_amount(turn(ask, *work), "Dena hai *Rs 8,803*, last date 5 Dec 2026. Reminder 3 Dec subah 9 baje.") == ""
+    assert unanswered_amount(turn(ask, *work), "Dena hai ₹12000 tak.") == ""
+    assert unanswered_amount(turn(ask, *work), "Last date 5 Dec 2026 hai, reminder 3 Dec ko.") != ""               # a year and dates are not an amount
+    assert unanswered_amount(turn(ask, *work), "Kaun sa bill hai, bijli ya paani?") == ""                           # a clarifying question is fine
+    assert unanswered_amount(turn("Ye lo bill", *work), "Reminder set ho gaya - 3 Dec subah 9 baje yaad dila dungi.") == ""     # no amount was asked for
+    assert unanswered_amount(turn("kitna dena hai?"), "Bill dekhna padega, bhej dijiye.") == ""                       # nothing was looked up this turn: nothing to repeat
 
 
 def test_a_question_or_a_list_of_reminders_is_not_a_claim():

@@ -20,7 +20,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from src import chatlog, clock, health_watch, prefs, tenants
-from src.agent import actions, bookkeeping, documents, extras, ageing, bank, gst, memory_pass, pc, reader, register_audit, sheet_tools, skills, tds_check, tools, web
+from src.agent import actions, bookkeeping, calc, documents, extras, ageing, bank, gst, memory_pass, pc, reader, register_audit, sheet_tools, skills, tds_check, tools, web
 from src.agent.context import compact
 from src.agent.policy import SessionCtx, approval_text, pre_tool_use
 from src.agent.prompt import build_system, latest_owner_text
@@ -45,7 +45,7 @@ EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memo
              "inspect_and_import_file": actions.inspect_and_import_file, "read_attachment": reader.read_attachment, "make_document": documents.make_document, "load_skill": skills.load_skill, "save_skill": skills.save_skill, "delete_skill": skills.delete_skill,"run_python": actions.run_python,
              "get_current_time": extras.get_current_time, "schedule_followup": extras.schedule_followup,
              "list_followups": extras.list_followups, "list_my_files": extras.list_my_files, "cancel_followup": extras.cancel_followup,
-             "check_gstin": extras.check_gstin, "build_payment_request": extras.build_payment_request,
+             "calculate": calc.calculate, "check_gstin": extras.check_gstin, "build_payment_request": extras.build_payment_request,
              "send_file_to_owner": extras.send_file_to_owner, "react_to_message": extras.react_to_owner, "web_search": web.web_search,
              "pc_files": pc.pc_files, "set_customer_phone": bookkeeping.set_customer_phone,
              "find_customer": bookkeeping.find_customer, "set_reply_style": prefs.set_reply_style,
@@ -314,14 +314,26 @@ def unbacked_claim(messages: list[dict], reply: str) -> str:
     taught = "write_continuum_evidence" in calls and bool(_STANDING_WORDS.search(str(messages[last].get("content") or ""))) if last >= 0 else False
     if _CLAIM_REMINDER.search(reply) and "schedule_followup" not in calls and not taught:      # a standing rule saved to memory is not a reminder set now
         return ("[system note] You said a reminder is set, but you did not call schedule_followup in this turn, so nothing is scheduled and the owner "
-                "would never be reminded. Call schedule_followup now with the exact date and time, then tell them the time it will come; if you could "
-                "not set it, say so plainly instead.")
+                "would never be reminded. Call schedule_followup now with the exact date and time. Then write your COMPLETE answer to the owner again: "
+                "everything they asked in this message (the figures, dates and totals) first, and the time the reminder will come in one line at the end. "
+                "If you could not set it, say so plainly instead.")
     sent = any(m["role"] == "tool" and ('"sent": true' in (m.get("content") or "") or '"files_sent_to_owner": ["' in (m.get("content") or "")) for m in turn)
     if _CLAIM_FILE.search(reply) and not sent:
         return ("[system note] You said you sent a file, but no send succeeded in this turn, so the owner has nothing. Send it now with "
                 "send_file_to_owner, or tell them plainly that it could not be sent.")
-    asked = str(messages[last].get("content") or "") if last >= 0 else ""
-    if calls and _ASKS_AMOUNT.search(asked) and not gives_a_figure(reply):          # e.g. a bill plus 'kitna dena hai?' answered with only 'reminder set'
+    return ""
+
+
+def unanswered_amount(messages: list[dict], reply: str) -> str:
+    """A system note when the owner asked for an amount in this message, something was looked up this turn, and the reply has no amount in it
+    (a bill plus 'kitna dena hai?' answered with only 'reminder set'). Its own nudge, so it still works after a reminder or file claim was corrected."""
+    reply = reply or ""
+    if "?" in reply or re.search(r"(?m)^\s*1[.)]\s", reply):
+        return ""
+    last = max((i for i, m in enumerate(messages) if m["role"] == "user" and not m["content"].startswith("[system note]")), default=-1)
+    if last < 0 or not any(c for m in messages[last + 1:] for c in (m.get("tool_calls") or [])):
+        return ""
+    if _ASKS_AMOUNT.search(str(messages[last].get("content") or "")) and not gives_a_figure(reply):
         return ("[system note] The owner asked for an amount in this message, and your reply has no amount in it. Give them the figure now, from the file "
                 "or the tool results you already have (say which amount it is), then add whatever you did for them in one line. If you truly cannot "
                 "find it, say that plainly and ask.")
@@ -426,7 +438,7 @@ async def _run(app, sid: str, fallback=None) -> None:
     if row is None:
         return
     messages, steps, suspended, empties = row["messages"], row["steps"], False, 0
-    budget, seen, nudged, card_nudged, claim_nudged, busy = 0, {}, False, False, False, 0
+    budget, seen, nudged, card_nudged, claim_nudged, amount_nudged, busy = 0, {}, False, False, False, False, 0
     ticker = None
     try:
         tenant = await tenants.by_id(pool, str(row["tenant_id"]))
@@ -470,6 +482,10 @@ async def _run(app, sid: str, fallback=None) -> None:
                 continue
             if not calls and not claim_nudged and row["trust"] == "TRUSTED" and (note := unbacked_claim(messages[:-1], msg.get("content") or "")):
                 claim_nudged = True    # self-check: it says a reminder is set or a file sent that this turn never made
+                messages.append({"role": "user", "content": note})
+                continue
+            if not calls and not amount_nudged and row["trust"] == "TRUSTED" and (note := unanswered_amount(messages[:-1], msg.get("content") or "")):
+                amount_nudged = True   # self-check: the owner asked for an amount and the reply has none
                 messages.append({"role": "user", "content": note})
                 continue
             if not calls and not card_nudged and row["trust"] == "TRUSTED" and owes_card(messages[:-1], msg.get("content") or ""):

@@ -157,7 +157,8 @@ async def tds_check(app, ctx, args: dict) -> dict:
         return {"error": p["error"], "hint": "ask the owner for the payments with section, gross amount and TDS deducted columns"}
     res = check(p["rows"], rates, th, no_pan)
     rules = {"summary": "; ".join(f"{k} {v if not isinstance(v, dict) else ', '.join(f'{a} {b}%' for a, b in v.items())}" + ("%" if not isinstance(v, dict) else "") for k, v in rates.items())
-             + (f"; no TDS at or below {', '.join(f'{k} Rs {v:,.0f}' for k, v in th.items())}" if th else "") + f"; no PAN: {no_pan:g}% or the rate if higher"}
+             + (f"; no TDS at or below {', '.join(f'{k} Rs {v:,.0f}' for k, v in th.items())}" if th else "; NO per-payment limit was given, so payments of every size are taxed")
+             + f"; no PAN: {no_pan:g}% or the rate if higher"}
     out = {"summary_lines": summary_lines(res, rules), "rules_used": rules["summary"], "payments_checked": len(res["rows"]),
            "expected_tds_rupees": sum(x["due"] for x in res["rows"]) / 100, "deducted_tds_rupees": sum(x["deducted"] for x in res["rows"]) / 100,
            "short_count": len(res["short"]), "short_rupees": sum(x["diff"] for x in res["short"]) / 100,
@@ -180,6 +181,8 @@ async def tds_check(app, ctx, args: dict) -> dict:
         out.update({"files_made": d["files"], "files_sent_to_owner": d["sent"], "files_not_sent": d["not_sent"], "_new_files": d["_new_files"], "file_refs": d["file_refs"]})
     out["next"] = ("Tell the owner the result in their language using summary_lines (the figures are final: quote them, never recompute them or redo this with code). "
                    + ("The PDF and the full Excel (short, excess and every payment) have already been sent. " if out.get("files_sent_to_owner") else "")
-                   + "State the rules used (rules_used) and ask the CA to confirm them; a payment at or below a threshold has no TDS even without a PAN.")
+                   + "FIRST compare rules_used with what the owner said: every rate, any limit below which a payment has no TDS ('30,000 ya kam pe TDS nahi'), the no-PAN rate. "
+                     "If something the owner said is missing or different there, call tds_check again with the corrected rules BEFORE you answer, and never tell the owner a rule "
+                     "was applied that rules_used does not show. Then state the rules used and ask the CA to confirm them; a payment at or below a limit has no TDS even without a PAN.")
     return ca_reports.compact(out, ("summary_lines", "next", "files_sent_to_owner", "files_not_sent", "rules_used", "payments_checked", "expected_tds_rupees", "deducted_tds_rupees",
                                     "short_count", "short_rupees", "excess_count", "excess_rupees"), cap=6)
