@@ -311,3 +311,150 @@ async def test_a_hand_made_copy_that_goes_beyond_the_ask_is_not_sent(app, reg, t
     rp = tmp_path / "report.xlsx"
     report.save(rp)
     assert await sheet_tools.edit_problems(app, ctx, rp.read_bytes(), "report.xlsx") == []
+
+
+# ------------------------------------------------------------------ questions over every row, big files, confirmation
+def sales_csv(path: Path, n: int = 0) -> Path:
+    rows = [("InvoiceNo", "Description", "Quantity", "InvoiceDate", "UnitPrice", "CustomerID", "Country"),
+            ("536365", "MUG", 6, "2010-12-01 08:26:00", 2.55, 17850, "United Kingdom"),
+            ("536366", "BOWL", 2, "2010-12-01 08:28:00", 3.0, 17850, "United Kingdom"),
+            ("C536379", "MUG", -1, "2010-12-01 09:41:00", 2.55, 14527, "Germany"),
+            ("536370", "JAR", 10, "2011-01-05 10:00:00", 1.5, "", "Germany"),
+            ("536371", "JAR", 4, "2011-02-05 10:00:00", 1.5, 12583, "France"),
+            ("536372", "MUG", 3, "2011-02-06 11:00:00", "", 12583, "France")]       # a price that is not a number
+    for i in range(n):
+        rows.append((f"7{i}", "PEN", 1, "2011-03-01 10:00:00", 1.0, 20000 + i % 7, "Spain"))
+    path.write_text("\n".join(",".join(str(c) for c in r) for r in rows) + "\n", encoding="utf-8")
+    return path
+
+
+def test_queries_answer_from_every_row_and_say_what_they_skipped(tmp_path):
+    f = sales_csv(tmp_path / "sales.csv")
+    R = "{Quantity} * {UnitPrice}"
+    out = se.query(str(f), [
+        {"measures": [{"op": "count"}, {"op": "sum", "of": R, "as": "rev"}, {"op": "count_distinct", "of": "CustomerID"}]},
+        {"where": [{"column": "InvoiceNo", "op": "starts_with", "value": "C"}], "measures": [{"op": "sum", "of": R}]},
+        {"group_by": "Country", "measures": [{"op": "sum", "of": "Quantity", "as": "qty"}], "sort": "qty"},
+        {"group_by": {"column": "InvoiceDate", "by": "month"}, "measures": [{"op": "sum", "of": R, "as": "rev"}]},
+        {"where": [{"column": "InvoiceDate", "op": "between", "value": ["2011-01-01", "2011-01-31"]}], "measures": [{"op": "count"}]},
+    ])
+    a = out["answers"]
+    assert a[0]["result"]["rows"] == 6 and a[0]["result"]["count_distinct of CustomerID"] == 3
+    assert a[0]["result"]["rev"] == round(6 * 2.55 + 6 - 2.55 + 15 + 6, 2)
+    assert a[0]["not_numbers_skipped"]                      # the row whose price is blank is named, not counted as 0
+    assert a[1]["result"] == {"sum of {Quantity} * {UnitPrice}": -2.55}
+    assert [g["Country"] for g in a[2]["rows"]][0] == "Germany" and a[2]["rows"][0]["qty"] == 9
+    assert [g["InvoiceDate (month)"] for g in a[3]["rows"]] == ["2010-12", "2011-01", "2011-02"]
+    assert a[4]["result"]["rows"] == 1
+
+
+def test_query_accepts_the_shapes_models_write_and_explains_the_right_one(tmp_path):
+    f = sales_csv(tmp_path / "sales.csv")
+    for cond in ({"field": "Country", "operator": "eq", "value": "germany"}, {"Country": "Germany"},
+                 {"Country": {"$eq": "Germany"}}, {"column": "Country", "op": "in", "value": ["Germany"]}):
+        out = se.query(str(f), [{"where": [cond], "measures": [{"agg": "sum", "field": "Quantity"}]}])
+        assert out["answers"][0]["result"]["sum of Quantity"] == 9, cond
+    bad = se.query(str(f), [{"where": [{"column": "Countri", "op": "=", "value": "x"}]}])
+    assert "no column called 'Countri'" in bad["error"] and "Country" in bad["error"]
+    assert "ops:" in se.query(str(f), [{"where": [{"op": "="}]}])["error"]
+
+
+def test_totals_and_the_block_below_are_never_counted_as_entries(reg):
+    out = se.query(str(reg), [{"measures": [{"op": "count"}, {"op": "sum", "of": "Aug-26 Bill Amount"}]}])
+    assert out["answers"][0]["result"]["rows"] == 7 and out["answers"][0]["result"]["sum of Aug-26 Bill Amount"] == 5525
+    assert "total_rows" in out["not_counted"] and "rows_below_totals" in out["not_counted"]
+    who = se.query(str(reg), [{"where": [{"column": "Aug Total", "op": "<", "value": 0}], "list": True, "columns": ["Name", "Aug Total"]}])
+    assert {r["Name"] for r in who["answers"][0]["matching_rows"]} == {"Diya", "Esha"}
+
+
+def test_a_very_big_sheet_is_queried_and_edited_row_by_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(se, "BIG_ROWS", 50)
+    f = sales_csv(tmp_path / "big.csv", n=200)
+    assert se.is_big(str(f))
+    q = se.query(str(f), [{"where": [{"column": "Country", "op": "=", "value": "Spain"}], "measures": [{"op": "sum", "of": "Quantity"}]}])
+    assert q["big"] and q["answers"][0]["result"]["sum of Quantity"] == 200
+    dst = tmp_path / "out.csv"
+    ch = [{"action": "add_column", "header": "Revenue", "compute": "{Quantity} * {UnitPrice}"},
+          {"column": "Country", "value": "ES", "rows": {"where": [{"column": "Country", "op": "=", "value": "Spain"}]}}]
+    r = se.apply_big(str(f), str(dst), ch, False, "add a Revenue column and change Spain to ES in Country")
+    assert r["saved"] and r["verified"], r
+    old, new = f.read_text(encoding="utf-8").splitlines(), dst.read_text(encoding="utf-8-sig").splitlines()
+    assert len(old) == len(new) and new[0].endswith("Revenue")
+    assert new[8].split(",")[-2:] == ["ES", "1"] and new[1].split(",")[0] == "536365"
+    unnamed = se.apply_big(str(f), str(tmp_path / "x.csv"), [{"column": "CustomerID", "value": 1}], False, "change Spain to ES in Country")
+    assert "did not name the column" in unnamed["error"]
+
+
+async def test_a_rule_the_owner_never_spelled_out_is_confirmed_before_saving(app):
+    ctx = SimpleNamespace(tenant_id="t", owner_words="jinko paise dene hain unke Aug Collection mein Pending likh do", confirmed=False)
+    ch = [{"column": "Aug Collection", "value": "Pending", "rows": {"where": [{"column": "Aug Total", "op": "<", "value": 0}]}}]
+    held = await sheet_tools.edit_spreadsheet(app, ctx, {"file_ref": "local:abc:x.xlsx", "changes": ch})
+    assert "error" not in held, held
+    assert held["needs_confirmation"] and held["saved"] is False and "ask_owner" in held["next"] and held["cells_to_change"] == 2
+    ctx.confirmed = True                                   # the owner answered the question
+    done = await sheet_tools.edit_spreadsheet(app, ctx, {"file_ref": "local:abc:x.xlsx", "changes": ch})
+    assert done["saved"] and done["verified"]
+    literal = SimpleNamespace(tenant_id="t", owner_words="Aug collection mein Diya aur Esha ko paid likh do", confirmed=False)
+    ok = await sheet_tools.edit_spreadsheet(app, literal, {"file_ref": "local:abc:x.xlsx", "changes": [
+        {"column": "Aug Collection", "value": "Paid", "rows": {"names": ["Diya", "Esha"]}}]})
+    assert ok["saved"]                                     # names the owner typed are their words, not a reading
+
+
+def test_a_sheet_written_in_streaming_mode_is_still_known_to_be_big(tmp_path, monkeypatch):
+    """Excel written row by row carries no row count; the saved file of a big edit must not be loaded whole on the next step."""
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet("Data")
+    ws.append(["Name", "Amount"])
+    for i in range(300):
+        ws.append([f"person {i}", i])
+    f = tmp_path / "stream.xlsx"
+    wb.save(f)
+    monkeypatch.setattr(se, "BIG_SHEET_XML", 2000)
+    assert se.is_big(str(f))
+    out = se.query(str(f), [{"measures": [{"op": "sum", "of": "Amount"}]}])
+    assert out["big"] and out["answers"][0]["result"]["sum of Amount"] == sum(range(300))
+
+
+def test_a_new_column_can_be_named_the_way_models_name_it(reg, tmp_path):
+    dst = tmp_path / "o.xlsx"
+    r = se.apply(str(reg), str(dst), [{"action": "add_column", "column": "Remarks", "value": "ok"}], owner_words="add a Remarks column")
+    assert r["verified"] and r["changes"][0]["column"].endswith("'Remarks' (new)")
+
+
+def test_a_rule_counts_as_the_owners_only_when_they_wrote_its_words():
+    from types import SimpleNamespace as NS
+    said = "jo cancelled invoices hain unki description mein cancelled likh do"
+    rule = [{"column": "Description", "value": "CANCELLED", "rows": {"where": [{"column": "InvoiceNo", "op": "starts_with", "value": "C"}]}}]
+    assert sheet_tools.needs_confirmation(rule, NS(owner_words=said, confirmed=False))      # 'C' is not a word they wrote
+    germany = [{"column": "Country", "value": "UK", "rows": {"where": [{"column": "Country", "op": "=", "value": "Germany"}]}}]
+    assert not sheet_tools.needs_confirmation(germany, NS(owner_words="country germany ko uk kar do", confirmed=False))
+
+
+def test_an_answer_to_a_question_is_known_from_the_conversation():
+    from src.agent_loop import answered_question
+    ask = {"role": "assistant", "content": "", "tool_calls": [{"id": "1", "function": {"name": "ask_owner", "arguments": "{}"}}]}
+    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "aug ko paid karo"}, ask,
+            {"role": "tool", "tool_call_id": "1", "content": '{"asked": true}'}, {"role": "user", "content": "1. Yes"}]
+    assert answered_question(msgs)
+    assert not answered_question(msgs + [{"role": "assistant", "content": "done"}, {"role": "user", "content": "now sort it"}])
+    assert not answered_question(msgs[:2])
+
+
+async def test_a_copy_with_rows_removed_is_caught_and_an_edit_is_not(app, reg, tmp_path):
+    """'Kharab rows hata do': the agent decided what 'bad' means and deleted 144,025 rows of a 541,909-row file, unasked."""
+    ctx = SimpleNamespace(tenant_id="t", files=("local:abc:Electricity Aug Sep.xlsx",))
+    wb = load_workbook(reg)
+    ws = wb.active
+    ws.delete_rows(4, 2)                                      # two students gone
+    cut = tmp_path / "cut.xlsx"
+    wb.save(cut)
+    gone = await sheet_tools.rows_removed(app, ctx, cut.read_bytes(), "Electricity_Aug_Sep.xlsx")
+    assert gone.startswith("2 of its")
+    edited = tmp_path / "edited.xlsx"
+    se.apply(str(reg), str(edited), [{"column": "Aug Collection", "value": "Paid"}])
+    assert await sheet_tools.rows_removed(app, ctx, edited.read_bytes(), "x.xlsx") == ""
+    other = Workbook()                                        # a different file is not a copy of theirs
+    other.active.append(["a", "b"])
+    op = tmp_path / "other.xlsx"
+    other.save(op)
+    assert await sheet_tools.rows_removed(app, ctx, op.read_bytes(), "o.xlsx") == ""

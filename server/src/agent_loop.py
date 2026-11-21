@@ -50,7 +50,8 @@ EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memo
              "pc_files": pc.pc_files, "set_customer_phone": bookkeeping.set_customer_phone,
              "find_customer": bookkeeping.find_customer, "set_reply_style": prefs.set_reply_style,
              "gst_reconcile": gst.gst_reconcile, "open_spreadsheet": sheet_tools.open_spreadsheet,
-             "edit_spreadsheet": sheet_tools.edit_spreadsheet, "ask_owner": extras.ask_owner}
+             "edit_spreadsheet": sheet_tools.edit_spreadsheet, "query_spreadsheet": sheet_tools.query_spreadsheet,
+             "ask_owner": extras.ask_owner}
 
 
 def _spawn(app, coro) -> None:
@@ -162,7 +163,18 @@ def _ctx(row, call_id: str = "", browsers=None) -> SessionCtx:
                       page=page_text(browsers.page(sid)) if browsers else "",
                       controls=str((browsers.page(sid) or {}).get("page", "")) if browsers else "",
                       last_fill=last_fill(row.get("messages") or [])[0], last_fill_value=last_fill(row.get("messages") or [])[1],
-                      owner_words=owner_words(row.get("messages") or []))
+                      owner_words=owner_words(row.get("messages") or []), confirmed=answered_question(row.get("messages") or []))
+
+
+def answered_question(messages: list[dict]) -> bool:
+    """True when the owner's latest message is the answer to an ask_owner question (the first thing they said since it)."""
+    def real(m):
+        return m.get("role") == "user" and not str(m.get("content") or "").startswith(("[system note]", "[Earlier conversation omitted"))
+    asked = [i for i, m in enumerate(messages) if m.get("role") == "assistant"
+             and any(c.get("function", {}).get("name") == "ask_owner" for c in (m.get("tool_calls") or []))]
+    if not asked:
+        return False
+    return sum(1 for m in messages[asked[-1] + 1:] if real(m)) == 1
 
 
 def owner_words(messages: list[dict], last: int = 12) -> str:
@@ -238,7 +250,7 @@ async def start_session(app, *, tenant, trust: str, trigger: str, content: str, 
 
 
 HEAVY_TOOLS = frozenset({"run_python", "inspect_and_import_file", "browser_step", "read_attachment", "make_document",
-                         "open_spreadsheet", "edit_spreadsheet"})
+                         "open_spreadsheet", "edit_spreadsheet", "query_spreadsheet"})
 
 
 def heavy(messages: list[dict]) -> bool:

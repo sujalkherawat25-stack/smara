@@ -5,7 +5,7 @@ description: Changing a file the owner already has (Excel workbook, sheet or CSV
 
 # Changing a file the owner sent
 
-1. `open_spreadsheet` the file: exact headers, entry rows, total row, any block below the totals.
+1. `open_spreadsheet` the file: exact headers, entry rows, total row, any block below the totals. To find rows by a rule (who owes, which country) use `query_spreadsheet` with `list: true`: it reads every row.
 2. Decide sheet, column, rows and value from the owner's words. If one of them has two readings that give a different
    file ("Aug collection ko paid kardo": write the word Paid, or fill in the amount due?), `ask_owner` with those options.
 3. `edit_spreadsheet`. A follow-up change uses the file_ref of the file you last sent, so the earlier change stays.

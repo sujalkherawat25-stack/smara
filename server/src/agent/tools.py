@@ -89,6 +89,14 @@ TOOLS = [
         "columns' formulas use it, sum_of_data_rows), the entry rows, total rows and any block below the totals (those are "
         "not entries). find='name' returns the rows mentioning it; rows='100-130' shows those rows.",
         {"file_ref": _S, "sheet": _S, "find": _S, "rows": _S}, ["file_ref"]),
+    _fn("query_spreadsheet", "Answer a question from EVERY row of an Excel/CSV file (any size, e.g. 500,000 rows): counts, sums, "
+        "averages, min/max, distinct counts, grouped by a column or by month/quarter/year, filtered. Totals and notes rows are "
+        "never counted as entries. Never add numbers up yourself: ask this and quote what it returns. queries: up to 8 of "
+        "{where: [{column, op (= != < <= > >= between in not_in contains starts_with ends_with empty not_empty), value}], "
+        "group_by: 'Country' | {column: 'InvoiceDate', by: month|quarter|year|week|weekday|day|fy}, measures: [{op: count|sum|avg|min|"
+        "max|count_distinct|median, of: 'Amount' or '{Quantity} * {UnitPrice}', as: name}], sort: name, limit, percent: true, "
+        "list: true (+ columns, sort) to see matching rows}. Dates as 2011-03-31; a date up to a day includes that day.",
+        {"file_ref": _S, "queries": {"type": "array", "items": {"type": "object"}}, "sheet": _S}, ["file_ref", "queries"]),
     _fn("edit_spreadsheet", "Change an Excel/CSV file cell-exactly; nothing outside the change is touched, and the saved "
         "file is checked against the original. A change: column (header); value (text/number) | formula ('={Bill}-{Paid}', "
         "{Header} = that column, same row) | compute (same, written as a number) | copy_from (column); action set|clear|"

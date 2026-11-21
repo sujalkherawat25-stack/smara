@@ -15,7 +15,7 @@ MAX_PENDING = 25
 MAX_PER_DAY = 50
 MAX_AHEAD = timedelta(days=60)
 MIN_AHEAD = timedelta(minutes=1)
-MAX_FILE_BYTES = 16_000_000
+MAX_FILE_BYTES = 45_000_000      # Telegram bots send up to 50 MB (they only DOWNLOAD 20 MB)
 MAX_RETRIES, RETRY_WINDOW = 2, timedelta(hours=6)     # quick re-schedules from a follow-up run, per 12 hours
 
 
@@ -195,11 +195,16 @@ async def send_file_to_owner(app, ctx: SessionCtx, args: dict) -> dict:
         return {"error": f"cannot send {ext or 'this'} file; allowed: {', '.join(sorted(SENDABLE))}"}
     data = app.state.sandbox.read_output(job_id, name)
     if not data or len(data) > MAX_FILE_BYTES:
-        return {"error": "file is empty or larger than 16 MB"}
+        return {"error": "file is empty or larger than 45 MB"}
     from src.agent import sheet_tools
     if problems := await sheet_tools.edit_problems(app, ctx, data, name):     # however the copy was made
         return {"sent": False, "error": "not sent: this copy of the owner's sheet goes beyond what they asked: "
                 + "; ".join(problems) + ". Redo it from their file with edit_spreadsheet, or ask_owner first."}
+    if not getattr(ctx, "confirmed", False) and (gone := await sheet_tools.rows_removed(app, ctx, data, name)):
+        return {"sent": False, "error": f"not sent: in this copy of the owner's sheet {gone}. Deleting their rows must be confirmed "
+                                        "first: ask_owner what exactly should go (the rule you would use and how many rows it removes, "
+                                        "with 2-3 examples), and send it only after they answer. If they only said something vague "
+                                        "like 'bad rows', ask what makes a row bad."}
     tenant = await tenants.by_id(app.state.pool, ctx.tenant_id)
     mime = SENDABLE.get(ext) or mimetypes.guess_type(name)[0] or "application/octet-stream"
     caption = re.sub(r"\s+", " ", str(args.get("caption") or ""))[:900]

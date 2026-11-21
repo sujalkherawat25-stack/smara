@@ -44,6 +44,7 @@ class SessionCtx:
     last_fill_value: str = ""      # and what it typed there
     controls: str = ""             # the numbered controls of the current page ('[12] button "Add to cart"' per line)
     owner_words: str = ""          # the owner's last few messages: what a file edit may touch is what they named
+    confirmed: bool = False        # the owner's latest message answers a question ask_owner put to them
 
 
 @dataclass(frozen=True)
@@ -108,7 +109,7 @@ def tier_of(name: str, args: dict) -> str:
     if name in ("query_ledger_sql", "resolve_continuum_memory", "run_python", "get_current_time", "check_gstin",
                 "build_payment_request", "list_followups", "web_search", "read_attachment", "make_document", "load_skill",
                 "search_chat_history", "gst_reconcile", "find_customer", "list_my_files", "react_to_message",
-                "open_spreadsheet", "edit_spreadsheet"):
+                "open_spreadsheet", "edit_spreadsheet", "query_spreadsheet"):
         return "T0"
     if name in ("schedule_followup", "cancel_followup", "send_file_to_owner", "set_customer_phone", "set_reply_style",
                 "save_skill", "delete_skill", "ask_owner"):
@@ -170,7 +171,7 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
             return Decision("deny", tier, "only the owner's own uploads can be imported")
     if name == "gst_reconcile" and any(args.get(k) not in ctx.files for k in ("books_file_ref", "gstr2b_file_ref")):
         return Decision("deny", tier, "only files attached to this conversation can be opened")
-    if name in ("open_spreadsheet", "edit_spreadsheet") and not can_open(args.get("file_ref"), ctx):
+    if name in ("open_spreadsheet", "edit_spreadsheet", "query_spreadsheet") and not can_open(args.get("file_ref"), ctx):
         return Decision("deny", tier, "only files attached to this conversation, or the owner's kept files, can be opened")
     if name == "ask_owner" and ctx.trust != "TRUSTED":
         return Decision("deny", tier, "only a conversation with the owner can ask the owner a question this way")

@@ -30,6 +30,11 @@ def _trim(result: dict) -> dict:
             if len(s.get("columns", [])) > 12:
                 s["columns_cut"] = f"{len(s['columns'])} columns; showing the first 12"
                 s["columns"] = s["columns"][:12]
+        for a in result.get("answers", []):
+            for k in ("rows", "matching_rows"):
+                if isinstance(a.get(k), list) and len(a[k]) > 5:
+                    a[k] = a[k][: max(5, len(a[k]) // 2)]
+                    a["cut"] = "shortened to fit; ask again with a smaller limit or one query at a time"
         if len(result.get("sheets", [])) > 3:
             result["sheets_cut"] = [s["sheet"] for s in result["sheets"][3:]]
             result["sheets"] = result["sheets"][:3]
@@ -102,6 +107,53 @@ async def edit_problems(app, ctx, data: bytes, name: str) -> list[str]:
     return []
 
 
+async def rows_removed(app, ctx, data: bytes, name: str) -> str:
+    """A copy of a sheet the owner sent in this conversation that has FEWER rows than their file (matched by the header
+    row), however the copy was made. '' when nothing was removed, it is not a copy of theirs, or it cannot be told."""
+    import asyncio
+    import tempfile
+    from src.agent import sheet_engine as se
+    ext = name.lower().rsplit(".", 1)[-1] if "." in name else ""
+    if ext not in ("xlsx", "xlsm", "csv"):
+        return ""
+    originals = [r for r in getattr(ctx, "files", ()) if str(r).startswith("local:") and str(r).lower().endswith("." + ext)]
+    if not originals:
+        return ""
+
+    def head(path):
+        gen = se._streams(path, values=False)
+        try:
+            for _, it in gen:
+                _, headers, _, _ = se._header_of(it)
+                return [h for _, h in sorted(headers.items()) if h]
+            return []
+        finally:
+            gen.close()
+
+    def check(orig_bytes: bytes, new_bytes: bytes):
+        with tempfile.TemporaryDirectory() as d:
+            old, new = Path(d) / f"old.{ext}", Path(d) / f"new.{ext}"
+            old.write_bytes(orig_bytes)
+            new.write_bytes(new_bytes)
+            try:
+                ha, hb = head(str(old)), head(str(new))
+                if not ha or ha != hb[:len(ha)]:
+                    return None                              # not a copy of this file
+                return se.entry_count(str(old)), se.entry_count(str(new))
+            except Exception:
+                return None
+    for ref in reversed(originals):                           # the latest upload first
+        try:
+            orig, _, _ = await actions._fetch(app, ref, ctx)
+        except Exception:
+            continue
+        counts = await asyncio.to_thread(check, orig, data)
+        if counts is not None:
+            before, after = counts
+            return f"{before - after} of its {before} rows are gone" if after < before else ""
+    return ""
+
+
 async def open_spreadsheet(app, ctx, args: dict) -> dict:
     ref = str(args.get("file_ref") or "")
     spec = {"op": "layout", **{k: args[k] for k in ("sheet", "rows", "find") if args.get(k)}}
@@ -115,6 +167,38 @@ async def open_spreadsheet(app, ctx, args: dict) -> dict:
     return _trim(out)
 
 
+async def query_spreadsheet(app, ctx, args: dict) -> dict:
+    ref = str(args.get("file_ref") or "")
+    queries = args.get("queries")
+    if queries is None and any(k in args for k in ("where", "group_by", "measures")):
+        queries = [{k: args[k] for k in ("where", "group_by", "measures", "sort", "limit", "list", "columns", "percent") if k in args}]
+    spec = {"op": "query", "queries": queries, **({"sheet": args["sheet"]} if args.get("sheet") else {})}
+    out, _, _ = await _run(app, ctx, ref, spec, timeout_s=290)
+    return _trim(out) if "error" not in out else out
+
+
+def _literal(where_value, said: str) -> bool:
+    """Every value of the rule is a word the owner actually wrote (whole words: a bare 'C' is not in 'cancelled')."""
+    vals = where_value if isinstance(where_value, list) else [where_value]
+    return all(re.search(r"(?<![\w.])" + re.escape(str(v).strip().lower()) + r"(?![\w])", said) for v in vals if v not in (None, ""))
+
+
+def needs_confirmation(changes: list, ctx) -> bool:
+    """Rows picked by a rule the owner did not spell out (their words never mention the values) are the model's reading,
+    so the owner confirms before anything is saved. Named columns, 'all rows', row numbers and names they typed are literal."""
+    if getattr(ctx, "confirmed", False):
+        return False
+    said = (getattr(ctx, "owner_words", "") or "").lower()
+    for ch in changes:
+        rows = ch.get("rows")
+        if isinstance(rows, dict):
+            conds = rows.get("where") or []
+            for c in (conds if isinstance(conds, list) else [conds]):
+                if isinstance(c, dict) and c.get("op") not in ("empty", "not_empty") and not _literal(c.get("value"), said):
+                    return True
+    return False
+
+
 async def edit_spreadsheet(app, ctx, args: dict) -> dict:
     ref = str(args.get("file_ref") or "")
     changes = args.get("changes")
@@ -124,8 +208,16 @@ async def edit_spreadsheet(app, ctx, args: dict) -> dict:
         return {"error": "changes must be a list like [{\"column\": \"Aug Collection\", \"value\": \"Paid\"}]"}
     if len(changes) > 20:
         return {"error": "at most 20 changes in one call"}
-    out, name, refs = await _run(app, ctx, ref, {"op": "edit", "changes": changes, "preview": bool(args.get("preview")),
-                                                 "owner_words": getattr(ctx, "owner_words", "") or ""})
+    preview = bool(args.get("preview"))
+    held = not preview and needs_confirmation(changes, ctx)
+    out, name, refs = await _run(app, ctx, ref, {"op": "edit", "changes": changes, "preview": preview or held,
+                                                 "owner_words": getattr(ctx, "owner_words", "") or ""}, timeout_s=290)
+    if held and "error" not in out:
+        return {**out, "needs_confirmation": True, "saved": False,
+                "next": ("NOT saved. Which rows to change comes from your reading of the sheet, not from the owner's words. Call "
+                         "ask_owner now: say in plain words the rule you used, how many rows it changes, 2-3 examples from "
+                         "'examples', and any effect listed. Options: 1. Yes, do exactly this 2. A different rule (they say which). "
+                         "When they answer, call edit_spreadsheet again with the same changes.")}
     if out.get("saved") and out.get("verified") and refs:
         out["file_ref"] = refs[0]
         out["filename"] = name

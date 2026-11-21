@@ -149,8 +149,11 @@ class LLM:
                  max_retries: int = 8, max_backoff_s: float = 20.0, max_concurrency: int = 4,
                  agent_rpm: float = 0, fallback_model: str = "", max_wait_s: float = 90.0,
                  fallback_after_s: float = 8.0, api_keys: list[str] | None = None, agent_burst: int = 4,
-                 fallback_on_busy: bool = True):
+                 fallback_on_busy: bool = True, max_tokens: int = 8192):
         self.enabled = bool(base_url)
+        # The provider's own default output limit is 2048 tokens. A reasoning model (glm5.3) spends all of it thinking about a
+        # spreadsheet task and returns an empty answer (finish_reason=length), so the limit is set here, not left to the default.
+        self.max_tokens = max_tokens
         self._model, self._reasoning = model, reasoning_model or model
         self.agent_model = agent_model or model     # the tool loop can run on a stronger model than extraction
         self.last_usage: dict = {}
@@ -169,7 +172,7 @@ class LLM:
         self._keys: list[_Key] = []
         for i, key in enumerate(keys, start=1):
             http = client or httpx.AsyncClient(
-                base_url=base_url, headers={"Authorization": f"Bearer {key}"}, timeout=90)
+                base_url=base_url, headers={"Authorization": f"Bearer {key}"}, timeout=150)   # glm5.3 can think for 60+ s
             self._keys.append(_Key(i, http, agent_rpm, agent_burst))
         if len(self._keys) > 1:
             log.info("LLM key pool: %d keys", len(self._keys))
@@ -248,30 +251,50 @@ class LLM:
 
     async def chat(self, messages: list[dict], tools: list[dict], allow_fallback: bool = True) -> dict:
         """One agent step: returns the assistant message (content and/or tool_calls)."""
-        req = {"model": self.agent_model, "temperature": 0, "messages": messages}
+        req = {"model": self.agent_model, "temperature": 0, "messages": messages, "max_tokens": self.max_tokens}
         if tools:
             req.update(tools=tools, tool_choice="auto")
         fb = bool(self.fallback_model) and self.fallback_model != self.agent_model and allow_fallback
         if any(k.bucket for k in self._keys):
             if fb and self.fallback_on_busy and self._best_wait() > self.fallback_after_s / 2:
                 self.stats["fallbacks"] += 1                    # the main model is busy: do not queue, use the spare one
-                body = await self._post({**req, "model": self.fallback_model})
+                body = await self._post_roomy({**req, "model": self.fallback_model})
                 return self._reply(body, self.fallback_model)
         try:
             # with a fallback model, do not queue behind a rate limit for long: switch after a few seconds
-            body = await self._post(req, max_wait=self.fallback_after_s if fb else None, paced=True)
+            body = await self._post_roomy(req, max_wait=self.fallback_after_s if fb else None, paced=True)
         except RateLimited:
             if not fb:
                 raise
             log.warning("agent model %s is rate limited; answering this step with %s", self.agent_model, self.fallback_model)
             self.stats["fallbacks"] += 1
-            body = await self._post({**req, "model": self.fallback_model})
+            body = await self._post_roomy({**req, "model": self.fallback_model})
             return self._reply(body, self.fallback_model)
         return self._reply(body, self.agent_model)
 
+    async def _post_roomy(self, req: dict, **kw) -> dict:
+        """_post, and when the model ran out of tokens while thinking (nothing to show), once more with three times the room."""
+        body = await self._post(req, **kw)
+        try:
+            ch = body["choices"][0]
+            cut = ch.get("finish_reason") == "length" and not ch["message"].get("tool_calls") and not (ch["message"].get("content") or "").strip()
+        except (KeyError, IndexError, TypeError, AttributeError):
+            cut = False
+        if cut and req.get("max_tokens"):
+            log.warning("%s used all %s tokens thinking; asking again with more room", req.get("model"), req["max_tokens"])
+            self.stats["roomier"] = self.stats.get("roomier", 0) + 1
+            body = await self._post({**req, "max_tokens": min(req["max_tokens"] * 3, 32000)}, **kw)
+        return body
+
     def _reply(self, body: dict, model: str) -> dict:
         self.last_usage = body.get("usage") or {}
-        msg = dict(body["choices"][0]["message"])
+        choice = body["choices"][0]
+        msg = dict(choice["message"])
+        if not msg.get("tool_calls") and not (msg.get("content") or "").strip():
+            u = body.get("usage") or {}
+            log.warning("empty reply from %s: finish=%s reasoning=%d chars completion_tokens=%s prompt_tokens=%s",
+                        model, choice.get("finish_reason"), len(msg.get("reasoning_content") or ""),
+                        u.get("completion_tokens"), u.get("prompt_tokens"))
         if msg.get("tool_calls"):
             msg["tool_calls"] = [repair_call(c) for c in msg["tool_calls"]]
         u = self.last_usage
