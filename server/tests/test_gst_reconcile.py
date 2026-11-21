@@ -107,9 +107,9 @@ def test_the_tool_reads_two_files_in_either_order_and_makes_the_report(monkeypat
     ctx = SessionCtx("s", "t", "TRUSTED", files=tuple(files))
     for args in ({"books_file_ref": "local:t1:books.xlsx", "gstr2b_file_ref": "local:t2:GSTR2B_oct.xlsx"},
                  {"books_file_ref": "local:t2:GSTR2B_oct.xlsx", "gstr2b_file_ref": "local:t1:books.xlsx"}):       # named the wrong way round
-        r = asyncio.run(gst.gst_reconcile(SimpleNamespace(), ctx, args))
+        r = asyncio.run(gst.gst_reconcile(SimpleNamespace(), ctx, {**args, "send": False}))
         assert r["counts"]["matched"] == 2 and r["itc_at_risk_rupees"] == 900.0 and r["counts_reconcile"]
-        assert r["report_file_ref"] == "sandbox:abc:report.pdf" and r["_new_files"] == ["sandbox:abc:report.pdf"]
+        assert r["file_refs"] == {"report.pdf": "sandbox:abc:report.pdf"} and r["_new_files"] == ["sandbox:abc:report.pdf"]
         assert r["files"] == {"books": "books.xlsx", "gstr2b": "GSTR2B_oct.xlsx"}
     kinds = [b["type"] for b in Docs.made["blocks"]]
     assert kinds[0] == "stats" and kinds[-1] == "note" and kinds.count("table") == 3
@@ -147,3 +147,94 @@ def test_the_import_tool_refuses_a_purchase_file_before_it_touches_the_ledger(mo
     for mode in ("inspect", "import"):
         r = asyncio.run(actions.inspect_and_import_file(SimpleNamespace(), SessionCtx("s", "t", "TRUSTED"), {"file_ref": "local:a:b.xlsx", "mode": mode}))
         assert r["imported"] is False and r["looks_like"] == "purchase register" and "gst_reconcile" in r["next"]
+
+
+# ---- what the CA actually needs from it: double bookings, blocked credit, the 2B's own flag, and the claimable figure ----
+def books_with(extra_rows):
+    return xlsx([["Date", "Supplier", "Supplier GSTIN", "Invoice", "Taxable", "CGST", "SGST", "IGST", "Narration"]] + extra_rows)
+
+
+def b2b_with(extra_rows):
+    return xlsx([["GSTIN of supplier", "Trade name", "Invoice number", "Invoice date", "Taxable value", "Integrated tax", "Central tax", "State/UT tax",
+                  "ITC Availability", "Reason"]] + extra_rows)
+
+
+G1, G2, G3 = "07AAAPK1111A1Z1", "07AAAPD2222B1Z2", "07AAAPR3333C1Z3"
+
+
+def test_the_same_invoice_entered_twice_with_the_same_figures_is_a_double_booking_not_an_amount_mismatch():
+    r = run(books_with([["01-10-2026", "Kumar", G1, "K-1", 10000, 900, 900, 0, "goods"], ["02-10-2026", "Kumar", G1, "K-1", 10000, 900, 900, 0, "goods"]]),
+            b2b_with([[G1, "Kumar", "K-1", "01-10-2026", 10000, 0, 900, 900, "Yes", ""]]))
+    assert r["counts"]["matched"] == 1 and r["counts"]["amount_mismatch"] == 0
+    assert [x["invoice"] for x in r["double_booked_in_books"]] == ["K-1"] and r["double_booked_in_books"][0]["itc_rupees"] == 1800
+    assert r["claimable_itc_rupees"] == 1800                                    # counted once
+
+
+def test_two_lines_of_one_invoice_with_different_figures_are_added_up():
+    r = run(books_with([["01-10-2026", "Kumar", G1, "K-1", 6000, 540, 540, 0, "goods"], ["01-10-2026", "Kumar", G1, "K-1", 4000, 360, 360, 0, "packing"]]),
+            b2b_with([[G1, "Kumar", "K-1", "01-10-2026", 10000, 0, 900, 900, "Yes", ""]]))
+    assert r["counts"]["matched"] == 1 and not r["double_booked_in_books"] and r["claimable_itc_rupees"] == 1800
+
+
+def test_blocked_credit_is_listed_for_the_ca_and_left_out_of_what_can_be_claimed():
+    r = run(books_with([["01-10-2026", "Kumar", G1, "K-1", 10000, 900, 900, 0, "Motor car repairs - director's vehicle"],
+                        ["02-10-2026", "Delhi", G2, "D-1", 5000, 450, 450, 0, "Stock purchase"],
+                        ["03-10-2026", "Rao", G3, "R-1", 2000, 180, 180, 0, "Diwali gift hampers"]]),
+            b2b_with([[G1, "Kumar", "K-1", "01-10-2026", 10000, 0, 900, 900, "Yes", ""], [G2, "Delhi", "D-1", "02-10-2026", 5000, 0, 450, 450, "Yes", ""],
+                      [G3, "Rao", "R-1", "03-10-2026", 2000, 0, 180, 180, "Yes", ""]]))
+    assert [(x["invoice"], x["head"]) for x in r["itc_blocked_17_5_to_review"]] == [("K-1", "motor vehicle"), ("R-1", "gifts, free samples")]
+    assert r["itc_blocked_17_5_rupees"] == 2160 and r["claimable_itc_rupees"] == 900 and "CA decides" in r["itc_blocked_note"]
+
+
+def test_the_gstr2b_own_itc_availability_column_is_honoured():
+    r = run(books_with([["01-10-2026", "Kumar", G1, "K-1", 10000, 900, 900, 0, "goods"], ["02-10-2026", "Delhi", G2, "D-1", 5000, 450, 450, 0, "goods"]]),
+            b2b_with([[G1, "Kumar", "K-1", "01-10-2026", 10000, 0, 900, 900, "No", "Supplier registration cancelled"],
+                      [G2, "Delhi", "D-1", "02-10-2026", 5000, 0, 450, 450, "Yes", ""]]))
+    assert r["itc_not_available_per_2b"] == [{"supplier": "Kumar", "invoice": "K-1", "reason": "Supplier registration cancelled", "itc_rupees": 1800.0}]
+    assert r["claimable_itc_rupees"] == 900 and r["claimable_invoices"] == 1
+
+
+def test_a_value_mismatch_is_claimable_only_at_what_the_supplier_reported():
+    r = run(books_with([["01-10-2026", "Kumar", G1, "K-1", 10000, 900, 900, 0, "goods"]]),
+            b2b_with([[G1, "Kumar", "K-1", "01-10-2026", 5000, 0, 450, 450, "Yes", ""]]))
+    assert r["counts"]["amount_mismatch"] == 1 and r["claimable_itc_rupees"] == 900 and r["itc_short_in_2b_rupees"] == 900
+
+
+def test_the_full_detail_workbook_neutralises_names_that_start_with_an_equals_sign():
+    sheets = gst.excel_sheets({**run(), "matched_invoices": [{"supplier": '=HYPERLINK("http://x","y")', "invoice": "1", "date": "", "tax_rupees": 1}]})
+    assert sheets[0][0] == "Summary" and any(s[0] == "Matched" for s in sheets)
+    assert "data_type = 's'" in gst.XL_CODE
+
+
+def test_the_tool_sends_the_pdf_and_the_excel_itself_and_hands_over_the_sentences_to_quote(monkeypatch):
+    """A model that had to assemble the answer sometimes redid the work in its own code and got it wrong: the figures arrive worded."""
+    from src.agent import actions, ca_reports, documents, extras
+    files = {"local:t1:books.xlsx": ("books.xlsx", BOOKS), "local:t2:GSTR2B_oct.xlsx": ("GSTR2B_oct.xlsx", B2B)}
+
+    async def fetch(app, ref, ctx=None):
+        name, data = files[ref]
+        return data, "", name
+    sent = []
+
+    async def send(app, ctx, args):
+        sent.append((args["file_ref"], args["caption"]))
+        return {"sent": True, "via": "telegram"}
+
+    async def excel(app, name, sheets):
+        return f"sandbox:x1:{name}", name
+    monkeypatch.setattr(actions, "_fetch", fetch)
+    monkeypatch.setattr(documents, "make_document", Docs().make_document)
+    monkeypatch.setattr(extras, "send_file_to_owner", send)
+    monkeypatch.setattr(ca_reports, "excel_file", excel)
+    ctx = SessionCtx("s", "t", "TRUSTED", files=tuple(files))
+    r = asyncio.run(gst.gst_reconcile(SimpleNamespace(), ctx, {"books_file_ref": "local:t1:books.xlsx", "gstr2b_file_ref": "local:t2:GSTR2B_oct.xlsx"}))
+    assert sorted(r["files_sent_to_owner"]) == ["GSTR2B_reconciliation.xlsx", "report.pdf"] and not r["files_not_sent"]
+    assert [s[0] for s in sent] == ["sandbox:abc:report.pdf", "sandbox:x1:GSTR2B_reconciliation.xlsx"] or len(sent) == 2
+    assert any("ITC claimable this month: Rs" in line for line in r["summary_lines"])
+    assert any("NOT in GSTR-2B: 1 invoices, ITC at risk Rs 450.00" in line for line in r["summary_lines"])
+    assert "never recompute" in r["next"] and "already been sent" in r["next"]
+
+
+def test_indian_digit_grouping_for_the_sentences():
+    from src.agent.ca_reports import rs
+    assert rs(7286766.86) == "Rs 72,86,766.86" and rs(999) == "Rs 999.00" and rs(1234) == "Rs 1,234.00" and rs(100000) == "Rs 1,00,000.00" and rs(-45541) == "-Rs 45,541.00"

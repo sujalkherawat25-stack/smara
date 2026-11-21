@@ -17,7 +17,7 @@ GSTR-2B is the monthly statement on the GST portal listing the invoices that sup
 Call `gst_reconcile(books_file_ref, gstr2b_file_ref)` with the two attached files. One call finds each file's header, matches on GSTIN (or supplier name) plus normalised invoice number, classifies every row, works out the ITC at risk and makes the PDF report. Then:
 1. Check `counts_reconcile` is true.
 2. `send_file_to_owner` with `report_file_ref`.
-3. Tell the owner, in a few lines: invoices in each file, matched, the ITC at risk, and the suppliers to chase (`chase_suppliers`, biggest first). Mention `possible_matches` (a different invoice number, same supplier and tax) as items for a person to confirm, never as matches.
+3. Tell the owner, in a few lines: invoices in each file, matched, the ITC at risk, `claimable_itc_rupees` (with its `claimable_basis`), and the suppliers to chase (`chase_suppliers`, biggest first). Say plainly what the tool set aside: `double_booked_in_books` (entered twice, counted once), `itc_blocked_17_5_to_review` (a reading of the narration; the CA decides) and `itc_not_available_per_2b` (the 2B's own flag). Mention `possible_matches` (a different invoice number, same supplier and tax) as items for a person to confirm, never as matches. `excel_file_ref` holds every row of every bucket: send it too when they want the detail.
 4. Offer one short message per supplier for the owner's approval.
 Do not write code for this and do not call `inspect_and_import_file` on a purchase register or a GSTR-2B: they are not receivables. Fall back to the manual procedure below only if `gst_reconcile` returns an error that the files cannot be read.
 

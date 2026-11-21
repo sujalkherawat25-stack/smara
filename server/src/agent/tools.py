@@ -50,8 +50,10 @@ _S = {"type": "string"}
 TOOLS = [
     _fn("query_ledger_sql", "Run ONE read-only SELECT on the shop's ledger. " + LEDGER_SCHEMA, {"sql": _S}, ["sql"]),
     _fn("web_search", "Search the web (DuckDuckGo, then Bing). Returns up to 8 results with title, url and a snippet, using the "
-        "owner's own PC browser when it is connected. Then open a result with browser_step navigate and read it. Use it for "
-        "anything outside the ledger: prices, places, suppliers, news, how-to. Quote what you read; never invent details.",
+        "owner's own PC browser when it is connected. Use it for anything outside the ledger: prices, places, suppliers, news, "
+        "how-to, a rule or a rate. Answer from the snippets and what you know, quoting what you read and never inventing details; for "
+        "tax or law say what you are sure of and tell them to confirm the exact section or rate with their CA. Open a page with "
+        "browser_step only when the owner asks you to open or fill something (each page waits for their tap).",
         {"query": _S}, ["query"]),
     _fn("get_current_time", "The current date and time in India (IST), the weekday, and whether it is business hours. "
         "Call this whenever the date or time matters; never guess it.", {}, []),
@@ -67,16 +69,22 @@ TOOLS = [
         "stores shop-wide notes and standing instructions (e.g. 'never remind Sharma before Friday').",
         {"party_id": _S, "text": _S}, ["party_id", "text"]),
     _fn("schedule_followup", "Wake yourself up later to do something (e.g. check if a customer paid, nudge the owner). "
-        "Give either at_ist ('YYYY-MM-DD HH:MM', Indian time) or in_minutes. Times in quiet hours (9 PM to 8 AM) move to "
-        "the next morning. Copy any names exactly as the owner wrote them. When it fires you get the instruction and can use all "
-        "tools; outward actions still need approval.",
-        {"instruction": _S, "at_ist": _S, "in_minutes": {"type": "integer"}}, ["instruction"]),
-    _fn("list_followups", "List your pending scheduled follow-ups.", {}, []),
+        "Give either at_ist ('YYYY-MM-DD HH:MM', Indian time) or in_minutes; up to 400 days ahead. Times in quiet hours (9 PM to 8 AM) "
+        "move to the next morning: tell the owner. For a reminder that comes back by itself (every month on the 11th) give the NEXT "
+        "date as at_ist and repeat = daily, weekly, monthly or yearly (until_ist 'YYYY-MM-DD' optional); one call per reminder, "
+        "never many one-off copies. Copy any names exactly as the owner wrote them. When it fires you get the instruction and can use "
+        "all tools; outward actions still need approval.",
+        {"instruction": _S, "at_ist": _S, "in_minutes": {"type": "integer"}, "repeat": _S, "until_ist": _S}, ["instruction"]),
+    _fn("list_followups", "List the reminders and follow-ups that are scheduled for the owner (what they asked you to remind THEM about, and "
+        "checks you planned), with each task_id. 'Mere saare reminders dikhao', 'kaunse reminders lage hain' and 'what reminders do I have' mean "
+        "THIS tool. It is not about payment reminders to customers.", {}, []),
     _fn("list_my_files", "List the files this person sent you earlier (they are kept; a file from yesterday or last week is still "
         "here). Optionally filter by part of the name. Each entry has a file_ref you can pass to run_python (file_refs) or "
         "read_attachment. Call this BEFORE you say you no longer have a file.",
         {"name_contains": _S}, []),
-    _fn("cancel_followup", "Cancel a pending follow-up by task_id.", {"task_id": _S}, ["task_id"]),
+    _fn("cancel_followup", "Cancel one of the owner's scheduled reminders or follow-ups ('GSTR wala hata do'): call list_followups, pick "
+        "the task whose text matches what they said, then cancel it by task_id and tell them which one you cancelled. Ask only if several "
+        "match.", {"task_id": _S}, ["task_id"]),
     _fn("check_gstin", "Validate a GSTIN's format and checksum (does not check live registration status).",
         {"gstin": _S}, ["gstin"]),
     _fn("build_payment_request", "Prepare the payment request text for an invoice: amount, the shop's UPI ID and a tap-to-pay "
@@ -93,7 +101,9 @@ TOOLS = [
         "averages, min/max, distinct counts, grouped by a column or by month/quarter/year, filtered. Totals and notes rows are "
         "never counted as entries. Never add numbers up yourself: ask this and quote what it returns. queries: up to 8 of "
         "{where: [{column, op (= != < <= > >= between in not_in contains starts_with ends_with empty not_empty), value}], "
-        "group_by: 'Country' | {column: 'InvoiceDate', by: month|quarter|year|week|weekday|day|fy}, measures: [{op: count|sum|avg|min|"
+        "group_by: 'Country' | {column: 'InvoiceDate', by: month|quarter|year|week|weekday|day|fy} | {column: 'Party', by: name} (gathers the "
+        "spellings of one party: case, M/s, Messrs, Pvt Ltd, '&'; returns spellings_gathered per party and names_that_may_be_the_same to show "
+        "the owner), measures: [{op: count|sum|avg|min|"
         "max|count_distinct|median, of: 'Amount' or '{Quantity} * {UnitPrice}', as: name}], sort: name, limit, percent: true, "
         "list: true (+ columns, sort) to see matching rows}. Dates as 2011-03-31; a date up to a day includes that day.",
         {"file_ref": _S, "queries": {"type": "array", "items": {"type": "object"}}, "sheet": _S}, ["file_ref", "queries"]),
@@ -179,9 +189,25 @@ TOOLS = [
         "Give the two attached files: books_file_ref (the purchase register from their books or Tally) and gstr2b_file_ref (the "
         "GSTR-2B from the GST portal), as Excel or CSV. It finds each file's header row itself, matches supplier GSTIN (or name) "
         "plus invoice number, and returns counts, the ITC at risk, the invoices missing from 2B, amount mismatches, invoices in 2B "
-        "but not in the books, possible typo matches and which suppliers to chase. Use this instead of writing code for a GST "
-        "reconciliation. Check counts_reconcile is true; if it returns an error, ask the owner for the files in a readable format.",
-        {"books_file_ref": _S, "gstr2b_file_ref": _S, "report": {"type": "boolean"}}, ["books_file_ref", "gstr2b_file_ref"]),
+        "but not in the books, possible typo matches and which suppliers to chase. It also returns the invoices booked twice, the "
+        "blocked credit (section 17(5)) to review, the ITC the 2B itself marks not available, and claimable_itc_rupees, and makes the "
+        "PDF and a full Excel. Use it for EVERY question about these two files, including a follow-up: it takes seconds, so call it "
+        "again instead of working the figures out yourself. Check counts_reconcile is true; if it returns an error, ask the owner for "
+        "the files in a readable format.",
+        {"books_file_ref": _S, "gstr2b_file_ref": _S, "report": {"type": "boolean"}, "send": {"type": "boolean"}}, ["books_file_ref", "gstr2b_file_ref"]),
+    _fn("bank_reconcile", "Bank reconciliation statement (BRS) in ONE call: the owner's cash/bank book against the bank statement, both Excel or "
+        "CSV. It matches on cheque/UTR/voucher number and amount and returns the balance per books and per bank, the payments not yet presented, the "
+        "receipts in transit, the bank charges, interest and direct credits missing from the books, an amount recorded differently (digits swapped), an "
+        "entry made twice, the corrected balances and whether they agree. It makes the PDF statement and an Excel and sends both to the owner. Use it for "
+        "EVERY bank reconciliation or BRS request, and call it again for a follow-up: never match the two files with your own code. as_on (YYYY-MM-DD) is "
+        "optional. If it says 'needs', ask the owner for that (an opening balance) and call again.",
+        {"book_file_ref": _S, "bank_file_ref": _S, "as_on": _S, "report": {"type": "boolean"}, "send": {"type": "boolean"}}, ["book_file_ref", "bank_file_ref"]),
+    _fn("ageing_report", "Receivables or payables ageing in ONE call from a list of open invoices (party, invoice date and/or due date, outstanding amount), "
+        "Excel or CSV. Buckets 0-30, 31-60, 61-90, 90+ days from the invoice date (basis 'invoice_date', the default) or days past the due date (basis "
+        "'due_date'), as on as_on (YYYY-MM-DD, default today). Returns the bucket totals, party-wise table and the biggest parties in the oldest bucket, "
+        "and sends the PDF and a full Excel (party-wise and invoice-wise) to the owner. Use it for EVERY ageing / outstanding-by-age request instead of "
+        "writing code; say which way the days were counted.",
+        {"file_ref": _S, "as_on": _S, "basis": _S, "report": {"type": "boolean"}, "send": {"type": "boolean"}}, ["file_ref"]),
     _fn("record_sale","Write a NEW sale on credit (udhaar) into the ledger, when the OWNER says they sold or gave goods and the "
         "customer will pay later ('Sharma ko 12000 ka maal diya, 15 din mein dega'). Give the customer's name as the owner said it, "
         "rupees, and credit_days if they said when it is due (30 if they did not; say so). The system makes the invoice number "
@@ -234,7 +260,11 @@ TOOLS = [
         "earlier run are NOT in ./out: pass their output_file_ref in file_refs. "
         "FOR BOOKS (what customers owe, receipts against invoices, TDS, GST bills) do NOT hand-write the matching: "
         "mh.match_names(names, ledger_names) maps typed spellings to the ledger ('and'/'&', case, spaces, Agarwal/Agrawal) and lists "
-        "the unclear ones in 'review'; mh.fifo_apply(invoices, payments) applies lump-sum receipts oldest invoice first and returns "
+        "the unclear ones in 'review'; mh.split_sheets(src, dst, 'Invoice Date', how='month') (or how='value' for a column like Country) puts each "
+        "month or value on its own sheet of ONE workbook with dates, numbers, formulas and formatting exactly as they were (pandas turns the "
+        "dates into text). 'Exact duplicate rows' means df.duplicated() over EVERY column as read, nothing looser (no stripping or lower-casing): keep "
+        "the first copy and quote that count; mh.group_names(names) gathers the spellings of one party (case, M/s, Messrs, Pvt Ltd, '&') for a "
+        "party-wise total and lists 'maybe_same' pairs to keep apart and show the owner; mh.fifo_apply(invoices, payments) applies lump-sum receipts oldest invoice first and returns "
         "open balances and advances; mh.norm_invoice(no) compares invoice numbers ignoring punctuation and case; "
         "mh.tds_194q(bills) does section 194Q: 0.1% ONLY on the part of a supplier's year purchases ABOVE Rs 50 lakh (62.5 lakh "
         "means tax on 12.5 lakh, never on the whole 62.5 lakh), and 5% (not 20%) when the supplier has no PAN; for supplier totals pass "
