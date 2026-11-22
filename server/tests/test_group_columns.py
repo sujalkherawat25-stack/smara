@@ -112,12 +112,12 @@ def test_the_sep_totals_edit_goes_through_and_changes_only_the_total_row(tmp_pat
 
 
 def dup_book(path: Path) -> Path:
-    """Three people called Mahi: two in room 101 (one has paid 80, the other nothing) and one in room 103."""
+    """Three people called Maya: two in room 101 (one has paid 80, the other nothing) and one in room 103."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Sheet1"
     ws.append(["Room no.", "Name", "Deposit", "Sep-26 Bill Amount", "Sep-26 Collection", "Sep-26 Total", "Remark"])
-    data = [(101, "Mahi", 100, 80), (None, "Mahi", 100, None), (102, "Neha", 70, 70), (None, "Opal", 70, None), (103, "Mahi", 60, None), (None, "Pia", 60, 60),
+    data = [(101, "Maya", 100, 80), (None, "Maya", 100, None), (102, "Neha", 70, 70), (None, "Opal", 70, None), (103, "Maya", 60, None), (None, "Pia", 60, 60),
             (104, "Quin", 90, 90), (105, "Rani", 55, 55), (None, "Sara", 55, None)]
     for i, (room, nm, bill, got) in enumerate(data, start=2):
         ws.append([room, nm, 500, bill, got, f"=E{i}-D{i}", None])
@@ -132,30 +132,30 @@ def edit(path, said, row, extra=None, tmp=None):
 
 def test_a_person_on_three_rows_is_asked_about_not_guessed(tmp_path):
     p = dup_book(tmp_path / "d.xlsx")
-    r = edit(p, "Mahi ka Sep Collection 90 kar do", 3)
-    assert r["nothing_changed"] and "'Mahi' is on 3 rows" in r["error"], r
+    r = edit(p, "Maya ka Sep Collection 90 kar do", 3)
+    assert r["nothing_changed"] and "'Maya' is on 3 rows" in r["error"], r
     assert "row 2, Room no. 101, now 80" in r["error"] and "row 3, Room no. 101, now empty" in r["error"] and "row 6, Room no. 103, now empty" in r["error"]
     assert "ask_owner" in r["error"] and "owner_confirmed_row" in r["error"]
-    ok = edit(p, "Mahi ka Sep Collection 90 kar do", 3, {"owner_confirmed_row": True})       # after the owner picked one of the options
+    ok = edit(p, "Maya ka Sep Collection 90 kar do", 3, {"owner_confirmed_row": True})       # after the owner picked one of the options
     assert not ok.get("error") and ok.get("verified"), ok
 
 
 def test_a_room_a_row_or_a_figure_only_one_row_has_says_which_person(tmp_path):
     p = dup_book(tmp_path / "d.xlsx")
-    assert not edit(p, "Room 103 ki Mahi ka Sep Collection 90 kar do", 6).get("error")             # only one Mahi in 103
-    assert not edit(p, "Mahi (row 6) ka Sep Collection 90 kar do", 6).get("error")
-    assert not edit(p, "Room 101 ki Mahi, jiska Sep Collection 80 hai, ka 90 kar do", 2).get("error")      # 80 is held by that row only
-    two_in_one_room = edit(p, "Room 101 ki Mahi ka Sep Collection 90 kar do", 3)
-    assert two_in_one_room.get("error") and "'Mahi' is on 3 rows" in two_in_one_room["error"]       # both Mahis are in 101: still not clear
+    assert not edit(p, "Room 103 ki Maya ka Sep Collection 90 kar do", 6).get("error")             # only one Maya in 103
+    assert not edit(p, "Maya (row 6) ka Sep Collection 90 kar do", 6).get("error")
+    assert not edit(p, "Room 101 ki Maya, jiska Sep Collection 80 hai, ka 90 kar do", 2).get("error")      # 80 is held by that row only
+    two_in_one_room = edit(p, "Room 101 ki Maya ka Sep Collection 90 kar do", 3)
+    assert two_in_one_room.get("error") and "'Maya' is on 3 rows" in two_in_one_room["error"]       # both Mayas are in 101: still not clear
     assert not edit(p, "Neha ka Sep Collection 90 kar do", 4).get("error")                          # a name on one row only
     assert not edit(p, "Sep Collection 90 kar do", 3).get("error")                                  # no name in the words: nothing to ask about
 
 
 def test_the_attached_files_name_does_not_count_as_the_owners_words(tmp_path):
     """On the server the owner's words arrive with the file reference ('file_ref=local:x:Bill_Aug__0_Sep_2026.xlsx; caption: ...'); the stray 0 of
-    the file name was held by one Mahi's row only and so 'said which Mahi'."""
+    the file name was held by one Maya's row only and so 'said which Maya'."""
     p = dup_book(tmp_path / "d.xlsx")
-    said = "[The owner attached a file: file_ref=local:abc:Bill_Aug__0_Sep_2026__1_.xlsx; caption: Mahi ka Sep Collection 90 kar do]"
+    said = "[The owner attached a file: file_ref=local:abc:Bill_Aug__0_Sep_2026__1_.xlsx; caption: Maya ka Sep Collection 90 kar do]"
     r = edit(p, said, 2)
-    assert r.get("error") and "'Mahi' is on 3 rows" in r["error"], r
-    assert not edit(p, said.replace("Mahi ka", "Room 103 ki Mahi ka"), 6).get("error")
+    assert r.get("error") and "'Maya' is on 3 rows" in r["error"], r
+    assert not edit(p, said.replace("Maya ka", "Room 103 ki Maya ka"), 6).get("error")
