@@ -313,7 +313,45 @@ class Sheet:
     def __init__(self, title: str, cells: dict, cached: dict, max_row: int, max_col: int):
         self.title, self.cells, self.cached, self.max_row, self.max_col = title, cells, cached, max_row, max_col
         self.ev = _Eval(cells, cached)
+        self._groups = None
         self._shape()
+
+    # -- a value written once for a whole group
+    def group_columns(self) -> dict[int, dict]:
+        """Columns among the first three that are written only on the FIRST row of each group (a room number, a party, a date) with the rows
+        below left empty, as in a merged cell: {column: {(row, column): the value that belongs to that blank cell}}. Conservative on purpose: the
+        first entry row has a value, at least 4 groups, a fifth to four fifths of the rows are empty, the values hardly repeat (a status or
+        a remark column does), no formulas, short values. The block under the totals is carried on its own."""
+        if self._groups is not None:
+            return self._groups
+        self._groups = {}
+        rows = [r for r in self.data_rows() if self.has_content(r)]
+        if len(rows) < 6:
+            return self._groups
+        for c in range(1, min(3, self.max_col) + 1):
+            filled = [(r, self.cells.get((r, c))) for r in rows if self.cells.get((r, c)) not in (None, "")]
+            if (len(filled) < 4 or filled[0][0] != rows[0] or not 0.2 * len(rows) <= len(rows) - len(filled) <= 0.8 * len(rows)
+                    or any(is_formula(v) or (isinstance(v, str) and len(v) > 40) for _, v in filled)
+                    or len({str(v).strip().lower() for _, v in filled}) < 0.9 * len(filled)):
+                continue
+            carry = {}
+            for block in (rows, [r for r in self.below if self.has_content(r)]):
+                last = None
+                if block and self.cells.get((block[0], c)) in (None, ""):
+                    continue
+                for r in block:
+                    v = self.cells.get((r, c))
+                    if v not in (None, ""):
+                        last = v
+                    elif last is not None:
+                        carry[(r, c)] = last
+            self._groups[c] = carry
+        return self._groups
+
+    def carried(self, r: int, c: int):
+        """What a blank cell in a group column stands for (None if the cell is not such a blank)."""
+        g = self.group_columns().get(c)
+        return g.get((r, c)) if g else None
 
     # -- shape
     def row_vals(self, r: int) -> list:
@@ -453,6 +491,10 @@ class Sheet:
             out["cells_showing_errors"] = errs
         if users := self.used_by(c):
             out["used_by_formulas_in"] = users[:3]
+        if c in self.group_columns():
+            out["written_once_per_group"] = (f"only the first row of each group has a value ({out['filled_rows']} of the entry rows); the empty cells below "
+                                             "belong to the same value, as in a merged cell. query_spreadsheet and edit_spreadsheet count them with it: "
+                                             "a filter on this column covers the whole group, not just its first row")
         return out
 
     def describe_row(self, r: int) -> dict:
@@ -460,6 +502,8 @@ class Sheet:
         for c in range(1, self.max_col + 1):
             v = self.cells.get((r, c))
             if v in (None, ""):
+                if (g := self.carried(r, c)) is not None:
+                    row[f"{col_letter(c)} {self.headers.get(c, '')}".strip() + " (group)"] = short(g)
                 continue
             key = f"{col_letter(c)} {self.headers.get(c, '')}".strip()
             if is_formula(v):
@@ -755,6 +799,8 @@ def _cond(sh, cond: dict):
 
     def ok(r):
         v = sh.ev.value(r, c)
+        if v in (None, "") and (g := sh.carried(r, c)) is not None:
+            v = g                                       # a blank under a group's first row counts as that group
         if op in ("empty", "is_empty"):
             return v in (None, "")
         if op in ("not_empty", "filled"):
@@ -832,6 +878,47 @@ def _target_rows(sh, ch: dict, col: int, report: dict) -> list[int]:
     return picked
 
 
+def _same_name_elsewhere(sh, rows: list[int], owner_words: str, col: int) -> str:
+    """The owner named a person who is on more than one row of the sheet and nothing in their words says which row (a room or row number, or a
+    figure that only one of the rows holds): the question to ask instead of guessing, '' when it is clear."""
+    ncol, err = sh.find_column(_name_col(sh))
+    if err or not ncol:
+        return ""
+    low = re.sub(r"file_ref=\S+", " ", str(owner_words)).lower()           # the attached file's own name is not the owner's words
+    tokens = set(re.findall(r"\d{2,}", low)) | set(re.findall(r"(?:row|room|kamra|line)\s*(?:no\.?\s*)?(\d+)", low))     # a room, a row or a figure
+    entries =[r for r in sh.data_rows() if sh.has_content(r)] + [r for r in sh.below if sh.has_content(r)]
+    by_name: dict[str, list[int]] = {}
+    for r in entries:
+        v = sh.cells.get((r, ncol))
+        if isinstance(v, str) and v.strip():
+            by_name.setdefault(norm(v), []).append(r)
+
+    def facts(r: int) -> set[str]:
+        out = {str(v).strip().lower().removesuffix(".0") for v in sh.row_vals(r) if v not in (None, "") and not is_formula(v)}
+        out |= {str(g).removesuffix(".0") for c in sh.group_columns() if (g := sh.carried(r, c)) is not None}
+        return out | {str(r)}
+
+    for r in rows:
+        name = sh.cells.get((r, ncol))
+        if not isinstance(name, str) or not name.strip():
+            continue
+        others = [o for o in by_name.get(norm(name), []) if o not in rows]
+        if not others or not re.search(rf"(?<![a-z]){re.escape(name.strip().lower())}(?![a-z])", low):
+            continue
+        mine = facts(r)
+        if any(t in mine and all(t not in facts(o) for o in others) for t in tokens):
+            continue                                                         # a room, a row or a figure that only this row has
+        def where(x: int) -> str:
+            room = next((sh.carried(x, c) if sh.cells.get((x, c)) in (None, "") else sh.cells.get((x, c)) for c in sh.group_columns()), None)
+            now = sh.cells.get((x, col))
+            return f"row {x}" + (f", {sh.headers.get(next(iter(sh.group_columns())))} {room}" if room is not None else "") + (f", now {short(now)}" if now not in (None, "") else ", now empty")
+        every = sorted({r, *others})
+        return (f"'{name.strip()}' is on {len(every)} rows ({'; '.join(where(x) for x in every)}) and the owner did not say which one. Do not guess: "
+                "ask_owner which one (one option per row, with its room or row and what it holds now). Once they have answered, repeat this change "
+                "with \"owner_confirmed_row\": true.")
+    return ""
+
+
 def _name_col(sh) -> str:
     for c, h in sh.headers.items():
         if re.search(r"name|party|customer|student|naam", h, re.I):
@@ -899,6 +986,9 @@ MONTHS = {"jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "sept",
           "march", "april", "june", "july", "august", "september", "october", "november", "december"}
 
 
+FILLER_WORDS = {"amount", "amt", "rupees", "rupee", "inr"}          # words in a header that only say 'this is money'
+
+
 CLEAR_WORDS = re.compile(r"(clear|empty|blank|remove|delete|erase|hata|mita|khali|khaali|saaf|nikal|हटा|मिटा|खाली)", re.I)
 
 
@@ -931,6 +1021,8 @@ def named_by_owner(header: str, letter: str, owner_words: str) -> bool:
         return True
     hw = _words(header)
     key = [w for w in hw if w not in MONTHS and len(w) > 2]
+    if len(key) > 1:                       # 'Bill Amount': the owner who says 'bill' named it; 'amount' only says it is money
+        key = [w for w in key if w not in FILLER_WORDS] or key
     months = {w[:3] for w in hw if w in MONTHS}
     said_months = {w[:3] for w in said if w in MONTHS}
 
@@ -1003,6 +1095,9 @@ def plan(book, changes: list[dict], owner_words: str = "") -> tuple[list, list]:
             rep["warning"] = "no row matched; nothing changed for this step"
             reports.append(rep)
             continue
+        if action in ("set", "clear") and owner_words and not ch.get("owner_confirmed_row") and len(rows) <= 12:
+            if why := _same_name_elsewhere(sh, rows, owner_words, col):
+                raise ValueError(f"change {i + 1}: {why}")
         n, sample, formulas_over, values_over = 0, [], 0, 0
         for r in rows:
             old = sh.cells.get((r, col))
@@ -1942,9 +2037,14 @@ def query(path: str, queries: list, sheet: str | None = None, include_rows_below
                 if v is UNK:
                     unknown[0] += 1
                     return None
+                if v in (None, "") and (g := sh.carried(r, c)) is not None:
+                    return g
                 return v
             for q in qs:
                 q.add(r, get, lambda q=q, r=r, get=get: _row_out(sh.headers, r, get, q.wanted_cols() or list(sh.headers)))
+        if groups := sh.group_columns():
+            out["filled_down"] = {sh.headers.get(c) or col_letter(c): "written only on the first row of each group in the file; the empty cells below "
+                                  "were read as the same value, so a filter or a group on it covers every row of the group" for c in groups}
         out.update({"sheet": sh.title, "entry_rows": len(rows), "not_counted": {
             **({"total_rows": sh.total_rows} if sh.total_rows else {}),
             **({"rows_below_totals": f"{sh.below[0]}-{sh.below[-1]}"} if sh.below and not include_rows_below_totals else {})}})
