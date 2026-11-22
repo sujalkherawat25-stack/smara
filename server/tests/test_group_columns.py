@@ -149,3 +149,13 @@ def test_a_room_a_row_or_a_figure_only_one_row_has_says_which_person(tmp_path):
     assert two_in_one_room.get("error") and "'Mahi' is on 3 rows" in two_in_one_room["error"]       # both Mahis are in 101: still not clear
     assert not edit(p, "Neha ka Sep Collection 90 kar do", 4).get("error")                          # a name on one row only
     assert not edit(p, "Sep Collection 90 kar do", 3).get("error")                                  # no name in the words: nothing to ask about
+
+
+def test_the_attached_files_name_does_not_count_as_the_owners_words(tmp_path):
+    """On the server the owner's words arrive with the file reference ('file_ref=local:x:Bill_Aug__0_Sep_2026.xlsx; caption: ...'); the stray 0 of
+    the file name was held by one Mahi's row only and so 'said which Mahi'."""
+    p = dup_book(tmp_path / "d.xlsx")
+    said = "[The owner attached a file: file_ref=local:abc:Bill_Aug__0_Sep_2026__1_.xlsx; caption: Mahi ka Sep Collection 90 kar do]"
+    r = edit(p, said, 2)
+    assert r.get("error") and "'Mahi' is on 3 rows" in r["error"], r
+    assert not edit(p, said.replace("Mahi ka", "Room 103 ki Mahi ka"), 6).get("error")

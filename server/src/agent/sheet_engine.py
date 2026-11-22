@@ -884,9 +884,9 @@ def _same_name_elsewhere(sh, rows: list[int], owner_words: str, col: int) -> str
     ncol, err = sh.find_column(_name_col(sh))
     if err or not ncol:
         return ""
-    low = str(owner_words).lower()
-    tokens = set(re.findall(r"\d+", low))
-    entries = [r for r in sh.data_rows() if sh.has_content(r)] + [r for r in sh.below if sh.has_content(r)]
+    low = re.sub(r"file_ref=\S+", " ", str(owner_words)).lower()           # the attached file's own name is not the owner's words
+    tokens = set(re.findall(r"\d{2,}", low)) | set(re.findall(r"(?:row|room|kamra|line)\s*(?:no\.?\s*)?(\d+)", low))     # a room, a row or a figure
+    entries =[r for r in sh.data_rows() if sh.has_content(r)] + [r for r in sh.below if sh.has_content(r)]
     by_name: dict[str, list[int]] = {}
     for r in entries:
         v = sh.cells.get((r, ncol))
