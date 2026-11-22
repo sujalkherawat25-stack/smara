@@ -1,6 +1,7 @@
 """Admin commands from an admin WhatsApp number; strangers land on the waitlist and the admins are told."""
 from test_agent_db import env, one  # noqa: F401
 
+from src import tenants
 from src.config import Settings, admin_wa_number
 from src.ingest.dispatch import dispatch
 from src.ingest.payload import InboundMessage
@@ -39,6 +40,23 @@ async def test_an_admin_number_makes_lists_and_revokes_invites(env):
     assert code in last(env, ADMIN)
     await dispatch(env.app, say(ADMIN, f"/revoke {code}"))
     assert "band kar diya" in last(env, ADMIN)
+
+
+async def test_any_other_message_from_an_admin_number_shows_the_commands_and_never_the_waitlist(env):
+    as_admin(env)
+    await dispatch(env.app, say(ADMIN, "Hi"))
+    assert "Smara admin" in last(env, ADMIN) and "/invite" in last(env, ADMIN)
+    await dispatch(env.app, say(ADMIN, "Hii"))                                      # every time, not once a day
+    assert len([m for m in env.app.state.wa.sent if m["to"] == ADMIN]) == 2
+    assert (await one(env.pool, "select count(*) n from waitlist where phone = %s", ADMIN))["n"] == 0
+
+
+async def test_an_admin_who_also_has_an_account_chats_with_smara_as_usual(env):
+    as_admin(env)
+    await tenants.create(env.pool, name="Admin Shop", owner_phone=ADMIN)
+    await dispatch(env.app, say(ADMIN, "Hi"))
+    sent = [m["text"]["body"] for m in env.app.state.wa.sent if m["to"] == ADMIN]
+    assert not any("Smara admin" in t for t in sent)
 
 
 async def test_the_same_command_from_anyone_else_is_just_a_message_and_a_waitlist_entry(env):
