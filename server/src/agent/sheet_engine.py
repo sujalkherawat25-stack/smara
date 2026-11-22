@@ -878,6 +878,47 @@ def _target_rows(sh, ch: dict, col: int, report: dict) -> list[int]:
     return picked
 
 
+def _same_name_elsewhere(sh, rows: list[int], owner_words: str, col: int) -> str:
+    """The owner named a person who is on more than one row of the sheet and nothing in their words says which row (a room or row number, or a
+    figure that only one of the rows holds): the question to ask instead of guessing, '' when it is clear."""
+    ncol, err = sh.find_column(_name_col(sh))
+    if err or not ncol:
+        return ""
+    low = str(owner_words).lower()
+    tokens = set(re.findall(r"\d+", low))
+    entries = [r for r in sh.data_rows() if sh.has_content(r)] + [r for r in sh.below if sh.has_content(r)]
+    by_name: dict[str, list[int]] = {}
+    for r in entries:
+        v = sh.cells.get((r, ncol))
+        if isinstance(v, str) and v.strip():
+            by_name.setdefault(norm(v), []).append(r)
+
+    def facts(r: int) -> set[str]:
+        out = {str(v).strip().lower().removesuffix(".0") for v in sh.row_vals(r) if v not in (None, "") and not is_formula(v)}
+        out |= {str(g).removesuffix(".0") for c in sh.group_columns() if (g := sh.carried(r, c)) is not None}
+        return out | {str(r)}
+
+    for r in rows:
+        name = sh.cells.get((r, ncol))
+        if not isinstance(name, str) or not name.strip():
+            continue
+        others = [o for o in by_name.get(norm(name), []) if o not in rows]
+        if not others or not re.search(rf"(?<![a-z]){re.escape(name.strip().lower())}(?![a-z])", low):
+            continue
+        mine = facts(r)
+        if any(t in mine and all(t not in facts(o) for o in others) for t in tokens):
+            continue                                                         # a room, a row or a figure that only this row has
+        def where(x: int) -> str:
+            room = next((sh.carried(x, c) if sh.cells.get((x, c)) in (None, "") else sh.cells.get((x, c)) for c in sh.group_columns()), None)
+            now = sh.cells.get((x, col))
+            return f"row {x}" + (f", {sh.headers.get(next(iter(sh.group_columns())))} {room}" if room is not None else "") + (f", now {short(now)}" if now not in (None, "") else ", now empty")
+        every = sorted({r, *others})
+        return (f"'{name.strip()}' is on {len(every)} rows ({'; '.join(where(x) for x in every)}) and the owner did not say which one. Do not guess: "
+                "ask_owner which one (one option per row, with its room or row and what it holds now). Once they have answered, repeat this change "
+                "with \"owner_confirmed_row\": true.")
+    return ""
+
+
 def _name_col(sh) -> str:
     for c, h in sh.headers.items():
         if re.search(r"name|party|customer|student|naam", h, re.I):
@@ -1054,6 +1095,9 @@ def plan(book, changes: list[dict], owner_words: str = "") -> tuple[list, list]:
             rep["warning"] = "no row matched; nothing changed for this step"
             reports.append(rep)
             continue
+        if action in ("set", "clear") and owner_words and not ch.get("owner_confirmed_row") and len(rows) <= 12:
+            if why := _same_name_elsewhere(sh, rows, owner_words, col):
+                raise ValueError(f"change {i + 1}: {why}")
         n, sample, formulas_over, values_over = 0, [], 0, 0
         for r in rows:
             old = sh.cells.get((r, col))
