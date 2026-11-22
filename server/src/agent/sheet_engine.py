@@ -313,7 +313,45 @@ class Sheet:
     def __init__(self, title: str, cells: dict, cached: dict, max_row: int, max_col: int):
         self.title, self.cells, self.cached, self.max_row, self.max_col = title, cells, cached, max_row, max_col
         self.ev = _Eval(cells, cached)
+        self._groups = None
         self._shape()
+
+    # -- a value written once for a whole group
+    def group_columns(self) -> dict[int, dict]:
+        """Columns among the first three that are written only on the FIRST row of each group (a room number, a party, a date) with the rows
+        below left empty, as in a merged cell: {column: {(row, column): the value that belongs to that blank cell}}. Conservative on purpose: the
+        first entry row has a value, at least 4 groups, a fifth to four fifths of the rows are empty, the values hardly repeat (a status or
+        a remark column does), no formulas, short values. The block under the totals is carried on its own."""
+        if self._groups is not None:
+            return self._groups
+        self._groups = {}
+        rows = [r for r in self.data_rows() if self.has_content(r)]
+        if len(rows) < 6:
+            return self._groups
+        for c in range(1, min(3, self.max_col) + 1):
+            filled = [(r, self.cells.get((r, c))) for r in rows if self.cells.get((r, c)) not in (None, "")]
+            if (len(filled) < 4 or filled[0][0] != rows[0] or not 0.2 * len(rows) <= len(rows) - len(filled) <= 0.8 * len(rows)
+                    or any(is_formula(v) or (isinstance(v, str) and len(v) > 40) for _, v in filled)
+                    or len({str(v).strip().lower() for _, v in filled}) < 0.9 * len(filled)):
+                continue
+            carry = {}
+            for block in (rows, [r for r in self.below if self.has_content(r)]):
+                last = None
+                if block and self.cells.get((block[0], c)) in (None, ""):
+                    continue
+                for r in block:
+                    v = self.cells.get((r, c))
+                    if v not in (None, ""):
+                        last = v
+                    elif last is not None:
+                        carry[(r, c)] = last
+            self._groups[c] = carry
+        return self._groups
+
+    def carried(self, r: int, c: int):
+        """What a blank cell in a group column stands for (None if the cell is not such a blank)."""
+        g = self.group_columns().get(c)
+        return g.get((r, c)) if g else None
 
     # -- shape
     def row_vals(self, r: int) -> list:
@@ -453,6 +491,10 @@ class Sheet:
             out["cells_showing_errors"] = errs
         if users := self.used_by(c):
             out["used_by_formulas_in"] = users[:3]
+        if c in self.group_columns():
+            out["written_once_per_group"] = (f"only the first row of each group has a value ({out['filled_rows']} of the entry rows); the empty cells below "
+                                             "belong to the same value, as in a merged cell. query_spreadsheet and edit_spreadsheet count them with it: "
+                                             "a filter on this column covers the whole group, not just its first row")
         return out
 
     def describe_row(self, r: int) -> dict:
@@ -460,6 +502,8 @@ class Sheet:
         for c in range(1, self.max_col + 1):
             v = self.cells.get((r, c))
             if v in (None, ""):
+                if (g := self.carried(r, c)) is not None:
+                    row[f"{col_letter(c)} {self.headers.get(c, '')}".strip() + " (group)"] = short(g)
                 continue
             key = f"{col_letter(c)} {self.headers.get(c, '')}".strip()
             if is_formula(v):
@@ -755,6 +799,8 @@ def _cond(sh, cond: dict):
 
     def ok(r):
         v = sh.ev.value(r, c)
+        if v in (None, "") and (g := sh.carried(r, c)) is not None:
+            v = g                                       # a blank under a group's first row counts as that group
         if op in ("empty", "is_empty"):
             return v in (None, "")
         if op in ("not_empty", "filled"):
@@ -899,6 +945,9 @@ MONTHS = {"jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "sept",
           "march", "april", "june", "july", "august", "september", "october", "november", "december"}
 
 
+FILLER_WORDS = {"amount", "amt", "rupees", "rupee", "inr"}          # words in a header that only say 'this is money'
+
+
 CLEAR_WORDS = re.compile(r"(clear|empty|blank|remove|delete|erase|hata|mita|khali|khaali|saaf|nikal|हटा|मिटा|खाली)", re.I)
 
 
@@ -931,6 +980,8 @@ def named_by_owner(header: str, letter: str, owner_words: str) -> bool:
         return True
     hw = _words(header)
     key = [w for w in hw if w not in MONTHS and len(w) > 2]
+    if len(key) > 1:                       # 'Bill Amount': the owner who says 'bill' named it; 'amount' only says it is money
+        key = [w for w in key if w not in FILLER_WORDS] or key
     months = {w[:3] for w in hw if w in MONTHS}
     said_months = {w[:3] for w in said if w in MONTHS}
 
@@ -1942,9 +1993,14 @@ def query(path: str, queries: list, sheet: str | None = None, include_rows_below
                 if v is UNK:
                     unknown[0] += 1
                     return None
+                if v in (None, "") and (g := sh.carried(r, c)) is not None:
+                    return g
                 return v
             for q in qs:
                 q.add(r, get, lambda q=q, r=r, get=get: _row_out(sh.headers, r, get, q.wanted_cols() or list(sh.headers)))
+        if groups := sh.group_columns():
+            out["filled_down"] = {sh.headers.get(c) or col_letter(c): "written only on the first row of each group in the file; the empty cells below "
+                                  "were read as the same value, so a filter or a group on it covers every row of the group" for c in groups}
         out.update({"sheet": sh.title, "entry_rows": len(rows), "not_counted": {
             **({"total_rows": sh.total_rows} if sh.total_rows else {}),
             **({"rows_below_totals": f"{sh.below[0]}-{sh.below[-1]}"} if sh.below and not include_rows_below_totals else {})}})
