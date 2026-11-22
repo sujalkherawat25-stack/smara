@@ -15,6 +15,7 @@ from urllib.parse import quote
 
 import httpx
 
+from src import tenants
 from src.config import admin_wa_number
 from src.ingest import admin_tg
 from src.loop.whatsapp import text_message
@@ -54,7 +55,10 @@ async def handle(app, msg) -> bool:
     cmd, _, rest = (msg.text or "").strip().partition(" ")
     name = cmd.lstrip("/").lower()
     if not cmd.startswith("/") or name not in COMMANDS:
-        return False
+        if await tenants.by_owner_phone(app.state.pool, msg.sender):
+            return False                      # an admin who also has a Smara account chats with Smara as usual
+        await _reply(app, msg.sender, HELP, msg.number_id)     # any other message from an admin number shows the commands
+        return True
     rest = " ".join(rest.split())
     try:
         if name == "invite":
