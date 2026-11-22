@@ -98,6 +98,12 @@ async def handle_stranger(app, msg) -> None:
     if row["due"]:
         first = row["messages"] <= 1 or not text or code is not None
         await _send(app, msg.sender, INVITE_ONLY if first else WAITLISTED, msg.number_id)
+    if row["messages"] <= 1:                                   # the admins hear about each new person once
+        try:
+            from src.ingest import admin_wa
+            await admin_wa.tell_admins_about_waitlist(app, msg.sender, msg.profile_name, text)
+        except Exception:
+            log.exception("could not tell the admins about the waitlist")
     if code and not invite:
         log.info("waitlisted %s: invalid or used code", msg.sender[-4:])
 

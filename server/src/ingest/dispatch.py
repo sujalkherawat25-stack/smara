@@ -1,5 +1,6 @@
 """Route one inbound message to Thread A (Owner, trusted) or Thread B (Debtor, untrusted)."""
 from src import tenants
+from src.ingest import admin_wa
 from src.ingest.debtor_flow import handle_debtor
 from src import limits
 from src.ingest.onboarding import _code_from, handle_stranger
@@ -36,6 +37,8 @@ async def dispatch(app, msg: InboundMessage) -> None:
     if not await _claim(pool, msg.wamid):
         return
     try:
+        if await admin_wa.handle(app, msg):            # /invite, /waitlist ... from an admin number
+            return
         owner = await tenants.by_owner_phone(pool, msg.sender)
         if owner:
             await tenants.touch_owner_inbound(pool, owner.id, msg.channel)   # remembers the channel; WhatsApp also opens the 24h window

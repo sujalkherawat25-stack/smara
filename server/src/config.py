@@ -9,6 +9,12 @@ def normalize_phone(raw: str) -> str:
     return "".join(ch for ch in raw if ch.isdigit())
 
 
+def admin_wa_number(raw: str) -> str:
+    """Digits with the country code; a bare 10-digit Indian number gets 91 in front. Empty if it is not a number."""
+    d = normalize_phone(raw or "")
+    return "91" + d if len(d) == 10 else d
+
+
 def reminder_mode(raw: str) -> str:
     """'own' or 'smara'. Anything else falls back to the default, 'own'."""
     value = (raw or "").strip().lower()
@@ -71,6 +77,8 @@ class Settings:
     # The Smara team's Telegram chat: ops alerts (owner messages that cannot be sent). None = log only.
     ops_telegram_chat_id: int | None = None
     admin_telegram_ids: tuple = ()      # Telegram ids that may use /invite, /waitlist ... (default: the ops chat)
+    admin_whatsapp_numbers: tuple = ()  # WhatsApp numbers (digits, with country code) that may use the same admin commands on WhatsApp
+    smara_wa_number: str = ""           # Smara's own public WhatsApp number (digits), used to build wa.me invite links
     # Shared secret the Syntarus operator dashboard sends to read the Smara numbers (empty = that endpoint is off)
     ops_dashboard_token: str = ""
     # Public https origin of this server; enables tappable pay links in reminders
@@ -156,6 +164,8 @@ def load_settings() -> Settings:
         telegram_webhook_secret=env.get("TELEGRAM_WEBHOOK_SECRET", ""),
         ops_telegram_chat_id=_chat_id(env.get("OPS_TELEGRAM_CHAT_ID", "")),
         admin_telegram_ids=tuple(i for i in (_chat_id(x) for x in env.get("ADMIN_TELEGRAM_IDS", "").split(",")) if i is not None),
+        admin_whatsapp_numbers=tuple(n for n in (admin_wa_number(x) for x in env.get("ADMIN_WHATSAPP_NUMBERS", "").split(",")) if n),
+        smara_wa_number=normalize_phone(env.get("SMARA_WA_NUMBER", "")),
         ops_dashboard_token=env.get("OPS_DASHBOARD_TOKEN", ""),
         public_base_url=env.get("PUBLIC_BASE_URL", ""),
         llm_base_url=env.get("LLM_BASE_URL", ""),
