@@ -174,3 +174,14 @@ def test_phone_tasks_get_the_browser_even_when_the_owners_project_has_none(tmp_p
     phone = native_hosted.phone_project()
     entry = next(p for p in native_management.preferences()["projects"] if p["workspace"] == phone)
     assert entry["options"]["browser_origins"] == ["*"] and entry["options"]["tools_enabled"] is True
+
+
+def test_the_packaged_app_runs_the_browser_helper_without_python(tmp_path):
+    """`smara-desktop.exe --browser-bridge <command>` is the helper inside the app (same entry the packaged exe uses)."""
+    import os, subprocess, sys
+    from pathlib import Path
+    src = Path(native_hosted.__file__).resolve().parents[1]
+    out = subprocess.run([sys.executable, "-c", "import sys; from smara.native_management import main; sys.exit(main())",
+                          "--browser-bridge", "status"], capture_output=True, text=True, timeout=60,
+                         env={**os.environ, "PYTHONPATH": str(src), "SMARA_BRIDGE_HOME": str(tmp_path / "bridge")})
+    assert out.returncode == 0 and "Not paired." in out.stdout
