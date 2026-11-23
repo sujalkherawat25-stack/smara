@@ -201,6 +201,33 @@ class ManagedBrowser:
             raise StaleObservation("browser observation is stale")
         return observation
 
+    # ------------------------------------------------------------------ a login the owner saved, or a code they gave
+    def login(self, session_id: str, observation_id: str, fills: list[tuple[str, str]], submit_ref: str | None = None) -> dict:
+        """Type each (ref, value) into its field and optionally press the submit control. The values never appear in the
+        action log or the returned observation."""
+        return self._call(self._login(session_id, observation_id, fills, submit_ref))
+
+    async def _login(self, session_id, observation_id, fills, submit_ref) -> dict:
+        session = self.sessions[session_id]
+        self._bound(session, observation_id)
+        page = self.page(session)
+        attempt = {"observation_id": observation_id, "ref": ",".join(str(r) for r, _ in fills), "action": "login",
+                   "started_at": time.time(), "status": "attempted"}
+        session.actions.append(attempt)
+        try:
+            for ref, value in fills:
+                await mb.fill_secret(page, str(ref), value)
+            if submit_ref:
+                out = await mb.handle(page, {"action": "click", "ref": str(submit_ref)}, allow_private=False)
+                if out.get("error"):
+                    raise ValueError(str(out["error"]))
+        except Exception as err:
+            attempt.update(status="failed", error=type(err).__name__, finished_at=time.time())
+            raise ValueError("The login fields could not be filled; observe again and retry, or hand off to the owner") from None
+        attempt.update(status="completed", finished_at=time.time())
+        session.generation += 1
+        return await self._observe(session_id)
+
     # ------------------------------------------------------------------ actions on an observed control
     def act(self, session_id: str, observation_id: str, ref: str, action: str, value: str | None = None) -> dict:
         return self._call(self._act(session_id, observation_id, ref, action, value))

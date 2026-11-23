@@ -22,6 +22,7 @@ from src.config import pc_allowed
 from src import health_watch
 from src.bridge.device_api import router as device_router
 from src.bridge.llm_proxy import router as desktop_llm_router
+from src.bridge.pc_tasks import router as pc_tasks_router
 from src.box.browser_session import BrowserSessions
 from src.box.sandbox import Sandbox
 from src.loop.llm import LLM
@@ -93,6 +94,7 @@ app = FastAPI(title="Smara", lifespan=lifespan, docs_url=None, redoc_url=None, o
 app.include_router(router)
 app.include_router(device_router)
 app.include_router(desktop_llm_router)
+app.include_router(pc_tasks_router)
 app.include_router(pay_router)
 app.include_router(connect_router)
 app.include_router(wa_link_router)

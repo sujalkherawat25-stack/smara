@@ -739,6 +739,9 @@ def run(store):
         from .native_telegram import run_connector
         telegram = threading.Thread(target=run_connector, args=(store, stop), daemon=True)
         telegram.start()
+        from .native_hosted import run_connector as run_hosted   # tasks the owner sends from WhatsApp/Telegram via hosted Smara
+        hosted = threading.Thread(target=run_hosted, args=(store, stop), daemon=True)
+        hosted.start()
         with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_GOALS, thread_name_prefix="smara-goal") as workers:
             futures = {}
             next_schedule_check, online = 0., True
@@ -782,6 +785,7 @@ def run(store):
                 workers.shutdown(wait=True, cancel_futures=False)
                 pulse.join(timeout=3)
                 telegram.join(timeout=3)
+                hosted.join(timeout=3)
                 with store.connect() as db:
                     store.set_meta(db, "service", {"pid": os.getpid(), "heartbeat": 0})
     return 0
