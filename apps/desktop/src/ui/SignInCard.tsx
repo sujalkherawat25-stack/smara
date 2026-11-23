@@ -69,8 +69,8 @@ export default function SignInCard({ helperLabel, onChange, locked }: { helperLa
   }
 
   return <section className="signin-card" aria-label="Sign in to Smara">
-    <h2>{state.partial ? "Finish connecting this PC" : "Sign in to Smara"}</h2>
-    <p className="signin-help">{state.partial ? "Part of the old pairing is still on this PC. Sign in once to connect everything." : "Connect this PC to your shop: answer Smara's steps here and let it use your own browser. You confirm in your own chat, so there is no password."}</p>
+    <h2>{state.signed_out ? "Signed out of Smara" : state.partial ? "Finish connecting this PC" : "Sign in to Smara"}</h2>
+    <p className="signin-help">{state.signed_out ? "Smara no longer accepts this PC (you signed out from the chat, or your account was reset). Sign in again to reconnect: it takes one tap in your chat." : state.partial ? "Part of the old pairing is still on this PC. Sign in once to connect everything." : "Connect this PC to your shop: answer Smara's steps here and let it use your own browser. You confirm in your own chat, so there is no password."}</p>
     <div className="signin-actions"><button className="primary" disabled={busy || locked} onClick={() => void run(() => login("start"))}>{busy ? "Starting…" : "Sign in"}</button></div>
     {error && <p role="alert" className="native-error">{error}</p>}
   </section>;

@@ -862,6 +862,15 @@ async def follow_new_tab(page, tabs_before: int):
     return new
 
 
+async def fill_secret(page, ref, value: str) -> None:
+    """Type a login the owner saved for this site, or a one-time code the owner gave, into its field.
+
+    Only Smara Desktop's own login tools call this, on the owner's PC (``managed_browser.login``). It is not a ``handle``
+    action, so a command that arrives from the server can never type a password or a code."""
+    loc, _ = await resolve(page, ref)
+    await loc.fill(str(value))
+
+
 async def type_into(page, box, value: str) -> None:
     """Type like a person. Rich editors (chat and post boxes) only notice real key events."""
     kind = await box.evaluate("""e => e.tagName === 'SELECT' ? 'select' : e.isContentEditable ? 'editable'
@@ -1269,6 +1278,22 @@ def log(msg: str) -> None:
                 pass
 
 
+def token_tag(token: str) -> str:
+    """A short fingerprint of the device token (never the token itself), so the status file can say which token the
+    server refused."""
+    import hashlib
+    return hashlib.sha256(str(token).encode()).hexdigest()[:16]
+
+
+def signed_out_by_server(token: str) -> bool:
+    """True when the server refused exactly this token before. A new sign-in brings a new token, which clears it."""
+    try:
+        cur = json.loads(STATUS.read_text(encoding="utf-8")) if STATUS.exists() else {}
+    except (OSError, ValueError):
+        return False
+    return bool(cur.get("signed_out")) and cur.get("signed_out_for") == token_tag(token)
+
+
 def write_status(**fields) -> None:
     """Small JSON file Smara Desktop reads to show On/Paused/last step. Never contains the token."""
     try:
@@ -1449,6 +1474,11 @@ async def run(a) -> int:
     if not cfg.get("token"):
         log("Not paired yet. Send 'pair browser' to Smara in WhatsApp, then run: python smara_bridge.py pair --code ...")
         return 1
+    if signed_out_by_server(cfg["token"]):
+        # The server already refused this token (the owner signed out in chat, or the account was reset). Asking again
+        # every few minutes only fills the server log; Smara Desktop shows "Sign in again" until a new token arrives.
+        log("This PC is signed out of Smara. Open Smara Desktop and press Sign in to connect again.")
+        return 1
     headers = {"Authorization": f"Bearer {cfg['token']}"}
     HOME.mkdir(parents=True, exist_ok=True)
     PID.write_text(str(os.getpid()))
@@ -1464,13 +1494,14 @@ async def run(a) -> int:
             try:
                 r = await http.post("/bridge/poll", params={"wait": 25})
                 if r.status_code == 401:
-                    log("This PC was disconnected from Smara (unpaired). Pair again to continue.")
+                    log("This PC was disconnected from Smara (signed out). Sign in again from Smara Desktop to continue.")
+                    write_status(online=False, signed_out=True, signed_out_for=token_tag(cfg["token"]))
                     return 1
                 job = r.json() if r.status_code == 200 else {}
             except (httpx.TransportError, ValueError):
                 await asyncio.sleep(3)
                 continue
-            write_status(last_poll_at=time.time(), online=True, paused=PAUSE.exists())
+            write_status(last_poll_at=time.time(), online=True, paused=PAUSE.exists(), signed_out=False)
             await maybe_overview(http)
             await maybe_tally_sync(cfg)
             if not job:

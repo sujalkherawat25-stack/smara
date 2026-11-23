@@ -453,7 +453,9 @@ def keeps_books(ledger: str, trust: str, query: str | None) -> bool:
 async def build_system(app, tenant, trust: str, session_id: str | None = None, query: str | None = None) -> str:
     """The run's instructions. `query` (the owner's latest message) switches on the memory lookup for that message."""
     from src.config import pc_allowed
-    pc_hint = ("Only if they have never connected a PC, suggest Smara Desktop (Settings > Browser) or 'pair browser'."
+    pc_hint = ("When a task needs the owner's own laptop (files or apps on it, sites they are logged in to there), hand the "
+               "whole task to it with run_on_pc instead of doing it step by step. Only if they have never connected a PC, "
+               "suggest Smara Desktop (Settings > Browser) or 'pair browser'."
                if pc_allowed(app.state.settings, tenant.id) else
                "This shop has no PC browser: you browse with Smara's own cloud browser. Never suggest pairing a PC, Smara "
                "Desktop or 'pair browser', and pc_files is not available here.")

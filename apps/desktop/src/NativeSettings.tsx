@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { nativeProbe, nativeSettings, type NativeSetup } from "./nativeApi";
+import { nativeProbe, nativeSettings, type NativeSetup, type SiteLogin } from "./nativeApi";
 import type { LocalModelProfile } from "./types";
 import { ANY_SITE, browsesAnySite, modelPayload, profileId } from "./settingsModel";
 import NativeTelegramSettings from "./NativeTelegramSettings";
@@ -95,7 +95,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
       {error && <p role="alert" className="native-error">{error.replaceAll("Settings → Tools", "Search & tools")}</p>}{notice && <p role="status" className="settings-notice">{notice}</p>}
 
       {tab === "models" && <div className="set-page">
-        <header><h2>Models</h2><p>The AI providers Smara can use. Pick the active one from the box next to the message field. Smara never silently swaps your model. Smara Desktop is for models with a 1M-token context window or more.</p></header>
+        <header><h2>Models</h2><p>“Smara (included)” is ready once you sign in: it uses Smara’s own model through your Smara account and shares your daily limit with your WhatsApp/Telegram chat, with no API key to set up. Advanced: add your own provider and key below (BYOK) and pick it from the box next to the message field. Smara never silently swaps your model.</p></header>
         <div className="set-group">
           {!setup.profiles.length && <div className="set-row"><div><strong>No model yet</strong><small>Add your provider below to start chatting.</small></div></div>}
           {setup.profiles.map(profile => <div className="set-row" key={profile.id}><div><strong>{profile.label}{profile.id === setup.preferences.active_model && <span className="set-badge">Active</span>}</strong><small>{profile.model} · {profile.provider}</small></div><button disabled={disabled} onClick={() => edit(profile)}>Edit</button></div>)}
@@ -134,6 +134,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
             <small>Separate sites with spaces. Leave empty to turn browsing off.</small>
             <div className="set-actions"><button disabled={disabled} onClick={() => void saveOptions({ tools: toolsEnabled, workers: workersEnabled, origins })}>Save sites</button></div></div>}
         </div>
+        <SiteLogins logins={setup.preferences.site_logins ?? []} disabled={disabled} save={save} />
         <details className="set-advanced"><summary>More controls <small>your own browser, allowed apps, limits and the activity feed</small></summary>
           <NativeBrowser locked={disabled} />
           <NativeAutomation workspace={setup.preferences.workspace} locked={disabled} onPendingChange={integrationBusy} onSelectionChange={async () => onUpdate(await nativeSettings())} />
@@ -195,4 +196,21 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
       </div>}
     </div>
   </section>;
+}
+
+/** Logins Smara may type for you on their own site (only that site; the password never reaches the AI or the server). */
+function SiteLogins({ logins, disabled, save }: { logins: SiteLogin[]; disabled: boolean; save: (operation: string, args: Record<string, unknown>) => Promise<void> }) {
+  const [host, setHost] = useState(""); const [username, setUsername] = useState(""); const [password, setPassword] = useState("");
+  const add = async () => { await save("save_site_login", { host, username, password }); setPassword(""); setHost(""); setUsername(""); };
+  return <div className="set-group" aria-label="Site logins">
+    <div className="set-row"><div><strong>Site logins</strong><small>Save a login once and Smara can sign in to that site by itself (for example when you ask from your phone). It is used only on that exact site, typed on this PC from its protected vault, and never shown to the AI or sent to Smara's server. Smara still asks you for one-time codes in the chat.</small></div></div>
+    {logins.map(login => <div className="set-row" key={login.host}><div><strong>{login.host}</strong><small>{login.username}</small></div>
+      <button className="text-button" disabled={disabled} onClick={() => void save("delete_site_login", { host: login.host })}>Remove</button></div>)}
+    <div className="set-row stack">
+      <label>Site<input aria-label="Site address" placeholder="gst.gov.in" disabled={disabled} value={host} onChange={event => setHost(event.target.value)} /></label>
+      <label>Username or email<input aria-label="Site username" autoComplete="off" disabled={disabled} value={username} onChange={event => setUsername(event.target.value)} /></label>
+      <label>Password<input aria-label="Site password" type="password" autoComplete="new-password" disabled={disabled} value={password} onChange={event => setPassword(event.target.value)} /></label>
+      <div className="set-actions"><button disabled={disabled || !host.trim() || !username.trim() || !password} onClick={() => void add()}>Save login</button></div>
+    </div>
+  </div>;
 }

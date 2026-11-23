@@ -68,6 +68,10 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
             return reply
         msg = replace(msg, kind="text", text=spoken)
         spoken_note = True
+    if msg.kind == "text" and not msg.button_id and getattr(app.state, "pool", None) is not None:
+        from src.bridge import pc_tasks           # a one-time code the PC asked for: straight to the PC, never logged
+        if (sent := await pc_tasks.capture_otp(app, tenant_id, msg.text)):
+            return sent
     if not msg.button_id and getattr(app.state, "pool", None) is not None:   # what the owner said joins the log (taps do not)
         said = msg.text or (f"[{msg.kind}: {msg.filename or msg.kind}] {msg.caption}".strip() if msg.media_id else "")
         await chatlog.record(app.state.pool, tenant_id, msg.channel, "owner", said,
@@ -99,6 +103,9 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
                                              channel=msg.channel)
         if action == "pref":
             return await _pref_button(app, tenant_id, ref)
+        if action in ("pc_ok", "pc_no"):                # an approval the owner's own PC asked for while running their task
+            from src.bridge import pc_tasks
+            return await pc_tasks.answer_button(app, tenant_id, ref, action == "pc_ok")
         if action in ("phone_ok", "phone_no"):          # the read-back card of a number heard in a voice note
             from src.agent.bookkeeping import decide_phone_card
             return await decide_phone_card(app, tenant_id, ref, action == "phone_ok")

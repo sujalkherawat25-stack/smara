@@ -3,8 +3,10 @@ import type { LocalModelProfile, LocalCredentialSummary } from "./types";
 import type { AgentRoster } from "./agents";
 export type ProjectOptions = { tools_enabled: boolean; workers_enabled: boolean; browser_origins: string[] };
 export type Project = { workspace: string; label: string; options?: ProjectOptions };
+/** A login Smara may type on its own site (the password stays in the PC's protected vault and is never listed). */
+export type SiteLogin = { host: string; username: string; updated_at: string };
 export type NativeSetup = {
-  preferences: { projects: Project[]; workspace: string; active_model: string; search_provider: string };
+  preferences: { projects: Project[]; workspace: string; active_model: string; search_provider: string; site_logins?: SiteLogin[] };
   profiles: LocalModelProfile[];
   credentials: LocalCredentialSummary[];
   search: { provider: string; configured: boolean; network_tested: boolean; detail: string; credential_alias?: string; endpoint?: string };

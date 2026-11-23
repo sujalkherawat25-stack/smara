@@ -50,6 +50,19 @@ def _safe_link(url: object) -> str:
     return str(url) if parsed.scheme == "https" and parsed.hostname in _HOSTS and not parsed.username else ""
 
 
+def _refused_by_server(token: str) -> bool:
+    """The browser helper writes signed_out into status.json when the server refused its token (signed out in chat, or
+    the account was reset). Only that exact token counts: a new sign-in brings a new token."""
+    if not token:
+        return False
+    try:
+        cur = json.loads((_home() / "status.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    import hashlib
+    return bool(cur.get("signed_out")) and cur.get("signed_out_for") == hashlib.sha256(token.encode()).hexdigest()[:16]
+
+
 def status() -> dict:
     """What the Sign-in card shows: signed in, waiting for the owner's tap, or signed out."""
     saved = approvals_status()
@@ -60,9 +73,10 @@ def status() -> dict:
         pass
     pending = read_object(_pending_path())
     waiting = bool(pending.get("secret")) and float(pending.get("expires_at") or 0) > time.time()
-    signed_in = bool(saved.get("connected")) and bool(helper.get("token"))
-    partial = (bool(saved.get("connected")) or bool(helper.get("token"))) and not signed_in    # paired the old way, one half only
-    return {"signed_in": signed_in, "partial": partial, "shop": saved.get("shop") or helper.get("shop") or "",
+    refused = _refused_by_server(helper.get("token") or "")
+    signed_in = bool(saved.get("connected")) and bool(helper.get("token")) and not refused
+    partial = (bool(saved.get("connected")) or bool(helper.get("token"))) and not signed_in and not refused   # paired the old way, one half only
+    return {"signed_in": signed_in, "partial": partial, "signed_out": refused and not waiting, "shop": saved.get("shop") or helper.get("shop") or "",
             "server": saved.get("server") or helper.get("server") or "",
             "waiting": waiting and not signed_in,
             "code": pending.get("code", "") if waiting else "", "message": pending.get("message", "") if waiting else "",
@@ -117,9 +131,32 @@ def poll() -> dict:
             pass
         write_object(approvals_path(), {"server": server, "shop": data.get("shop", ""), "token": protect(data["owner_token"])})
         _pending_path().unlink(missing_ok=True)
+        install_smara_model(server, data["owner_token"])
     elif state in ("denied", "expired"):
         _pending_path().unlink(missing_ok=True)
     return {**status(), "state": state}
+
+
+SMARA_MODEL_ID = "smara"
+
+
+def install_smara_model(server: str, owner_token: str) -> bool:
+    """After sign-in: Smara's own model (through the owner's Smara account, no API key to find) becomes a model profile,
+    and the active one when the owner has not picked another. Their own keys (BYOK) stay as they are. Never breaks the
+    sign-in: a failure here only means the owner picks a model by hand."""
+    try:
+        from .native_management import manage
+        from .native_profiles import load_profiles
+        manage({"operation": "save_model", "profile": {
+            "id": SMARA_MODEL_ID, "label": "Smara (included)", "provider": "smara", "model": "smara",
+            "base_url": server.rstrip("/") + "/bridge/llm/v1", "auth_header": "authorization", "api_key": owner_token,
+            "context_window": 131072}})
+        profiles, active, _ = load_profiles()
+        if not active or not any(p.get("id") == active for p in profiles):
+            manage({"operation": "select_model", "id": SMARA_MODEL_ID})
+        return True
+    except Exception:
+        return False
 
 
 def sign_out() -> dict:

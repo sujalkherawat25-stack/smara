@@ -3,7 +3,7 @@
 export type SignInState = "none" | "pending" | "asked" | "approved" | "denied" | "expired";
 
 export type SignIn = {
-  signed_in: boolean; partial?: boolean; waiting: boolean; shop: string; server: string;
+  signed_in: boolean; partial?: boolean; signed_out?: boolean; waiting: boolean; shop: string; server: string;
   code: string; message: string; links: { telegram?: string; whatsapp?: string };
   expires_at: number; state?: SignInState;
 };

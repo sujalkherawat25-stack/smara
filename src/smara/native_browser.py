@@ -60,6 +60,8 @@ TOOLS = [
     tool("browser_switch", "Switch to a listed owned tab and invalidate older observations.", {"tab_id": {"type": "string"}}, ["tab_id"]),
     tool("browser_scroll", "Scroll the owned viewport and obtain fresh DOM references.", {"dy": {"type": "integer", "minimum": -3000, "maximum": 3000}}, ["dy"]),
     tool("browser_handoff", "Pause ALL model browser actions for human login in the visible owned browser. Human resumes in Settings; the agent never types passwords or resumes itself."),
+    tool("browser_login", "Log in on the current page with the login the owner saved for this site in Smara Desktop (Settings > Browser > Site logins). The saved username and password are filled in on this PC; you never see the password. Give the refs of the username and password fields (and the sign-in button) from a fresh observation. Only works on the site the login was saved for. Needs the owner's OK.", {"observation_id": {"type": "string"}, "username_ref": {"type": "string"}, "password_ref": {"type": "string"}, "submit_ref": {"type": "string"}}, ["observation_id", "password_ref"]),
+    tool("browser_fill_code", "Type a one-time code (OTP) the owner gave you into the code field from a fresh observation, and optionally press the verify button. Get the code by asking the owner with your question tool (one question that says OTP or code); never guess one.", {"observation_id": {"type": "string"}, "ref": {"type": "string"}, "code": {"type": "string"}, "submit_ref": {"type": "string"}}, ["observation_id", "ref", "code"]),
     tool("browser_upload", "Upload ONE explicit non-secret project file to a fresh observed file input. Requires transfer opt-in and native approval; can transmit data immediately.", {"observation_id": {"type": "string"}, "ref": {"type": "string"}, "path": {"type": "string"}}, ["observation_id", "ref", "path"]),
     tool("browser_download", "Download from one fresh observed reference, after transfer opt-in and approval. Retain a non-executable project artifact; never open/run it.", {"observation_id": {"type": "string"}, "ref": {"type": "string"}}, ["observation_id", "ref"]),
 ]
@@ -199,6 +201,8 @@ class NativeBrowser:
         observed = self.latest["observation"]
         if self.engine.current_url(self.session) != observed["url"] or not self.allowed(observed["url"]) or time.time() - observed["timestamp"] > 120:
             raise StaleObservation("Page changed or observation expired")
+        if name in {"browser_login", "browser_fill_code"}:
+            return self.secret_fill(name, arguments, observed)
         if name in {"browser_upload", "browser_download"}:
             if not self.options["transfers"]: raise ValueError("File transfers require user opt-in")
             self.latest = None; self.actions += 1
@@ -230,6 +234,43 @@ class NativeBrowser:
             return self.present(self.engine.act(self.session, observed["observation_id"], arguments["ref"], arguments["action"], arguments.get("value")))
         finally:
             self.allow_writes = False
+
+
+    def secret_fill(self, name, arguments, observed):
+        """A saved site login, or a one-time code the owner gave: typed on this PC by the browser itself."""
+        import re
+        def kind(ref):
+            return (self.engine.attribute(self.session, observed["observation_id"], ref, "type") or "").lower()
+        if name == "browser_fill_code":
+            code = str(arguments.get("code") or "").strip()
+            if not re.fullmatch(r"[0-9A-Za-z]{4,10}", code):
+                raise ValueError("A one-time code is 4-10 letters or digits; ask the owner for it")
+            if kind(arguments["ref"]) in {"password", "file", "hidden"}:
+                raise ValueError("Choose the code field, not a password or file field")
+            fills = [(arguments["ref"], code)]
+            used = {"code_entered": True}
+        else:
+            from .native_site_logins import for_url
+            saved = for_url(observed["url"])
+            if saved is None:
+                raise ValueError("No login is saved for this site. Ask the owner to add it in Smara Desktop > Settings > Browser > "
+                                 "Site logins, or use browser_handoff so they log in themselves.")
+            host, username, password = saved
+            if kind(arguments["password_ref"]) != "password":
+                raise ValueError("password_ref must be the page's password field")
+            fills = []
+            if arguments.get("username_ref"):
+                if kind(arguments["username_ref"]) in {"password", "file", "hidden"}:
+                    raise ValueError("username_ref must be the username or email field")
+                fills.append((arguments["username_ref"], username))
+            fills.append((arguments["password_ref"], password))
+            used = {"logged_in_with_saved_login_for": host, "username": username}
+        self.allow_writes = True; self.latest = None; self.actions += 1
+        try:
+            observed_after = self.engine.login(self.session, observed["observation_id"], fills, arguments.get("submit_ref") or None)
+        finally:
+            self.allow_writes = False
+        return {**used, "observation": self.present(observed_after)}
 
 
 def failure_text(exc):
