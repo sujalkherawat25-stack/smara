@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from src.bridge.continuum import ContinuumClient, scope_user
-from src import clock, tenants
+from src import clock, proactive, tenants
 from src.bridge.outbox import enqueue_standalone
 from src.loop import wa_link
 from src.loop.outbound import record
@@ -41,26 +41,46 @@ async def _event(conn, oid, frm, to, actor, source_id=None):
            VALUES (%s, %s, %s, %s, %s)""", (oid, frm, to, actor, source_id))
 
 
-async def claim_due(pool, now: datetime, limit: int = 20) -> list[dict]:
+async def claim_due(pool, now: datetime, limit: int = 20, *, default_on: bool = True,
+                    cards_per_day: int = proactive.CARDS_PER_DAY) -> list[dict]:
     """Postgres decides what is due (never semantic search). Claims rows by
-    moving them to WAITING_OWNER_APPROVAL; SKIP LOCKED makes ticks overlap-safe."""
+    moving them to WAITING_OWNER_APPROVAL; SKIP LOCKED makes ticks overlap-safe.
+
+    Only shops that turned the daily cards on are asked (default_on=True asks every shop: tests), and never more than
+    cards_per_day cards a day for one shop: the rest wait for tomorrow instead of arriving as a burst."""
     async with pool.connection() as conn:
         async with conn.transaction():
+            used = {str(r["tenant_id"]): r["n"] for r in await (await conn.execute(
+                """SELECT o.tenant_id, count(*) n FROM obligation_events e JOIN obligations o ON o.id = e.obligation_id
+                    WHERE e.actor = 'SYSTEM_CRON' AND e.to_state = 'WAITING_OWNER_APPROVAL'
+                      AND e.created_at > %s - interval '24 hours' GROUP BY o.tenant_id""", (now,))).fetchall()}
+            full = [t for t, n in used.items() if n >= cards_per_day]
+            cands = await (await conn.execute(
+                """SELECT id, tenant_id FROM obligations
+                    WHERE state IN ('ACTIVE', 'DISPATCHED', 'SNOOZED')
+                      AND next_followup_at <= %s AND attempt_count < %s
+                      AND (%s OR EXISTS (SELECT 1 FROM proactive_optin po WHERE po.tenant_id = obligations.tenant_id))
+                      AND NOT (tenant_id::text = ANY(%s))
+                      AND NOT EXISTS (SELECT 1 FROM parties x WHERE x.id = obligations.party_id AND x.opted_out_at IS NOT NULL)
+                      AND EXISTS (SELECT 1 FROM parties x WHERE x.id = obligations.party_id AND x.whatsapp_phone IS NOT NULL)
+                    ORDER BY next_followup_at LIMIT %s FOR UPDATE SKIP LOCKED""",
+                (now, MAX_ATTEMPTS, default_on, full, limit))).fetchall()
+            take, count = [], dict(used)
+            for r in cands:
+                t = str(r["tenant_id"])
+                if count.get(t, 0) < cards_per_day:
+                    take.append(r["id"])
+                    count[t] = count.get(t, 0) + 1
+            if not take:
+                return []
             cur = await conn.execute(
-                """WITH due AS (
-                     SELECT id, state AS prev FROM obligations
-                      WHERE state IN ('ACTIVE', 'DISPATCHED', 'SNOOZED')
-                        AND next_followup_at <= %s AND attempt_count < %s
-                        AND NOT EXISTS (SELECT 1 FROM parties x WHERE x.id = obligations.party_id AND x.opted_out_at IS NOT NULL)
-                        AND EXISTS (SELECT 1 FROM parties x WHERE x.id = obligations.party_id AND x.whatsapp_phone IS NOT NULL)
-                      ORDER BY next_followup_at LIMIT %s FOR UPDATE SKIP LOCKED)
+                """WITH due AS (SELECT id, state AS prev FROM obligations WHERE id = ANY(%s))
                    UPDATE obligations o SET state = 'WAITING_OWNER_APPROVAL'
                      FROM due, parties p
                     WHERE o.id = due.id AND p.id = o.party_id
                 RETURNING o.id, o.tenant_id, o.party_id, o.invoice_ref, o.amount_paise, o.due_date,
                           o.attempt_count, o.source, p.canonical_name, due.prev""",
-                (now, MAX_ATTEMPTS, limit),
-            )
+                (take,))
             rows = await cur.fetchall()
             for r in rows:
                 await _event(conn, r["id"], r["prev"], "WAITING_OWNER_APPROVAL", "SYSTEM_CRON")

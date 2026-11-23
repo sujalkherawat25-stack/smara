@@ -6,7 +6,7 @@ import time
 
 import re
 
-from src import chatlog, clock, facts as shop_facts, prefs
+from src import chatlog, clock, facts as shop_facts, prefs, proactive
 from src.agent import skills
 from src.bridge.continuum import scope_user
 
@@ -76,7 +76,9 @@ BASE = (
     "text. A PDF with no text layer is a scan; say a clear photo or the original file works better.\n"
     "- Files the owner sent earlier are kept for them. If they ask about or for an earlier file, call list_my_files and open it "
     "from there; never say a file is gone before you have checked.\n"
-    "- On Telegram you can put an emoji reaction on the owner's message with react_to_message, the way a friendly person does: "
+    "- Emoji: in your text at most one, and only when it fits a friendly moment (a thanks, a greeting, good news); none in "
+    "answers about money owed, mistakes, complaints, files or anything serious, and never as bullet decoration.\n"
+    "- On Telegram and on WhatsApp you can put an emoji reaction on the owner's message with react_to_message, the way a friendly person does: "
     "a 👍 or 🙏 for a thanks, 🎉 or 🔥 for good news (a big payment came in, a job finished well), 👀 when a file or voice note "
     "arrives and the work will take a while, 😁 for a greeting or a joke. Use it now and then, not on every message (about one "
     "message in four at most), once per turn, and never for bad news, a complaint, money lost or a serious question. A reaction "
@@ -103,6 +105,10 @@ BASE = (
     "(durable facts) BEFORE you say you do not remember or ask the owner to repeat themselves. If both find nothing, say so.\n"
     "- Remember durable facts and standing instructions with write_continuum_evidence (party_id='shop' for shop-wide). "
     "Plan future work with schedule_followup instead of promising to remember.\n"
+    "- Never start things nobody asked for. Call schedule_followup only when the owner's CURRENT message asks to be reminded or "
+    "for something to be done later: not for a question, not because an earlier message of theirs said so, not on your own idea. "
+    "If you already scheduled it, do not schedule it again (list_followups shows what is set). Do not offer a list of extra "
+    "reminders or services; offer at most one next step in one short line, and only when it clearly helps.\n"
     "- Give the owner exactly what they asked for: the file type, the time they named (if they gave none, pick a sensible one "
     "and say so). Never send a different format and call it done.\n"
     "- Doing something because of a standing rule (a reminder the owner asked for 'whenever', a saved preference) never replaces answering "
@@ -244,7 +250,7 @@ def newcomer_block(n: int) -> str:
         "- If they only want a quick answer, give it and keep the curiosity to a single closing line.\n")
 
 
-async def ledger_line(pool, tenant_id: str) -> str:
+async def ledger_line(pool, tenant_id: str, proactive_on: bool = True) -> str:
     """The ledger in a few lines at the start of every run: the totals, and the customers owing most past their due date.
     Most owner questions ('summary', 'whom to call', 'how much overdue') are answered from this without a single query, which
     is one model call instead of four or five (the provider's per-minute call quota is what limits how many shops can chat at once)."""
@@ -270,6 +276,10 @@ async def ledger_line(pool, tenant_id: str) -> str:
         out += ("\nCustomers owing most past the due date (largest first; the full ledger is in the database): "
                 + "; ".join(f"{r['canonical_name']} Rs {_inr(int(r['paise']))} ({r['bills']} bill{'s' if r['bills'] != 1 else ''}, "
                              f"oldest {int(r['days'])} days late)" for r in top) + ".")
+    if not proactive_on and snap["od"]:
+        out += ("\nSmara's own daily reminder cards and morning summary are OFF for this owner (nothing is sent unless they ask). "
+                "Mention that once, in a line, only if it fits what they are doing, and turn them on with set_proactive_messages "
+                "only if they say yes.")
     return out
 
 
@@ -447,7 +457,7 @@ async def build_system(app, tenant, trust: str, session_id: str | None = None, q
                if pc_allowed(app.state.settings, tenant.id) else
                "This shop has no PC browser: you browse with Smara's own cloud browser. Never suggest pairing a PC, Smara "
                "Desktop or 'pair browser', and pc_files is not available here.")
-    ledger = await ledger_line(app.state.pool, tenant.id)
+    ledger = await ledger_line(app.state.pool, tenant.id, await proactive.enabled(app, tenant.id, app.state.settings))
     base = BASE.format(shop=tenant.name, now=clock.describe(), ledger=ledger, pc_hint=pc_hint)
     if keeps_books(ledger, trust, query):
         base += BOOKS

@@ -2,7 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from src import clock, health_watch, tenants
+from src import clock, health_watch, proactive, tenants
 from src.bridge.outbox import drain
 from src.ingest import owner_files
 from src.loop import wa_link
@@ -52,7 +52,8 @@ async def tick(app, now: datetime) -> int:
         await reopen_unanswered(pool, now)
     except Exception:
         log.exception("unanswered-approval sweep failed")
-    claimed = await claim_due(pool, now, limit=CLAIM_PER_TICK)
+    claimed = await claim_due(pool, now, limit=CLAIM_PER_TICK, default_on=app.state.settings.proactive_default,
+                              cards_per_day=app.state.settings.proactive_cards_per_day)
     gate = asyncio.Semaphore(DRAFTS_AT_ONCE)
     results = await asyncio.gather(*(_remind(app, pool, now, o, i < AGENT_DRAFTS_PER_TICK, gate, known)
                                      for i, o in enumerate(claimed)), return_exceptions=True)
@@ -124,6 +125,8 @@ async def send_digests(app, local: datetime) -> int:
     """At most one digest per tenant per IST day, durable across restarts."""
     pool, sent = app.state.pool, 0
     for t in await tenants.all_tenants(pool):
+        if not await proactive.enabled(pool, t.id, app.state.settings):     # the morning summary is for owners who asked for it
+            continue
         async with pool.connection() as conn:
             cur = await conn.execute(
                 "INSERT INTO digest_log (tenant_id, digest_date) VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING 1",

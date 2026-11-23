@@ -1,4 +1,7 @@
 """Route one inbound message to Thread A (Owner, trusted) or Thread B (Debtor, untrusted)."""
+import asyncio
+import logging
+
 from src import tenants
 from src.ingest import admin_wa
 from src.ingest.debtor_flow import handle_debtor
@@ -9,6 +12,23 @@ from src.loop.owner_channel import send_to_owner
 from src.loop.whatsapp import text_message
 from src.ingest.payload import InboundMessage
 from src.loop.owner_channel import resend_undelivered
+
+
+log = logging.getLogger(__name__)
+
+
+async def _mark_read(app, msg: InboundMessage) -> None:
+    """The blue ticks and the typing dots for a WhatsApp message, in the background so the answer is not held up by it."""
+    async def go() -> None:
+        try:
+            await app.state.wa.mark_read(msg.wamid, number_id=msg.number_id or None)
+        except Exception as err:
+            log.info("read mark not sent for %s: %s", msg.wamid[-6:], type(err).__name__)
+    task = asyncio.create_task(go())
+    bg = getattr(app.state, "bg", None)
+    if bg is not None:
+        bg.add(task)
+        task.add_done_callback(bg.discard)
 
 
 async def _claim(pool, wamid: str) -> bool:
@@ -36,12 +56,20 @@ async def dispatch(app, msg: InboundMessage) -> None:
     pool = app.state.pool
     if not await _claim(pool, msg.wamid):
         return
+    if msg.kind == "reaction":              # a 👍 on one of our messages: nobody asked anything, so it never starts a reply
+        return
+    if msg.channel == "whatsapp":
+        await _mark_read(app, msg)
     try:
         if await admin_wa.handle(app, msg):            # /invite, /waitlist ... from an admin number
             return
         owner = await tenants.by_owner_phone(pool, msg.sender)
         if owner:
             await tenants.touch_owner_inbound(pool, owner.id, msg.channel)   # remembers the channel; WhatsApp also opens the 24h window
+            if msg.channel == "whatsapp" and not msg.button_id:              # the message the agent's react tool puts an emoji on
+                if not hasattr(app.state, "wa_last"):
+                    app.state.wa_last = {}
+                app.state.wa_last[str(owner.id)] = (msg.sender, msg.wamid, msg.number_id)
             owner = await tenants.by_id(pool, owner.id)
             if msg.channel == "whatsapp" and not msg.button_id:
                 await limits.record(pool, owner.id, limits.kind_of(msg))

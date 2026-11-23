@@ -102,6 +102,22 @@ class WhatsAppClient:
         resp.raise_for_status()
         return ((resp.json().get("messages") or [{}])[0]).get("id")
 
+    async def mark_read(self, wamid: str, *, number_id: str | None = None, typing: bool = True) -> None:
+        """The blue ticks on the person's message, and (typing=True) the 'typing…' dots until we answer (WhatsApp shows them
+        for up to 25 seconds). A nicety: if WhatsApp refuses the dots we still try the plain read mark."""
+        url = f"{GRAPH}/{number_id or self._default_number}/messages"
+        body = {"messaging_product": "whatsapp", "status": "read", "message_id": wamid}
+        headers = await self._headers(number_id)
+        resp = await self._http.post(url, json={**body, **({"typing_indicator": {"type": "text"}} if typing else {})}, headers=headers)
+        if resp.status_code >= 400 and typing:
+            resp = await self._http.post(url, json=body, headers=headers)
+        resp.raise_for_status()
+
+    async def react(self, to: str, wamid: str, emoji: str, *, number_id: str | None = None) -> None:
+        """One emoji reaction on a message the person sent us (WhatsApp shows it on their message)."""
+        await self.send({"messaging_product": "whatsapp", "recipient_type": "individual", "to": to, "type": "reaction",
+                         "reaction": {"message_id": wamid, "emoji": "❤️" if emoji == "❤" else emoji}}, number_id=number_id)
+
     async def upload_media(self, data: bytes, mime: str, filename: str, *, number_id: str | None = None) -> str:
         """Upload a file to WhatsApp and return its media id (used to send it as a document)."""
         resp = await self._http.post(f"{GRAPH}/{number_id or self._default_number}/media",
