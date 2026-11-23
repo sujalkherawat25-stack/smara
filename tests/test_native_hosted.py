@@ -97,3 +97,21 @@ def test_signed_out_pc_does_not_poll(tmp_path, monkeypatch):
     (tmp_path / "bridge" / "status.json").write_text(json.dumps({"signed_out": True,
                                                                  "signed_out_for": hashlib.sha256(b"dev-token").hexdigest()[:16]}))
     assert native_hosted.credentials() is None
+
+
+def test_phone_tasks_get_their_own_project_and_the_owners_selection_stays(tmp_path, monkeypatch):
+    from smara import native_management
+    from pathlib import Path
+    monkeypatch.setattr(native_management, "settings_path", lambda: tmp_path / "native-settings.json")
+    monkeypatch.setenv("SMARA_DESKTOP_STATE", str(tmp_path / "desktop.json"))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    mine = tmp_path / "shop"; mine.mkdir()
+    native_management.manage({"operation": "add_project", "workspace": str(mine), "label": "shop"})
+    native_management.manage({"operation": "save_project_options", "workspace": str(mine),
+                              "options": {"tools_enabled": True, "workers_enabled": False, "browser_origins": ["*"]}})
+    phone = native_hosted.phone_project()
+    prefs = native_management.preferences()
+    assert Path(prefs["workspace"]).resolve() == mine.resolve()                   # the owner's project is still selected
+    entry = next(p for p in prefs["projects"] if p["workspace"] == phone)
+    assert entry["label"] == "Phone tasks" and entry["options"]["browser_origins"] == ["*"]
+    assert native_hosted.phone_project() == phone and len(prefs["projects"]) == 2  # created once
