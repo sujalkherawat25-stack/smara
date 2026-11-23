@@ -1,0 +1,99 @@
+"""A task the owner sends from their phone becomes a goal on this PC; its approvals, code questions and result go back."""
+import json
+
+import httpx
+
+from smara import native_goals, native_hosted
+from smara.native_goals import GoalStore
+
+
+class Server:
+    """The hosted side, as far as the PC can see it."""
+    def __init__(self):
+        self.tasks = [{"task_id": "t-1", "task": "Download the October GST return PDF"}]
+        self.calls, self.answers = [], []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        body = json.loads(request.content or b"{}")
+        self.calls.append((path, body))
+        if request.headers.get("authorization") != "Bearer dev-token":
+            return httpx.Response(401)
+        if path == "/smara/bridge/tasks/next":
+            return httpx.Response(200, json=self.tasks.pop(0) if self.tasks else {})
+        if path == "/smara/bridge/tasks/answers":
+            out, self.answers = self.answers, []
+            return httpx.Response(200, json={"answers": out})
+        return httpx.Response(200, json={"ok": True})
+
+    def sent(self, suffix):
+        return [b for p, b in self.calls if p.endswith(suffix)]
+
+
+def setup(tmp_path, monkeypatch):
+    store = GoalStore(tmp_path / "goals.sqlite")
+    server = Server()
+    http = httpx.Client(transport=httpx.MockTransport(server))
+    conn = native_hosted.HostedConnector(store, http, "https://ai.example.com/smara", "dev-token")
+    monkeypatch.setattr(conn, "defaults", lambda: {"workspace": str(tmp_path), "profile_id": "synthetic"})
+    monkeypatch.setattr(native_goals, "operate",
+                        lambda req, store: store.action({k: v for k, v in req.items() if k not in ("use_apps",)} | {"use_apps": True}))
+    return store, server, conn
+
+
+def test_a_phone_task_runs_as_a_goal_and_its_approval_and_result_go_back(tmp_path, monkeypatch):
+    store, server, conn = setup(tmp_path, monkeypatch)
+    assert conn.pick_up(wait=0)
+    started = server.sent("/t-1/started")
+    goal_id = started[0]["goal_id"]
+    goal = store.claim()
+    assert goal["id"] == goal_id and "GST return" in goal["spec"]["objective"] and goal["spec"]["sandbox"] == "workspace-write"
+
+    request_id = store.pending(goal, {"id": 15, "method": "item/commandExecution/requestApproval", "params": {"command": ["dir", "C:\\Reports"]}})
+    conn.relay()
+    asked = server.sent("/t-1/ask")
+    assert asked == [{"request_id": request_id, "summary": "run a command on your PC: dir C:\\Reports"}]
+
+    server.answers = [{"task_id": "t-1", "request_id": request_id, "kind": "approval", "answer": "allow"}]
+    assert conn.apply_answers() == 1
+    assert store.consume_response(goal, request_id)["result"] == {"decision": "accept"}
+
+    store.finish(store.get(goal_id) | {"lease": goal["lease"]}, {"summary": "Saved GSTR3B_Oct.pdf in Downloads"}, "ready_for_review", "")
+    conn.relay()
+    result = server.sent("/t-1/result")
+    assert result and result[0]["state"] == "done" and "GSTR3B_Oct.pdf" in result[0]["summary"]
+    conn.relay()
+    assert len(server.sent("/t-1/result")) == 1                   # reported once
+
+
+def test_a_code_question_is_asked_in_the_chat_and_the_reply_answers_it(tmp_path, monkeypatch):
+    store, server, conn = setup(tmp_path, monkeypatch)
+    conn.pick_up(wait=0)
+    goal = store.claim()
+    request_id = store.pending(goal, {"id": 16, "method": "item/tool/requestUserInput", "params": {
+        "questions": [{"id": "otp", "header": "Login", "question": "Enter the OTP sent to your phone for the GST portal"}]}})
+    conn.relay()
+    ask = server.sent("/t-1/ask")[0]
+    assert ask["kind"] == "otp" and "OTP" in ask["summary"]
+    server.answers = [{"task_id": "t-1", "request_id": request_id, "kind": "otp", "answer": "482913"}]
+    conn.apply_answers()
+    assert store.consume_response(goal, request_id)["result"] == {"answers": {"otp": {"answers": ["482913"]}}}
+
+
+def test_no_project_or_model_tells_the_owner_instead_of_failing_silently(tmp_path, monkeypatch):
+    store, server, conn = setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(conn, "defaults", lambda: None)
+    conn.pick_up(wait=0)
+    assert server.sent("/t-1/result")[0]["state"] == "failed" and store.claim() is None
+
+
+def test_signed_out_pc_does_not_poll(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMARA_BRIDGE_HOME", str(tmp_path / "bridge"))
+    assert native_hosted.credentials() is None                     # never signed in
+    (tmp_path / "bridge").mkdir()
+    (tmp_path / "bridge" / "config.json").write_text(json.dumps({"server": "https://ai.example.com/smara", "token": "dev-token"}))
+    assert native_hosted.credentials() == ("https://ai.example.com/smara", "dev-token")
+    import hashlib
+    (tmp_path / "bridge" / "status.json").write_text(json.dumps({"signed_out": True,
+                                                                 "signed_out_for": hashlib.sha256(b"dev-token").hexdigest()[:16]}))
+    assert native_hosted.credentials() is None

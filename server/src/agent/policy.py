@@ -111,7 +111,7 @@ def tier_of(name: str, args: dict) -> str:
                 "search_chat_history", "gst_reconcile", "bank_reconcile", "ageing_report", "audit_gst_register", "tds_check", "find_customer", "list_my_files", "react_to_message",
                 "open_spreadsheet", "edit_spreadsheet", "query_spreadsheet"):
         return "T0"
-    if name in ("schedule_followup", "cancel_followup", "send_file_to_owner", "set_customer_phone", "set_reply_style", "set_proactive_messages",
+    if name in ("schedule_followup", "cancel_followup", "send_file_to_owner", "set_customer_phone", "set_reply_style", "set_proactive_messages", "run_on_pc",
                 "save_skill", "delete_skill", "ask_owner"):
         return "T1"
     if name == "inspect_and_import_file":
@@ -217,6 +217,9 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
     if name in ("save_skill", "delete_skill") and ctx.trust != "TRUSTED":
         return Decision("deny", tier, "only a conversation with the owner can save or delete a skill; a customer's message, "
                                       "a file or a scheduled job cannot change how Smara works for the shop")
+    if name == "run_on_pc" and ctx.trust != "TRUSTED":
+        return Decision("deny", tier, "only the owner, in their own chat, can send a task to their PC; a customer's message, a "
+                                      "file or a scheduled job cannot")
     if name == "set_proactive_messages" and ctx.trust != "TRUSTED":
         return Decision("deny", tier, "only the owner can turn the messages Smara starts by itself on or off; a customer's "
                                       "message, a file or a scheduled job cannot")
