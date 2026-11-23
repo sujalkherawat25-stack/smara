@@ -25,7 +25,7 @@ $manifest = [ordered]@{ version = $version; file = $name; notes = $Notes; pub_da
 $temp = Join-Path ([IO.Path]::GetTempPath()) "smara-latest-$version.json"
 [IO.File]::WriteAllText($temp, ($manifest | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
 
-$stage = "~/desktop-release-$version"
+$stage = "desktop-release-$version"            # in the SSH user's home folder (ssh and scp start there)
 ssh -i $Key $Server "mkdir -p $stage"
 scp -i $Key $installer "${Server}:$stage/"
 scp -i $Key $temp "${Server}:$stage/latest.json"
