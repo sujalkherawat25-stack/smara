@@ -131,9 +131,32 @@ def poll() -> dict:
             pass
         write_object(approvals_path(), {"server": server, "shop": data.get("shop", ""), "token": protect(data["owner_token"])})
         _pending_path().unlink(missing_ok=True)
+        install_smara_model(server, data["owner_token"])
     elif state in ("denied", "expired"):
         _pending_path().unlink(missing_ok=True)
     return {**status(), "state": state}
+
+
+SMARA_MODEL_ID = "smara"
+
+
+def install_smara_model(server: str, owner_token: str) -> bool:
+    """After sign-in: Smara's own model (through the owner's Smara account, no API key to find) becomes a model profile,
+    and the active one when the owner has not picked another. Their own keys (BYOK) stay as they are. Never breaks the
+    sign-in: a failure here only means the owner picks a model by hand."""
+    try:
+        from .native_management import manage
+        from .native_profiles import load_profiles
+        manage({"operation": "save_model", "profile": {
+            "id": SMARA_MODEL_ID, "label": "Smara (included)", "provider": "smara", "model": "smara",
+            "base_url": server.rstrip("/") + "/bridge/llm/v1", "auth_header": "authorization", "api_key": owner_token,
+            "context_window": 131072}})
+        profiles, active, _ = load_profiles()
+        if not active or not any(p.get("id") == active for p in profiles):
+            manage({"operation": "select_model", "id": SMARA_MODEL_ID})
+        return True
+    except Exception:
+        return False
 
 
 def sign_out() -> dict:

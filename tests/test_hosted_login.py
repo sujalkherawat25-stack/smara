@@ -116,3 +116,27 @@ def test_the_browser_helper_stops_asking_with_a_refused_token(tmp_path, monkeypa
     smara_bridge.write_status(online=False, signed_out=True, signed_out_for=smara_bridge.token_tag("tok-1"))
     assert smara_bridge.signed_out_by_server("tok-1") and not smara_bridge.signed_out_by_server("tok-2")
     assert "tok-1" not in (tmp_path / "status.json").read_text()                 # only a fingerprint is written
+
+
+def test_sign_in_installs_smaras_own_model_and_picks_it_only_when_none_is_chosen(home, monkeypatch):
+    from smara import native_management
+    calls = []
+    monkeypatch.setattr(native_management, "manage", lambda req: calls.append(req) or {})
+    import smara.native_profiles as np
+    monkeypatch.setattr(np, "load_profiles", lambda: ([{"id": "smara"}], "", {}))
+    assert hosted_login.install_smara_model("https://ai.example.com/smara", "sma_own")
+    saved = calls[0]["profile"]
+    assert saved["base_url"] == "https://ai.example.com/smara/bridge/llm/v1" and saved["api_key"] == "sma_own"
+    assert calls[1] == {"operation": "select_model", "id": "smara"}
+    calls.clear()
+    monkeypatch.setattr(np, "load_profiles", lambda: ([{"id": "smara"}, {"id": "my-openai"}], "my-openai", {}))
+    hosted_login.install_smara_model("https://ai.example.com/smara", "sma_own")
+    assert [c["operation"] for c in calls] == ["save_model"]                 # their own BYOK choice is kept
+
+
+def test_a_failure_installing_the_model_never_breaks_sign_in(home, monkeypatch):
+    from smara import native_management
+    def boom(req):
+        raise RuntimeError("vault locked")
+    monkeypatch.setattr(native_management, "manage", boom)
+    assert hosted_login.install_smara_model("https://ai.example.com/smara", "sma_own") is False

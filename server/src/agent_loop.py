@@ -22,6 +22,7 @@ from datetime import date, datetime, timedelta, timezone
 from src import chatlog, clock, health_watch, prefs, proactive, tenants
 from src.agent import actions, bookkeeping, calc, documents, extras, ageing, bank, gst, memory_pass, pc, reader, register_audit, sheet_tools, skills, tds_check, tools, web
 from src.agent.context import compact
+from src.bridge import pc_tasks
 from src.agent.policy import SessionCtx, approval_text, pre_tool_use
 from src.agent.prompt import build_system, latest_owner_text
 from src.loop.llm import RateLimited
@@ -48,7 +49,7 @@ EXECUTORS = {"query_ledger_sql": tools.query_ledger_sql, "resolve_continuum_memo
              "calculate": calc.calculate, "check_gstin": extras.check_gstin, "build_payment_request": extras.build_payment_request,
              "send_file_to_owner": extras.send_file_to_owner, "react_to_message": extras.react_to_owner, "web_search": web.web_search,
              "pc_files": pc.pc_files, "set_customer_phone": bookkeeping.set_customer_phone,
-             "find_customer": bookkeeping.find_customer, "set_reply_style": prefs.set_reply_style, "set_proactive_messages": proactive.set_proactive_messages,
+             "find_customer": bookkeeping.find_customer, "set_reply_style": prefs.set_reply_style, "set_proactive_messages": proactive.set_proactive_messages, "run_on_pc": pc_tasks.run_on_pc,
              "gst_reconcile": gst.gst_reconcile, "bank_reconcile": bank.bank_reconcile, "ageing_report": ageing.ageing_report,
              "audit_gst_register": register_audit.audit_gst_register, "tds_check": tds_check.tds_check,
              "open_spreadsheet": sheet_tools.open_spreadsheet,
