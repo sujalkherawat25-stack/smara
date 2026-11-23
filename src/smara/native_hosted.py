@@ -59,6 +59,33 @@ def describe(method: str, params: dict) -> str:
     return "continue with a step that needs your OK"
 
 
+PHONE_PROJECT = "Phone tasks"
+
+
+def phone_project() -> str:
+    """The project folder tasks from the phone run in (Documents/Smara phone tasks). A task there can still read and use
+    the rest of the PC, but it never locks the owner's own project, so their Desktop chat keeps working while it runs.
+    Created and registered once, with the browsing/tool options of the owner's current project; the owner's selected
+    project stays selected."""
+    from pathlib import Path
+    from .native_management import manage, preferences
+    root = Path.home() / "Documents" / "Smara phone tasks"
+    root.mkdir(parents=True, exist_ok=True)
+    prefs = preferences()
+    known = next((p for p in prefs["projects"] if Path(p["workspace"]).resolve() == root.resolve()), None)
+    if known:
+        return known["workspace"]
+    current = prefs.get("workspace") or ""
+    source = next((p for p in prefs["projects"] if p["workspace"] == current), prefs["projects"][0] if prefs["projects"] else None)
+    out = manage({"operation": "add_project", "workspace": str(root), "label": PHONE_PROJECT})
+    workspace = out["preferences"]["workspace"]
+    if source and source.get("options"):
+        manage({"operation": "save_project_options", "workspace": workspace, "options": source["options"]})
+    if current:
+        manage({"operation": "select_project", "workspace": current})
+    return workspace
+
+
 def questions(params: dict) -> list[dict]:
     return [q for q in (params.get("questions") or []) if isinstance(q, dict) and isinstance(q.get("id"), str)]
 
@@ -77,14 +104,11 @@ class HostedConnector:
 
     # ---- tasks in
     def defaults(self) -> dict | None:
-        from .native_management import preferences
         from .native_profiles import load_profiles
-        prefs = preferences()
-        workspace = prefs.get("workspace") or next((p["workspace"] for p in prefs.get("projects") or []), "")
         profiles, active, _ = load_profiles()
-        if not workspace or not any(p.get("id") == active for p in profiles):
+        if not any(p.get("id") == active for p in profiles):
             return None
-        return {"workspace": workspace, "profile_id": active}
+        return {"workspace": phone_project(), "profile_id": active}
 
     def pick_up(self, wait: int = POLL_S) -> bool:
         got = self.post(f"/bridge/tasks/next?wait={wait}", timeout=wait + 15)
@@ -105,8 +129,10 @@ class HostedConnector:
                      "objective": f"{task}\n\n(Sent by the owner from their phone. Do it on this PC by yourself. If a site needs "
                                   "a login, use browser_login (the owner's saved login for that site). If it asks for a one-time "
                                   "code, ask the owner with ONE question that says 'OTP' and then use browser_fill_code; never "
-                                  "guess a code. A captcha or a payment is the owner's: use browser_handoff and say so. Finish "
-                                  "with a short plain summary of what you did and where any file is.)",
+                                  "guess a code. A captcha or a payment is the owner's: use browser_handoff and say so. Save any "
+                                  "file you make in this project folder. Your final answer is exactly what the owner reads on "
+                                  "their phone: give the actual result (the list, the numbers, the answer, up to about 40 lines; "
+                                  "more goes into a file here), not a description of your work, then where any file is.)",
                      "success_criteria": "The owner's request is done on this PC, or it is clear exactly what blocked it."},
                     store=self.store)
         except ValueError as err:
