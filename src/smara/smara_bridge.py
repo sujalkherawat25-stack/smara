@@ -862,6 +862,15 @@ async def follow_new_tab(page, tabs_before: int):
     return new
 
 
+async def fill_secret(page, ref, value: str) -> None:
+    """Type a login the owner saved for this site, or a one-time code the owner gave, into its field.
+
+    Only Smara Desktop's own login tools call this, on the owner's PC (``managed_browser.login``). It is not a ``handle``
+    action, so a command that arrives from the server can never type a password or a code."""
+    loc, _ = await resolve(page, ref)
+    await loc.fill(str(value))
+
+
 async def type_into(page, box, value: str) -> None:
     """Type like a person. Rich editors (chat and post boxes) only notice real key events."""
     kind = await box.evaluate("""e => e.tagName === 'SELECT' ? 'select' : e.isContentEditable ? 'editable'

@@ -102,8 +102,11 @@ class HostedConnector:
         try:
             operate({**config, "action": "create", "identity": identity, "task_kind": "general", "sandbox": "workspace-write",
                      "use_apps": True,
-                     "objective": f"{task}\n\n(Sent by the owner from their phone. Do it on this PC. Finish with a short plain "
-                                  "summary of what you did and where any file is.)",
+                     "objective": f"{task}\n\n(Sent by the owner from their phone. Do it on this PC by yourself. If a site needs "
+                                  "a login, use browser_login (the owner's saved login for that site). If it asks for a one-time "
+                                  "code, ask the owner with ONE question that says 'OTP' and then use browser_fill_code; never "
+                                  "guess a code. A captcha or a payment is the owner's: use browser_handoff and say so. Finish "
+                                  "with a short plain summary of what you did and where any file is.)",
                      "success_criteria": "The owner's request is done on this PC, or it is clear exactly what blocked it."},
                     store=self.store)
         except ValueError as err:

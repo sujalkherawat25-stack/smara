@@ -70,7 +70,13 @@ def preferences():
                  **({"options": project_options(p["options"])} if "options" in p else {})} for p in projects]
     _, selected, _ = load_profiles()
     return {"projects": projects, "workspace": saved.get("workspace") or (projects[0]["workspace"] if projects else ""),
-            "active_model": selected, "search_provider": saved.get("search_provider") or search_status(protected_only=True).get("provider") or "tavily"}
+            "active_model": selected, "search_provider": saved.get("search_provider") or search_status(protected_only=True).get("provider") or "tavily",
+            "site_logins": _site_logins(saved)}
+
+
+def _site_logins(saved):
+    from .native_site_logins import listing
+    return listing(saved)
 
 
 @contextlib.contextmanager
@@ -304,6 +310,14 @@ def manage(request):
             if not any(p.get("id") == identity for p in profiles):
                 raise ValueError("Choose a configured model")
             saved["active_model"] = identity
+        elif operation == "save_site_login":
+            from .native_site_logins import save
+            vault_before = read_object(vault_path())
+            save(saved, request.get("host", ""), request.get("username", ""), request.get("password"))
+        elif operation == "delete_site_login":
+            from .native_site_logins import delete
+            vault_before = read_object(vault_path())
+            delete(saved, request.get("host", ""))
         elif operation == "select_search":
             provider = request.get("provider")
             if provider not in PROVIDERS:
