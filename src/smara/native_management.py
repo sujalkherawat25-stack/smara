@@ -442,6 +442,11 @@ def main(argv=None):
     if args[:1] == ["--native-computer"]:
         from .native_computer import main as computer_main
         return computer_main(args[1:])
+    if args[:1] == ["--browser-bridge"]:
+        # The PC browser helper (smara_bridge), bundled: no Python needed on the owner's PC.
+        from .smara_bridge import main as bridge_main
+        sys.argv = [sys.argv[0]] + args[1:]
+        return bridge_main()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--native-manage", action="store_true")
     parsed = parser.parse_args(args)

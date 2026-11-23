@@ -152,6 +152,7 @@ function fixture({ olderChats = [], startupFailure = false, unknownTurn = false,
     if (name.endsWith("ui/NativeFiles")) return { default: () => null, __esModule: true };
     if (name.endsWith("ui/HostedPanel")) return { default: () => null, __esModule: true };
     if (name.endsWith("ui/TeachPanel")) return { default: () => null, __esModule: true };
+    if (name.endsWith("ui/UpdateBanner")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeBrowser")) return { default: () => null, __esModule: true };
     if (name.endsWith("/agents")) return agentsModule;
     if (name.endsWith("toolCards")) return toolCardsModule;

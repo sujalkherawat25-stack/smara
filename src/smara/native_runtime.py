@@ -213,7 +213,11 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         # this the model fell back to driving the whole computer to open a web page. Click, type and key presses still ask first.
         from .native_browser import ANY_PUBLIC_SITE
         browser_origins = [ANY_PUBLIC_SITE]
-    npx = shutil.which("npx") if browser_origins else None
+    # One browser everywhere by default: Smara's own (bundled, nothing downloaded at run time, the same on every PC, and the
+    # only one with saved site logins, one-time codes and hand-off). Microsoft's Playwright MCP needs Node.js and an npm
+    # download, so it is an advanced choice: SMARA_BROWSER_ENGINE=playwright.
+    wants_playwright = os.getenv("SMARA_BROWSER_ENGINE", "").strip().lower() == "playwright"
+    npx = shutil.which("npx") if browser_origins and wants_playwright else None
     if browser_origins and npx:
         # The browser tool Codex users plug in: Microsoft's Playwright MCP, one plain tool per action.
         from .native_browser import configured_origins, ANY_PUBLIC_SITE
@@ -222,7 +226,7 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         settings.update(playwright_settings(npx, configured_origins(browser_origins), ANY_PUBLIC_SITE, workspace.resolve(),
                                             (home / "playwright-profile").resolve(), find_browser("auto")))
     elif browser_origins:
-        # No Node.js on this PC: Smara's own browser tools, on the same engine as the hosted agent.
+        # Smara's own browser tools, on the same engine as the hosted agent.
         from .native_browser import configured_origins, LOOK_ONLY, TOOLS as browser_tools
         configured_origins(browser_origins)
         browser_args = (["--native-browser"] if getattr(sys, "frozen", False) else ["-m", "smara.native_browser"])
@@ -231,6 +235,7 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
             browser_args += ["--origin", value]
         settings.update({
             "mcp_servers.smara_browser.env.SMARA_DESKTOP_STATE": str(state_path().resolve()),
+            "mcp_servers.smara_browser.env.SMARA_BROWSER_PROFILE": str((home / "playwright-profile").resolve()),
             "mcp_servers.smara_browser.enabled": True,
             "mcp_servers.smara_browser.command": sys.executable,
             "mcp_servers.smara_browser.args": browser_args,

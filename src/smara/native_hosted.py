@@ -25,6 +25,12 @@ CREDS_RETRY_S = 5
 DONE = {"ready_for_review": "done", "completed": "done", "blocked": "failed", "stopped": "failed", "paused": "failed",
         "failed": "failed"}
 CODE_WORDS = re.compile(r"\b(otp|one[- ]time|verification code|code|pin)\b", re.I)
+# A phone task's work allowance. The goal budget counts request BYTES (a conservative upper bound: one desktop model step is
+# about 100 KB, roughly 25-30k real tokens), so a step is budgeted at 120 KB. When it runs out, the owner is asked on the
+# phone whether to keep going (EXTRA more steps each time, at most EXTENSIONS times) instead of the task just stopping.
+STEPS, STEP_BYTES, CYCLES = 40, 120_000, 8
+EXTRA, EXTENSIONS = 20, 2
+BUDGET = "budget:"
 
 
 def credentials() -> tuple[str, str] | None:
@@ -79,8 +85,12 @@ def phone_project() -> str:
     source = next((p for p in prefs["projects"] if p["workspace"] == current), prefs["projects"][0] if prefs["projects"] else None)
     out = manage({"operation": "add_project", "workspace": str(root), "label": PHONE_PROJECT})
     workspace = out["preferences"]["workspace"]
-    if source and source.get("options"):
-        manage({"operation": "save_project_options", "workspace": workspace, "options": source["options"]})
+    # The owner's own options, but always with tools and the browser: a phone task is useless without them (any public
+    # site; local and private addresses stay closed, and every step that changes a page still asks on the phone).
+    options = {"tools_enabled": True, "workers_enabled": False, **((source or {}).get("options") or {})}
+    options["tools_enabled"] = True
+    options["browser_origins"] = options.get("browser_origins") or ["*"]
+    manage({"operation": "save_project_options", "workspace": workspace, "options": options})
     if current:
         manage({"operation": "select_project", "workspace": current})
     return workspace
@@ -125,7 +135,7 @@ class HostedConnector:
         from .native_goals import operate
         try:
             operate({**config, "action": "create", "identity": identity, "task_kind": "general", "sandbox": "workspace-write",
-                     "use_apps": True,
+                     "use_apps": True, "max_cycles": CYCLES, "max_requests": STEPS, "max_token_estimate": STEPS * STEP_BYTES,
                      "objective": f"{task}\n\n(Sent by the owner from their phone. Do it on this PC by yourself. If a site needs "
                                   "a login, use browser_login (the owner's saved login for that site). If it asks for a one-time "
                                   "code, ask the owner with ONE question that says 'OTP' and then use browser_fill_code; never "
@@ -157,6 +167,8 @@ class HostedConnector:
                 body = json.loads(row["body"])
                 if row["kind"] == "awaiting_approval" and body.get("request_id"):
                     self.ask(task_id, row["goal_id"], body["request_id"])
+                elif row["kind"] == "paused" and self.out_of_allowance(row["goal_id"]):
+                    self.ask_for_more(task_id, row["goal_id"])
                 elif row["kind"] in DONE:
                     self.finish(task_id, row["goal_id"], row["kind"], body)
             with self.store.connect() as db:          # one event at a time, so a crash repeats at most one (the server ignores repeats)
@@ -179,10 +191,60 @@ class HostedConnector:
             return
         self.post(f"/bridge/tasks/{task_id}/ask", {"request_id": request_id, "summary": describe(req["method"], params)})
 
-    def finish(self, task_id: str, goal_id: str, state: str, body: dict) -> None:
+    # ---- a task that used up its work allowance asks the owner whether to keep going
+    def out_of_allowance(self, goal_id: str) -> bool:
+        goal = self.store.get(goal_id) or {}
+        spec = goal.get("spec") or {}
+        with self.store.connect() as db:
+            blocked = self.store.meta(db, "budget_blocked:" + goal_id)
+        return bool(blocked) or "budget" in str(goal.get("detail") or "").lower() or (
+            bool(spec) and (goal.get("requests", 0) >= spec.get("max_requests", 1) or goal.get("cycles", 0) >= spec.get("max_cycles", 1)
+                            or goal.get("token_estimate", 0) >= spec.get("max_token_estimate", 1)))
+
+    def ask_for_more(self, task_id: str, goal_id: str) -> None:
+        with self.store.connect() as db:
+            asked = self.store.meta(db, "hosted_extensions", {})
+            n = int(asked.get(goal_id, 0))
+            if n < EXTENSIONS:
+                asked[goal_id] = n + 1
+                self.store.set_meta(db, "hosted_extensions", asked)
+        goal = self.store.get(goal_id) or {}
+        if n >= EXTENSIONS:
+            self.finish(task_id, goal_id, "paused", {}, stopped=f"it used all its work ({goal.get('requests', 0)} model steps) "
+                                                                "without finishing")
+            return
+        self.post(f"/bridge/tasks/{task_id}/ask", {"request_id": f"{BUDGET}{goal_id}:{n + 1}", "summary":
+                  f"keep working on this task. It has used its work allowance ({goal.get('requests', 0)} model steps) and is "
+                  f"not finished yet. Allow gives it {EXTRA} more steps; Deny stops it here."})
+
+    def more(self, goal_id: str, allow: bool, task_id: str) -> None:
+        if not allow:
+            self.finish(task_id, goal_id, "paused", {}, stopped="you chose to stop it when it ran out of work allowance")
+            return
+        goal = self.store.get(goal_id) or {}
+        spec = goal.get("spec") or {}
+        if goal.get("state") != "paused":
+            return                                     # already resumed (a repeat answer) or finished meanwhile
+        room = (spec.get("max_requests", 0) - goal.get("requests", 0) >= EXTRA // 2
+                and spec.get("max_token_estimate", 0) - goal.get("token_estimate", 0) >= EXTRA // 2 * STEP_BYTES
+                and spec.get("max_cycles", 0) > goal.get("cycles", 0))
+        if not room:                                   # on a retry the limits may already be extended
+            self.store.action({"action": "extend", "id": goal_id,
+                               "max_requests": max(spec.get("max_requests", STEPS), goal.get("requests", 0)) + EXTRA,
+                               "max_token_estimate": max(spec.get("max_token_estimate", 0), goal.get("token_estimate", 0)) + EXTRA * STEP_BYTES,
+                               "max_cycles": max(spec.get("max_cycles", CYCLES), goal.get("cycles", 0)) + 2})
+        self.store.action({"action": "resume", "id": goal_id})
+
+    def finish(self, task_id: str, goal_id: str, state: str, body: dict, stopped: str = "") -> None:
         goal = self.store.get(goal_id) or {}
         checkpoint = goal.get("checkpoint") or {}
         summary = str(checkpoint.get("summary") or body.get("summary") or goal.get("detail") or "").strip()
+        if DONE[state] == "failed" and (stopped or not summary or summary.startswith("Cycle interrupted")):
+            # The runtime's own wording ("Cycle interrupted before the final checkpoint ...") means nothing on a phone.
+            reason = stopped or str(goal.get("detail") or "it stopped before finishing").strip()
+            known = "" if summary.startswith("Cycle interrupted") else summary
+            summary = (f"It stopped because {reason}." + (f"\n\nSo far: {known}" if known else "") +
+                       "\n\nThe steps it took are in Smara Desktop (Goals) on your PC. Ask again with a narrower request if needed.")
         outputs = checkpoint.get("outputs") or []
         if outputs:
             summary += "\n\nFiles on your PC: " + ", ".join(str(o) for o in outputs[:10])
@@ -191,17 +253,31 @@ class HostedConnector:
             mapping = self.store.meta(db, "hosted_tasks", {})
             mapping.pop(goal_id, None)
             self.store.set_meta(db, "hosted_tasks", mapping)
+            asked = self.store.meta(db, "hosted_extensions", {})
+            if asked.pop(goal_id, None) is not None:
+                self.store.set_meta(db, "hosted_extensions", asked)
 
     # ---- the owner's answers come in
     def apply_answers(self) -> int:
         got = self.post("/bridge/tasks/answers").get("answers") or []
         with self.store.connect() as db:
             reverse = {t: g for g, t in self.store.meta(db, "hosted_tasks", {}).items()}
+        with self.store.connect() as db:
+            waiting = self.store.meta(db, "hosted_more_pending", [])      # "keep going" answers whose goal was still stopping
+        got = waiting + got
+        later = []
         for a in got:
             goal_id = reverse.get(a["task_id"])
             if not goal_id:
                 continue
             try:
+                if str(a.get("request_id") or "").startswith(BUDGET):
+                    try:
+                        self.more(goal_id, a.get("answer") == "allow", a["task_id"])
+                    except ValueError:
+                        if a.get("tries", 0) < 30:                         # the cycle still holds its lease: try next round
+                            later.append({**a, "tries": a.get("tries", 0) + 1})
+                    continue
                 if a["kind"] == "otp":
                     with self.store.connect() as db:
                         req = db.execute("SELECT params FROM goal_requests WHERE id=?", (a["request_id"],)).fetchone()
@@ -216,7 +292,9 @@ class HostedConnector:
                     self.store.respond(goal_id, a["request_id"], allow=a["answer"] == "allow")
             except ValueError:
                 pass                                   # already answered on the PC, or expired: the first answer wins
-        return len(got)
+        with self.store.connect() as db:
+            self.store.set_meta(db, "hosted_more_pending", later)
+        return len(got) - len(waiting)
 
 
 def run_connector(store, stop) -> None:

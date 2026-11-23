@@ -551,8 +551,25 @@ def test_full_source_import_preserves_runtime_and_sandbox():
     assert (source / "NOTICE").is_file()
 
 
-def test_playwright_mcp_is_the_browser_when_node_is_installed(tmp_path, monkeypatch):
+def test_smaras_own_browser_is_used_even_when_node_is_installed(tmp_path, monkeypatch):
+    """One browser everywhere: the one with saved logins and one-time codes, whatever is installed on the PC."""
     monkeypatch.setattr("smara.native_runtime.shutil.which", lambda _name: "npx")
+    monkeypatch.delenv("SMARA_BROWSER_ENGINE", raising=False)
+    adapter = ResponsesAdapter(ChatEndpoint("http://127.0.0.1", "synthetic", ""))
+    try:
+        for interactive, origins in ((True, None), (False, ["*"])):
+            on, _ = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path, browser_origins=origins, interactive=interactive)
+            assert "mcp_servers.smara_browser.enabled=true" in on and "mcp_servers.playwright.enabled=true" not in on
+            assert "@playwright/mcp" not in " ".join(on)
+            assert 'mcp_servers.smara_browser.tools.browser_login.approval_mode="prompt"' in on
+            assert 'mcp_servers.smara_browser.tools.browser_observe.approval_mode="approve"' in on
+    finally:
+        adapter.server.server_close(); adapter.client.close()
+
+
+def test_playwright_mcp_is_the_browser_when_chosen_and_node_is_installed(tmp_path, monkeypatch):
+    monkeypatch.setattr("smara.native_runtime.shutil.which", lambda _name: "npx")
+    monkeypatch.setenv("SMARA_BROWSER_ENGINE", "playwright")
     adapter = ResponsesAdapter(ChatEndpoint("http://127.0.0.1", "synthetic", ""))
     try:
         on, _ = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path, browser_origins=["*"])
@@ -570,6 +587,7 @@ def test_playwright_mcp_is_the_browser_when_node_is_installed(tmp_path, monkeypa
 
 def test_a_chat_with_the_owner_always_has_the_browser_without_any_setting(tmp_path, monkeypatch):
     monkeypatch.setattr("smara.native_runtime.shutil.which", lambda _name: "npx")
+    monkeypatch.setenv("SMARA_BROWSER_ENGINE", "playwright")
     adapter = ResponsesAdapter(ChatEndpoint("http://127.0.0.1", "synthetic", ""))
     try:
         chat, _ = launch_options(adapter, home=tmp_path / "home", workspace=tmp_path, browser_origins=None, interactive=True)

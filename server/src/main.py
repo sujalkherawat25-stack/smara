@@ -23,6 +23,7 @@ from src import health_watch
 from src.bridge.device_api import router as device_router
 from src.bridge.llm_proxy import router as desktop_llm_router
 from src.bridge.pc_tasks import router as pc_tasks_router
+from src.desktop_updates import router as desktop_updates_router
 from src.box.browser_session import BrowserSessions
 from src.box.sandbox import Sandbox
 from src.loop.llm import LLM
@@ -100,6 +101,7 @@ app.include_router(connect_router)
 app.include_router(wa_link_router)
 app.include_router(legal_router)
 app.include_router(telegram_router)
+app.include_router(desktop_updates_router)
 
 
 STALE_OUTBOX_S = 1800

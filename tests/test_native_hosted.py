@@ -80,6 +80,52 @@ def test_a_code_question_is_asked_in_the_chat_and_the_reply_answers_it(tmp_path,
     assert store.consume_response(goal, request_id)["result"] == {"answers": {"otp": {"answers": ["482913"]}}}
 
 
+def test_a_phone_task_that_runs_out_of_work_asks_the_owner_and_carries_on(tmp_path, monkeypatch):
+    from smara.native_budget import BudgetLimitError
+    import pytest
+    store, server, conn = setup(tmp_path, monkeypatch)
+    conn.pick_up(wait=0)
+    goal = store.claim()
+    assert goal["spec"]["max_requests"] == native_hosted.STEPS                 # a phone task gets a real allowance
+    for _ in range(native_hosted.STEPS):
+        store.reserve(goal, 100_000)                                            # ~one desktop model step each
+    with pytest.raises(BudgetLimitError):
+        store.reserve(goal, 100_000)
+    store.finish(store.get(goal["id"]) | {"lease": goal["lease"]}, {"summary": "Cycle interrupted before the final checkpoint."},
+                 "paused", "Cumulative goal inference budget reached; extend its limits before resuming")
+    conn.relay()
+    ask = server.sent("/t-1/ask")
+    assert len(ask) == 1 and ask[0]["request_id"].startswith("budget:") and "keep working" in ask[0]["summary"]
+    assert not server.sent("/t-1/result")                                       # not reported as failed
+
+    server.answers = [{"task_id": "t-1", "request_id": ask[0]["request_id"], "kind": "approval", "answer": "allow"}]
+    conn.apply_answers()
+    again = store.get(goal["id"])
+    assert again["state"] == "queued" and again["spec"]["max_requests"] == native_hosted.STEPS + native_hosted.EXTRA
+    goal = store.claim()
+    store.reserve(goal, 100_000)                                                # it can work again
+
+    store.finish(store.get(goal["id"]) | {"lease": goal["lease"]}, {"summary": ""}, "paused", "Cumulative goal budget reached")
+    conn.relay()
+    second = server.sent("/t-1/ask")[-1]
+    server.answers = [{"task_id": "t-1", "request_id": second["request_id"], "kind": "approval", "answer": "deny"}]
+    conn.apply_answers()
+    result = server.sent("/t-1/result")
+    assert result and result[0]["state"] == "failed" and "you chose to stop it" in result[0]["summary"]
+    assert "Cycle interrupted" not in result[0]["summary"]
+
+
+def test_a_failed_task_says_why_in_plain_words(tmp_path, monkeypatch):
+    store, server, conn = setup(tmp_path, monkeypatch)
+    conn.pick_up(wait=0)
+    goal = store.claim()
+    store.finish(store.get(goal["id"]) | {"lease": goal["lease"]}, {"summary": "Cycle interrupted before the final checkpoint."},
+                 "blocked", "The project folder is no longer available")
+    conn.relay()
+    text = server.sent("/t-1/result")[0]["summary"]
+    assert "The project folder is no longer available" in text and "Cycle interrupted" not in text
+
+
 def test_no_project_or_model_tells_the_owner_instead_of_failing_silently(tmp_path, monkeypatch):
     store, server, conn = setup(tmp_path, monkeypatch)
     monkeypatch.setattr(conn, "defaults", lambda: None)
@@ -115,3 +161,27 @@ def test_phone_tasks_get_their_own_project_and_the_owners_selection_stays(tmp_pa
     entry = next(p for p in prefs["projects"] if p["workspace"] == phone)
     assert entry["label"] == "Phone tasks" and entry["options"]["browser_origins"] == ["*"]
     assert native_hosted.phone_project() == phone and len(prefs["projects"]) == 2  # created once
+
+
+def test_phone_tasks_get_the_browser_even_when_the_owners_project_has_none(tmp_path, monkeypatch):
+    from smara import native_management
+    from pathlib import Path
+    monkeypatch.setattr(native_management, "settings_path", lambda: tmp_path / "native-settings.json")
+    monkeypatch.setenv("SMARA_DESKTOP_STATE", str(tmp_path / "desktop.json"))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    mine = tmp_path / "shop"; mine.mkdir()
+    native_management.manage({"operation": "add_project", "workspace": str(mine), "label": "shop"})
+    phone = native_hosted.phone_project()
+    entry = next(p for p in native_management.preferences()["projects"] if p["workspace"] == phone)
+    assert entry["options"]["browser_origins"] == ["*"] and entry["options"]["tools_enabled"] is True
+
+
+def test_the_packaged_app_runs_the_browser_helper_without_python(tmp_path):
+    """`smara-desktop.exe --browser-bridge <command>` is the helper inside the app (same entry the packaged exe uses)."""
+    import os, subprocess, sys
+    from pathlib import Path
+    src = Path(native_hosted.__file__).resolve().parents[1]
+    out = subprocess.run([sys.executable, "-c", "import sys; from smara.native_management import main; sys.exit(main())",
+                          "--browser-bridge", "status"], capture_output=True, text=True, timeout=60,
+                         env={**os.environ, "PYTHONPATH": str(src), "SMARA_BRIDGE_HOME": str(tmp_path / "bridge")})
+    assert out.returncode == 0 and "Not paired." in out.stdout

@@ -50,6 +50,8 @@ services:
       - smara_browser:/data/browser-profiles
       # Files the owner sends (kept 7 days). A named volume keeps them across releases.
       - smara_owner_files:/app/data/owner-files
+      # Signed Smara Desktop installers for the app's own updater (/desktop/update, /desktop/download).
+      - smara_desktop_releases:/app/data/desktop-releases
     ports:
       - "127.0.0.1:8090:8080"
     depends_on:
@@ -134,3 +136,5 @@ volumes:
     name: smara_browser
   smara_owner_files:
     name: smara_owner_files
+  smara_desktop_releases:
+    name: smara_desktop_releases

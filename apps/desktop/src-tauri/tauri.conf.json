@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Smara Desktop",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "identifier": "com.syntarus.smara.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -28,8 +28,18 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.ico", "icons/icon.icns", "icons/icon.png"],
-    "resources": ["resources/smara-desktop.exe", "resources/_internal/", "resources/LIVE_WEB_ACCEPTANCE_V5*.json", "resources/native/", "resources/browser/"],
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.icns",
+      "icons/icon.png"
+    ],
+    "resources": [
+      "resources/smara-desktop.exe",
+      "resources/_internal/",
+      "resources/LIVE_WEB_ACCEPTANCE_V5*.json",
+      "resources/native/",
+      "resources/browser/"
+    ],
     "category": "Utility",
     "shortDescription": "A private, approval-first desktop companion for Smara",
     "longDescription": "Smara Desktop runs its source-owned native agent harness with your selected model provider, separate local projects, saved sessions, explicit approvals and workspace sandboxing. Native settings manage DPAPI-protected credentials. Public research, local-memory readers, isolated workers and public DOM browsing are opt-in. Historical data remains untouched; old execution engines are not included.",
@@ -37,6 +47,18 @@
       "nsis": {
         "startMenuFolder": "Smara",
         "installerHooks": "nsis-hooks.nsh"
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYyREJCNTYyOTQwN0E4RTAKUldUZ3FBZVVZclhiOHFRUHF6dkttSVR2djdNK0QwN1BKM01jN0hrRVVoZk12aXNqNkdzMy9PUnEK",
+      "endpoints": [
+        "https://ai.syntarus.com/smara/desktop/update/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }
