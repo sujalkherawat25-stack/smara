@@ -50,6 +50,19 @@ def _safe_link(url: object) -> str:
     return str(url) if parsed.scheme == "https" and parsed.hostname in _HOSTS and not parsed.username else ""
 
 
+def _refused_by_server(token: str) -> bool:
+    """The browser helper writes signed_out into status.json when the server refused its token (signed out in chat, or
+    the account was reset). Only that exact token counts: a new sign-in brings a new token."""
+    if not token:
+        return False
+    try:
+        cur = json.loads((_home() / "status.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    import hashlib
+    return bool(cur.get("signed_out")) and cur.get("signed_out_for") == hashlib.sha256(token.encode()).hexdigest()[:16]
+
+
 def status() -> dict:
     """What the Sign-in card shows: signed in, waiting for the owner's tap, or signed out."""
     saved = approvals_status()
@@ -60,9 +73,10 @@ def status() -> dict:
         pass
     pending = read_object(_pending_path())
     waiting = bool(pending.get("secret")) and float(pending.get("expires_at") or 0) > time.time()
-    signed_in = bool(saved.get("connected")) and bool(helper.get("token"))
-    partial = (bool(saved.get("connected")) or bool(helper.get("token"))) and not signed_in    # paired the old way, one half only
-    return {"signed_in": signed_in, "partial": partial, "shop": saved.get("shop") or helper.get("shop") or "",
+    refused = _refused_by_server(helper.get("token") or "")
+    signed_in = bool(saved.get("connected")) and bool(helper.get("token")) and not refused
+    partial = (bool(saved.get("connected")) or bool(helper.get("token"))) and not signed_in and not refused   # paired the old way, one half only
+    return {"signed_in": signed_in, "partial": partial, "signed_out": refused and not waiting, "shop": saved.get("shop") or helper.get("shop") or "",
             "server": saved.get("server") or helper.get("server") or "",
             "waiting": waiting and not signed_in,
             "code": pending.get("code", "") if waiting else "", "message": pending.get("message", "") if waiting else "",

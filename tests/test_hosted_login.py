@@ -93,3 +93,26 @@ def test_unknown_requests_are_refused(home):
         hosted_login.manage({"operation": "hosted_login", "action": "start", "token": "x"})
     with pytest.raises(ValueError):
         hosted_login.manage({"operation": "hosted_login", "action": "nope"})
+
+
+def test_a_token_the_server_refused_shows_signed_out_until_a_new_sign_in(home, monkeypatch):
+    import hashlib
+    monkeypatch.setattr(hosted_login, "_client", Fake([(200, START),
+        (200, {"status": "approved", "device_token": "dev-t", "owner_token": "sma_own", "shop": "Demo Shop"})]))
+    hosted_login.start()
+    assert hosted_login.poll()["signed_in"]
+    tag = hashlib.sha256(b"dev-t").hexdigest()[:16]                         # what the browser helper writes on a 401
+    (home / "bridge" / "status.json").write_text(json.dumps({"signed_out": True, "signed_out_for": tag}))
+    st = hosted_login.status()
+    assert not st["signed_in"] and st["signed_out"] and not st["partial"]
+    (home / "bridge" / "status.json").write_text(json.dumps({"signed_out": True, "signed_out_for": "someoldtoken0000"}))
+    assert hosted_login.status()["signed_in"]                               # a refusal of an older token does not count
+
+
+def test_the_browser_helper_stops_asking_with_a_refused_token(tmp_path, monkeypatch):
+    from smara import smara_bridge
+    monkeypatch.setattr(smara_bridge, "STATUS", tmp_path / "status.json")
+    assert not smara_bridge.signed_out_by_server("tok-1")
+    smara_bridge.write_status(online=False, signed_out=True, signed_out_for=smara_bridge.token_tag("tok-1"))
+    assert smara_bridge.signed_out_by_server("tok-1") and not smara_bridge.signed_out_by_server("tok-2")
+    assert "tok-1" not in (tmp_path / "status.json").read_text()                 # only a fingerprint is written
