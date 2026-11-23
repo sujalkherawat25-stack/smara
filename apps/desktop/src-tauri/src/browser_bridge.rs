@@ -51,6 +51,30 @@ fn bridge_script() -> Option<PathBuf> {
     let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/browser/smara_bridge.py");
     dev.is_file().then_some(dev)
 }
+/// The installed app's bundled companion, which runs the helper with `--browser-bridge` (no Python needed on the PC).
+pub fn bundled_helper() -> Option<PathBuf> {
+    if std::env::var_os("SMARA_BRIDGE_PYTHON").is_some() { return None; }      // developer override: use that Python
+    let path = std::env::current_exe().ok()?.parent()?.join("resources/smara-desktop.exe");
+    path.is_file().then_some(path)
+}
+/// The helper as a command: the bundled companion when installed, otherwise Python with the script (a source checkout).
+fn helper_command() -> Result<Command, String> {
+    if let Some(path) = bundled_helper() {
+        let mut command = Command::new(path);
+        command.arg("--browser-bridge").env("PYTHONIOENCODING", "utf-8").env("PYTHONUTF8", "1").stdin(Stdio::null());
+        hide(&mut command);
+        return Ok(command);
+    }
+    let script = bridge_script().ok_or("The bridge component is missing from this install")?;
+    let mut command = python();
+    command.arg(script);
+    Ok(command)
+}
+/// What the Windows startup entry must contain to be the current helper.
+fn startup_target() -> Option<PathBuf> {
+    if bundled_helper().is_some() { return std::env::current_exe().ok(); }
+    bridge_script()
+}
 fn python() -> Command {
     let mut command = if let Some(p) = std::env::var_os("SMARA_BRIDGE_PYTHON") { Command::new(p) }
         else if cfg!(windows) { let mut c = Command::new("py"); c.arg("-3"); c } else { Command::new("python3") };
@@ -164,19 +188,19 @@ fn snapshot() -> Value {
 
 /// Run one helper command to completion and return its trimmed output.
 fn helper(args: &[&str]) -> Result<(bool, String), String> {
-    let script = bridge_script().ok_or("The bridge component is missing from this install")?;
-    let output = python().arg(&script).args(args).stdout(Stdio::piped()).stderr(Stdio::piped()).output()
-        .map_err(|_| "Python 3 was not found. Open Settings → Browser and press “Install browser components”, or install Python 3 from python.org once.".to_owned())?;
+    let output = helper_command()?.args(args).stdout(Stdio::piped()).stderr(Stdio::piped()).output()
+        .map_err(|_| "The browser helper could not start. Reinstall Smara Desktop, or (developers) install Python 3.".to_owned())?;
     let mut text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     let err = String::from_utf8_lossy(&output.stderr);
     if !output.status.success() && text.is_empty() { text = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("The helper failed").to_owned(); }
     Ok((output.status.success(), text))
 }
 fn components() -> Value {
-    let has_python = python().arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
-    let has_modules = has_python && python().args(["-c", "import playwright, httpx"]).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
+    let bundled = bundled_helper().is_some();
+    let has_python = bundled || python().arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
+    let has_modules = bundled || has_python && python().args(["-c", "import playwright, httpx"]).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
     let found = |paths: &[&str]| paths.iter().any(|p| std::path::Path::new(p).is_file());
-    json!({"python": has_python, "modules": has_modules, "browsers": {
+    json!({"python": has_python, "modules": has_modules, "bundled": bundled, "browsers": {
         "brave": found(&[r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe", r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe"]),
         "chrome": found(&[r"C:\Program Files\Google\Chrome\Application\chrome.exe", r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"]),
         "edge": found(&[r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"]) }})
@@ -185,8 +209,9 @@ fn components() -> Value {
 fn ensure_inner() -> Result<(), String> {
     if !snapshot()["paired"].as_bool().unwrap_or(false) { return Ok(()); }
     // One canonical copy: the startup entry must launch the bundled helper, so a reboot never brings back an older one.
-    let current = bridge_script().map(|script| startup_command().map(|command| startup_uses(&command, &script)).unwrap_or(false)).unwrap_or(true);
-    if !current { helper(&["install-startup"])?; }        // rewrites the entry to the bundled script; starts it only if not running
+    let current = startup_target().map(|target| startup_command().map(|command| startup_uses(&command, &target)
+        && (bundled_helper().is_none() || command.contains("--browser-bridge"))).unwrap_or(false)).unwrap_or(true);
+    if !current { helper(&["stop"]).ok(); helper(&["install-startup"])?; }   // an old (Python) helper is replaced by the bundled one
     else if helper_pid().is_none() { helper(&["ensure"])?; }
     Ok(())
 }
@@ -244,6 +269,7 @@ pub async fn bridge_unpair() -> Result<Value, String> {
 #[tauri::command]
 pub async fn bridge_install_components() -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(|| {
+        if bundled_helper().is_some() { return Ok(components()); }      // everything ships inside Smara Desktop
         let output = python().args(["-m", "pip", "install", "--user", "--disable-pip-version-check", "playwright", "httpx"])
             .stdout(Stdio::piped()).stderr(Stdio::piped()).output()
             .map_err(|_| "Python 3 is not installed. Install it once from python.org (tick “Add python.exe to PATH”), then press this button again.".to_owned())?;

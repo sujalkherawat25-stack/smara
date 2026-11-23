@@ -93,3 +93,18 @@ def test_uninstall_startup_removes_the_watchdog(windows, monkeypatch):
         OpenKey=lambda *a, **k: (_ for _ in ()).throw(OSError()), DeleteValue=lambda *a: None))
     assert mb.cmd_uninstall_startup() == 0
     assert any(c[0][:2] == ["schtasks", "/Delete"] and mb.WATCHDOG_TASK in c[0] for c in calls)
+
+
+def test_inside_smara_desktop_the_helper_runs_from_the_app_not_python(tmp_path, monkeypatch):
+    """Installed Smara Desktop: startup entry and watchdog launch the window-less app with --browser-bridge."""
+    resources = tmp_path / "Smara Desktop" / "resources"
+    resources.mkdir(parents=True)
+    (resources / "smara-desktop.exe").write_bytes(b"")
+    app = tmp_path / "Smara Desktop" / "smara-desktop.exe"
+    app.write_bytes(b"")
+    monkeypatch.setattr(mb.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(mb.sys, "executable", str(resources / "smara-desktop.exe"))
+    assert mb.startup_command() == [str(app.resolve()), "--browser-bridge", "run"]
+    program, arguments = mb.watchdog_command()
+    assert program == str(app.resolve()) and arguments == '--browser-bridge "ensure"'
+    assert "python" not in " ".join(mb.startup_command()).lower()

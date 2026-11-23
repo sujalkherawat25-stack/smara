@@ -353,6 +353,17 @@ fn native_open_url(url: String) -> Result<(), String> {
     open::that_detached(parsed.as_str()).map_err(|_| "Cannot open link".into())
 }
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--browser-bridge") {
+        // The PC browser helper's startup entry and self-repair task launch this window-less app; it runs the bundled
+        // helper hidden (no console, no Python needed). Every argument after the flag is passed on unchanged.
+        if let Some(path) = browser_bridge::bundled_helper() {
+            let mut command = Command::new(path);
+            command.args(std::env::args_os().skip(1)).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+            command_hidden(&mut command);
+            let _ = command.spawn();
+        }
+        return;
+    }
     if std::env::args().any(|argument| argument == "--background-worker") {
         // The GUI-subsystem executable is the login launcher. Its frozen
         // JSON-RPC companion retains console stdio but is launched hidden.

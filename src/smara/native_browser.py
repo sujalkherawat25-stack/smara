@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -79,7 +80,10 @@ class NativeBrowser:
         from .native_browser_control import DEFAULTS
         self.options = {**DEFAULTS, **(options or {})}
         self.control = control
-        self.engine = ManagedBrowser(directory / uuid.uuid4().hex, headless=not self.options["visible"])
+        # Smara's own browser profile (set by the runtime) keeps the owner's sign-ins between runs, the same profile the
+        # Teach recorder and the earlier browser used. Without it (tests, other callers) every session starts fresh.
+        profile = os.getenv("SMARA_BROWSER_PROFILE") or None
+        self.engine = ManagedBrowser(directory / uuid.uuid4().hex, headless=not self.options["visible"], profile_dir=profile)
         self.session = None
         self.latest = None
         self.allow_writes = False

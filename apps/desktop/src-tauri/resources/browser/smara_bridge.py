@@ -1615,10 +1615,22 @@ def cmd_tally_sync(a) -> int:
     return 0
 
 
-def startup_command() -> list[str]:
+def launcher() -> list[str]:
+    """The program (and leading arguments) that runs this helper. Inside Smara Desktop it is the app itself
+    (`Smara Desktop.exe --browser-bridge ...`, no window, no Python needed on the PC); from a source checkout it is
+    Python with this script."""
+    if getattr(sys, "frozen", False):
+        app = Path(sys.executable).resolve().parent.parent / "smara-desktop.exe"
+        if app.is_file():
+            return [str(app), "--browser-bridge"]
+        return [str(Path(sys.executable).resolve()), "--browser-bridge"]
     exe = Path(sys.executable)
     pyw = exe.with_name("pythonw.exe")
-    return [str(pyw if pyw.is_file() else exe), str(Path(__file__).resolve()), "run"]
+    return [str(pyw if pyw.is_file() else exe), str(Path(__file__).resolve())]
+
+
+def startup_command() -> list[str]:
+    return launcher() + ["run"]
 
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -1644,9 +1656,9 @@ WATCHDOG_MINUTES = 5
 
 
 def watchdog_command() -> tuple[str, str]:
-    """(program, arguments) the watchdog runs: the same interpreter and script as the helper, with `ensure`."""
-    cmd = startup_command()
-    return cmd[0], " ".join(f'"{x}"' for x in cmd[1:-1] + ["ensure"])
+    """(program, arguments) the watchdog runs: the same program as the helper, with `ensure`."""
+    cmd = launcher()
+    return cmd[0], " ".join(f'"{x}"' if not x.startswith("--") else x for x in cmd[1:] + ["ensure"])
 
 
 def _run_quiet(args: list[str], env: dict | None = None, timeout: int = 60):
@@ -1665,7 +1677,10 @@ def watchdog_state() -> str:
         return "missing"
     if out.returncode != 0:
         return "missing"
-    return "current" if str(Path(__file__).resolve()).lower() in (out.stdout or "").lower() else "stale"
+    xml = (out.stdout or "").lower()
+    run = launcher()                                  # the script (source) or the app and its flag (Smara Desktop)
+    wanted = run if getattr(sys, "frozen", False) else run[1:]
+    return "current" if all(part.lower() in xml for part in wanted) else "stale"
 
 
 def register_watchdog() -> bool:

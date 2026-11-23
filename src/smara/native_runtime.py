@@ -235,6 +235,7 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
             browser_args += ["--origin", value]
         settings.update({
             "mcp_servers.smara_browser.env.SMARA_DESKTOP_STATE": str(state_path().resolve()),
+            "mcp_servers.smara_browser.env.SMARA_BROWSER_PROFILE": str((home / "playwright-profile").resolve()),
             "mcp_servers.smara_browser.enabled": True,
             "mcp_servers.smara_browser.command": sys.executable,
             "mcp_servers.smara_browser.args": browser_args,

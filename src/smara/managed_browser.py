@@ -40,11 +40,16 @@ class BrowserSession:
 
 
 class ManagedBrowser:
-    def __init__(self, artifact_root: Path, executable_path: str | None = None, headless: bool = True):
+    def __init__(self, artifact_root: Path, executable_path: str | None = None, headless: bool = True,
+                 profile_dir: Path | None = None):
         self.root = Path(artifact_root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.executable = executable_path or self._find()
         self.headless = headless
+        # A profile folder keeps sign-ins between runs (Smara's own profile, never the owner's personal one). Only one
+        # program can hold a profile at a time; when it is busy this browser starts fresh instead of failing.
+        self.profile_dir = Path(profile_dir) if profile_dir else None
+        self.shared = None
         self.runtime = None
         self.browser = None
         self.sessions: dict[str, BrowserSession] = {}
@@ -70,6 +75,15 @@ class ManagedBrowser:
             options["executable_path"] = self.executable
         try:
             self.runtime = await async_playwright().start()
+            if self.profile_dir is not None:
+                try:
+                    self.profile_dir.mkdir(parents=True, exist_ok=True)
+                    self.shared = await self.runtime.chromium.launch_persistent_context(
+                        str(self.profile_dir), accept_downloads=True, **options)
+                    self.browser = self.shared
+                    return
+                except Exception:
+                    self.shared = None                 # profile in use by another Smara task: a fresh browser
             self.browser = await self.runtime.chromium.launch(**options)
         except Exception as exc:
             raise BrowserUnavailable(f"no supported Chromium could start ({type(exc).__name__})") from exc
@@ -86,6 +100,23 @@ class ManagedBrowser:
         if self.browser is None:
             await self._start()
         ident = f"browser_{uuid.uuid4().hex[:20]}"
+        if self.shared is not None:
+            # The profile's one context: configure it once; each session gets its own fresh tab in it.
+            context = self.shared
+            if configure_context and not getattr(context, "_smara_configured", False):
+                configured = configure_context(context)
+                if asyncio.iscoroutine(configured):
+                    await configured
+                context._smara_configured = True
+            session = BrowserSession(ident, context)
+            if not getattr(context, "_smara_listening", False):
+                context.on("page", lambda page: self._attach_to_owner(page))
+                context._smara_listening = True
+            for stale in [p for p in context.pages if p.url in ("about:blank", "")]:
+                await stale.close()
+            self.sessions[ident] = session
+            self._attach(session, await context.new_page())
+            return ident
         context = await self.browser.new_context(**(context_options or {"accept_downloads": True}))
         try:
             if configure_context:
@@ -100,6 +131,11 @@ class ManagedBrowser:
         self._attach(session, await context.new_page())
         self.sessions[ident] = session
         return ident
+
+    def _attach_to_owner(self, page) -> None:
+        """A tab a page opened in the shared profile belongs to the newest open session."""
+        if self.sessions:
+            self._attach(list(self.sessions.values())[-1], page)
 
     def _attach(self, session: BrowserSession, page) -> None:
         if any(existing is page for existing in session.pages.values()):
@@ -315,8 +351,17 @@ class ManagedBrowser:
 
     async def _close(self, session_id: str) -> None:
         session = self.sessions.pop(session_id, None)
-        if session is not None:
-            await session.context.close()
+        if session is None:
+            return
+        if session.context is self.shared:
+            for page in list(session.pages.values()):      # the shared profile stays open; only this session's tabs close
+                if not page.is_closed():
+                    await page.close()
+            if not self.sessions:
+                await self.shared.close()                   # last session: release the profile for other Smara tasks
+                self.shared = self.browser = None
+            return
+        await session.context.close()
 
     def cancel(self, session_id: str) -> None:
         self.close(session_id)
@@ -337,6 +382,9 @@ class ManagedBrowser:
     async def _shutdown(self) -> None:
         for ident in list(self.sessions):
             await self._close(ident)
+        if self.shared is not None:
+            await self.shared.close()
+            self.shared = self.browser = None
         if self.browser is not None:
             await self.browser.close()
             self.browser = None

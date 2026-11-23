@@ -42,6 +42,11 @@ if __name__ == "__main__" and sys.argv[1:] == ["--native-app-server"]:
 if __name__ == "__main__" and sys.argv[1:2] == ["--native-tools"]:
     from smara.native_tools import main as tools_main
     raise SystemExit(tools_main(sys.argv[2:]))
+if __name__ == "__main__" and sys.argv[1:2] == ["--browser-bridge"]:
+    # The PC browser helper (smara_bridge), bundled: no Python needed on the owner's PC.
+    sys.argv = [sys.argv[0]] + sys.argv[2:]
+    from smara.smara_bridge import main as bridge_main
+    raise SystemExit(bridge_main())
 if __name__ == "__main__" and sys.argv[1:2] == ["--native-browser"]:
     from smara.native_browser import main as browser_main
     raise SystemExit(browser_main(sys.argv[2:]))
