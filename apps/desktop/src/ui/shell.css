@@ -710,3 +710,11 @@
 .teach-steps li { padding-left: 4px; }
 .teach-steps li > span { margin-right: 8px; }
 .teach-panel .settings-form { max-width: 520px; }
+
+/* Update ready: one quiet bar above the chat, never a modal. */
+.update-banner { display: flex; flex-wrap: wrap; align-items: center; gap: var(--smara-space-3); padding: var(--smara-space-2) var(--smara-space-4);
+  background: var(--smara-surface); border-bottom: 1px solid var(--smara-line); color: var(--smara-ink); font-size: var(--smara-body); }
+.update-banner > span { flex: 1 1 240px; }
+.update-banner > button:not(.link) { background: var(--smara-accent); color: var(--smara-on-accent); border: 0; border-radius: var(--smara-radius); padding: 6px 12px; cursor: pointer; }
+.update-banner > button:disabled { opacity: 0.55; cursor: not-allowed; }
+.update-banner > button.link { background: none; border: 0; color: var(--smara-muted); cursor: pointer; padding: 0; }

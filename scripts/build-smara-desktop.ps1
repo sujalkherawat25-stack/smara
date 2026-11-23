@@ -161,6 +161,16 @@ try {
     try { cargo check; Assert-NativeSuccess 'cargo check' } finally { Pop-Location }
     # NSIS is the supported beta distribution path on Windows. WiX/MSI is
     # optional and can fail on machines without a working light.exe install.
+    # The installer is signed for the in-app updater with Smara's update key. It never lives in the repo: CI passes it in
+    # TAURI_SIGNING_PRIVATE_KEY(_PASSWORD); on the release PC it is read from ~/smara-secrets/desktop-updater.
+    $updaterKey = Join-Path $HOME 'smara-secrets\desktop-updater\smara-updater.key'
+    if (-not $env:TAURI_SIGNING_PRIVATE_KEY -and (Test-Path $updaterKey)) {
+        $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content $updaterKey -Raw
+        $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = Get-Content (Join-Path (Split-Path $updaterKey) 'password.txt') -Raw
+    }
+    if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+        throw 'The update signing key is missing (TAURI_SIGNING_PRIVATE_KEY, or ~/smara-secrets/desktop-updater). Installers must be signed for the updater.'
+    }
     npm exec tauri build -- --bundles nsis
     Assert-NativeSuccess 'Tauri package build'
 } finally {

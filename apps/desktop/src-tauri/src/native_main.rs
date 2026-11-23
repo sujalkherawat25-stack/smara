@@ -378,6 +378,9 @@ fn main() {
         return;
     }
     tauri::Builder::default()
+        // Updates come from Smara's server and install only if signed with Smara's update key (public key in tauri.conf).
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file, native_project_files, browser_bridge::bridge_state, browser_bridge::bridge_check, browser_bridge::bridge_ensure, browser_bridge::bridge_stop, browser_bridge::bridge_pause, browser_bridge::bridge_pair, browser_bridge::bridge_unpair, browser_bridge::bridge_install_components, control_bar::computer_bar_state, control_bar::computer_bar_pause, control_bar::computer_bar_stop])
         .setup(|app| {
             browser_bridge::ensure_on_startup();

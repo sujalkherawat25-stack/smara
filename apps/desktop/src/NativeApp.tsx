@@ -7,6 +7,7 @@ import { AgentForm, type AgentDraft } from "./ui/AgentRoster";
 import { ToolGroup } from "./ui/ToolCard";
 import NativeFiles from "./ui/NativeFiles";
 import HostedPanel from "./ui/HostedPanel";
+import UpdateBanner from "./ui/UpdateBanner";
 import TeachPanel from "./ui/TeachPanel";
 import { EmptyChat } from "./ui/EmptyChat";
 import NativeBrowser from "./NativeBrowser";
@@ -1292,6 +1293,7 @@ export default function NativeApp() {
         <button className={`settings-button${settingsOpen ? " selected" : ""}`} disabled={navigationLocked} onClick={() => void toggleSettings()}>Settings</button>
       </div>
     </aside><main>
+      <UpdateBanner busy={navigationLocked} />
       <header className="native-topbar">
         <div className="topbar-title">
           {!settingsOpen && currentAgent && <span className="avatar sm" data-tone={avatarTone} aria-hidden="true">{avatarInitial}</span>}

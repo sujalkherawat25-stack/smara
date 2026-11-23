@@ -107,6 +107,8 @@ class Settings:
     sarvam_stt_url: str = "https://api.sarvam.ai/speech-to-text"
     # Files the owner sends (any type, up to 20 MB) are kept here permanently, one folder per shop (250 MB each), outside the database
     owner_files_dir: str = "./data/owner-files"
+    # Signed Smara Desktop installers and latest.json, served to the app's updater (src/desktop_updates.py)
+    desktop_releases_dir: str = "./data/desktop-releases"
     tick_seconds: int = 60
     digest_hour_ist: int = 9
     # Nothing proactive (cards, digests, reminders) goes out between these IST hours
@@ -189,6 +191,7 @@ def load_settings() -> Settings:
         sarvam_api_key=env.get("SARVAM_API_KEY", ""),
         sarvam_stt_url=env.get("SARVAM_STT_URL", "https://api.sarvam.ai/speech-to-text"),
         owner_files_dir=env.get("OWNER_FILES_DIR") or "./data/owner-files",
+        desktop_releases_dir=env.get("DESKTOP_RELEASES_DIR") or "./data/desktop-releases",
         tick_seconds=int(env.get("TICK_SECONDS", "60")),
         digest_hour_ist=int(env.get("DIGEST_HOUR_IST", "9")),
         quiet_start_hour=parse_quiet_hours(env.get("QUIET_HOURS_IST", "21-8"))[0],
