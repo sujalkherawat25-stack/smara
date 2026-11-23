@@ -1620,7 +1620,8 @@ def launcher() -> list[str]:
     (`Smara Desktop.exe --browser-bridge ...`, no window, no Python needed on the PC); from a source checkout it is
     Python with this script."""
     if getattr(sys, "frozen", False):
-        app = Path(sys.executable).resolve().parent.parent / "smara-desktop.exe"
+        from .install_path import real_path
+        app = real_path(Path(sys.executable).resolve().parent.parent / "smara-desktop.exe")
         if app.is_file():
             return [str(app), "--browser-bridge"]
         return [str(Path(sys.executable).resolve()), "--browser-bridge"]

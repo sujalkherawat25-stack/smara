@@ -175,7 +175,8 @@ def startup_command(enabled):
     if os.name != "nt": raise ValueError("Login startup is available only on Windows")
     if enabled and not getattr(sys, "frozen", False):
         raise ValueError("Login startup requires an installed, verified Smara companion")
-    desktop = Path(sys.executable).resolve().parent.parent / "smara-desktop.exe"
+    from .install_path import real_path
+    desktop = real_path(Path(sys.executable).resolve().parent.parent / "smara-desktop.exe")
     if enabled and (Path(sys.executable).resolve().parent.name.casefold() != "resources" or not desktop.is_file()):
         raise ValueError("Login startup requires the installed Desktop companion, not a console CLI")
     import winreg
