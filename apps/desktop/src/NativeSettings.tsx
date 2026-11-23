@@ -95,7 +95,7 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
       {error && <p role="alert" className="native-error">{error.replaceAll("Settings → Tools", "Search & tools")}</p>}{notice && <p role="status" className="settings-notice">{notice}</p>}
 
       {tab === "models" && <div className="set-page">
-        <header><h2>Models</h2><p>The AI providers Smara can use. Pick the active one from the box next to the message field. Smara never silently swaps your model. Smara Desktop is for models with a 1M-token context window or more.</p></header>
+        <header><h2>Models</h2><p>“Smara (included)” is ready once you sign in: it uses Smara’s own model through your Smara account and shares your daily limit with your WhatsApp/Telegram chat, with no API key to set up. Advanced: add your own provider and key below (BYOK) and pick it from the box next to the message field. Smara never silently swaps your model.</p></header>
         <div className="set-group">
           {!setup.profiles.length && <div className="set-row"><div><strong>No model yet</strong><small>Add your provider below to start chatting.</small></div></div>}
           {setup.profiles.map(profile => <div className="set-row" key={profile.id}><div><strong>{profile.label}{profile.id === setup.preferences.active_model && <span className="set-badge">Active</span>}</strong><small>{profile.model} · {profile.provider}</small></div><button disabled={disabled} onClick={() => edit(profile)}>Edit</button></div>)}
