@@ -424,3 +424,9 @@ async def test_a_user_without_a_ledger_gets_no_invoice_talk_and_no_daily_digest(
     assert "No ledger is set up" in line and "open invoices" not in line
     from src import clock
     assert await build_digest(env.pool, env.t.id, clock.today()) == ""
+
+
+async def test_the_agent_is_told_that_figures_from_earlier_in_the_chat_may_be_stale(env):
+    from src.agent.prompt import build_system
+    text = await build_system(env.app, env.t, "TRUSTED")
+    assert "may be out of date" in text and "The ledger line above is current" in text
