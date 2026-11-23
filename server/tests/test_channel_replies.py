@@ -340,6 +340,7 @@ async def test_a_morning_with_many_due_reminders_never_waits_for_a_queue_of_agen
         return True                                                       # as if the agent made its card
     monkeypatch.setattr(scheduler, "_agent_reminder", slow_agent)
     env.app.state.llm = ScriptLLM()                                       # enabled
+    env.app.state.settings = Settings(**{**env.app.state.settings.__dict__, "proactive_cards_per_day": 100})   # this test is about speed, not the daily cap
     sent = await scheduler.tick(env.app, datetime.now(timezone.utc) + timedelta(minutes=20))
     assert sent == 13                                                      # the 12 new ones and the one from the fixture: all asked about
     assert live["drafts"] == scheduler.AGENT_DRAFTS_PER_TICK and live["peak"] <= scheduler.DRAFTS_AT_ONCE

@@ -77,6 +77,9 @@ class Settings:
     # The Smara team's Telegram chat: ops alerts (owner messages that cannot be sent). None = log only.
     ops_telegram_chat_id: int | None = None
     admin_telegram_ids: tuple = ()      # Telegram ids that may use /invite, /waitlist ... (default: the ops chat)
+    # Messages Smara starts by itself (collection cards, morning summary): True = for every shop (tests), False = only shops that opted in
+    proactive_default: bool = True
+    proactive_cards_per_day: int = 8      # most collection cards one shop gets in a day; the rest wait for tomorrow
     admin_whatsapp_numbers: tuple = ()  # WhatsApp numbers (digits, with country code) that may use the same admin commands on WhatsApp
     smara_wa_number: str = ""           # Smara's own public WhatsApp number (digits), used to build wa.me invite links
     # Shared secret the Syntarus operator dashboard sends to read the Smara numbers (empty = that endpoint is off)
@@ -164,6 +167,8 @@ def load_settings() -> Settings:
         telegram_webhook_secret=env.get("TELEGRAM_WEBHOOK_SECRET", ""),
         ops_telegram_chat_id=_chat_id(env.get("OPS_TELEGRAM_CHAT_ID", "")),
         admin_telegram_ids=tuple(i for i in (_chat_id(x) for x in env.get("ADMIN_TELEGRAM_IDS", "").split(",")) if i is not None),
+        proactive_cards_per_day=int(env.get("PROACTIVE_CARDS_PER_DAY", "8") or 8),
+        proactive_default=env.get("PROACTIVE_DEFAULT", "off").strip().lower() in ("on", "1", "true", "yes"),
         admin_whatsapp_numbers=tuple(n for n in (admin_wa_number(x) for x in env.get("ADMIN_WHATSAPP_NUMBERS", "").split(",")) if n),
         smara_wa_number=normalize_phone(env.get("SMARA_WA_NUMBER", "")),
         ops_dashboard_token=env.get("OPS_DASHBOARD_TOKEN", ""),

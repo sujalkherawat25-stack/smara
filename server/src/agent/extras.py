@@ -123,6 +123,25 @@ async def _owner_words(app, session_id: str) -> str:
     return users[-1][:500] if users else ""
 
 
+def _words(text: str) -> set[str]:
+    return {w for w in re.findall(r"\w+", re.sub(r"(?<=\d),(?=\d)", "", str(text).lower())) if len(w) >= 3 or w.isdigit()}
+
+
+async def _already_scheduled(conn, tenant_id: str, at, instruction: str) -> str | None:
+    """The id of a pending task of this shop for the same minute that says about the same thing, so a question asked later
+    ('how much does Ravi owe?') cannot add a second copy of the reminder the owner already got."""
+    rows = await (await conn.execute(
+        """SELECT id, payload FROM agent_tasks WHERE tenant_id = %s AND status = 'PENDING' AND kind = 'followup'
+              AND run_at BETWEEN %s AND %s""", (tenant_id, at - timedelta(minutes=1), at + timedelta(minutes=1)))).fetchall()
+    new = _words(instruction)
+    for r in rows:
+        old = _words((r["payload"] or {}).get("instruction", "")) | _words((r["payload"] or {}).get("owner_said", ""))
+        shared = new & old
+        if len(shared) >= 3 and len(shared) / min(len(new), len(old)) >= 0.5:
+            return str(r["id"])
+    return None
+
+
 async def schedule_followup(app, ctx: SessionCtx, args: dict) -> dict:
     instruction = str(args.get("instruction") or "").strip()
     if not instruction or len(instruction) > 1000:
@@ -140,6 +159,10 @@ async def schedule_followup(app, ctx: SessionCtx, args: dict) -> dict:
     if isinstance(recur, str):
         return {"error": recur}
     async with app.state.pool.connection() as conn:
+        twin = await _already_scheduled(conn, ctx.tenant_id, at, instruction)
+        if twin:
+            return {"task_id": twin, "already_scheduled": True, "will_run_at_ist": at.strftime("%Y-%m-%d %H:%M"),
+                    "note": "The same reminder is already set for this time, so nothing new was added. Tell the owner it is set (once)."}
         c = await (await conn.execute(
             """SELECT count(*) FILTER (WHERE status = 'PENDING') pending,
                       count(*) FILTER (WHERE created_at > now() - interval '24 hours') today
@@ -229,6 +252,28 @@ async def build_payment_request(app, ctx: SessionCtx, args: dict) -> dict:
             "text": text + (f"\nTap to pay: {link}" if link else ""), "link": link}
 
 
+REACT_GAP = timedelta(minutes=4)      # on WhatsApp: at most one reaction per shop every few minutes, and never two on one message
+
+
+async def _react_on_whatsapp(app, ctx: SessionCtx, tenant, emoji: str) -> dict:
+    last = (getattr(app.state, "wa_last", None) or {}).get(str(ctx.tenant_id))
+    wa = getattr(app.state, "wa", None)
+    if wa is None or not last:
+        return {"reacted": False, "note": "no WhatsApp message to react to here; just write your reply"}
+    to, wamid, number_id = last
+    now = clock.now()
+    log = app.state.__dict__.setdefault("wa_reacted", {})
+    prev = log.get(str(ctx.tenant_id))
+    if prev and (prev[1] == wamid or now - prev[0] < REACT_GAP):
+        return {"reacted": False, "note": "you reacted a moment ago; no second reaction now, just write your reply"}
+    try:
+        await wa.react(to, wamid, emoji, number_id=number_id or None)
+    except Exception as err:
+        return {"reacted": False, "note": f"reaction not shown ({type(err).__name__}); just write your reply"}
+    log[str(ctx.tenant_id)] = (now, wamid)
+    return {"reacted": True, "note": "the reaction is on their message; still write your normal reply"}
+
+
 async def react_to_owner(app, ctx: SessionCtx, args: dict) -> dict:
     """An emoji reaction on the owner's latest Telegram message. Never raises: a reaction is a nicety, so any failure is
     reported to the model as a short note and the turn carries on."""
@@ -238,6 +283,8 @@ async def react_to_owner(app, ctx: SessionCtx, args: dict) -> dict:
         return {"reacted": False, "error": "use one of: " + " ".join(REACTIONS)}
     tg = getattr(app.state, "tg", None)
     tenant = await tenants.by_id(app.state.pool, ctx.tenant_id)
+    if tenant is not None and getattr(tenant, "owner_last_channel", None) == "whatsapp":
+        return await _react_on_whatsapp(app, ctx, tenant, emoji)
     chat_id = getattr(tenant, "telegram_chat_id", None) if tenant else None
     mid = (getattr(app.state, "tg_last", None) or {}).get(chat_id)
     if tg is None or not chat_id or not mid:
