@@ -37,11 +37,12 @@ GRANT_DEFAULT_MINUTES, GRANT_MAX_MINUTES = 30, 120
 
 _ACT_PROPS = {"observation_id": {"type": "string", "description": "From the latest computer_observe/computer_act result"},
               "action": {"type": "string", "enum": ["click", "double_click", "right_click", "type_text", "press_key", "scroll", "drag", "set_value"]},
-              "element_index": {"type": "integer", "minimum": 0, "description": "Index in the observation tree (click, set_value)"},
+              "element_index": {"type": "integer", "minimum": 0, "description": "Index in the observation tree (click, set_value; with type_text it clicks into that field first)"},
               "x": {"type": "integer"}, "y": {"type": "integer"}, "to_x": {"type": "integer"}, "to_y": {"type": "integer"},
               "text": {"type": "string"}, "key": {"type": "string", "description": "Chord such as Return, Tab, Control+a, Control+Shift+s, F2, KP_0"},
               "value": {"type": "string"}, "scroll_x": {"type": "integer"}, "scroll_y": {"type": "integer", "description": "Positive scrolls down"}}
 _ACT_KEYS = set(_ACT_PROPS) - {"observation_id", "action"}
+_OPTIONAL = {"scroll": {"scroll_x", "scroll_y"}, "type_text": {"element_index", "x", "y"}}   # type_text: click into that field first
 _NEEDS = {"click": [{"element_index"}, {"x", "y"}], "double_click": [{"element_index"}, {"x", "y"}], "right_click": [{"element_index"}, {"x", "y"}],
           "type_text": [{"text"}], "press_key": [{"key"}], "scroll": [{"x", "y"}], "drag": [{"x", "y", "to_x", "to_y"}], "set_value": [{"element_index", "value"}]}
 
@@ -126,7 +127,8 @@ def critical_reason(app, title, blob, elements, args, focused):
                 (chord != "y" or re.search(r"\b(accept|delete|cancel)\b", blob or "", re.I)): return "Tally accept/delete/cancel shortcut"
         if chord == "return" and CRITICAL.search(title or "") and not (focused and focused.get("type") in {"Edit", "Document"}): return "Enter in a dialog titled '" + title[:60] + "'"
     elif action == "type_text":
-        if re.search(r"[\r\n]\s*$", args["text"]) and (label_hit(focused) or CRITICAL.search(title or "")): return "text ends with Enter in a critical dialog"
+        field = next((e for e in elements if e["index"] == args["element_index"]), None) if "element_index" in args else focused
+        if re.search(r"[\r\n]\s*$", args["text"]) and (label_hit(field) or CRITICAL.search(title or "")): return "text ends with Enter in a critical dialog"
     return None
 
 
@@ -318,8 +320,10 @@ class Computer:
         if action not in _NEEDS: raise ValueError("Unsupported computer action")
         given = set(args) - {"observation_id", "action"}
         if not any(option <= given for option in _NEEDS[action]): raise ValueError("Missing arguments for " + action)
-        extra = given - set().union(*[o for o in _NEEDS[action]]) - ({"scroll_x", "scroll_y"} if action == "scroll" else set())
-        if extra: raise ValueError("Unexpected arguments for " + action)
+        allowed = set().union(*[o for o in _NEEDS[action]]) | _OPTIONAL.get(action, set())
+        extra = given - allowed
+        if extra: raise ValueError(f"Unexpected arguments for {action}: {', '.join(sorted(extra))} (it takes {', '.join(sorted(allowed))})")
+        if action == "type_text" and given & {"x", "y"} and not {"x", "y"} <= given: raise ValueError("type_text needs both x and y, or neither")
         if ("element_index" in args) and ({"x", "y"} & given): raise ValueError("Use an element index or coordinates, not both")
         for key in ("text", "value"):
             if key in args:
@@ -344,9 +348,9 @@ class Computer:
         if why and not confirmed: raise ValueError("Critical action (" + why + "): call computer_act_confirmed with the same arguments so the owner can approve it.")
         # The window must still be what was observed.
         if list(self.backend.rect(prior["window"])) != list(prior["rect"]): raise ValueError("Window moved or resized; observe again")
-        if action in {"click", "double_click", "right_click", "set_value"} and "element_index" in args:
+        if action in {"click", "double_click", "right_click", "set_value", "type_text"} and "element_index" in args:
             element = next(e for e in prior["elements"] if e["index"] == args["element_index"])
-            if element.get("sensitive") and action == "set_value": raise ValueError("Secret fields are never written by the agent")
+            if element.get("sensitive") and action in {"set_value", "type_text"}: raise ValueError("Secret fields are never written by the agent")
             if not element["enabled"]: raise ValueError("Element is disabled")
         self.bump(grant)
         self.latest = None; self.actions += 1  # The observation is spent whatever happens next.
@@ -366,7 +370,14 @@ class Computer:
                     element = next(e for e in prior["elements"] if e["index"] == args["element_index"])
                     self.backend.click_element(window, oid, args["element_index"], element["rect"], button=button, count=count)
                 else: self.backend.click(window, args["x"], args["y"], button=button, count=count)
-            elif action == "type_text": self.backend.type_text(window, args["text"], permitted, check_focus)
+            elif action == "type_text":
+                # With a target, click into that field first; the live focus is checked again before every keystroke.
+                if "element_index" in args:
+                    element = next(e for e in prior["elements"] if e["index"] == args["element_index"])
+                    self.backend.click_element(window, oid, args["element_index"], element["rect"], button="left", count=1)
+                    time.sleep(.15)
+                elif "x" in args: self.backend.click(window, args["x"], args["y"], button="left", count=1); time.sleep(.15)
+                self.backend.type_text(window, args["text"], permitted, check_focus)
             elif action == "press_key": self.backend.press_key(window, args["key"])
             elif action == "scroll": self.backend.scroll(window, args["x"], args["y"], args.get("scroll_x", 0), args.get("scroll_y", 0))
             elif action == "drag": self.backend.drag(window, args["x"], args["y"], args["to_x"], args["to_y"])
@@ -490,12 +501,17 @@ def _content(result, grant_share):
     return parts
 
 
+class RepeatedCall(Exception):
+    """The model sent a call identical to one that was just refused."""
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--workspace", required=True)
     args = parser.parse_args(argv)
     computer = Computer(args.workspace)
     atexit.register(control.release_input, computer.holder)
     initialized = False
+    rejected = [None, 0]   # (signature of the last refused call, how many times in a row)
     for line in sys.stdin:
         identity = None
         try:
@@ -511,13 +527,26 @@ def main(argv=None):
             elif method == "tools/list": result = {"tools": TOOLS}
             elif method == "tools/call":
                 params = request.get("params") or {}
+                signature = json.dumps([params.get("name"), params.get("arguments") or {}], sort_keys=True, default=str)
                 try:
+                    if rejected[0] == signature and rejected[1] >= 1:
+                        # The same call was already refused: say so plainly instead of letting the model loop on it.
+                        rejected[1] += 1
+                        raise RepeatedCall(f"You already sent this exact call {rejected[1] - 1} time(s) and it was refused. Do not send it "
+                                           "again. Change the arguments as the earlier error says, take another route, or stop and tell the "
+                                           "owner in one line what is blocking you.")
                     out = computer.call(params.get("name"), params.get("arguments") or {})
+                    rejected[0], rejected[1] = None, 0
                     share = bool((selected(computer.workspace) or {}).get("share_screenshots"))
                     shown = {k: v for k, v in out.items()}
                     result = {"content": _content(shown, share), "isError": False}
                     audit_call(params.get("name"), params.get("arguments") or {}, out)
+                except RepeatedCall as error:
+                    result = {"content": [{"type": "text", "text": "Computer call refused: " + str(error)}], "isError": True}
+                    audit_call(params.get("name"), params.get("arguments") or {}, None, "repeated refused call")
                 except Exception as error:
+                    if rejected[0] != signature: rejected[0], rejected[1] = signature, 0
+                    rejected[1] += 1
                     message = str(error) if isinstance(error, ValueError) else type(error).__name__
                     result = {"content": [{"type": "text", "text": "Computer call rejected: " + message[:400] + " Reobserve; never retry an uncertain action."}], "isError": True}
                     audit_call(params.get("name"), params.get("arguments") or {}, None, message)

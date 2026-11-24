@@ -341,3 +341,39 @@ def test_non_browser_windows_are_not_delayed(setup):
     backend.observe = lambda *a, **k: (looks.append(1), real_observe(*a, **k))[1]
     out = computer.call("computer_observe", {"window_id": "7"})
     assert len(looks) == 1 and "page_ready" not in out
+
+
+def test_type_text_into_a_named_field_clicks_it_first(setup):
+    computer, backend, _, _ = setup
+    act(computer, {"action": "type_text", "element_index": 0, "text": "Mohita Shadwani"})
+    assert [c for c in backend.calls if c[0] != "observe"] == [("click_element", 0, {"button": "left", "count": 1}), ("type", "Mohita Shadwani")]
+    backend.calls.clear()
+    act(computer, {"action": "type_text", "x": 10, "y": 5, "text": "hi"})
+    assert [c for c in backend.calls if c[0] != "observe"] == [("click", 10, 5, "left", 1), ("type", "hi")]
+    with pytest.raises(ValueError, match="never written"): act(computer, {"action": "type_text", "element_index": 3, "text": "abc"})
+    computer.latest = None
+    with pytest.raises(ValueError, match="both x and y"): act(computer, {"action": "type_text", "x": 10, "text": "hi"})
+    with pytest.raises(ValueError, match=r"Unexpected arguments for press_key: element_index \(it takes key\)"):
+        act(computer, {"action": "press_key", "key": "Tab", "element_index": 0})
+
+
+def test_a_refused_call_repeated_word_for_word_is_stopped(monkeypatch, capsys, tmp_path):
+    import io, json, sys
+    class Stub:
+        workspace, holder, label = tmp_path, "h", "test"
+        def __init__(self, *_): self.n = 0
+        def call(self, name, args):
+            self.n += 1
+            raise ValueError("Unexpected arguments for type_text")
+    stub = Stub()
+    monkeypatch.setattr(nc, "Computer", lambda *_: stub)
+    monkeypatch.setattr(nc, "audit_call", lambda *a, **k: None)
+    bad = {"name": "computer_act", "arguments": {"action": "type_text", "bogus": 1, "observation_id": "o", "text": "x"}}
+    other = {"name": "computer_act", "arguments": {"action": "type_text", "observation_id": "o", "text": "y"}}
+    lines = [{"jsonrpc": "2.0", "id": 0, "method": "initialize"}] + [{"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": p}
+                                                                       for i, p in enumerate([bad, bad, bad, other], 1)]
+    monkeypatch.setattr(sys, "stdin", io.StringIO("\n".join(json.dumps(x) for x in lines) + "\n"))
+    nc.main(["--workspace", str(tmp_path)])
+    texts = [json.loads(l)["result"]["content"][0]["text"] for l in capsys.readouterr().out.splitlines()[1:]]
+    assert texts[0].startswith("Computer call rejected") and "already sent this exact call 1 time" in texts[1] and "2 time" in texts[2]
+    assert texts[3].startswith("Computer call rejected") and stub.n == 2      # repeats never reach the computer; a changed call does
