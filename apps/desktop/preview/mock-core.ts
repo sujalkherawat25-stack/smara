@@ -124,6 +124,11 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
       if (request.operation === "hosted_memory") return { connected: true, shop: "Sharma Traders", enabled: request.action === "set" ? request.enabled === true : false } as T;
       if (request.operation === "connectors") return connectorsPreview(request) as T;
       if (request.operation === "teach") return teachPreview(request) as T;
+      if (request.operation === "owner_browser") {
+        if (request.action === "save") ownerBrowser = { use: request.use === true, browser: String(request.browser) };
+        return { ...ownerBrowser, installed: ["brave", "chrome", "edge"], connected: ownerBrowser.use, connected_browser: ownerBrowser.use ? "Brave" : "",
+          extension_folder: "C:\\Users\\you\\AppData\\Local\\Smara Desktop\\resources\\browser-extension", path: "" } as T;
+      }
       if (request.operation === "hosted_login") return loginPreview(String(request.action)) as T;
       if (request.operation === "hosted_approvals") return hostedPreview(request) as T;
       return setup as T;
@@ -175,6 +180,7 @@ const sampleGoals = [
   sampleGoal("t3", "queued", "Draft payment reminders for dues older than 60 days", "rohan", ""),
   sampleGoal("t4", "completed", "Read the three bank statement PDFs and list failed rows", "nisha", "Accepted by user"),
 ];
+let ownerBrowser = { use: false, browser: "brave" };
 let goalListCalls = 0;
 function goalsPreview(goal: Record<string, unknown>) {
   if (goal.action === "get") {

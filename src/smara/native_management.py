@@ -206,6 +206,9 @@ def manage(request):
     if operation == "teach":
         from .native_teach import manage as teach
         return teach(request)
+    if operation == "owner_browser":
+        from .owner_browser import manage as owner_browser
+        return owner_browser(request)
     if operation == "hosted_login":
         from .hosted_login import manage as hosted_login
         return hosted_login(request)
@@ -411,6 +414,10 @@ def manage(request):
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
+    if args[:1] and (args[0].startswith("chrome-extension://") or args[0] == "--native-browser-host"):
+        # Started by Brave, Chrome or Edge for the Smara extension (native messaging): which Smara tasks want a browser.
+        from .owner_browser import host
+        return host()
     if args[:1] == ["--native-pdf"]:
         from .native_pdf import main as pdf_main
         return pdf_main(args[1:])

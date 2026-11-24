@@ -247,6 +247,15 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         })
         if not getattr(sys, "frozen", False):
             settings["mcp_servers.smara_browser.env.PYTHONPATH"] = str((source_root() / "src").resolve())
+        from .owner_browser import choice as owner_choice
+        owner = owner_choice()
+        if owner["use"]:
+            # The owner's own browser through the Smara extension (it may have to start first, so allow longer steps).
+            settings.update({"mcp_servers.smara_browser.env.SMARA_BROWSER_MODE": "owner",
+                             "mcp_servers.smara_browser.env.SMARA_OWNER_BROWSER": owner["path"],
+                             "mcp_servers.smara_browser.tool_timeout_sec": 90})
+        if agent_label:
+            settings["mcp_servers.smara_browser.env.SMARA_BROWSER_LABEL"] = agent_label[:60]
         for entry in browser_tools:
             settings[f'mcp_servers.smara_browser.tools.{entry["name"]}.approval_mode'] = "approve" if entry["name"] in LOOK_ONLY else "prompt"
     # The team tools (Smara the manager, hiring, standing rules, handing out jobs) in every chat. Changes to the
