@@ -52,14 +52,17 @@ def test_the_computer_server_offers_the_chat_request_and_asks_first():
 def test_websites_go_to_the_browser_tools_and_apps_to_the_computer_tools():
     from smara.native_prompt import BASE_PROMPT
     from smara import native_computer as nc
-    assert "use the `browser_*` tools" in BASE_PROMPT and "Never use the `computer_*` tools for a website" in BASE_PROMPT
+    assert "use the `browser_*` tools" in BASE_PROMPT and "do not switch to `computer_*` for it" in BASE_PROMPT
+    # "Use my Brave": the owner's real browser, where they are signed in, through the computer tools.
+    assert "use my Brave" in BASE_PROMPT and "`computer_open_url` with that browser" in BASE_PROMPT
+    assert "Never say you cannot use their browser" in BASE_PROMPT
     assert "`browser_login`" in BASE_PROMPT and "you never see the password" in BASE_PROMPT       # saved logins
     assert "`browser_fill_code`" in BASE_PROMPT and "Never guess" in BASE_PROMPT                   # owner's OTP only
     assert "`browser_handoff`" in BASE_PROMPT
     assert "fails twice" in BASE_PROMPT and "instead of looping" in BASE_PROMPT
     described = {t["name"]: t["description"] for t in nc.TOOLS}
-    assert described["computer_open_url"].startswith("Not for normal website work")
-    assert "Windows apps only" in described["computer_request_access"]
+    assert described["computer_open_url"].startswith("Only when the owner asks you to use THEIR OWN browser")
+    assert "their own browser (brave, chrome, edge)" in described["computer_request_access"]
 
 
 def test_connected_services_are_named_in_the_prompt_only_when_there_are_some(tmp_path, monkeypatch):

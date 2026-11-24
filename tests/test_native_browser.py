@@ -130,3 +130,11 @@ def test_failures_report_our_own_message_and_one_line_for_engine_errors():
     engine_error = type("Error", (Exception,), {})("Page.goto: net::ERR_BLOCKED\nCall log:\n  - navigating to https://x/ secret-token-123")
     text = failure_text(engine_error)
     assert text.startswith("Error: Page.goto: net::ERR_BLOCKED.") and "Call log" not in text and "secret-token" not in text and "computer_" in text
+
+
+def test_smara_browser_is_shown_when_the_owners_settings_are_used_and_hidden_otherwise(tmp_path, monkeypatch):
+    from smara.native_browser_control import DEFAULTS, options
+    monkeypatch.setenv("SMARA_DESKTOP_STATE", str(tmp_path / "desktop.json"))
+    assert DEFAULTS["visible"] is True and options(str(tmp_path))["visible"] is True     # what the app passes: shown
+    assert NativeBrowser(tmp_path, ["*"], {"transfers": True}).options["visible"] is False   # partial options (tests, CI): hidden
+    assert NativeBrowser(tmp_path, ["*"]).options["visible"] is False

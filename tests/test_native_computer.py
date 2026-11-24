@@ -222,7 +222,7 @@ def test_tally_unreachable_is_a_clear_error(setup):
 def test_open_url_opens_the_default_browser_and_returns_its_window(setup, monkeypatch):
     computer, backend, _, _ = setup
     opened = []
-    backend.open_url = lambda url: opened.append(url)
+    backend.open_url = lambda url, executable=None: opened.append(url)
     brave = {"id": "9", "app": "brave.exe", "title": "TechCrunch", "pid": 2, "created": 2.0, "exe": "brave.exe", "handle": 9}
     monkeypatch.setattr(backend, "targets", lambda: [dict(backend.window, foreground=False, minimized=False), dict(brave, foreground=True, minimized=False)])
     monkeypatch.setattr("smara.research._is_public_http_url", lambda url: url.startswith("https://techcrunch.com"))
@@ -236,9 +236,27 @@ def test_open_url_opens_the_default_browser_and_returns_its_window(setup, monkey
 @pytest.mark.parametrize("url", ["http://127.0.0.1:9000/", "file:///C:/Users/x/secret.txt", "https://user:pw@example.com/", "javascript:alert(1)", "x" * 2500])
 def test_open_url_refuses_private_local_and_credentialed_addresses(setup, url):
     computer, backend, _, _ = setup
-    backend.open_url = lambda _url: pytest.fail("Must not reach the browser")
+    backend.open_url = lambda _url, _exe=None: pytest.fail("Must not reach the browser")
     with pytest.raises(ValueError, match="public http"):
         computer.call("computer_open_url", {"url": url})
+
+
+def test_open_url_in_the_owners_own_browser_uses_that_browser(setup, monkeypatch):
+    computer, backend, grant, root = setup
+    opened = []
+    backend.open_url = lambda url, executable=None: opened.append((url, executable))
+    brave = {"id": "9", "app": "brave.exe", "title": "LinkedIn", "pid": 2, "created": 2.0, "exe": "brave.exe", "handle": 9}
+    monkeypatch.setattr(backend, "targets", lambda: [dict(brave, foreground=True, minimized=False)])
+    monkeypatch.setattr("smara.research._is_public_http_url", lambda url: url.startswith("https://www.linkedin.com"))
+    monkeypatch.setattr("smara.smara_bridge.find_browser", lambda name: r"C:\Braverave.exe" if name == "brave" else None)
+    out = computer.call("computer_open_url", {"url": "https://www.linkedin.com/messaging/", "browser": "brave"})
+    assert opened == [("https://www.linkedin.com/messaging/", r"C:\Braverave.exe")] and out["windows"][0]["app"] == "brave.exe"
+    with pytest.raises(ValueError, match="not installed"):
+        computer.call("computer_open_url", {"url": "https://www.linkedin.com/", "browser": "chrome"})
+    write_object(grant_path(root), {**grant, "scope": "apps", "apps": ["excel.exe"]})     # access to Excel only
+    with pytest.raises(ValueError, match="access to brave first"):
+        computer.call("computer_open_url", {"url": "https://www.linkedin.com/", "browser": "brave"})
+    assert len(opened) == 1
 
 
 def test_open_url_without_a_grant_tells_the_agent_to_ask_in_the_chat_not_in_settings(tmp_path, monkeypatch):

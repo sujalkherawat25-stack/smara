@@ -94,8 +94,6 @@ try {
         '--hidden-import', 'smara.native_outcomes'
         '--hidden-import', 'smara.native_voice'
         '--hidden-import', 'smara.native_browser'
-        '--hidden-import', 'smara.owner_browser'
-        '--collect-submodules', 'websockets'
         '--hidden-import', 'smara.native_budget'
         '--hidden-import', 'smara.native_admission'
         '--hidden-import', 'smara.native_outreach'

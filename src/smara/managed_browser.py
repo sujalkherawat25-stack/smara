@@ -39,24 +39,9 @@ class BrowserSession:
     actions: list[dict] = field(default_factory=list)
 
 
-def _running(executable: str) -> bool:
-    import psutil
-    name = Path(executable).name.lower()
-    for process in psutil.process_iter(["name"]):
-        if (process.info.get("name") or "").lower() == name:
-            return True
-    return False
-
-
 class ManagedBrowser:
     def __init__(self, artifact_root: Path, executable_path: str | None = None, headless: bool = True,
-                 profile_dir: Path | None = None, owner_browser: str | None = None, label: str = "Smara"):
-        # owner_browser: work in the owner's own browser (this exe) through the Smara extension, with their sign-ins.
-        # If it does not answer, Smara's own browser is used and `note` says why.
-        self.owner_browser = owner_browser
-        self.label = label
-        self.relay = None
-        self.note = ""
+                 profile_dir: Path | None = None):
         self.root = Path(artifact_root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.executable = executable_path or self._find()
@@ -90,16 +75,6 @@ class ManagedBrowser:
             options["executable_path"] = self.executable
         try:
             self.runtime = await async_playwright().start()
-            if self.owner_browser is not None:
-                try:
-                    await self._connect_owner()
-                    return
-                except Exception as exc:
-                    if self.relay is not None:
-                        await self.relay.close()
-                        self.relay = None
-                    self.note = (f"Your own browser did not connect ({str(exc)[:160]}), so this is running in Smara's own browser. "
-                                 "Check that the Smara extension is on in your browser (Smara Desktop > Settings > Browser).")
             if self.profile_dir is not None:
                 try:
                     self.profile_dir.mkdir(parents=True, exist_ok=True)
@@ -112,19 +87,6 @@ class ManagedBrowser:
             self.browser = await self.runtime.chromium.launch(**options)
         except Exception as exc:
             raise BrowserUnavailable(f"no supported Chromium could start ({type(exc).__name__})") from exc
-
-    async def _connect_owner(self) -> None:
-        from . import owner_browser as ob
-        self.relay = ob.Relay(self.label)
-        endpoint = await self.relay.start()
-        if not await self.relay.wait_for_extension(3):
-            if self.owner_browser and not _running(self.owner_browser):
-                import subprocess
-                subprocess.Popen([self.owner_browser])     # opens the owner's browser as they would; the extension then answers
-            if not await self.relay.wait_for_extension(ob.CONNECT_SECONDS):
-                raise ob.OwnerBrowserUnavailable("the Smara extension did not answer")
-        self.browser = await self.runtime.chromium.connect_over_cdp(endpoint)
-        self.shared = self.browser.contexts[0]
 
     def start(self) -> None:
         if self.browser is None:
@@ -266,13 +228,7 @@ class ManagedBrowser:
             pass
         ident = f"obs_{uuid.uuid4().hex[:20]}"
         screenshot = self.root / f"{ident}.png"
-        try:
-            await page.screenshot(path=str(screenshot), full_page=False, timeout=8000)
-        except Exception:
-            if self.relay is None:
-                raise
-            # In the owner's browser a tab they moved to the background may not paint; reading the page still works.
-            screenshot.write_bytes(b"")
+        await page.screenshot(path=str(screenshot), full_page=False)
         observation = {"observation_id": ident, "session_id": session_id, "tab_id": session.active_tab,
                        "url": page.url, "title": await page.title(), "timestamp": time.time(),
                        "generation": session.generation, "elements": elements, "listing": mb.render(snap),
@@ -403,11 +359,6 @@ class ManagedBrowser:
         session = self.sessions.pop(session_id, None)
         if session is None:
             return
-        if session.context is self.shared and self.relay is not None:
-            # In the owner's own browser the tabs stay open, so the owner can see where Smara stopped; Smara just lets go.
-            if not self.sessions:
-                await self._release_owner()
-            return
         if session.context is self.shared:
             for page in list(session.pages.values()):      # the shared profile stays open; only this session's tabs close
                 if not page.is_closed():
@@ -417,17 +368,6 @@ class ManagedBrowser:
                 self.shared = self.browser = None
             return
         await session.context.close()
-
-    async def _release_owner(self) -> None:
-        try:
-            if self.browser is not None:
-                await self.browser.close()                  # disconnects; the owner's browser keeps running
-        except Exception:
-            pass
-        self.shared = self.browser = None
-        if self.relay is not None:
-            await self.relay.close()
-            self.relay = None
 
     def cancel(self, session_id: str) -> None:
         self.close(session_id)
@@ -448,8 +388,6 @@ class ManagedBrowser:
     async def _shutdown(self) -> None:
         for ident in list(self.sessions):
             await self._close(ident)
-        if self.relay is not None:
-            await self._release_owner()
         if self.shared is not None:
             await self.shared.close()
             self.shared = self.browser = None
