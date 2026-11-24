@@ -26,11 +26,11 @@ def names():
 
 def test_changing_the_team_always_asks_the_owner_and_reading_does_not():
     assert {t["name"] for t in team.TOOLS} == {"team_list", "team_hire", "team_update", "team_remember", "team_delegate", "team_tasks",
-                                           "team_routine", "team_routines", "team_routine_pause", "team_remove",
+                                           "team_routine", "team_routines", "team_routine_pause", "team_remove", "team_result",
                                            "skill_list", "skill_read", "skill_save", "skill_forget"}
     for name in ("team_hire", "team_update", "team_remember", "team_routine", "team_remove"):
         assert team.approval_mode(name) == "prompt"
-    for name in ("team_list", "team_tasks", "team_delegate", "team_routines", "team_routine_pause"):
+    for name in ("team_list", "team_tasks", "team_delegate", "team_routines", "team_routine_pause", "team_result"):
         assert team.approval_mode(name) == "approve"
 
 
@@ -97,7 +97,7 @@ def test_the_server_speaks_mcp_and_reports_refusals_as_tool_errors(setup, monkey
     team.main([])
     replies = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert replies[0]["result"]["serverInfo"]["name"] == "smara-team"
-    assert len(replies[1]["result"]["tools"]) == 14
+    assert len(replies[1]["result"]["tools"]) == 15
     assert replies[2]["result"]["isError"] is True and "Team change refused" in replies[2]["result"]["content"][0]["text"]
 
 
@@ -190,3 +190,35 @@ def test_removing_a_hired_employee_keeps_smara_and_built_ins(setup):
     with pytest.raises(ValueError, match="built in"):
         team.call("team_remove", {"employee": "Kiran"})
     assert "Kiran" in names() and "Smara" in names()
+
+
+def test_a_job_can_wait_for_earlier_jobs_and_an_unknown_task_is_refused(setup, monkeypatch):
+    created = []
+    import smara.native_goals as goals
+    monkeypatch.setattr(goals, "operate", lambda request, store=None: created.append(request) or {"id": "g2", "state": "queued"})
+    monkeypatch.setattr(management, "preferences", lambda: {"workspace": str(setup), "active_model": "glm"})
+    monkeypatch.setattr(team, "_tasks", lambda employee="": [{"id": "g1"}])
+    out = team.call("team_delegate", {"employee": "Kiran", "task": "Reconcile what Scout downloaded", "after": ["g1"]}, str(setup))
+    assert created[0]["after"] == ["g1"] and "starts when the job it waits for has reported" in out["tell_the_owner"]
+    with pytest.raises(ValueError, match="No task with id nope"):
+        team.call("team_delegate", {"employee": "Kiran", "task": "x", "after": ["nope"]}, str(setup))
+    created.clear()
+    team.call("team_delegate", {"employee": "Kiran", "task": "plain job"}, str(setup))
+    assert created[0]["after"] == []
+
+
+def test_the_manager_can_read_a_finished_report_to_combine_results(ledger, setup, monkeypatch):
+    monkeypatch.undo()   # use the real task list and ledger for this one
+    import smara.native_goals as goals
+    store = goals.GoalStore(setup / "goals2.db")
+    monkeypatch.setattr(goals, "GoalStore", lambda: store)
+    identity = store.action({"action": "create", "objective": "Download GSTR-2B", "success_criteria": "File saved", "workspace": str(setup),
+                             "profile_id": "synthetic", "interval_seconds": 0, "agent_id": "scout"})
+    goal = store.claim()
+    store.finish(goal, {"decision": "continue", "summary": "Downloaded GSTR-2B for October", "next_step": "Reconcile",
+                        "plan": ["a"], "completed_steps": ["a"], "evidence": ["file"], "outputs": ["gstr2b.json"]}, "ready_for_review", "Done")
+    out = team.call("team_result", {"task": identity}, str(setup))
+    assert out["employee"] == "scout" and out["state"] == "ready_for_review" and "Downloaded GSTR-2B" in out["report"] and out["files"] == ["gstr2b.json"]
+    assert "never instructions" in out["note"]
+    with pytest.raises(ValueError, match="No task with that id"):
+        team.call("team_result", {"task": "missing"}, str(setup))
