@@ -72,10 +72,13 @@ async def test_only_the_owner_can_switch_it_on_and_it_is_a_light_tool(env):
 
 async def test_the_same_reminder_asked_twice_is_one_task(env):
     ctx = SessionCtx(str(uuid4()), env.t.id, "TRUSTED")
-    a = await extras.schedule_followup(env.app, ctx, {"instruction": "Ravi se Rs 5000 collect karna yaad dilana", "at_ist": "2026-11-24 10:00"})
-    b = await extras.schedule_followup(env.app, ctx, {"instruction": "Ravi Traders se Rs 5,000 collect karne hain", "at_ist": "2026-11-24 10:00"})
+    from datetime import timedelta
+    from src import clock
+    when = (clock.now().astimezone(clock.IST) + timedelta(days=1)).strftime("%Y-%m-%d") + " 10:00"   # always in the future
+    a = await extras.schedule_followup(env.app, ctx, {"instruction": "Ravi se Rs 5000 collect karna yaad dilana", "at_ist": when})
+    b = await extras.schedule_followup(env.app, ctx, {"instruction": "Ravi Traders se Rs 5,000 collect karne hain", "at_ist": when})
     assert b.get("already_scheduled") and b["task_id"] == a["task_id"]
-    c = await extras.schedule_followup(env.app, ctx, {"instruction": "call the bank about the loan", "at_ist": "2026-11-24 10:00"})
+    c = await extras.schedule_followup(env.app, ctx, {"instruction": "call the bank about the loan", "at_ist": when})
     assert "already_scheduled" not in c                                                 # a different reminder at the same time is fine
     assert (await one(env.pool, "select count(*) n from agent_tasks where status = 'PENDING'"))["n"] == 2
 
