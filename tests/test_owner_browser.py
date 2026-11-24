@@ -178,3 +178,11 @@ def test_runtime_hands_the_browser_choice_to_the_browser_helper(state, tmp_path,
 def test_smara_browser_window_is_shown_by_default():
     from smara.native_browser_control import DEFAULTS
     assert DEFAULTS["visible"] is True
+
+
+def test_only_the_owners_saved_settings_show_the_window(tmp_path, state):
+    from smara.native_browser import NativeBrowser
+    from smara.native_browser_control import options
+    assert options(str(tmp_path))["visible"] is True                       # what the app passes: shown
+    assert NativeBrowser(tmp_path, ["*"], {"transfers": True}).options["visible"] is False   # partial options: hidden
+    assert NativeBrowser(tmp_path, ["*"]).options["visible"] is False

@@ -78,8 +78,8 @@ class NativeBrowser:
         if not directory.resolve().is_relative_to(self.workspace):
             raise ValueError("Browser artifacts escape the workspace")
         from .native_browser_control import DEFAULTS
-        # The owner's saved settings (main() passes them) show the window by default; other callers (tests) stay hidden.
-        self.options = {**DEFAULTS, **({"visible": False} if options is None else options)}
+        # The owner's saved settings (main() passes all of them) show the window by default; callers that do not say stay hidden.
+        self.options = {**DEFAULTS, "visible": False, **(options or {})}
         self.control = control
         # Smara's own browser profile (set by the runtime) keeps the owner's sign-ins between runs, the same profile the
         # Teach recorder and the earlier browser used. Without it (tests, other callers) every session starts fresh.
