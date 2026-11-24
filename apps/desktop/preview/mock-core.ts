@@ -79,6 +79,7 @@ function response(method: string, params: Record<string, unknown>): unknown {
 }
 
 export async function invoke<T = unknown>(command: string, args: Record<string, unknown> = {}): Promise<T> {
+  if (command.startsWith("plugin:updater") || command.startsWith("plugin:process")) return null as T;   // the preview never has an update
   switch (command) {
     case "native_status": return { built: true, windowsTerminalBuild: true, sourceOwned: true } as T;
     case "native_start": return { generation: "preview-1", sourceOwned: true } as T;
@@ -174,6 +175,7 @@ const sampleGoals = [
   sampleGoal("t3", "queued", "Draft payment reminders for dues older than 60 days", "rohan", ""),
   sampleGoal("t4", "completed", "Read the three bank statement PDFs and list failed rows", "nisha", "Accepted by user"),
 ];
+let goalListCalls = 0;
 function goalsPreview(goal: Record<string, unknown>) {
   if (goal.action === "get") {
     const found = sampleGoals.find(item => item.id === goal.id) ?? sampleGoals[0];
@@ -181,7 +183,10 @@ function goalsPreview(goal: Record<string, unknown>) {
       approvals: found.state === "awaiting_approval" ? [{ id: "r1", method: "mcpServer/elicitation/request", params: { mode: "form", serverName: "playwright",
         message: "Allow the playwright tool browser_click: Download GSTR-2B (JSON)?", requestedSchema: { type: "object", properties: {} }, _meta: { codex_approval_kind: "mcp_tool_call" } } }] : [] };
   }
-  return { goals: sampleGoals, service: { running: true }, max_parallel: 3, parallel_limit: 4,
+  // Preview only: the third time the board is read, Kiran's running job finishes, so the "finished" note can be seen.
+  goalListCalls += 1;
+  const goals = goalListCalls >= 3 ? sampleGoals.map(item => item.state === "running" ? { ...item, state: "ready_for_review", lease: null, checkpoint: { ...item.checkpoint, summary: "Posted the day book totals: Rs 4,52,300 sales for October." } } : item) : sampleGoals;
+  return { goals, service: { running: true }, max_parallel: 3, parallel_limit: 4,
     input: { holder: "h", label: "Kiran: Post the day book totals", task: "t2", pid: 1, until: Date.now() / 1000 + 15 } };
 }
 
@@ -233,3 +238,6 @@ function teachPreview(request: Record<string, unknown>) {
   return { state: teachState.state, detail: "", start_url: teachState.started, steps, count: steps.length, lesson: request.action === "lesson" ? "Kiran, I just showed you how I do a job…" : undefined };
 }
 
+// The updater plugin imports these from @tauri-apps/api/core; the preview has no updater, so plain stand-ins are enough.
+export class Resource { constructor(public rid = 0) {} async close() {} }
+export class Channel<T = unknown> { id = 0; onmessage: (message: T) => void = () => undefined; }

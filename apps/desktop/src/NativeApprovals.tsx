@@ -34,7 +34,7 @@ export default function NativeApprovals({ chatWaiting, onShowChat, onCount }: { 
   };
   useEffect(() => {
     let disposed = false, busy = false;
-    const poll = async () => { if (disposed || busy) return; busy = true; try { await refresh(); } catch (reason) { if (!disposed) setError(String(reason)); } finally { busy = false; } };
+    const poll = async () => { if (disposed || busy || (typeof document !== "undefined" && document.visibilityState === "hidden")) return; busy = true; try { await refresh(); } catch (reason) { if (!disposed) setError(String(reason)); } finally { busy = false; } };
     void poll();
     const timer = setInterval(() => void poll(), 4000);
     return () => { disposed = true; clearInterval(timer); };

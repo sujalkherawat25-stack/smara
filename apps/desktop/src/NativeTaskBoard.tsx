@@ -38,7 +38,7 @@ export default function NativeTaskBoard({ projects, workspace, profile, roster, 
   useEffect(() => {
     let disposed = false, polling = false;
     const poll = async () => {
-      if (disposed || polling) return;
+      if (disposed || polling || (typeof document !== "undefined" && document.visibilityState === "hidden")) return;
       polling = true;
       try { await refresh(); } catch (reason) { if (!disposed) setError(String(reason)); } finally { polling = false; }
     };

@@ -718,3 +718,10 @@
 .update-banner > button:not(.link) { background: var(--smara-accent); color: var(--smara-on-accent); border: 0; border-radius: var(--smara-radius); padding: 6px 12px; cursor: pointer; }
 .update-banner > button:disabled { opacity: 0.55; cursor: not-allowed; }
 .update-banner > button.link { background: none; border: 0; color: var(--smara-muted); cursor: pointer; padding: 0; }
+
+.job-notes { display: grid; gap: 6px; margin-bottom: 8px; }
+.job-note { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--line, #333); border-radius: 10px; background: rgba(60, 170, 110, .12); font-size: 13px; }
+.job-note[data-tone="attention"] { background: rgba(230, 150, 40, .14); }
+.job-note span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.job-note button { border: 0; background: transparent; color: inherit; cursor: pointer; text-decoration: underline; padding: 2px 4px; }
+.job-note button[aria-label="Dismiss"] { text-decoration: none; font-size: 16px; line-height: 1; }

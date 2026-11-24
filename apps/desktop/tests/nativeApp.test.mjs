@@ -115,6 +115,7 @@ function fixture({ olderChats = [], startupFailure = false, unknownTurn = false,
     if (name.endsWith("transcriptWindow")) return transcriptWindow;
     assert.fail(`Unexpected import ${name}`);
   });
+  const jobNoticesModule = evaluate("../src/jobNotices.ts", name => assert.fail(`Unexpected import ${name}`));
   const emptyChat = evaluate("../src/ui/EmptyChat.tsx", name => {
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
     assert.fail(`Unexpected import ${name}`);
@@ -148,6 +149,7 @@ function fixture({ olderChats = [], startupFailure = false, unknownTurn = false,
     if (name.endsWith("TranscriptItem")) return transcriptItem;
     if (name.endsWith("ui/AgentRoster")) return rosterComponent;
     if (name.endsWith("ui/EmptyChat")) return emptyChat;
+    if (name.endsWith("jobNotices")) return jobNoticesModule;
     if (name.endsWith("ui/ToolCard")) return toolCard;
     if (name.endsWith("ui/NativeFiles")) return { default: () => null, __esModule: true };
     if (name.endsWith("ui/HostedPanel")) return { default: () => null, __esModule: true };

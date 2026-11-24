@@ -10,6 +10,7 @@ import HostedPanel from "./ui/HostedPanel";
 import UpdateBanner from "./ui/UpdateBanner";
 import TeachPanel from "./ui/TeachPanel";
 import { EmptyChat } from "./ui/EmptyChat";
+import { jobNotices, type JobNotice } from "./jobNotices";
 import NativeBrowser from "./NativeBrowser";
 import NativeGoals from "./NativeGoals";
 import NativeTaskBoard from "./NativeTaskBoard";
@@ -78,6 +79,8 @@ function terminalError(reason: unknown): string {
 }
 
 /** Right-pane tabs. The last one opened is saved in localStorage (for the next session's first open). */
+/** True while the window is minimised or in the background: polling pauses then. (Guarded for test environments without a document.) */
+const pageHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
 type Pane = "changes" | "terminal" | "browser" | "tasks" | "files" | "hosted" | "board" | "inbox" | "teach";
 const PANE_KEY = "smara.lastPane";
 
@@ -148,6 +151,11 @@ export default function NativeApp() {
   const [earlier, setEarlier] = useState<Item[]>([]);
   const [earlierState, setEarlierState] = useState<"none" | "loading" | "loaded">("none");
   const [roster, setRoster] = useState<RosterData>(EMPTY_ROSTER);
+  /** "Kiran finished" notes above the message box; the first goal snapshot only sets the baseline. */
+  const [finishedNotes, setFinishedNotes] = useState<JobNotice[]>([]);
+  const goalStatesRef = useRef<Record<string, string> | null>(null);
+  const rosterRef = useRef(roster);
+  rosterRef.current = roster;
   /** Employees who just joined (hired in chat): shown with a "New" badge and a short highlight. */
   const [freshIds, setFreshIds] = useState<string[]>([]);
   const rosterIdsRef = useRef<string[]>([]);
@@ -328,6 +336,9 @@ export default function NativeApp() {
     );
     setGoalWorking(blocksChat(allGoals) || (!!value.current_goal?.lease && value.current_goal.spec.sandbox === "workspace-write"));
     setTeamGoals(allGoals);
+    const seen = jobNotices(goalStatesRef.current, allGoals, id => agentById(rosterRef.current, id || "")?.name || "Smara");
+    goalStatesRef.current = seen.states;
+    if (seen.notices.length) setFinishedNotes(current => [...current, ...seen.notices.filter(note => !current.some(old => old.id === note.id))].slice(-3));
     setGoalServiceRunning(!!value.service.running);
     if (value.service.running) {
       setGoalServiceStarting(false); setGoalServiceError(value.service.online === false ? "Network offline · queued work waits; interrupted actions are not replayed." : ""); setGoalPollError("");
@@ -392,6 +403,7 @@ export default function NativeApp() {
     let disposed = false, timer: number | undefined, pending = false;
     const poll = async () => {
       if (disposed || pending || !workspace) return;
+      if (pageHidden()) { timer = setTimeout(() => void poll(), 15_000); return; }     // nobody is looking: do not start a helper process every few seconds
       pending = true;
       try {
         const value = await goalRequest<GoalList>("list", { workspace });
@@ -1399,6 +1411,7 @@ export default function NativeApp() {
           onOpenOwner={typeof approvals[0].params.threadId === "string" && threads.some(thread => thread.id === approvals[0].params.threadId) ? () => void selectThread(String(approvals[0].params.threadId)) : undefined} />
       : <form className="native-composer" onSubmit={event => { event.preventDefault(); void send(); }}>
         {!!contextFiles.length && <div className="composer-files">{contextFiles.map(file => <span key={file.path}><button type="button" title={file.path} onClick={() => setPreviewPath(file.path)}>{file.name}</button><button type="button" aria-label={`Remove ${file.name}`} disabled={navigationLocked} onClick={() => setContextFiles(current => current.filter(item => item.path !== file.path))}>Remove</button></span>)}</div>}
+        {finishedNotes.length > 0 && <div className="job-notes" role="status" aria-label="Finished jobs">{finishedNotes.map(note => <div key={note.id} className="job-note" data-tone={note.tone}><span>{note.text}</span><button type="button" onClick={() => { setPanel("board"); setFinishedNotes(current => current.filter(old => old.id !== note.id)); }}>View</button><button type="button" aria-label="Dismiss" onClick={() => setFinishedNotes(current => current.filter(old => old.id !== note.id))}>×</button></div>)}</div>}
         {editingPrompt && <div className="composer-edit-notice">Sending this edited text adds a follow-up; the original stays in chat history. <button type="button" onClick={() => { setEditingPrompt(false); setDraft(""); }}>Cancel edit</button></div>}
         {slashOptions.length > 0 && <div className="slash-command-menu" role="listbox" aria-label="Smara commands">{slashOptions.map((option, index) => <button type="button" role="option" aria-selected={index === slashSelection} key={option.command} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setSlashSelection(index)} onClick={() => chooseSlashCommand(option.command)}><code>{option.command}</code><span><strong>{option.label}</strong><small>{option.description}</small></span><kbd>↵</kbd></button>)}</div>}
         <textarea ref={composerRef} aria-label="Message Smara" rows={2} placeholder={`Message ${currentAgent?.name ?? "Smara"} (/ for commands)`} value={draft} onChange={event => { setDraft(event.target.value); setSlashSelection(0); event.target.style.height = "auto"; event.target.style.height = `${Math.min(event.target.scrollHeight, 260)}px`; }} onKeyDown={event => {

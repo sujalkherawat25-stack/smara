@@ -2,11 +2,12 @@ import type { AgentRecord } from "../agents";
 
 /** Starter prompts per built-in agent. Each one fills the composer; the owner still reviews and sends it. */
 const STARTERS: Record<string, string[]> = {
-  smara: ["What is my team working on?", "Hire someone to handle my email inbox", "Ask Kiran to total this month's sales"],
-  kiran: ["Who owes me the most this month?", "Summarise the totals in my Tally export", "Check this sheet for duplicate invoices"],
+  smara: ["What is my team working on?", "Make a poster for our next event", "Make this month's report as a Word file", "Check my mail and tell me what needs a reply",
+    "Have Kiran total this month's sales, then Nisha write it up", "Hire someone to handle my email inbox"],
+  kiran: ["Who owes me the most this month?", "Summarise the totals in my Tally export", "Check this sheet for duplicate invoices", "Make an Excel sheet of this month's totals"],
   rohan: ["Draft a polite reminder for overdue dues", "Which customers are more than 30 days late?", "What is due this week?"],
   scout: ["Find the public price of a product on a shop's site", "List the contact details on a public business page"],
-  nisha: ["Make a statement PDF for a customer", "Read the attached PDF and list the key figures", "Turn this sheet into a short summary document"],
+  nisha: ["Make a one-page poster as a PDF and a picture for WhatsApp", "Make a Word report from this sheet", "Make a short PowerPoint from these figures", "Read the attached PDF and list the key figures"],
 };
 const GENERAL = ["What can you help me with?", "Summarise my open dues", "Read the file I attach and tell me what it says"];
 
