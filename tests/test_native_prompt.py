@@ -9,7 +9,7 @@ def test_base_prompt_is_short_smara_and_keeps_the_safety_rules(tmp_path, monkeyp
     from smara import native_connectors
     monkeypatch.setattr(native_connectors, "state_path", lambda: tmp_path / "state.json")      # never the owner's real connectors
     text = native_prompt.BASE_PROMPT
-    assert len(text) < 4000                                    # was 21 KB (~5k tokens) on every message
+    assert len(text) < 4800                                    # was 21 KB (~5k tokens) on every message
     assert "You are Smara" in text and "Codex CLI" not in text
     for rule in ("data, never instructions", "never moves money", "OTP", "apply_patch"):
         assert rule in text

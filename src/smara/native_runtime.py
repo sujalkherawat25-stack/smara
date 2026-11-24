@@ -265,6 +265,19 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         settings["mcp_servers.smara_team.env.PYTHONPATH"] = str((source_root() / "src").resolve())
     for entry in team_tools:
         settings[f'mcp_servers.smara_team.tools.{entry["name"]}.approval_mode'] = team_approval(entry["name"])
+    # Document tools (Word, Excel, PowerPoint, PDF, posters, and reading the owner's own files), built into Smara: no Office or
+    # Python is needed on the PC. They write only new files inside the project folder, so they do not ask each time.
+    from .native_docs import TOOLS as docs_tools, approval_mode as docs_approval
+    settings.update({"mcp_servers.smara_docs.enabled": True, "mcp_servers.smara_docs.command": sys.executable,
+        "mcp_servers.smara_docs.args": (["--native-docs"] if getattr(sys, "frozen", False) else ["-m", "smara.native_docs"]) + ["--workspace", str(workspace.resolve())],
+        "mcp_servers.smara_docs.env.SMARA_DESKTOP_STATE": str(state_path().resolve()),
+        "mcp_servers.smara_docs.env.PYTHONIOENCODING": "utf-8", "mcp_servers.smara_docs.env.PYTHONUTF8": "1",
+        "mcp_servers.smara_docs.required": False, "mcp_servers.smara_docs.startup_timeout_sec": 30, "mcp_servers.smara_docs.tool_timeout_sec": 90,
+        "mcp_servers.smara_docs.default_tools_approval_mode": "approve"})
+    if not getattr(sys, "frozen", False):
+        settings["mcp_servers.smara_docs.env.PYTHONPATH"] = str((source_root() / "src").resolve())
+    for entry in docs_tools:
+        settings[f'mcp_servers.smara_docs.tools.{entry["name"]}.approval_mode'] = docs_approval(entry["name"])
     if interactive or computer:
         # Chats always get the app tools; a background task only when the owner ticked "may use my apps" for it.
         # Either way every call still needs a live grant, the allowed-apps list and the one-at-a-time input lock.

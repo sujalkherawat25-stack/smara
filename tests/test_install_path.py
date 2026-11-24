@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from smara.install_path import real_path
+from smara.smara_bridge import real_install_path as real_path
 
 
 def make(root: Path, *names: str) -> Path:

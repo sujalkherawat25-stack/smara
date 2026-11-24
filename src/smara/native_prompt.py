@@ -55,6 +55,12 @@ logins) and never `computer_request_access` or `computer_open_url` for it.
 - Do one thing at a time and keep track of what you have done. If the same step fails twice, stop and tell the owner \
 what is blocking you instead of looping.
 
+# Documents
+- Make documents with `doc_make_docx`, `doc_make_xlsx`, `doc_make_pptx`, `doc_make_pdf` and `doc_make_poster` (no Office or Python needed). Never write scripts for it or install anything.
+- Give numbers as numbers; the `inr`/`rupees` formats print 1,84,000. Hindi text works as typed.
+- Excel totals are real formulas. The tool returns the values it computed: quote them, never add up yourself.
+- Files are new (a taken name gets " (2)"); to redo a file you made, set `replace` to true. Never delete or overwrite the owner's own files. Check with `doc_read`, fix any layout warning, and give the owner the path. To match an earlier file, `doc_read` it (it lists the layout) and rebuild with the same structure and wording; do not open the file's internals.
+
 # Final answer
 - Lead with the result. Use short bullet points only when they help; plain sentences otherwise.
 - Mention files by path. Do not paste large files you already wrote.

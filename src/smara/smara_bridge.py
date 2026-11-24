@@ -1615,13 +1615,25 @@ def cmd_tally_sync(a) -> int:
     return 0
 
 
+def real_install_path(path: Path) -> Path:
+    """A program seen through a Windows app package's private copy of AppData\Local (when Smara was started from inside a packaged
+    app such as the Claude desktop app) maps back to the real install, so a startup entry or scheduled task never points at a
+    copy that gets no updates. Any other path, or one whose real file is missing, is returned unchanged."""
+    parts = path.parts
+    lowered = [part.casefold() for part in parts]
+    for index in range(len(parts) - 6):
+        if lowered[index:index + 3] == ["appdata", "local", "packages"] and lowered[index + 4:index + 6] == ["localcache", "local"]:
+            real = Path(*parts[:index + 2], *parts[index + 6:])
+            return real if real.is_file() else path
+    return path
+
+
 def launcher() -> list[str]:
     """The program (and leading arguments) that runs this helper. Inside Smara Desktop it is the app itself
     (`Smara Desktop.exe --browser-bridge ...`, no window, no Python needed on the PC); from a source checkout it is
     Python with this script."""
     if getattr(sys, "frozen", False):
-        from .install_path import real_path
-        app = real_path(Path(sys.executable).resolve().parent.parent / "smara-desktop.exe")
+        app = real_install_path(Path(sys.executable).resolve().parent.parent / "smara-desktop.exe")
         if app.is_file():
             return [str(app), "--browser-bridge"]
         return [str(Path(sys.executable).resolve()), "--browser-bridge"]
