@@ -84,13 +84,7 @@ class NativeBrowser:
         # Smara's own browser profile (set by the runtime) keeps the owner's sign-ins between runs, the same profile the
         # Teach recorder and the earlier browser used. Without it (tests, other callers) every session starts fresh.
         profile = os.getenv("SMARA_BROWSER_PROFILE") or None
-        # The owner may choose their own browser (Brave, Chrome or Edge, through the Smara extension): Smara then works in its
-        # own tabs there, with the owner's sign-ins, in plain sight. Everything else here (origins, approvals) stays the same.
-        self.owner_mode = os.getenv("SMARA_BROWSER_MODE") == "owner"
-        self.engine = ManagedBrowser(directory / uuid.uuid4().hex, headless=not self.options["visible"], profile_dir=profile,
-                                     owner_browser=(os.getenv("SMARA_OWNER_BROWSER") or "") if self.owner_mode else None,
-                                     label=os.getenv("SMARA_BROWSER_LABEL") or "Smara")
-        self.told_note = False
+        self.engine = ManagedBrowser(directory / uuid.uuid4().hex, headless=not self.options["visible"], profile_dir=profile)
         self.session = None
         self.latest = None
         self.allow_writes = False
@@ -136,22 +130,11 @@ class NativeBrowser:
         self.latest = {"observation": observed, "text": full_text}
         # The same numbered page the WhatsApp agent reads. Screenshots stay local; they are not sent to the model.
         result = {key: value for key, value in observed.items() if key not in {"body_text", "screenshot", "screenshot_sha256"}}
-        result["browser"] = self.browser_name()
-        if getattr(self.engine, "note", "") and not self.told_note:
-            result["browser_note"] = self.engine.note
-            self.told_note = True
+        result["browser"] = "Smara's own browser, " + ("shown on the owner's screen" if self.options["visible"] else "hidden (the owner cannot see it)")
         return {**result, **page(full_text), "element_limit": 250,
                 "elements_may_be_incomplete": observed["total_controls"] > len(observed["elements"]),
                 "modality": "DOM text; no vision", "actions_used": self.actions,
                 "action_limit": self.options["max_actions"], "seconds_limit": self.options["seconds"]}
-
-    def in_owner_browser(self):
-        return getattr(self.engine, "relay", None) is not None
-
-    def browser_name(self):
-        if self.in_owner_browser():
-            return "the owner's own browser (Smara's tabs, with the owner's sign-ins; the owner can watch)"
-        return "Smara's own browser" + ("" if self.options["visible"] else " (hidden window)")
 
     def observe(self):
         return self.present(self.engine.observe(self.session))
@@ -199,12 +182,10 @@ class NativeBrowser:
         if name == "browser_observe":
             return self.observe()
         if name == "browser_handoff":
-            if not (self.options["visible"] or self.in_owner_browser()) or not self.control:
-                raise ValueError("Human handoff requires a visible user-controlled session")
+            if not self.options["visible"] or not self.control: raise ValueError("Human handoff requires a visible user-controlled session")
             self.latest = None; self.allow_writes = False
             self.control.update(paused=True)
-            where = "in the Smara tab of their own browser" if self.in_owner_browser() else "in the owned browser"
-            return {"paused": True, "session_id": self.control.id, "instruction": f"Human completes login {where} and resumes in Settings → Integrations. Do not poll or bypass this handoff."}
+            return {"paused": True, "session_id": self.control.id, "instruction": "Human completes login in the owned browser and resumes in Settings → Integrations. Do not poll or bypass this handoff."}
         if name == "browser_tabs":
             return {"tabs": [item for item in self.engine.tabs(self.session) if self.allowed(item["url"])]}
         if name == "browser_switch":
@@ -218,8 +199,6 @@ class NativeBrowser:
         if name == "browser_snapshot":
             observed = self.observe()
             image = Path(self.latest["observation"]["screenshot"])
-            if not image.is_file() or image.stat().st_size == 0:
-                raise ValueError("No picture of this tab right now (the owner may have switched to another tab); read the page with browser_observe instead")
             return {"path": str(image), "sha256": self.latest["observation"]["screenshot_sha256"], "observation_id": observed["observation_id"], "uploaded": False}
         if not self.latest or arguments["observation_id"] != self.latest["observation"]["observation_id"]:
             raise StaleObservation("Observation expired; observe again")
@@ -232,9 +211,6 @@ class NativeBrowser:
             return self.secret_fill(name, arguments, observed)
         if name in {"browser_upload", "browser_download"}:
             if not self.options["transfers"]: raise ValueError("File transfers require user opt-in")
-            if name == "browser_download" and self.in_owner_browser():
-                raise ValueError("In the owner's own browser a download goes to their browser's Downloads folder; click the link with "
-                                 "browser_act (with their OK) and tell them, or ask them to switch Smara to its own browser for downloads")
             self.latest = None; self.actions += 1
             if name == "browser_upload":
                 from .native_browser_transfer import upload_file
@@ -343,9 +319,7 @@ def serve(workspace, origins, reader=None, writer=None, options=None, control=No
                 elif not initialized:
                     raise ValueError("Initialize first")
                 elif method == "tools/list":
-                    where = (" Runs in the owner's own browser (their sign-ins), in tabs Smara opens, which the owner can watch; it never "
-                             "reads the owner's other tabs." if browser.owner_mode else "")
-                    result = {"tools": [{**entry, "description": entry["description"] + where + " Configured origins: " + ", ".join(sorted(browser.origins))} for entry in TOOLS]}
+                    result = {"tools": [{**entry, "description": entry["description"] + " Configured origins: " + ", ".join(sorted(browser.origins))} for entry in TOOLS]}
                 elif method == "tools/call":
                     try:
                         value = browser.call(params.get("name"), params.get("arguments") or {})

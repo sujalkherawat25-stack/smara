@@ -195,7 +195,12 @@ class WindowsBackend:
     def launch(self, path):
         os.startfile(path)  # noqa: S606 - path vetted by policy layer
 
-    def open_url(self, url):
+    def open_url(self, url, executable=None):
+        if executable:
+            # The owner's own browser (its normal profile and sign-ins): the page opens as a new tab, as if they clicked a link.
+            import subprocess
+            subprocess.Popen([executable, url])  # noqa: S603 - fixed browser path and a public http(s) URL vetted by the policy layer
+            return
         os.startfile(url)  # noqa: S606 - public http(s) URL vetted by the policy layer; the shell hands it to the default browser
 
     # ---- observation ---------------------------------------------------

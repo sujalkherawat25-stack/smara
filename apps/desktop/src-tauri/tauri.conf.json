@@ -38,8 +38,7 @@
       "resources/_internal/",
       "resources/LIVE_WEB_ACCEPTANCE_V5*.json",
       "resources/native/",
-      "resources/browser/",
-      "resources/browser-extension/"
+      "resources/browser/"
     ],
     "category": "Utility",
     "shortDescription": "A private, approval-first desktop companion for Smara",

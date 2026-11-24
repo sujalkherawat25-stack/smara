@@ -725,10 +725,3 @@
 .job-note span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .job-note button { border: 0; background: transparent; color: inherit; cursor: pointer; text-decoration: underline; padding: 2px 4px; }
 .job-note button[aria-label="Dismiss"] { text-decoration: none; font-size: 16px; line-height: 1; }
-
-.owner-browser { border: 1px solid var(--border, #30363d); border-radius: 10px; padding: 12px 14px; margin: 8px 0 14px; display: grid; gap: 8px; }
-.owner-browser h3 { margin: 0; }
-.owner-browser-on { color: #3fb950; margin: 0; }
-.owner-browser-off { color: #d29922; margin: 0; }
-.owner-browser-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
-.owner-browser-steps code { word-break: break-all; }
