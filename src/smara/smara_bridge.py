@@ -1790,7 +1790,7 @@ def cmd_stop() -> int:
         print("The helper is not running.")
         return 0
     if platform.system() == "Windows":
-        subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, text=True)
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True)  # /T: also its Playwright driver
     else:
         try:
             os.kill(pid, 15)
