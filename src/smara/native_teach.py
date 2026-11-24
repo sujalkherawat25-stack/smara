@@ -12,7 +12,6 @@ owner stops it or closes the window, and no more than MAX_EVENTS steps are kept.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
@@ -307,6 +306,7 @@ def manage(request: dict) -> dict:
 
 # ---------------------------------------------------------------------------------------------------- the recorder process
 async def record(url: str) -> None:
+    import asyncio
     from playwright.async_api import async_playwright
     from .native_runtime import runtime_home
     from .smara_bridge import find_browser
@@ -378,6 +378,7 @@ def main(argv=None) -> int:
     parser.add_argument("--url", required=True)
     options = parser.parse_args(argv)
     try:
+        import asyncio
         url = _public_url(options.url)
         asyncio.run(record(url))
         return 0

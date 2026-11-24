@@ -19,7 +19,6 @@ import threading
 import uuid
 from typing import Any
 
-from .native_provider import ChatEndpoint, ResponsesAdapter
 
 # Every message re-sends the whole conversation (no prompt cache on most providers), so long chats are compacted early:
 # a chat that had grown to ~65k tokens made even "hi" take 8-10 s. The compacted summary keeps what matters.
@@ -387,6 +386,7 @@ def serve_bootstrap(input_stream=None, output_stream=None) -> int:
     config = json.loads(input_stream.readline())
     binary = native_binary(config.get("binary"))
     workspace = Path(config["workspace"]).resolve()
+    from .native_provider import ChatEndpoint, ResponsesAdapter   # not at import: it loads httpx and an HTTP server (~130 ms) that settings calls never need
     endpoint = ChatEndpoint(config["base_url"], config["model"], config.get("api_key", ""), config.get("auth_header", "authorization"), config.get("context_window"))
     home = Path(config["home"]) if config.get("home") else runtime_home()
     search_enabled = config.get("tools_enabled") is not True and _search_credential_available()
@@ -589,6 +589,7 @@ def main(argv: list[str] | None = None) -> int:
         from .native_profiles import load_profiles, resolve_profile_key
         profiles, active_id, credentials = load_profiles()
         profile = active_profile(profiles, active_id)
+        from .native_provider import ChatEndpoint, ResponsesAdapter
         endpoint = ChatEndpoint(profile["base_url"], profile["model"], resolve_profile_key(profile, credentials), profile.get("auth_header", "authorization"), profile.get("context_window"))
         with ResponsesAdapter(endpoint) as adapter:
             options, environment = launch_options(adapter, home=runtime_home(), workspace=Path.cwd(), tools_enabled=tools_enabled,

@@ -12,7 +12,6 @@ import uuid
 from urllib.parse import urlsplit
 from . import native_agents
 from .native_profiles import load_profiles, protect, read_object, resolve_credential, resolve_profile_key, state_path, write_object
-from .native_provider import ChatEndpoint, probe_endpoint
 from .native_search import PROVIDERS, SearchError, probe_search, search_status
 
 PROFILE_FIELDS = {"id", "label", "model", "provider", "base_url", "auth_header", "credential_name", "updated_at", "context_window"}
@@ -144,6 +143,7 @@ def _test_model(request):
         if profile is None:
             raise ValueError("Choose a configured model to test")
         key = resolve_profile_key(profile, credentials, allow_environment=False)
+        from .native_provider import ChatEndpoint, probe_endpoint   # imported here: it pulls in httpx and an HTTP server (~170 ms)
         endpoint = ChatEndpoint(
             str(profile.get("base_url") or ""), str(profile.get("model") or ""), key,
             str(profile.get("auth_header") or "authorization"), profile.get("context_window"),
@@ -378,6 +378,7 @@ def manage(request):
                 raise ValueError("Model context window must be an integer from 4096 to 10000000 tokens")
             # Catch known Sarvam API/model-version mismatches before saving a
             # profile or replacing its protected key.
+            from .native_provider import ChatEndpoint
             ChatEndpoint(base, profile["model"].strip(), "", header, context_window)
             secret = profile.get("api_key") or ""
             if secret:

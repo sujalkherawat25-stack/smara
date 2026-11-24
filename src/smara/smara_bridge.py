@@ -1616,7 +1616,7 @@ def cmd_tally_sync(a) -> int:
 
 
 def real_install_path(path: Path) -> Path:
-    """A program seen through a Windows app package's private copy of AppData\Local (when Smara was started from inside a packaged
+    """A program seen through a Windows app package's private copy of the AppData Local folder (when Smara was started from inside a packaged
     app such as the Claude desktop app) maps back to the real install, so a startup entry or scheduled task never points at a
     copy that gets no updates. Any other path, or one whose real file is missing, is returned unchanged."""
     parts = path.parts
