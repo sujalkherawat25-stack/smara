@@ -173,6 +173,20 @@ How each test works:
 request's bytes plus its maximum output, about 70k per request, against a 500k default. Delegated jobs and routines
 now get 100k per allowed request.
 
+## Jobs in sequence (one employee's result feeds the next)
+
+`team_delegate` takes `after`: the task ids of earlier jobs. The job stays queued ("Waiting for scout to finish first" on the
+board) until every earlier job has a report (ready for review or completed). Its run then receives those reports, labelled as
+data from other workers and never instructions, with the files they made; the saved job keeps the owner's own words. If an
+earlier job was stopped or no longer exists, the waiting job pauses with the reason instead of running blind; the owner's
+Resume then runs it without that report (pausing and resuming a job that is only waiting keeps it waiting). `team_result`
+lets the manager read a finished report and combine several into one answer. Jobs without `after` still run side by side.
+
+Measured with the real model (Sarvam GLM-5.3, hand-overs recorded by the eval-only `SMARA_TEAM_DRYRUN_LOG`, never queued):
+"first Scout downloads GSTR-2B, then Kiran reconciles, then Nisha writes it up" was chained correctly 3 of 3 times
+(Kiran after Scout, Nisha after Kiran); "Kiran totals sales and, at the same time, Rohan lists old dues" went out as two
+independent jobs 3 of 3 times.
+
 ## Teaching an employee
 
 Two ways, both ending in the same `skill_save` approval card (the owner reads the exact steps before anything is learned):

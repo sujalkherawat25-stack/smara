@@ -263,6 +263,8 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
     settings["mcp_servers.smara_team.env.SMARA_AGENT_SKILLS_DIR"] = str(skills_root().resolve())  # one place for learned skills
     if not getattr(sys, "frozen", False):
         settings["mcp_servers.smara_team.env.PYTHONPATH"] = str((source_root() / "src").resolve())
+    if os.environ.get("SMARA_TEAM_DRYRUN_LOG"):   # evals only: hand-overs are recorded in this file, never queued
+        settings["mcp_servers.smara_team.env.SMARA_TEAM_DRYRUN_LOG"] = os.environ["SMARA_TEAM_DRYRUN_LOG"]
     for entry in team_tools:
         settings[f'mcp_servers.smara_team.tools.{entry["name"]}.approval_mode'] = team_approval(entry["name"])
     # Document tools (Word, Excel, PowerPoint, PDF, posters, and reading the owner's own files), built into Smara: no Office or

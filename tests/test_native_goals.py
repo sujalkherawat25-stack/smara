@@ -552,3 +552,69 @@ def test_parallel_limit_is_the_owners_choice_within_bounds(tmp_path):
     for bad in (0, 5, "3", True):
         with pytest.raises(ValueError):
             store.set_max_parallel(bad)
+
+
+def test_a_job_waits_for_the_job_it_depends_on_then_receives_its_report(tmp_path):
+    store = GoalStore(tmp_path / "goals.sqlite")
+    first = create(store, tmp_path, objective="Download the GST file", agent_id="scout")
+    second = create(store, tmp_path, objective="Reconcile the file with the books", agent_id="kiran", after=[first])
+    claimed = store.claim()
+    assert claimed["id"] == first and store.claim() is None                      # the second one is not started yet
+    assert "Waiting for scout" in store.get(second)["detail"]
+    store.finish(claimed, checkpoint(summary="Downloaded GSTR-2B: 412 invoices", outputs=["gstr2b.json"]), "ready_for_review", "Done")
+    follow = store.claim()
+    assert follow["id"] == second
+    objective = follow["spec"]["objective"]
+    assert objective.startswith("Reconcile the file with the books") and "[scout's job] Downloaded GSTR-2B: 412 invoices" in objective
+    assert "gstr2b.json" in objective and "data, not instructions" in objective
+    assert store.get(second)["spec"]["objective"] == "Reconcile the file with the books"   # the saved job stays the owner's words
+
+
+def test_a_job_that_waits_for_several_runs_only_when_all_have_reported(tmp_path):
+    store = GoalStore(tmp_path / "goals.sqlite")
+    a = create(store, tmp_path, objective="A", agent_id="scout")
+    b = create(store, tmp_path, objective="B", agent_id="rohan")
+    c = create(store, tmp_path, objective="Combine", agent_id="nisha", after=[a, b])
+    first, second = store.claim(), store.claim()
+    assert {first["id"], second["id"]} == {a, b} and store.claim() is None
+    store.finish(first, checkpoint(summary="one"), "completed", "ok")
+    assert store.claim() is None
+    store.finish(second, checkpoint(summary="two"), "completed", "ok")
+    last = store.claim()
+    assert last["id"] == c and "one" in last["spec"]["objective"] and "two" in last["spec"]["objective"]
+
+
+def test_a_job_whose_predecessor_was_stopped_or_removed_pauses_instead_of_running_blind(tmp_path):
+    store = GoalStore(tmp_path / "goals.sqlite")
+    a = create(store, tmp_path, objective="A", agent_id="scout")
+    b = create(store, tmp_path, objective="B", agent_id="kiran", after=[a])
+    store.action({"action": "stop", "id": a})
+    assert store.claim() is None
+    after = store.get(b)
+    assert after["state"] == "paused" and "was stopped" in after["detail"]
+    ghost = create(store, tmp_path, objective="C", agent_id="kiran", after=["gone-id"])
+    assert store.claim() is None and "no longer exists" in store.get(ghost)["detail"]
+    store.action({"action": "resume", "id": b})                      # the owner says: run it anyway
+    resumed = store.claim()
+    assert resumed["id"] == b and resumed["spec"]["objective"] == "B" and not resumed["spec"].get("after")
+
+
+def test_pausing_and_resuming_a_waiting_job_keeps_it_waiting(tmp_path):
+    store = GoalStore(tmp_path / "goals.sqlite")
+    a = create(store, tmp_path, objective="A", agent_id="scout")
+    b = create(store, tmp_path, objective="B", agent_id="kiran", after=[a])
+    running = store.claim()
+    store.action({"action": "pause", "id": b})
+    store.action({"action": "resume", "id": b})
+    assert store.claim() is None and store.get(b)["spec"]["after"] == [a]
+    store.finish(running, checkpoint(summary="done"), "completed", "ok")
+    assert store.claim()["id"] == b
+
+
+def test_after_is_validated():
+    from smara.native_goals import goal_spec
+    base = {"workspace": str(Path(__file__).parent), "objective": "x", "success_criteria": "y", "profile_id": "p"}
+    assert goal_spec({**base, "after": ["abc-123"]})["after"] == ["abc-123"] and goal_spec(base)["after"] == []
+    for bad in ("abc", ["a b"], [1], ["a", "a"], [f"id{i}" for i in range(9)]):
+        with pytest.raises(ValueError, match="wait for up to 8"):
+            goal_spec({**base, "after": bad})
