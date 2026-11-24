@@ -377,3 +377,92 @@ def test_a_refused_call_repeated_word_for_word_is_stopped(monkeypatch, capsys, t
     texts = [json.loads(l)["result"]["content"][0]["text"] for l in capsys.readouterr().out.splitlines()[1:]]
     assert texts[0].startswith("Computer call rejected") and "already sent this exact call 1 time" in texts[1] and "2 time" in texts[2]
     assert texts[3].startswith("Computer call rejected") and stub.n == 2      # repeats never reach the computer; a changed call does
+def owners_brave(backend, address_name="Address and search bar"):
+    """The owner's Brave on a YouTube video: address bar above the page, a search box inside the page."""
+    backend.window = dict(backend.window, app="brave.exe", exe="brave.exe", title="Lofi beats - YouTube")
+    backend.title = "Lofi beats - YouTube - Brave"
+    address = element(0, "Edit", address_name, (80, 10, 900, 40), value="youtube.com/watch?v=abc")
+    backend.elements = [address, element(1, "Document", "Lofi beats - YouTube", (0, 50, 1000, 700)),
+                        element(2, "Edit", "Search", (300, 60, 700, 90)), element(3, "Button", "Back", (0, 10, 30, 40))]
+    return address, backend.elements[2]
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_a_refused_private_url_is_not_typed_into_the_address_bar_instead(setup, confirmed):
+    computer, backend, _, _ = setup
+    owners_brave(backend)
+    with pytest.raises(ValueError, match="computer_open_url refuses this address.*not done another way"):
+        act(computer, {"action": "set_value", "element_index": 0, "value": "http://127.0.0.1:8765/form.html"}, confirmed)
+    computer.latest = None
+    with pytest.raises(ValueError, match="computer_open_url refuses this address"):
+        act(computer, {"action": "set_value", "element_index": 0, "value": "192.168.1.5/admin"}, confirmed)
+    assert not [c for c in backend.calls if c[0] != "observe"]
+
+
+def test_the_address_bar_of_the_owners_tab_is_never_typed_into(setup):
+    computer, backend, _, _ = setup
+    address, _ = owners_brave(backend)
+    backend.focus = dict(address)
+    for args in ({"action": "type_text", "text": "lofi beats playlist"}, {"action": "type_text", "text": "http://localhost:3000"},
+                 {"action": "press_key", "key": "Return"}, {"action": "press_key", "key": "Control+v"}, {"action": "press_key", "key": "a"}):
+        for confirmed in (False, True):
+            computer.latest = None
+            with pytest.raises(ValueError, match="address bar|computer_open_url refuses"): act(computer, args, confirmed)
+    computer.latest = None
+    with pytest.raises(ValueError, match=r"Open the page with computer_open_url \(it opens a new tab\)"):
+        act(computer, {"action": "type_text", "text": "lofi beats playlist"})
+    assert not [c for c in backend.calls if c[0] != "observe"]
+    computer.latest = None
+    act(computer, {"action": "press_key", "key": "Escape"})                 # leaving the bar is fine
+    assert ("key", "Escape") in backend.calls
+
+
+def test_an_unnamed_or_translated_address_bar_is_found_by_where_it_sits(setup):
+    computer, backend, _, _ = setup
+    address, _ = owners_brave(backend, address_name="पता और खोज बार")
+    with pytest.raises(ValueError, match="address bar"):
+        act(computer, {"action": "set_value", "element_index": 0, "value": "https://www.youtube.com/"})
+    assert not [c for c in backend.calls if c[0] != "observe"]
+
+
+def test_text_fields_inside_the_page_are_still_typed_into(setup):
+    computer, backend, _, _ = setup
+    _, search = owners_brave(backend)
+    act(computer, {"action": "set_value", "element_index": 2, "value": "http://127.0.0.1:8765/form.html"})
+    backend.focus = dict(search)
+    computer.latest = None
+    act(computer, {"action": "type_text", "text": "lofi beats"})
+    assert ("set_value", 2, "http://127.0.0.1:8765/form.html") in backend.calls and ("type", "lofi beats") in backend.calls
+
+
+def test_focus_jumping_to_the_address_bar_mid_typing_is_refused(setup):
+    computer, backend, _, _ = setup
+    address, search = owners_brave(backend)
+    backend.focus = dict(search)
+    obs = computer.observe("7")
+    backend.focused = lambda _: dict(address)
+    with pytest.raises(ValueError, match="address bar"):
+        computer.call("computer_act", {"observation_id": obs["observation_id"], "action": "type_text", "text": "lofi beats"})
+    assert not [c for c in backend.calls if c[0] == "type"]
+
+
+def test_address_bar_rule_is_for_browsers_only_and_is_in_the_tool_text_and_prompt(setup):
+    computer, backend, _, _ = setup
+    backend.elements = [element(0, "Edit", "Address bar", (0, 0, 100, 20))]     # e.g. File Explorer-like app, not a browser
+    act(computer, {"action": "set_value", "element_index": 0, "value": "Kolkata office"})
+    assert ("set_value", 0, "Kolkata office") in backend.calls
+    from smara.native_prompt import BASE_PROMPT
+    described = {t["name"]: t["description"] for t in nc.TOOLS}
+    assert "never type in the address bar" in described["computer_act"] and "computer_open_url" in described["computer_act"]
+    assert "Open pages only with `computer_open_url` (a new tab)" in BASE_PROMPT and len(BASE_PROMPT) < 4800
+
+
+def test_type_text_aimed_at_the_address_bar_by_index_or_point_is_refused(setup):
+    computer, backend, _, _ = setup
+    _, search = owners_brave(backend)
+    backend.focus = dict(search)                    # focus is in the page, but the call aims at the address bar
+    for target in ({"element_index": 0}, {"x": 500, "y": 25}):
+        computer.latest = None
+        with pytest.raises(ValueError, match="computer_open_url refuses this address"):
+            act(computer, {"action": "type_text", "text": "127.0.0.1:8765/form.html", **target}, True)
+    assert not [c for c in backend.calls if c[0] != "observe"]
