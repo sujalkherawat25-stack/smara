@@ -12,6 +12,9 @@ if sys.argv[1:2] == ["--native-tools"]:
 if sys.argv[1:2] == ["--native-browser"]:
     from smara.native_browser import main as browser_main
     raise SystemExit(browser_main(sys.argv[2:]))
+if sys.argv[1:2] == ["--native-docs"]:
+    from smara.native_docs import main as docs_main
+    raise SystemExit(docs_main(sys.argv[2:]))
 if sys.argv[1:2] == ["--native-computer"]:
     from smara.native_computer import main as computer_main
     raise SystemExit(computer_main(sys.argv[2:]))
