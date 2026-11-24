@@ -466,3 +466,9 @@ def test_type_text_aimed_at_the_address_bar_by_index_or_point_is_refused(setup):
         with pytest.raises(ValueError, match="computer_open_url refuses this address"):
             act(computer, {"action": "type_text", "text": "127.0.0.1:8765/form.html", **target}, True)
     assert not [c for c in backend.calls if c[0] != "observe"]
+
+
+def test_the_act_tool_text_tells_the_model_how_to_type():
+    described = {t["name"]: t["description"] for t in nc.TOOLS}["computer_act"]
+    assert "type_text with just the text" in described and "element_index" in described and "Document" in described
+    assert "ONE call" in nc._ACT_PROPS["text"]["description"] and "one at a time" in nc._ACT_PROPS["text"]["description"]
