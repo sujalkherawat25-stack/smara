@@ -451,7 +451,7 @@ def test_cli_enables_saved_search_readers_without_enabling_memory(tmp_path, monk
     monkeypatch.setattr(runtime, "native_binary", lambda: tmp_path / "smara-native.exe")
     monkeypatch.setattr(runtime, "runtime_home", lambda: tmp_path / "home")
     monkeypatch.setattr(runtime, "_search_credential_available", lambda: True)
-    monkeypatch.setattr(runtime, "ResponsesAdapter", Adapter)
+    monkeypatch.setattr("smara.native_provider.ResponsesAdapter", Adapter)   # native_runtime imports it when the CLI starts
     monkeypatch.setattr("smara.native_profiles.load_profiles", lambda: ([{"id": "synthetic", "base_url": "http://127.0.0.1", "model": "synthetic"}], "synthetic", {}))
     monkeypatch.setattr("smara.native_profiles.resolve_profile_key", lambda *_args: "")
     monkeypatch.setattr(runtime, "launch_options", lambda _adapter, **kwargs: (captured.update(kwargs) or [], {}))

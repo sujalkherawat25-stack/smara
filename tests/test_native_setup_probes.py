@@ -85,7 +85,7 @@ def test_settings_model_probe_uses_only_saved_credential(native_settings, monkey
         observed["endpoint"] = endpoint
         return {"ok": True, "model": endpoint.model, "elapsed_ms": 1}
 
-    monkeypatch.setattr(native_management, "probe_endpoint", probe)
+    monkeypatch.setattr("smara.native_provider.probe_endpoint", probe)   # native_management imports it when a test runs
     result = native_management.manage({"operation": "test_model", "id": "fixture"})
     assert observed["endpoint"].api_key == "synthetic-saved-key"
     assert result["ok"] is True

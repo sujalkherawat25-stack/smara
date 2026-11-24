@@ -24,7 +24,7 @@ from urllib.parse import urljoin
 
 import httpx
 
-MAX_BYTES = 1_000_000
+from .mcp_tool import MAX_BYTES, tool   # light module: the computer and browser servers use it without loading httpx
 PAGE_CHARS = 8_000
 
 
@@ -43,12 +43,6 @@ def reader_error(exc):
     if isinstance(exc, httpx.TimeoutException):
         return "Source timed out. Choose another public source instead of repeating this request."
     return "Tool failed: " + type(exc).__name__ + ". Check tool arguments or choose another public source."
-
-
-def tool(name, description, properties=None, required=None):
-    return {"name": name, "description": description,
-            "inputSchema": {"type": "object", "properties": properties or {}, "required": required or [], "additionalProperties": False},
-            "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": name in {"web_search", "fetch_url", "academic_search"}}}
 
 
 TOOLS = [

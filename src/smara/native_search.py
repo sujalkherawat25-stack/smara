@@ -2,7 +2,14 @@
 from __future__ import annotations
 import os
 from urllib.parse import urlsplit
-import httpx
+class _LazyHttpx:
+    """httpx takes about 90 ms to import and most calls here (settings, status) never touch the network, so load it on first use."""
+    def __getattr__(self, name):
+        import httpx as real
+        return getattr(real, name)
+
+
+httpx = _LazyHttpx()
 from .native_profiles import read_object, resolve_credential, state_path
 
 PROVIDERS = {

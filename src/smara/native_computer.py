@@ -27,7 +27,7 @@ import uuid
 from pathlib import Path
 from .native_profiles import read_object, write_object, state_path
 from .native_goals import workspace_key
-from .native_tools import tool, MAX_BYTES
+from .mcp_tool import tool, MAX_BYTES
 from . import computer_control as control
 
 ACTION_LIMIT = 400
