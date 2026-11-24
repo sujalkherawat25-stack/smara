@@ -16,5 +16,7 @@ export default defineConfig({
       { find: /^@tauri-apps\/api\/app$/, replacement: here("./mock-app.ts") },
     ],
   },
+  // The updater plugins import the Tauri core API; pre-bundling them would bypass the mock above and fail.
+  optimizeDeps: { exclude: ["@tauri-apps/plugin-updater", "@tauri-apps/plugin-process"] },
   server: { port: 1421, strictPort: true },
 });
