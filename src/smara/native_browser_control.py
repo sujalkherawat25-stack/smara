@@ -7,7 +7,8 @@ import uuid
 from .native_profiles import read_object, write_object, state_path
 from .native_goals import workspace_key
 
-DEFAULTS = {"visible": False, "transfers": False, "max_actions": 80, "seconds": 900}
+# The window is shown by default: the owner should be able to watch what Smara does (they can hide it in Settings).
+DEFAULTS = {"visible": True, "transfers": False, "max_actions": 80, "seconds": 900}
 
 
 def options(workspace):

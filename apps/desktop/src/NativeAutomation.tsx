@@ -4,6 +4,40 @@ type Browser = { options: { visible: boolean; transfers: boolean; max_actions: n
 type Computer = { selected: { target: { title: string }; expires: number } | null; targets: { id: string; title: string; exe: string; app?: string }[]; detail: string;
   control?: { paused: boolean }; apps?: string[]; known_apps?: Record<string, string>; hotkey?: string };
 const SUGGESTED_APPS = ["excel.exe", "tallyprime.exe", "tally.exe", "busywin.exe", "explorer.exe", "notepad.exe", "calc.exe", "winword.exe"];
+type OwnerBrowser = { use: boolean; browser: string; installed: string[]; connected: boolean; connected_browser: string; extension_folder: string };
+const BROWSER_NAMES: Record<string, string> = { brave: "Brave", chrome: "Chrome", edge: "Edge" };
+
+/** Smara in the owner's own Brave, Chrome or Edge (their sign-ins), through the Smara extension added once. */
+export function OwnerBrowserCard({ locked }: { locked: boolean }) {
+  const [state, setState] = useState<OwnerBrowser | null>(null), [choice, setChoice] = useState(""), [pending, setPending] = useState(false), [error, setError] = useState("");
+  const call = async (action: string, values: Record<string, unknown> = {}) => {
+    setPending(true); setError("");
+    try {
+      const value = await invoke<OwnerBrowser>("native_manage", { request: { operation: "owner_browser", action, ...values } });
+      setState(value); setChoice(current => current || value.browser || value.installed[0] || "");
+    } catch (reason) { setError(String(reason)); } finally { setPending(false); }
+  };
+  useEffect(() => { void call("status"); const timer = window.setInterval(() => { if (document.visibilityState !== "hidden") void call("status"); }, 10000); return () => window.clearInterval(timer); }, []);
+  if (!state) return error ? <p role="alert">{error}</p> : null;
+  const name = BROWSER_NAMES[choice] ?? choice;
+  if (!state.installed.length) return <p>Smara can also work in your own Brave, Chrome or Edge, but none is installed on this PC.</p>;
+  return <article className="owner-browser">
+    <h3>Use my own browser</h3>
+    <p>Smara works in your own browser, with your sign-ins, so you never sign in twice. It opens its own tabs there (a purple "Smara" group) that you can watch, and never reads your other tabs. Every click or form still asks you first.</p>
+    {error && <p role="alert">{error}</p>}
+    <label>Browser <select disabled={locked || pending} value={choice} onChange={event => setChoice(event.target.value)}>{state.installed.map(item => <option key={item} value={item}>{BROWSER_NAMES[item] ?? item}</option>)}</select></label>
+    <p className={state.connected ? "owner-browser-on" : "owner-browser-off"}>{state.connected ? `Connected: the Smara extension is running in ${name}.` : `The Smara extension is not running in ${name} yet.`}</p>
+    {!state.connected && <ol className="owner-browser-steps">
+      <li><button disabled={pending} onClick={() => void call("open_extensions", { browser: choice })}>Open {name}'s extensions page</button></li>
+      <li>Turn on <b>Developer mode</b> (top right).</li>
+      <li>Click <b>Load unpacked</b> and choose this folder: <code>{state.extension_folder}</code> <button disabled={pending} onClick={() => void call("open_folder")}>Show folder</button></li>
+    </ol>}
+    <button disabled={locked || pending || !choice} onClick={() => void call("save", { use: !state.use || state.browser !== choice, browser: choice })}>
+      {state.use && state.browser === choice ? `Stop using ${name}` : `Use ${name} for Smara`}</button>
+    <small>{state.use ? `Smara uses ${BROWSER_NAMES[state.browser] ?? state.browser} from the next chat.` : "Smara uses its own browser."} If {name} is closed, Smara opens it.</small>
+  </article>;
+}
+
 export default function NativeAutomation({ workspace, locked, onPendingChange, onSelectionChange }: { workspace: string; locked: boolean; onPendingChange: (value: boolean) => void; onSelectionChange?: () => Promise<void> }) {
   const busy = useRef(false);
   const [browser, setBrowser] = useState<Browser | null>(null), [computer, setComputer] = useState<Computer | null>(null), [error, setError] = useState(""), [pending, setPending] = useState(false);
@@ -12,15 +46,15 @@ export default function NativeAutomation({ workspace, locked, onPendingChange, o
     if (busy.current) return; busy.current = true; setPending(true); onPendingChange(true); setError("");
     try {
       const result = await invoke<Browser | Computer>("native_manage", { request: { operation, action, workspace, ...values } });
-      if (operation === "browser_control") { const value = result as Partial<Browser>; setBrowser({ options: value.options ?? { visible: false, transfers: false, max_actions: 50, seconds: 600 }, sessions: value.sessions ?? [] }); }
+      if (operation === "browser_control") { const value = result as Partial<Browser>; setBrowser({ options: value.options ?? { visible: true, transfers: false, max_actions: 80, seconds: 900 }, sessions: value.sessions ?? [] }); }
       else { const value = result as Computer; setComputer(value); if (value.apps) setApps(value.apps); if (onSelectionChange) await onSelectionChange(); }
     } catch (reason) { setError(String(reason)); } finally { busy.current = false; setPending(false); onPendingChange(false); }
   };
   useEffect(() => { void request("browser_control"); }, [workspace]);
   const disabled = locked || pending;
-  return <section className="settings-card settings-form"><h2>Windows apps & owned browser</h2>{error && <p role="alert">{error}</p>}
-    <p>Smara can drive a fresh browser window of its own (never your personal profile) and Windows apps such as Tally and Excel. Sites follow the website setting above.</p>
-    {browser && <><label><input type="checkbox" disabled={disabled} checked={browser.options.visible} onChange={event => setBrowser({ ...browser, options: { ...browser.options, visible: event.target.checked } })} /> Show owned browser</label>
+  return <section className="settings-card settings-form"><h2>Browser & Windows apps</h2>{error && <p role="alert">{error}</p>}
+    <p>Smara's own browser is a separate window with its own sign-ins. Sites follow the website setting above.</p>
+    {browser && <><label><input type="checkbox" disabled={disabled} checked={browser.options.visible} onChange={event => setBrowser({ ...browser, options: { ...browser.options, visible: event.target.checked } })} /> Show Smara's browser window while it works</label>
       <label><input type="checkbox" disabled={disabled} checked={browser.options.transfers} onChange={event => setBrowser({ ...browser, options: { ...browser.options, transfers: event.target.checked } })} /> Allow reviewed file transfers</label>
       <small>Transfers still ask for native approval. Uploads may transmit immediately. Accepted files are at most 10 MB; executables and hidden files are blocked. Retrieval size is checked after browser download, not a network byte quota.</small>
       <label>Browser action limit<input disabled={disabled} type="number" min={1} max={500} value={browser.options.max_actions} onChange={event => setBrowser({ ...browser, options: { ...browser.options, max_actions: Number(event.target.value) } })} /></label>

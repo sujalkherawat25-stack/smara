@@ -40,6 +40,8 @@ pub fn needs_runtime_restart(operation: &str, request: &Value, running: Option<(
         "save_model" => request["profile"]["id"].as_str() == Some(active_profile),
         "save_credential" | "delete_credential" => request["name"].as_str() == Some(active_credential),
         "connectors" => matches!(request["action"].as_str(), Some("save" | "remove" | "toggle")),
+        // The browser helper reads these when it starts: which browser to use, and whether its window is shown.
+        "owner_browser" | "browser_control" => request["action"].as_str() == Some("save"),
         _ => false,
     }
 }
@@ -595,6 +597,9 @@ mod transport_tests {
         assert!(needs_runtime_restart("select_project", &req(json!({})), running));
         assert!(needs_runtime_restart("connectors", &req(json!({"action": "save"})), running));
         assert!(!needs_runtime_restart("connectors", &req(json!({"action": "list"})), running));
+        assert!(needs_runtime_restart("owner_browser", &req(json!({"action": "save"})), running));
+        assert!(!needs_runtime_restart("owner_browser", &req(json!({"action": "status"})), running));
+        assert!(needs_runtime_restart("browser_control", &req(json!({"action": "save"})), running));
         assert!(needs_runtime_restart("save_project_options", &req(json!({})), running));
         assert!(needs_runtime_restart("save_model", &req(json!({"profile": {"id": "local:glm"}})), running));
         assert!(!needs_runtime_restart("save_model", &req(json!({"profile": {"id": "local:other"}})), running));

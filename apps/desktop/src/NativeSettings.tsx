@@ -6,7 +6,7 @@ import NativeTelegramSettings from "./NativeTelegramSettings";
 import NativeMemorySettings from "./NativeMemorySettings";
 import NativeEmail from "./NativeEmail";
 import NativeBackground from "./NativeBackground";
-import NativeAutomation from "./NativeAutomation";
+import NativeAutomation, { OwnerBrowserCard } from "./NativeAutomation";
 import NativeBrowser from "./NativeBrowser";
 import AccessNow from "./ui/AccessNow";
 import Connectors from "./ui/Connectors";
@@ -134,8 +134,9 @@ export default function NativeSettings({ setup, locked, onUpdate, onClose, onPen
             <small>Separate sites with spaces. Leave empty to turn browsing off.</small>
             <div className="set-actions"><button disabled={disabled} onClick={() => void saveOptions({ tools: toolsEnabled, workers: workersEnabled, origins })}>Save sites</button></div></div>}
         </div>
+        <OwnerBrowserCard locked={disabled} />
         <SiteLogins logins={setup.preferences.site_logins ?? []} disabled={disabled} save={save} />
-        <details className="set-advanced"><summary>More controls <small>your own browser, allowed apps, limits and the activity feed</small></summary>
+        <details className="set-advanced"><summary>More controls <small>Smara's browser window, allowed apps, limits and the activity feed</small></summary>
           <NativeBrowser locked={disabled} />
           <NativeAutomation workspace={setup.preferences.workspace} locked={disabled} onPendingChange={integrationBusy} onSelectionChange={async () => onUpdate(await nativeSettings())} />
         </details>

@@ -189,7 +189,7 @@ fn invalidate_snapshot() {
 /// Settings operations the UI may request. Anything else (secret reads, legacy execution) is refused here.
 const UI_SETTINGS_OPERATIONS: &[&str] = &["bootstrap", "runtime_health", "goals", "background", "browser_control", "computer_control",
     "voice", "outreach", "save_outreach", "add_project", "select_project", "save_project_options", "select_model", "select_search",
-    "save_credential", "delete_credential", "save_model", "save_memory", "test_memory", "test_model", "test_search", "agents", "audit", "hosted_approvals", "hosted_memory", "hosted_login", "connectors", "teach", "save_site_login", "delete_site_login"];
+    "save_credential", "delete_credential", "save_model", "save_memory", "test_memory", "test_model", "test_search", "agents", "audit", "hosted_approvals", "hosted_memory", "hosted_login", "connectors", "teach", "owner_browser", "save_site_login", "delete_site_login"];
 
 /// Operations after which the cached projects or model profiles are stale. Settings that do not affect
 /// them (memory, search, keys for other models, probes, outreach) leave the cache alone.
@@ -487,6 +487,7 @@ mod snapshot_tests {
         assert!(UI_SETTINGS_OPERATIONS.contains(&"agents"));
         assert!(UI_SETTINGS_OPERATIONS.contains(&"hosted_login"));
         assert!(UI_SETTINGS_OPERATIONS.contains(&"teach"));
+        assert!(UI_SETTINGS_OPERATIONS.contains(&"owner_browser"));
         assert!(UI_SETTINGS_OPERATIONS.contains(&"connectors"));
         assert!(!refreshes_snapshot("agents"));
         assert!(!native_runtime::needs_runtime_restart("agents", &json!({"action": "assign"}), Some(("local:glm", "GLM_KEY"))));
