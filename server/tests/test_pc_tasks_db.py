@@ -167,3 +167,24 @@ def test_the_block_ends_with_the_owners_next_message_and_needs_a_real_hand_off()
     assert not handed_to_pc([asked, made, refused]) and owes_file([asked, made, refused])      # no PC: still done here
     again = {"role": "user", "content": "send me a PDF of the same here too"}
     assert not handed_to_pc([asked, made, queued, again]) and owes_file([asked, made, queued, again])
+
+
+def test_saying_the_job_was_sent_is_not_a_claim_that_a_file_was_sent():
+    from src.agent_loop import unbacked_claim
+    turn = [{"role": "user", "content": PC_ASK},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "function": {"name": "run_on_pc", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": '{"task_id": "t1", "pc_online": true}'}]
+    fine = ("Laptop on hai — task bhej diya hai. PDF ban jaye to naam, total aur saved path yahin bhej dungi. Kisi ko send "
+            "nahi hoga, sirf aapke folder mein save hoga.",          # the real reply that was wrongly held back
+            "Task laptop pe bhej diya hai. PDF ka path yahin aayega.",
+            "Laptop pe bhej diya. PDF wahin save hogi.",
+            "I've sent the task. The PDF will be saved on your laptop.",
+            "Sent to your laptop. PDF will follow in this chat.",
+            "Your job has been sent. File details will come here.")
+    for reply in fine:
+        assert unbacked_claim(turn, reply) == "", reply
+    false_claims = ("PDF bhej diya hai.", "I have sent you the PDF file.", "Task ho gaya, PDF bhej di.",
+                    "Task bhej diya hai. PDF bhi aapko bhej di.", "I made the PDF and sent it to your laptop.",
+                    "Sent the task. I have also sent you the Excel file.")
+    for reply in false_claims:
+        assert "nothing was sent from here" in unbacked_claim(turn, reply), reply
