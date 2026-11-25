@@ -11,6 +11,7 @@ import argparse
 import ctypes
 import hashlib
 import json
+import os
 from pathlib import Path
 from statistics import median
 import sys
@@ -138,6 +139,15 @@ def inspect_pdf(raw, *, start_page=1, max_pages=4, render_dir=None):
             "limitations": "Rendered layout preflight only. Contrast and sparse-page checks are heuristic, not semantic or full visual verification. Review page images before delivery."}
 
 
+TEXT_ONLY_LIMITS = ("Layout preflight only: contrast and sparse-page checks are heuristic. You read text only, so do not make page "
+                    "pictures to check this file; use doc_read for its words and figures. A person still judges how it looks.")
+
+
+def model_sees_pictures() -> bool:
+    """Set by the program that starts this tool server; unset (a person or another caller) keeps the picture command."""
+    return os.environ.get("SMARA_MODEL_SEES_PICTURES") != "0"
+
+
 def inspect_workspace_pdf(workspace, path, *, start_page=1, max_pages=4):
     if not isinstance(path, str) or Path(path).suffix.lower() != ".pdf":
         raise DocumentError("Select one PDF inside the workspace.")
@@ -147,6 +157,9 @@ def inspect_workspace_pdf(workspace, path, *, start_page=1, max_pages=4):
         raise DocumentError("PDF path must remain inside the workspace, outside internal state folders.")
     _, raw, _ = read_document(root, path)
     result = inspect_pdf(raw, start_page=start_page, max_pages=max_pages)
+    if not model_sees_pictures():
+        result["limitations"] = TEXT_ONLY_LIMITS
+        return result
     # An explicit shell action exports images under native permissions. Never
     # write workspace files from the out-of-sandbox, read-only MCP server.
     result["preview_command_argv"] = ([sys.executable, "--native-pdf"] if getattr(sys, "frozen", False)

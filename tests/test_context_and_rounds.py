@@ -116,3 +116,35 @@ def test_team_tools_stay_for_team_or_schedule_requests_and_for_other_tasks():
         assert unneeded_tool_options(phone(words)) == [], words
     assert unneeded_tool_options({"objective": "Reconcile the books"}) == []                 # started on the PC
     assert unneeded_tool_options(phone("Reconcile the books", agent_id="kiran")) == []      # an employee's own job
+
+
+PDF_REQUEST = {"input": "make a pdf", "tools": [{"type": "function", "name": "pdf_inspect", "parameters": {"type": "object", "properties": {}}}]}
+
+
+def system_text(model, sarvam):
+    payload, _ = translate_request(PDF_REQUEST, model, sarvam=sarvam)
+    return " ".join(m["content"] for m in payload["messages"] if m["role"] == "system")
+
+
+def test_a_text_only_model_is_not_told_to_make_page_pictures():
+    reading = system_text("glm5.3", True)
+    assert "preview_command_argv" not in reading and "render page PNGs" not in reading
+    assert "Do not make page pictures" in reading and "doc_read" in reading
+    for model, sarvam in (("gemma4", True), ("other-model", False)):
+        assert "preview_command_argv" in system_text(model, sarvam)
+
+
+def test_the_pdf_checker_gives_the_picture_command_only_to_a_model_that_sees(tmp_path, monkeypatch):
+    from smara.native_pdf import inspect_workspace_pdf
+    make_pdf(tmp_path / "dues.pdf", [{"type": "paragraph", "text": "hello"}])
+    monkeypatch.setenv("SMARA_MODEL_SEES_PICTURES", "0")
+    found = inspect_workspace_pdf(str(tmp_path), "dues.pdf")
+    assert "preview_command_argv" not in found and "do not make page pictures" in found["limitations"]
+    assert "Review page images" not in found["limitations"]
+    monkeypatch.setenv("SMARA_MODEL_SEES_PICTURES", "1")
+    assert "preview_command_argv" in inspect_workspace_pdf(str(tmp_path), "dues.pdf")
+
+
+def test_the_tool_description_does_not_ask_for_a_visual_review():
+    from smara.native_tools import TOOLS
+    assert "visually review" not in next(t for t in TOOLS if t["name"] == "pdf_inspect")["description"]
