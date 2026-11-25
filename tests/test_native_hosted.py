@@ -126,6 +126,56 @@ def test_a_failed_task_says_why_in_plain_words(tmp_path, monkeypatch):
     assert "The project folder is no longer available" in text and "Cycle interrupted" not in text
 
 
+def _finish_with(tmp_path, monkeypatch, checkpoint):
+    store, server, conn = setup(tmp_path, monkeypatch)
+    conn.pick_up(wait=0)
+    goal = store.claim()
+    store.finish(store.get(goal["id"]) | {"lease": goal["lease"]}, checkpoint, "ready_for_review", "")
+    conn.relay()
+    return goal, server.sent("/t-1/result")[0]["summary"]
+
+
+def test_a_result_that_points_at_evidence_reaches_the_phone_with_it(tmp_path, monkeypatch):
+    rows = [f"2026-11-2{i} | File | report{i}.pdf | {i}00 bytes" for i in range(5)]
+    _, text = _finish_with(tmp_path, monkeypatch, {
+        "summary": "Listing succeeded. The newest entries are in evidence below, newest first.",
+        "evidence": rows + ["PowerShell process exited with code 0; the command was read-only"]})
+    assert all(row in text for row in rows) and "exited with code" not in text
+
+
+def test_a_one_line_note_over_many_recorded_results_gets_them(tmp_path, monkeypatch):
+    rows = [f"process{i} PID {i} CPU {i}.0" for i in range(12)]
+    _, text = _finish_with(tmp_path, monkeypatch, {"summary": "Returned the top 12 processes by CPU.", "evidence": rows})
+    assert all(row in text for row in rows)
+
+
+def test_a_complete_reply_is_sent_as_written(tmp_path, monkeypatch):
+    complete = "It is a Udyam registration certificate. I left the ID numbers out, as you asked."
+    _, text = _finish_with(tmp_path, monkeypatch, {"summary": complete, "evidence": ["Page 1 shows number UDYAM-XX-00-0000000"]})
+    assert text == complete
+
+
+def test_a_reply_carrying_its_own_list_below_is_not_repeated(tmp_path, monkeypatch):
+    listed = "The files are listed below:@one.pdf@two.pdf@three.pdf".replace("@", chr(10))
+    _, text = _finish_with(tmp_path, monkeypatch, {"summary": listed, "evidence": ["Ran Get-ChildItem"]})
+    assert text == listed
+
+
+def test_a_long_result_is_cut_on_a_whole_line_and_saved_in_full(tmp_path, monkeypatch):
+    rows = chr(10).join(f"row {i:04d} " + "x" * 40 for i in range(200))
+    goal, text = _finish_with(tmp_path, monkeypatch, {"summary": rows, "evidence": ["observed"], "outputs": ["dues.xlsx"]})
+    saved = tmp_path / f"phone-result-{goal['id'][:8]}.txt"
+    assert len(text) <= native_hosted.PHONE_CHARS and str(saved) in text and "Files on your PC: dues.xlsx" in text
+    assert text.split(chr(10) * 2)[0].endswith("x" * 40)
+    assert "row 0199" in saved.read_text(encoding="utf-8-sig")
+
+
+def test_phone_tasks_say_the_summary_is_the_reply(tmp_path, monkeypatch):
+    store, _, conn = setup(tmp_path, monkeypatch)
+    conn.pick_up(wait=0)
+    assert '"summary" is the whole reply' in store.claim()["spec"]["objective"]
+
+
 def test_no_project_or_model_tells_the_owner_instead_of_failing_silently(tmp_path, monkeypatch):
     store, server, conn = setup(tmp_path, monkeypatch)
     monkeypatch.setattr(conn, "defaults", lambda: None)

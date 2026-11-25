@@ -17,6 +17,7 @@ import json
 import re
 import time
 import uuid
+from pathlib import Path
 
 import httpx
 
@@ -31,6 +32,47 @@ CODE_WORDS = re.compile(r"\b(otp|one[- ]time|verification code|code|pin)\b", re.
 STEPS, STEP_BYTES, CYCLES = 40, 120_000, 8
 EXTRA, EXTENSIONS = 20, 2
 BUDGET = "budget:"
+# The server puts at most this much of a result into the owner's chat message and silently drops the rest.
+PHONE_CHARS = 3500
+# A summary that points at text the phone never gets ("the list is in evidence below").
+POINTS_ELSEWHERE = re.compile(r"\b(?:in|see) (?:the )?evidence\b|\bevidence below\b|\b(?:listed|shown|given|included|"
+                              r"detailed|are|is) below\b", re.I)
+TOOL_NOTE = re.compile(r"\bexit(?:ed)?(?: with)? code\b|^answered directly\b", re.I)
+
+
+def missing_details(summary: str, evidence: list) -> str:
+    """The checkpoint's recorded results, when the summary alone would leave the owner without them: it points at text
+    that is not there, or it is one short paragraph while many results were recorded. Otherwise nothing, so a complete
+    reply stays exactly as the model wrote it (including what the owner asked to leave out)."""
+    lines = [str(e).strip() for e in evidence]
+    lines = [e for e in lines if e and e not in summary and not TOOL_NOTE.search(e)]
+    if not lines:
+        return ""
+    pointer = POINTS_ELSEWHERE.search(summary)
+    if pointer and summary[pointer.end():].count("\n") >= 2:
+        pointer = None                       # "the list is below:" followed by the list itself
+    short_note = len(summary) < 600 and "\n" not in summary and len(lines) >= 8
+    return "\n".join(lines) if pointer or short_note else ""
+
+
+def phone_text(summary: str, files: str, workspace: str, goal_id: str) -> str:
+    """The reply as it fits in one chat message. A longer one is saved whole on the PC, and the message says where."""
+    if len(summary) + len(files) <= PHONE_CHARS:
+        return summary + files
+    saved = "\n\n(Cut to fit. The full result is in Smara Desktop under Goals.)"
+    if workspace:
+        try:
+            path = Path(workspace) / f"phone-result-{goal_id[:8]}.txt"
+            path.write_text(summary + files, encoding="utf-8-sig")
+            saved = f"\n\n(Cut to fit. The full result is on your PC: {path})"
+        except OSError:
+            pass
+    room = max(PHONE_CHARS - len(saved) - len(files), 500)
+    head = summary[:room]
+    if "\n" in head[room // 2:]:
+        head = head[:head.rfind("\n")]       # end on a whole line
+    return (head.rstrip() + files + saved)[:PHONE_CHARS]
+
 
 
 def credentials() -> tuple[str, str] | None:
@@ -73,7 +115,6 @@ def phone_project() -> str:
     the rest of the PC, but it never locks the owner's own project, so their Desktop chat keeps working while it runs.
     Created and registered once, with the browsing/tool options of the owner's current project; the owner's selected
     project stays selected."""
-    from pathlib import Path
     from .native_management import manage, preferences
     root = Path.home() / "Documents" / "Smara phone tasks"
     root.mkdir(parents=True, exist_ok=True)
@@ -140,9 +181,12 @@ class HostedConnector:
                                   "a login, use browser_login (the owner's saved login for that site). If it asks for a one-time "
                                   "code, ask the owner with ONE question that says 'OTP' and then use browser_fill_code; never "
                                   "guess a code. A captcha or a payment is the owner's: use browser_handoff and say so. Save any "
-                                  "file you make in this project folder. Your final answer is exactly what the owner reads on "
-                                  "their phone: give the actual result (the list, the numbers, the answer, up to about 40 lines; "
-                                  "more goes into a file here), not a description of your work, then where any file is.)",
+                                  "file you make in this project folder. In your final JSON checkpoint, \"summary\" is the whole "
+                                  "reply the owner reads on their phone: put the actual result in it (the list itself, the "
+                                  "numbers, the answer; one item per line, under 3000 characters; more goes into a file here), "
+                                  "not a description of your work, then where any file is. The owner never sees evidence, plan "
+                                  "or completed_steps, so never point to them. Leave out of the reply whatever the owner asked "
+                                  "you not to include.)",
                      "success_criteria": "The owner's request is done on this PC, or it is clear exactly what blocked it."},
                     store=self.store)
         except ValueError as err:
@@ -245,10 +289,14 @@ class HostedConnector:
             known = "" if summary.startswith("Cycle interrupted") else summary
             summary = (f"It stopped because {reason}." + (f"\n\nSo far: {known}" if known else "") +
                        "\n\nThe steps it took are in Smara Desktop (Goals) on your PC. Ask again with a narrower request if needed.")
+        if DONE[state] == "done":
+            details = missing_details(summary, checkpoint.get("evidence") or [])
+            if details:
+                summary += "\n\n" + details
         outputs = checkpoint.get("outputs") or []
-        if outputs:
-            summary += "\n\nFiles on your PC: " + ", ".join(str(o) for o in outputs[:10])
-        self.post(f"/bridge/tasks/{task_id}/result", {"state": DONE[state], "summary": summary[:5900]})
+        files = "\n\nFiles on your PC: " + ", ".join(str(o) for o in outputs[:10]) if outputs else ""
+        reply = phone_text(summary, files, str((goal.get("spec") or {}).get("workspace") or ""), goal_id)
+        self.post(f"/bridge/tasks/{task_id}/result", {"state": DONE[state], "summary": reply})
         with self.store.connect() as db:
             mapping = self.store.meta(db, "hosted_tasks", {})
             mapping.pop(goal_id, None)
