@@ -151,7 +151,7 @@ def inspect_workspace_pdf(workspace, path, *, start_page=1, max_pages=4):
     # write workspace files from the out-of-sandbox, read-only MCP server.
     result["preview_command_argv"] = ([sys.executable, "--native-pdf"] if getattr(sys, "frozen", False)
                                       else [sys.executable, "-m", "smara.native_pdf"])
-    result["preview_command_argv"] += [str(target), "--start-page", str(start_page), "--render-dir", str(root / "pdf-previews")]
+    result["preview_command_argv"] += [str(target), "--start-page", str(start_page), "--render-dir", str(root / "pdf-previews" / target.stem)]
     return result
 
 

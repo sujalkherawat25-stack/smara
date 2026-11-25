@@ -21,6 +21,8 @@ from pathlib import Path
 
 import httpx
 
+from .native_phone_cleanup import clean_up
+
 POLL_S = 20
 CREDS_RETRY_S = 5
 DONE = {"ready_for_review": "done", "completed": "done", "blocked": "failed", "stopped": "failed", "paused": "failed",
@@ -32,6 +34,9 @@ CODE_WORDS = re.compile(r"\b(otp|one[- ]time|verification code|code|pin)\b", re.
 STEPS, STEP_BYTES, CYCLES = 40, 120_000, 8
 EXTRA, EXTENSIONS = 20, 2
 BUDGET = "budget:"
+ASK_CHARS = 960                  # an Allow/Deny card holds about 1,000 characters
+SECRET_FIELD = re.compile(r"otp|one_?time|passw|passcode|secret|token|cvv|card_?num|api_?key|^(?:code|pin|pass)$", re.I)
+SO_FAR = "What it has so far (Smara's checks were not completed):"
 # The server puts at most this much of a result into the owner's chat message and silently drops the rest.
 PHONE_CHARS = 3500
 # A summary that points at text the phone never gets ("the list is in evidence below").
@@ -88,6 +93,30 @@ def credentials() -> tuple[str, str] | None:
     return server, token
 
 
+def describe_tool(params: dict) -> str:
+    """A tool approval in words the owner can decide on: what leaves the PC, where it goes, and what it is given."""
+    message = str(params.get("message") or params.get("serverName") or "")
+    meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
+    given = meta.get("tool_params") if isinstance(meta.get("tool_params"), dict) else {}
+    named = re.search(r'tool "([\w.-]+)"', message)
+    tool = named.group(1) if named else ""
+    path = str(given.get("path") or "an unnamed file")[:300]
+    if params.get("serverName") == "smara_readers" and tool == "image_analyze":
+        return (f"UPLOAD A PICTURE from your PC to Sarvam, an outside AI service, to read it: {path}\nThe whole picture is "
+                "sent, including any names, numbers or other private details on it. Sarvam may charge for this."
+                + (f"\nQuestion asked about it: {str(given.get('question'))[:250]}" if given.get("question") else ""))
+    if params.get("serverName") == "smara_readers" and tool == "document_ocr":
+        return (f"UPLOAD A FILE from your PC to Sarvam, an outside AI service, to read its text: {path}\nThe whole document "
+                "is sent, including any private details in it. Sarvam may charge for this.")
+    lines = ["use an app: " + message[:300]]
+    if meta.get("tool_description"):
+        lines.append("What it does: " + str(meta["tool_description"])[:300])
+    shown = [f"{k}: {'(hidden)' if SECRET_FIELD.search(str(k)) else str(v)[:200]}" for k, v in given.items()]
+    if shown:
+        lines.append("With: " + "; ".join(shown))
+    return "\n".join(lines)[:ASK_CHARS]
+
+
 def describe(method: str, params: dict) -> str:
     """One line the owner can decide on from their phone."""
     if method == "item/commandExecution/requestApproval":
@@ -103,7 +132,7 @@ def describe(method: str, params: dict) -> str:
         wanted = ", ".join(sorted((params.get("permissions") or {}).keys())) or "more access"
         return f"use {wanted} for this task" + (f" ({str(params.get('reason'))[:300]})" if params.get("reason") else "")
     if method == "mcpServer/elicitation/request":
-        return "use an app: " + str(params.get("message") or params.get("serverName") or "")[:600]
+        return describe_tool(params)
     return "continue with a step that needs your OK"
 
 
@@ -257,9 +286,13 @@ class HostedConnector:
             self.finish(task_id, goal_id, "paused", {}, stopped=f"it used all its work ({goal.get('requests', 0)} model steps) "
                                                                 "without finishing")
             return
-        self.post(f"/bridge/tasks/{task_id}/ask", {"request_id": f"{BUDGET}{goal_id}:{n + 1}", "summary":
-                  f"keep working on this task. It has used its work allowance ({goal.get('requests', 0)} model steps) and is "
-                  f"not finished yet. Allow gives it {EXTRA} more steps; Deny stops it here."})
+        text = (f"keep working on this task. It has used its work allowance ({goal.get('requests', 0)} model steps) and is "
+                f"not finished yet. Allow gives it {EXTRA} more steps; Deny stops it here.")
+        so_far = str((goal.get("checkpoint") or {}).get("last_answer") or "").strip()
+        if so_far:
+            block = f"\n\n{SO_FAR}\n{so_far}"
+            text += block if len(text) + len(block) <= ASK_CHARS else block[:ASK_CHARS - len(text) - 30] + "... (Deny sends it all)"
+        self.post(f"/bridge/tasks/{task_id}/ask", {"request_id": f"{BUDGET}{goal_id}:{n + 1}", "summary": text})
 
     def more(self, goal_id: str, allow: bool, task_id: str) -> None:
         if not allow:
@@ -287,15 +320,27 @@ class HostedConnector:
             # The runtime's own wording ("Cycle interrupted before the final checkpoint ...") means nothing on a phone.
             reason = stopped or str(goal.get("detail") or "it stopped before finishing").strip()
             known = "" if summary.startswith("Cycle interrupted") else summary
-            summary = (f"It stopped because {reason}." + (f"\n\nSo far: {known}" if known else "") +
+            earlier = str(checkpoint.get("last_answer") or "").strip()
+            so_far = f"\n\n{SO_FAR}\n{earlier}" if not known and earlier else (f"\n\nSo far: {known}" if known else "")
+            summary = (f"It stopped because {reason}." + so_far +
                        "\n\nThe steps it took are in Smara Desktop (Goals) on your PC. Ask again with a narrower request if needed.")
         if DONE[state] == "done":
             details = missing_details(summary, checkpoint.get("evidence") or [])
             if details:
                 summary += "\n\n" + details
-        outputs = checkpoint.get("outputs") or []
-        files = "\n\nFiles on your PC: " + ", ".join(str(o) for o in outputs[:10]) if outputs else ""
-        reply = phone_text(summary, files, str((goal.get("spec") or {}).get("workspace") or ""), goal_id)
+        spec = goal.get("spec") or {}
+        workspace = str(spec.get("workspace") or "")
+        try:
+            owner_words = str(spec.get("objective") or "").split("\n\n(Sent by the owner")[0]
+            removed = clean_up(workspace, goal.get("created") or 0, owner_words)
+        except OSError:
+            removed = []                      # a file in use must never stop the result from reaching the owner
+        outputs = [str(o) for o in checkpoint.get("outputs") or [] if str(o) not in removed]
+        files = "\n\nFiles on your PC: " + ", ".join(outputs[:10]) if outputs else ""
+        if removed:
+            files += ("\n\nI removed the temporary copies and page pictures made for this task. Your originals were not "
+                      "touched.")
+        reply = phone_text(summary, files, workspace, goal_id)
         self.post(f"/bridge/tasks/{task_id}/result", {"state": DONE[state], "summary": reply})
         with self.store.connect() as db:
             mapping = self.store.meta(db, "hosted_tasks", {})
