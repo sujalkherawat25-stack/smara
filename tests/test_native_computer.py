@@ -472,3 +472,84 @@ def test_the_act_tool_text_tells_the_model_how_to_type():
     described = {t["name"]: t["description"] for t in nc.TOOLS}["computer_act"]
     assert "type_text with just the text" in described and "element_index" in described and "Document" in described
     assert "ONE call" in nc._ACT_PROPS["text"]["description"] and "one at a time" in nc._ACT_PROPS["text"]["description"]
+
+
+# ---- short answers: only what changed is written out -----------------------------------------------------
+
+def page(count):
+    return [element(i, "Button" if i % 2 else "Text", f"Item {i}", (0, i * 20, 100, i * 20 + 18)) for i in range(count)]
+
+
+def test_act_answer_lists_only_changed_elements_and_keeps_the_other_indexes(setup):
+    computer, backend, _, _ = setup
+    backend.elements = page(40)
+    first = computer.observe("7")
+    assert first["tree_mode"] == "full" and "[39]" in first["tree"]
+    backend.elements = page(40)
+    backend.elements[5] = element(5, "Button", "Item 5 changed", (0, 100, 100, 118))
+    out = act(computer, {"action": "scroll", "x": 5, "y": 5, "scroll_y": 3})
+    assert out["tree_mode"] == "changes" and out["unchanged"] == 39 and "Item 5 changed" in out["tree"] and "Item 6" not in out["tree"]
+    assert len(out["tree"]) < len(first["tree"]) / 10
+    assert out["effect"]["changed_ui_text"] is True and out["observation_id"] == computer.latest["observation_id"]
+
+
+def test_an_inserted_row_does_not_renumber_the_elements_after_it(setup):
+    computer, backend, _, _ = setup
+    backend.elements = page(30)
+    computer.observe("7")
+    # A new first row pushes everything down by one position and backend numbers; the rows keep their own numbers.
+    shifted = [element(0, "Button", "Banner", (0, 0, 100, 18))] + [element(i + 1, e["type"], e["name"], (0, e["rect"][1], 100, e["rect"][3]), depth=0) for i, e in enumerate(page(30))]
+    backend.elements = shifted
+    out = act(computer, {"action": "scroll", "x": 5, "y": 5, "scroll_y": 3})
+    by_name = {e["name"]: e for e in computer.latest["elements"]}
+    assert out["tree_mode"] == "changes" and "Banner" in out["tree"] and "Item 9" not in out["tree"]
+    assert by_name["Item 9"]["index"] == 9 and by_name["Item 9"]["raw"] == 10 and by_name["Banner"]["index"] >= 30
+    # Clicking the unchanged element by its stable number reaches the backend's own number for it.
+    act(computer, {"action": "click", "element_index": 9})
+    assert ("click_element", 10, {"button": "left", "count": 1}) in backend.calls
+
+
+def test_removed_elements_are_reported_as_gone_and_cannot_be_targeted(setup):
+    computer, backend, _, _ = setup
+    backend.elements = page(30)
+    computer.observe("7")
+    backend.elements = [e for e in page(30) if e["index"] not in {10, 11, 12}]
+    out = act(computer, {"action": "scroll", "x": 5, "y": 5, "scroll_y": 3})
+    assert out["tree_mode"] == "changes" and out["gone"] == "10-12"
+    with pytest.raises(ValueError, match="Unknown element index"): act(computer, {"action": "click", "element_index": 11})
+
+
+def test_mostly_new_page_and_observe_return_the_whole_tree(setup):
+    computer, backend, _, _ = setup
+    backend.elements = page(30)
+    computer.observe("7")
+    backend.elements = [element(i, "Button", f"Other {i}", (0, i * 20, 100, i * 20 + 18)) for i in range(30)]
+    out = act(computer, {"action": "scroll", "x": 5, "y": 5, "scroll_y": 3})
+    assert out["tree_mode"] == "full" and "Other 29" in out["tree"]
+    assert computer.call("computer_observe", {"window_id": "7"})["tree_mode"] == "full"
+
+
+def test_whole_tree_is_sent_again_after_a_run_of_short_answers(setup):
+    computer, backend, _, _ = setup
+    backend.elements = page(30)
+    modes = [act(computer, {"action": "scroll", "x": 5, "y": 5, "scroll_y": 1})["tree_mode"] for _ in range(nc.MAX_DELTA_RUN + 2)]
+    assert modes[:nc.MAX_DELTA_RUN] == ["changes"] * nc.MAX_DELTA_RUN and modes[nc.MAX_DELTA_RUN] == "full" and modes[-1] == "changes"
+
+
+def test_decorations_are_hidden_from_the_model_but_the_policy_still_sees_them(setup):
+    computer, backend, _, _ = setup
+    backend.elements = [element(0, "Image", "Logo"), element(1, "Separator", ""), element(2, "Text", ""), element(3, "Button", "Send invoice"), element(4, "Text", "Total 100")]
+    out = computer.observe("7")
+    assert "Logo" not in out["tree"] and "Separator" not in out["tree"] and "[3] Button" in out["tree"] and "Total 100" in out["tree"]
+    assert "@" in out["tree"].split("[3]")[1].split("\n")[0] and "@" not in out["tree"].split("[4]")[1]   # clickable elements keep their place
+    assert len(computer.latest["elements"]) == 5
+    with pytest.raises(ValueError, match="computer_act_confirmed"): act(computer, {"action": "click", "element_index": 3})
+
+
+def test_stale_observation_is_still_refused_after_a_short_answer(setup):
+    computer, backend, _, _ = setup
+    backend.elements = page(30)
+    first = computer.observe("7")
+    second = computer.call("computer_act", {"observation_id": first["observation_id"], "action": "scroll", "x": 5, "y": 5, "scroll_y": 1})
+    assert second["tree_mode"] == "changes" or second["tree_mode"] == "full"
+    with pytest.raises(ValueError, match="Stale observation"): computer.call("computer_act", {"observation_id": first["observation_id"], "action": "scroll", "x": 5, "y": 5, "scroll_y": 1})
