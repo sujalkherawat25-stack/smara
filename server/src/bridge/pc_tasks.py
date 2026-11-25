@@ -9,6 +9,7 @@ access to the PC: the PC connects out and fetches only its own shop's tasks and 
 import asyncio
 import logging
 import re
+import time
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -70,7 +71,9 @@ async def run_on_pc(app, ctx, args: dict) -> dict:
     if busy >= 3:
         return {"error": "three PC tasks are already waiting or running; tell the owner to wait for those first"}
     out = await queue(pool, ctx.tenant_id, task)
-    online = await device.online_device(pool, ctx.tenant_id)
+    # Online here means the PC's task worker is asking for work, not just that the device token was used: the browser
+    # helper shares the token, so it kept the PC "online" while no worker was there to start the task.
+    online = worker_online(app, ctx.tenant_id)
     return {**out, "pc_online": bool(online),
             "note": ("Sent to the owner's PC; it starts within seconds. Tell the owner in one line that their laptop is on it and "
                      "that approvals and the result will come here. Do not do the task yourself as well." if online else
@@ -137,10 +140,27 @@ async def _claim(pool, tenant_id) -> dict | None:
     return {"expired": [r["task"] for r in gone], "task": row}
 
 
+WORKER_SEEN_S = 120      # a task worker asks every POLL_S seconds (long poll); after this long without a call it is gone
+
+
+def _worker_polls(app) -> dict:
+    if not hasattr(app.state, "pc_worker_polls"):
+        app.state.pc_worker_polls = {}
+    return app.state.pc_worker_polls
+
+
+def worker_online(app, tenant_id: str) -> bool:
+    """True when this shop's PC task worker asked for work recently (this server process; after a restart it is known
+    again within one poll)."""
+    seen = _worker_polls(app).get(str(tenant_id))
+    return seen is not None and time.monotonic() - seen < WORKER_SEEN_S
+
+
 @router.post("/next")
 async def next_task(request: Request, authorization: str | None = Header(default=None), wait: int = POLL_S):
     dev = await _device(request, authorization)
     app, tid = request.app, str(dev["tenant_id"])
+    _worker_polls(app)[tid] = time.monotonic()
     deadline = asyncio.get_running_loop().time() + max(0, min(wait, POLL_S))
     while True:
         got = await _claim(app.state.pool, tid)

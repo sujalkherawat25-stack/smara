@@ -2,11 +2,12 @@
 ; Playwright driver (`resources\_internal\playwright\driver\node.exe`) holds files in the install folder. Stop that
 ; helper and every process it started before files are replaced or removed, or the update cannot overwrite them.
 ; Only processes running from this install folder are touched; the main window is left to Tauri's own running-app check.
-; After an update the app starts the helper again (and its watchdog would within a few minutes).
+; The background worker (`--native-goals`: phone tasks, routines) and everything it started are stopped the same way.
+; After an update the app starts the helper and the worker again (and the helper's watchdog would within a few minutes).
 !macro SMARA_STOP_HELPER
   Push $0
   System::Call 'Kernel32::SetEnvironmentVariable(t "SMARA_INSTDIR", t "$INSTDIR\")'
-  nsExec::Exec `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$d=$$env:SMARA_INSTDIR; $$all=@(Get-CimInstance Win32_Process); $$ids=@($$all | Where-Object { $$_.CommandLine -like '*--browser-bridge*' -and $$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$d, 'OrdinalIgnoreCase') } | ForEach-Object { $$_.ProcessId }); for ($$i=0; $$i -lt $$ids.Count; $$i++) { $$ids += @($$all | Where-Object { $$_.ParentProcessId -eq $$ids[$$i] } | ForEach-Object { $$_.ProcessId }) }; $$ids | ForEach-Object { Stop-Process -Id $$_ -Force -ErrorAction SilentlyContinue }"`
+  nsExec::Exec `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$d=$$env:SMARA_INSTDIR; $$all=@(Get-CimInstance Win32_Process); $$ids=@($$all | Where-Object { ($$_.CommandLine -like '*--browser-bridge*' -or $$_.CommandLine -like '*--native-goals*') -and $$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$d, 'OrdinalIgnoreCase') } | ForEach-Object { $$_.ProcessId }); for ($$i=0; $$i -lt $$ids.Count; $$i++) { $$ids += @($$all | Where-Object { $$_.ParentProcessId -eq $$ids[$$i] } | ForEach-Object { $$_.ProcessId }) }; $$ids | ForEach-Object { Stop-Process -Id $$_ -Force -ErrorAction SilentlyContinue }"`
   Pop $0
   Pop $0
 !macroend
