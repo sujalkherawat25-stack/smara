@@ -230,3 +230,20 @@ def test_poster_and_picture_replace_together(ws, monkeypatch):
 
 def test_the_number_format_keeps_whole_numbers_whole():
     assert build.display(12, "number") == "12" and build.display(1234.5, "number") == "1,234.50" and build.display(1234567, "number") == "1,234,567"
+
+
+def test_only_a_row_that_reads_like_a_total_is_highlighted(ws):
+    dues = [["Ravi Traders", 12500], ["Meena Stores", 8400], ["Kapoor & Sons", 23000]]
+    for rows, expected in ((dues, False), (dues + [["Total", 43900]], True), (dues + [["", 43900]], True),
+                           (dues + [["Grand total (3 parties)", "\u20b943,900"]], True), (dues + [["कुल", 43900]], True),
+                           ([["1", "x"], ["2", "y"], ["3", "गुरुकुल"]], False), ([], False)):
+        block = build.clean_blocks([{"type": "table", "header": ["Party", "Amount"], "rows": rows, "total_row": True}])[0]
+        assert block["total_row"] is expected, rows
+
+
+def test_a_total_row_that_was_not_given_is_reported_to_the_model(ws):
+    table = {"type": "table", "header": ["Party", "Amount"], "rows": [["Ravi", 1], ["Meena", 2]], "total_row": True}
+    out = nd.call("doc_make_docx", {"path": "a", "blocks": [table]}, ws)
+    assert "total_row was not applied" in out["table_note"]
+    table["rows"].append(["Total", 3])
+    assert "table_note" not in nd.call("doc_make_docx", {"path": "b", "blocks": [table]}, ws)

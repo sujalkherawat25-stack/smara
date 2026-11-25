@@ -38,7 +38,7 @@ _THEME = {"type": "string", "enum": sorted(build.THEMES), "description": "Colour
 _BLOCKS = {"type": "array", "items": {"type": "object"}, "description": (
     "Content in order. Each block is an object with a type: "
     "{type:'heading',text,level:1-3}, {type:'paragraph',text,bold?,align?:left|center|right}, {type:'bullets',items:[...]}, "
-    "{type:'numbered',items:[...]}, {type:'table',header:[...],rows:[[...]],total_row?:true,formats?:[null|'inr'|'rupees'|'percent'|'number' per column]}, "
+    "{type:'numbered',items:[...]}, {type:'table',header:[...],rows:[[...]],total_row?:true (only when the last of your rows is the total, labelled Total; nothing is added up for you),formats?:[null|'inr'|'rupees'|'percent'|'number' per column]}, "
     "{type:'image',path,width_cm?}, {type:'page_break'}, {type:'spacer'}. Give numbers as numbers (not text) so they align and format; "
     "'inr' groups digits the Indian way (1,84,000) and 'rupees' adds the rupee sign.")}
 _TABLE = {"type": "object", "description": "header:[...], rows:[[...]], formats?:[...] like a table block"}
@@ -226,6 +226,15 @@ def _spec(arguments: dict, allowed: set[str]) -> dict:
     return arguments
 
 
+def _table_note(spec: dict) -> dict:
+    """Tells the model when it asked for a total row but gave none, so it does not think the tool added one."""
+    for block in spec.get("blocks") or []:
+        if isinstance(block, dict) and block.get("total_row") and not build.is_total_row(block.get("rows") or []):
+            return {"table_note": "total_row was not applied: the last row of that table is not a total. Nothing was added up. "
+                                  "If the document needs a total, make the file again with a last row labelled Total."}
+    return {}
+
+
 def call(name: str, arguments: dict, workspace: str) -> dict:
     if not isinstance(arguments, dict):
         raise DocsError("Invalid arguments")
@@ -234,12 +243,12 @@ def call(name: str, arguments: dict, workspace: str) -> dict:
         spec = _spec(arguments, {"path", "title", "subtitle", "blocks", "theme", "page", "landscape", "header_text", "footer_text", "replace"})
         path, replacing = _target(root, spec, ".docx")
         info = _make(path, replacing, lambda out: build.build_docx(out, spec, _image(root)))
-        return _finish(root, path, {**info, "next": "Check it with doc_read, then tell the owner the path."}, replacing)
+        return _finish(root, path, {**info, **_table_note(spec), "next": "Check it with doc_read, then tell the owner the path."}, replacing)
     if name == "doc_make_pdf":
         spec = _spec(arguments, {"path", "title", "subtitle", "blocks", "theme", "page", "landscape", "header_text", "footer_text", "replace"})
         path, replacing = _target(root, spec, ".pdf")
         info = _make(path, replacing, lambda out: _print(lambda: docs_html.report_pdf(out, spec, _image(root)), lambda: build.build_pdf_report(out, spec, _image(root)), spec))
-        return _finish(root, path, {**info, **_layout(path)}, replacing)
+        return _finish(root, path, {**info, **_layout(path), **_table_note(spec)}, replacing)
     if name == "doc_make_xlsx":
         spec = _spec(arguments, {"path", "sheets", "theme", "replace"})
         path, replacing = _target(root, spec, ".xlsx")

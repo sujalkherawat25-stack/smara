@@ -141,6 +141,21 @@ def _rows(rows, limit=MAX_ROWS) -> list[list]:
     return out
 
 
+# A row is highlighted as a total only if it reads like one: the flag alone once styled the last party in a list as the total.
+TOTAL_WORDS = re.compile(r"\b(sub-?total|totals?|net (payable|amount|due|total|profit|loss)|closing balance|balance due|sum)\b"
+                         r"|(?<![\u0900-\u097F])(कुल|एकूण)(?![\u0900-\u097F])|કુલ|மொத்தம்|মোট", re.I)
+
+
+def is_total_row(rows: list) -> bool:
+    """The last row says it is a total, or it has a blank label with a figure (an unlabelled total line)."""
+    if not rows or not rows[-1]:
+        return False
+    last = rows[-1]
+    if any(not is_number(cell) and TOTAL_WORDS.search(str(cell)) for cell in last):
+        return True
+    return len(rows) > 1 and not str(last[0]).strip() and any(is_number(cell) for cell in last)
+
+
 def clean_blocks(blocks) -> list[dict]:
     if not isinstance(blocks, list) or not blocks or len(blocks) > MAX_BLOCKS:
         raise ValueError(f"Give 1 to {MAX_BLOCKS} content blocks")
@@ -163,6 +178,7 @@ def clean_blocks(blocks) -> list[dict]:
             fmts = block.get("formats") if isinstance(block.get("formats"), list) else []
             item = {"type": "table", "header": header, "rows": _rows(block.get("rows") or []), "total_row": bool(block.get("total_row")),
                     "formats": [f if f in ("inr", "rupees", "number", "percent", "integer") else None for f in fmts]}
+            item["total_row"] = item["total_row"] and is_total_row(item["rows"])
             if not item["header"] and not item["rows"]:
                 raise ValueError("A table needs a header or rows")
         elif kind == "image":
