@@ -124,3 +124,46 @@ async def test_a_plain_number_is_a_normal_message_when_no_code_was_asked(env):
     env.app.state.llm = ScriptLLM(llm_say("ok"))
     await dispatch(env.app, say("482913"))
     assert texts(env)[-1] != "Code sent to your PC."
+
+
+PC_ASK = ("Make a one page PDF summarizing the dues in dues.csv from downloads and save it to the phone task folder. "
+          "Don't send the file to anyone.")
+
+
+async def test_a_job_sent_to_the_pc_is_not_also_done_here(env):
+    """The real case: "PDF" and "send" (in "don't send") made our own self-check order a second copy after the hand-off."""
+    from test_agent_db import ScriptLLM, call, say as llm_say
+    headers = await pc(env)
+    llm = env.app.state.llm = ScriptLLM(call("run_on_pc", task="make the dues PDF on the laptop"),
+                                        llm_say("Your laptop is on it. The result will come here."))
+    await dispatch(env.app, say(PC_ASK))
+    assert len(llm.seen) == 2                       # no self-check turned the reply back
+    assert texts(env)[-1] == "Your laptop is on it. The result will come here."
+    async with api(env) as http:
+        assert (await http.post("/bridge/tasks/next?wait=0", headers=headers)).json()["task"] == "make the dues PDF on the laptop"
+
+
+async def test_doing_it_here_after_the_hand_off_is_turned_back(env):
+    from test_agent_db import ScriptLLM, call, say as llm_say
+    await pc(env)
+    llm = env.app.state.llm = ScriptLLM(call("run_on_pc", task="make the dues PDF on the laptop"),
+                                        call("run_python", code="print(1)"),
+                                        llm_say("I have sent you the PDF file."), llm_say("Your laptop is still working on it."))
+    await dispatch(env.app, say(PC_ASK))
+    seen = [m["content"] for m in llm.seen[-1] if m["role"] in ("tool", "user")]
+    assert any("on the owner's PC now" in c for c in seen)
+    assert any("nothing was sent from here" in c for c in seen) and not any("send_file_to_owner" in c for c in seen)
+    assert texts(env)[-1] == "Your laptop is still working on it."
+
+
+def test_the_block_ends_with_the_owners_next_message_and_needs_a_real_hand_off():
+    from src.agent_loop import handed_to_pc, owes_file
+    asked = {"role": "user", "content": PC_ASK}
+    made = {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "function": {"name": "run_on_pc", "arguments": "{}"}}]}
+    queued = {"role": "tool", "tool_call_id": "c1", "content": '{"task_id": "t1", "pc_online": true}'}
+    refused = {"role": "tool", "tool_call_id": "c1", "content": '{"error": "no PC is connected to this account."}'}
+    note = {"role": "user", "content": "[system note] anything"}
+    assert handed_to_pc([asked, made, queued, note]) and not owes_file([asked, made, queued])
+    assert not handed_to_pc([asked, made, refused]) and owes_file([asked, made, refused])      # no PC: still done here
+    again = {"role": "user", "content": "send me a PDF of the same here too"}
+    assert not handed_to_pc([asked, made, queued, again]) and owes_file([asked, made, queued, again])
