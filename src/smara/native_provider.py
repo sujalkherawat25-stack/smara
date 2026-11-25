@@ -320,6 +320,24 @@ def _shorten_old_result(text: str) -> str:
             f"If you need them, run the tool again or read that part of the file ...]\n{text[-OLD_RESULT_TAIL:]}")
 
 
+def model_sees_pictures(model: str, sarvam: bool) -> bool:
+    """Of Sarvam's chat models only Gemma 4 takes pictures. Another provider's model is taken to see them."""
+    return not sarvam or model == "gemma4"
+
+
+PDF_GUIDE = (
+    "For PDF deliverables: retain the editable generator, compile it before running, and write large documents in bounded sections. "
+    "With ReportLab, explicitly transition from cover to body PageTemplate; Paragraph textColor overrides TableStyle TEXTCOLOR. ")
+PDF_LOOK = (
+    "Use pdf_inspect on every page range, repair warnings, and render page PNGs using its preview_command_argv via the native command sandbox. "
+    "Text extraction and file hashes do not prove readable layout. Do not claim visual verification when no image review succeeded. ")
+PDF_READ_ONLY = (
+    "You read text only. To check a PDF you made, use pdf_inspect on every page range (repair its warnings) and doc_read for the "
+    "words and figures; that is enough. Do not make page pictures of it, call view_image, or upload it to check how it looks: you "
+    "cannot see a picture, and each of these asks the owner for approval or wastes steps. Say its text and layout checks passed, "
+    "not that you looked at it. Make or upload a picture only if the owner asks for one. ")
+
+
 def translate_request(
     request: dict[str, Any], model: str, *, default_max_output_tokens: int | None = None,
     sarvam: bool = False,
@@ -363,16 +381,12 @@ def translate_request(
 
     for spec in request.get("tools", []):
         tool(spec)
+    sees_pictures = model_sees_pictures(model, sarvam)
     messages = []
     if request.get("instructions"):
         messages.append({"role": "system", "content": request["instructions"]})
     if any(name.endswith("pdf_inspect") for name in mapping):
-        messages.append({"role": "system", "content":
-            "For PDF deliverables: retain the editable generator, compile it before running, and write large documents in bounded sections. "
-            "With ReportLab, explicitly transition from cover to body PageTemplate; Paragraph textColor overrides TableStyle TEXTCOLOR. "
-            "Use pdf_inspect on every page range, repair warnings, and render page PNGs using its preview_command_argv via the native command sandbox. "
-            "Text extraction and file hashes do not prove readable layout. Do not claim visual verification when no image review succeeded. "
-            "For a text-only model, do not call view_image; image_analyze is a separate approval-gated upload, not an automatic fallback. "
+        messages.append({"role": "system", "content": PDF_GUIDE + (PDF_LOOK if sees_pictures else PDF_READ_ONLY) +
             "Read current version/revision from source instead of carrying stale values from conversation history."})
     if any(research_tool(name) for name in mapping):
         messages.append({"role": "system", "content":
@@ -387,7 +401,6 @@ def translate_request(
     results = [i for i, item in enumerate(inputs)
                if isinstance(item, dict) and item.get("type") in {"function_call_output", "custom_tool_call_output"}]
     recent = set(results[-RECENT_TOOL_RESULTS:])
-    sees_pictures = not sarvam or model == "gemma4"
     pictures: list = []                     # attached after the whole run of tool results, which must stay together
 
     def attach_pictures() -> None:

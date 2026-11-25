@@ -173,6 +173,11 @@ def launch_options(adapter: ResponsesAdapter, *, home: Path, workspace: Path, to
         # descendants, junction escape and PTY lifecycle on this backend.
         settings["windows.sandbox"] = "mxc"
         settings["features.prefer_mxc"] = False
+    # The PDF checker must not hand a model that reads text only a command for making page pictures.
+    from urllib.parse import urlparse as _urlparse
+    from .native_provider import model_sees_pictures
+    sees = model_sees_pictures(adapter.endpoint.model, _urlparse(adapter.endpoint.base_url).hostname == "api.sarvam.ai")
+    settings["mcp_servers.smara_readers.env.SMARA_MODEL_SEES_PICTURES"] = "1" if sees else "0"
     window = adapter.endpoint.effective_context_window
     if window:
         settings["model_context_window"] = window

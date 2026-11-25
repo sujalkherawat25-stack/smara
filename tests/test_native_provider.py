@@ -45,8 +45,8 @@ def test_pdf_workflow_guidance_is_capability_scoped_and_preserves_user_request()
     assert payload["messages"][-1]["content"] == "Create a PDF"
     guidance = payload["messages"][0]["content"]
     assert "retain the editable generator" in guidance
-    assert "do not call view_image" in guidance
-    assert "do not prove readable layout" in guidance
+    assert "Do not make page pictures of it, call view_image" in guidance
+    assert "not that you looked at it" in guidance
     without, _ = translate_request({"input": "Hello"}, "other-model")
     assert without["messages"] == [{"role": "user", "content": "Hello"}]
 
