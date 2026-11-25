@@ -14,6 +14,9 @@ from pathlib import Path
 
 KEEP_WORDS = re.compile(r"\b(keep|copy|copies|move|save)\b", re.I)
 NEGATED = re.compile(r"\b(not|don't|dont|never|without|no|nothing)\b", re.I)
+# Page pictures are working files: only a request about pictures themselves keeps them ("save the PDF" does not).
+KEEP_PICTURES = re.compile(r"\b(keep|save|send|give|share|copy|export|convert|turn|make|take|need|want)\b.*"
+                           r"\b(pictures?|images?|screenshots?|snapshots?|previews?|pngs?|jpe?gs?|photos?|crops?)\b", re.I)
 SEARCH_FOLDERS = ("Downloads", "Desktop", "Documents")
 MAX_LOOKED_AT = 20_000
 SLACK_S = 2
@@ -21,9 +24,18 @@ PICTURES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 MENTIONS_A_COPY = re.compile(r"\b(cop(?:y|ies|ied)|saved)\b", re.I)
 
 
+def _asks(task: str, pattern: re.Pattern) -> bool:
+    """Some sentence of the request matches and does not forbid it ("do not copy" asks for nothing)."""
+    return any(pattern.search(part) and not NEGATED.search(part) for part in re.split(r"(?<!\d)\.(?!\w)|[!?\n;]+", task))
+
+
 def asked_to_keep(task: str) -> bool:
-    """The owner's own words ask for a copy or a saved file. A sentence that forbids it ("do not copy") does not count."""
-    return any(KEEP_WORDS.search(part) and not NEGATED.search(part) for part in re.split(r"[.!?\n;]+", task))
+    """The owner's own words ask for a copy or a saved file."""
+    return _asks(task, KEEP_WORDS)
+
+
+def asked_to_keep_pictures(task: str) -> bool:
+    return _asks(task, KEEP_PICTURES)
 
 
 def _created(info: os.stat_result) -> float:
@@ -87,7 +99,7 @@ def drop_stale_mentions(text: str, removed: list[str]) -> str:
 
 def clean_up(workspace: str, since: float, task: str, home: Path | None = None) -> list[str]:
     """Remove the temporary files of a finished task; returns their paths relative to the phone tasks folder."""
-    if not workspace or not since or asked_to_keep(task):
+    if not workspace or not since:
         return []
     try:
         folder = Path(workspace).resolve(strict=True)
@@ -104,7 +116,8 @@ def clean_up(workspace: str, since: float, task: str, home: Path | None = None) 
             pass
 
     previews = folder / "pdf-previews"
-    if previews.is_dir() and previews.resolve() == previews:             # never follow a link out of the folder
+    if (not asked_to_keep_pictures(task) and previews.is_dir()
+            and previews.resolve() == previews):                       # never follow a link out of the folder
         for picture in sorted(previews.rglob("*")):
             if (picture.suffix.lower() in PICTURES and picture.is_file() and not picture.is_symlink()
                     and picture.resolve().is_relative_to(previews) and _created(picture.stat()) >= since - SLACK_S):
@@ -115,7 +128,7 @@ def clean_up(workspace: str, since: float, task: str, home: Path | None = None) 
             except OSError:
                 pass
     emptied: set[Path] = set()
-    for file in _files_inside(folder):
+    for file in () if asked_to_keep(task) else _files_inside(folder):
         info = file.stat()
         # Made here during the task, but its content is older than the task: a copy that kept the original's date.
         if (_created(info) >= since - SLACK_S and info.st_mtime < since - SLACK_S and info.st_size

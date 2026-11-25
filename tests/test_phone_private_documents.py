@@ -8,7 +8,7 @@ from smara import native_hosted
 from smara.native_goal_runtime import checkpoint_from, partial_checkpoint
 from smara.native_outcomes import review, validate_acceptance
 from smara.native_documents import language_code
-from smara.native_phone_cleanup import asked_to_keep, clean_up, drop_stale_mentions
+from smara.native_phone_cleanup import asked_to_keep, asked_to_keep_pictures, clean_up, drop_stale_mentions
 
 from test_native_hosted import setup
 
@@ -252,3 +252,49 @@ def test_names_that_look_like_command_words_do_not_count():
         assert "no delete, change or internet step" in native_hosted.command_effects(text), text
     only_delete = native_hosted.command_effects("Remove-Item .reading-copy/a.pdf")
     assert only_delete.startswith("run a command on your PC that can DELETE files.")
+
+
+def test_saving_a_document_does_not_keep_the_pictures_made_to_check_it(tmp_path):
+    home, folder = _phone_folder(tmp_path)
+    started = time.time()
+    picture = folder / "pdf-previews" / "dues-summary" / "page-001.png"
+    picture.parent.mkdir(parents=True)
+    picture.write_bytes(b"png")
+    made = folder / "dues-summary.pdf"
+    made.write_bytes(b"%PDF new")
+    task = ("Create a ONE-PAGE PDF summary of the dues. Save the PDF in the folder C:\\Users\\me\\Documents\\Smara phone "
+            "tasks. Do NOT send the file to anyone, just save it locally. Do not modify the original CSV.")
+    assert clean_up(str(folder), started, task, home) == ["pdf-previews/dues-summary/page-001.png"]
+    assert made.exists() and not (folder / "pdf-previews").exists()
+
+
+def test_pictures_stay_when_the_owner_asks_for_pictures(tmp_path):
+    home, folder = _phone_folder(tmp_path)
+    started = time.time()
+    picture = folder / "pdf-previews" / "bill" / "page-001.png"
+    picture.parent.mkdir(parents=True)
+    picture.write_bytes(b"png")
+    for task in ("Save each page of bill.pdf as a picture", "Convert bill.pdf into PNG images and keep them",
+                 "Take a screenshot of the bill. Save it."):
+        assert clean_up(str(folder), started, task, home) == [] and picture.exists(), task
+    for task in ("Save the PDF.", "Read the scanned image and save a summary. Do not keep any pictures.",
+                 "What kind of document is this scanned picture?"):
+        assert not asked_to_keep_pictures(task), task
+
+
+def test_a_requested_copy_is_still_kept_while_pictures_go(tmp_path):
+    home, folder = _phone_folder(tmp_path)
+    started = time.time()
+    _old(home / "Downloads" / "bill.pdf", b"bill")
+    copy = _old(folder / "bill.pdf", b"bill")
+    picture = folder / "pdf-previews" / "bill" / "page-001.png"
+    picture.parent.mkdir(parents=True)
+    picture.write_bytes(b"png")
+    assert clean_up(str(folder), started, "Copy bill.pdf into the phone tasks folder", home) == ["pdf-previews/bill/page-001.png"]
+    assert copy.exists()
+
+
+def test_phone_tasks_say_not_to_invent_names(tmp_path, monkeypatch):
+    store, _, conn = setup(tmp_path, monkeypatch)
+    conn.pick_up(wait=0)
+    assert "do not add a business, person or brand name" in store.claim()["spec"]["objective"]
