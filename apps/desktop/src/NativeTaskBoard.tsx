@@ -4,7 +4,7 @@ import { goalLabel, goalRequest, type Goal, type GoalList } from "./goalApi";
 import type { AgentRoster } from "./agents";
 import { supportsApproval } from "./nativeView";
 import { actionLabel, timeLabel, type AuditEntry } from "./auditView";
-import { uploadWarning } from "./askCard";
+import { commandWarning, uploadWarning } from "./askCard";
 import { approvalText, byColumn, canDismiss, canPause, canResume, canStop, COLUMNS, inputLine, projectName, title } from "./taskBoardView";
 
 type Props = {
@@ -110,7 +110,8 @@ export default function NativeTaskBoard({ projects, workspace, profile, roster, 
             <small>{projectName(goal.spec.workspace, projects)}{goal.spec.sandbox === "workspace-write" ? " · edits files" : ""}{goal.spec.use_apps ? " · uses apps" : ""} · {goal.cycles}/{goal.spec.max_cycles} rounds</small>
             {goal.detail && <p className="task-step">{goal.detail}</p>}
             {full?.approvals?.map(request => <div key={request.id} className="task-approval">
-              <p style={{ whiteSpace: "pre-line" }}>{uploadWarning(request) || approvalText(request)}</p>
+              <p style={{ whiteSpace: "pre-line" }}>{uploadWarning(request) || commandWarning(request) || approvalText(request)}</p>
+              {commandWarning(request) && <details><summary>Show the command</summary><pre>{String(request.params.command ?? "")}</pre></details>}
               <button className="primary" disabled={pending || !supportsApproval(request.method, request.params)} onClick={() => void act("respond", { id: goal.id, request_id: request.id, allow: true })}>Approve</button>
               <button disabled={pending || !supportsApproval(request.method, request.params)} onClick={() => void act("respond", { id: goal.id, request_id: request.id, allow: false })}>Deny</button>
             </div>)}

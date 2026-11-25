@@ -94,6 +94,32 @@ function accessView(params: Record<string, unknown>): AskView {
       + "Sending, paying, deleting and signing in still ask you each time. It never types passwords, OTPs or card numbers.", risky: false };
 }
 
+// A command word counts only on its own, not as part of a name such as ".reading-copy" or "notes.md".
+const DELETES = /(?<![\w.-])(remove-item|rm|del|erase|rmdir|rd|ri|clear-content|clear-recyclebin|shred|format-volume)(?![\w.-])|(?:\.|::)delete\(|\b(rmtree|unlink|rmsync|deletefile)\b/i;
+const CHANGES = /(?<![\w.-])(set-content|add-content|out-file|new-item|copy-item|move-item|rename-item|copy|cp|move|mv|ren|mkdir|md|set-itemproperty|new-itemproperty|stop-process|stop-service|start-service|start-process|taskkill|shutdown|restart-computer|invoke-expression|iex|install-module|msiexec|reg add)(?![\w.-])|>/i;
+const INTERNET = /\b(invoke-webrequest|invoke-restmethod|iwr|irm|curl|wget|start-bitstransfer|send-mailmessage|net\.webclient|httpclient)\b|https?:\/\//i;
+const HIDDEN = /-e(?:nc(?:odedcommand)?)?\s+[A-Za-z0-9+/=]{16,}|frombase64string/i;
+const HARMLESS_REDIRECT = /\d?>\s*\$null|\d>&\d|->|=>/gi;
+const FILE_NAME = /^[^<>:*?$(){}]{1,100}\.(pdf|docx?|xlsx?|pptx?|csv|txt|md|json|png|jpe?g|webp|zip|exe|msi|bat|ps1|py)$/i;
+
+/** A command in words the owner can act on (the phone shows the same). Never a promise that a command is harmless. */
+export function commandWarning(request: { method: string; params: Record<string, unknown> }): string {
+  if (request.method !== "item/commandExecution/requestApproval") return "";
+  const raw = request.params.command;
+  const command = Array.isArray(raw) ? raw.join(" ") : str(raw);
+  const text = command.replace(HARMLESS_REDIRECT, " ");
+  const found = ([[DELETES, "DELETE files"], [CHANGES, "create or change things on your PC"], [INTERNET, "use the internet"]] as const)
+    .filter(([pattern]) => pattern.test(text)).map(([, words]) => words);
+  const headline = HIDDEN.test(text) ? "This command has HIDDEN (encoded) contents. Don't allow it unless you know what it is."
+    : found.length ? `This command can ${found.join(", and ")}.`
+    : "Smara recognised no delete, change or internet step in this command, but it cannot check every effect.";
+  // Right after a folder separator, spaces belong to the file name; elsewhere they separate words.
+  const pieces = [...command.matchAll(/([\\/]?)([^\\/"'|;=,]+)/g)].flatMap(([, slash, run]) =>
+    slash && !/\.(pdf|docx?|xlsx?|pptx?|csv|txt|md|json|png|jpe?g|webp|zip|exe|msi|bat|ps1|py)\s/i.test(run.trim()) ? [run.trim()] : run.split(/\s+/));
+  const names = [...new Set(pieces.filter(piece => FILE_NAME.test(piece) && !/^(powershell|pwsh|cmd)\.exe$/i.test(piece)))];
+  return headline + (names.length ? `\nFiles it names: ${names.slice(0, 6).join(", ")}` : "");
+}
+
 /** An approval that sends a file off this PC, in words the owner can decide on (the phone shows the same); "" otherwise. */
 export function uploadWarning(request: { method: string; params: Record<string, unknown> }): string {
   const p = request.params;
@@ -113,8 +139,10 @@ export function askView(request: { method: string; params: Record<string, unknow
   const reason = str(p.reason);
   if (request.method === "item/commandExecution/requestApproval") {
     const command = Array.isArray(p.command) ? p.command.join(" ") : str(p.command);
-    return { kind: "command", title: "Run a command on this PC?", summary: reason || "Smara wants to run this command.",
-      detail: command.slice(0, 2000) + (str(p.cwd) ? `\n\nFolder: ${str(p.cwd)}` : ""), risky: RISKY.test(command) };
+    const effects = commandWarning(request);
+    return { kind: "command", title: "Run a command on this PC?", summary: effects + (reason ? `\n\nSmara's reason: ${reason}` : ""),
+      detail: command.slice(0, 2000) + (str(p.cwd) ? `\n\nFolder: ${str(p.cwd)}` : ""),
+      risky: RISKY.test(command) || /DELETE files|use the internet|HIDDEN/.test(effects) };
   }
   if (request.method === "item/fileChange/requestApproval") {
     return { kind: "files", title: "Change files in this project?", summary: reason || "Smara wants to save changes to project files.",

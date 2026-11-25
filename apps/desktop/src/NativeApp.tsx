@@ -14,7 +14,7 @@ import { jobNotices, type JobNotice } from "./jobNotices";
 import NativeBrowser from "./NativeBrowser";
 import NativeGoals from "./NativeGoals";
 import NativeTaskBoard from "./NativeTaskBoard";
-import { uploadWarning } from "./askCard";
+import { commandWarning, uploadWarning } from "./askCard";
 import NativeApprovals from "./NativeApprovals";
 import { EMPTY_ROSTER, agentById, agentNameProblem, chatsForAgent, chatsNewestFirst, developerInstructionsFor, threadTime, agentTone, contactTime, type AgentRecord, type AgentRoster as RosterData } from "./agents";
 import { groupTranscript } from "./toolCards";
@@ -1371,8 +1371,9 @@ export default function NativeApp() {
               </label>)}
               <button disabled={goalPending} onClick={() => void answerGoalQuestions(currentGoal.id, request.id, questions!)}>Continue</button>
             </> : <>
-              {uploadWarning(request) ? <p style={{ whiteSpace: "pre-line" }}>{uploadWarning(request)}</p>
-                : <pre>{JSON.stringify(request.params, null, 2)}</pre>}
+              {uploadWarning(request) ? <p style={{ whiteSpace: "pre-line" }}>{uploadWarning(request)}</p> : <>
+                {commandWarning(request) && <p style={{ whiteSpace: "pre-line" }}>{commandWarning(request)}</p>}
+                <pre>{JSON.stringify(request.params, null, 2)}</pre></>}
               {supportsApproval(request.method, request.params) && <button disabled={goalPending}
                 onClick={() => void goalAction("respond", { id: currentGoal.id, request_id: request.id, allow: true })}>Allow this action</button>}
               {canDeny && <button disabled={goalPending} onClick={() => void goalAction("respond", { id: currentGoal.id, request_id: request.id, allow: false })}>Deny</button>}

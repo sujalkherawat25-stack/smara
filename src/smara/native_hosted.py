@@ -117,6 +117,42 @@ def describe_tool(params: dict) -> str:
     return "\n".join(lines)[:ASK_CHARS]
 
 
+# A command word counts only on its own, not as part of a name such as ".reading-copy" or "notes.md".
+DELETES = re.compile(r"(?<![\w.-])(remove-item|rm|del|erase|rmdir|rd|ri|clear-content|clear-recyclebin|shred|format-volume)(?![\w.-])|"
+                     r"(?:\.|::)delete\(|\b(rmtree|unlink|rmsync|deletefile)\b", re.I)
+CHANGES = re.compile(r"(?<![\w.-])(set-content|add-content|out-file|new-item|copy-item|move-item|rename-item|copy|cp|move|mv|ren|mkdir|md|set-itemproperty|new-itemproperty|stop-process|stop-service|start-service|start-process|taskkill|shutdown|restart-computer|invoke-expression|iex|install-module|msiexec|reg add)(?![\w.-])|>", re.I)
+INTERNET = re.compile(r"\b(invoke-webrequest|invoke-restmethod|iwr|irm|curl|wget|start-bitstransfer|send-mailmessage|"
+                      r"net\.webclient|httpclient)\b|https?://", re.I)
+HIDDEN = re.compile(r"-e(?:nc(?:odedcommand)?)?\s+[A-Za-z0-9+/=]{16,}|frombase64string", re.I)
+HARMLESS_REDIRECT = re.compile(r"\d?>\s*\$null|\d>&\d|->|=>", re.I)
+FILE_NAME = re.compile(r"^[^<>:*?$(){}]{1,100}\.(pdf|docx?|xlsx?|pptx?|csv|txt|md|json|png|jpe?g|webp|zip|exe|msi|bat|ps1|py)$", re.I)
+
+
+SPACED_ON = re.compile(r"\.(pdf|docx?|xlsx?|pptx?|csv|txt|md|json|png|jpe?g|webp|zip|exe|msi|bat|ps1|py)\s", re.I)
+
+
+def command_effects(command: str) -> str:
+    """A command in words the owner can act on. It names what it recognises and never promises a command is harmless."""
+    text = HARMLESS_REDIRECT.sub(" ", command)
+    found = [words for pattern, words in ((DELETES, "DELETE files"), (CHANGES, "create or change things on your PC"),
+                                          (INTERNET, "use the internet")) if pattern.search(text)]
+    if HIDDEN.search(text):
+        headline = "run a command on your PC with HIDDEN (encoded) contents. Deny it unless you know what it is."
+    elif found:
+        headline = "run a command on your PC that can " + ", and ".join(found) + "."
+    else:
+        headline = ("run a command on your PC. Smara recognised no delete, change or internet step in it, but it cannot "
+                    "check every effect.")
+    names = []
+    for after_slash, run in re.findall(r'''([\\/]?)([^\\/"'|;=,]+)''', command):
+        # Right after a folder separator, spaces belong to the file name; elsewhere they separate words.
+        whole = after_slash and not SPACED_ON.search(run.strip())
+        for piece in ([run.strip()] if whole else run.split()):
+            if FILE_NAME.match(piece) and piece.lower() not in {"powershell.exe", "pwsh.exe", "cmd.exe"} and piece not in names:
+                names.append(piece)
+    return headline + (f"\nFiles it names: {', '.join(names[:6])}" if names else "")
+
+
 def describe(method: str, params: dict) -> str:
     """One line the owner can decide on from their phone."""
     if method == "item/commandExecution/requestApproval":
@@ -124,7 +160,9 @@ def describe(method: str, params: dict) -> str:
         if isinstance(command, list):
             command = " ".join(str(c) for c in command)
         reason = str(params.get("reason") or "").strip()
-        return f"run a command on your PC: {str(command)[:600]}" + (f" ({reason[:200]})" if reason else "")
+        head = command_effects(str(command)) + (f"\nSmara's reason: {reason[:200]}" if reason else "")
+        full = f"{head}\n\nFull command: {command}"
+        return full if len(full) <= ASK_CHARS else full[:ASK_CHARS - 30] + "... (cut; see it on the PC)"
     if method == "item/fileChange/requestApproval":
         reason = str(params.get("reason") or "").strip()
         return "change files in your project" + (f": {reason[:400]}" if reason else "")
@@ -219,7 +257,8 @@ class HostedConnector:
                                   "underscores. Search the rest of the user folder only if that finds nothing, and never "
                                   "AppData. Put any picture you make only to read a document (page pictures, crops) under "
                                   "pdf-previews/. Those pictures, and copies made only for reading, are removed after the "
-                                  "task, so do not say they are saved. The owner never sees evidence, plan "
+                                  "task by Smara itself: do not delete them yourself (that would ask the owner for an "
+                                  "approval) and do not say they are saved. The owner never sees evidence, plan "
                                   "or completed_steps, so never point to them. Leave out of the reply whatever the owner asked "
                                   "you not to include.)",
                      "success_criteria": "The owner's request is done on this PC, or it is clear exactly what blocked it."},
