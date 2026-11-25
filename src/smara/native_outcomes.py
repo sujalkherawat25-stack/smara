@@ -107,6 +107,33 @@ def made_before(workspace, path, since):
         return False
 
 
+LOCAL_PREFLIGHT_PAGES = 40
+
+
+def local_preflight(workspace, path, sha256):
+    """(pages rendered, page count, warnings) from running the local PDF check here. It is free and uploads nothing, so a
+    finished task never needs another model round only because the model did not call pdf_inspect on its last version."""
+    from .native_documents import DocumentError
+    from .native_pdf import inspect_pdf
+    inspected, total, issues = set(), None, []
+    try:
+        raw = (Path(workspace) / path).read_bytes()
+        start = 1
+        while total is None or (start <= total and start <= LOCAL_PREFLIGHT_PAGES):
+            report = inspect_pdf(raw, start_page=start)
+            if report["content_sha256"] != sha256:
+                return set(), None, []                     # the file changed while it was being checked
+            total = report["total_pages"]
+            for page in report["pages"]:
+                if page.get("rendered") is True:
+                    inspected.add(page["page"])
+                    issues.extend(page.get("issues") or [])
+            start += max(1, len(report["pages"]))
+    except (OSError, DocumentError):
+        return set(), None, []                             # unreadable here: the check stays failed
+    return inspected, total, issues
+
+
 def review(spec, checkpoint, transcript, *, elapsed_seconds=0, cycle_turn_ids=None, since=None):
     kind = spec.get("task_kind", "general")
     turns = transcript.get("turns", [])
@@ -200,9 +227,14 @@ def review(spec, checkpoint, transcript, *, elapsed_seconds=0, cycle_turn_ids=No
                     if type(number) is int and 1 <= number <= total and page.get("rendered") is True:
                         inspected.add(number)
                         issues.extend(page.get("issues") or [])
+        if total is None or len(inspected) < total:
+            ran, count, found = local_preflight(spec["workspace"], output["path"], output["sha256"])
+            if count is not None:
+                inspected, total, issues = inspected | ran, count, issues + found
         passed = total is not None and len(inspected) == total and not issues
+        warned = (" (" + ", ".join(sorted(set(map(str, issues)))) + ")") if issues else ""
         check("PDF layout preflight", passed,
-              f"{output['path']}: rendered {len(inspected)}/{total or '?'} pages of the current PDF; {len(issues)} layout warnings. "
+              f"{output['path']}: rendered {len(inspected)}/{total or '?'} pages of the current PDF; {len(issues)} layout warnings{warned}. "
               "Resolve warnings and inspect every page with pdf_inspect. This is heuristic preflight, not visual or semantic proof; human review is still required.")
     return {"kind": kind, "passed": all(c["passed"] for c in checks), "checks": checks,
         "coverage": coverage,

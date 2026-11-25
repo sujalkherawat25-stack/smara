@@ -592,8 +592,6 @@
 .native-app .member-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .native-app .member-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .native-app .member-role { flex: 1; min-width: 0; font-size: 12px; color: var(--smara-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.native-app .member-tag { flex: 0 0 auto; margin-right: auto; padding: 0 6px; border-radius: 999px; font-size: 10.5px; font-weight: 600; line-height: 17px;
-  color: var(--smara-accent); background: color-mix(in srgb, var(--smara-accent) 14%, transparent); }
 .native-app .member-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--smara-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .native-app .member-status i { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; }
 .native-app .member-status[data-tone="working"] i { background: var(--smara-running); animation: member-pulse 1.6s ease-in-out infinite; }
@@ -638,7 +636,6 @@
 @keyframes thinking-shine { from { background-position: 120% 0; } to { background-position: -120% 0; } }
 @media (prefers-reduced-motion: reduce) { .native-app .thinking-text { animation: none; color: var(--smara-muted); background: none; } }
 .native-app .member-name { flex: 0 1 auto; min-width: 2.5em; }
-.native-app .member-tag { margin-right: 0; }
 .native-app .member-line .contact-time { margin-left: auto; }
 .native-app .avatar[data-tone="manager"] { background: linear-gradient(135deg, #8ef0b4, #3ccf7e); color: #fff; font-weight: 800; }
 

@@ -26,7 +26,7 @@ export default function JobPanel({ agent, onEdit, onClose }: { agent: AgentRecor
   };
   useEffect(() => { void load(); }, [agent.id]);
   return <section className="job-panel" aria-label={`${agent.name}'s job`}>
-    <header><div><strong>{agent.name}</strong><small>{manager ? "Manager" : agent.role}</small></div><button className="text-button" onClick={onClose} aria-label="Close">Close</button></header>
+    <header><div><strong>{agent.name}</strong>{!manager && <small>{agent.role}</small>}</div><button className="text-button" onClick={onClose} aria-label="Close">Close</button></header>
     <h4>{manager ? "What Smara does" : "Job"}</h4>
     <p>{job || "No job written yet. Tell them in chat what they should do."}</p>
     <h4>Standing rules</h4>

@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -163,6 +164,34 @@ def user_input_response(params, answers):
     return {"answers": result}
 
 
+PHONE_MARK = "(Sent by the owner from their phone."
+TEAM_WORDS = re.compile(r"\b(team|employees?|hire|delegate|assign|routines?|schedule[ds]?|every\s+(day|morning|evening|night|week|month|"
+                        r"monday|tuesday|wednesday|thursday|friday|saturday|sunday)|daily|weekly|monthly|roz|rozana|har\s+(din|roz|hafte|"
+                        r"mahine|subah|shaam))\b|टीम|रोज़|रोज|हर\s+(दिन|हफ्ते|महीने|सुबह|शाम)", re.I)
+
+
+def unneeded_tool_options(spec) -> list[str]:
+    """Engine options that leave the team tools out of an ordinary phone task (every tool's description is sent with every
+    step). The saved-skill tools in the same server stay."""
+    objective = str(spec.get("objective") or "")
+    if spec.get("agent_id") or PHONE_MARK not in objective:
+        return []
+    asked = objective.split(PHONE_MARK)[0]
+    from .native_team import TOOLS
+    names = []
+    try:
+        from .native_agents import MANAGER_ID, roster
+        from .native_management import settings_path
+        from .native_profiles import read_object
+        names = [str(a["name"]) for a in roster(read_object(settings_path())) if a["id"] != MANAGER_ID]
+    except (ImportError, OSError, RuntimeError, ValueError, KeyError):
+        pass
+    if TEAM_WORDS.search(asked) or any(re.search(rf"\b{re.escape(name)}\b", asked, re.I) for name in names if name):
+        return []
+    unused = [t["name"] for t in TOOLS if t["name"].startswith("team_")]
+    return ["-c", "mcp_servers.smara_team.disabled_tools=" + json.dumps(unused)]
+
+
 class GoalBudget:
     """Reserve provider requests before sending; reservations survive a crash."""
     def __init__(self, client, store, goal):
@@ -200,6 +229,7 @@ class NativeGoalSession:
             tools_enabled=spec["tools_enabled"], search_enabled=not spec["tools_enabled"],
             workers_enabled=spec["workers_enabled"], browser_origins=spec["browser_origins"],
             computer=bool(spec.get("use_apps")), agent_label=task_label(spec), task_id=goal["id"])
+        options = options + unneeded_tool_options(spec)
         # Every tool call and approval of this task goes to the owner's activity log, under the task's id.
         from .agent_audit import RuntimeAuditor
         self.auditor = RuntimeAuditor(download_dir=workspace / ".smara" / "browser", task=goal["id"])

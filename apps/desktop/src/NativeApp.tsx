@@ -1279,13 +1279,13 @@ export default function NativeApp() {
           const latest = chatsNewestFirst(threads, roster, agent.id)[0];
           const selected = agent.id === activeAgentId;
           const manager = agent.id === MANAGER_ID;
-          const state = selected && busy ? { tone: "working" as const, text: "Replying…" } : memberStatus(agent.id, teamGoals, latest ? threadLabel(latest) : "", agent.role);
+          const state = selected && busy ? { tone: "working" as const, text: "Replying…" } : memberStatus(agent.id, teamGoals, latest ? threadLabel(latest) : "", manager ? "Ready" : agent.role);
           const fresh = freshIds.includes(agent.id);
           return <div className={`member${manager ? " member-manager" : ""}${fresh ? " member-new" : ""}`} key={agent.id}>
             <button className="member-open" aria-current={selected ? "true" : undefined} disabled={navigationLocked} onClick={() => { setFreshIds(current => current.filter(id => id !== agent.id)); openAgent(agent.id); }}>
               <span className="member-avatar" data-tone={manager ? "manager" : agentTone(agent)} aria-hidden="true">{manager ? "S" : initials(agent.name)}</span>
               <span className="member-text">
-                <span className="member-line"><span className="member-name">{agent.name}</span>{fresh && <span className="member-fresh">New</span>}{manager ? <span className="member-tag">Manager</span> : <span className="member-role">{agent.role}</span>}{latest && !manager && <time className="contact-time">{contactTime(threadTime(latest), Date.now())}</time>}</span>
+                <span className="member-line"><span className="member-name">{agent.name}</span>{fresh && <span className="member-fresh">New</span>}{!manager && <span className="member-role">{agent.role}</span>}{latest && !manager && <time className="contact-time">{contactTime(threadTime(latest), Date.now())}</time>}</span>
                 <span className="member-status" data-tone={state.tone}>{state.tone !== "idle" && <i aria-hidden="true" />}{state.text}</span>
               </span>
             </button>

@@ -20,7 +20,7 @@ def test_bootstrap_lists_smara_the_manager_first_then_four_employees(setup):
     value = management.manage({"operation": "bootstrap"})
     roster = value["agents"]["roster"]
     assert [agent["name"] for agent in roster] == ["Smara", "Kiran", "Rohan", "Scout", "Nisha"]
-    assert roster[0]["role"] == "Manager" and "team_delegate" in roster[0]["instructions"]
+    assert roster[0]["role"] == "Assistant" and "team_delegate" in roster[0]["instructions"]
     assert all(agent["preset"] for agent in roster)
     assert value["agents"]["default"] == "smara"
     assert not {agent["name"] for agent in roster} & {"Munim", "Vasooli", "Browser", "Files"}
