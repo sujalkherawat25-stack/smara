@@ -54,8 +54,22 @@ async def test_only_the_owner_can_send_and_only_with_a_connected_pc(env):
     assert "cannot use a PC" in (await pc_tasks.run_on_pc(env.app, ctx(env), {"task": "download my GST report"}))["error"]
 
 
+async def test_the_pc_counts_as_online_only_while_its_task_worker_asks_for_work(env):
+    headers = await pc(env)                                     # the device token is in use (the browser helper shares it)
+    out = await pc_tasks.run_on_pc(env.app, ctx(env), {"task": "list my Downloads folder"})
+    assert out["task_id"] and not out["pc_online"] and "not online" in out["note"]
+    async with api(env) as http:
+        got = (await http.post("/bridge/tasks/next?wait=0", headers=headers)).json()   # the worker asks: it takes the task
+    assert got["task_id"] == out["task_id"]
+    assert (await pc_tasks.run_on_pc(env.app, ctx(env), {"task": "list my Desktop folder"}))["pc_online"]
+    pc_tasks._worker_polls(env.app)[str(env.t.id)] -= pc_tasks.WORKER_SEEN_S + 1    # the worker stopped asking
+    assert not (await pc_tasks.run_on_pc(env.app, ctx(env), {"task": "list my Music folder"}))["pc_online"]
+
+
 async def test_a_task_goes_to_the_pc_asks_through_the_chat_and_reports_back(env):
     headers = await pc(env)
+    async with api(env) as http:
+        assert (await http.post("/bridge/tasks/next?wait=0", headers=headers)).json() == {}          # the worker is there
     out = await pc_tasks.run_on_pc(env.app, ctx(env), {"task": "Download the October GST return PDF from the GST portal"})
     assert out["pc_online"] and out["task_id"]
     async with api(env) as http:

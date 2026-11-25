@@ -32,6 +32,25 @@ fn command_hidden(command: &mut Command) {
         command.creation_flags(0x08000000);
     }
 }
+/// The background worker runs phone tasks (WhatsApp/Telegram -> this PC), routines and background jobs. Before 0.2.15 it
+/// started only at Windows sign-in, so once it stopped (an update, a crash) phone tasks waited until the next sign-in.
+/// Now the open app keeps one running: it starts the worker, and starts it again if it ends. A second worker exits at
+/// once (the store is locked by the first, for example the one started at sign-in), so then the app only looks again
+/// every few minutes. The worker keeps running after the app closes, as before.
+fn keep_background_worker() {
+    let Some(path) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|root| root.join("resources/smara-desktop.exe"))).filter(|path| path.is_file()) else {
+        return; // a source checkout: no bundled worker
+    };
+    std::thread::spawn(move || loop {
+        let started = std::time::Instant::now();
+        let mut command = Command::new(&path);
+        command.arg("--native-goals").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        command_hidden(&mut command);
+        if let Ok(mut child) = command.spawn() { let _ = child.wait(); }
+        let pause = if started.elapsed() < std::time::Duration::from_secs(30) { 300 } else { 15 };
+        std::thread::sleep(std::time::Duration::from_secs(pause));
+    });
+}
 fn executor_command(args: &[String]) -> Command {
     let executable = executor_executable();
     let mut command = if executable.is_file() { Command::new(executable) } else {
@@ -384,6 +403,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![native_status, native_start, native_send, native_stop, native_manage, native_review, native_open_url, native_preview_file, native_open_workspace_file, native_project_files, browser_bridge::bridge_state, browser_bridge::bridge_check, browser_bridge::bridge_ensure, browser_bridge::bridge_stop, browser_bridge::bridge_pause, browser_bridge::bridge_pair, browser_bridge::bridge_unpair, browser_bridge::bridge_install_components, control_bar::computer_bar_state, control_bar::computer_bar_pause, control_bar::computer_bar_stop])
         .setup(|app| {
             browser_bridge::ensure_on_startup();
+            keep_background_worker();
             // The on-screen "Smara is controlling your PC" bar and the Ctrl+Alt+Esc stop key.
             control_bar::start(app.handle().clone(), state_path().parent().map(Path::to_path_buf).unwrap_or_else(app_data_dir));
             // Load projects and model profiles in the background, so the first terminal command does not wait for it.
