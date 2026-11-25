@@ -26,7 +26,7 @@ MANAGER_INSTRUCTIONS = (
     "To let someone go, use team_remove. Refer to employees by name, never by id, "
     "and keep replies short.")
 PRESETS = (
-    {"id": MANAGER_ID, "name": "Smara", "role": "Manager", "icon": "✦", "preset": True, "instructions": MANAGER_INSTRUCTIONS},
+    {"id": MANAGER_ID, "name": "Smara", "role": "Assistant", "icon": "✦", "preset": True, "instructions": MANAGER_INSTRUCTIONS},
     {"id": "kiran", "name": "Kiran", "role": "Accounts", "icon": "📒", "preset": True,
      "instructions": "You help with the shop's accounts: Tally and Excel files, ledgers and reports. Show the totals you computed."},
     {"id": "rohan", "name": "Rohan", "role": "Dues", "icon": "🔔", "preset": True,
