@@ -167,6 +167,7 @@ function fixture({ olderChats = [], startupFailure = false, unknownTurn = false,
     if (name.endsWith("NativeTaskBoard")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeApprovals")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeAskCard")) return askCard;
+    if (name === "./askCard") return askCardModule;
     if (name.endsWith("/team")) return teamModule;
     if (name.endsWith("ui/JobPanel")) return { default: () => null, __esModule: true };
     if (name.endsWith("NativeVoice")) return { default: () => null, ReadAloud: () => null, __esModule: true };

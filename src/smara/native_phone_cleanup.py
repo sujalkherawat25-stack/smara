@@ -1,8 +1,9 @@
 """After a phone task: remove what Smara made only to read the owner's documents.
 
 Only two kinds of file are ever removed, both inside the phone tasks folder and both created during the task:
-page pictures under pdf-previews/, and a copy of a file whose identical original is still on the PC. Anything the task
-wrote itself, anything that existed before, and a copy with no matching original stay where they are.
+pictures under pdf-previews/ (page pictures and any crops of them), and a copy of a file whose identical original is
+still on the PC. Anything else the task wrote, anything that existed before, and a copy with no matching original stay
+where they are.
 """
 from __future__ import annotations
 
@@ -16,6 +17,8 @@ NEGATED = re.compile(r"\b(not|don't|dont|never|without|no|nothing)\b", re.I)
 SEARCH_FOLDERS = ("Downloads", "Desktop", "Documents")
 MAX_LOOKED_AT = 20_000
 SLACK_S = 2
+PICTURES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+MENTIONS_A_COPY = re.compile(r"\b(cop(?:y|ies|ied)|saved)\b", re.I)
 
 
 def asked_to_keep(task: str) -> bool:
@@ -60,6 +63,28 @@ def has_original(copy: Path, folder: Path, home: Path) -> bool:
     return False
 
 
+def drop_stale_mentions(text: str, removed: list[str]) -> str:
+    """Take out sentences that still say a removed copy or picture is saved on the PC."""
+    names = {Path(r).name.lower() for r in removed if not r.startswith("pdf-previews/")}
+    if not removed:
+        return text
+
+    def stale(sentence: str) -> bool:
+        low = sentence.lower()
+        if "pdf-previews" in low:
+            return True
+        return bool(MENTIONS_A_COPY.search(low)) and "original" not in low and any(name in low for name in names)
+
+    kept = []
+    for line in text.split("\n"):
+        parts = re.split(r"(?<=[.!?])\s+", line)
+        left = [part for part in parts if not stale(part)]
+        if left or len(parts) == 0:
+            kept.append(" ".join(left) if len(left) != len(parts) else line)
+    out = re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+    return out or text
+
+
 def clean_up(workspace: str, since: float, task: str, home: Path | None = None) -> list[str]:
     """Remove the temporary files of a finished task; returns their paths relative to the phone tasks folder."""
     if not workspace or not since or asked_to_keep(task):
@@ -80,8 +105,9 @@ def clean_up(workspace: str, since: float, task: str, home: Path | None = None) 
 
     previews = folder / "pdf-previews"
     if previews.is_dir() and previews.resolve() == previews:             # never follow a link out of the folder
-        for picture in sorted(previews.rglob("page-*.png")):
-            if not picture.is_symlink() and picture.resolve().is_relative_to(previews) and _created(picture.stat()) >= since - SLACK_S:
+        for picture in sorted(previews.rglob("*")):
+            if (picture.suffix.lower() in PICTURES and picture.is_file() and not picture.is_symlink()
+                    and picture.resolve().is_relative_to(previews) and _created(picture.stat()) >= since - SLACK_S):
                 remove(picture)
         for empty in sorted((p for p in previews.rglob("*") if p.is_dir()), reverse=True) + [previews]:
             try:

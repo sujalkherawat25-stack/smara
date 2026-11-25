@@ -7,7 +7,8 @@ from pathlib import Path
 from smara import native_hosted
 from smara.native_goal_runtime import checkpoint_from, partial_checkpoint
 from smara.native_outcomes import review, validate_acceptance
-from smara.native_phone_cleanup import asked_to_keep, clean_up
+from smara.native_documents import language_code
+from smara.native_phone_cleanup import asked_to_keep, clean_up, drop_stale_mentions
 
 from test_native_hosted import setup
 
@@ -145,3 +146,44 @@ def test_a_finished_phone_task_cleans_up_before_it_replies(tmp_path, monkeypatch
     text = server.sent("/t-1/result")[0]["summary"]
     assert text.startswith(ANSWER) and "I removed the temporary copies" in text and "Files on your PC" not in text
     assert not picture.exists()
+
+
+def test_cropped_pictures_go_too_whatever_they_are_called(tmp_path):
+    home, folder = _phone_folder(tmp_path)
+    started = time.time()
+    made = folder / "pdf-previews" / "smara-test-certificate"
+    made.mkdir(parents=True)
+    for name in ("page-001.png", "top-page-001.png", "top-page-002.PNG", "crop.jpg"):
+        (made / name).write_bytes(b"picture")
+    (made / "notes.txt").write_text("not a picture")
+    removed = clean_up(str(folder), started, "What kind of document is it?", home)
+    assert sorted(Path(r).name for r in removed) == ["crop.jpg", "page-001.png", "top-page-001.png", "top-page-002.PNG"]
+    assert (made / "notes.txt").exists()
+
+
+def test_the_reply_does_not_say_a_removed_copy_is_still_saved():
+    reply = chr(10).join([
+        "Found: C:/Users/me/Downloads/smara-test-certificate.pdf (hyphenated near-match).",
+        "Document type: sample course-completion certificate.",
+        "The original file was not changed. A read-only copy is saved at C:/Docs/Smara phone tasks/smara-test-certificate.pdf.",
+        "Page pictures are in pdf-previews/smara-test-certificate."])
+    text = drop_stale_mentions(reply, ["smara-test-certificate.pdf", "pdf-previews/smara-test-certificate/page-001.png"])
+    assert "copy is saved" not in text and "pdf-previews" not in text
+    assert "Found: C:/Users/me/Downloads/smara-test-certificate.pdf" in text and "The original file was not changed." in text
+    assert "Document type: sample course-completion certificate." in text
+    assert drop_stale_mentions(reply, []) == reply
+    other = "I saved dues.xlsx in the folder." + chr(10) * 2 + "Total due: 7040."
+    assert drop_stale_mentions(other, ["UDYAM.pdf"]) == other
+
+
+def test_a_language_written_as_a_word_is_accepted():
+    for given, code in (("English", "en-IN"), ("hindi", "hi-IN"), ("en", "en-IN"), ("en_in", "en-IN"), ("", "en-IN"),
+                        ("mr-IN", "mr-IN"), ("Klingon", "Klingon")):
+        assert language_code(given) == code
+
+
+def test_phone_tasks_say_how_to_find_files(tmp_path, monkeypatch):
+    store, _, conn = setup(tmp_path, monkeypatch)
+    conn.pick_up(wait=0)
+    objective = store.claim()["spec"]["objective"]
+    assert "hyphens or underscores" in objective and "never AppData" in objective and "under pdf-previews/" in objective

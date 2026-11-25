@@ -32,6 +32,7 @@ function fixture(state = "queued", failFeedback = false) {
     } };
     if (name.endsWith("nativeView")) return { supportsApproval: method => method === "item/commandExecution/requestApproval" };
     if (name.endsWith("NativeMarkdown")) return { default: () => null, __esModule: true };
+    if (name === "./askCard") return { uploadWarning: () => "" };
     assert.fail("Unexpected import " + name);
   };
   vm.runInNewContext(code, { module, exports: module.exports, require, crypto: { randomUUID: () => "syntheticcreationreceipt" }, setInterval: () => 1, clearInterval() {} });
