@@ -309,6 +309,14 @@ _CLAIM_FILE = re.compile(r"((file|excel|pdf|report|statement|sheet|document|atta
                          r"(bhej\s*(diya|di\b|di\s*hai)|sent|attached)\W+(\w+\W+){0,3}(file|excel|pdf|report|statement|sheet|document))", re.I)
 
 
+# "Task bhej diya hai" / "sent to your laptop" is about the job, not a file. A file word before the verb keeps it a file claim.
+_JOB_SENT = re.compile(r"\b(?:task|kaam|job|request)\b(?:(?!\b(?:pdf|file|excel|report|statement|sheet|document|attachment|brs)\b)[^.!?\n]){0,40}?"
+                       r"\b(?:bhej\s*(?:diya|di)(?:\s*hai)?|sent)\b"
+                       r"|\b(?:laptop|pc)\s+(?:pe|par|ko)\s+bhej\s*(?:diya|di)(?:\s*hai)?\b"
+                       r"|\bsent\s+(?:(?:the|your|this|that)\s+)?(?:task|job|request)\b"
+                       r"|\bsent\s+to\s+(?:(?:your|the)\s+)?(?:laptop|pc)\b", re.I)
+
+
 _ASKS_AMOUNT = re.compile(r"(kitna|kitne|kitni|how much|total kya|kya total|amount kya|kya amount|dena hai|dena padega|payable)", re.I)
 _MONEYISH = re.compile(r"(?:rs\.?|₹|inr|rupees?|rupaye)\s*[\d,]+|\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d{3,}", re.I)
 
@@ -338,7 +346,9 @@ def unbacked_claim(messages: list[dict], reply: str) -> str:
                 "everything they asked in this message (the figures, dates and totals) first, and the time the reminder will come in one line at the end. "
                 "If you could not set it, say so plainly instead.")
     sent = any(m["role"] == "tool" and ('"sent": true' in (m.get("content") or "") or '"files_sent_to_owner": ["' in (m.get("content") or "")) for m in turn)
-    if _CLAIM_FILE.search(reply) and not sent and handed_to_pc(messages):
+    if not sent and handed_to_pc(messages):
+        if not _CLAIM_FILE.search(_JOB_SENT.sub(" . ", reply)):
+            return ""
         return ("[system note] You said a file was sent, but nothing was sent from here: the job is on the owner's PC and is not "
                 "finished. Tell them that, and that the result will come in this chat. Do not make or send a file yourself.")
     if _CLAIM_FILE.search(reply) and not sent:
