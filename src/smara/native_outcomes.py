@@ -97,7 +97,17 @@ def normalized(text):
     return " ".join(text.split())
 
 
-def review(spec, checkpoint, transcript, *, elapsed_seconds=0, cycle_turn_ids=None):
+def made_before(workspace, path, since):
+    """True when a file's content is older than the task: a copy or move that kept its date, not something the task wrote."""
+    if not since:
+        return False
+    try:
+        return (Path(workspace) / path).stat().st_mtime < since - 2
+    except OSError:
+        return False
+
+
+def review(spec, checkpoint, transcript, *, elapsed_seconds=0, cycle_turn_ids=None, since=None):
     kind = spec.get("task_kind", "general")
     turns = transcript.get("turns", [])
     items = [item for turn in turns for item in turn.get("items", [])]
@@ -169,8 +179,10 @@ def review(spec, checkpoint, transcript, *, elapsed_seconds=0, cycle_turn_ids=No
               "Each explicit requirement needs observed citation, output or test evidence. Linkage does not prove that the evidence satisfies the requirement; review correctness.")
     if outputs:
         check("Output files", True, f"Hashed {len(outputs)} existing project files. Changed files will need another review.")
+    # A PDF the task only brought in (the owner's own certificate or bill, copied here to be read) is not Smara's layout.
+    brought_in = [output["path"] for output in outputs if made_before(spec["workspace"], output["path"], since)]
     for output in outputs:
-        if not output["path"].lower().endswith(".pdf"):
+        if not output["path"].lower().endswith(".pdf") or output["path"] in brought_in:
             continue
         inspected, total, issues = set(), None, []
         for item in items:
@@ -201,17 +213,22 @@ def review(spec, checkpoint, transcript, *, elapsed_seconds=0, cycle_turn_ids=No
                     "semantic_correctness": "not_automatically_verified"},
         "tests": list(tests.values())[-50:], "sources": [{k: v for k, v in s.items() if k != "texts"} for s in sources.values()][:100],
         "claims": claims, "failed_pages": failed_pages[-20:], "outputs": outputs, "elapsed_seconds": round(elapsed_seconds, 1),
+        "brought_in": brought_in,
         "review_required": True}
 
 
 def validate_acceptance(goal):
     report = goal["checkpoint"].get("outcome")
-    pdf_output = any(output["path"].lower().endswith(".pdf") for output in (report or {}).get("outputs", []))
+    brought_in = set((report or {}).get("brought_in", []))
+    pdf_output = any(output["path"].lower().endswith(".pdf") and output["path"] not in brought_in
+                     for output in (report or {}).get("outputs", []))
     if pdf_output and not any(c.get("name") == "PDF layout preflight" and c.get("passed") is True for c in (report or {}).get("checks", [])):
         raise ValueError("PDF layout evidence is incomplete; continue for a fresh review")
     if (goal["spec"].get("task_kind", "general") != "general" or pdf_output) and (not report or not report.get("passed")):
         raise ValueError("Outcome evidence checks are incomplete; add feedback and continue")
     for saved in (report or {}).get("outputs", []):
+        if saved["path"] in brought_in and not (Path(goal["spec"]["workspace"]) / saved["path"]).exists():
+            continue                      # a temporary copy of the owner's own file, removed after the task
         try:
             current = output_record(goal["spec"]["workspace"], saved["path"])
         except (OSError, ValueError):
@@ -224,6 +241,8 @@ def progress_text(goal):
     cp = goal["checkpoint"]
     report = cp.get("outcome") or {}
     lines = [cp.get("summary") or goal.get("detail") or "Waiting for a cycle"]
+    if cp.get("last_answer"):
+        lines.append("Latest answer before it stopped (checks not completed): " + cp["last_answer"])
     if cp.get("completed_steps"):
         lines.append("Done: " + "; ".join(cp["completed_steps"][-5:]))
     lines.extend(f"{'PASS' if c['passed'] else 'MISSING'} · {c['name']}: {c['detail']}" for c in report.get("checks", []))

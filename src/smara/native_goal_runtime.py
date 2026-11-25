@@ -494,6 +494,7 @@ def checkpoint_from(text, workspace, task_kind="general"):
         raise ValueError("Invalid requirement coverage links")
     value["coverage"] = coverage
     value.pop("outcome", None)  # A model cannot submit its own verification.
+    value.pop("last_answer", None)  # Only the supervisor carries an earlier cycle's answer forward.
     if value["decision"] == "ready_for_review" and not value["evidence"]:
         raise ValueError("Provide evidence before requesting result review")
     return value
@@ -537,9 +538,14 @@ def partial_checkpoint(session, goal, elapsed_seconds):
         "evidence": ["Completed native tool/command records retained in the saved session"], "outputs": outputs,
         "claims": goal["checkpoint"].get("claims", []),
         "coverage": goal["checkpoint"].get("coverage", []), "partial": True}
+    # An interrupted cycle must not erase what an earlier one already found.
+    earlier = goal["checkpoint"]
+    answer = earlier.get("last_answer") if earlier.get("partial") else earlier.get("summary")
+    if answer:
+        checkpoint["last_answer"] = answer
     transcript = {"turns": prior_turns + [{"id": "interrupted-cycle", "items": current_items}]}
     checkpoint["outcome"] = review(goal["spec"], checkpoint, transcript,
-        elapsed_seconds=elapsed_seconds, cycle_turn_ids=["interrupted-cycle"])
+        elapsed_seconds=elapsed_seconds, cycle_turn_ids=["interrupted-cycle"], since=goal.get("created"))
     # Observations can remain useful while the final synthesis is absent.
     # Partial evidence must never certify an interrupted goal's completion.
     checkpoint["outcome"]["passed"] = False
@@ -598,7 +604,7 @@ def execute_cycle(store, goal, *, endpoint=None, session_factory=NativeGoalSessi
                     prior = session.rpc("thread/read", {"threadId": thread["id"], "includeTurns": True})["thread"]
                     session.observed_prior_transcript = prior
                     from .native_outcomes import review
-                    observed_prior = review(goal["spec"], goal["checkpoint"], prior, cycle_turn_ids=[])
+                    observed_prior = review(goal["spec"], goal["checkpoint"], prior, cycle_turn_ids=[], since=goal.get("created"))
                 prompt = json.dumps({"objective": goal["spec"]["objective"], "success_criteria": goal["spec"]["success_criteria"],
                     "saved_checkpoint": goal["checkpoint"], "feedback": [item["text"] for item in feedback],
                     "observed_prior_outcome": observed_prior,
@@ -649,7 +655,7 @@ def execute_cycle(store, goal, *, endpoint=None, session_factory=NativeGoalSessi
                         adapter.checkpoint_thread_id = None
                 phase = "verify_outcome"
                 from .native_outcomes import review
-                checkpoint["outcome"] = review(goal["spec"], checkpoint, transcript, elapsed_seconds=time.monotonic() - started, cycle_turn_ids=cycle_turn_ids)
+                checkpoint["outcome"] = review(goal["spec"], checkpoint, transcript, elapsed_seconds=time.monotonic() - started, cycle_turn_ids=cycle_turn_ids, since=goal.get("created"))
                 if checkpoint["decision"] == "ready_for_review" and not checkpoint["outcome"]["passed"]:
                     checkpoint["decision"] = "continue"
                     checkpoint["next_step"] = "Resolve outcome evidence gaps: " + "; ".join(c["name"] for c in checkpoint["outcome"]["checks"] if not c["passed"])
