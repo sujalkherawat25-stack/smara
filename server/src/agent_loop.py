@@ -268,6 +268,23 @@ _FILE_ASK = re.compile(r"\b(pdf|excel|xlsx)\b", re.I)
 _SEND_ASK = re.compile(r"(bhej|send|bana|de do|dedo|chahiye|chahie|mail)", re.I)
 
 
+# A job handed to the owner's PC must not also be done here: the owner gets two results, and ours was made without reading
+# their files. These are the tools that would do or deliver it. A new owner message lifts the block.
+PC_DOES_IT = frozenset({"run_python", "make_document", "edit_spreadsheet", "send_file_to_owner", "browser_step"})
+ON_THE_PC = ("This job is on the owner's PC now; do not do or send it here. Reply in one or two lines that their PC is working on it "
+             "and the result will come in this chat. If they also asked for something separate, say you will do it when they send "
+             "it as its own message.")
+
+
+def handed_to_pc(messages: list[dict]) -> bool:
+    """True when run_on_pc succeeded since the owner's latest message."""
+    last = max((i for i, m in enumerate(messages) if m["role"] == "user"
+                and not str(m.get("content") or "").startswith(("[system note]", "[Earlier conversation omitted"))), default=-1)
+    turn = messages[last + 1:]
+    ids = {c["id"] for m in turn for c in (m.get("tool_calls") or []) if c["function"]["name"] == "run_on_pc"}
+    return any(m["role"] == "tool" and m.get("tool_call_id") in ids and '"task_id"' in (m.get("content") or "") for m in turn)
+
+
 def asked_owner(messages: list[dict], calls: list[dict]) -> bool:
     """True when this step put a question to the owner (ask_owner went out)."""
     ids = {c["id"] for c in calls if c["function"]["name"] == "ask_owner"}
@@ -277,6 +294,8 @@ def asked_owner(messages: list[dict], calls: list[dict]) -> bool:
 
 def owes_file(messages: list[dict]) -> bool:
     """True when the owner's latest message asked for a PDF/Excel file and this turn never sent one."""
+    if handed_to_pc(messages):
+        return False      # the PC makes it
     last = max((i for i, m in enumerate(messages) if m["role"] == "user" and not m["content"].startswith("[system note]")), default=-1)
     if last < 0 or not (_FILE_ASK.search(messages[last]["content"]) and _SEND_ASK.search(messages[last]["content"])):
         return False
@@ -319,6 +338,9 @@ def unbacked_claim(messages: list[dict], reply: str) -> str:
                 "everything they asked in this message (the figures, dates and totals) first, and the time the reminder will come in one line at the end. "
                 "If you could not set it, say so plainly instead.")
     sent = any(m["role"] == "tool" and ('"sent": true' in (m.get("content") or "") or '"files_sent_to_owner": ["' in (m.get("content") or "")) for m in turn)
+    if _CLAIM_FILE.search(reply) and not sent and handed_to_pc(messages):
+        return ("[system note] You said a file was sent, but nothing was sent from here: the job is on the owner's PC and is not "
+                "finished. Tell them that, and that the result will come in this chat. Do not make or send a file yourself.")
     if _CLAIM_FILE.search(reply) and not sent:
         return ("[system note] You said you sent a file, but no send succeeded in this turn, so the owner has nothing. Send it now with "
                 "send_file_to_owner, or tell them plainly that it could not be sent.")
@@ -329,8 +351,8 @@ def unanswered_amount(messages: list[dict], reply: str) -> str:
     """A system note when the owner asked for an amount in this message, something was looked up this turn, and the reply has no amount in it
     (a bill plus 'kitna dena hai?' answered with only 'reminder set'). Its own nudge, so it still works after a reminder or file claim was corrected."""
     reply = reply or ""
-    if "?" in reply or re.search(r"(?m)^\s*1[.)]\s", reply):
-        return ""
+    if "?" in reply or re.search(r"(?m)^\s*1[.)]\s", reply) or handed_to_pc(messages):
+        return ""         # after a hand-off the figure comes from the PC; asking for it here would invite a guess
     last = max((i for i, m in enumerate(messages) if m["role"] == "user" and not m["content"].startswith("[system note]")), default=-1)
     if last < 0 or not any(c for m in messages[last + 1:] for c in (m.get("tool_calls") or [])):
         return ""
@@ -393,6 +415,8 @@ def owes_card(messages: list[dict], reply: str) -> bool:
     not give a reason it cannot be done. Nothing waits for the owner in that case."""
     last = max((i for i, m in enumerate(messages) if m["role"] == "user" and not m["content"].startswith("[system note]")), default=-1)
     ask = messages[last]["content"] if last >= 0 else ""
+    if handed_to_pc(messages):
+        return False      # "send it from my laptop" is the PC's job, with its own approval
     if not _REMIND_ASK.search(ask) or _QUESTION.search(ask) or _LIST_ASK.search(ask) or _NOT_POSSIBLE.search(reply or ""):
         return False
     return not any(_sent_to_customer(c) for m in messages[last:] for c in (m.get("tool_calls") or []))
@@ -559,7 +583,9 @@ async def _process(app, row, messages: list, calls: list) -> bool:
         row["messages"] = messages                    # the policy needs this turn's typing, not the saved copy
         ctx = _ctx(row, cid, getattr(app.state, "browsers", None))
         d = pre_tool_use(ctx, name, args, tools.TOOL_NAMES)
-        if d.verdict == "allow" and (turned_back := specialist_redirect(messages, name, args)):
+        if name in PC_DOES_IT and handed_to_pc(messages):
+            result = {"error": ON_THE_PC}
+        elif d.verdict == "allow" and (turned_back := specialist_redirect(messages, name, args)):
             result = turned_back
         elif d.verdict == "deny":
             result = {"error": f"blocked by policy: {d.reason}"}
