@@ -187,3 +187,68 @@ def test_phone_tasks_say_how_to_find_files(tmp_path, monkeypatch):
     conn.pick_up(wait=0)
     objective = store.claim()["spec"]["objective"]
     assert "hyphens or underscores" in objective and "never AppData" in objective and "under pdf-previews/" in objective
+
+
+def test_a_copy_inside_a_subfolder_is_removed_with_the_folder_made_for_it(tmp_path):
+    home, folder = _phone_folder(tmp_path)
+    kept_folder = folder / "reports"
+    kept_folder.mkdir()
+    time.sleep(2.6)
+    started = time.time()
+    _old(home / "Downloads" / "smara-test-certificate.pdf", b"fake certificate")
+    nested = _old(folder / ".reading-copy" / "deeper" / "smara-test-certificate.pdf", b"fake certificate")
+    in_old_folder = _old(kept_folder / "smara-test-certificate.pdf", b"fake certificate")
+    no_original = _old(folder / "work" / "only-here.pdf", b"nowhere else")
+    internal = _old(folder / ".smara" / "state.pdf", b"fake certificate")
+    removed = clean_up(str(folder), started, "What kind of document is it?", home)
+    assert sorted(removed) == [".reading-copy/deeper/smara-test-certificate.pdf", "reports/smara-test-certificate.pdf"]
+    assert not (folder / ".reading-copy").exists() and not nested.exists() and not in_old_folder.exists()
+    assert kept_folder.exists() and no_original.exists() and internal.exists()
+    assert (home / "Downloads" / "smara-test-certificate.pdf").exists()
+
+
+COMMAND = (r""""C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$target = Resolve-Path """
+           r"""-LiteralPath ".reading-copy'"\\smara-test-certificate.pdf\"; if ($true) { Remove-Item -LiteralPath $target.Path -Force }'""")
+
+
+def test_a_command_approval_leads_with_what_it_can_do():
+    card = native_hosted.describe("item/commandExecution/requestApproval", {"command": COMMAND})
+    first = card.split(chr(10))[0]
+    assert "can DELETE files" in first and "Remove-Item" not in first
+    assert "Files it names: smara-test-certificate.pdf" in card and "Full command:" in card
+    assert len(card) <= native_hosted.ASK_CHARS
+    long = native_hosted.describe("item/commandExecution/requestApproval", {"command": "del a.txt " + "x" * 3000})
+    assert len(long) <= native_hosted.ASK_CHARS and "see it on the PC" in long
+
+
+def test_command_words_never_promise_a_command_is_harmless():
+    effects = native_hosted.command_effects
+    assert "no delete, change or internet step" in effects("Get-ChildItem C:/Users -Recurse 2>$null")
+    assert "cannot check every effect" in effects("Get-Process | Sort-Object CPU")
+    assert "create or change" in effects("Get-Process > processes.txt")
+    assert "use the internet" in effects("Invoke-WebRequest https://example.com -OutFile a.zip")
+    assert "DELETE files, and create or change" in effects("Copy-Item a.txt b.txt; Remove-Item a.txt")
+    assert "HIDDEN" in effects("powershell -EncodedCommand SQBFAFgAIAAoAE4AZQB3AC0A")
+    for text in ("Remove-Item x", "rm -r x", "[IO.File]::Delete('x')", "python -c \"import shutil; shutil.rmtree('x')\"",
+                 "node -e \"require('fs').rmSync('x')\"", "cmd /c del x", "(Get-Item x).Delete()"):
+        assert "DELETE files" in effects(text), text
+
+
+def test_the_model_is_told_not_to_delete_its_own_copies(tmp_path, monkeypatch):
+    store, _, conn = setup(tmp_path, monkeypatch)
+    conn.pick_up(wait=0)
+    assert "do not delete them yourself" in store.claim()["spec"]["objective"]
+
+
+def test_file_names_are_listed_without_the_words_around_them():
+    effects = native_hosted.command_effects
+    assert effects("python report.py").endswith("Files it names: report.py")
+    assert effects('Remove-Item "C:/Docs/Smara test certificate.pdf"').endswith("Files it names: Smara test certificate.pdf")
+    assert effects("Copy-Item C:/a/one.pdf two.pdf").endswith("Files it names: one.pdf, two.pdf")
+
+
+def test_names_that_look_like_command_words_do_not_count():
+    for text in ("Get-Content .reading-copy/notes.md", "Get-Item C:/old-copy/del.txt", "Get-ChildItem -Filter *.md"):
+        assert "no delete, change or internet step" in native_hosted.command_effects(text), text
+    only_delete = native_hosted.command_effects("Remove-Item .reading-copy/a.pdf")
+    assert only_delete.startswith("run a command on your PC that can DELETE files.")

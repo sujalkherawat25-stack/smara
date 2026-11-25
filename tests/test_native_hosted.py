@@ -52,7 +52,8 @@ def test_a_phone_task_runs_as_a_goal_and_its_approval_and_result_go_back(tmp_pat
     request_id = store.pending(goal, {"id": 15, "method": "item/commandExecution/requestApproval", "params": {"command": ["dir", "C:\\Reports"]}})
     conn.relay()
     asked = server.sent("/t-1/ask")
-    assert asked == [{"request_id": request_id, "summary": "run a command on your PC: dir C:\\Reports"}]
+    assert asked == [{"request_id": request_id, "summary": "run a command on your PC. Smara recognised no delete, change or internet step in it, but it cannot "
+                      "check every effect." + chr(10) * 2 + "Full command: dir C:\\Reports"}]
 
     server.answers = [{"task_id": "t-1", "request_id": request_id, "kind": "approval", "answer": "allow"}]
     assert conn.apply_answers() == 1

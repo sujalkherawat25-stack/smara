@@ -7,7 +7,7 @@ const module = { exports: {} };
 const code = ts.transpileModule(readFileSync(new URL("../src/askCard.ts", import.meta.url), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 vm.runInNewContext(code, { module, exports: module.exports });
-const { askView, uploadWarning } = module.exports;
+const { askView, uploadWarning, commandWarning } = module.exports;
 
 test("a browser step reads as a plain question, and outward steps are marked", () => {
   const view = askView({ method: "mcpServer/elicitation/request", params: { serverName: "playwright",
@@ -23,7 +23,7 @@ test("a browser step reads as a plain question, and outward steps are marked", (
 test("commands, file changes and access requests each get their own wording", () => {
   const command = askView({ method: "item/commandExecution/requestApproval", params: { command: "python report.py", cwd: "C:/Shop", reason: "Build the report" } });
   assert.equal(command.title, "Run a command on this PC?");
-  assert.equal(command.summary, "Build the report");
+  assert.match(command.summary, /cannot check every effect[\s\S]*Smara's reason: Build the report/);
   assert.match(command.detail, /python report\.py[\s\S]*Folder: C:\/Shop/);
   assert.equal(askView({ method: "item/fileChange/requestApproval", params: {} }).title, "Change files in this project?");
   assert.match(askView({ method: "item/permissions/requestApproval", params: { permissions: { network: {} } } }).summary, /internet access/);
@@ -108,4 +108,21 @@ test("an upload says what leaves the PC and where it goes, on the PC as on the p
   assert.match(view.summary, /UPLOAD A PICTURE[\s\S]*page-001\.png[\s\S]*private details/);
   assert.equal(uploadWarning(request("pdf_inspect", "bill.pdf")), "");
   assert.equal(uploadWarning({ method: "item/fileChange/requestApproval", params: {} }), "");
+});
+
+test("a command approval on the PC leads with what the command can do", () => {
+  const request = command => ({ method: "item/commandExecution/requestApproval", params: { command } });
+  const deleting = commandWarning(request('powershell.exe -Command "Remove-Item .reading-copy\\smara-test-certificate.pdf"'));
+  assert.match(deleting, /can DELETE files\./);
+  assert.match(deleting, /Files it names: smara-test-certificate\.pdf$/);
+  assert.match(commandWarning(request("Get-ChildItem C:/Users 2>$null")), /cannot check every effect/);
+  assert.match(commandWarning(request("curl https://example.com > a.txt")), /create or change things on your PC, and use the internet/);
+  assert.match(commandWarning(request("powershell -enc SQBFAFgAIAAoAE4AZQB3AC0A")), /HIDDEN/);
+  assert.match(commandWarning(request("python report.py")), /Files it names: report\.py$/);
+  assert.match(commandWarning(request('del "C:/Docs/Smara test certificate.pdf"')), /Files it names: Smara test certificate\.pdf$/);
+  const view = askView(request("rm notes.txt"));
+  assert.equal(view.risky, true);
+  assert.match(view.summary, /DELETE files/);
+  assert.match(view.detail, /rm notes\.txt/);
+  assert.equal(commandWarning({ method: "item/fileChange/requestApproval", params: {} }), "");
 });

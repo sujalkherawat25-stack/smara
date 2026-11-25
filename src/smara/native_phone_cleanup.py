@@ -1,8 +1,8 @@
 """After a phone task: remove what Smara made only to read the owner's documents.
 
 Only two kinds of file are ever removed, both inside the phone tasks folder and both created during the task:
-pictures under pdf-previews/ (page pictures and any crops of them), and a copy of a file whose identical original is
-still on the PC. Anything else the task wrote, anything that existed before, and a copy with no matching original stay
+pictures under pdf-previews/ (page pictures and any crops of them), and a copy of a file (in the folder or any folder
+inside it) whose identical original is still on the PC. Anything else the task wrote, anything that existed before, and a copy with no matching original stay
 where they are.
 """
 from __future__ import annotations
@@ -114,11 +114,39 @@ def clean_up(workspace: str, since: float, task: str, home: Path | None = None) 
                 empty.rmdir()
             except OSError:
                 pass
-    for file in sorted(folder.iterdir()):
-        if file.is_symlink() or not file.is_file():
-            continue
+    emptied: set[Path] = set()
+    for file in _files_inside(folder):
         info = file.stat()
         # Made here during the task, but its content is older than the task: a copy that kept the original's date.
-        if _created(info) >= since - SLACK_S and info.st_mtime < since - SLACK_S and has_original(file, folder, home):
+        if (_created(info) >= since - SLACK_S and info.st_mtime < since - SLACK_S and info.st_size
+                and has_original(file, folder, home)):
+            before = len(removed)
             remove(file)
+            if len(removed) > before:
+                emptied.add(file.parent)
+    # A folder the task made only to hold such copies goes too, once it is empty.
+    for holder in sorted(emptied, key=lambda p: len(p.parts), reverse=True):
+        while holder != folder and holder.is_relative_to(folder):
+            try:
+                if _created(holder.stat()) < since - SLACK_S:
+                    break
+                holder.rmdir()
+            except OSError:
+                break
+            holder = holder.parent
     return removed
+
+
+def _files_inside(folder: Path):
+    """Ordinary files in the folder and below, not following links, not Smara's own state or the page pictures."""
+    seen = 0
+    for current, folders, files in os.walk(folder):
+        here = Path(current)
+        folders[:] = sorted(f for f in folders if f.lower() not in {".smara", ".git", "pdf-previews"}
+                            and not (here / f).is_symlink() and (here / f).resolve() == here / f)
+        for name in sorted(files):
+            seen += 1
+            if seen > MAX_LOOKED_AT:
+                return
+            if not (here / name).is_symlink():
+                yield here / name
