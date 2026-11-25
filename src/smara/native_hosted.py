@@ -21,7 +21,7 @@ from pathlib import Path
 
 import httpx
 
-from .native_phone_cleanup import clean_up
+from .native_phone_cleanup import clean_up, drop_stale_mentions
 
 POLL_S = 20
 CREDS_RETRY_S = 5
@@ -213,7 +213,13 @@ class HostedConnector:
                                   "file you make in this project folder. In your final JSON checkpoint, \"summary\" is the whole "
                                   "reply the owner reads on their phone: put the actual result in it (the list itself, the "
                                   "numbers, the answer; one item per line, under 3000 characters; more goes into a file here), "
-                                  "not a description of your work, then where any file is. The owner never sees evidence, plan "
+                                  "not a description of your work, then where any file is. To find a file by name, search "
+                                  "Downloads, Desktop and Documents first (top level, then deeper), matching the words of the "
+                                  "name with anything between them: a name given with spaces is often written with hyphens or "
+                                  "underscores. Search the rest of the user folder only if that finds nothing, and never "
+                                  "AppData. Put any picture you make only to read a document (page pictures, crops) under "
+                                  "pdf-previews/. Those pictures, and copies made only for reading, are removed after the "
+                                  "task, so do not say they are saved. The owner never sees evidence, plan "
                                   "or completed_steps, so never point to them. Leave out of the reply whatever the owner asked "
                                   "you not to include.)",
                      "success_criteria": "The owner's request is done on this PC, or it is clear exactly what blocked it."},
@@ -335,6 +341,7 @@ class HostedConnector:
             removed = clean_up(workspace, goal.get("created") or 0, owner_words)
         except OSError:
             removed = []                      # a file in use must never stop the result from reaching the owner
+        summary = drop_stale_mentions(summary, removed)
         outputs = [str(o) for o in checkpoint.get("outputs") or [] if str(o) not in removed]
         files = "\n\nFiles on your PC: " + ", ".join(outputs[:10]) if outputs else ""
         if removed:

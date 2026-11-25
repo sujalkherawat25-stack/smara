@@ -142,7 +142,29 @@ def html_text(text):
     return "\n".join(line.strip() for line in "".join(parser.parts).splitlines() if line.strip())
 
 
+LANGUAGE_NAMES = {"english": "en-IN", "hindi": "hi-IN", "bengali": "bn-IN", "tamil": "ta-IN", "telugu": "te-IN",
+                  "marathi": "mr-IN", "gujarati": "gu-IN", "kannada": "kn-IN", "malayalam": "ml-IN", "punjabi": "pa-IN",
+                  "odia": "od-IN", "urdu": "ur-IN", "assamese": "as-IN"}
+
+
+def language_code(value) -> str:
+    """"English", "en" or "en_in" as the code the service expects; anything unrecognised is returned unchanged."""
+    text = str(value or "").strip()
+    if not text:
+        return "en-IN"
+    low = text.lower().replace("_", "-")
+    if low in LANGUAGE_NAMES:
+        return LANGUAGE_NAMES[low]
+    short = {code.split("-")[0]: code for code in LANGUAGE_NAMES.values()}
+    if low in short:
+        return short[low]
+    if re.fullmatch(r"[a-z]{2,3}-[a-z]{2}", low):
+        return low.split("-")[0] + "-" + low.split("-")[1].upper()
+    return text
+
+
 async def digitise(workspace, file_path, language="en-IN", *, client=None, key=None, max_wait=30):
+    language = language_code(language)
     if not re.fullmatch(r"[a-z]{2,3}-[A-Z]{2}", language):
         raise DocumentError("Use a BCP-47 language such as en-IN or hi-IN.")
     filename, raw, mime = read_document(workspace, file_path)

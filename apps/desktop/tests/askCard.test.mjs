@@ -7,7 +7,7 @@ const module = { exports: {} };
 const code = ts.transpileModule(readFileSync(new URL("../src/askCard.ts", import.meta.url), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 vm.runInNewContext(code, { module, exports: module.exports });
-const { askView } = module.exports;
+const { askView, uploadWarning } = module.exports;
 
 test("a browser step reads as a plain question, and outward steps are marked", () => {
   const view = askView({ method: "mcpServer/elicitation/request", params: { serverName: "playwright",
@@ -95,4 +95,17 @@ test("a watch asks in plain words and says it stays quiet", () => {
   assert.match(card.title, /watch for a mail from the GST portal/);
   assert.match(card.summary, /Checks every 15 minutes/);
   assert.match(card.detail, /Stays quiet/);
+});
+
+test("an upload says what leaves the PC and where it goes, on the PC as on the phone", () => {
+  const request = (tool, path) => ({ method: "mcpServer/elicitation/request", params: { serverName: "smara_readers",
+    message: `Allow the smara_readers MCP server to run tool "${tool}"?`, _meta: { codex_approval_kind: "mcp_tool_call", tool_params: { path } } } });
+  const file = uploadWarning(request("document_ocr", "bill.pdf"));
+  assert.match(file, /UPLOAD A FILE[\s\S]*Sarvam[\s\S]*bill\.pdf[\s\S]*whole document[\s\S]*charge/);
+  const view = askView(request("image_analyze", "pdf-previews/bill/page-001.png"));
+  assert.equal(view.title, "Upload a picture to Sarvam?");
+  assert.equal(view.risky, true);
+  assert.match(view.summary, /UPLOAD A PICTURE[\s\S]*page-001\.png[\s\S]*private details/);
+  assert.equal(uploadWarning(request("pdf_inspect", "bill.pdf")), "");
+  assert.equal(uploadWarning({ method: "item/fileChange/requestApproval", params: {} }), "");
 });

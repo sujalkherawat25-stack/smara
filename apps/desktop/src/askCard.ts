@@ -94,6 +94,20 @@ function accessView(params: Record<string, unknown>): AskView {
       + "Sending, paying, deleting and signing in still ask you each time. It never types passwords, OTPs or card numbers.", risky: false };
 }
 
+/** An approval that sends a file off this PC, in words the owner can decide on (the phone shows the same); "" otherwise. */
+export function uploadWarning(request: { method: string; params: Record<string, unknown> }): string {
+  const p = request.params;
+  if (request.method !== "mcpServer/elicitation/request" || str(p.serverName) !== "smara_readers") return "";
+  const tool = /tool\s+"?([A-Za-z0-9_.-]+)"?/.exec(str(p.message))?.[1] ?? "";
+  if (tool !== "image_analyze" && tool !== "document_ocr") return "";
+  const meta = (p._meta && typeof p._meta === "object" ? p._meta : {}) as Record<string, unknown>;
+  const given = (meta.tool_params && typeof meta.tool_params === "object" ? meta.tool_params : {}) as Record<string, unknown>;
+  const path = str(given.path).slice(0, 300) || "an unnamed file";
+  return tool === "image_analyze"
+    ? `UPLOAD A PICTURE from your PC to Sarvam, an outside AI service, to read it: ${path}\nThe whole picture is sent, including any names, numbers or other private details on it. Sarvam may charge for this.`
+    : `UPLOAD A FILE from your PC to Sarvam, an outside AI service, to read its text: ${path}\nThe whole document is sent, including any private details in it. Sarvam may charge for this.`;
+}
+
 export function askView(request: { method: string; params: Record<string, unknown> }): AskView {
   const p = request.params;
   const reason = str(p.reason);
@@ -114,6 +128,9 @@ export function askView(request: { method: string; params: Record<string, unknow
   const server = str(p.serverName);
   const meta = (p._meta && typeof p._meta === "object" ? p._meta : {}) as Record<string, unknown>;
   const params = (meta.tool_params && typeof meta.tool_params === "object" ? meta.tool_params : {}) as Record<string, unknown>;
+  const upload = uploadWarning(request);
+  if (upload) return { kind: "tool", title: /A PICTURE/.test(upload) ? "Upload a picture to Sarvam?" : "Upload a file to Sarvam?",
+    summary: upload, detail: str(params.question).slice(0, 2000), risky: true };
   const team = teamView(server, str(meta.tool_name) || toolFromTitle(str(meta.tool_title)), params);
   if (team) return team;
   if (str(meta.tool_name) === "computer_request_access" || /computer_request_access/.test(message)) return accessView(params);

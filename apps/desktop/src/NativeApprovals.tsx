@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { goalRequest, type Goal, type GoalList } from "./goalApi";
 import { supportsApproval } from "./nativeView";
 import { approvalText } from "./taskBoardView";
+import { uploadWarning } from "./askCard";
 import { askedLabel, codeLooksRight, outcomeText, sharingText, toolLabel, type HostedList, type HostedStatus, type Outcome, type SharingStatus } from "./approvalsView";
 
 const sharing = <T,>(action: string, values: Record<string, unknown> = {}) =>
@@ -91,7 +92,7 @@ export default function NativeApprovals({ chatWaiting, onShowChat, onCount }: { 
     <h3>Background tasks <small>{tasks.length ? `${tasks.length} waiting` : "none waiting"}</small></h3>
     {tasks.map(goal => goal.approvals!.map(request => <article key={goal.id + request.id} className="inbox-card">
       <div className="task-card-head"><span className="task-agent">{goal.spec.objective.slice(0, 70)}</span></div>
-      <p className="inbox-text">{approvalText(request)}</p>
+      <p className="inbox-text" style={{ whiteSpace: "pre-line" }}>{uploadWarning(request) || approvalText(request)}</p>
       <div className="task-actions">
         <button className="primary" disabled={pending || !supportsApproval(request.method, request.params)} onClick={() => void run(async () => { await goalRequest("respond", { id: goal.id, request_id: request.id, allow: true }); setNotice("Approved. The task carries on."); })}>Approve</button>
         <button disabled={pending || !supportsApproval(request.method, request.params)} onClick={() => void run(async () => { await goalRequest("respond", { id: goal.id, request_id: request.id, allow: false }); setNotice("Denied."); })}>Deny</button>
