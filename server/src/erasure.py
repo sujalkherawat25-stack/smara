@@ -19,6 +19,7 @@ import re
 from src import tenants
 from src.bridge.continuum import scope_user
 from src.ingest import owner_files
+from src.loop.whatsapp import text_message
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ ASK_FILES = (
 # Every table that holds a shop's rows through tenant_id, children before parents. test_erasure checks this list is complete.
 TENANT_TABLES = (
     "agent_sessions", "agent_tasks", "bridge_jobs", "bridge_devices", "bridge_pairings", "browser_tasks", "chat_messages",
-    "customer_routing", "data_requests", "digest_log", "digest_optout", "proactive_optin", "pc_task_asks", "pc_tasks", "llm_usage", "outbound_messages", "owner_inbound_log", "owner_prefs",
+    "customer_routing", "data_requests", "digest_log", "digest_optin", "digest_optout", "proactive_optin","pc_task_asks", "pc_tasks", "llm_usage", "outbound_messages", "owner_inbound_log", "owner_prefs",
     "owner_skills", "desktop_logins", "owner_desktop_tokens", "owner_desktop_pairings", "owner_memory_sharing", "payables", "shop_facts", "tally_syncs", "tenant_keys", "tenant_secrets", "wa_link_daily_sends",
     "wa_links", "whatsapp_connect_links", "whatsapp_connections", "obligations", "parties",
 )
@@ -136,12 +137,21 @@ async def erase_account(app, tenant_id: str) -> str | None:
     return None
 
 
-async def _farewell(app, tenant, channel: str) -> None:
-    text = ("Aapka account aur saara data (shop, customers, rakam, messages, files, yaaddasht) hata diya gaya hai. "
+FAREWELL = ("Aapka account aur saara data (shop, customers, rakam, messages, files, yaaddasht) hata diya gaya hai. "
             "Dobara use karna ho to naya invite chahiye. Shukriya.\n(Your account and all data are deleted. Thank you.)")
-    tg = getattr(app.state, "tg", None)
-    if channel == "telegram" and tg is not None and tenant.telegram_chat_id:
-        await tg.send({"chat_id": tenant.telegram_chat_id, "text": text})
+
+
+async def _say(app, tenant, channel: str, text: str) -> None:
+    """One plain message on the channel they asked on. Sent directly: after a deletion there is no account left to log it
+    against. Never raises: what was done is done, and an error here must not make the same message run again."""
+    try:
+        if channel == "telegram":
+            if getattr(app.state, "tg", None) is not None and tenant.telegram_chat_id:
+                await app.state.tg.send({"chat_id": tenant.telegram_chat_id, "text": text})
+        elif getattr(app.state, "wa", None) is not None:
+            await app.state.wa.send(text_message(tenant.owner_phone, text))
+    except Exception:
+        log.exception("could not send the account deletion reply")
 
 
 async def handle_confirm(app, tenant_id: str, channel: str) -> None:
@@ -149,12 +159,8 @@ async def handle_confirm(app, tenant_id: str, channel: str) -> None:
     tenant = await tenants.by_id(app.state.pool, tenant_id)
     if tenant is None:
         return
-    tg = getattr(app.state, "tg", None)
     reason = await erase_account(app, tenant.id)
-    if reason is None:
-        await _farewell(app, tenant, channel)
-    elif channel == "telegram" and tg is not None and tenant.telegram_chat_id:
-        await tg.send({"chat_id": tenant.telegram_chat_id, "text": reason})
+    await _say(app, tenant, channel, FAREWELL if reason is None else reason)
 
 
 async def delete_all_files(app, tenant_id: str) -> str:

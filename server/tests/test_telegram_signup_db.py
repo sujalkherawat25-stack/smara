@@ -120,6 +120,6 @@ async def test_telegram_messages_count_towards_the_daily_limit(pool):
     async with pool.connection() as c:
         await c.execute("update tenants set telegram_chat_id = %s where id = %s", (CHAT, t.id))
     for _ in range(3):
-        await tgmod.handle_update(app, msg("help"))
-    assert (await one(pool, "select count(*) as n from owner_inbound_log where tenant_id = %s", t.id))["n"] == 3
+        await tgmod.handle_update(app, msg("what do I owe"))
+    assert (await one(pool, "select count(*) as n from owner_inbound_log where tenant_id = %s", t.id))["n"] == 2    # the one turned back is not counted
     assert "limit" in last(app)["text"].lower()

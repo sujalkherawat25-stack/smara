@@ -71,9 +71,7 @@ async def dispatch(app, msg: InboundMessage) -> None:
                     app.state.wa_last = {}
                 app.state.wa_last[str(owner.id)] = (msg.sender, msg.wamid, msg.number_id)
             owner = await tenants.by_id(pool, owner.id)
-            if msg.channel == "whatsapp" and not msg.button_id:
-                await limits.record(pool, owner.id, limits.kind_of(msg))
-            if (stop := await limits.check(app, owner, msg)):
+            if (stop := await limits.admit(app, owner, msg)):
                 await send_to_owner(app, owner, text_message(owner.owner_phone, stop), kind="owner_text",
                                     reply_channel=msg.channel, number_id=msg.number_id or None)
             else:

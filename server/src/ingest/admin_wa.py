@@ -9,6 +9,9 @@
     /waitlist                     who asked for access and is not invited yet
     /invites                      codes that can still be used
     /revoke SMA-AB12              switch a code off
+    /limit 9000000001             what that account used in the last 24 hours, with buttons to give it more
+    /limit 9000000001 3 7         3 times the normal daily limits for 7 days (2 to 10 times, 1 to 90 days; "normal" ends it).
+                                  Smara sends such a button by itself when someone is stopped by a limit
     /admin                        this list
 Only a message from an admin number is treated as a command; from anyone else the same text is just a message.
 """
@@ -20,16 +23,19 @@ from uuid import uuid4
 
 import httpx
 
-from src import tenants
+from src import limits, tenants
 from src.config import admin_wa_number
 from src.ingest import admin_tg, onboarding
 from src.loop.outbound import record
 from src.loop.owner_channel import send_to_owner
 from src.loop.whatsapp import template_message, text_message
+from src.ops_alert import ops_alert
 
 log = logging.getLogger(__name__)
-COMMANDS = ("approve", "invite", "waitlist", "invites", "revoke", "admin")
+COMMANDS = ("approve", "invite", "waitlist", "invites", "revoke", "limit", "admin")
 APPROVE_BUTTON = "adm:approve:"      # followed by the number; only ever acted on when an admin number sends it
+LIMIT_BUTTON = "adm:limit:"          # followed by <account>:<times>:<days>; the same rule
+LIMIT_NAMES = {"msgs": "messages", "files": "files", "tokens": "AI tokens"}
 WINDOW = timedelta(hours=23, minutes=50)      # a little inside WhatsApp's 24 hours
 HELP = ("Smara admin (WhatsApp):\n"
         "• /waitlist : jinhone access maanga; list me naam chun kar approve kijiye\n"
@@ -38,6 +44,8 @@ HELP = ("Smara admin (WhatsApp):\n"
         "• /invite 7877787675 naam : code banakar us number par Smara khud bhej deta hai (agar unhone pichhle 24 ghante me likha ho)\n"
         "• /invites : jo codes abhi chal sakte hain\n"
         "• /revoke CODE : ek code band karta hai\n"
+        "• /limit 9000000001 : us user ka 24 ghante ka istemaal, aur limit badhane ke button\n"
+        "• /limit 9000000001 3 7 : 7 din ke liye 3 guna limit ('/limit 9000000001 normal' se wapas)\n"
         "Har code banne ke 20 ghante baad band ho jata hai aur sirf ek insaan ke liye chalta hai.")
 
 
@@ -66,6 +74,8 @@ async def handle(app, msg) -> bool:
     name = cmd.lstrip("/").lower()
     if (msg.button_id or "").startswith(APPROVE_BUTTON):
         cmd, name, rest = "/approve", "approve", msg.button_id.removeprefix(APPROVE_BUTTON)
+    elif (msg.button_id or "").startswith(LIMIT_BUTTON):
+        cmd, name, rest = "/limit", "limit", " ".join(msg.button_id.removeprefix(LIMIT_BUTTON).rsplit(":", 2))
     if not cmd.startswith("/") or name not in COMMANDS:
         if await tenants.by_owner_phone(app.state.pool, msg.sender):
             return False                      # an admin who also has a Smara account chats with Smara as usual
@@ -83,6 +93,8 @@ async def handle(app, msg) -> bool:
             await _invites(app, msg)
         elif name == "revoke":
             await _revoke(app, msg, rest)
+        elif name == "limit":
+            await _limit(app, msg, rest)
         else:
             await _reply(app, msg.sender, HELP, msg.number_id)
     except Exception:
@@ -143,7 +155,8 @@ async def _tell_approved(app, tenant, phone: str, name: str, wrote_recently: boo
     payload = text_message(phone, approved_message(name))
     if wrote_recently:
         try:
-            await send_to_owner(app, tenant, payload, kind="owner_text", reply_channel="whatsapp")
+            # kept like a note: if WhatsApp refuses it later, it is sent again when they next write
+            await send_to_owner(app, tenant, payload, kind="owner_note", reply_channel="whatsapp")
             return "now"
         except httpx.HTTPError:
             log.warning("approval message not accepted for %s", phone[-4:])
@@ -235,6 +248,114 @@ async def _revoke(app, msg, rest: str) -> None:
         cur = await conn.execute("UPDATE invite_codes SET revoked_at = now() WHERE code = %s AND revoked_at IS NULL RETURNING code", (code,))
         done = await cur.fetchone()
     await _reply(app, msg.sender, f"{code} band kar diya." if done else f"{code} nahi mila ya pehle se band hai.", msg.number_id)
+
+
+# ---------------------------------------------------------------- daily limits
+
+LIMIT_HELP = ("Aise likhiye:\n/limit 9000000001 : istemaal dekhiye\n"
+              f"/limit 9000000001 3 7 : 7 din ke liye 3 guna (2 se {limits.MAX_TIMES} guna, 1 se {limits.MAX_DAYS} din)\n"
+              "/limit 9000000001 normal : wapas normal")
+
+
+def _limit_args(rest: str) -> tuple[str, int | None, int] | None:
+    """(account, times or None to only look, days) from '9000000001', '+91 90000 00001 3 7' or 'tg123 normal'; None if unclear."""
+    tokens = rest.split()
+    for k in (2, 1, 0):
+        if k >= len(tokens):
+            continue
+        head, opts = tokens[:len(tokens) - k], [t.lower() for t in tokens[len(tokens) - k:]]
+        if k and not re.fullmatch(r"\d{1,2}x?|normal", opts[0]):
+            continue
+        if k == 2 and not re.fullmatch(r"\d{1,2}d?", opts[1]):
+            continue
+        account = head[0].lower() if len(head) == 1 and re.fullmatch(r"tg\d+", head[0].lower()) else _number(" ".join(head))
+        if account is None:
+            continue
+        times = None if not k else 1 if opts[0] == "normal" else int(opts[0].rstrip("x"))
+        return account, times, int(opts[1].rstrip("d")) if k == 2 else 1
+    return None
+
+
+def _lakh(n: int) -> str:
+    return f"{n / 100_000:.1f} lakh"
+
+
+def _who(tenant) -> str:
+    phone = tenant.owner_phone
+    return f"{tenant.name} ({'+' + phone if phone.isdigit() else phone})"
+
+
+def _usage_line(used: dict, allowed: dict) -> str:
+    return (f"messages {used['msgs']}/{allowed['msgs']}, files {used['files']}/{allowed['files']}, "
+            f"AI tokens {_lakh(used['tokens'])}/{_lakh(allowed['tokens'])}")
+
+
+def _button_message(to: str, body: str, buttons: list[tuple[str, str]]) -> dict:
+    return {"messaging_product": "whatsapp", "to": to, "type": "interactive", "interactive": {
+        "type": "button", "body": {"text": body[:1024]},
+        "action": {"buttons": [{"type": "reply", "reply": {"id": i, "title": t[:20]}} for i, t in buttons[:3]]}}}
+
+
+async def _limit(app, msg, rest: str) -> None:
+    parsed = _limit_args(rest)
+    if parsed is None:
+        return await _reply(app, msg.sender, LIMIT_HELP, msg.number_id)
+    account, times, days = parsed
+    pool, s = app.state.pool, app.state.settings
+    tenant = await tenants.by_owner_phone(pool, account)
+    if tenant is None:
+        return await _reply(app, msg.sender, f"{account} ka koi account nahi hai.", msg.number_id)
+    if times is None:
+        now_has = (f"{limits.times(tenant)}x, {admin_tg._till(tenant.limit_until)} tak" if limits.times(tenant) > 1
+                   else "normal limit")
+        if tenant.limits_exempt:
+            now_has = "is account par koi limit nahi hai"
+        body = (f"{_who(tenant)}\nPichhle 24 ghante: "
+                f"{_usage_line(await limits.usage(pool, tenant.id), limits.allowance(s, tenant))}\nAbhi: {now_has}.")
+        choices = [(f"{LIMIT_BUTTON}{account}:2:1", "2x, 24 ghante"), (f"{LIMIT_BUTTON}{account}:2:30", "2x, 30 din"),
+                   (f"{LIMIT_BUTTON}{account}:1:0", "Normal limit")]
+        return await app.state.wa.send(_button_message(msg.sender, body, choices), number_id=msg.number_id or None)
+    if not 1 <= times <= limits.MAX_TIMES or (times > 1 and not 1 <= days <= limits.MAX_DAYS):
+        return await _reply(app, msg.sender, LIMIT_HELP, msg.number_id)
+    stopped = bool(tenant.limit_alerted_at) and datetime.now(timezone.utc) - tenant.limit_alerted_at < timedelta(hours=24)
+    until = datetime.now(timezone.utc) + timedelta(days=days) if times > 1 else None
+    async with pool.connection() as conn:       # after a change, the next time they are stopped is news again
+        await conn.execute("UPDATE tenants SET limit_times = %s, limit_until = %s, limit_alerted_at = NULL WHERE id = %s",
+                           (times, until, tenant.id))
+    tenant = await tenants.by_id(pool, tenant.id)
+    if times == 1:
+        return await _reply(app, msg.sender, f"{_who(tenant)}: wapas normal limit.", msg.number_id)
+    allowed, still = limits.allowance(s, tenant), await limits.reached(pool, s, tenant)
+    told = ""
+    if stopped and still is None:                # they were turned back in the last day: let them know they can carry on
+        try:
+            await send_to_owner(app, tenant, text_message(tenant.owner_phone, "Your Smara limit has been raised. You can carry on."),
+                                kind="owner_note", reply_channel=tenant.owner_last_channel or "whatsapp")
+            told = " Unhe bata diya hai."
+        except Exception:
+            log.warning("could not tell account %s that its limit was raised", tenant.id)
+    warn = (f"\n⚠️ Ye allowance bhi poora ho chuka hai ({LIMIT_NAMES[still.what]} {still.used}/{still.limit}). Zyada guna dijiye."
+            if still else "")
+    await _reply(app, msg.sender, f"✅ {_who(tenant)}: {times}x limit {admin_tg._till(until)} tak. Har 24 ghante me "
+                                  f"{allowed['msgs']} messages, {allowed['files']} files, {_lakh(allowed['tokens'])} AI tokens."
+                                  f"{told}{warn}", msg.number_id)
+
+
+async def tell_admins_about_limit(app, tenant, hit) -> bool:
+    """Someone was stopped by a daily limit. True if at least one admin channel took the message."""
+    used, cap = (_lakh(hit.used), _lakh(hit.limit)) if hit.what == "tokens" else (hit.used, hit.limit)
+    about = (f"⚠️ {_who(tenant)} ki daily limit poori ho gayi: {LIMIT_NAMES[hit.what]} {used}/{cap}. "
+             f"Lagbhag {limits.when_text(hit.free_at, hinglish=True)} IST tak ruke rahenge.")
+    offer = min(max(limits.times(tenant) * 2, 2), limits.MAX_TIMES)
+    told = await ops_alert(app, f"limit-{tenant.id}", f"{about}\nBadhane ke liye admin WhatsApp par: /limit {tenant.owner_phone}")
+    for number in admin_numbers(app.state.settings):
+        try:
+            await app.state.wa.send(_button_message(number, f"{about}\nButton dabaiye, ya /limit {tenant.owner_phone}",
+                                                    [(f"{LIMIT_BUTTON}{tenant.owner_phone}:{offer}:1", f"{offer}x, 24 ghante")]))
+            told = True
+        except Exception:
+            log.info("WhatsApp admin %s not reachable now (outside the 24h window)", number[-4:])
+    return told
 
 
 async def tell_admins_about_waitlist(app, phone: str, name: str, text: str) -> None:

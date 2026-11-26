@@ -510,7 +510,7 @@ async def build_system(app, tenant, trust: str, session_id: str | None = None, q
     style = ""
     if trust != "UNTRUSTED":       # last, so it is the freshest instruction the model reads before answering
         try:
-            style = "\n\n" + prefs.prompt_block(await prefs.get(app.state.pool, tenant.id))
+            style = "\n\n" + prefs.prompt_block(await prefs.get(app.state.pool, tenant.id), (query or "") if owner_run else "")
         except Exception:
             log.info("reply setting unavailable for %s", tenant.id)
     return base + "\n" + ROLE[trust] + style

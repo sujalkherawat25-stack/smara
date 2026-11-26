@@ -146,8 +146,7 @@ async def connect_page(request: Request, t: str = ""):
                                            "for a new one.", True), status_code=404)
     s = app.state.settings
     if not configured(s):
-        return HTMLResponse(_page(tenant.name, {}, "Connecting your own number is not switched on yet. We will tell you "
-                                                   "when it is.", True))
+        return HTMLResponse(_page(tenant.name, {}, "Connecting your own number is not switched on yet.", True))
     cfg = {"token": t, "app_id": s.meta_app_id, "config_id": s.meta_es_config_id, "version": GRAPH_VERSION}
     return HTMLResponse(_page(tenant.name, cfg, "Takes about two minutes. Keep your phone nearby for the code Meta sends.", False))
 

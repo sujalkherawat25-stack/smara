@@ -245,9 +245,7 @@ async def _owner(app, tenant, msg: InboundMessage) -> None:
     from src.loop.whatsapp import text_message
 
     await tenants.touch_owner_inbound(app.state.pool, tenant.id, "telegram")   # approvals now follow the owner here
-    if not msg.button_id:                       # the same daily limits as on WhatsApp; button taps are never limited
-        await limits.record(app.state.pool, tenant.id, limits.kind_of(msg))
-    if (stop := await limits.check(app, tenant, msg)):
+    if (stop := await limits.admit(app, tenant, msg)):          # the same daily limits as on WhatsApp
         await send_to_owner(app, tenant, text_message(tenant.owner_phone, stop), kind="owner_text", reply_channel="telegram")
     else:
         await handle_owner(app, tenant, msg)

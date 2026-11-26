@@ -11,7 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 router = APIRouter()
-CONTACT = "Message 'delete my data' to Smara on Telegram, then confirm with DELETE MY ACCOUNT"
+CONTACT = "Message 'delete my data' to Smara on WhatsApp (or Telegram, if you use Smara there), then confirm with DELETE MY ACCOUNT"
 EMAIL = "hello@syntarus.com"
 UPDATED = "November 2026"
 
@@ -103,11 +103,13 @@ they have agreed to hear from the business on WhatsApp. A customer can reply STO
 <li>We do not use customer details for anything other than the business's own messages: no marketing, no sharing between businesses.</li></ul>
 <h2>Who processes it</h2>
 <p>Our server in India; an AI model provider (Sarvam), which reads message text and the text of files and photos, and turns voice notes into text,
-to answer; Syntarus's own memory service, which keeps notes and promises; WhatsApp (Meta), which delivers messages and files; and Telegram, which delivers messages and files when the owner
-chats with Smara there. Customers of a business are only ever messaged on WhatsApp.
+to answer; Syntarus's own memory service, which keeps notes and promises; WhatsApp (Meta), which delivers messages and files; Telegram, which delivers messages and files when the owner
+chats with Smara there; and, when you ask Smara to look something up, web search engines and the websites it opens, which receive the search words.
+Customers of a business are only ever messaged on WhatsApp.
 We do not sell data or use it for advertising.</p>
 <h2>How long</h2>
-<p>Until the business leaves Smara or asks us to delete it. Nightly backups are kept for 7 days.</p>
+<p>Until the business leaves Smara or asks us to delete it. Nightly backups on our server are kept for 7 days. Encrypted copies of them,
+kept away from the server for disaster recovery, are removed after about two months.</p>
 <h2>Your rights</h2>
 <p>You can see your data and ask us to delete it. """ + CONTACT + """, or open the <a href="data-deletion">data deletion page</a>.
 You can also write to <a href="mailto:""" + EMAIL + """">""" + EMAIL + """</a>.</p>
@@ -142,12 +144,13 @@ Smara is not a financial, legal or tax adviser.</p>
 async def data_deletion(request: Request):
     return _shell(request, "Delete your Smara data", """
 <p>You can delete everything Smara holds about you, yourself, at any time:</p>
-<ol><li>Open Telegram and message Smara: <strong>delete my data</strong>. Smara explains what will go.</li>
+<ol><li>Open WhatsApp (or Telegram, if you use Smara there) and message Smara: <strong>delete my data</strong>. Smara explains what will go.</li>
 <li>To confirm, send exactly <strong>DELETE MY ACCOUNT</strong> (capital letters, typed). Nothing softer deletes anything.</li>
 <li>Smara then deletes, right away, your shop, customers, dues, messages, files, saved skills and everything its memory service
 holds about you, and tells you it is done. It cannot be undone. If the memory service cannot be reached, nothing is deleted and
 Smara asks you to try again.</li>
-<li>Backups made before that are removed automatically within 7 days.</li></ol>
+<li>Backups made before that are removed automatically: those on our server within 7 days, and the encrypted copies kept
+away from it within about two months.</li></ol>
 <p>To free file space without deleting the account, send <strong>files</strong> to see your files and <strong>delete 3</strong> to remove one
 (restorable for 30 days). To remove all kept files, send <strong>delete all files</strong> and confirm with <strong>DELETE ALL FILES</strong>.</p>
 <p>A customer of a shop who wants their number removed can reply <strong>STOP</strong> to any message, and that shop will not message them again.</p>""")

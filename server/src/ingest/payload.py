@@ -44,6 +44,31 @@ def verify_signature(app_secret: str, raw_body: bytes, header: str | None) -> bo
     return hmac.compare_digest(expected, header.removeprefix("sha256="))
 
 
+def _line(value) -> str:
+    return " ".join(str(value or "").split())[:120]
+
+
+def shared_text(m: dict) -> str:
+    """A shared contact or location, or a tapped template button, as the words a person would have typed. '' for others."""
+    kind = m.get("type")
+    if kind == "contacts":
+        cards = []
+        for c in (m.get("contacts") or [])[:10]:
+            numbers = ", ".join(_line(p.get("phone")) for p in (c.get("phones") or [])[:3] if p.get("phone"))
+            cards.append(f"{_line((c.get('name') or {}).get('formatted_name')) or 'no name'}: {numbers or 'no number'}")
+        return "[Shared contact] " + "; ".join(cards) if cards else ""
+    if kind == "location":
+        place = m.get("location") or {}
+        bits = [_line(place.get("name")), _line(place.get("address"))]
+        lat, lng = place.get("latitude"), place.get("longitude")
+        if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+            bits.append(f"https://maps.google.com/?q={lat},{lng}")
+        return "[Shared location] " + ", ".join(b for b in bits if b) if any(bits) else ""
+    if kind == "button":
+        return _line((m.get("button") or {}).get("text"))
+    return ""
+
+
 def parse_messages(payload: dict) -> list[InboundMessage]:
     out: list[InboundMessage] = []
     for entry in payload.get("entry", []):
@@ -57,7 +82,7 @@ def parse_messages(payload: dict) -> list[InboundMessage]:
                     wamid=m.get("id", ""),
                     sender=normalize_phone(m.get("from", "")),
                     kind=kind,
-                    text=(m.get("text") or {}).get("body", ""),
+                    text=(m.get("text") or {}).get("body", "") or shared_text(m),
                     media_id=(m.get(kind) or {}).get("id") if kind in MEDIA_KINDS else None,
                     caption=(m.get(kind) or {}).get("caption", "") if kind in ("image", "document", "video") else "",
                     filename=(m.get(kind) or {}).get("filename", "") if kind == "document" else "",
