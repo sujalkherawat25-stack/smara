@@ -411,6 +411,10 @@ def manage(request):
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
+    # Every mode of the packaged engine speaks UTF-8. A frozen program ignores PYTHONIOENCODING and takes the Windows code
+    # page, where a dash in a tool's reply is unreadable to the app, a rupee sign stops the tool and Hindi arrives broken.
+    from .native_runtime import configure_protocol_stdio
+    configure_protocol_stdio(sys.stdin, sys.stdout)
     if args[:1] == ["--native-pdf"]:
         from .native_pdf import main as pdf_main
         return pdf_main(args[1:])
