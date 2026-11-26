@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 
-from .native_goals import ACTIVE, MAX_PARALLEL, GoalStore
+from .native_goals import ACTIVE, MAX_PARALLEL, GoalStore, employee_name
 
 
 MAX_CONCURRENT_GOALS = MAX_PARALLEL     # upper bound of the worker pool; the owner's setting (store.max_parallel) decides
@@ -46,7 +46,12 @@ def goal_instructions(spec, base):
         return base
     from .native_skills import brief
     return (base + f"\n\nYou are {agent['name']}, the shop's {agent.get('role') or 'assistant'}. "
-            + str(agent.get("instructions") or "")[:4000] + "\n\n" + brief(agent["id"]))
+            + str(agent.get("instructions") or "")[:4000] + "\n\n" + brief(agent["id"]) + "\n\n" + REPORT_NOTE)
+
+
+# Whoever waits for this job (the next employee, or the task that handed it over) reads the summary, not the steps.
+REPORT_NOTE = ('In your final checkpoint, "summary" is your report and is all the others get: put the actual results in it '
+               '(the figures with their names, the list, the answer), not just a description of what you did.')
 
 _FAILURE_STAGE_LABELS = {
     "load_provider_profile": "loading the model profile",
@@ -696,7 +701,14 @@ def execute_cycle(store, goal, *, endpoint=None, session_factory=NativeGoalSessi
                 session.close()
         # Keep project ownership until native child/tool cleanup has finished.
         phase = "save_checkpoint"
-        store.finish(goal, checkpoint, state, checkpoint["summary"], [item["id"] for item in feedback])
+        # A task that handed jobs over is not done, whatever it called itself: it lets go of the project here (a job may
+        # be unable to start until it does) and runs again with the reports, to give the owner one answer.
+        handed = store.unreported(goal["id"], goal.get("reported") or ())
+        if handed:
+            names = ", ".join(dict.fromkeys(employee_name(job["spec"]) for job in handed))
+            store.finish(goal, checkpoint, "queued", f"Waiting for {names} to report", [item["id"] for item in feedback], waiting=True)
+        else:
+            store.finish(goal, checkpoint, state, checkpoint["summary"], [item["id"] for item in feedback])
     except InterruptedError:
         store.finish(goal, partial_checkpoint(session, goal, time.monotonic() - started), "paused", "Supervisor stopped; resume explicitly")
     except Exception as exc:
