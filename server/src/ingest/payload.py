@@ -63,7 +63,7 @@ def parse_messages(payload: dict) -> list[InboundMessage]:
                     filename=(m.get(kind) or {}).get("filename", "") if kind == "document" else "",
                     number_id=number_id,
                     mime=(m.get(kind) or {}).get("mime_type", "") if kind in MEDIA_KINDS else "",
-                    button_id=((m.get("interactive") or {}).get("button_reply") or {}).get("id"),
+                    button_id=(((i := m.get("interactive") or {}).get("button_reply") or i.get("list_reply")) or {}).get("id"),
                     reply_to=(m.get("context") or {}).get("id", ""),
                     profile_name=names.get(m.get("from", ""), ""),
                 )
