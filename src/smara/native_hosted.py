@@ -8,7 +8,8 @@ out and only sees its own shop's tasks:
   owner's active model, project-editing access and the PC's apps and browser;
 - every approval that goal needs goes to the owner's chat as Allow / Deny, and a question it asks (such as a one-time
   code) is asked there too; the answers come back through ``/bridge/tasks/answers``;
-- when the goal finishes, its summary goes back to the chat.
+- when the goal finishes, its summary goes back to the chat. Jobs it handed to employees ask for their approvals in the
+  same chat, under their names, and the goal reports only after they have.
 
 Everything the owner sees on the PC (the goal, its activity and outputs) stays in Smara Desktop as usual."""
 from __future__ import annotations
@@ -21,6 +22,7 @@ from pathlib import Path
 
 import httpx
 
+from .native_goals import employee_name
 from .native_phone_cleanup import clean_up, drop_stale_mentions
 
 POLL_S = 20
@@ -278,21 +280,31 @@ class HostedConnector:
     # ---- what the goals ask and finish with goes out
     def relay(self) -> None:
         with self.store.connect() as db:
-            mapping = self.store.meta(db, "hosted_tasks", {})
             cursor = self.store.meta(db, "hosted_event_cursor", 0)
             rows = db.execute("SELECT * FROM goal_events WHERE seq>? ORDER BY seq LIMIT 100", (cursor,)).fetchall()
         for row in rows:
-            task_id = mapping.get(row["goal_id"])
+            # Read for each event: once a task has reported, nothing more may be asked under it.
+            with self.store.connect() as db:
+                mapping = self.store.meta(db, "hosted_tasks", {})
+                task_id = next((mapping[g] for g in self.store.lineage(row["goal_id"], db) if g in mapping), None)
             if task_id:
                 body = json.loads(row["body"])
                 if row["kind"] == "awaiting_approval" and body.get("request_id"):
                     self.ask(task_id, row["goal_id"], body["request_id"])
                 elif row["kind"] == "paused" and self.out_of_allowance(row["goal_id"]):
                     self.ask_for_more(task_id, row["goal_id"])
-                elif row["kind"] in DONE:
+                elif row["kind"] in DONE and row["goal_id"] in mapping:   # a handed-over job reports to its task, not the phone
                     self.finish(task_id, row["goal_id"], row["kind"], body)
             with self.store.connect() as db:          # one event at a time, so a crash repeats at most one (the server ignores repeats)
                 self.store.set_meta(db, "hosted_event_cursor", row["seq"])
+
+    def card(self, goal_id: str, text: str) -> str:
+        """A question as the phone shows it, naming the employee when it comes from a job handed to one."""
+        spec = (self.store.get(goal_id) or {}).get("spec") or {}
+        if not spec.get("parent"):
+            return text
+        text = f"({employee_name(spec)}'s job) {text}"
+        return text if len(text) <= ASK_CHARS else text[:ASK_CHARS - 30] + "... (cut; see it on the PC)"
 
     def ask(self, task_id: str, goal_id: str, request_id: str) -> None:
         with self.store.connect() as db:
@@ -304,22 +316,18 @@ class HostedConnector:
             asked = " / ".join(str(q.get("question") or q.get("header") or "") for q in questions(params))[:900]
             kind = "otp" if CODE_WORDS.search(asked) and len(questions(params)) == 1 else "approval"
             if kind == "approval":     # a free-text question cannot be answered with Allow/Deny: ask the owner on the PC
-                self.post(f"/bridge/tasks/{task_id}/ask", {"request_id": request_id, "summary":
-                          f"answer a question in Smara Desktop: {asked}. (Allow lets you answer it on the PC; Deny stops this step.)"})
+                self.post(f"/bridge/tasks/{task_id}/ask", {"request_id": request_id, "summary": self.card(goal_id,
+                          f"answer a question in Smara Desktop: {asked}. (Allow lets you answer it on the PC; Deny stops this step.)")})
                 return
-            self.post(f"/bridge/tasks/{task_id}/ask", {"request_id": request_id, "kind": "otp", "summary": asked})
+            self.post(f"/bridge/tasks/{task_id}/ask", {"request_id": request_id, "kind": "otp", "summary": self.card(goal_id, asked)})
             return
-        self.post(f"/bridge/tasks/{task_id}/ask", {"request_id": request_id, "summary": describe(req["method"], params)})
+        self.post(f"/bridge/tasks/{task_id}/ask", {"request_id": request_id, "summary": self.card(goal_id, describe(req["method"], params))})
 
     # ---- a task that used up its work allowance asks the owner whether to keep going
     def out_of_allowance(self, goal_id: str) -> bool:
         goal = self.store.get(goal_id) or {}
-        spec = goal.get("spec") or {}
         with self.store.connect() as db:
-            blocked = self.store.meta(db, "budget_blocked:" + goal_id)
-        return bool(blocked) or "budget" in str(goal.get("detail") or "").lower() or (
-            bool(spec) and (goal.get("requests", 0) >= spec.get("max_requests", 1) or goal.get("cycles", 0) >= spec.get("max_cycles", 1)
-                            or goal.get("token_estimate", 0) >= spec.get("max_token_estimate", 1)))
+            return self.store.out_of_allowance(db, goal)
 
     def ask_for_more(self, task_id: str, goal_id: str) -> None:
         with self.store.connect() as db:
@@ -330,8 +338,7 @@ class HostedConnector:
                 self.store.set_meta(db, "hosted_extensions", asked)
         goal = self.store.get(goal_id) or {}
         if n >= EXTENSIONS:
-            self.finish(task_id, goal_id, "paused", {}, stopped=f"it used all its work ({goal.get('requests', 0)} model steps) "
-                                                                "without finishing")
+            self.give_up(task_id, goal_id, f"it used all its work ({goal.get('requests', 0)} model steps) without finishing")
             return
         text = (f"keep working on this task. It has used its work allowance ({goal.get('requests', 0)} model steps) and is "
                 f"not finished yet. Allow gives it {EXTRA} more steps; Deny stops it here.")
@@ -339,11 +346,11 @@ class HostedConnector:
         if so_far:
             block = f"\n\n{SO_FAR}\n{so_far}"
             text += block if len(text) + len(block) <= ASK_CHARS else block[:ASK_CHARS - len(text) - 30] + "... (Deny sends it all)"
-        self.post(f"/bridge/tasks/{task_id}/ask", {"request_id": f"{BUDGET}{goal_id}:{n + 1}", "summary": text})
+        self.post(f"/bridge/tasks/{task_id}/ask", {"request_id": f"{BUDGET}{goal_id}:{n + 1}", "summary": self.card(goal_id, text)})
 
     def more(self, goal_id: str, allow: bool, task_id: str) -> None:
         if not allow:
-            self.finish(task_id, goal_id, "paused", {}, stopped="you chose to stop it when it ran out of work allowance")
+            self.give_up(task_id, goal_id, "you chose to stop it when it ran out of work allowance")
             return
         goal = self.store.get(goal_id) or {}
         spec = goal.get("spec") or {}
@@ -358,6 +365,32 @@ class HostedConnector:
                                "max_token_estimate": max(spec.get("max_token_estimate", 0), goal.get("token_estimate", 0)) + EXTRA * STEP_BYTES,
                                "max_cycles": max(spec.get("max_cycles", CYCLES), goal.get("cycles", 0)) + 2})
         self.store.action({"action": "resume", "id": goal_id})
+
+    def give_up(self, task_id: str, goal_id: str, reason: str) -> None:
+        """No more work for this task. An employee's job just stops, and the task that handed it over reports that."""
+        if not ((self.store.get(goal_id) or {}).get("spec") or {}).get("parent"):
+            self.finish(task_id, goal_id, "paused", {}, stopped=reason)
+            return
+        self.store.action({"action": "stop", "id": goal_id})
+        with self.store.connect() as db:
+            db.execute("UPDATE goals SET detail=? WHERE id=? AND state='stopped'", ("Stopped because " + reason, goal_id))
+
+    def pause_unfinished_jobs(self, goal_id: str) -> list[str]:
+        """When a phone task ends without success, jobs still going could ask nobody on the phone: pause them (the owner
+        can resume them on the PC) and say whose they are."""
+        names, waiting = [], [goal_id]
+        while waiting:
+            with self.store.connect() as db:
+                jobs = self.store.handed_over(db, waiting.pop())
+            for job in jobs:
+                waiting.append(job["id"])
+                if job["state"] in ("queued", "running", "awaiting_approval"):
+                    self.store.action({"action": "pause", "id": job["id"]})
+                    with self.store.connect() as db:
+                        db.execute("UPDATE goals SET detail='Paused: the phone task it came from has ended' WHERE id=? AND state='paused'",
+                                   (job["id"],))
+                    names.append(employee_name(job["spec"]))
+        return list(dict.fromkeys(names))
 
     def finish(self, task_id: str, goal_id: str, state: str, body: dict, stopped: str = "") -> None:
         goal = self.store.get(goal_id) or {}
@@ -388,6 +421,10 @@ class HostedConnector:
         if removed:
             files += ("\n\nI removed the temporary copies and page pictures made for this task. Your originals were not "
                       "touched.")
+        if DONE[state] == "failed":
+            paused = self.pause_unfinished_jobs(goal_id)
+            if paused:
+                files += f"\n\nNot finished, now paused on your PC: the job of {', '.join(paused)}."
         reply = phone_text(summary, files, workspace, goal_id)
         self.post(f"/bridge/tasks/{task_id}/result", {"state": DONE[state], "summary": reply})
         with self.store.connect() as db:
@@ -408,11 +445,21 @@ class HostedConnector:
         got = waiting + got
         later = []
         for a in got:
-            goal_id = reverse.get(a["task_id"])
-            if not goal_id:
+            root_id = reverse.get(a["task_id"])
+            if not root_id:
+                continue
+            # The answer may belong to a job the phone task handed over; it must be one of this task's own.
+            request_id = str(a.get("request_id") or "")
+            if request_id.startswith(BUDGET):
+                goal_id = request_id[len(BUDGET):].rsplit(":", 1)[0]
+            else:
+                with self.store.connect() as db:
+                    asked = db.execute("SELECT goal_id FROM goal_requests WHERE id=?", (request_id,)).fetchone()
+                goal_id = asked["goal_id"] if asked else root_id
+            if root_id not in self.store.lineage(goal_id):
                 continue
             try:
-                if str(a.get("request_id") or "").startswith(BUDGET):
+                if request_id.startswith(BUDGET):
                     try:
                         self.more(goal_id, a.get("answer") == "allow", a["task_id"])
                     except ValueError:
