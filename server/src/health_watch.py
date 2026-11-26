@@ -15,7 +15,7 @@ import time
 from collections import Counter
 from datetime import datetime
 
-from src import clock
+from src import clock, server_logs
 
 log = logging.getLogger(__name__)
 EVERY_S = 3600
@@ -39,7 +39,7 @@ class _ErrorCounter(logging.Handler):
             key = (record.name, str(record.msg)[:80], exc)
             _errors[key] += 1
             if key not in _examples:
-                detail = str(record.exc_info[1])[:120] if record.exc_info[1] else ""
+                detail = server_logs.redact(str(record.exc_info[1]))[:120] if record.exc_info[1] else ""
                 _examples[key] = f"{exc}: {detail}" if detail else exc
         except Exception:
             pass                                       # counting must never break logging
@@ -50,6 +50,7 @@ _handler = _ErrorCounter()
 
 def install() -> None:
     """Count errors from every logger. Safe to call more than once."""
+    server_logs.install()                   # first: a handler on the root logger stops Python's own printing of errors
     root = logging.getLogger()
     if _handler not in root.handlers:
         root.addHandler(_handler)
@@ -59,7 +60,7 @@ def tool_failed(name: str, err: BaseException) -> None:
     """A tool raised inside an agent run (called by the agent loop)."""
     key = (name, type(err).__name__)
     _tools[key] += 1
-    _examples.setdefault(("tool",) + key, str(err)[:120])
+    _examples.setdefault(("tool",) + key, server_logs.redact(str(err))[:120])
 
 
 def snapshot() -> dict:

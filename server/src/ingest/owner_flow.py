@@ -340,6 +340,8 @@ async def _transcribe(app, msg: InboundMessage) -> tuple[str, str | None]:
         return "", VOICE_FAILED
     try:
         spoken = (await transcribe(s.sarvam_api_key, data, mime or "audio/ogg", url=s.sarvam_stt_url)).strip()
+    except MediaError as e:                     # says what the owner can do (too long, or not a readable recording)
+        return "", str(e)
     except Exception:
         log.exception("owner voice transcription failed")
         return "", VOICE_FAILED
