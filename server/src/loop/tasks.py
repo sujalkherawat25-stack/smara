@@ -3,7 +3,7 @@ were deferred out of quiet hours. Never runs during quiet hours."""
 import logging
 from datetime import datetime, timedelta
 
-from src import clock, tenants
+from src import clock, limits, tenants
 from src.agent.policy import SessionCtx
 from src.loop.owner_channel import send_to_owner
 from src.loop.whatsapp import text_message
@@ -38,6 +38,10 @@ async def run_due(app, now: datetime) -> int:
                     ("FAILED" if final else "PENDING", f"{type(e).__name__}: {e}"[:300], now + RETRY_AFTER, t["id"]))
             if final:
                 await _chain(app, t, now)       # a failed run must not end a monthly reminder
+                try:
+                    await _say_it_failed(app, t)
+                except Exception:
+                    log.exception("could not tell the owner that task %s failed", t["id"])
             continue
         async with app.state.pool.connection() as conn:
             await conn.execute("UPDATE agent_tasks SET status = 'DONE' WHERE id = %s", (t["id"],))
@@ -62,6 +66,36 @@ async def _chain(app, t: dict, now: datetime) -> None:
                            (t["tenant_id"], nxt, json.dumps(t["payload"]), t["created_by_session"]))
 
 
+def _asked_for(payload: dict) -> str:
+    """What the owner asked for, in their own words where they were kept (a retry set by an earlier run kept ours instead)."""
+    said = str(payload.get("owner_said") or "")
+    return (said if said and not said.startswith("A follow-up you scheduled") else str(payload.get("instruction") or ""))[:500]
+
+
+async def _tell(app, tenant, text: str) -> None:
+    await send_to_owner(app, tenant, text_message(tenant.owner_phone, text), kind="owner_note")
+
+
+async def _say_it_failed(app, t: dict) -> None:
+    """The last try failed too. Something the owner asked for is never just dropped: they get it in plain words (no model)."""
+    tenant = await tenants.by_id(app.state.pool, str(t["tenant_id"]))
+    if tenant is None:
+        return
+    if t["kind"] == "followup":
+        await _tell(app, tenant, "I couldn't run something you scheduled. So that it isn't missed, this is what you asked for:\n"
+                                 f"“{_asked_for(t['payload'])}”")
+    else:
+        who = t["payload"].get("label") or "your customer"
+        await _tell(app, tenant, f"I couldn't send the reminder you approved for {who}. Please send it yourself, or ask me again.")
+
+
+async def _out_of_allowance(app, tenant) -> bool:
+    if tenant.limits_exempt:
+        return False
+    used = (await limits.usage(app.state.pool, tenant.id))["tokens"]
+    return used >= limits.allowance(app.state.settings, tenant)["tokens"]
+
+
 async def _run_one(app, t: dict) -> None:
     from src.agent import actions
     from src.agent_loop import start_session
@@ -69,6 +103,10 @@ async def _run_one(app, t: dict) -> None:
     if tenant is None:
         return
     payload = t["payload"]
+    if t["kind"] == "followup" and await _out_of_allowance(app, tenant):      # the reminder still arrives, without the model
+        await _tell(app, tenant, f"Your reminder:\n“{_asked_for(payload)}”\n\n(Today's AI allowance is used up, so this is "
+                                 "only what you asked for; I haven't checked or done anything else.)")
+        return
     if t["kind"] == "followup":
         said = (f"The owner's exact words when they asked (trust these over the summary): \"{payload['owner_said']}\"\n"
                 if payload.get("owner_said") else "")

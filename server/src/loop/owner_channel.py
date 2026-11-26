@@ -196,11 +196,12 @@ async def _deliver(app, tenant, payload: dict, *, kind: str, obligation_id=None,
     for i, part in enumerate(parts):   # owners hear from Smara's own number, never from their shop's
         if i:
             await asyncio.sleep(PART_GAP_S)
-        msg_id = await _official_send(app, "a message",
-                                      lambda part=part: app.state.wa.send({**part, "to": tenant.owner_phone}, number_id=number_id))
-        if msg_id:
+        out = {**part, "to": tenant.owner_phone}
+        msg_id = await _official_send(app, "a message", lambda out=out: app.state.wa.send(out, number_id=number_id))
+        if msg_id:       # WhatsApp can still refuse it later. A note keeps its words, so it can be sent again; cards are rebuilt
             await record(pool, msg_id, tenant_id=tenant.id, kind=kind, to_phone=tenant.owner_phone,
-                         obligation_id=obligation_id, adjustment_id=adjustment_id, agent_session_id=agent_session_id)
+                         obligation_id=obligation_id, adjustment_id=adjustment_id, agent_session_id=agent_session_id,
+                         payload=out if kind == "owner_note" else None)
     return "whatsapp"
 
 
@@ -289,17 +290,46 @@ async def resend_undelivered(app, tenant, channel: str) -> int:
         cur = await conn.execute(
             """UPDATE outbound_messages SET status = 'resent', updated_at = now()
                 WHERE tenant_id = %s AND status IN ('held', 'failed') AND kind = ANY(%s)
-            RETURNING kind, obligation_id, adjustment_id, agent_session_id, payload""", (tenant.id, list(CARD_KINDS)))
-        rows = await cur.fetchall()
+            RETURNING msg_id, kind, obligation_id, adjustment_id, agent_session_id, payload, error_code, created_at""",
+            (tenant.id, list(CARD_KINDS)))
+        rows = sorted(await cur.fetchall(), key=lambda r: r["created_at"])
     sent = 0
-    for r in rows:
-        payload = await _rebuild(app, tenant, r)
-        if payload:
-            await send_to_owner(app, tenant, payload, kind=r["kind"], obligation_id=r["obligation_id"],
-                                adjustment_id=r["adjustment_id"], reply_channel=channel,
-                                agent_session_id=r["agent_session_id"])
-            sent += 1
+    for i, r in enumerate(rows):
+        try:
+            payload = await _rebuild(app, tenant, r)
+            if payload:
+                await send_to_owner(app, tenant, _marked_late(payload, r), kind=r["kind"], obligation_id=r["obligation_id"],
+                                    adjustment_id=r["adjustment_id"], reply_channel=channel,
+                                    agent_session_id=r["agent_session_id"])
+                sent += 1
+        except Exception as err:    # what was not sent is kept, never marked as sent
+            log.warning("could not re-send what was waiting for account %s", tenant.id, exc_info=True)
+            refused = isinstance(err, httpx.HTTPStatusError) and err.response.status_code in REFUSED_MESSAGE
+            async with pool.connection() as conn:
+                await conn.execute("UPDATE outbound_messages SET status = %s, updated_at = now() WHERE msg_id = ANY(%s)",
+                                   ("failed" if refused else "held",
+                                    [r["msg_id"]] if refused else [x["msg_id"] for x in rows[i:]]))
+            if not refused:         # the channel is down: this and the rest are tried again by the next pass
+                break
     return sent
+
+
+# The channel refused this one message itself. It waits for their next message instead of being retried every minute,
+# and does not hold up the ones behind it.
+REFUSED_MESSAGE = (400, 404, 413, 422)
+
+
+LATE_AFTER = timedelta(hours=1)
+
+
+def _marked_late(payload: dict, r: dict) -> dict:
+    """A note WhatsApp refused earlier says when it was meant to arrive, so a reminder is not read as being for now."""
+    if r["kind"] != "owner_note" or not r["error_code"] or payload.get("type") != "text" \
+            or datetime.now(timezone.utc) - r["created_at"] < LATE_AFTER:
+        return payload
+    when = r["created_at"].astimezone(clock.IST).strftime("%d %b, %I:%M %p IST")
+    body = f"(Late: this was meant to reach you on {when}, but WhatsApp did not deliver it then.)\n\n{payload['text']['body']}"
+    return {**payload, "text": {**payload["text"], "body": body}}
 
 
 async def _rebuild(app, tenant, r: dict) -> dict | None:

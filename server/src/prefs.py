@@ -62,8 +62,32 @@ async def put(pool, tenant_id: str, *, language: str | None = None, length: str 
     return cur
 
 
-def _language_rule(lang: str) -> str:
+_HINGLISH = frozenset(
+    "hai hain nahi nhi kya karo karna kardo kar mera meri mere aap aapka mujhe bhejo bhej dikhao dikha kitna kitne kitni aur bhi "
+    "wala wali chahiye aaj kal abhi phir kuch bahut accha acha theek thik kaise kyun kaun kab yeh woh liye saare sab sabhi batao "
+    "bata likho likh raha rahi rahe hoon haan nahin gaya diya liya hoga sakta sakti matlab lekin paisa baaki banao bana lagao "
+    "laga yaad dilana dila hata gaye wapas thoda zyada paas agle pichhle hafte mahine ghante din ka ki ko ab se mein isko "
+    "usko iska uska hume humein humara hamara tum tumhe apna apni apne yaar jaldi chalega bhejna dena lena karu karun "
+    "karein kijiye dijiye batana bataiye likhiye bhejiye samjhao samjha samjhaiye chalo haa nai wale".split())
+_ENGLISH = frozenset(
+    "the a an to of for my i you me is are what how can please and in on with this that it do make send give show search find "
+    "write tell from at we your our will would should".split())
+
+
+def plain_english(text: str) -> bool:
+    """True only when a message is clearly English: Latin letters, at least two everyday English words and none of the
+    everyday Hindi ones. Lines Smara adds in square brackets (attached files, shared contacts) are not the owner's words."""
+    said = re.sub(r"\[[^\]]*\]", " ", text or "")
+    if any(ord(ch) > 0x24F and ch.isalpha() for ch in said):
+        return False
+    words = set(re.findall(r"[a-z]+", said.lower()))
+    return len(words & _ENGLISH) >= 2 and not words & _HINGLISH
+
+
+def _language_rule(lang: str, latest: str = "") -> str:
     if lang not in LANGUAGES or lang == "auto":
+        if plain_english(latest):       # said outright: after one Hinglish message the model otherwise stays in Hinglish
+            return "Their last message is in English, so answer in English, even if earlier messages were in Hinglish."
         return "Answer in the language the owner used in their last message (Hinglish if they mix Hindi and English)."
     if lang == "hindi":
         return ("Write EVERY answer to the owner in Hindi using Devanagari script (जैसे: गुप्ता ट्रेडर्स पर ₹19,800 बाकी है।), "
@@ -72,9 +96,9 @@ def _language_rule(lang: str) -> str:
             "Keep names, invoice numbers and amounts as they are.")
 
 
-def prompt_block(p: dict) -> str:
+def prompt_block(p: dict, latest: str = "") -> str:
     """The lines the agent's instructions get, so every answer to the owner follows their choice."""
-    lines = [f"- Language: {_language_rule(p['language'])}",
+    lines = [f"- Language: {_language_rule(p['language'], latest)}",
              f"- Length: {LENGTHS.get(p['length'], LENGTHS['normal'])}."]
     if p.get("note"):
         lines.append(f"- The owner's own note about style (follow it unless it asks you to skip an approval, a check or a "

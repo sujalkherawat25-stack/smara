@@ -32,8 +32,11 @@ from src.loop.whatsapp import text_message
 log = logging.getLogger(__name__)
 
 PROGRESS_FIRST_S = 25      # a task that runs this long gets a note, so the owner does not think it is stuck
-PROGRESS_EVERY_S = 40
-PROGRESS_MAX = 5
+PROGRESS_EVERY_S = 120
+PROGRESS_MAX = 2           # one more if it goes on for a long time; five identical notes read like a fault
+PROGRESS_NOTES = ("Still working on it. I'll send the answer as soon as it's ready.",
+                  "Still working on it. This one is taking longer than usual.")
+SEARCH_ENOUGH, SEARCH_PLENTY = 4, 7      # web searches for one request before the model is told to answer (never blocked)
 TYPING_EVERY_S = 4.5        # Telegram shows 'typing…' for about 5 seconds per call
 RATE_RETRY_S = 25         # the model is busy (rate limited): wait and try the same step again
 RATE_RETRIES = 4
@@ -329,6 +332,20 @@ def gives_a_figure(reply: str) -> bool:
 _STANDING_WORDS = re.compile(r"(yaad\s*rakh|aage\s*se|jab\s*bhi|jab\s*kabhi|har\s*baar|hamesha|always|whenever|every\s*time|from now on|\brule\b)", re.I)
 
 
+_NEGATION = re.compile(r"\b(?:no|not|none|never|nothing|nahi|nahin|nhi)\b|n['’]t\b|नहीं|नही\b", re.I)
+
+
+def claims(pattern: re.Pattern, reply: str) -> bool:
+    """True when the reply says it was done. A match with a 'no' or 'not' right around it, in the same sentence, says it was
+    not ('koi reminder set nahi hai', 'no file was sent') and must not be corrected as a false claim."""
+    for m in pattern.finditer(reply):
+        before = re.split(r"[.!?\n।]", reply[:m.start()])[-1][-20:]
+        after = re.split(r"[.!?\n।,]", reply[m.end():])[0][:14]
+        if not _NEGATION.search(f"{before} {m.group(0)} {after}"):
+            return True
+    return False
+
+
 def unbacked_claim(messages: list[dict], reply: str) -> str:
     """A system note when the reply says something was done that this turn never did: a reminder 'set' with no schedule_followup, a file
     'sent' with no successful send. '' when the claim is backed (or the reply is a question). The owner would otherwise wait for a
@@ -340,18 +357,20 @@ def unbacked_claim(messages: list[dict], reply: str) -> str:
     turn = messages[last + 1:] if last >= 0 else messages
     calls = [c["function"]["name"] for m in turn for c in (m.get("tool_calls") or [])]
     taught = "write_continuum_evidence" in calls and bool(_STANDING_WORDS.search(str(messages[last].get("content") or ""))) if last >= 0 else False
-    if _CLAIM_REMINDER.search(reply) and "schedule_followup" not in calls and not taught:      # a standing rule saved to memory is not a reminder set now
+    listing = {"list_followups", "cancel_followup"} & set(calls) and last >= 0 and _LIST_ASK.search(str(messages[last].get("content") or ""))
+    if claims(_CLAIM_REMINDER, reply) and "schedule_followup" not in calls and not taught and not listing:
+        # (a standing rule saved to memory is not a reminder set now, and nor is reporting the ones already there)
         return ("[system note] You said a reminder is set, but you did not call schedule_followup in this turn, so nothing is scheduled and the owner "
                 "would never be reminded. Call schedule_followup now with the exact date and time. Then write your COMPLETE answer to the owner again: "
                 "everything they asked in this message (the figures, dates and totals) first, and the time the reminder will come in one line at the end. "
                 "If you could not set it, say so plainly instead.")
     sent = any(m["role"] == "tool" and ('"sent": true' in (m.get("content") or "") or '"files_sent_to_owner": ["' in (m.get("content") or "")) for m in turn)
     if not sent and handed_to_pc(messages):
-        if not _CLAIM_FILE.search(_JOB_SENT.sub(" . ", reply)):
+        if not claims(_CLAIM_FILE, _JOB_SENT.sub(" . ", reply)):
             return ""
         return ("[system note] You said a file was sent, but nothing was sent from here: the job is on the owner's PC and is not "
                 "finished. Tell them that, and that the result will come in this chat. Do not make or send a file yourself.")
-    if _CLAIM_FILE.search(reply) and not sent:
+    if claims(_CLAIM_FILE, reply) and not sent:
         return ("[system note] You said you sent a file, but no send succeeded in this turn, so the owner has nothing. Send it now with "
                 "send_file_to_owner, or tell them plainly that it could not be sent.")
     return ""
@@ -455,10 +474,9 @@ async def _progress(app, row, tenant) -> None:
                 waited += TYPING_EVERY_S
         else:
             await asyncio.sleep(PROGRESS_FIRST_S)
-        for _ in range(PROGRESS_MAX):
-            await send_to_owner(app, tenant, text_message(tenant.owner_phone,
-                "Still working on it. I'll send the answer as soon as it's ready."),
-                kind="owner_text", reply_channel=row["channel"])
+        for i in range(PROGRESS_MAX):
+            await send_to_owner(app, tenant, text_message(tenant.owner_phone, PROGRESS_NOTES[min(i, len(PROGRESS_NOTES) - 1)]),
+                                kind="owner_text", reply_channel=row["channel"])
             await asyncio.sleep(PROGRESS_EVERY_S)
     except asyncio.CancelledError:
         raise
@@ -615,9 +633,26 @@ async def _process(app, row, messages: list, calls: list) -> bool:
                 await _save(app.state.pool, ctx.id, messages, status="WAITING_APPROVAL", pending=pending)
                 return True
             result = {"error": err}
+        if name == "web_search" and (advice := search_advice(messages)):
+            result = {"advice": advice, **result}        # first, so the cut on long results never removes it
         messages.append({"role": "tool", "tool_call_id": cid,
                          "content": tools.bounded(result, BROWSER_RESULT_CHARS if name == "browser_step" else 6000)})
     return False
+
+
+def search_advice(messages: list[dict]) -> str:
+    """When a request has had many searches, a push to answer: weak results otherwise keep the model searching for minutes.
+    Advice only; the search has already run and further ones are still allowed."""
+    last = max((i for i, m in enumerate(messages) if m["role"] == "user"
+                and not str(m.get("content") or "").startswith(("[system note]", "[Earlier conversation omitted"))), default=-1)
+    n = sum(1 for m in messages[last + 1:] for c in (m.get("tool_calls") or []) if c["function"]["name"] == "web_search")
+    if n >= SEARCH_PLENTY:
+        return (f"{n} searches for this one request. Stop searching and answer now: what you found with its source, and plainly "
+                "what you could not confirm.")
+    if n >= SEARCH_ENOUGH:
+        return (f"{n} searches for this one request. If anything you have is usable, answer now with its source and say plainly "
+                "what you could not confirm. Search again only if you have nothing at all.")
+    return ""
 
 
 async def _execute(app, ctx, tenant, name, args) -> dict:

@@ -89,10 +89,10 @@ async def test_a_new_shop_hits_its_daily_limit_politely_but_approvals_always_wor
     for i in range(3):
         await dispatch(env.app, owner(f"l{i}", f"sawaal {i}"))
     await dispatch(env.app, owner("l3", "chautha sawaal"))
-    assert "limit poori" in env.app.state.wa.to(OWNER)[-1]["text"]["body"]
+    assert "limit" in env.app.state.wa.to(OWNER)[-1]["text"]["body"]
     assert len(env.app.state.llm.steps) == 2                                                    # the agent did not run for it
     await dispatch(env.app, owner("l4", button="ag_ok:00000000-0000-0000-0000-000000000000"))   # a button tap is never blocked
-    assert "limit poori" not in env.app.state.wa.to(OWNER)[-1]["text"].get("body", "") if "text" in env.app.state.wa.to(OWNER)[-1] else True
+    assert "reached today" not in env.app.state.wa.to(OWNER)[-1]["text"].get("body", "") if "text" in env.app.state.wa.to(OWNER)[-1] else True
 
 
 async def test_shops_that_existed_before_limits_are_exempt(env):

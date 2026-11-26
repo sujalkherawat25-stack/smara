@@ -48,6 +48,8 @@ VOICE_OFF = "Voice notes are not enabled on Smara yet. Please type your message 
 VOICE_FAILED = "I could not turn that voice note into text right now. Please type it, or send it again."
 VOICE_UNCLEAR = "Voice note samajh nahi aaya. Kripya type karke bhejiye ya dobara bolkar bhejiye."
 FILE_FAILED = "I could not download that file. Please send it again."
+UNREADABLE_KINDS = ("unsupported", "unknown", "order")      # polls, view-once media and other things WhatsApp does not pass on
+CANT_OPEN = "I can't open that kind of message. Please type it, or send it as a file, photo or voice note."
 DEFAULT_MIME = {"image": "image/jpeg", "audio": "audio/ogg", "video": "video/mp4"}
 
 
@@ -62,6 +64,8 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
     if msg.size > owner_files.MAX_BYTES:            # a file or voice note over the limit: said plainly, nothing is kept
         return owner_files.too_large_text(msg.size)
     spoken_note = False
+    if msg.kind in UNREADABLE_KINDS and not msg.text:       # said plainly: silence would look like Smara ignored them
+        return CANT_OPEN
     if msg.kind == "audio" and msg.media_id:        # a voice note is read as if the owner had typed it
         spoken, reply = await _transcribe(app, msg)
         if reply:
@@ -208,8 +212,8 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
                     f"code with that SIM's WhatsApp:\n{link}\n\n"
                     "Customer messages will go out from that number. Nothing is sent without your approval.")
         if not configured(app.state.settings):
-            return ("Apna khud ka WhatsApp number jodna abhi chalu nahi hua hai (Meta ki manzoori baaki hai). "
-                    "Jaise hi chalu hoga, main aapko bataunga.")
+            return ("Apna khud ka WhatsApp number jodna abhi chalu nahi hua hai. Tab tak main customer ke liye message "
+                    "likhkar de sakti hoon, aur aap use apne WhatsApp se bhej sakte hain.")
         link = await new_link(app.state.pool, app.state.settings, tenant_id)
         return ("Apna WhatsApp Business number Smara se jodne ke liye ye link kholiye (24 ghante, ek baar):\n"
                 f"{link}\n\nAapke customers ko message aapke apne number se jayenge. Kuch bhi bina aapke tap ke nahi jata.")
@@ -240,7 +244,11 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         return "Theek hai, ab main hafte ka summary aur daily alerts nahi bhejunga. Dobara chahiye to 'digest on' likhiye."
     if cmd in ("digest on", "summary on", "weekly on", "digest chalu", "digest chalu karo", "digest start"):
         await review.set_digest(app.state.pool, tenant_id, True)
-        return "Done. Ab har Monday hafte ka summary aayega, aur kuch zaroori hone par alert. 'digest' likhkar kabhi bhi dekh sakte hain."
+        reply = ("Done. Jab aapke records me kisi ka baaki ya supplier bill hoga, to har Monday uska summary aayega, aur kuch "
+                 "zaroori hone par alert. 'digest' likhkar kabhi bhi dekh sakte hain.")
+        if msg.channel == "whatsapp" and not getattr(app.state.settings, "wa_owner_template", ""):
+            reply += " WhatsApp par ye tabhi pahunchta hai jab aapne pichhle 24 ghante me mujhe kuch likha ho."
+        return reply
     if cmd == "digest":                    # the full summary on demand: built from the ledger, no model
         digest = await build_digest(app.state.pool, tenant_id, clock.today())
         line = await wa_link.health_line(app.state.pool, tenant_id)

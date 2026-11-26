@@ -15,6 +15,7 @@ import uuid
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from src import limits, tenants
 from src.bridge import approvals
 
 log = logging.getLogger(__name__)
@@ -27,14 +28,6 @@ MODEL_NAME = "smara"
 
 def _error(status: int, message: str, kind: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": {"message": message, "type": kind}})
-
-
-async def used_today(pool, tenant_id) -> int:
-    async with pool.connection() as conn:
-        row = await (await conn.execute(
-            "SELECT coalesce(sum(total_tokens), 0) n FROM llm_usage WHERE tenant_id = %s AND created_at > now() - interval '24 hours'",
-            (tenant_id,))).fetchone()
-    return int(row["n"])
 
 
 @router.post("/chat/completions")
@@ -58,10 +51,14 @@ async def chat_completions(request: Request, authorization: str | None = Header(
         return _error(400, "Send an OpenAI-style body with a non-empty 'messages' list.", "invalid_request_error")
     tools = body.get("tools") if isinstance(body.get("tools"), list) else []
     tid = str(owner["tenant_id"])
-    limit = int(getattr(app.state.settings, "owner_daily_tokens", 4_000_000))
-    if await used_today(app.state.pool, tid) >= limit:
-        return _error(429, "Today's Smara usage limit is reached (shared with your WhatsApp/Telegram chat). It resets over the "
-                           "next 24 hours, or add your own API key under Settings > Models > Advanced.", "rate_limit_error")
+    account = await tenants.by_id(app.state.pool, tid)
+    if account is not None and not account.limits_exempt:           # the same allowance as chat, a raised one included
+        used = (await limits.usage(app.state.pool, tid))["tokens"]
+        if used >= (limit := limits.allowance(app.state.settings, account)["tokens"]):
+            await limits.alert_team(app, account, limits.Hit("tokens", limit, used,
+                                                            await limits.free_at(app.state.pool, tid, "tokens", used, limit)))
+            return _error(429, "Today's Smara usage limit is reached (shared with your WhatsApp/Telegram chat). It resets over "
+                               "the next 24 hours, or add your own API key under Settings > Models > Advanced.", "rate_limit_error")
     busy = app.state.__dict__.setdefault("desktop_llm_busy", {})
     if busy.get(tid, 0) >= IN_FLIGHT:
         return _error(429, "Smara is already answering two requests from this PC; try again in a moment.", "rate_limit_error")

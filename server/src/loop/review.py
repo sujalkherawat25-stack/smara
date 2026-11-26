@@ -32,12 +32,17 @@ async def opted_out(pool, tenant_id: str) -> bool:
         return await (await conn.execute("SELECT 1 FROM digest_optout WHERE tenant_id = %s", (tenant_id,))).fetchone() is not None
 
 
-async def set_digest(pool, tenant_id: str, on: bool) -> None:
+async def opted_in(pool, tenant_id: str) -> bool:
+    """They asked for the summary with 'digest on' (it then goes out even where Smara starts nothing unless asked)."""
     async with pool.connection() as conn:
-        if on:
-            await conn.execute("DELETE FROM digest_optout WHERE tenant_id = %s", (tenant_id,))
-        else:
-            await conn.execute("INSERT INTO digest_optout (tenant_id) VALUES (%s) ON CONFLICT DO NOTHING", (tenant_id,))
+        return await (await conn.execute("SELECT 1 FROM digest_optin WHERE tenant_id = %s", (tenant_id,))).fetchone() is not None
+
+
+async def set_digest(pool, tenant_id: str, on: bool) -> None:
+    add, remove = ("digest_optin", "digest_optout") if on else ("digest_optout", "digest_optin")
+    async with pool.connection() as conn:
+        await conn.execute(f"DELETE FROM {remove} WHERE tenant_id = %s", (tenant_id,))
+        await conn.execute(f"INSERT INTO {add} (tenant_id) VALUES (%s) ON CONFLICT DO NOTHING", (tenant_id,))
 
 
 async def last_file_day(pool, tenant_id: str) -> date | None:

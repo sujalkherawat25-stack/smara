@@ -21,9 +21,13 @@ JOIN = re.compile(r"^\s*(?:join|code|invite|start)?\s*[:\-]?\s*([A-Za-z]{2,5}-?[
 JOIN_WORD = re.compile(r"^\s*(?:join|code|invite)\b[\s:\-]*([A-Za-z0-9][A-Za-z0-9\- ]{3,15}?)\s*$", re.I)   # spaces allowed: "join sma zjl9ur"
 
 INVITE_ONLY = ("Hi! I'm Smara, an AI assistant for anyone who works, studies or runs something: writing, research, files, "
-               "plans, reminders and more.\n\nAccess is by invite for now. You're on the waitlist, and I'll message you here "
-               "as soon as you're in.\n\nIf you have an invite code, send 'JOIN CODE'.")
-WAITLISTED = "You're on the waitlist. I'll message you here as soon as you have access."
+               "plans, reminders and more.\n\nAccess is by invite for now, and you're on the waitlist. I'll message you here "
+               "when you're in. WhatsApp doesn't always let me message first, so if you haven't heard from me in a few days, "
+               "just send 'hi' again.\n\nIf you have an invite code, send 'JOIN CODE'.")
+WAITLISTED = "You're on the waitlist. I'll message you here when you have access; if you haven't heard in a few days, send 'hi' again."
+BAD_CODE = ("That invite code isn't working: it may have expired or been used already. Please ask whoever sent it for a new "
+            "one. You're on the waitlist meanwhile.")
+CODE_TRIED = re.compile(r"^\s*join\b|\b[A-Za-z]{2,5}-[A-Za-z0-9]{6}\s*$", re.I)       # clearly sending a code, not just a word
 
 
 def new_code(prefix: str = "SMA") -> str:
@@ -96,7 +100,9 @@ async def handle_stranger(app, msg) -> None:
             (msg.sender, text[:300], text[:300], display_name(msg.profile_name) if msg.profile_name else ""))).fetchone()
         if row["due"]:
             await conn.execute("UPDATE waitlist SET replied_at = now() WHERE phone = %s", (msg.sender,))
-    if row["due"]:
+    if code and not invite and CODE_TRIED.search(text) and not _guessing(msg.sender):
+        await _send(app, msg.sender, BAD_CODE, msg.number_id)     # always answered (up to the guess limit), never silence
+    elif row["due"]:
         first = row["messages"] <= 1 or not text or code is not None
         await _send(app, msg.sender, INVITE_ONLY if first else WAITLISTED, msg.number_id)
     if row["messages"] <= 1:                                   # the admins hear about each new person once

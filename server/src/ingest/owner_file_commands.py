@@ -96,9 +96,17 @@ def _parse(cmd: str):
     return None
 
 
+def _normal(text: str) -> str:
+    return " ".join(_PUNCT.sub(" ", (text or "").lower()).split())     # "Yes, delete 2." is the same as "yes delete 2"
+
+
+def is_command(text: str) -> bool:
+    return _parse(_normal(text)) is not None
+
+
 async def handle(app, tenant_id: str, text: str) -> str | None:
     """The reply to a file command, or None if the text is not one (the message then goes on as usual)."""
-    parsed = _parse(" ".join(_PUNCT.sub(" ", (text or "").lower()).split()))   # "Yes, delete 2." is the same as "yes delete 2"
+    parsed = _parse(_normal(text))
     if parsed is None:
         return None
     what, no = parsed

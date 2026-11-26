@@ -5,7 +5,7 @@ from datetime import datetime
 from psycopg_pool import AsyncConnectionPool
 
 _COLS = ("id, name, owner_phone, upi_vpa, upi_name, wa_phone_number_id, owner_last_inbound_at, "
-         "owner_nudged_at, telegram_chat_id, owner_last_channel, limits_exempt")
+         "owner_nudged_at, telegram_chat_id, owner_last_channel, limits_exempt, limit_times, limit_until, limit_alerted_at")
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,9 @@ class Tenant:
     telegram_chat_id: int | None = None
     owner_last_channel: str | None = None
     limits_exempt: bool = False
+    limit_times: int = 1                       # extra allowance an admin gave (limits.times), until limit_until
+    limit_until: datetime | None = None
+    limit_alerted_at: datetime | None = None   # when the admins were last told this account was stopped
 
     @property
     def upi(self) -> dict | None:

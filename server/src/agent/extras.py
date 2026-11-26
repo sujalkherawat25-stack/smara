@@ -8,7 +8,7 @@ from src import clock
 from src.agent import actions
 from src.agent.policy import REACTIONS, SessionCtx
 from src.box.gstin import check_gstin_status
-from src.loop.owner_channel import send_document_to_owner
+from src.loop.owner_channel import pick_channel, send_document_to_owner, window_open
 from src.loop.upi import pay_url, rupees, upi_text
 
 MAX_PENDING = 25
@@ -191,7 +191,25 @@ async def schedule_followup(app, ctx: SessionCtx, args: dict) -> dict:
         nxt = next_run(at, recur, at)
         out["repeats"] = recur["every"] + (f" until {recur['until']}" if recur.get("until") else " until cancelled")
         out["then_next"] = nxt.strftime("%Y-%m-%d %H:%M") if nxt else None
+    if warning := await _whatsapp_cannot_reach(app, ctx.tenant_id, at):
+        out["delivery_warning"] = warning
+        out["next"] += " " + warning
     return out
+
+
+async def _whatsapp_cannot_reach(app, tenant_id: str, at: datetime) -> str | None:
+    """What the owner must be told when WhatsApp will not carry a message at that time: it takes one only within 24 hours of
+    their own last message, unless an approved owner template is set up (WA_OWNER_TEMPLATE)."""
+    from src import tenants
+    tenant = await tenants.by_id(app.state.pool, tenant_id)
+    if tenant is None or getattr(app.state.settings, "wa_owner_template", ""):
+        return None
+    if pick_channel(app, tenant, at) != "whatsapp" or window_open(tenant, at):
+        return None
+    due = at.astimezone(clock.IST).strftime("%I:%M %p on %d %b").lstrip("0")
+    return ("IMPORTANT, say this to the owner in one short line in their language: WhatsApp only lets Smara message them within "
+            f"24 hours of their own last message, and this is due later than that. If they send any message in the 24 hours "
+            f"before {due}, it will arrive on time; otherwise it arrives the next time they write.")
 
 
 async def list_followups(app, ctx: SessionCtx, args: dict) -> dict:

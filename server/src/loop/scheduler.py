@@ -125,7 +125,8 @@ async def send_digests(app, local: datetime) -> int:
     """At most one digest per tenant per IST day, durable across restarts."""
     pool, sent = app.state.pool, 0
     for t in await tenants.all_tenants(pool):
-        if not await proactive.enabled(pool, t.id, app.state.settings):     # the morning summary is for owners who asked for it
+        # the morning summary is for owners who asked for it, in chat or with 'digest on'
+        if not (await proactive.enabled(pool, t.id, app.state.settings) or await review.opted_in(pool, t.id)):
             continue
         async with pool.connection() as conn:
             cur = await conn.execute(
