@@ -1,5 +1,8 @@
 """The same admin commands as admin_tg, for the people who run Smara and write from WhatsApp (ADMIN_WHATSAPP_NUMBERS).
 
+    /approve 9000000001           let someone on the waitlist in, with no code: the account is made at once and Smara tells
+                                  them the wait is over (if WhatsApp will not carry that yet, when they next write).
+                                  The same by tapping "Approve" on a new request, or a name in the /waitlist list
     /invite                       a one-use code (20 hours) and a wa.me link, to forward to anyone
     /invite 7877787675 Ramesh     the same, and Smara sends the code to that number itself (it only arrives if they wrote
                                   to Smara in the last 24 hours, as the waitlist does; the code is shown here to forward either way)
@@ -11,21 +14,28 @@ Only a message from an admin number is treated as a command; from anyone else th
 """
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
+from uuid import uuid4
 
 import httpx
 
 from src import tenants
 from src.config import admin_wa_number
-from src.ingest import admin_tg
-from src.loop.whatsapp import text_message
+from src.ingest import admin_tg, onboarding
+from src.loop.outbound import record
+from src.loop.owner_channel import send_to_owner
+from src.loop.whatsapp import template_message, text_message
 
 log = logging.getLogger(__name__)
-COMMANDS = ("invite", "waitlist", "invites", "revoke", "admin")
+COMMANDS = ("approve", "invite", "waitlist", "invites", "revoke", "admin")
+APPROVE_BUTTON = "adm:approve:"      # followed by the number; only ever acted on when an admin number sends it
+WINDOW = timedelta(hours=23, minutes=50)      # a little inside WhatsApp's 24 hours
 HELP = ("Smara admin (WhatsApp):\n"
+        "• /waitlist : jinhone access maanga; list me naam chun kar approve kijiye\n"
+        "• /approve 9000000001 : waitlist wale ko bina code turant access (Smara unhe khud bata deta hai)\n"
         "• /invite : ek invite code + link banata hai (kisi ko bhi forward kar sakte hain)\n"
         "• /invite 7877787675 naam : code banakar us number par Smara khud bhej deta hai (agar unhone pichhle 24 ghante me likha ho)\n"
-        "• /waitlist : jinhone access maanga aur abhi invite nahi hue\n"
         "• /invites : jo codes abhi chal sakte hain\n"
         "• /revoke CODE : ek code band karta hai\n"
         "Har code banne ke 20 ghante baad band ho jata hai aur sirf ek insaan ke liye chalta hai.")
@@ -54,6 +64,8 @@ async def handle(app, msg) -> bool:
         return False
     cmd, _, rest = (msg.text or "").strip().partition(" ")
     name = cmd.lstrip("/").lower()
+    if (msg.button_id or "").startswith(APPROVE_BUTTON):
+        cmd, name, rest = "/approve", "approve", msg.button_id.removeprefix(APPROVE_BUTTON)
     if not cmd.startswith("/") or name not in COMMANDS:
         if await tenants.by_owner_phone(app.state.pool, msg.sender):
             return False                      # an admin who also has a Smara account chats with Smara as usual
@@ -61,7 +73,9 @@ async def handle(app, msg) -> bool:
         return True
     rest = " ".join(rest.split())
     try:
-        if name == "invite":
+        if name == "approve":
+            await _approve(app, msg, rest)
+        elif name == "invite":
             await _invite(app, msg, rest)
         elif name == "waitlist":
             await _waitlist(app, msg)
@@ -101,19 +115,103 @@ async def _invite(app, msg, rest: str) -> None:
                                   f"Agar unhe na mile to ye bhejiye: {link or 'JOIN ' + code}", msg.number_id)
 
 
+def _number(text: str) -> str | None:
+    """A phone number typed with or without +, spaces or dashes (10 digits are taken as Indian); None if it is not one."""
+    if not re.fullmatch(r"\+?[\d\s\-()]+", text.strip()):
+        return None
+    number = admin_wa_number(text)
+    return number if 10 <= len(number) <= 15 else None
+
+
+def approved_message(name: str) -> str:
+    """What a person reads when their wait ends. Everything in it is something Smara does today."""
+    first = name.split(" ")[0] if name and name != "Friend" else ""
+    return (f"🎉 Hi{' ' + first if first else ''}! Your wait is over: you now have access to Smara.\n\n"
+            "I'm your AI assistant here on WhatsApp. Write to me like you would to a sharp colleague, in English, Hindi or "
+            "Hinglish, by text or voice note. I can:\n"
+            "• Write, fix and translate messages, emails and documents\n"
+            "• Read the PDFs, photos, spreadsheets and voice notes you send\n"
+            "• Make Excel sheets, PDFs, Word files and charts\n"
+            "• Research, plan, and remind you when it matters\n\n"
+            "I only act with your OK. I never move money and I never need your passwords.\n\n"
+            "No code needed. Just reply with the first thing you'd like help with.")
+
+
+async def _tell_approved(app, tenant, phone: str, name: str, wrote_recently: bool) -> str:
+    """'now' if the message went out; otherwise it is kept and goes out when they next write ('template' if an approved
+    template told them to in the meantime, else 'later')."""
+    payload = text_message(phone, approved_message(name))
+    if wrote_recently:
+        try:
+            await send_to_owner(app, tenant, payload, kind="owner_text", reply_channel="whatsapp")
+            return "now"
+        except httpx.HTTPError:
+            log.warning("approval message not accepted for %s", phone[-4:])
+    await record(app.state.pool, f"held:{uuid4()}", tenant_id=tenant.id, kind="owner_note", to_phone=tenant.owner_phone,
+                 status="held", payload=payload)                  # sent by resend_undelivered on their next message
+    template = getattr(app.state.settings, "wa_approved_template", "")
+    if template:
+        try:
+            await app.state.wa.send(template_message(phone, template, app.state.settings.wa_reminder_lang, [name]))
+            return "template"
+        except httpx.HTTPError:
+            log.warning("approval template not accepted for %s", phone[-4:])
+    return "later"
+
+
+async def _approve(app, msg, rest: str) -> None:
+    phone = _number(rest)
+    if phone is None:
+        return await _reply(app, msg.sender, "Aise likhiye: /approve 9000000001 (ya /waitlist bhej kar naam chuniye)", msg.number_id)
+    pool = app.state.pool
+    if await tenants.by_owner_phone(pool, phone):
+        return await _reply(app, msg.sender, f"{phone} ka account pehle se hai.", msg.number_id)
+    async with pool.connection() as conn:
+        waiting = await (await conn.execute("SELECT name, last_seen_at FROM waitlist WHERE phone = %s", (phone,))).fetchone()
+    if waiting is None:             # only people who asked: a mistyped number must not get an account
+        return await _reply(app, msg.sender, f"{phone} waitlist me nahi hai. Naye insaan ke liye: /invite {phone}", msg.number_id)
+    name = onboarding.display_name(waiting["name"])
+    tenant = await tenants.create(pool, name=name, owner_phone=phone)
+    async with pool.connection() as conn:
+        await conn.execute("UPDATE waitlist SET approved_at = now(), invited_at = now() WHERE phone = %s", (phone,))
+        await conn.execute("DELETE FROM onboarding_sessions WHERE phone = %s", (phone,))
+    seen = waiting["last_seen_at"]
+    how = await _tell_approved(app, tenant, phone, name, bool(seen) and datetime.now(timezone.utc) - seen < WINDOW)
+    log.info("waitlist approval: account %s, message %s", tenant.id, how)
+    who = f"{name} ({phone})" if waiting["name"] else phone
+    number = getattr(app.state.settings, "smara_wa_number", "")
+    link = f"\nAbhi batana ho to ye link bhej dijiye: https://wa.me/{number}?text=Hi" if number and how != "now" else ""
+    told = {"now": "Unhe 'wait khatam' wala message bhej diya.",
+            "template": "Unhone 24 ghante se nahi likha, isliye WhatsApp template bheja; poora message unke reply par jayega.",
+            "later": "Unhone 24 ghante se nahi likha, isliye WhatsApp abhi message nahi jaane deta; jab wo likhenge tab jayega."}[how]
+    await _reply(app, msg.sender, f"✅ {who} approved. Account ban gaya, code ki zaroorat nahi. {told}{link}", msg.number_id)
+
+
 async def _waitlist(app, msg) -> None:
     async with app.state.pool.connection() as conn:
         rows = await (await conn.execute(
-            """SELECT phone, first_text, messages FROM waitlist WHERE invited_at IS NULL
+            """SELECT phone, name, first_text, messages FROM waitlist WHERE invited_at IS NULL
                 ORDER BY created_at DESC LIMIT 15""")).fetchall()
+        total = (await (await conn.execute("SELECT count(*) AS n FROM waitlist WHERE invited_at IS NULL")).fetchone())["n"]
     if not rows:
         return await _reply(app, msg.sender, "Waitlist khali hai.", msg.number_id)
     lines = []
     for r in rows:
         tg = r["phone"].startswith("tg:")
-        lines.append(f"• {r['phone'].removeprefix('tg:')}{' (Telegram)' if tg else ''}: {r['messages']} msg, "
-                     f"\"{(r['first_text'] or '')[:50]}\"" + ("" if tg else f"  -> /invite {r['phone']}"))
-    await _reply(app, msg.sender, "Waitlist (nayi pehle):\n" + "\n".join(lines), msg.number_id)
+        who = r["phone"].removeprefix("tg:") + (" (Telegram)" if tg else f" {r['name']}" if r["name"] else "")
+        lines.append(f"• {who}: {r['messages']} msg, \"{(r['first_text'] or '')[:50]}\"")
+    more = f"\n(aur {total - len(rows)}; approve karne ke baad dobara /waitlist)" if total > len(rows) else ""
+    await _reply(app, msg.sender, f"Waitlist (nayi pehle, {total}):\n" + "\n".join(lines) + more
+                 + "\nApprove: neeche list se chuniye, ya /approve <number>", msg.number_id)
+    choices = [{"id": APPROVE_BUTTON + r["phone"], "title": (r["name"] or f"+{r['phone']}")[:24],
+                "description": f"+{r['phone']}: {r['first_text'] or ''}"[:72]}
+               for r in rows if not r["phone"].startswith("tg:")][:10]           # WhatsApp lists hold at most 10
+    if choices:
+        await app.state.wa.send(
+            {"messaging_product": "whatsapp", "to": msg.sender, "type": "interactive", "interactive": {
+                "type": "list", "body": {"text": "Kise approve karna hai? Chunte hi unhe access mil jata hai."},
+                "action": {"button": "Approve karein", "sections": [{"title": "Waitlist", "rows": choices}]}}},
+            number_id=msg.number_id or None)
 
 
 async def _invites(app, msg) -> None:
@@ -142,8 +240,8 @@ async def _revoke(app, msg, rest: str) -> None:
 async def tell_admins_about_waitlist(app, phone: str, name: str, text: str) -> None:
     """Someone wrote to Smara's WhatsApp number without an invite: every admin (Telegram, and WhatsApp numbers that
     wrote in the last 24 hours) gets one message with what is needed to invite them."""
-    note = (f"Naya WhatsApp waitlist request: {name or '?'}, +{phone}.\nUnhone likha: \"{text[:120]}\"\n"
-            f"Access dene ke liye: /invite {phone}")
+    about = f"Naya WhatsApp waitlist request: {name or '?'}, +{phone}.\nUnhone likha: \"{text[:120]}\""
+    note = f"{about}\nAccess dene ke liye: /invite {phone}"           # Telegram has no approve command yet
     if getattr(app.state, "tg", None) is not None:
         for admin in admin_tg.admin_ids(app.state.settings):
             try:
@@ -152,6 +250,8 @@ async def tell_admins_about_waitlist(app, phone: str, name: str, text: str) -> N
                 log.warning("could not tell admin %s about the WhatsApp waitlist", admin)
     for number in admin_numbers(app.state.settings):
         try:
-            await _reply(app, number, note)
+            await app.state.wa.send({"messaging_product": "whatsapp", "to": number, "type": "interactive", "interactive": {
+                "type": "button", "body": {"text": f"{about}\nTap Approve, ya /approve {phone}"[:1024]},
+                "action": {"buttons": [{"type": "reply", "reply": {"id": APPROVE_BUTTON + phone, "title": "Approve"}}]}}})
         except Exception:
             log.info("WhatsApp admin %s not reachable now (outside the 24h window)", number[-4:])

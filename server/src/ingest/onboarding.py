@@ -89,10 +89,11 @@ async def handle_stranger(app, msg) -> None:
     # invite-only: one reply a day, and everything they write is kept for whoever decides who to invite
     async with pool.connection() as conn:
         row = await (await conn.execute(
-            """INSERT INTO waitlist (phone, first_text, last_text) VALUES (%s, %s, %s)
-               ON CONFLICT (phone) DO UPDATE SET last_text = EXCLUDED.last_text, messages = waitlist.messages + 1
+            """INSERT INTO waitlist (phone, first_text, last_text, name, last_seen_at) VALUES (%s, %s, %s, %s, now())
+               ON CONFLICT (phone) DO UPDATE SET last_text = EXCLUDED.last_text, messages = waitlist.messages + 1,
+                  name = coalesce(nullif(EXCLUDED.name, ''), waitlist.name), last_seen_at = now()
                RETURNING messages, (replied_at IS NULL OR replied_at < now() - interval '1 day') AS due""",
-            (msg.sender, text[:300], text[:300]))).fetchone()
+            (msg.sender, text[:300], text[:300], display_name(msg.profile_name) if msg.profile_name else ""))).fetchone()
         if row["due"]:
             await conn.execute("UPDATE waitlist SET replied_at = now() WHERE phone = %s", (msg.sender,))
     if row["due"]:

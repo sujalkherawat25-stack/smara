@@ -69,6 +69,7 @@ class Settings:
     pc_browser_tenants: str = "*"
     # Approved template that tells the owner "N items waiting" when their 24h window is closed
     wa_owner_template: str = ""
+    wa_approved_template: str = ""   # approved template (one variable: the name) telling a waitlisted person they are in
     telegram_bot_token: str = ""
     # Python sandbox: container (prod, isolated smara_sandbox), local (dev/tests only), off
     sandbox_mode: str = "local"
@@ -161,6 +162,7 @@ def load_settings() -> Settings:
         wa_reminder_lang=env.get("WA_REMINDER_LANG", "en"),
         wa_reminder_params=env.get("WA_REMINDER_PARAMS", "customer,invoice,amount,due"),
         wa_owner_template=env.get("WA_OWNER_TEMPLATE", ""),
+        wa_approved_template=env.get("WA_APPROVED_TEMPLATE", ""),
         reminder_send_mode=reminder_mode(env.get("REMINDER_SEND_MODE", "own")),
         pc_browser_tenants=env.get("PC_BROWSER_TENANTS", ""),
         telegram_bot_token=env.get("TELEGRAM_BOT_TOKEN", ""),
