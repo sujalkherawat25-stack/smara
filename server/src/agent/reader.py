@@ -147,6 +147,8 @@ async def read_attachment(app, ctx: SessionCtx, args: dict) -> dict:
             return {**base, "kind": "video", "note": "videos cannot be watched; ask the owner what it shows or for a photo or the document itself"}
         if name.endswith(TEXT_EXT) or mime.startswith("text/") or mime in ("application/json", "application/xml"):
             return {**base, "kind": "text", **_cap(decode_text(data))}
+    except MediaError as e:
+        return {**base, "error": str(e)}
     except Exception as e:                           # damaged, protected or strange files must not crash the turn
         return {**base, "error": f"could not read this file ({type(e).__name__}); it may be damaged or password protected"}
     return {**base, "kind": "other", "note": "this file type cannot be read directly. If it is an archive or data file, try run_python."}

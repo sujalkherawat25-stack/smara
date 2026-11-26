@@ -3,10 +3,13 @@
 External-API shapes here (Graph media fetch, Sarvam /speech-to-text, OpenAI-style
 image_url parts) follow the vendors' public docs but are not yet exercised live.
 """
+import array
 import asyncio
 import logging
 import base64
+import io
 import re
+import wave
 
 import httpx
 
@@ -16,6 +19,10 @@ GRAPH = "https://graph.facebook.com/v20.0"
 SARVAM_STT = "https://api.sarvam.ai/speech-to-text"
 MAX_MEDIA_BYTES = 100 * 1024 * 1024      # WhatsApp itself accepts at most 100 MB per document
 ATTEMPTS = 3
+STT_PIECE_S = 29        # the speech service refuses a recording over 30 s
+STT_CUT_FROM_S = 20     # a longer one is cut at its quietest moment between this and STT_PIECE_S
+STT_AT_ONCE = 3
+MAX_VOICE_S = 300       # longer than this is refused with a plain message (speech is paid for by the second)
 
 
 log = logging.getLogger(__name__)
@@ -86,26 +93,94 @@ async def to_wav(audio: bytes) -> bytes:
     return out
 
 
-async def transcribe(api_key: str, audio: bytes, mime: str = "audio/ogg",
-                     client: httpx.AsyncClient | None = None, url: str = SARVAM_STT) -> str:
-    """Hinglish-capable STT. Returns '' when no key is configured. The key is sent in a header and never logged."""
-    if not api_key:
-        return ""
-    wav = await to_wav(audio)
-    http = client or httpx.AsyncClient(timeout=60)
+def _spoken_length(seconds: float) -> str:
+    minutes, rest = divmod(int(round(seconds)), 60)
+    return f"{minutes} min {rest} s"
+
+
+def split_wav(wav: bytes) -> list[bytes]:
+    """A recording the speech service can take, as it is; a longer one as pieces in order, each cut at the quietest moment
+    near the end of its piece so that words are not split. No sound is dropped or repeated."""
     try:
+        with wave.open(io.BytesIO(wav)) as source:
+            channels, width, rate = source.getnchannels(), source.getsampwidth(), source.getframerate()
+            # ffmpeg cannot write the length into a piped header, so it is worked out from the size, before copying anything
+            length = len(wav) / (rate * channels * width)
+            if length > MAX_VOICE_S + 0.5:
+                raise MediaError(f"That voice note is {_spoken_length(length)} long. I can take up to "
+                                 f"{MAX_VOICE_S // 60} minutes: please send it in shorter parts, or type it.")
+            pcm = source.readframes(source.getnframes())    # likewise: read to the end
+    except (wave.Error, EOFError):
+        return [wav]                                        # cannot be measured: the speech service decides
+    if len(pcm) / (rate * channels * width) <= STT_PIECE_S or width != 2:
+        return [wav]
+    samples = array.array("h", pcm)                         # 16-bit little-endian, as to_wav makes it
+    per_second, window = rate * channels, rate * channels // 5
+
+    def loudness(at: int) -> int:
+        return sum(map(abs, samples[at:at + window]))
+
+    cuts, start = [0], 0
+    while len(samples) - start > STT_PIECE_S * per_second:
+        first = start + STT_CUT_FROM_S * per_second
+        last = min(start + STT_PIECE_S * per_second, len(samples) - 2 * per_second)     # the last piece keeps 2 s or more
+        quietest = min(range(last - window, first - 1, -window // 2), key=loudness)     # latest first: ties give fewer pieces
+        start = (quietest + window // 2) // channels * channels
+        cuts.append(start)
+    cuts.append(len(samples))
+    pieces = []
+    for begin, end in zip(cuts, cuts[1:]):
+        out = io.BytesIO()
+        with wave.open(out, "wb") as piece:
+            piece.setnchannels(channels)
+            piece.setsampwidth(width)
+            piece.setframerate(rate)
+            piece.writeframes(samples[begin:end].tobytes())
+        pieces.append(out.getvalue())
+    return pieces
+
+
+async def _speech_to_text(http: httpx.AsyncClient, api_key: str, url: str, wav: bytes) -> str:
+    for attempt in range(ATTEMPTS):
         resp = await http.post(
-            url or SARVAM_STT, headers={"api-subscription-key": api_key},
+            url, headers={"api-subscription-key": api_key},
             files={"file": ("voice.wav", wav, "audio/wav")},
             data={"model": "saarika:v2.5", "language_code": "unknown"},
         )
-        if resp.status_code >= 400:
-            log.warning("speech service answered %s: %s", resp.status_code, resp.text[:200])
-        resp.raise_for_status()
-        return resp.json().get("transcript", "")
+        busy = resp.status_code == 429 or resp.status_code >= 500
+        if not busy or attempt == ATTEMPTS - 1:
+            break
+        await asyncio.sleep(1 + 2 * attempt)
+    if resp.status_code >= 400:
+        log.warning("speech service answered %s: %s", resp.status_code, resp.text[:200])
+    resp.raise_for_status()
+    return resp.json().get("transcript", "")
+
+
+async def transcribe(api_key: str, audio: bytes, mime: str = "audio/ogg",
+                     client: httpx.AsyncClient | None = None, url: str = SARVAM_STT) -> str:
+    """Hinglish-capable STT. Returns '' when no key is configured. The key is sent in a header and never logged.
+    A long recording is sent in pieces. If any piece fails, all of it fails: half an instruction must never be acted on."""
+    if not api_key:
+        return ""
+    pieces = split_wav(await to_wav(audio))
+    http = client or httpx.AsyncClient(timeout=60)
+    gate = asyncio.Semaphore(STT_AT_ONCE)
+
+    async def one(piece: bytes) -> str:
+        async with gate:
+            return await _speech_to_text(http, api_key, url or SARVAM_STT, piece)
+
+    jobs = [asyncio.ensure_future(one(piece)) for piece in pieces]
+    try:
+        said = await asyncio.gather(*jobs)
     finally:
+        for job in jobs:
+            job.cancel()                                    # no effect on the finished ones
+        await asyncio.gather(*jobs, return_exceptions=True)
         if client is None:
             await http.aclose()
+    return said[0] if len(said) == 1 else " ".join(part.strip() for part in said if part.strip())
 
 
 async def read_image(llm: LLM, image: bytes, mime: str) -> dict:
