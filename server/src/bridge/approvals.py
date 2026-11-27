@@ -84,7 +84,7 @@ async def pending(pool, tenant_id: str) -> list[dict]:
                 ORDER BY updated_at DESC LIMIT 50""", (tenant_id, list(DESKTOP_TOOLS)))).fetchall()
     return [{"id": str(r["id"]), "tool": r["pending"].get("name"), "card": str(r["pending"].get("card") or "")[:1024],
              "step": _safe_args(r["pending"].get("name"), r["pending"].get("args") or {}),
-             "site_choice": r["pending"].get("name") == "browser_step",
+             "site_choice": r["pending"].get("site_choice", r["pending"].get("name") == "browser_step"),
              "asked_at": r["updated_at"].isoformat() if r["updated_at"] else None} for r in rows]
 
 

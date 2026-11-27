@@ -23,7 +23,7 @@ from src import chatlog, clock, health_watch, prefs, proactive, tenants
 from src.agent import actions, bookkeeping, calc, documents, extras, ageing, bank, gst, memory_pass, pc, reader, register_audit, sheet_tools, skills, tds_check, tools, web
 from src.agent.context import compact
 from src.bridge import pc_tasks
-from src.agent.policy import SessionCtx, approval_text, pre_tool_use
+from src.agent.policy import SessionCtx, approval_text, control, pre_tool_use, typed_into_form
 from src.agent.prompt import build_system, latest_owner_text
 from src.loop.llm import RateLimited
 from src.loop.owner_channel import CURRENT_REPLY_CHANNEL, send_to_owner
@@ -166,6 +166,27 @@ def last_fill(messages: list[dict]) -> tuple[str, str]:
     return "", ""
 
 
+def fill_place(messages: list[dict]) -> tuple[str, str]:
+    """(the box, the page's address) of the agent's most recent 'fill', as noted in that step's result."""
+    for m in reversed(messages):
+        if m.get("role") == "tool" and str(m.get("content") or "").startswith('{"typed_into": '):
+            try:
+                note, _ = json.JSONDecoder().raw_decode(m["content"], len('{"typed_into": '))
+                return str(note["box"]), str(note["url"])
+            except (ValueError, KeyError, TypeError):
+                break
+    return "", ""
+
+
+def _note_fill(args: dict, ctx, result: dict, browsers) -> dict:
+    """First in the result, so cutting a long page never removes it."""
+    if args.get("action") != "fill" or result.get("error"):
+        return result
+    box = control(ctx.controls, args["ref"]) if args.get("ref") not in (None, "") else str(args.get("selector") or "")
+    url = str((browsers.page(ctx.id) or {}).get("url", "")) if browsers else ""
+    return {"typed_into": {"box": box[:120], "url": url}, **result}
+
+
 def _ctx(row, call_id: str = "", browsers=None) -> SessionCtx:
     sid = str(row["id"])
     return SessionCtx(id=sid, tenant_id=str(row["tenant_id"]), trust=row["trust"],
@@ -175,6 +196,8 @@ def _ctx(row, call_id: str = "", browsers=None) -> SessionCtx:
                       page=page_text(browsers.page(sid)) if browsers else "",
                       controls=str((browsers.page(sid) or {}).get("page", "")) if browsers else "",
                       last_fill=last_fill(row.get("messages") or [])[0], last_fill_value=last_fill(row.get("messages") or [])[1],
+                      last_fill_box=fill_place(row.get("messages") or [])[0], last_fill_url=fill_place(row.get("messages") or [])[1],
+                      url=str((browsers.page(sid) or {}).get("url", "")) if browsers else "",
                       owner_words=owner_words(row.get("messages") or []), confirmed=answered_question(row.get("messages") or []))
 
 
@@ -651,8 +674,11 @@ async def _process(app, row, messages: list, calls: list) -> bool:
         else:
             err = await actions.validate_gated(app, ctx, name, args)
             if err is None:
-                extra = await actions.open_gate(app, ctx, tenant, name, args, approval_text(name, args, getattr(getattr(app.state, "browsers", None), "page", lambda _: None)(ctx.id),
-                                                       ctx.last_fill_value if name == "browser_step" else ""))   # args now hold computed amounts
+                page = getattr(getattr(app.state, "browsers", None), "page", lambda _: None)(ctx.id)
+                typed = ctx.last_fill_value if name == "browser_step" and typed_into_form(ctx) else ""
+                language = (await prefs.get(app.state.pool, ctx.tenant_id))["language"] if name == "browser_step" else ""
+                extra = await actions.open_gate(app, ctx, tenant, name, args,   # args now hold computed amounts
+                                                approval_text(name, args, page, typed, language), language)
                 pending = {"call_id": cid, "name": name, "args": args, "card": extra.get("card", d.card),
                            "remaining": calls[i + 1:], **{k: v for k, v in extra.items() if k != "card"}}
                 await _save(app.state.pool, ctx.id, messages, status="WAITING_APPROVAL", pending=pending)
@@ -660,6 +686,8 @@ async def _process(app, row, messages: list, calls: list) -> bool:
             result = {"error": err}
         if name == "web_search" and (advice := search_advice(messages)):
             result = {"advice": advice, **result}        # first, so the cut on long results never removes it
+        if name == "browser_step":
+            result = _note_fill(args, ctx, result, getattr(app.state, "browsers", None))
         messages.append({"role": "tool", "tool_call_id": cid,
                          "content": tools.bounded(result, BROWSER_RESULT_CHARS if name == "browser_step" else 6000)})
     return False
@@ -774,6 +802,8 @@ async def resume(app, tenant_id: str, *, sid: str | None = None, adjustment_id: 
         else:
             await actions.on_rejected(app, ctx, p["name"], p["args"])
             result = {"error": "the owner rejected this action"}
+        if p["name"] == "browser_step" and approved:
+            result = _note_fill(p["args"], ctx, result, getattr(app.state, "browsers", None))
         messages.append({"role": "tool", "tool_call_id": p["call_id"], "content": tools.bounded(result)})
         if await _process(app, row, messages, p.get("remaining") or []):
             _mark(app, sid, False)      # waiting on the owner again: not running

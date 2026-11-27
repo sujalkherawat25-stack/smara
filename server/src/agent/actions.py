@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from src import clock
 from src.agent import bookkeeping, gst
-from src.agent.policy import SessionCtx, target_words
+from src.agent.policy import BUTTONS, SECRET_FIELD, SessionCtx, target_words
 from src.agent.tools import party_in_tenant
 from src.bridge.coordinator import submit_debtor_claim
 from src.ingest import owner_files
@@ -159,9 +159,6 @@ def _compute_amount(args: dict, owed: float) -> str | None:
     return None
 
 
-SECRET_FIELD = re.compile(r"pass(word|wd)|\botp\b|\bm?pin\b(?!.?code)|cvv|card.?number|\bupi.?pin\b|secret", re.I)
-
-
 async def validate_gated(app, ctx: SessionCtx, name: str, args: dict) -> str | None:
     """Concrete checks before any card is shown. Returns an error for the model, or None."""
     pool = app.state.pool
@@ -216,7 +213,7 @@ async def validate_gated(app, ctx: SessionCtx, name: str, args: dict) -> str | N
     return None
 
 
-async def open_gate(app, ctx: SessionCtx, tenant, name: str, args: dict, card: str) -> dict:
+async def open_gate(app, ctx: SessionCtx, tenant, name: str, args: dict, card: str, language: str = "") -> dict:
     """Show the owner the card; returns what must be stored as the session's pending call."""
     if name == "propose_ledger_adjustment":   # reuse the ledger's own PENDING row and Approve/Reject path
         o = await _obligation(app.state.pool, ctx, args["obligation_id"])
@@ -239,14 +236,18 @@ async def open_gate(app, ctx: SessionCtx, tenant, name: str, args: dict, card: s
         p = await party_in_tenant(app.state.pool, ctx.tenant_id, args["to"])
         who = f"To: {p['canonical_name']} (+{p['whatsapp_phone']})\n"
     btn = lambda k, t: {"type": "reply", "reply": {"id": f"{k}:{ctx.id}", "title": t}}
+    # "allow this site" only means something on the owner's own PC: a server browser step that still asks is one that sends
+    site_choice = name == "browser_step" and ctx.on_device
+    titles = BUTTONS.get(language, BUTTONS["english"]) if name == "browser_step" else \
+        ("Done, continue", "Cancel") if name == "hand_off_to_owner" else ("Approve", "Reject")
     await send_to_owner(app, tenant, {
         "messaging_product": "whatsapp", "to": tenant.owner_phone, "type": "interactive", "interactive": {
             "type": "button", "body": {"text": (who + card)[:1024]},
-            "action": {"buttons": [btn("ag_ok", "Done, continue") if name == "hand_off_to_owner" else btn("ag_ok", "Approve"),
-                                   *([btn("ag_site", "Approve + this site")] if name == "browser_step" else []),
-                                   btn("ag_no", "Cancel") if name == "hand_off_to_owner" else btn("ag_no", "Reject")]}}},
+            "action": {"buttons": [btn("ag_ok", titles[0]),
+                                   *([btn("ag_site", "Approve + this site")] if site_choice else []),
+                                   btn("ag_no", titles[1])]}}},
         kind="owner_agent_card", agent_session_id=ctx.id)
-    return {"card": (who + card)[:1024]}
+    return {"card": (who + card)[:1024], "buttons": list(titles), "site_choice": site_choice}
 
 
 async def execute_approved(app, ctx: SessionCtx, tenant, name: str, args: dict) -> dict:
