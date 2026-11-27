@@ -25,7 +25,9 @@ FREE_COMMANDS = frozenset({
     "digest off", "summary off", "weekly off", "digest band", "digest band karo", "digest stop",
     "unpair browser", "disconnect browser", "stop desktop approvals", "desktop approvals off", "unpair desktop approvals",
     "stop sharing desktop memory", "desktop memory off", "stop desktop memory", "forget desktop memory", "delete desktop memory",
-    "telegram off"})
+    "telegram off",
+    "follow-up off", "follow up off", "followup off", "follow-ups off", "follow ups off", "followups off", "check-in off",
+    "checkin off", "follow-up band karo", "follow up band karo", "followup band karo"})
 
 
 def command_of(text: str) -> str:

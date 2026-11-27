@@ -28,6 +28,8 @@ async def set_proactive_messages(app, ctx, args: dict) -> dict:
     if not isinstance(on, bool):
         return {"error": "give on = true or false"}
     await set_on(app.state.pool, ctx.tenant_id, on)
+    from src.loop import checkin
+    await checkin.set_off(app.state.pool, ctx.tenant_id, not on)      # "stop messaging me" covers the follow-up too
     if on:
         return {"saved": True, "on": True, "note_for_you": "Confirm in one line: from the next working morning Smara will send up to "
                 f"{CARDS_PER_DAY} reminder cards a day for overdue invoices (each needs their tap) and a morning summary; "

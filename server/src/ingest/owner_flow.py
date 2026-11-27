@@ -22,6 +22,7 @@ from src.ingest.sheet_mapper import SheetRow, map_sheet_detail, parse_amount_pai
 from src.agent_loop import attach_to_running, resume, start_session
 from src.loop import review, wa_link
 from src.loop.digest import build_digest
+from src.loop import checkin
 from src.loop.reminders import decide_reminder
 from src.loop.owner_channel import send_to_owner
 from src.loop.whatsapp import text_message
@@ -36,7 +37,7 @@ HELP = ("Just talk to me, in English, Hindi or Hinglish, by text or voice note. 
         "• For a business: 'Ravi ka kitna baaki hai?', 'Gupta ne 5000 cash diya', payment reminders, GST\n\n"
         "When something works well, I can save it as a skill so it is faster next time. I only act with your OK: nothing "
         "is sent to anyone or changed until you approve it.\n\n"
-        "Commands:\n• 'digest': today's summary ('digest off' stops the Monday summary and alerts)\n• 'style': language and length of my answers\n• 'skills': your saved skills\n"
+        "Commands:\n• 'digest': today's summary ('digest off' stops the Monday summary and alerts)\n• 'follow-up off': no follow-up from me after we chat\n• 'style': language and length of my answers\n• 'skills': your saved skills\n"
         "• 'files': files you sent me\n• 'export': how to get a list out of Tally or Busy\n• 'sample': a sample file\n"
         "• 'telegram': connect Telegram (from WhatsApp)")
 PC_LATER = ("Apne PC ka browser jodna Smara Desktop ke saath aayega, jo abhi jaldi aa raha hai. Tab tak main Smara ke apne cloud "
@@ -245,6 +246,9 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
     if cmd in ("digest off", "summary off", "weekly off", "digest band", "digest band karo", "digest stop"):
         await review.set_digest(app.state.pool, tenant_id, False)
         return "Theek hai, ab main hafte ka summary aur daily alerts nahi bhejunga. Dobara chahiye to 'digest on' likhiye."
+    if cmd in checkin.OFF_COMMANDS or cmd in checkin.ON_COMMANDS:
+        await checkin.set_off(app.state.pool, tenant_id, cmd in checkin.OFF_COMMANDS)
+        return checkin.SAID_OFF if cmd in checkin.OFF_COMMANDS else checkin.SAID_ON
     if cmd in ("digest on", "summary on", "weekly on", "digest chalu", "digest chalu karo", "digest start"):
         await review.set_digest(app.state.pool, tenant_id, True)
         reply = ("Done. Jab aapke records me kisi ka baaki ya supplier bill hoga, to har Monday uska summary aayega, aur kuch "

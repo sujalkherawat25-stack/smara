@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from src import clock, health_watch, proactive, tenants
 from src.bridge.outbox import drain
 from src.ingest import owner_files
-from src.loop import wa_link
+from src.loop import checkin, wa_link
 from src.loop import review
 from src.loop.digest import build_digest
 from src.loop.reminders import (claim_due, draft_reminder, release_claim, reminder_card, reopen_unanswered,
@@ -48,6 +48,10 @@ async def tick(app, now: datetime) -> int:
         await run_due(app, now)
     except Exception:
         log.exception("held-card flush / scheduled tasks failed")
+    try:                                  # one follow-up for people who went quiet, while WhatsApp still allows it
+        await checkin.send_due(app, now)
+    except Exception:
+        log.exception("follow-up pass failed")
     try:                                  # a lost or unanswered card must not park an invoice for ever
         await reopen_unanswered(pool, now)
     except Exception:
