@@ -84,16 +84,83 @@ def plain_english(text: str) -> bool:
     return len(words & _ENGLISH) >= 2 and not words & _HINGLISH
 
 
+# A message that is only one of these words is the person picking a language. It is saved here, by the server: left to the
+# model, the choice was often not stored, and a later message in another language changed the language of the answers.
+_CHOICES = {"hindi": "hindi", "हिंदी": "hindi", "हिन्दी": "hindi", "hinglish": "hinglish", "english": "english",
+            "इंग्लिश": "english", "अंग्रेज़ी": "english", "अंग्रेजी": "english"}
+CHOSEN = {
+    "hindi": "ठीक है, अब से मैं आपसे हिंदी में बात करूँगी। बताइए, किस काम में मदद चाहिए?",
+    "hinglish": "Theek hai, ab se main aapse Hinglish mein baat karungi. Bataiye, kis kaam mein madad chahiye?",
+    "english": "Sure, I'll talk with you in English from now on. What do you need help with?",
+}
+
+
+def bare_choice(text: str) -> str | None:
+    """The language picked, when the whole message is just its name (with any bold marks, quotes or full stop)."""
+    return _CHOICES.get((text or "").strip(" \t\r\n.!।*_\"'“”‘’").lower())
+
+
+async def choose(pool, tenant_id: str, text: str, ref: str) -> str | None:
+    """Save the language and return the one-line answer, or None when the message is not a choice. A bare name counts
+    only when Smara's last message offered the languages, or nothing has been said yet: in the middle of a task
+    ('which language should I translate it into?' - 'Hindi') it is an answer for the assistant."""
+    lang = bare_choice(text)
+    if lang is None:
+        return None
+    async with pool.connection() as conn:
+        last = await (await conn.execute(
+            """SELECT content FROM chat_messages WHERE tenant_id = %s AND role = 'smara'
+                ORDER BY created_at DESC, id DESC LIMIT 1""", (tenant_id,))).fetchone()
+        if last is None:
+            earlier = await (await conn.execute(
+                "SELECT 1 FROM chat_messages WHERE tenant_id = %s AND role = 'owner' AND ref IS DISTINCT FROM %s LIMIT 1",
+                (tenant_id, ref))).fetchone()
+            if earlier:
+                return None
+        elif not all(word in last["content"].lower() for word in ("hinglish", "english")):
+            return None
+    await put(pool, tenant_id, language=lang)
+    return CHOSEN[lang]
+
+
+def wrong_language(lang: str, reply: str) -> str:
+    """A note telling the model to write its reply again, or "". Only for a chosen English or Hindi, and only when the
+    reply is clearly in the other one: told the rule, the model still sometimes copies the language of a message.
+    Quoted text is left out: a message written for someone else may be in any language."""
+    own = re.sub(r'"[^"]*"|“[^”]*”', " ", reply or "")
+    hindi_letters = sum("ऀ" <= ch <= "ॿ" for ch in own)
+    latin = re.findall(r"[A-Za-z]+", own)
+    if lang == "english":
+        hits = sum(w.lower() in _HINGLISH for w in latin)
+        wrong, name = hindi_letters > 20 or (hits >= 3 and hits * 12 >= len(latin)), "simple Indian English"
+    elif lang == "hindi":
+        wrong, name = len(latin) >= 12 and sum(map(len, latin)) > hindi_letters * 2, "Hindi in Devanagari script"
+    else:
+        return ""
+    if not wrong:
+        return ""
+    return (f"[system note] The owner chose {name}, and your reply is not in it. Write the same reply again in {name}, with "
+            "the same facts and nothing new, and call no tool. Text you wrote for them to send to someone else stays in its "
+            "own language, inside double quotes. Do not mention this note.")
+
+
 def _language_rule(lang: str, latest: str = "") -> str:
     if lang not in LANGUAGES or lang == "auto":
         if plain_english(latest):       # said outright: after one Hinglish message the model otherwise stays in Hinglish
             return "Their last message is in English, so answer in English, even if earlier messages were in Hinglish."
         return "Answer in the language the owner used in their last message (Hinglish if they mix Hindi and English)."
+    others = ("Only text they ask you to write or translate for someone else goes in the language they ask for; your own "
+              "words around it stay in this one.")
     if lang == "hindi":
         return ("Write EVERY answer to the owner in Hindi using Devanagari script (जैसे: गुप्ता ट्रेडर्स पर ₹19,800 बाकी है।), "
-                "even when the owner writes in Hinglish or English. Keep invoice numbers and amounts in digits.")
-    return (f"Write EVERY answer to the owner in {LANGUAGES[lang]}, even when the owner writes in another language. "
-            "Keep names, invoice numbers and amounts as they are.")
+                f"even when the owner writes in Hinglish or English. Keep invoice numbers and amounts in digits. {others}")
+    if lang == "english":    # said outright: told only "every answer", the model still copied a Hinglish message
+        return ("Write EVERY answer to the owner in simple Indian English ONLY. They chose English. Even when their latest "
+                "message is in Hinglish or Hindi, do NOT copy its language: no Hindi words, greetings, questions or closing "
+                "lines (not even 'Bilkul', 'ji' or 'Aapki dukaan'). Keep names, invoice numbers and amounts as they are. "
+                f"This also overrides any Hinglish example elsewhere in these instructions. {others}")
+    return (f"Write EVERY answer to the owner in {LANGUAGES[lang]}, even when the owner writes in another language and "
+            f"even if earlier answers used a different one. Keep names, invoice numbers and amounts as they are. {others}")
 
 
 def prompt_block(p: dict, latest: str = "") -> str:
