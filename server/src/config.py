@@ -81,6 +81,8 @@ class Settings:
     # Messages Smara starts by itself (collection cards, morning summary): True = for every shop (tests), False = only shops that opted in
     proactive_default: bool = True
     proactive_cards_per_day: int = 8      # most collection cards one shop gets in a day; the rest wait for tomorrow
+    # One follow-up within 24 hours of someone's last message (loop/checkin.py). Production turns it on; FOLLOW_UP=off stops it
+    checkin_on: bool = False
     admin_whatsapp_numbers: tuple = ()  # WhatsApp numbers (digits, with country code) that may use the same admin commands on WhatsApp
     smara_wa_number: str = ""           # Smara's own public WhatsApp number (digits), used to build wa.me invite links
     # Shared secret the Syntarus operator dashboard sends to read the Smara numbers (empty = that endpoint is off)
@@ -173,6 +175,7 @@ def load_settings() -> Settings:
         admin_telegram_ids=tuple(i for i in (_chat_id(x) for x in env.get("ADMIN_TELEGRAM_IDS", "").split(",")) if i is not None),
         proactive_cards_per_day=int(env.get("PROACTIVE_CARDS_PER_DAY", "8") or 8),
         proactive_default=env.get("PROACTIVE_DEFAULT", "off").strip().lower() in ("on", "1", "true", "yes"),
+        checkin_on=env.get("FOLLOW_UP", "on").strip().lower() in ("on", "1", "true", "yes"),
         admin_whatsapp_numbers=tuple(n for n in (admin_wa_number(x) for x in env.get("ADMIN_WHATSAPP_NUMBERS", "").split(",")) if n),
         smara_wa_number=normalize_phone(env.get("SMARA_WA_NUMBER", "")),
         ops_dashboard_token=env.get("OPS_DASHBOARD_TOKEN", ""),
