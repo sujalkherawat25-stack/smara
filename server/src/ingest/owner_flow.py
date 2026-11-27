@@ -133,6 +133,9 @@ async def _route(app, tenant_id: str, msg: InboundMessage) -> str | None:
         return await login.answer(app.state.pool, tenant_id, cmd in ("yes", "haan", "ha"))
     if msg.kind == "text" and (style := prefs.parse(msg.text)):
         return await _style(app, tenant_id, msg, *style)
+    if msg.kind == "text" and getattr(app.state, "pool", None) is not None and \
+            (chosen := await prefs.choose(app.state.pool, tenant_id, msg.text, msg.wamid)):
+        return chosen
     if cmd in ("help", "commands", "menu"):
         return HELP
     if msg.kind == "text" and (cmd in ("skills", "my skills", "skill", "meri skills") or cmd.startswith("skill delete ")):

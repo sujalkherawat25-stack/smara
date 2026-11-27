@@ -36,6 +36,12 @@ PROGRESS_EVERY_S = 120
 PROGRESS_MAX = 2           # one more if it goes on for a long time; five identical notes read like a fault
 PROGRESS_NOTES = ("Still working on it. I'll send the answer as soon as it's ready.",
                   "Still working on it. This one is taking longer than usual.")
+# for someone who picked a language; everyone else gets the English notes above
+PROGRESS_NOTES_IN = {
+    "hindi": ("इस पर काम चल रहा है। जवाब तैयार होते ही भेज दूँगी।", "अभी काम चल रहा है। इसमें थोड़ा ज़्यादा समय लग रहा है।"),
+    "hinglish": ("Is par kaam chal raha hai. Jawab taiyar hote hi bhej dungi.",
+                 "Abhi kaam chal raha hai. Isme thoda zyada samay lag raha hai."),
+}
 SEARCH_ENOUGH, SEARCH_PLENTY = 4, 7      # web searches for one request before the model is told to answer (never blocked)
 TYPING_EVERY_S = 4.5        # Telegram shows 'typing…' for about 5 seconds per call
 RATE_RETRY_S = 25         # the model is busy (rate limited): wait and try the same step again
@@ -459,6 +465,18 @@ async def run(app, sid: str, fallback=None) -> None:
         _mark(app, sid, False)
 
 
+async def _progress_notes(app, tenant) -> tuple[str, str]:
+    pool = getattr(getattr(app, "state", None), "pool", None)
+    if pool is None:
+        return PROGRESS_NOTES
+    try:
+        language = (await prefs.get(pool, str(tenant.id)))["language"]
+    except Exception:
+        log.warning("language setting not read for a progress note")
+        return PROGRESS_NOTES
+    return PROGRESS_NOTES_IN.get(language, PROGRESS_NOTES)
+
+
 async def _progress(app, row, tenant) -> None:
     """Tells the owner a long task is still going. Only for messages the owner sent, on the channel they used."""
     try:
@@ -474,8 +492,9 @@ async def _progress(app, row, tenant) -> None:
                 waited += TYPING_EVERY_S
         else:
             await asyncio.sleep(PROGRESS_FIRST_S)
+        notes = await _progress_notes(app, tenant)
         for i in range(PROGRESS_MAX):
-            await send_to_owner(app, tenant, text_message(tenant.owner_phone, PROGRESS_NOTES[min(i, len(PROGRESS_NOTES) - 1)]),
+            await send_to_owner(app, tenant, text_message(tenant.owner_phone, notes[min(i, len(notes) - 1)]),
                                 kind="owner_text", reply_channel=row["channel"])
             await asyncio.sleep(PROGRESS_EVERY_S)
     except asyncio.CancelledError:
@@ -492,6 +511,7 @@ async def _run(app, sid: str, fallback=None) -> None:
         return
     messages, steps, suspended, empties = row["messages"], row["steps"], False, 0
     budget, seen, nudged, card_nudged, claim_nudged, amount_nudged, busy = 0, {}, False, False, False, False, 0
+    language_nudged = False
     ticker = None
     try:
         tenant = await tenants.by_id(pool, str(row["tenant_id"]))
@@ -547,6 +567,11 @@ async def _run(app, sid: str, fallback=None) -> None:
                                  "but you did not call send_whatsapp_message to the CUSTOMER, so the owner has no approval card (a draft sent to the owner "
                                  "is not one). Call send_whatsapp_message now with to set to the customer and the exact message (the owner's tap sends it). "
                                  "If it cannot be sent (no phone number, unknown customer), say that plainly instead."})
+                continue
+            if not calls and not language_nudged and row["trust"] == "TRUSTED" and \
+                    (note := prefs.wrong_language((await prefs.get(pool, str(row["tenant_id"])))["language"], msg.get("content") or "")):
+                language_nudged = True     # self-check: they chose a language and the reply is in another one
+                messages.append({"role": "user", "content": note})
                 continue
             if not calls:
                 if not await _finish_unless_inbox(pool, sid, messages, steps):

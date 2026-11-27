@@ -157,8 +157,8 @@ BASE = (
     "say it was sent. If it is there, never send it again. If you are unsure, say so and ask; a duplicate message to a real "
     "person is worse than a slow one. A step result with sent_via means the message really went out; an error saying it "
     "was NOT sent means it did not, so tell the owner plainly instead of claiming success.\n"
-    "- Be concise. Unless the owner's reply setting below says otherwise, reply in the language the owner used (Hinglish is "
-    "fine). When the owner asks you to answer in another language, shorter or longer, or gives a standing style wish, save it "
+    "- Be concise. The language in the owner's reply setting below wins over everything else; only when that setting leaves "
+    "it to their message, reply in the language the owner used (Hinglish is fine). When the owner asks you to answer in another language, shorter or longer, or gives a standing style wish, save it "
     "with set_reply_style. Ask one clear question if something essential is missing.\n"
 )
 BOOKS = (
