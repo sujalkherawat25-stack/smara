@@ -136,7 +136,8 @@ def test_pre_tool_use_tiers_and_untrusted_lockdown():
     assert v(trusted, "send_whatsapp_message", {"to": "p1", "text": "x"}) == "approve"
     assert v(trusted, "propose_ledger_adjustment", {"obligation_id": "o"}) == "approve"
     assert v(trusted, "browser_step", {"action": "navigate", "url": "https://a.com"}) == "allow"
-    assert v(trusted, "browser_step", {"action": "click", "selector": "#x"}) == "approve"
+    assert v(trusted, "browser_step", {"action": "click", "selector": "#x"}) == "allow"
+    assert v(trusted, "browser_step", {"action": "click", "selector": "#pay-now"}) == "approve"
     assert v(trusted, "inspect_and_import_file", {"file_ref": "whatsapp:m1:a.csv", "mode": "import"}) == "allow"
     assert v(trusted, "inspect_and_import_file", {"file_ref": "whatsapp:EVIL:x.csv", "mode": "inspect"}) == "deny"
     assert v(trusted, "drop_tables", {}) == "deny"
@@ -267,13 +268,13 @@ async def test_rejected_gate_feeds_back_and_sends_nothing(env):
 async def test_browser_read_runs_but_click_waits_for_owner(env):
     br = env.app.state.browsers
     env.app.state.llm = ScriptLLM(call("browser_step", action="navigate", url="https://example.com/form"),
-                                  call("browser_step", action="click", selector="#go"),
+                                  call("browser_step", action="click", selector="button:has-text('Submit')"),
                                   say("Clicked and verified the page."))
     await dispatch(env.app, owner("w9", "submit the form on example.com"))
     assert [s["action"] for s in br.steps] == ["navigate"]                           # click not yet run
     sid = (await one(env.pool, "select id from agent_sessions where status = 'WAITING_APPROVAL'"))["id"]
     await dispatch(env.app, owner("w10", button=f"ag_ok:{sid}"))
-    assert [s["action"] for s in br.steps] == ["navigate", "click"] and br.steps[1]["selector"] == "#go"
+    assert [s["action"] for s in br.steps] == ["navigate", "click"] and "Submit" in br.steps[1]["selector"]
 
 
 # ---------------------------------------------------------------- import with self-verification

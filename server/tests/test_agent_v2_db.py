@@ -515,14 +515,15 @@ async def test_telegram_owner_approves_a_browser_click_end_to_end(env):
     await _set(env, telegram_chat_id=555)
     br = env.app.state.browsers
     env.app.state.llm = ScriptLLM(call("browser_step", action="navigate", url="https://example.com/form"),
-                                  call("browser_step", action="click", selector="#go"),
+                                  call("browser_step", action="click", selector="button:has-text('Submit')"),
                                   say("Clicked and checked the page."))
     await tgmod.handle_update(env.app, {"message": {"chat": {"id": 555, "type": "private"}, "message_id": 1,
                                                     "text": "submit the form on example.com"}})
     card = tg.sent[-1]
-    assert "click" in card["text"] and "Form" in card["text"] and "example.com/form" in card["text"]   # page context shown
+    assert card["text"] == "May I press “Submit” on example.com?"                                  # one plain question
     sid = (await one(env.pool, "select id from agent_sessions where status = 'WAITING_APPROVAL'"))["id"]
-    assert [b[0]["callback_data"] for b in card["reply_markup"]["inline_keyboard"]] == [f"ag_ok:{sid}", f"ag_site:{sid}", f"ag_no:{sid}"]
+    assert [b[0]["callback_data"] for b in card["reply_markup"]["inline_keyboard"]] == [f"ag_ok:{sid}", f"ag_no:{sid}"]
+    assert [b[0]["text"] for b in card["reply_markup"]["inline_keyboard"]] == ["Yes, do it", "No"]
     await tgmod.handle_update(env.app, {"callback_query": {"id": "cb1", "data": f"ag_ok:{sid}", "message": {"chat": {"id": 555}}}})
     assert [s["action"] for s in br.steps] == ["navigate", "click"]
     assert tg.sent[-1]["text"] == "Clicked and checked the page." and env.app.state.wa.sent == []   # all on Telegram

@@ -179,26 +179,94 @@ async def test_owner_pairs_and_unpairs_from_chat(env):
     assert not await device.online_device(env.pool, env.t.id)
 
 
-# ---------------------------------------------------------------- 'approve this site': autonomy with limits
+# ---------------------------------------------------------------- Smara's server browser: ask only before sending
 
-async def test_owner_allows_one_site_and_the_agent_stops_asking_except_for_risky_steps(env):
+LISTING = ('[1] link "Programs - Current Programs"\n[2] button "Show more"\n[3] searchbox "Search"\n[4] textbox "Pincode"\n'
+           '[5] button "Check"\n[6] button "Proceed to Buy"\n[7] link "Sales Brochure"\n[8] textbox "Password"\n[9] button "Sign up"')
+
+
+def _server(**kw):
+    from src.agent.policy import SessionCtx
+    return SessionCtx(**{"id": "s", "tenant_id": "t", "trust": "TRUSTED", "controls": LISTING, "host": "shop.example",
+                         "page": "https://shop.example/items items", "url": "https://shop.example/items", **kw})
+
+
+def _verdict(ctx, **args):
+    from src.agent.policy import pre_tool_use
+    from src.agent.tools import TOOL_NAMES
+    return pre_tool_use(ctx, "browser_step", args, TOOL_NAMES).verdict
+
+
+def test_looking_around_the_server_browser_needs_no_tap():
+    c = _server()
+    for args in ({"action": "click", "ref": 1}, {"action": "click", "ref": 2}, {"action": "click", "selector": "#x"},
+                 {"action": "fill", "ref": 3, "value": "buy sony earphones"}, {"action": "fill", "ref": 4, "value": "302001"},
+                 {"action": "select", "ref": 2, "value": "Price"}, {"action": "press", "value": "Escape"},
+                 {"action": "close_tab"}):
+        assert _verdict(c, **args) == "allow", args
+    assert _verdict(_server(last_fill="3", last_fill_box='searchbox "Search"'), action="press", value="Enter") == "allow"
+
+
+def test_anything_that_sends_pays_or_signs_up_still_waits_for_the_owner():
+    c = _server()
+    assert _verdict(c, action="click", ref=6) == "approve" and _verdict(c, action="click", ref=9) == "approve"
+    assert _verdict(c, action="fill", ref=8, value="hunter2") == "approve"        # then refused: Smara never types these
+    typed = _server(last_fill="4", last_fill_box='textbox "Pincode"', last_fill_url="https://shop.example/items")
+    assert _verdict(typed, action="click", ref=5) == "approve"                     # a button may send what was typed
+    assert _verdict(typed, action="press", value="Enter") == "approve" and _verdict(typed, action="press", value="space") == "approve"
+    assert _verdict(typed, action="click", ref=7) == "allow"                       # a link is only a link
+    moved_on = _server(last_fill="4", last_fill_box='textbox "Pincode"', last_fill_url="https://shop.example/search")
+    assert _verdict(moved_on, action="click", ref=2) == "allow"                    # that page is gone, and its box with it
+
+
+def test_sign_in_pages_scheduled_jobs_and_customers_stay_strict():
+    sign_in = _server(page="https://shop.example/login sign in")
+    assert _verdict(sign_in, action="click", ref=7) == "allow"                     # plain links are free there too
+    assert _verdict(sign_in, action="click", ref=2) == "approve"
+    assert _verdict(sign_in, action="fill", ref=4, value="x") == "approve"
+    job = _server(trust="SYSTEM")
+    assert _verdict(job, action="click", ref=7) == "allow"
+    assert _verdict(job, action="click", ref=2) == "approve" and _verdict(job, action="fill", ref=3, value="x") == "approve"
+    assert _verdict(_server(trust="UNTRUSTED", party_id="p"), action="click", ref=7) == "deny"
+    pc = _server(on_device=True, page="https://shop.example/login sign in")
+    assert _verdict(pc, action="click", ref=7) == "approve"                        # the owner's PC rules are unchanged
+
+
+async def test_a_server_browser_task_asks_once_and_only_before_the_send(env):
     br = env.app.state.browsers
     env.app.state.llm = ScriptLLM(
         call("browser_step", action="navigate", url="https://example.com/form"),
-        call("browser_step", action="click", selector="#next"),            # first act: needs a tap
-        call("browser_step", action="fill", selector="#qty", value="2"),   # same site now allowed
-        call("browser_step", action="click", selector="button:has-text('Place order')"),   # risky: asks again
+        call("browser_step", action="click", selector="#next"),
+        call("browser_step", action="fill", selector="#qty", value="2"),
+        call("browser_step", action="click", selector="button:has-text('Place order')"),
         say("Done for now."))
     await dispatch(env.app, owner("g1", "fill the form on example.com"))
+    assert [s["action"] for s in br.steps] == ["navigate", "click", "fill"]          # no tap for any of these
+    card = env.app.state.wa.sent[-1]["interactive"]
+    assert card["body"]["text"].startswith("May I press “Place order” on example.com?") and "2" in card["body"]["text"]
+    assert [b["reply"]["title"] for b in card["action"]["buttons"]] == ["Yes, do it", "No"]
     sid = (await one(env.pool, "select id from agent_sessions where status = 'WAITING_APPROVAL'"))["id"]
-    card = env.app.state.wa.sent[-1]["interactive"]["action"]["buttons"]
-    assert [b["reply"]["id"].split(":")[0] for b in card] == ["ag_ok", "ag_site", "ag_no"]
-    await dispatch(env.app, owner("g2", button=f"ag_site:{sid}"))
-    assert [s["action"] for s in br.steps] == ["navigate", "click", "fill"]           # fill ran with no second tap
-    assert (await one(env.pool, "select status from agent_sessions"))["status"] == "WAITING_APPROVAL"   # Place order waits
-    assert "Place order" in env.app.state.wa.sent[-1]["interactive"]["body"]["text"]
-    grants = (await one(env.pool, "select grants from agent_sessions"))["grants"]
-    assert grants[0]["host"] == "example.com"
+    await dispatch(env.app, owner("g2", button=f"ag_ok:{sid}"))
+    assert [s["action"] for s in br.steps][-1] == "click" and env.app.state.wa.sent[-1]["text"]["body"] == "Done for now."
+
+
+async def test_the_question_is_in_the_language_the_owner_chose(env):
+    from src import prefs
+    await prefs.put(env.pool, env.t.id, language="hindi")
+    env.app.state.llm = ScriptLLM(call("browser_step", action="navigate", url="https://example.com/form"),
+                                  call("browser_step", action="click", selector="button:has-text('Submit')"), say("ठीक है"))
+    await dispatch(env.app, owner("h1", "form भर दो"))
+    card = env.app.state.wa.sent[-1]["interactive"]
+    assert card["body"]["text"] == "क्या मैं example.com पर “Submit” दबाऊँ?"
+    assert [b["reply"]["title"] for b in card["action"]["buttons"]] == ["हाँ, करें", "नहीं"]
+
+
+def test_where_the_last_typing_happened_is_read_from_that_steps_result():
+    from src.agent.tools import bounded
+    from src.agent_loop import fill_place
+    done = bounded({"typed_into": {"box": 'searchbox "Search"', "url": "https://a.example/s"}, "page": "x" * 9000}, 500)
+    assert fill_place([{"role": "tool", "content": done}]) == ('searchbox "Search"', "https://a.example/s")
+    assert fill_place([{"role": "tool", "content": '{"ok": true}'}]) == ("", "")
 
 
 async def test_a_grant_never_covers_secrets_other_sites_or_customer_sessions(env):
@@ -213,8 +281,6 @@ async def test_a_grant_never_covers_secrets_other_sites_or_customer_sessions(env
                          page="https://example.com/login sign in")
     assert v(sign_in, {"action": "click", "selector": "#next"}) == "approve"           # never on a sign-in / payment page
     assert v(ctx, {"action": "click", "selector": "a:has-text('Delete account')"}) == "approve"
-    other = SessionCtx(id="s", tenant_id="t", trust="TRUSTED", grants=("example.com",), host="evil.com")
-    assert v(other, {"action": "click", "selector": "#next"}) == "approve"
     sysctx = SessionCtx(id="s", tenant_id="t", trust="SYSTEM", grants=("example.com",), host="example.com")
     assert v(sysctx, {"action": "click", "selector": "#next"}) == "approve"            # scheduled jobs never inherit a grant
 
@@ -725,7 +791,7 @@ async def test_pressing_enter_in_a_message_box_needs_the_owners_tap_but_search_b
     await dispatch(env.app, owner("lk1", "LinkedIn pe Manvi ko hi bolo"))
     assert [s["action"] for s in br.steps] == ["navigate", "fill", "press", "click", "fill"]
     card = env.app.state.wa.sent[-1]["interactive"]["body"]["text"]
-    assert "SEND this message on" in card and "hi manvi, this is Smara" in card                 # the owner sees the exact text
+    assert "May I send this on example.com?" in card and "hi manvi, this is Smara" in card                 # the owner sees the exact text
     sid = (await one(env.pool, "select id from agent_sessions where status = 'WAITING_APPROVAL'"))["id"]
     await dispatch(env.app, owner("lk2", button=f"ag_ok:{sid}"))
     assert [s["action"] for s in br.steps][-1] == "press"                               # sent only after the tap
@@ -784,7 +850,7 @@ def test_approvals_read_the_controls_name_from_the_page_listing():
     assert sensitive_step({"action": "click", "ref": 21}, ctx) and sensitive_step({"action": "click", "ref": 9}, ctx)
     assert not sensitive_step({"action": "click", "ref": 4}, ctx) and not sensitive_step({"action": "click", "ref": 7}, ctx)
     card = approval_text("browser_step", {"action": "click", "ref": 9}, {"url": "https://shop.example/cart", "title": "Cart", "page": listing})
-    assert "the “Place order” button" in card and "shop.example/cart" in card
+    assert card == "May I press “Place order” on shop.example?"
     enter = {"action": "press", "value": "Enter"}
     assert submits_typed_text(enter, SessionCtx(id="s", tenant_id="t", trust="TRUSTED", controls=listing, last_fill="5"))
     assert not submits_typed_text(enter, SessionCtx(id="s", tenant_id="t", trust="TRUSTED", controls=listing, last_fill="3"))

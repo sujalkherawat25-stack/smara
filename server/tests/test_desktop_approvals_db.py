@@ -31,7 +31,7 @@ async def owner_token(env, http):
 async def waiting_browser_step(env, wamid="ds1"):
     env.app.state.llm = ScriptLLM(
         call("browser_step", action="navigate", url="https://example.com/form"),
-        call("browser_step", action="click", selector="#next"),
+        call("browser_step", action="click", selector="button:has-text('Submit')"),
         say("Clicked next."))
     await dispatch(env.app, owner(wamid, "click next on example.com"))
     return str((await one(env.pool, "select id from agent_sessions where status = 'WAITING_APPROVAL'"))["id"])
@@ -58,8 +58,8 @@ async def test_desktop_sees_the_same_card_and_approving_runs_the_step(env):
         h = {"Authorization": f"Bearer {token}"}
         sid = await waiting_browser_step(env)
         listed = (await http.get("/bridge/approvals", headers=h)).json()["approvals"]
-        assert [a["id"] for a in listed] == [sid] and listed[0]["tool"] == "browser_step" and listed[0]["site_choice"] is True
-        assert "click" in listed[0]["card"].lower() and listed[0]["step"]["action"] == "click"
+        assert [a["id"] for a in listed] == [sid] and listed[0]["tool"] == "browser_step" and listed[0]["site_choice"] is False
+        assert "Submit" in listed[0]["card"] and listed[0]["step"]["action"] == "click"
         r = await http.post(f"/bridge/approvals/{sid}", json={"choice": "approve"}, headers=h)
         assert r.status_code == 200, r.text
         assert [s["action"] for s in env.app.state.browsers.steps] == ["navigate", "click"]

@@ -154,9 +154,9 @@ def test_files_are_refused_off_device_for_counterparties_and_without_a_path():
     assert pre_tool_use(ctx(), "browser_step", {"action": "upload", "ref": 7}, KNOWN).verdict == "deny"
 
 
-def test_tabs_are_free_and_closing_a_tab_runs_on_the_owners_pc():
+def test_tabs_are_free_and_so_is_closing_one():
     assert pre_tool_use(ctx(on_device=False), "browser_step", {"action": "tabs"}, KNOWN).verdict == "allow"
     assert pre_tool_use(ctx(on_device=False), "browser_step", {"action": "tab", "value": "2"}, KNOWN).verdict == "allow"
     assert pre_tool_use(ctx(page="https://news.example/"), "browser_step", {"action": "close_tab", "value": "2"}, KNOWN).verdict == "allow"
-    assert pre_tool_use(ctx(on_device=False), "browser_step", {"action": "close_tab"}, KNOWN).verdict == "approve"
+    assert pre_tool_use(ctx(on_device=False), "browser_step", {"action": "close_tab"}, KNOWN).verdict == "allow"
     assert pre_tool_use(ctx(), "browser_step", {"action": "evaluate"}, KNOWN).verdict == "deny"

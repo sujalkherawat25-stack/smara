@@ -7,7 +7,8 @@ The model cannot reach a side effect any other way.
                run_python (isolated sandbox: no network, no ledger access, own files only)
   T1 internal  write evidence, import the owner's own file, message the owner, schedule/cancel the
                agent's own follow-ups, send the owner a file the sandbox produced
-  T2 outward   message a counterparty, browser click/fill/press        -> owner approval
+  T2 outward   message a counterparty, a browser step that sends       -> owner approval
+               something out (looking around in a browser runs on its own: see server_looks_around)
   T3 money     propose a ledger adjustment                              -> owner approval
 
 UNTRUSTED sessions (started by a counterparty's message) may only record
@@ -42,6 +43,9 @@ class SessionCtx:
     page: str = ""                 # lower-case url + title of the current page
     last_fill: str = ""            # ref of the last box the agent typed into in this conversation
     last_fill_value: str = ""      # and what it typed there
+    last_fill_box: str = ""        # what that box was ('searchbox "Search"'), as listed when it typed
+    last_fill_url: str = ""        # the page it typed on
+    url: str = ""                  # the page the browser is on right now
     controls: str = ""             # the numbered controls of the current page ('[12] button "Add to cart"' per line)
     owner_words: str = ""          # the owner's last few messages: what a file edit may touch is what they named
     confirmed: bool = False        # the owner's latest message answers a question ask_owner put to them
@@ -60,7 +64,9 @@ class Decision:
 OUTWARD_STEP = re.compile(
     r"\b(pay|payment|pay now|buy|buy now|purchase|checkout|check out|place order|place my order|confirm order|order now|"
     r"submit|delete|remove account|transfer|send|send money|book now|confirm booking|subscribe|cancel order|withdraw|donate|"
-    r"upi|net ?banking|publish|post)\b", re.I)
+    r"upi|net ?banking|publish|post|sign ?up|register|enrol|enroll|rsvp|reserve|apply now|unsubscribe)\b", re.I)
+# Boxes Smara never types into.
+SECRET_FIELD = re.compile(r"pass(word|wd)|\botp\b|\bm?pin\b(?!.?code)|cvv|card.?number|\bupi.?pin\b|secret", re.I)
 # Pages where any click or typing waits for the owner: signing in, paying, one-time codes.
 SENSITIVE_PAGE = re.compile(r"login|log-in|signin|sign-in|sign in|checkout|payment|/pay|otp|password|captcha", re.I)
 
@@ -87,8 +93,41 @@ def submits_typed_text(args: dict, ctx) -> bool:
     a comment, a form). That is outward, exactly like clicking Send."""
     if args.get("action") != "press" or str(args.get("value", "")).lower() not in ("enter", "return", "numpadenter"):
         return False
-    box = control(ctx.controls, ctx.last_fill) or ctx.last_fill
-    return bool(ctx.last_fill) and not SEARCH_BOX.search(box)
+    return bool(ctx.last_fill) and not SEARCH_BOX.search(typed_box(ctx))
+
+
+def typed_box(ctx) -> str:
+    return ctx.last_fill_box or control(ctx.controls, ctx.last_fill) or ctx.last_fill
+
+
+def typed_into_form(ctx) -> bool:
+    """Something typed into a box that is not a search box is still on the page in front of the agent, so the next button
+    may send it. Once the page has changed, it is gone."""
+    if not ctx.last_fill or SEARCH_BOX.search(typed_box(ctx)):
+        return False
+    return not ctx.last_fill_url or ctx.last_fill_url == ctx.url
+
+
+def server_looks_around(args: dict, ctx) -> bool:
+    """Smara's own server browser has none of the owner's sign-ins. Links, menus, filters, searching and filling boxes
+    run without asking: nothing leaves until a button or Enter sends it. These still wait for the owner: anything worded as
+    paying, buying, sending, deleting, booking or signing up; sending what was typed; and sign-in and payment pages (where
+    only plain links are free). A scheduled job may only follow plain links."""
+    if ctx.on_device or ctx.trust not in ("TRUSTED", "SYSTEM"):
+        return False
+    action = args.get("action")
+    is_link = action == "click" and control(ctx.controls, args.get("ref", "")).startswith("link ")
+    if action == "fill":      # the words typed are not a step: searching for "buy earphones" buys nothing
+        if OUTWARD_STEP.search(target_words(args, ctx)) or SECRET_FIELD.search(f"{target_words(args, ctx)} {args.get('value', '')}"):
+            return False
+    elif sensitive_step(args, ctx) or submits_typed_text(args, ctx):
+        return False
+    if is_link:
+        return True
+    if ctx.trust != "TRUSTED" or SENSITIVE_PAGE.search(ctx.page):
+        return False
+    pushes = action == "click" or (action == "press" and str(args.get("value", "")).strip().lower() in ("", "space"))
+    return not (pushes and typed_into_form(ctx))
 
 
 def sensitive_step(args: dict, ctx=None) -> bool:
@@ -238,9 +277,11 @@ def pre_tool_use(ctx: SessionCtx, name: str, args: dict, known_tools: frozenset[
                                       "name and link) and that they can finish that last step themselves on their phone or PC")
     if tier in ("T0", "T1"):
         return Decision("allow", tier)
+    if name == "browser_step" and server_looks_around(args, ctx):
+        return Decision("allow", "T2s", "looking around in Smara's server browser")
     if name == "browser_step" and ctx.trust == "TRUSTED" and not sensitive_step(args, ctx) and not submits_typed_text(args, ctx):
         # On the owner's own PC (visible, with a Stop button) the agent acts freely, except on pages where the owner must
-        # act (sign-in, payment, one-time codes). On the server browser the owner approves, or allows a site for a while.
+        # act (sign-in, payment, one-time codes). Elsewhere the owner approves, or has allowed the site for a while.
         on_page = bool(SENSITIVE_PAGE.search(ctx.page))
         if ctx.on_device and not on_page:
             return Decision("allow", "T2a", "autonomous on the owner's own browser")
@@ -303,7 +344,54 @@ def _target(selector: str) -> str:
     return kind
 
 
-def approval_text(name: str, args: dict, page: dict | None = None, typed: str = "") -> str:
+# What a person reads before a browser step: one short question, in their language, with the real site name only.
+ASK = {
+    "english": {"press": "May I press “{what}” on {site}?", "press_any": "May I press a button on {site}?",
+                "send": "May I send this on {site}?\n\n\"{typed}\"", "send_by": "May I press “{what}” on {site}?\n\nThis may send what I typed:\n\"{typed}\"",
+                "type": "May I type this on {site}?\n\n\"{typed}\"", "other": "May I do the next step on {site}?"},
+    "hinglish": {"press": "Kya main {site} par “{what}” dabaun?", "press_any": "Kya main {site} par ek button dabaun?",
+                 "send": "Kya main {site} par yeh bhej doon?\n\n\"{typed}\"", "send_by": "Kya main {site} par “{what}” dabaun?\n\nIsse mera likha hua ja sakta hai:\n\"{typed}\"",
+                 "type": "Kya main {site} par yeh likhoon?\n\n\"{typed}\"", "other": "Kya main {site} par agla step karoon?"},
+    "hindi": {"press": "क्या मैं {site} पर “{what}” दबाऊँ?", "press_any": "क्या मैं {site} पर एक बटन दबाऊँ?",
+              "send": "क्या मैं {site} पर यह भेज दूँ?\n\n\"{typed}\"", "send_by": "क्या मैं {site} पर “{what}” दबाऊँ?\n\nइससे मेरा लिखा हुआ भेजा जा सकता है:\n\"{typed}\"",
+              "type": "क्या मैं {site} पर यह लिखूँ?\n\n\"{typed}\"", "other": "क्या मैं {site} पर अगला कदम करूँ?"},
+}
+BUTTONS = {"english": ("Yes, do it", "No"), "hinglish": ("Haan, karo", "Nahi"), "hindi": ("हाँ, करें", "नहीं")}
+
+
+def _label(args: dict, page: dict) -> str:
+    """The words on the thing to be pressed, or "" when it has none."""
+    line = control(page.get("page", ""), args["ref"]) if args.get("ref") not in (None, "") else ""
+    if line:
+        m = re.match(r'\S+ "(.*?)"', line)
+        return m.group(1)[:60] if m else ""
+    if args.get("text"):
+        return str(args["text"])[:60]
+    m = re.search(r"“(.*?)”", _target(str(args.get("selector") or "")))
+    return m.group(1)[:60] if m else ""
+
+
+def browser_question(args: dict, page: dict, typed: str, language: str) -> str:
+    from urllib.parse import urlparse
+    say = ASK.get(language, ASK["english"])
+    site = (urlparse(page.get("url", "")).hostname or "").removeprefix("www.") or "this page"
+    act, val = args.get("action"), str(args.get("value") or "")
+    if act == "press" and typed:
+        key = "send"
+    elif act == "click":
+        what = _label(args, page)
+        key = "send_by" if what and typed else "press" if what else "press_any"
+        return say[key].format(site=site, what=what, typed=typed[:600])
+    elif act == "press":
+        return say["press"].format(site=site, what=val or "Enter")
+    elif act == "fill":
+        key, typed = "type", val
+    else:
+        key = "other"
+    return say[key].format(site=site, typed=typed[:600])
+
+
+def approval_text(name: str, args: dict, page: dict | None = None, typed: str = "", language: str = "") -> str:
     if name == "send_whatsapp_message":
         return f"Send this WhatsApp message?\n\n\"{str(args.get('text', ''))[:700]}\""
     if name == "propose_ledger_adjustment":
@@ -322,28 +410,17 @@ def approval_text(name: str, args: dict, page: dict | None = None, typed: str = 
                 f"{' (replaces the existing file)' if args.get('overwrite') else ''}\n\n\"{str(args.get('text') or '')[:400]}\"")
     if name == "hand_off_to_owner":
         return f"Your turn in the browser: {str(args.get('reason', ''))[:600]}\n\nDo it yourself, then tap Done and I will carry on."
-    if name == "browser_step" and typed and args.get("action") == "press":
-        return f"Smara is about to SEND this message on {_site(page)}:\n\n\"{typed[:600]}\"\n\nApprove to send it."
-    if name == "browser_step":
-        act, sel, val = args.get("action"), str(args.get("selector") or ""), str(args.get("value") or "")
-        site = _site(page)
+    if name == "browser_step" and args.get("action") in BROWSER_FILES:     # only ever on the owner's own PC
+        act, val, site = args.get("action"), str(args.get("value") or ""), _site(page)
         line = control((page or {}).get("page", ""), args["ref"]) if args.get("ref") not in (None, "") else ""
         if not line and args.get("text"):
             line = f'clickable "{args["text"]}"'
-        what = _described(line) if line else (_target(sel) if sel else "a control")
-        if act == "click":
-            return f"Smara wants to click {what} on {site}.\n\nApprove?"
-        if act == "fill":
-            return f"Smara wants to type into {what} on {site}:\n\n\"{val[:300]}\"\n\nApprove?"
-        if act == "press":
-            return f"Smara wants to press {val or 'Enter'} on {site}.\n\nApprove?"
+        what = _described(line) if line else _target(str(args.get("selector") or ""))
         if act == "download":
             return (f"Smara wants to DOWNLOAD a file from {site} by clicking {what}.\n\nIt will be saved in the Smara "
                     f"Shared folder on your PC (Downloads). Programs and scripts are refused.\n\nApprove?")
-        if act == "upload":
-            return (f"Smara wants to UPLOAD your file “{val[:120]}” (Smara Shared folder on your PC) to {site}, into "
-                    f"{what}.\n\nThis sends the file to that website.\n\nApprove?")
-        if act == "close_tab":
-            return f"Smara wants to close a browser tab ({val or 'the current one'}) on {site}.\n\nApprove?"
-        return f"Smara wants to {act} {what} on {site}.\n\nApprove?"
+        return (f"Smara wants to UPLOAD your file “{val[:120]}” (Smara Shared folder on your PC) to {site}, into "
+                f"{what}.\n\nThis sends the file to that website.\n\nApprove?")
+    if name == "browser_step":
+        return browser_question(args, page or {}, typed, language)
     return f"Allow {name}?"

@@ -346,11 +346,14 @@ async def _rebuild(app, tenant, r: dict) -> dict | None:
             if not sess:
                 return None
             btn = lambda k, t: {"type": "reply", "reply": {"id": f"{k}:{sess['id']}", "title": t}}
+            held = sess["pending"]
+            hand_off = held.get("name") == "hand_off_to_owner"
+            yes, no = held.get("buttons") or (("Done, continue", "Cancel") if hand_off else ("Approve", "Reject"))
+            site = held.get("site_choice", held.get("name") == "browser_step")
             return {"messaging_product": "whatsapp", "to": tenant.owner_phone, "type": "interactive", "interactive": {
-                "type": "button", "body": {"text": sess["pending"]["card"][:1024]},
-                "action": {"buttons": [btn("ag_ok", "Done, continue") if sess["pending"].get("name") == "hand_off_to_owner" else btn("ag_ok", "Approve"),
-                                       *([btn("ag_site", "Approve + this site")] if sess["pending"].get("name") == "browser_step" else []),
-                                       btn("ag_no", "Cancel") if sess["pending"].get("name") == "hand_off_to_owner" else btn("ag_no", "Reject")]}}}
+                "type": "button", "body": {"text": held["card"][:1024]},
+                "action": {"buttons": [btn("ag_ok", yes), *([btn("ag_site", "Approve + this site")] if site else []),
+                                       btn("ag_no", no)]}}}
         if r["kind"] == "owner_reminder_card":
             cur = await conn.execute(
                 """SELECT o.*, p.canonical_name FROM obligations o JOIN parties p ON p.id = o.party_id
