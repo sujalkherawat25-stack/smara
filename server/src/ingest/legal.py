@@ -123,8 +123,9 @@ async def terms(request: Request):
 <p>By using Smara you agree to these terms.</p>
 <h2>What Smara is</h2>
 <p>An assistant that reads your business records and the files you send, answers questions, and drafts reminders, statements and reports.
-It can make mistakes: check amounts before you approve anything. Smara never sends a message to your customers, changes an invoice, or does
-anything on a website without your approval.</p>
+It can make mistakes: check amounts before you approve anything. Smara never sends a message to your customers or changes an invoice without your approval. It can browse
+websites on its own to find things out (opening pages and links, using menus, searching and filling in boxes), and asks you before
+it takes a step meant to send, buy, pay, book, sign up or delete. It can make mistakes in telling these apart.</p>
 <h2>Your responsibilities</h2>
 <ul><li>Share only customer information you are allowed to share, and message customers only about unpaid invoices they have with you.</li>
 <li>Message only customers who have given you their number and agreed to hear from you on WhatsApp, and stop when they ask you to.</li>
