@@ -101,7 +101,7 @@ async def test_each_setup_runs_cleans_up_after_every_question_and_restores_what_
         assert (names >= {"resolve_continuum_memory"}) == (system != "c")              # c has no Continuum tool
         history_in_prompt = any("Earlier chats with the owner" in s for s in llm.systems)
         assert history_in_prompt == (system != "b")                                    # b sees no chat history
-        assert any("Memory about this message" in s for s in llm.systems) == (system in ("a", "b") and bool(mem.rows))
+        assert any("Notes from memory about the shop" in s for s in llm.systems) == (system in ("a", "b") and bool(mem.rows))
         async with pool.connection() as c:
             left = (await (await c.execute("SELECT count(*) AS n FROM agent_sessions")).fetchone())["n"]
         assert left == 0                                                               # no question leaves a conversation behind

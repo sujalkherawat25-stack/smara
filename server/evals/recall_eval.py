@@ -208,6 +208,12 @@ class Patch:
     async def _zero(self, *a, **k):
         return 0
 
+    async def _no_facts(self, *a, **k):                     # prompt.owner_facts_block: the text, and the wordings shown
+        return "", frozenset()
+
+    async def _no_lookup(self, *a, **k):                    # prompt.relevant_memory: the shop's card, and the customers' text
+        return "", ""
+
     def __enter__(self):
         import src.agent_loop as loop
         self._set(memory_pass, "remember_from_turn", self._zero)               # a question must not teach anything
@@ -217,12 +223,12 @@ class Patch:
         if self.system == "b":
             self._set(chatlog, "recent", self._empty)
             self._set(chatlog, "related", self._empty)
-            self._set(prompt, "owner_facts_block", self._empty)       # Continuum only: no stored facts either
+            self._set(prompt, "owner_facts_block", self._no_facts)    # Continuum only: no stored facts either
             drop |= {"search_chat_history"}
         if self.system == "c":
-            self._set(prompt, "standing_instructions", self._empty_standing)
-            self._set(prompt, "relevant_memory", self._empty)
-            self._set(prompt, "owner_facts_block", self._empty)
+            self._set(prompt, "standing_notes", self._empty_standing)
+            self._set(prompt, "relevant_memory", self._no_lookup)
+            self._set(prompt, "owner_facts_block", self._no_facts)
             drop |= {"resolve_continuum_memory"}
         self._set(tools, "TOOLS", [t for t in tools.TOOLS if t["function"]["name"] not in drop])
         return self

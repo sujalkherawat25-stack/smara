@@ -164,7 +164,7 @@ async def test_every_owner_message_gets_memory_about_the_customer_it_names(env):
     system = llm.seen[0][0]["content"]
     assert "Memory about this message" in system
     assert "- Ravi: Promised to pay by Friday." in system
-    assert "- the shop: Owner prefers Hinglish" in system
+    assert system.split("Notes from memory about the shop")[1].count("Owner prefers Hinglish and morning reminders.") == 1
     assert any(a.endswith(env.pid) for a in env.app.state.continuum.asked)
     assert prompt.memory_stats()["failed"] == 0
 
@@ -288,7 +288,7 @@ async def test_all_the_owners_standing_rules_reach_the_agent_not_just_the_first_
     system = llm.seen[0][0]["content"]
     for r in rules:
         assert r in system, f"lost: {r[:30]}"
-    assert "the LAST one listed is the newer decision" in system
+    assert "the LAST one listed is the newer one" in system
 
 
 def test_two_facts_noted_the_same_day_keep_the_order_they_were_given_in():
