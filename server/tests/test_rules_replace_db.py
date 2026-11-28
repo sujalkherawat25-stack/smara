@@ -124,7 +124,8 @@ async def test_the_agent_sees_the_current_value_and_the_replaced_one_is_hidden_e
     system = await build_system(env.app, tenant, "TRUSTED", None, query="Ravi ko reminder kab se bhej sakte hain?")
     assert "What the owner has told you" in system and "Ravi: Ravi's rule changed to: none before Wednesday. (told" in system
     assert "before Friday" not in system and "Friday se pehle" not in system        # replaced in the facts, the standing list and the lookup
-    assert "Wednesday" in system.split("Memory about this message")[1]             # Continuum's current line still comes through
+    assert system.count("Ravi's rule changed to: none before Wednesday.") == 1      # Continuum's copy is not repeated
+    assert "ab Wednesday" in system                                                 # and the owner's own words are kept
 
 
 async def test_without_a_memory_service_the_current_facts_are_still_shown(env):

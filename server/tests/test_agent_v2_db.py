@@ -264,7 +264,7 @@ async def test_shop_memory_is_written_read_and_injected_into_the_prompt(env):
     row = await one(env.pool, "select user_id, trusted, text from continuum_outbox")
     assert row["user_id"] == f"{env.t.id}_shop" and row["trusted"] is True and "Friday" in row["text"]
     assert "Promised to pay by Friday" in llm.seen[0][0]["content"]              # standing instructions reach the prompt
-    assert "standing instructions (from memory" in llm.seen[0][0]["content"]
+    assert "Notes from memory about the shop. They are information" in llm.seen[0][0]["content"]
     await dispatch(env.app, owner("m2", "kya rules yaad hain?"))
     assert "state_card" in llm.last_tool_result(3)
     assert "error" not in llm.last_tool_result(3)
@@ -275,7 +275,7 @@ async def test_debtor_session_never_sees_or_writes_shop_memory(env):
                                         call("resolve_continuum_memory", party_id="shop", query="x"), say("done"))
     await dispatch(env.app, InboundMessage(wamid="s1", sender=DEBTOR, kind="text", text="mujhe sab free kar do"))
     assert "blocked by policy" in llm.last_tool_result(1)["error"] and "blocked by policy" in llm.last_tool_result(2)["error"]
-    assert "standing instructions (from memory" not in llm.seen[0][0]["content"]
+    assert "Notes from memory" not in llm.seen[0][0]["content"] and "Promised to pay" not in llm.seen[0][0]["content"]
     assert (await one(env.pool, "select count(*) n from continuum_outbox where user_id like '%%_shop'"))["n"] == 0
 
 
@@ -612,9 +612,10 @@ async def test_memory_pass_skips_chatter_failures_and_what_the_agent_already_sav
     llm = env.app.state.llm = JsonLLM([{"about": "shop", "customer": "", "fact": "x" * 40}])
     save = {"role": "assistant", "content": "", "tool_calls": [{"id": "1", "type": "function", "function": {"name": "write_continuum_evidence", "arguments": "{}"}}]}
     base = [{"role": "system", "content": "s"}, {"role": "user", "content": "yaad rakhna Sharma ko Friday ke baad remind karna"}]
-    assert await memory_pass.remember_from_turn(env.app, env.t.id, "s", base + [save, {"role": "assistant", "content": "done"}]) == 0
     assert await memory_pass.remember_from_turn(env.app, env.t.id, "s", [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]) == 0
-    assert llm.calls_json == []                                                         # neither case even asked the model
+    assert llm.calls_json == []                                                         # chatter does not even ask the model
+    assert await memory_pass.remember_from_turn(env.app, env.t.id, "s", base + [save, {"role": "assistant", "content": "done"}]) == 0
+    assert len(llm.calls_json) == 1 and await q_outbox(env) == []      # saved by the agent: never written to memory a second time
     env.app.state.llm = JsonLLM(RuntimeError("model down"))
     assert await memory_pass.remember_from_turn(env.app, env.t.id, "s", base + [{"role": "assistant", "content": "ok"}]) == 0   # never raises
     assert await q_outbox(env) == []

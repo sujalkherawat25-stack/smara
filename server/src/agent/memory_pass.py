@@ -3,12 +3,18 @@
 The agent only writes memory when it decides to, and a small model often does not. This pass reads ONLY what the owner
 typed in the turn (never customer text, file contents or web pages) and Smara's reply, asks the light model for durable
 facts, and writes them to Continuum through the same outbox as every other write, so they are ordered and retried.
-Skipped when the agent already saved something itself this turn. Best effort: it never affects the conversation.
+Writes nothing to Continuum when the agent already saved something itself this turn (see below). Best effort: it never
+affects the conversation.
 
 Each fact keeps the owner's own words next to the sentence (so a number or an address survives the model's paraphrase) and
 says who pays whom. A fact about something that can change (a rule, a limit, an address, a habit) carries a topic; a new
 value for the same topic replaces the old one in shop_facts (see facts.py), which is what the prompt shows as current.
+
+The prompt lists as rules to follow only what is marked here: an instruction about Smara's work that is in the owner's
+own typed words. Everything else it remembers is information. So when the agent saved something itself the pass still
+runs, to keep the topic and the rule mark in shop_facts, but writes nothing more to Continuum.
 """
+import hashlib
 import logging
 import re
 
@@ -31,7 +37,7 @@ SYSTEM = (
     "You decide what a personal and work assistant should remember for months. You are given what the "
     "user wrote this turn, the assistant's reply, and the facts already on file. Output JSON "
     "{\"facts\": [{\"about\": \"shop\" or \"customer\", \"customer\": \"name exactly as the owner wrote it, or empty\", "
-    "\"topic\": \"...\", \"fact\": \"...\", \"said\": \"...\"}]}.\n"
+    "\"topic\": \"...\", \"fact\": \"...\", \"said\": \"...\", \"rule\": true or false}]}.\n"
     "Keep ONLY durable facts the owner stated: a customer's payment habits, promises, disputes or relationship; the owner's "
     "standing rules and preferences; business details (payment terms, GSTIN, bank or payment days, staff, working hours, addresses).\n"
     "Money counts: keep what the owner says they owe someone, what someone owes them, a promised payment, a cheque that is "
@@ -42,6 +48,11 @@ SYSTEM = (
     "fact: one self-contained sentence in English, about 25 words at most, naming the person or business. Keep WHO PAYS WHOM "
     "exactly: 'X ko ... dene hain' means the owner must pay X; 'X ne bola ... dega' means X will pay the owner.\n"
     "said: the owner's own words for it, copied exactly from what they wrote, 150 characters at most.\n"
+    "rule: true ONLY when the owner is telling the assistant how to do its work from now on: to do or never do something, a "
+    "time or limit it must keep to, a format or habit it must follow ('Friday se pehle reminder mat bhejna', 'hamesha PDF "
+    "bhejo', 'never offer more than 5% discount'). false for information, even important information (an address, who does "
+    "what, how a customer behaves, a promise, an amount), for what someone else asked for or said, and for anything meant "
+    "for this one time only. If unsure, false. A rule always has a topic.\n"
     "topic: for something that stays true until it changes (a reminder rule, a credit limit, a payment habit, an address, who "
     "does what) give a short snake_case label such as reminder_rule, credit_limit, payment_habit, godown_address, tally_operator. "
     "If the owner is changing or repeating something already on file, use EXACTLY the topic it has there and write fact as the "
@@ -92,11 +103,22 @@ async def _on_file(pool, tenant_id: str) -> str:
         f"{r['topic']} | {r['customer'] or 'shop'} | {r['text'][:160]}" for r in rows)
 
 
+def _words(text: str) -> str:
+    return " ".join(re.findall(r"\w+", text.lower()))
+
+
+def _set_as_rule(fact: dict, said: str, owner_said: str) -> bool:
+    """The model calls it a rule AND the words it quotes really are the owner's, typed this turn."""
+    quoted = _words(said)
+    return fact.get("rule") is True and bool(quoted) and quoted in _words(owner_said)
+
+
 async def remember_from_turn(app, tenant_id: str, session_id: str, messages: list[dict]) -> int:
     llm = getattr(app.state, "llm", None)
     ask = getattr(llm, "json", None)
-    if not callable(ask) or not getattr(llm, "enabled", False) or _agent_already_saved(messages):
+    if not callable(ask) or not getattr(llm, "enabled", False):
         return 0
+    saved = _agent_already_saved(messages)     # the note itself is in Continuum already: only shop_facts is left to do
     owner_said = _owner_text(messages)
     reply = next((str(m.get("content") or "") for m in reversed(messages) if m["role"] == "assistant" and not m.get("tool_calls")), "")
     if len(owner_said.strip()) < 12:
@@ -124,9 +146,17 @@ async def remember_from_turn(app, tenant_id: str, session_id: str, messages: lis
         if about_customer and not pid and customer:
             text = f"About {customer[:60]}: {text}"        # not in the ledger: keep the name with the fact
             topic = f"{topic}_{shop_facts.slug(customer, 20)}" if topic else ""
+        is_rule = _set_as_rule(f, said, owner_said)
+        if is_rule and not topic:
+            topic = f"rule_{hashlib.sha1(text.encode()).hexdigest()[:10]}"
+        if saved and not topic:
+            continue
         try:
             if topic:
-                await shop_facts.upsert(pool, tenant_id, pid, topic, text, said)
+                await shop_facts.upsert(pool, tenant_id, pid, topic, text, said, is_rule)
+            if saved:
+                written += 1
+                continue
             await enqueue_standalone(pool, user_id=scope, source_id=f"mem_{session_id}_{i}"[:200],
                                      text=shop_facts.compose(text, said), trusted=True,
                                      metadata={"actor": "owner", "session": session_id, "via": "memory_pass", "topic": topic})
